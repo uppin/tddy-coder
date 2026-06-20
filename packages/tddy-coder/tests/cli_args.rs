@@ -49,7 +49,10 @@ fn create_fake_tddy_tools(dir: &Path) -> std::io::Result<()> {
 #[test]
 fn cli_accepts_recipe_flag() {
     // When
-    let output = tddy_coder_bin().arg("--help").output().expect("run tddy-coder --help");
+    let output = tddy_coder_bin()
+        .arg("--help")
+        .output()
+        .expect("run tddy-coder --help");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("--recipe"),
@@ -60,11 +63,31 @@ fn cli_accepts_recipe_flag() {
         .split("--recipe <RECIPE>")
         .nth(1)
         .expect("--recipe must appear in --help");
-    assert!(recipe_help.contains("tdd"), "help --recipe must list 'tdd'; got:{}", recipe_help);
-    assert!(recipe_help.contains("bugfix"), "help --recipe must list 'bugfix'; got:{}", recipe_help);
-    assert!(recipe_help.contains("free-prompting"), "help --recipe must list 'free-prompting'; got:{}", recipe_help);
-    assert!(recipe_help.contains("grill-me"), "help --recipe must list 'grill-me'; got:{}", recipe_help);
-    assert!(recipe_help.contains("review"), "help --recipe must list 'review'; got:{}", recipe_help);
+    assert!(
+        recipe_help.contains("tdd"),
+        "help --recipe must list 'tdd'; got:{}",
+        recipe_help
+    );
+    assert!(
+        recipe_help.contains("bugfix"),
+        "help --recipe must list 'bugfix'; got:{}",
+        recipe_help
+    );
+    assert!(
+        recipe_help.contains("free-prompting"),
+        "help --recipe must list 'free-prompting'; got:{}",
+        recipe_help
+    );
+    assert!(
+        recipe_help.contains("grill-me"),
+        "help --recipe must list 'grill-me'; got:{}",
+        recipe_help
+    );
+    assert!(
+        recipe_help.contains("review"),
+        "help --recipe must list 'review'; got:{}",
+        recipe_help
+    );
 
     let mut cmd_bad = tddy_coder_bin();
     cmd_bad.args(["--recipe", "unknown-recipe"]);

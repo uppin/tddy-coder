@@ -334,7 +334,10 @@ mod relocation_tests {
 
         // Then
         let expected = root.join("docs/plans").join(dir_name);
-        assert_eq!(result, expected, "final path should be at suggested location");
+        assert_eq!(
+            result, expected,
+            "final path should be at suggested location"
+        );
         assert!(expected.exists(), "target directory should exist");
         assert!(
             expected.join("SessionDoc.md").exists(),
@@ -402,7 +405,10 @@ mod relocation_tests {
             .expect("whitespace suggestion should fall back, not error");
 
         // Then
-        assert_eq!(result, staging, "whitespace-only suggestion should fall back");
+        assert_eq!(
+            result, staging,
+            "whitespace-only suggestion should fall back"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -425,7 +431,10 @@ mod relocation_tests {
 
         // Then
         assert_eq!(result, staging, "same-path should return staging unchanged");
-        assert!(staging.is_dir(), "staging directory should still exist as a real dir");
+        assert!(
+            staging.is_dir(),
+            "staging directory should still exist as a real dir"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -502,7 +511,10 @@ mod context_header_tests {
             "header must start with the marker line, got: {:?}",
             &header[..header.floor_char_boundary(200)]
         );
-        assert!(header.contains("SessionDoc.md:"), "header must list SessionDoc.md");
+        assert!(
+            header.contains("SessionDoc.md:"),
+            "header must list SessionDoc.md"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -518,7 +530,10 @@ mod context_header_tests {
         let header = build_context_header(Some(&dir), None, CTX_TEST_PRIMARY_DOC_AND_AT);
 
         // Then
-        assert!(header.contains("SessionDoc.md:"), "should list SessionDoc.md");
+        assert!(
+            header.contains("SessionDoc.md:"),
+            "should list SessionDoc.md"
+        );
         assert!(
             !header.contains("acceptance-tests.md:"),
             "must not list missing acceptance-tests.md"
@@ -553,7 +568,10 @@ mod context_header_tests {
         let header = build_context_header(None, None, CTX_TEST_PRIMARY_DOC);
 
         // Then
-        assert!(header.is_empty(), "header must be empty when session_dir is None");
+        assert!(
+            header.is_empty(),
+            "header must be empty when session_dir is None"
+        );
     }
 
     // ── AC4: paths are absolute ───────────────────────────────────────────────
@@ -600,17 +618,26 @@ mod context_header_tests {
             prepend_context_header(original.clone(), Some(&dir), None, CTX_TEST_PRIMARY_DOC);
 
         // Then
-        assert!(result.starts_with("<context-reminder>"), "result must start with context-reminder tag");
+        assert!(
+            result.starts_with("<context-reminder>"),
+            "result must start with context-reminder tag"
+        );
         assert!(
             result.contains("**CRITICAL FOR CONTEXT AND SUMMARY**"),
             "result must contain header marker inside context-reminder"
         );
-        assert!(result.contains("</context-reminder>"), "result must contain closing context-reminder tag");
+        assert!(
+            result.contains("</context-reminder>"),
+            "result must contain closing context-reminder tag"
+        );
         let close_tag = "</context-reminder>";
         let close_pos = result.find(close_tag).expect("must find closing tag");
         let after_tag = &result[close_pos + close_tag.len()..];
         let body = after_tag.trim_start_matches('\n');
-        assert_eq!(body, original, "original prompt must appear verbatim after the context-reminder block");
+        assert_eq!(
+            body, original,
+            "original prompt must appear verbatim after the context-reminder block"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -650,7 +677,11 @@ mod context_header_tests {
     fn context_header_includes_refactoring_plan_when_it_is_in_the_basename_list() {
         // Given
         let dir = temp_dir("includes-refactoring-plan");
-        fs::write(dir.join("refactoring-plan.md"), "# Refactoring Plan\n## Tasks\n- Rename").unwrap();
+        fs::write(
+            dir.join("refactoring-plan.md"),
+            "# Refactoring Plan\n## Tasks\n- Rename",
+        )
+        .unwrap();
 
         // When
         let header = build_context_header(Some(&dir), None, CTX_TEST_REFACTOR);
@@ -678,7 +709,10 @@ mod context_header_tests {
             prepend_context_header(original.clone(), Some(&dir), None, CTX_TEST_PRIMARY_DOC);
 
         // Then
-        assert_eq!(result, original, "prompt must be unchanged when no header is needed");
+        assert_eq!(
+            result, original,
+            "prompt must be unchanged when no header is needed"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -64,7 +64,6 @@ async fn green_missing_submit_is_followed_by_retry_invoke_carrying_error_and_suc
         .filter(|r| r.goal_id.as_str() == "green")
         .collect();
 
-
     // Then
     assert!(
         green_invokes.len() >= 2,

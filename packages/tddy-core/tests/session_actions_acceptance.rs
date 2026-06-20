@@ -35,8 +35,16 @@ fn list_action_summaries_must_be_sorted_ascending_by_id() {
     let dir = unique_temp_session_dir("sort");
     let session = dir.as_path();
     fs::create_dir_all(session).expect("mkdir session root");
-    write_fixture_action(session, "zeta.yaml", "version: 1\nid: zeta\nsummary: Z\narchitecture: native\ncommand: ['true']\n");
-    write_fixture_action(session, "alpha.yaml", "version: 1\nid: alpha\nsummary: A\narchitecture: native\ncommand: ['true']\n");
+    write_fixture_action(
+        session,
+        "zeta.yaml",
+        "version: 1\nid: zeta\nsummary: Z\narchitecture: native\ncommand: ['true']\n",
+    );
+    write_fixture_action(
+        session,
+        "alpha.yaml",
+        "version: 1\nid: alpha\nsummary: A\narchitecture: native\ncommand: ['true']\n",
+    );
 
     // When
     let result =
@@ -44,7 +52,11 @@ fn list_action_summaries_must_be_sorted_ascending_by_id() {
 
     // Then
     let ids: Vec<&str> = result.actions.iter().map(|s| s.id.as_str()).collect();
-    assert_eq!(ids, vec!["alpha", "zeta"], "summaries must be ascending by id");
+    assert_eq!(
+        ids,
+        vec!["alpha", "zeta"],
+        "summaries must be ascending by id"
+    );
 }
 
 /// Unknown manifest keys must be rejected by serde `deny_unknown_fields` (manifest version contract).
@@ -79,7 +91,14 @@ fn cargo_style_test_totals_must_parse_into_test_summary() {
     let got = parse_test_summary_from_process_output(stdout).expect("parse test totals");
 
     // Then
-    assert_eq!(got, TestSummary { passed: 12, failed: 3, skipped: 4 });
+    assert_eq!(
+        got,
+        TestSummary {
+            passed: 12,
+            failed: 3,
+            skipped: 4
+        }
+    );
 }
 
 #[test]
@@ -100,7 +119,10 @@ fn resolve_allowlisted_path_must_accept_destination_inside_session_tree() {
     let got = resolve_allowlisted_path(session, None, "out/artifact.txt", "output_binding");
 
     // Then
-    assert!(got.is_ok(), "paths inside the session tree must resolve; got {got:?}");
+    assert!(
+        got.is_ok(),
+        "paths inside the session tree must resolve; got {got:?}"
+    );
 }
 
 /// Full JSON Schema semantics require rejecting wrong primitive types for typed properties.
@@ -149,5 +171,8 @@ command: ["true"]
     let out = run_manifest_command(session.as_path(), None, &manifest, &json!({}));
 
     // Then
-    assert!(out.is_ok(), "running the command must return a JSON invocation record; got {out:?}");
+    assert!(
+        out.is_ok(),
+        "running the command must return a JSON invocation record; got {out:?}"
+    );
 }

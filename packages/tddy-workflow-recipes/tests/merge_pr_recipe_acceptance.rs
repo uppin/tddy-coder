@@ -68,9 +68,21 @@ fn merge_pr_graph_has_ordered_goals() {
     );
 
     let ids: BTreeSet<String> = graph.task_ids().cloned().collect();
-    assert!(ids.contains(TASK_ANALYZE), "graph must include analyze; got {:?}", ids);
-    assert!(ids.contains(TASK_SYNC_MAIN), "graph must include sync-main; got {:?}", ids);
-    assert!(ids.contains(TASK_FINALIZE), "graph must include finalize; got {:?}", ids);
+    assert!(
+        ids.contains(TASK_ANALYZE),
+        "graph must include analyze; got {:?}",
+        ids
+    );
+    assert!(
+        ids.contains(TASK_SYNC_MAIN),
+        "graph must include sync-main; got {:?}",
+        ids
+    );
+    assert!(
+        ids.contains(TASK_FINALIZE),
+        "graph must include finalize; got {:?}",
+        ids
+    );
     assert!(ids.contains("end"), "graph must include end; got {:?}", ids);
 
     assert_eq!(

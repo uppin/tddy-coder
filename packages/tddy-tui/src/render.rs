@@ -2173,7 +2173,10 @@ mod tests {
         let text = prompt_text(&state, &vs);
 
         // Then
-        assert_eq!(text, "Up/Down navigate  Enter select", "error recovery must show navigation hint in prompt");
+        assert_eq!(
+            text, "Up/Down navigate  Enter select",
+            "error recovery must show navigation hint in prompt"
+        );
     }
 
     #[test]

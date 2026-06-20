@@ -14,7 +14,10 @@ fn encode_resize_produces_correct_osc_sequence() {
 
     // Then
     let expected = b"\x1b]resize;120;30\x07";
-    assert_eq!(bytes, expected, "encode_resize must produce OSC resize sequence");
+    assert_eq!(
+        bytes, expected,
+        "encode_resize must produce OSC resize sequence"
+    );
 }
 
 #[test]

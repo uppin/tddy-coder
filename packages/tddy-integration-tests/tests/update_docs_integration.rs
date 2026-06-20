@@ -50,7 +50,6 @@ async fn update_docs_invokes_backend_with_update_docs_goal() {
     // When
     let result = run_goal_until_done(&engine, "update-docs", ctx).await;
 
-
     // Then
     assert!(
         result.is_ok(),
@@ -150,7 +149,6 @@ async fn update_docs_parses_structured_response() {
     let output =
         tddy_workflow_recipes::parse_update_docs_response(&output_str).expect("parse output");
 
-
     // Then
     assert!(!output.summary.is_empty(), "summary must not be empty");
     assert_eq!(output.docs_updated, 3, "docs_updated should be 3");
@@ -165,7 +163,6 @@ async fn cursor_backend_accepts_update_docs() {
     let backend = CursorBackend::with_path(std::path::PathBuf::from("/nonexistent/agent"));
     let req = common::stub_invoke_request("update-docs", "update-docs");
 
-
     // When
     let result = backend.invoke(req).await;
 
@@ -173,8 +170,7 @@ async fn cursor_backend_accepts_update_docs() {
     // (agent CLI not installed) or InvocationFailed for other reasons, but must
     // NOT return InvocationFailed("update-docs is not supported").
     if let Err(tddy_core::BackendError::InvocationFailed(ref msg)) = result {
-
-    // Then
+        // Then
         assert!(
             !msg.to_lowercase().contains("update-docs")
                 || !msg.to_lowercase().contains("not supported"),

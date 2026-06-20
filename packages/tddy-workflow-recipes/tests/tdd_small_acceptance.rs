@@ -29,10 +29,18 @@ const POST_GREEN_REVIEW_GOLDEN: &str = r#"{
 fn tdd_small_graph_excludes_demo_and_acceptance_tests_nodes() {
     // Given
     let backend = Arc::new(StubBackend::new());
-    let expected_ids: BTreeSet<String> = ["plan", "red", "green", "post-green-review", "refactor", "update-docs", "end"]
-        .into_iter()
-        .map(String::from)
-        .collect();
+    let expected_ids: BTreeSet<String> = [
+        "plan",
+        "red",
+        "green",
+        "post-green-review",
+        "refactor",
+        "update-docs",
+        "end",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
 
     // When
     let graph = TddSmallRecipe.build_graph(backend);
@@ -41,13 +49,36 @@ fn tdd_small_graph_excludes_demo_and_acceptance_tests_nodes() {
 
     // Then
     assert_eq!(graph.id, "tdd_small_workflow");
-    assert_eq!(ids, expected_ids, "tdd-small must expose exactly this task id set");
-    assert!(!ids.contains("demo"), "tdd-small must not include demo task id");
-    assert!(!ids.contains("acceptance-tests"), "tdd-small must not include acceptance-tests task id");
-    assert!(!ids.contains("evaluate"), "tdd-small must not include separate evaluate task id");
-    assert!(!ids.contains("validate"), "tdd-small must not include separate validate task id");
-    assert_eq!(graph.next_task_id("plan", &ctx), Some("red".to_string()), "plan must edge to merged red");
-    assert_eq!(graph.next_task_id("green", &ctx), Some("post-green-review".to_string()), "green must edge to post-green-review");
+    assert_eq!(
+        ids, expected_ids,
+        "tdd-small must expose exactly this task id set"
+    );
+    assert!(
+        !ids.contains("demo"),
+        "tdd-small must not include demo task id"
+    );
+    assert!(
+        !ids.contains("acceptance-tests"),
+        "tdd-small must not include acceptance-tests task id"
+    );
+    assert!(
+        !ids.contains("evaluate"),
+        "tdd-small must not include separate evaluate task id"
+    );
+    assert!(
+        !ids.contains("validate"),
+        "tdd-small must not include separate validate task id"
+    );
+    assert_eq!(
+        graph.next_task_id("plan", &ctx),
+        Some("red".to_string()),
+        "plan must edge to merged red"
+    );
+    assert_eq!(
+        graph.next_task_id("green", &ctx),
+        Some("post-green-review".to_string()),
+        "green must edge to post-green-review"
+    );
 }
 
 /// PRD: merged evaluate+validate JSON round-trips without losing required fields.
@@ -61,7 +92,10 @@ fn tdd_small_merged_submit_schema_round_trip() {
     assert_eq!(parsed.goal, "post-green-review");
     assert!(!parsed.summary.is_empty(), "summary must be non-empty");
     assert_eq!(parsed.risk_level, "medium");
-    assert!(!parsed.validity_assessment.is_empty(), "validity_assessment must be non-empty");
+    assert!(
+        !parsed.validity_assessment.is_empty(),
+        "validity_assessment must be non-empty"
+    );
 
     let again = serde_json::to_string(&parsed).expect("serialize");
     let back: PostGreenReviewOutput = serde_json::from_str(&again).expect("deserialize");

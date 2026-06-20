@@ -39,8 +39,14 @@ fn tdd_recipe_start_goal_is_interview() {
         Some("interview"),
         "goal_ids must list interview first"
     );
-    assert!(ids.contains(&"interview".to_string()), "goal_ids must include interview");
-    assert!(ids.contains(&"plan".to_string()), "goal_ids must include plan");
+    assert!(
+        ids.contains(&"interview".to_string()),
+        "goal_ids must include interview"
+    );
+    assert!(
+        ids.contains(&"plan".to_string()),
+        "goal_ids must include plan"
+    );
 }
 
 #[test]
@@ -53,9 +59,15 @@ fn tdd_interview_goal_hints_and_submit_policy() {
     let hints = recipe.goal_hints(&gid);
 
     // Then
-    assert!(hints.is_some(), "TddRecipe must expose GoalHints for interview (elicitation step)");
+    assert!(
+        hints.is_some(),
+        "TddRecipe must expose GoalHints for interview (elicitation step)"
+    );
     let h = hints.expect("checked above");
-    assert!(h.agent_output, "interview should surface agent output (grill-me-style elicitation)");
+    assert!(
+        h.agent_output,
+        "interview should surface agent output (grill-me-style elicitation)"
+    );
     assert_eq!(
         h.permission,
         PermissionHint::ReadOnly,
@@ -79,7 +91,10 @@ async fn tdd_interview_handoff_populates_plan_context() {
 
     let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddRecipe);
     let graph = Arc::new(build_tdd_workflow_graph(backend.clone(), recipe.clone()));
-    assert!(graph.get_task("interview").is_some(), "graph must include interview task");
+    assert!(
+        graph.get_task("interview").is_some(),
+        "graph must include interview task"
+    );
 
     let hooks = recipe.create_hooks(None);
     let dir = std::env::temp_dir().join(format!("tdd-interview-handoff-{}", std::process::id()));
@@ -91,14 +106,25 @@ async fn tdd_interview_handoff_populates_plan_context() {
     std::fs::create_dir_all(&repo).expect("repo root");
     let session_base = dir.join("session_base");
     let session_dir = create_session_dir_in(&session_base).expect("session dir");
-    let init_cs = Changeset { initial_prompt: Some("feature blurb SKIP_QUESTIONS".to_string()), ..Changeset::default() };
+    let init_cs = Changeset {
+        initial_prompt: Some("feature blurb SKIP_QUESTIONS".to_string()),
+        ..Changeset::default()
+    };
     let _ = write_changeset(&session_dir, &init_cs);
 
-    let session = Session::new_from_task("handoff1".to_string(), "tdd_workflow".to_string(), "interview".to_string());
-    session.context.set_sync("feature_input", "feature blurb SKIP_QUESTIONS".to_string());
+    let session = Session::new_from_task(
+        "handoff1".to_string(),
+        "tdd_workflow".to_string(),
+        "interview".to_string(),
+    );
+    session
+        .context
+        .set_sync("feature_input", "feature blurb SKIP_QUESTIONS".to_string());
     session.context.set_sync("output_dir", repo);
     session.context.set_sync("session_dir", session_dir.clone());
-    session.context.set_sync("answers", HANDOFF_MARKER.to_string());
+    session
+        .context
+        .set_sync("answers", HANDOFF_MARKER.to_string());
     storage.save(&session).await.expect("save session");
 
     let runner = FlowRunner::new_with_hooks(graph, storage.clone(), Some(hooks));

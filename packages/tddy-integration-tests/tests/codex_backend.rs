@@ -76,8 +76,7 @@ exit 0
 
     let result = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
@@ -147,8 +146,7 @@ exit 0
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
@@ -203,8 +201,7 @@ exit 0
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
@@ -249,8 +246,7 @@ exit 0
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
@@ -297,15 +293,13 @@ exit 7
 
     let err = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect_err("nonzero exit should fail invoke for non-plan goals");
 
     match err {
         BackendError::InvocationFailed(msg) => {
-
-    // Then
+            // Then
             assert!(
                 msg.contains("code 7") && msg.contains("integration stub exit 7"),
                 "expected exit code and JSONL error in message, got: {}",
@@ -349,8 +343,7 @@ exit 0
 
     let result = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
@@ -369,15 +362,13 @@ fn codex_backend_reports_binary_not_found() {
 
     let err = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect_err("expected BinaryNotFound for missing codex binary");
 
     match err {
         BackendError::BinaryNotFound(msg) => {
-
-    // Then
+            // Then
             assert!(
                 msg.contains("codex") || msg.to_lowercase().contains("not found"),
                 "message should name the binary or not-found: {}",

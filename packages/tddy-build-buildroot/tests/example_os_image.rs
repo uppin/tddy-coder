@@ -20,8 +20,11 @@ fn staged() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
     let br_dir = dir.path().join("external/buildroot");
     std::fs::create_dir_all(&br_dir).expect("mkdir");
-    std::fs::copy(fake_buildroot_src().join("Makefile"), br_dir.join("Makefile"))
-        .expect("copy Makefile");
+    std::fs::copy(
+        fake_buildroot_src().join("Makefile"),
+        br_dir.join("Makefile"),
+    )
+    .expect("copy Makefile");
     dir
 }
 
@@ -52,8 +55,7 @@ async fn buildroot_defconfig_action_creates_config_file() {
 
     // Then
     assert_eq!(
-        record.actions[0].exit_code,
-        0,
+        record.actions[0].exit_code, 0,
         "defconfig stderr: {}",
         record.actions[0].stderr
     );
@@ -82,8 +84,7 @@ async fn buildroot_build_action_creates_rootfs_image() {
 
     // Then
     assert_eq!(
-        record.actions[1].exit_code,
-        0,
+        record.actions[1].exit_code, 0,
         "build stderr: {}",
         record.actions[1].stderr
     );

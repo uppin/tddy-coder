@@ -204,7 +204,6 @@ async fn green_workflow_returns_error_when_progress_md_missing() {
     let ctx = ctx_green(session_dir.clone(), None, false);
     let result = engine.run_goal(&GoalId::new("green"), ctx).await;
 
-
     // Then
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
@@ -258,7 +257,6 @@ artifacts: {}
 
     let ctx = ctx_green(session_dir.clone(), None, false);
     let result = engine.run_goal(&GoalId::new("green"), ctx).await;
-
 
     // Then
     assert!(result.is_err());
@@ -545,7 +543,6 @@ async fn green_goal_reports_demo_results() {
         "# Demo Plan\n## Type\ncli\n## Steps\n1. Run `cargo run`\n## Verification\nSee output",
     )
     .expect("write demo-plan.md");
-
 
     // When
     const GREEN_OUTPUT_WITH_DEMO: &str = r#"{"goal":"green","summary":"Implemented. All tests passing. Demo verified.","tests":[{"name":"auth_service_validates_email","file":"packages/auth/src/service.rs","line":42,"status":"passing"},{"name":"auth_service_rejects_empty_email","file":"packages/auth/src/service.rs","line":55,"status":"passing"},{"name":"session_store_persists_token","file":"packages/auth/tests/session_it.rs","line":22,"status":"passing"}],"implementations":[{"name":"AuthService","file":"packages/auth/src/service.rs","line":10,"kind":"struct"}],"demo_results":{"summary":"Demo executed successfully","steps_completed":1}}"#;

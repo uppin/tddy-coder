@@ -49,7 +49,10 @@ fn invoke_request_has_remote_field() {
     };
 
     // Then
-    assert!(req.remote.is_some(), "InvokeRequest.remote must be Some when set");
+    assert!(
+        req.remote.is_some(),
+        "InvokeRequest.remote must be Some when set"
+    );
     assert_eq!(
         req.remote.as_ref().unwrap().session_id,
         "sess-abc123",
@@ -68,7 +71,10 @@ fn invoke_request_remote_defaults_to_none() {
     };
 
     // Then
-    assert!(req.remote.is_none(), "InvokeRequest.remote must default to None");
+    assert!(
+        req.remote.is_none(),
+        "InvokeRequest.remote must default to None"
+    );
 }
 
 /// Phase 5 AC: `RemoteToolEnv::env_pairs()` (or equivalent) returns all TDDY_REMOTE_* key-value
@@ -96,8 +102,14 @@ fn remote_tool_env_env_pairs_covers_all_required_vars() {
         "env_pairs must include TDDY_REMOTE_DAEMON_URL; got keys: {:?}",
         map.keys().collect::<Vec<_>>()
     );
-    assert!(map.contains_key("TDDY_REMOTE_SESSION_ID"), "env_pairs must include TDDY_REMOTE_SESSION_ID");
-    assert!(map.contains_key("TDDY_REMOTE_SESSION_TOKEN"), "env_pairs must include TDDY_REMOTE_SESSION_TOKEN");
+    assert!(
+        map.contains_key("TDDY_REMOTE_SESSION_ID"),
+        "env_pairs must include TDDY_REMOTE_SESSION_ID"
+    );
+    assert!(
+        map.contains_key("TDDY_REMOTE_SESSION_TOKEN"),
+        "env_pairs must include TDDY_REMOTE_SESSION_TOKEN"
+    );
     assert_eq!(map["TDDY_REMOTE_DAEMON_URL"], "http://relay.local:9000");
     assert_eq!(map["TDDY_REMOTE_SESSION_ID"], "sess-789");
     assert_eq!(map["TDDY_REMOTE_SESSION_TOKEN"], "tok-abc");

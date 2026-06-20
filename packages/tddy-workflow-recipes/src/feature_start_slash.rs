@@ -53,6 +53,9 @@ mod tests {
 
         // Then
         assert!(err.contains("tdd"), "error must mention 'tdd'; got: {err}");
-        assert!(err.contains("bugfix"), "error must mention 'bugfix'; got: {err}");
+        assert!(
+            err.contains("bugfix"),
+            "error must mention 'bugfix'; got: {err}"
+        );
     }
 }

@@ -338,7 +338,10 @@ mod build_wire_tests {
         .unwrap();
 
         // Then — flags default to false
-        assert!(!defaults.no_cache, "expected no_cache to be false by default");
+        assert!(
+            !defaults.no_cache,
+            "expected no_cache to be false by default"
+        );
         assert!(!defaults.dry_run, "expected dry_run to be false by default");
     }
 
@@ -383,6 +386,9 @@ mod build_wire_tests {
         let executor = build_executor();
 
         // Then
-        assert!(executor.is_none(), "no executor should be registered in tddy-core");
+        assert!(
+            executor.is_none(),
+            "no executor should be registered in tddy-core"
+        );
     }
 }

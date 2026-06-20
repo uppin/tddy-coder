@@ -64,8 +64,14 @@ state:
     assert_eq!(s.workflow_state, "Red");
     assert_eq!(s.agent, "claude");
     assert_eq!(s.model, "sonnet-4");
-    assert!(!s.elapsed_display.is_empty(), "elapsed_display must not be empty");
-    assert_ne!(s.elapsed_display, "—", "elapsed_display must not be the placeholder dash");
+    assert!(
+        !s.elapsed_display.is_empty(),
+        "elapsed_display must not be empty"
+    );
+    assert_ne!(
+        s.elapsed_display, "—",
+        "elapsed_display must not be the placeholder dash"
+    );
 }
 
 /// Acceptance: `SessionEntry.pending_elicitation` must match `pending_elicitation` in `.session.yaml`.

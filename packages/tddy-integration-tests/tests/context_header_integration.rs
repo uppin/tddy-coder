@@ -95,7 +95,6 @@ async fn prompt_header_lists_prd_md_with_absolute_path() {
     let invocations = backend.invocations();
     let prompt = &invocations[0].prompt;
 
-
     // Then
     assert!(
         prompt.contains("PRD.md:"),
@@ -153,7 +152,6 @@ async fn prompt_header_omits_missing_artifacts() {
     let invocations = backend.invocations();
     let prompt = &invocations[0].prompt;
 
-
     // Then
     assert!(
         !prompt.contains("TODO.md:"),
@@ -197,7 +195,6 @@ async fn prompt_header_is_separated_from_body_by_a_blank_line() {
 
     let invocations = backend.invocations();
     let prompt = &invocations[0].prompt;
-
 
     // Then
     assert!(
@@ -305,7 +302,6 @@ async fn prompt_has_no_context_header_when_output_dir_is_empty() {
         storage_dir,
         Some(common::tdd_recipe().create_hooks(None)),
     );
-
 
     // When
     let _ = run_plan(&engine, "A feature", &output_dir, None)

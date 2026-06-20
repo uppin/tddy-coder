@@ -15,7 +15,10 @@ fn invoke_request_has_goal_id_and_hints() {
 
     // Then
     assert_eq!(req.goal_id, GoalId::new("plan"));
-    assert!(!req.hints.display_name.is_empty(), "goal hints must have a non-empty display name");
+    assert!(
+        !req.hints.display_name.is_empty(),
+        "goal hints must have a non-empty display name"
+    );
 }
 
 /// InvokeRequest can be built for every goal id defined by the TDD recipe.
@@ -27,8 +30,18 @@ fn invoke_request_supports_all_tdd_goal_ids() {
     // When / Then
     for gid in recipe.goal_ids() {
         let req = common::stub_invoke_request("test", gid.as_str());
-        assert_eq!(req.goal_id, gid, "goal_id must match for goal {}", gid.as_str());
-        assert_eq!(req.submit_key, recipe.submit_key(&gid), "submit_key must match for goal {}", gid.as_str());
+        assert_eq!(
+            req.goal_id,
+            gid,
+            "goal_id must match for goal {}",
+            gid.as_str()
+        );
+        assert_eq!(
+            req.submit_key,
+            recipe.submit_key(&gid),
+            "submit_key must match for goal {}",
+            gid.as_str()
+        );
     }
 }
 
@@ -47,7 +60,11 @@ fn invoke_response_session_id_is_option() {
         .build();
 
     // Then
-    assert_eq!(resp_with_session.session_id.as_deref(), Some("session-123"), "session_id must round-trip");
+    assert_eq!(
+        resp_with_session.session_id.as_deref(),
+        Some("session-123"),
+        "session_id must round-trip"
+    );
 }
 
 /// CodingBackend trait has name() method returning backend identifier.
@@ -57,5 +74,9 @@ fn coding_backend_has_name_method() {
     let backend = MockBackend::new();
 
     // When / Then
-    assert_eq!(backend.name(), "mock", "MockBackend must identify itself as 'mock'");
+    assert_eq!(
+        backend.name(),
+        "mock",
+        "MockBackend must identify itself as 'mock'"
+    );
 }

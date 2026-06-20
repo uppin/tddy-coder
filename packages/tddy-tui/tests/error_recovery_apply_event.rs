@@ -75,7 +75,10 @@ fn should_quit_event_sets_quit_flag_in_state() {
     );
 
     // Then
-    assert!(state.should_quit, "ShouldQuit must set the quit flag so the TUI loop exits");
+    assert!(
+        state.should_quit,
+        "ShouldQuit must set the quit flag so the TUI loop exits"
+    );
 }
 
 #[test]
@@ -94,8 +97,16 @@ fn workflow_error_preserves_goal_and_state_for_status_bar() {
     );
 
     // Then
-    assert_eq!(state.current_goal.as_deref(), Some("refactor"), "goal must be preserved across error");
-    assert_eq!(state.current_state.as_deref(), Some("Refactoring"), "current state must be preserved across error");
+    assert_eq!(
+        state.current_goal.as_deref(),
+        Some("refactor"),
+        "goal must be preserved across error"
+    );
+    assert_eq!(
+        state.current_state.as_deref(),
+        Some("Refactoring"),
+        "current state must be preserved across error"
+    );
 }
 
 #[test]

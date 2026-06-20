@@ -44,18 +44,27 @@ async fn list_exec_tools_returns_non_empty_catalog_with_valid_schemas() {
 
     // Then
     let tools = &resp.get_ref().tools;
-    assert!(!tools.is_empty(), "ListExecTools must return at least one tool");
+    assert!(
+        !tools.is_empty(),
+        "ListExecTools must return at least one tool"
+    );
 
     for tool in tools {
-        assert!(!tool.name.is_empty(), "every ToolDef must have a non-empty name");
+        assert!(
+            !tool.name.is_empty(),
+            "every ToolDef must have a non-empty name"
+        );
         assert!(
             !tool.description.is_empty(),
             "every ToolDef must have a non-empty description (tool: {})",
             tool.name
         );
-        let schema: serde_json::Value =
-            serde_json::from_str(&tool.input_schema_json).unwrap_or_else(|_| {
-                panic!("ToolDef '{}' must have valid JSON in input_schema_json", tool.name)
+        let schema: serde_json::Value = serde_json::from_str(&tool.input_schema_json)
+            .unwrap_or_else(|_| {
+                panic!(
+                    "ToolDef '{}' must have valid JSON in input_schema_json",
+                    tool.name
+                )
             });
         assert!(
             schema.is_object(),
@@ -66,7 +75,16 @@ async fn list_exec_tools_returns_non_empty_catalog_with_valid_schemas() {
     }
 
     let names: std::collections::HashSet<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-    for expected in &["Read", "Write", "StrReplace", "Delete", "Grep", "Glob", "Shell", "Await"] {
+    for expected in &[
+        "Read",
+        "Write",
+        "StrReplace",
+        "Delete",
+        "Grep",
+        "Glob",
+        "Shell",
+        "Await",
+    ] {
         assert!(
             names.contains(expected),
             "catalog must include cursor tool '{}', got: {:?}",
@@ -166,9 +184,18 @@ async fn execute_tool_background_shell_then_await_round_trips() {
 
     // Then
     let shell_body = shell_resp.get_ref();
-    assert!(!shell_body.is_error, "Shell background launch must succeed (is_error=false)");
-    assert!(!shell_body.job_id.is_empty(), "Shell background must return a non-empty job_id");
-    assert!(shell_body.job_running, "Shell background must return job_running=true immediately");
+    assert!(
+        !shell_body.is_error,
+        "Shell background launch must succeed (is_error=false)"
+    );
+    assert!(
+        !shell_body.job_id.is_empty(),
+        "Shell background must return a non-empty job_id"
+    );
+    assert!(
+        shell_body.job_running,
+        "Shell background must return job_running=true immediately"
+    );
 
     let job_id = shell_body.job_id.clone();
 
@@ -191,10 +218,13 @@ async fn execute_tool_background_shell_then_await_round_trips() {
         "Await must succeed, got error: {:?}",
         await_body.error_message
     );
-    assert!(!await_body.job_running, "Await must return job_running=false when the job completes");
+    assert!(
+        !await_body.job_running,
+        "Await must return job_running=false when the job completes"
+    );
 
-    let result: serde_json::Value =
-        serde_json::from_str(&await_body.result_json).expect("Await result_json must be valid JSON");
+    let result: serde_json::Value = serde_json::from_str(&await_body.result_json)
+        .expect("Await result_json must be valid JSON");
     let exit_code = result
         .get("exit_code")
         .and_then(|v| v.as_i64())
@@ -250,7 +280,10 @@ async fn execute_tool_connect_by_id_works_on_cli_session_worktree() {
         .expect("ExecuteTool Read against a claude-cli session must not fail");
 
     // Then
-    assert!(!resp.get_ref().is_error, "Read must succeed against a claude-cli session worktree");
+    assert!(
+        !resp.get_ref().is_error,
+        "Read must succeed against a claude-cli session worktree"
+    );
     let result: serde_json::Value =
         serde_json::from_str(&resp.get_ref().result_json).expect("result_json must be valid JSON");
     assert_eq!(

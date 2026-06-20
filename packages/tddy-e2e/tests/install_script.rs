@@ -220,7 +220,10 @@ fn install_copies_binaries_to_custom_dir() {
     );
 
     // Then
-    assert!(st.success(), "install should succeed with test env; got {st:?}");
+    assert!(
+        st.success(),
+        "install should succeed with test env; got {st:?}"
+    );
     for name in ["tddy-daemon", "tddy-coder", "tddy-tools"] {
         let p = bin_dir.join(name);
         assert!(p.is_file(), "expected {} installed", p.display());
@@ -262,7 +265,10 @@ fn install_creates_config_only_if_absent() {
     assert!(st.success(), "first install: {st:?}");
     let cfg = cfg_dir.join("daemon.yaml");
     let first = fs::read_to_string(&cfg).unwrap();
-    assert!(first.contains(bin_dir.to_str().unwrap()), "config must reference bin_dir");
+    assert!(
+        first.contains(bin_dir.to_str().unwrap()),
+        "config must reference bin_dir"
+    );
 
     // Given — pre-existing custom config
     fs::write(&cfg, "custom: preserved\n").unwrap();
@@ -273,7 +279,10 @@ fn install_creates_config_only_if_absent() {
     // Then — custom config is preserved
     assert!(st2.success(), "second install: {st2:?}");
     let after = fs::read_to_string(&cfg).unwrap();
-    assert_eq!(after, "custom: preserved\n", "config must not be overwritten");
+    assert_eq!(
+        after, "custom: preserved\n",
+        "config must not be overwritten"
+    );
 }
 
 #[test]
@@ -310,7 +319,10 @@ fn install_generates_unit_with_correct_paths() {
         bin_dir.display(),
         cfg_file.display()
     );
-    assert!(unit.contains(&want_exec), "unit file missing expected ExecStart line.\nGot:\n{unit}");
+    assert!(
+        unit.contains(&want_exec),
+        "unit file missing expected ExecStart line.\nGot:\n{unit}"
+    );
 }
 
 #[test]
@@ -340,7 +352,10 @@ fn install_preserves_systemd_unit_unless_overwrite_env() {
     assert!(st.success(), "first install: {st:?}");
     let unit_path = sys_dir.join("tddy-daemon.service");
     let mut unit = fs::read_to_string(&unit_path).unwrap();
-    assert!(!unit.contains("User=preserve_test"), "template should not contain marker yet");
+    assert!(
+        !unit.contains("User=preserve_test"),
+        "template should not contain marker yet"
+    );
     unit.push_str("\nUser=preserve_test\n");
     fs::write(&unit_path, &unit).unwrap();
 
@@ -350,7 +365,10 @@ fn install_preserves_systemd_unit_unless_overwrite_env() {
     // Then — unit is preserved
     assert!(st2.success(), "second install: {st2:?}");
     let after = fs::read_to_string(&unit_path).unwrap();
-    assert!(after.contains("User=preserve_test"), "unit must not be overwritten on reinstall; got:\n{after}");
+    assert!(
+        after.contains("User=preserve_test"),
+        "unit must not be overwritten on reinstall; got:\n{after}"
+    );
 
     // When — third install with INSTALL_OVERWRITE_SYSTEMD_UNIT=1
     let mut env_overwrite: Vec<(&str, &str)> = base_env.to_vec();
@@ -360,10 +378,20 @@ fn install_preserves_systemd_unit_unless_overwrite_env() {
     // Then — unit is replaced
     assert!(st3.success(), "third install with overwrite: {st3:?}");
     let final_unit = fs::read_to_string(&unit_path).unwrap();
-    assert!(!final_unit.contains("User=preserve_test"), "INSTALL_OVERWRITE_SYSTEMD_UNIT=1 should replace unit; got:\n{final_unit}");
+    assert!(
+        !final_unit.contains("User=preserve_test"),
+        "INSTALL_OVERWRITE_SYSTEMD_UNIT=1 should replace unit; got:\n{final_unit}"
+    );
     let cfg_file = cfg_dir.join("daemon.yaml");
-    let want_exec = format!("ExecStart={}/tddy-daemon -c {}", bin_dir.display(), cfg_file.display());
-    assert!(final_unit.contains(&want_exec), "fresh unit should contain ExecStart; got:\n{final_unit}");
+    let want_exec = format!(
+        "ExecStart={}/tddy-daemon -c {}",
+        bin_dir.display(),
+        cfg_file.display()
+    );
+    assert!(
+        final_unit.contains(&want_exec),
+        "fresh unit should contain ExecStart; got:\n{final_unit}"
+    );
 }
 
 #[test]
@@ -379,7 +407,10 @@ fn install_fails_without_binaries() {
     let st = run_install_in(root, &[("INSTALL_NO_SYSTEMCTL", "1")]);
 
     // Then
-    assert!(!st.success(), "install should fail when release binaries are missing");
+    assert!(
+        !st.success(),
+        "install should fail when release binaries are missing"
+    );
 }
 
 #[test]
@@ -447,7 +478,10 @@ fn install_fails_when_config_lists_codex_acp_without_native() {
     );
 
     // Then
-    assert!(!st.success(), "install should fail when allowed_agents lists codex-acp but native package is missing");
+    assert!(
+        !st.success(),
+        "install should fail when allowed_agents lists codex-acp but native package is missing"
+    );
 }
 
 #[test]
@@ -472,5 +506,8 @@ fn install_fails_when_install_bundle_codex_acp_without_native() {
     );
 
     // Then
-    assert!(!st.success(), "install should fail when INSTALL_BUNDLE_CODEX_ACP=1 but native package is missing");
+    assert!(
+        !st.success(),
+        "install should fail when INSTALL_BUNDLE_CODEX_ACP=1 but native package is missing"
+    );
 }

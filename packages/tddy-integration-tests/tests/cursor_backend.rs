@@ -47,8 +47,7 @@ exit 0
 
     let result = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
@@ -128,13 +127,12 @@ exit 0
         let req = stub_invoke_request("Create tests", goal_id);
         let _ = tokio::runtime::Runtime::new()
             .unwrap()
-
-    // When
+            // When
             .block_on(backend.invoke(req))
             .expect("invoke should succeed");
         let captured = fs::read_to_string(&args_file).expect("read captured args");
 
-    // Then
+        // Then
         assert!(
             !captured.contains("--plan"),
             "should not have --plan when goal is {}, got: {}",
@@ -176,8 +174,7 @@ exit 0
 
     let result = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke Goal::Validate must succeed like other goals");
 
@@ -226,8 +223,7 @@ exit 0
 
     let result = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke Goal::Refactor must succeed like other non-plan goals");
 
@@ -279,8 +275,7 @@ exit 0
 
     let result = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
@@ -333,8 +328,7 @@ exit 0
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
@@ -410,8 +404,7 @@ exit 0
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
@@ -464,8 +457,7 @@ exit 0
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
@@ -519,8 +511,7 @@ exit 0
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
@@ -594,8 +585,7 @@ exit 0
 
     match &result.status {
         ExecutionStatus::WaitingForInput { .. } => {
-
-    // Then
+            // Then
             assert!(!result.session_id.is_empty(), "session_id should be set");
         }
         ExecutionStatus::Completed => {

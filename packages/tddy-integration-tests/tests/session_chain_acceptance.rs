@@ -81,7 +81,6 @@ fn chain_base_resolved_from_parent_session_changeset_branch() {
     )
     .expect("must resolve origin/<branch> from parent session changeset + validate repo match");
 
-
     // Then
     assert_eq!(origin_ref, "origin/feature/parent-stack");
 

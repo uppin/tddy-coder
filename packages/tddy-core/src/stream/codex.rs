@@ -201,7 +201,10 @@ mod tests {
         let got = parse_codex_jsonl_output(&lines);
 
         // Then
-        assert_eq!(got.session_id.as_deref(), Some("019d73e9-5b90-7ea2-aae8-67aec4c248ed"));
+        assert_eq!(
+            got.session_id.as_deref(),
+            Some("019d73e9-5b90-7ea2-aae8-67aec4c248ed")
+        );
     }
 
     #[test]
@@ -247,7 +250,10 @@ mod tests {
         let message = codex_jsonl_last_error_message(&lines);
 
         // Then
-        assert_eq!(message.as_deref(), Some("unexpected status 401 Unauthorized: no token"));
+        assert_eq!(
+            message.as_deref(),
+            Some("unexpected status 401 Unauthorized: no token")
+        );
     }
 
     #[test]
@@ -259,10 +265,15 @@ mod tests {
              2026-04-09T20:27:25.555500Z ERROR codex_api::endpoint::responses_websocket: b";
 
         // When
-        let got = codex_stderr_brief_for_user(stderr).expect("non-empty stderr should produce a brief");
+        let got =
+            codex_stderr_brief_for_user(stderr).expect("non-empty stderr should produce a brief");
 
         // Then
         assert_eq!(got, "a → b");
-        assert!(!got.starts_with("2026-"), "tracing timestamp should be stripped, got {:?}", got);
+        assert!(
+            !got.starts_with("2026-"),
+            "tracing timestamp should be stripped, got {:?}",
+            got
+        );
     }
 }

@@ -59,7 +59,6 @@ async fn planning_workflow_produces_prd_and_todo_in_output_directory() {
         Some(hooks),
     );
 
-
     // When
     let (output_path, _) = run_plan(
         &engine,
@@ -69,7 +68,6 @@ async fn planning_workflow_produces_prd_and_todo_in_output_directory() {
     )
     .await
     .expect("planning should succeed");
-
 
     // Then
     assert!(output_path.is_dir(), "output should be a directory");
@@ -124,7 +122,6 @@ async fn planning_workflow_invokes_backend_with_plan_permission_mode() {
         Some(hooks),
     );
 
-
     // When
     let (session_dir, _) = run_plan(&engine, "Feature X", &output_dir, None)
         .await
@@ -163,7 +160,6 @@ async fn planning_workflow_with_stub_backend_transitions_to_planned() {
         storage_dir.clone(),
         Some(hooks),
     );
-
 
     // When
     let first = run_plan(&engine, "Add a feature", &output_dir, None).await;
@@ -229,10 +225,8 @@ async fn planning_workflow_transitions_to_failed_when_backend_errors() {
         Some(hooks),
     );
 
-
     // When
     let result = run_plan(&engine, "Feature Y", &output_dir, None).await;
-
 
     // Then
     assert!(result.is_err(), "planning should fail");
@@ -273,10 +267,8 @@ async fn planning_workflow_returns_clarification_needed_when_backend_returns_que
         Some(hooks),
     );
 
-
     // When
     let result = run_plan(&engine, "Feature Z", &output_dir, None).await;
-
 
     // Then
     assert!(
@@ -346,10 +338,8 @@ async fn planning_workflow_returns_clarification_needed_with_structured_question
         Some(hooks),
     );
 
-
     // When
     let result = run_plan(&engine, "Feature Z", &output_dir, None).await;
-
 
     // Then
     assert!(
@@ -384,7 +374,6 @@ async fn planning_workflow_produces_prd_after_clarification_answers() {
         storage_dir.clone(),
         Some(hooks),
     );
-
 
     // When
     let first = run_plan(&engine, "Feature Z", &output_dir, None).await;
@@ -434,7 +423,6 @@ async fn planning_workflow_stub_backend_clarification_roundtrip() {
         storage_dir.clone(),
         Some(hooks),
     );
-
 
     // When
     let first = run_plan(&engine, "test feature", &output_dir, None).await;
@@ -487,7 +475,6 @@ async fn planning_workflow_rejects_json_with_whitespace_only_prd() {
         storage_dir.clone(),
         Some(hooks),
     );
-
 
     // When
     let result = run_plan(&engine, "another feature", &output_dir, None).await;

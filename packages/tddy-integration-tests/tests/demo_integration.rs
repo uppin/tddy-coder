@@ -238,8 +238,7 @@ fn default_models_includes_demo() {
         defaults.keys().collect::<Vec<_>>()
     );
     assert!(
-
-    // When
+        // When
         tddy_core::resolve_model(Some(&changeset), "demo", None, Some(&defaults)).is_some(),
         "resolve_model should fall back to recipe defaults for demo"
     );
@@ -264,7 +263,6 @@ async fn evaluate_accepts_green_complete_state() {
 
     // When
     let result = run_goal_until_done(&engine, "evaluate", ctx).await;
-
 
     // Then
     assert!(
@@ -309,7 +307,6 @@ async fn evaluate_accepts_demo_complete_state() {
 
     // When
     let result = run_goal_until_done(&engine, "evaluate", ctx).await;
-
 
     // Then
     assert!(
@@ -380,7 +377,6 @@ async fn demo_backend_invocation_uses_goal_demo() {
 
     // When
     let result = engine.run_goal(&GoalId::new("demo"), ctx).await;
-
 
     // Then
     assert!(result.is_ok(), "demo should succeed, got {:?}", result);

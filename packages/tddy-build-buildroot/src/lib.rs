@@ -92,12 +92,20 @@ impl BuildPlugin for BuildrootPlugin {
 fn relative_path(from_dir: &str, to_path: &str) -> String {
     let from: Vec<&str> = from_dir.split('/').filter(|s| !s.is_empty()).collect();
     let to: Vec<&str> = to_path.split('/').filter(|s| !s.is_empty()).collect();
-    let common = from.iter().zip(to.iter()).take_while(|(a, b)| a == b).count();
+    let common = from
+        .iter()
+        .zip(to.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
     let ups = from.len() - common;
     let down = &to[common..];
     let mut parts: Vec<&str> = std::iter::repeat_n("..", ups).collect();
     parts.extend(down.iter().copied());
-    if parts.is_empty() { ".".to_string() } else { parts.join("/") }
+    if parts.is_empty() {
+        ".".to_string()
+    } else {
+        parts.join("/")
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -168,7 +176,10 @@ mod tests {
     #[test]
     fn relative_path_crosses_directory_boundary() {
         // Given / When / Then
-        assert_eq!(relative_path("external/buildroot", "build/br-out"), "../../build/br-out");
+        assert_eq!(
+            relative_path("external/buildroot", "build/br-out"),
+            "../../build/br-out"
+        );
     }
 
     #[test]
@@ -193,7 +204,10 @@ mod tests {
         let actions = lower("defconfig: qemu_x86_64_defconfig\nbuildroot_dir: external/buildroot\noutput_dir: build/br-out\n");
 
         // Then
-        assert_eq!(actions[1].outputs[0].path, "build/br-out/images/rootfs.ext4");
+        assert_eq!(
+            actions[1].outputs[0].path,
+            "build/br-out/images/rootfs.ext4"
+        );
     }
 
     #[test]

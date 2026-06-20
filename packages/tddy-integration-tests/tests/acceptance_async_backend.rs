@@ -14,7 +14,6 @@ async fn mock_backend_invoke_is_async() {
 
     let req = common::stub_invoke_request("test", "plan");
 
-
     // When
     let result = backend.invoke(req).await;
 

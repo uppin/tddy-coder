@@ -307,10 +307,7 @@ mod tests {
         let encoded = s.encode_telegram_user(42).expect("encode");
 
         // Then
-        assert!(
-            encoded.len() >= 8,
-            "encoded state should be non-trivial"
-        );
+        assert!(encoded.len() >= 8, "encoded state should be non-trivial");
     }
 
     #[test]

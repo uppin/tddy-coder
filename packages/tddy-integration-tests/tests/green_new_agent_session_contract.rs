@@ -68,7 +68,6 @@ async fn green_with_new_agent_session_does_not_resume_old_session() {
         .await
         .expect("green should complete");
 
-
     // Then
     assert!(
         matches!(outcome.status, ExecutionStatus::Paused { .. }),
@@ -120,7 +119,6 @@ async fn green_without_new_agent_session_resumes_existing_session() {
         .run_goal(&GoalId::new("green"), ctx)
         .await
         .expect("green should complete");
-
 
     // Then
     assert!(
@@ -186,7 +184,6 @@ async fn green_new_agent_session_remediation_retries_also_start_fresh() {
         .run_goal(&GoalId::new("green"), ctx)
         .await
         .expect("green should complete after remediation retry");
-
 
     // Then
     assert!(

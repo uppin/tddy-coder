@@ -83,6 +83,12 @@ fn invalid_start_slash_surfaces_supported_recipe_list() {
         "invalid /start- suffix must parse as a start-slash command and yield an error (not None)"
     );
     let err = parsed.unwrap().unwrap_err();
-    assert!(err.contains("tdd"), "error must list 'tdd' in supported names; got: {err}");
-    assert!(err.contains("bugfix"), "error must list 'bugfix' in supported names; got: {err}");
+    assert!(
+        err.contains("tdd"),
+        "error must list 'tdd' in supported names; got: {err}"
+    );
+    assert!(
+        err.contains("bugfix"),
+        "error must list 'bugfix' in supported names; got: {err}"
+    );
 }

@@ -67,7 +67,6 @@ async fn red_workflow_reads_prd_and_acceptance_tests_md_invokes_backend() {
     // When
     let result = engine.run_goal(&GoalId::new("red"), ctx).await.unwrap();
 
-
     // Then
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),
@@ -274,7 +273,6 @@ async fn red_workflow_returns_error_when_acceptance_tests_md_missing() {
     // When
     let result = run_goal_until_done(&engine, "red", ctx).await;
 
-
     // Then
     assert!(
         result.is_err(),
@@ -413,7 +411,6 @@ async fn red_workflow_transitions_to_failed_when_retry_also_fails_validation() {
 
     // When
     let result = run_goal_until_done(&engine, "red", ctx).await;
-
 
     // Then
     assert!(result.is_err());

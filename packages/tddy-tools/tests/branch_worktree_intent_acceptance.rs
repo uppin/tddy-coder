@@ -50,10 +50,22 @@ fn persist_changeset_workflow_accepts_branch_intent_and_round_trips() {
     );
 
     let raw = fs::read_to_string(dir.join("changeset.yaml")).expect("read changeset.yaml");
-    assert!(raw.contains("branch_worktree_intent"), "changeset.yaml must contain 'branch_worktree_intent'; got:\n{raw}");
-    assert!(raw.contains("new_branch_from_base"), "changeset.yaml must contain 'new_branch_from_base'; got:\n{raw}");
-    assert!(raw.contains("selected_integration_base_ref"), "changeset.yaml must contain 'selected_integration_base_ref'; got:\n{raw}");
-    assert!(raw.contains("new_branch_name"), "changeset.yaml must contain 'new_branch_name'; got:\n{raw}");
+    assert!(
+        raw.contains("branch_worktree_intent"),
+        "changeset.yaml must contain 'branch_worktree_intent'; got:\n{raw}"
+    );
+    assert!(
+        raw.contains("new_branch_from_base"),
+        "changeset.yaml must contain 'new_branch_from_base'; got:\n{raw}"
+    );
+    assert!(
+        raw.contains("selected_integration_base_ref"),
+        "changeset.yaml must contain 'selected_integration_base_ref'; got:\n{raw}"
+    );
+    assert!(
+        raw.contains("new_branch_name"),
+        "changeset.yaml must contain 'new_branch_name'; got:\n{raw}"
+    );
 
     let ctx = Context::new();
     merge_persisted_workflow_into_context(&dir, &ctx).expect("merge workflow into context");
@@ -96,5 +108,8 @@ fn invalid_branch_worktree_intent_value_fails_validation() {
     let result = validate_output("changeset-workflow", bad);
 
     // Then
-    assert!(result.is_err(), "schema must reject unknown branch_worktree_intent enum values");
+    assert!(
+        result.is_err(),
+        "schema must reject unknown branch_worktree_intent enum values"
+    );
 }

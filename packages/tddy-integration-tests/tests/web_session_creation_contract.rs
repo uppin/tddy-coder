@@ -99,7 +99,6 @@ async fn session_yaml_and_changeset_yaml_must_be_in_same_directory() {
     )
     .expect("write .session.yaml");
 
-
     // Then
     assert!(
         daemon_session_dir.join(SESSION_METADATA_FILENAME).exists(),

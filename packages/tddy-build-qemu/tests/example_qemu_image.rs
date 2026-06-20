@@ -16,8 +16,7 @@ fn staged() -> tempfile::TempDir {
     let images = dir.path().join("build/br-out/images");
     std::fs::create_dir_all(&images).expect("mkdir");
     // 1 MiB zero-filled raw "disk image" — valid input for qemu-img convert -f raw
-    std::fs::write(images.join("rootfs.ext4"), vec![0u8; 1024 * 1024])
-        .expect("write raw image");
+    std::fs::write(images.join("rootfs.ext4"), vec![0u8; 1024 * 1024]).expect("write raw image");
     dir
 }
 
@@ -45,8 +44,7 @@ async fn qemu_disk_image_converts_raw_to_qcow2() {
 
     // Then
     assert_eq!(
-        record.actions[0].exit_code,
-        0,
+        record.actions[0].exit_code, 0,
         "stderr: {}",
         record.actions[0].stderr
     );
@@ -54,7 +52,11 @@ async fn qemu_disk_image_converts_raw_to_qcow2() {
     assert!(qcow2_path.exists(), "qcow2 output must be created");
     // Verify qcow2 magic header: first 4 bytes are b"QFI\xfb"
     let header = std::fs::read(&qcow2_path).expect("read qcow2");
-    assert_eq!(&header[..4], b"QFI\xfb", "output must be a valid qcow2 image");
+    assert_eq!(
+        &header[..4],
+        b"QFI\xfb",
+        "output must be a valid qcow2 image"
+    );
 }
 
 #[tokio::test]

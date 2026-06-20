@@ -26,7 +26,6 @@ fn process_ndjson_extracts_result_text_and_session_id() {
     let result =
         process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
-
     // Then
     assert_eq!(result.session_id, "sess-123");
     assert!(result.result_text.contains("Feature X"));
@@ -40,7 +39,6 @@ fn process_ndjson_extracts_ask_user_question_events() {
     let cursor = Cursor::new(NDJSON_WITH_QUESTIONS);
     let result =
         process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
-
 
     // Then
     assert_eq!(result.session_id, "sess-456");
@@ -67,7 +65,6 @@ fn process_ndjson_deduplicates_questions() {
     let result =
         process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
-
     // Then
     assert_eq!(
         result.questions.len(),
@@ -90,7 +87,6 @@ fn process_ndjson_extracts_questions_from_permission_denials() {
     let result =
         process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
-
     // Then
     assert_eq!(result.session_id, "sess-denied");
     assert_eq!(result.questions.len(), 1);
@@ -110,7 +106,6 @@ fn process_ndjson_extracts_questions_from_workflow_fixes_format() {
     let cursor = Cursor::new(ndjson);
     let result =
         process_ndjson_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
-
 
     // Then
     assert_eq!(result.session_id, "43c6980b-00c2-4de7-8bc5-5901bc3d85eb");
@@ -146,7 +141,6 @@ fn process_ndjson_emits_progress_events_for_tasks_and_tools() {
     let result = process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
 
-
     // Then
     assert_eq!(result.result_text, "done");
     assert_eq!(
@@ -180,7 +174,6 @@ fn process_ndjson_extracts_glob_pattern_as_detail() {
     process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
 
-
     // Then
     assert_eq!(events.len(), 2, "SessionStarted + ToolUse");
     assert!(
@@ -206,7 +199,6 @@ fn process_ndjson_extracts_write_file_path_as_detail() {
     process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
 
-
     // Then
     assert_eq!(events.len(), 2, "SessionStarted + ToolUse");
     assert!(
@@ -231,7 +223,6 @@ fn process_ndjson_extracts_tool_use_detail_from_input() {
     let mut events = Vec::new();
     process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
-
 
     // Then
     assert_eq!(events.len(), 2, "SessionStarted + ToolUse");
@@ -259,7 +250,6 @@ fn process_ndjson_skips_tool_use_when_parent_tool_use_id_set() {
     let mut events = Vec::new();
     process_ndjson_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
-
 
     // Then
     assert_eq!(
@@ -298,7 +288,6 @@ fn process_cursor_stream_concatenates_partial_chunks() {
     let result =
         process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
-
     // Then
     assert_eq!(result.session_id, "cursor-sess");
     assert!(
@@ -336,7 +325,6 @@ fn process_cursor_stream_emits_tool_use_with_detail_for_display() {
     let _ = process_cursor_stream(cursor, |ev| events.push(ev.clone()), |_| {}, None, None, 0)
         .expect("should process");
 
-
     // Then
     assert_eq!(events.len(), 3, "SessionStarted + 2 ToolUse events");
     assert!(
@@ -373,7 +361,6 @@ fn process_cursor_stream_extracts_ask_user_question_for_qa() {
     let result =
         process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
 
-
     // Then
     assert_eq!(result.questions.len(), 1, "should extract 1 question");
     assert_eq!(result.questions[0].header, "Tech Stack");
@@ -398,7 +385,6 @@ fn process_cursor_stream_extracts_ask_question_tool_call() {
     let cursor = Cursor::new(ndjson);
     let result =
         process_cursor_stream(cursor, |_| {}, |_| {}, None, None, 0).expect("should process");
-
 
     // Then
     assert_eq!(result.questions.len(), 1);

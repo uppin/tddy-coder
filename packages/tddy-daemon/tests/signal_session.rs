@@ -47,9 +47,15 @@ async fn signal_session_sends_sigint_to_pid() {
         .unwrap();
 
     // Then
-    assert!(response.into_inner().ok, "signal_session must return ok=true");
+    assert!(
+        response.into_inner().ok,
+        "signal_session must return ok=true"
+    );
     let status = child.wait().unwrap();
-    assert!(!status.success(), "process should have been terminated by SIGINT");
+    assert!(
+        !status.success(),
+        "process should have been terminated by SIGINT"
+    );
 }
 
 /// Acceptance: SignalSession returns error for a dead PID.

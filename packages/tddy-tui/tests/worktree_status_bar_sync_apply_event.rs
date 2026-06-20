@@ -59,5 +59,9 @@ fn worktree_switch_broadcast_keeps_status_bar_segment_in_view_state() {
         Some("my-wt-dir"),
         "view state must set active_worktree_display to the same short label the presenter uses for the status bar"
     );
-    assert_eq!(state.activity_log.len(), 1, "activity log must record the entry");
+    assert_eq!(
+        state.activity_log.len(),
+        1,
+        "activity log must record the entry"
+    );
 }

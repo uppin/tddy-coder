@@ -21,7 +21,11 @@ fn persist_interview_handoff_writes_relay_file() {
 
     // Then
     let p = interview_handoff_path(&tmp);
-    assert!(p.exists(), "persist_interview_handoff_for_plan must write {:?}", p);
+    assert!(
+        p.exists(),
+        "persist_interview_handoff_for_plan must write {:?}",
+        p
+    );
     assert_eq!(fs::read_to_string(&p).unwrap(), marker);
 }
 
@@ -58,7 +62,10 @@ fn apply_staged_when_relay_missing_leaves_context_unchanged() {
     apply_staged_interview_handoff_to_plan_context(&tmp, &ctx).unwrap();
 
     // Then
-    assert!(ctx.get_sync::<String>("answers").is_none(), "missing relay must not set answers");
+    assert!(
+        ctx.get_sync::<String>("answers").is_none(),
+        "missing relay must not set answers"
+    );
 }
 
 #[test]
@@ -74,7 +81,10 @@ fn apply_staged_when_relay_empty_does_not_set_answers() {
     apply_staged_interview_handoff_to_plan_context(&tmp, &ctx).unwrap();
 
     // Then
-    assert!(ctx.get_sync::<String>("answers").is_none(), "whitespace-only relay must not set answers");
+    assert!(
+        ctx.get_sync::<String>("answers").is_none(),
+        "whitespace-only relay must not set answers"
+    );
 }
 
 #[test]
@@ -96,6 +106,12 @@ fn relay_paths_are_independent_per_session_dir() {
     apply_staged_interview_handoff_to_plan_context(&b, &ctx_b).unwrap();
 
     // Then
-    assert_eq!(ctx_a.get_sync::<String>("answers").as_deref(), Some("marker-a"));
-    assert_eq!(ctx_b.get_sync::<String>("answers").as_deref(), Some("marker-b"));
+    assert_eq!(
+        ctx_a.get_sync::<String>("answers").as_deref(),
+        Some("marker-a")
+    );
+    assert_eq!(
+        ctx_b.get_sync::<String>("answers").as_deref(),
+        Some("marker-b")
+    );
 }

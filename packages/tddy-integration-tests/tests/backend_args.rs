@@ -36,7 +36,6 @@ fn build_claude_args_includes_output_format_stream_json() {
     // When
     let args = build_claude_args(&req, &config, None);
 
-
     // Then
     assert!(
         args.contains(&"--output-format".to_string()),
@@ -61,7 +60,6 @@ fn build_claude_args_includes_session_id_on_first_call() {
     // When
     let args = build_claude_args(&req, &config, None);
 
-
     // Then
     assert!(args.contains(&"--session-id".to_string()));
     let sid_idx = args.iter().position(|a| a == "--session-id").unwrap();
@@ -78,7 +76,6 @@ fn build_claude_args_includes_resume_on_followup_call() {
 
     // When
     let args = build_claude_args(&req, &config, None);
-
 
     // Then
     assert!(args.contains(&"--resume".to_string()));
@@ -157,7 +154,7 @@ fn no_single_arg_contains_both_system_and_user_prompt_content() {
         let has_sys = arg.contains("SYSTEM_MARKER");
         let has_user = arg.contains("USER_MARKER");
 
-    // Then
+        // Then
         assert!(
             !(has_sys && has_user),
             "no arg should contain both system and user content: {:?}",
@@ -232,7 +229,6 @@ fn request_without_system_prompt_has_user_prompt_after_p() {
     // When
     let args = build_claude_args(&req, &config, None);
 
-
     // Then
     assert!(!args.contains(&"--append-system-prompt".to_string()));
     assert!(!args.contains(&"--append-system-prompt-file".to_string()));
@@ -252,7 +248,6 @@ fn system_prompt_passed_via_file_when_path_provided() {
 
     // When
     let args = build_claude_args(&req, &config, Some(path));
-
 
     // Then
     assert!(
@@ -280,7 +275,6 @@ fn build_claude_args_includes_allowed_tools_when_set() {
         "Write".to_string(),
         "Bash(cargo *)".to_string(),
     ];
-
 
     // When
     let args = build_claude_args(&req, &config, None);
@@ -326,10 +320,8 @@ fn build_claude_args_includes_permission_prompt_tool_and_mcp_config_when_set() {
     config.permission_prompt_tool = Some("approval_prompt".to_string());
     config.mcp_config_path = Some(std::path::PathBuf::from("/tmp/mcp.json"));
 
-
     // When
     let args = build_claude_args(&req, &config, None);
-
 
     // Then
     assert!(
@@ -393,8 +385,7 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n\n## TODO\n\n
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
@@ -447,8 +438,7 @@ printf '%s\n' '{{"type":"result","result":"ok","session_id":"test-session"}}'
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
@@ -501,8 +491,7 @@ printf '%s\n' '{{"type":"result","result":"ok","session_id":"test-session"}}'
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
@@ -554,8 +543,7 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n\n## TODO\n\n
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
-
-    // When
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 

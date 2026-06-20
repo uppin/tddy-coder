@@ -17,7 +17,15 @@ fn remote_allowlist_excludes_all_native_fs_and_shell_tools() {
     let allowlist = remote_codebase_allowlist();
 
     // Then
-    let forbidden = ["Read", "Write", "Edit", "Glob", "Grep", "SemanticSearch", "NotebookEdit"];
+    let forbidden = [
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "SemanticSearch",
+        "NotebookEdit",
+    ];
     for tool in &forbidden {
         assert!(
             !allowlist.contains(&tool.to_string()),

@@ -84,9 +84,18 @@ mod tests {
         let s = codex_callback_url(port, "abc", "xyz").unwrap();
 
         // Then
-        assert!(s.starts_with("http://127.0.0.1:1455/auth/callback?"), "callback URL must use loopback address with /auth/callback path");
-        assert!(s.contains("code=abc"), "callback URL must include code query param");
-        assert!(s.contains("state=xyz"), "callback URL must include state query param");
+        assert!(
+            s.starts_with("http://127.0.0.1:1455/auth/callback?"),
+            "callback URL must use loopback address with /auth/callback path"
+        );
+        assert!(
+            s.contains("code=abc"),
+            "callback URL must include code query param"
+        );
+        assert!(
+            s.contains("state=xyz"),
+            "callback URL must include state query param"
+        );
     }
 
     #[test]

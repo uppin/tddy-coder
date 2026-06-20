@@ -86,7 +86,6 @@ async fn workflow_engine_session_id_is_uuid_v7_with_precreated_session_tree() {
         .await
         .expect("plan goal");
 
-
     // Then
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),
@@ -147,7 +146,6 @@ async fn plan_task_allocated_session_dir_basename_is_uuid_v7() {
         .run_goal(&GoalId::new("plan"), ctx)
         .await
         .expect("plan goal");
-
 
     // Then
     assert!(

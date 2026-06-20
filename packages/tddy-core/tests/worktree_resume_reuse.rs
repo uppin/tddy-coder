@@ -87,7 +87,11 @@ selected_branch_to_work_on: main
     let path = session_dir.join("changeset.yaml");
     let mut raw = fs::read_to_string(&path).unwrap();
     raw.push_str("workflow:\n");
-    for line in workflow_yaml.lines() { raw.push_str("  "); raw.push_str(line); raw.push('\n'); }
+    for line in workflow_yaml.lines() {
+        raw.push_str("  ");
+        raw.push_str(line);
+        raw.push('\n');
+    }
     fs::write(&path, raw).unwrap();
 
     let wt_first =
@@ -103,12 +107,16 @@ selected_branch_to_work_on: main
     // When
     let wt_second =
         setup_worktree_for_session_with_integration_base(&repo, &session_dir, "origin/main")
-            .expect("must reuse existing git worktree when the directory is already linked; got error");
+            .expect(
+                "must reuse existing git worktree when the directory is already linked; got error",
+            );
 
     // Then
     assert_eq!(
         wt_first.canonicalize().unwrap_or_else(|_| wt_first.clone()),
-        wt_second.canonicalize().unwrap_or_else(|_| wt_second.clone()),
+        wt_second
+            .canonicalize()
+            .unwrap_or_else(|_| wt_second.clone()),
         "resume must return the same worktree path as the first setup"
     );
 

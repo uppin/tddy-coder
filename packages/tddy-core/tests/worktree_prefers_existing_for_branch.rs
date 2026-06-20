@@ -70,16 +70,41 @@ fn work_on_selected_reuses_existing_worktree_at_branch_tip_instead_of_second_add
     fs::create_dir_all(&repo).unwrap();
     init_repo_with_main(&repo);
 
-    Command::new("git").args(["checkout", "-b", "feature/oauth-test", "origin/main"]).current_dir(&repo).output().expect("branch");
+    Command::new("git")
+        .args(["checkout", "-b", "feature/oauth-test", "origin/main"])
+        .current_dir(&repo)
+        .output()
+        .expect("branch");
     fs::write(repo.join("f2"), "y").unwrap();
-    Command::new("git").args(["add", "f2"]).current_dir(&repo).output().unwrap();
-    Command::new("git").args(["commit", "-m", "feat"]).current_dir(&repo).output().unwrap();
-    Command::new("git").args(["push", "-u", "origin", "feature/oauth-test"]).current_dir(&repo).output().unwrap();
-    Command::new("git").args(["checkout", "main"]).current_dir(&repo).output().unwrap();
+    Command::new("git")
+        .args(["add", "f2"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "feat"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["push", "-u", "origin", "feature/oauth-test"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["checkout", "main"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
 
     let pre_existing = repo.join(".worktrees").join("already-there");
     Command::new("git")
-        .args(["worktree", "add", pre_existing.to_str().unwrap(), "feature/oauth-test"])
+        .args([
+            "worktree",
+            "add",
+            pre_existing.to_str().unwrap(),
+            "feature/oauth-test",
+        ])
         .current_dir(&repo)
         .output()
         .expect("worktree add");
@@ -103,7 +128,11 @@ selected_branch_to_work_on: origin/feature/oauth-test
     let path = session_dir.join("changeset.yaml");
     let mut raw = fs::read_to_string(&path).unwrap();
     raw.push_str("workflow:\n");
-    for line in workflow_yaml.lines() { raw.push_str("  "); raw.push_str(line); raw.push('\n'); }
+    for line in workflow_yaml.lines() {
+        raw.push_str("  ");
+        raw.push_str(line);
+        raw.push('\n');
+    }
     fs::write(&path, raw).unwrap();
 
     // When
@@ -116,9 +145,17 @@ selected_branch_to_work_on: origin/feature/oauth-test
         pre_existing.canonicalize().unwrap_or_else(|_| pre_existing.clone()),
         "must not create a second worktree under a new basename when one already holds the branch tip"
     );
-    let list = Command::new("git").args(["worktree", "list"]).current_dir(&repo).output().expect("worktree list");
+    let list = Command::new("git")
+        .args(["worktree", "list"])
+        .current_dir(&repo)
+        .output()
+        .expect("worktree list");
     let list_s = String::from_utf8_lossy(&list.stdout);
-    assert_eq!(list_s.lines().count(), 2, "expected exactly main repo + one linked worktree; got:\n{list_s}");
+    assert_eq!(
+        list_s.lines().count(),
+        2,
+        "expected exactly main repo + one linked worktree; got:\n{list_s}"
+    );
 
     let _ = fs::remove_dir_all(&base);
 }
@@ -131,16 +168,41 @@ fn optional_chain_base_path_reuses_existing_worktree_for_work_on_selected() {
     fs::create_dir_all(&repo).unwrap();
     init_repo_with_main(&repo);
 
-    Command::new("git").args(["checkout", "-b", "feature/oauth-chain", "origin/main"]).current_dir(&repo).output().expect("branch");
+    Command::new("git")
+        .args(["checkout", "-b", "feature/oauth-chain", "origin/main"])
+        .current_dir(&repo)
+        .output()
+        .expect("branch");
     fs::write(repo.join("fc"), "z").unwrap();
-    Command::new("git").args(["add", "fc"]).current_dir(&repo).output().unwrap();
-    Command::new("git").args(["commit", "-m", "feat"]).current_dir(&repo).output().unwrap();
-    Command::new("git").args(["push", "-u", "origin", "feature/oauth-chain"]).current_dir(&repo).output().unwrap();
-    Command::new("git").args(["checkout", "main"]).current_dir(&repo).output().unwrap();
+    Command::new("git")
+        .args(["add", "fc"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "feat"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["push", "-u", "origin", "feature/oauth-chain"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["checkout", "main"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
 
     let pre_existing = repo.join(".worktrees").join("chain-existing");
     Command::new("git")
-        .args(["worktree", "add", pre_existing.to_str().unwrap(), "feature/oauth-chain"])
+        .args([
+            "worktree",
+            "add",
+            pre_existing.to_str().unwrap(),
+            "feature/oauth-chain",
+        ])
         .current_dir(&repo)
         .output()
         .expect("worktree add");
@@ -164,7 +226,11 @@ selected_branch_to_work_on: origin/feature/oauth-chain
     let path = session_dir.join("changeset.yaml");
     let mut raw = fs::read_to_string(&path).unwrap();
     raw.push_str("workflow:\n");
-    for line in workflow_yaml.lines() { raw.push_str("  "); raw.push_str(line); raw.push('\n'); }
+    for line in workflow_yaml.lines() {
+        raw.push_str("  ");
+        raw.push_str(line);
+        raw.push('\n');
+    }
     fs::write(&path, raw).unwrap();
 
     // When
@@ -177,9 +243,17 @@ selected_branch_to_work_on: origin/feature/oauth-chain
         pre_existing.canonicalize().unwrap_or_else(|_| pre_existing.clone()),
         "merge-pr-style entrypoint must not add a second worktree when one already matches the branch tip"
     );
-    let list = Command::new("git").args(["worktree", "list"]).current_dir(&repo).output().expect("worktree list");
+    let list = Command::new("git")
+        .args(["worktree", "list"])
+        .current_dir(&repo)
+        .output()
+        .expect("worktree list");
     let list_s = String::from_utf8_lossy(&list.stdout);
-    assert_eq!(list_s.lines().count(), 2, "expected exactly main repo + one linked worktree; got:\n{list_s}");
+    assert_eq!(
+        list_s.lines().count(),
+        2,
+        "expected exactly main repo + one linked worktree; got:\n{list_s}"
+    );
 
     let _ = fs::remove_dir_all(&base);
 }

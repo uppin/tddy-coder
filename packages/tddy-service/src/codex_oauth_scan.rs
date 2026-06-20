@@ -124,8 +124,14 @@ mod tests {
         let d = codex_oauth_from_authorize_url_only(url).expect("detected");
 
         // Then
-        assert_eq!(d.callback_port, 1455, "port must default to 1455 when not in terminal output");
-        assert_eq!(d.state, "xyz", "state must be extracted from authorize URL query param");
+        assert_eq!(
+            d.callback_port, 1455,
+            "port must default to 1455 when not in terminal output"
+        );
+        assert_eq!(
+            d.state, "xyz",
+            "state must be extracted from authorize URL query param"
+        );
     }
 
     #[test]
@@ -141,8 +147,17 @@ Listening on http://127.0.0.1:8765/auth/callback
         let d = scan_codex_oauth_from_buffer(&b).expect("detected");
 
         // Then
-        assert!(d.authorize_url.contains("auth.openai.com"), "authorize URL must point to openai auth host");
-        assert_eq!(d.callback_port, 8765, "callback port must be extracted from the loopback URL");
-        assert_eq!(d.state, "abc", "state must be extracted from the authorize URL query param");
+        assert!(
+            d.authorize_url.contains("auth.openai.com"),
+            "authorize URL must point to openai auth host"
+        );
+        assert_eq!(
+            d.callback_port, 8765,
+            "callback port must be extracted from the loopback URL"
+        );
+        assert_eq!(
+            d.state, "abc",
+            "state must be extracted from the authorize URL query param"
+        );
     }
 }

@@ -12,10 +12,16 @@ use tddy_core::workflow::extract_remote_env_from_ctx;
 fn extract_remote_env_returns_some_when_required_keys_set() {
     // Given
     let mut ctx: std::collections::HashMap<String, String> = Default::default();
-    ctx.insert("remote_daemon_url".to_string(), "http://relay.local:9000".to_string());
+    ctx.insert(
+        "remote_daemon_url".to_string(),
+        "http://relay.local:9000".to_string(),
+    );
     ctx.insert("remote_session_id".to_string(), "sess-abc123".to_string());
     ctx.insert("remote_session_token".to_string(), "tok-xyz".to_string());
-    ctx.insert("remote_daemon_instance_id".to_string(), "relay-local".to_string());
+    ctx.insert(
+        "remote_daemon_instance_id".to_string(),
+        "relay-local".to_string(),
+    );
 
     // When
     let env = extract_remote_env_from_ctx(&ctx)
@@ -50,7 +56,10 @@ fn extract_remote_env_returns_none_when_keys_absent() {
 fn extract_remote_env_returns_none_on_partial_keys() {
     // Given — only daemon_url, missing session_id and session_token
     let mut ctx: std::collections::HashMap<String, String> = Default::default();
-    ctx.insert("remote_daemon_url".to_string(), "http://relay.local:9000".to_string());
+    ctx.insert(
+        "remote_daemon_url".to_string(),
+        "http://relay.local:9000".to_string(),
+    );
 
     // When
     let env = extract_remote_env_from_ctx(&ctx);
@@ -68,12 +77,21 @@ fn extract_remote_env_returns_none_on_partial_keys() {
 fn extract_remote_env_captures_optional_livekit_keys() {
     // Given
     let mut ctx: std::collections::HashMap<String, String> = Default::default();
-    ctx.insert("remote_daemon_url".to_string(), "http://relay.local:9000".to_string());
+    ctx.insert(
+        "remote_daemon_url".to_string(),
+        "http://relay.local:9000".to_string(),
+    );
     ctx.insert("remote_session_id".to_string(), "sess-789".to_string());
     ctx.insert("remote_session_token".to_string(), "tok-abc".to_string());
-    ctx.insert("remote_livekit_url".to_string(), "ws://lk.example.com".to_string());
+    ctx.insert(
+        "remote_livekit_url".to_string(),
+        "ws://lk.example.com".to_string(),
+    );
     ctx.insert("remote_livekit_room".to_string(), "common-room".to_string());
-    ctx.insert("remote_server_identity".to_string(), "relay-local-sess-789".to_string());
+    ctx.insert(
+        "remote_server_identity".to_string(),
+        "relay-local-sess-789".to_string(),
+    );
 
     // When
     let env = extract_remote_env_from_ctx(&ctx).expect("must return Some with all keys set");

@@ -218,7 +218,11 @@ mod tests {
         };
 
         // When / Then
-        assert_eq!(question_height(&mode), 5, "2 (header+question) + 2 options + 1 Other");
+        assert_eq!(
+            question_height(&mode),
+            5,
+            "2 (header+question) + 2 options + 1 Other"
+        );
     }
 
     #[test]
@@ -238,7 +242,6 @@ mod tests {
         assert_eq!(question_height(&AppMode::Running), 0);
     }
 
-
     #[test]
     fn layout_chunks_returns_four_non_zero_regions() {
         // Given
@@ -248,8 +251,14 @@ mod tests {
         let (activity, spacer, status, prompt) = layout_chunks(area);
 
         // Then
-        assert!(activity.width > 0, "activity region must have non-zero width");
-        assert!(activity.height > 0, "activity region must have non-zero height");
+        assert!(
+            activity.width > 0,
+            "activity region must have non-zero width"
+        );
+        assert!(
+            activity.height > 0,
+            "activity region must have non-zero height"
+        );
         assert_eq!(spacer.height, 1, "spacer is one row");
         assert_eq!(status.height, 1, "status bar is one row");
         assert!(prompt.height >= 1, "prompt must have at least one row");
@@ -313,7 +322,10 @@ mod tests {
             layout_chunks_with_inbox(area, 0, 0, prompt_h);
 
         // Then
-        assert_eq!(prompt.height, prompt_h, "prompt bar height must match the given parameter");
+        assert_eq!(
+            prompt.height, prompt_h,
+            "prompt bar height must match the given parameter"
+        );
     }
 
     /// PRD (plan approval activity pane): PRD + footer live in the activity region; the dynamic

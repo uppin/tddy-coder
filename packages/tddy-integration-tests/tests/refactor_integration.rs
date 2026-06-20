@@ -49,7 +49,6 @@ async fn refactor_invokes_backend_with_refactor_goal() {
     // When
     let result = run_goal_until_done(&engine, "refactor", ctx).await;
 
-
     // Then
     assert!(result.is_ok(), "refactor should succeed, got: {:?}", result);
 
@@ -93,7 +92,6 @@ async fn refactor_requires_refactoring_plan() {
 
     // When
     let result = run_goal_until_done(&engine, "refactor", ctx).await;
-
 
     // Then
     assert!(
@@ -183,7 +181,6 @@ async fn refactor_parses_structured_response() {
     // When
     let output = tddy_workflow_recipes::parse_refactor_response(&output_str).expect("parse output");
 
-
     // Then
     assert!(!output.summary.is_empty(), "summary must not be empty");
     assert_eq!(output.tasks_completed, 5, "tasks_completed should be 5");
@@ -201,10 +198,8 @@ async fn refactor_cursor_backend_does_not_reject_goal_before_spawn() {
     let backend = CursorBackend::with_path(std::path::PathBuf::from("/nonexistent/cursor"));
     let req = common::stub_invoke_request("refactor", "refactor");
 
-
     // When
     let result = backend.invoke(req).await;
-
 
     // Then
     assert!(

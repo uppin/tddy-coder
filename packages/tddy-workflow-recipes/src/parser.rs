@@ -1198,7 +1198,10 @@ mod tests {
     #[test]
     fn parse_planning_response_rejects_wrong_goal() {
         // When
-        let err = parse_planning_response("{\"goal\":\"red\",\"prd\":\"# PRD\\n\\n## TODO\\n\\n- [ ] T1\"}").unwrap_err();
+        let err = parse_planning_response(
+            "{\"goal\":\"red\",\"prd\":\"# PRD\\n\\n## TODO\\n\\n- [ ] T1\"}",
+        )
+        .unwrap_err();
 
         // Then
         assert!(matches!(err, ParseError::Malformed(_)));
@@ -1407,7 +1410,10 @@ mod tests {
     #[test]
     fn parse_green_response_errors_on_wrong_goal() {
         // When
-        let err = parse_green_response(r#"{"goal":"red","summary":"Wrong goal.","tests":[],"implementations":[]}"#).unwrap_err();
+        let err = parse_green_response(
+            r#"{"goal":"red","summary":"Wrong goal.","tests":[],"implementations":[]}"#,
+        )
+        .unwrap_err();
 
         // Then
         assert!(matches!(err, ParseError::Malformed(_)));

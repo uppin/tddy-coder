@@ -140,7 +140,6 @@ async fn plan_discovery_identifies_doc_locations() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
-
     // When
     let (output_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
         .await
@@ -177,7 +176,6 @@ async fn changeset_yaml_contains_prd_name() {
         storage_dir,
         Some(common::tdd_recipe().create_hooks(None)),
     );
-
 
     // When
     let (output_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
@@ -219,7 +217,6 @@ async fn plan_goal_creates_demo_plan() {
         storage_dir,
         Some(common::tdd_recipe().create_hooks(None)),
     );
-
 
     // When
     let (output_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
@@ -460,7 +457,6 @@ async fn system_prompt_stored_in_session_dir() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
-
     // When
     let (output_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
         .await
@@ -509,7 +505,6 @@ async fn session_object_has_system_prompt_file() {
         storage_dir,
         Some(common::tdd_recipe().create_hooks(None)),
     );
-
 
     // When
     let (output_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
@@ -651,7 +646,6 @@ async fn changeset_contains_clarification_qa() {
     // When
     let result = engine.run_goal(&GoalId::new("plan"), ctx).await.unwrap();
 
-
     // Then
     assert!(
         matches!(&result.status, ExecutionStatus::WaitingForInput { .. }),
@@ -762,7 +756,6 @@ async fn changeset_yaml_sessions_array_tracks_all_sessions() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
-
     // When
     let (plan_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
         .await
@@ -842,7 +835,7 @@ async fn changeset_written_before_plan_agent() {
                         if path.is_dir() && path.join("changeset.yaml").exists() {
                             *self.session_dir_captured.lock().unwrap() = Some(path.clone());
 
-    // When
+                            // When
                             if let Ok(cs) = read_changeset(&path) {
                                 *self.changeset_state_at_invoke.lock().unwrap() =
                                     Some(cs.state.current.to_string());

@@ -40,7 +40,11 @@ fn branch_review_parser_rejects_wrong_goal_like_post_green_review() {
     let e = parse_branch_review_output(&json).unwrap_err();
 
     // Then
-    assert!(e.contains("branch-review"), "expected 'branch-review' in error; got {:?}", e);
+    assert!(
+        e.contains("branch-review"),
+        "expected 'branch-review' in error; got {:?}",
+        e
+    );
     assert!(e.contains("goal"), "expected 'goal' in error; got {:?}", e);
 }
 
@@ -81,7 +85,11 @@ fn branch_review_parser_accepts_minimal_valid_json_shape() {
     let r = parse_branch_review_output(&json);
 
     // Then
-    assert!(r.is_ok(), "must parse branch-review JSON; got {:?}", r.err());
+    assert!(
+        r.is_ok(),
+        "must parse branch-review JSON; got {:?}",
+        r.err()
+    );
 }
 
 #[test]
@@ -114,5 +122,7 @@ fn review_hooks_before_task_smoke() {
     let ctx = Context::new();
 
     // When / Then — must not error
-    hooks.before_task("inspect", &ctx).expect("before_task must succeed for inspect");
+    hooks
+        .before_task("inspect", &ctx)
+        .expect("before_task must succeed for inspect");
 }

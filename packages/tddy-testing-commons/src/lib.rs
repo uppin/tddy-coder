@@ -18,7 +18,9 @@ pub use builders::{
     a_changeset, a_session_metadata, an_invoke_request, an_invoke_response, ChangesetBuilder,
     InvokeResponseBuilder, SessionMetadataBuilder,
 };
-pub use fakes::{mock_backend, mock_backend_returning_ok, mock_backend_returning_outputs, MockBackend};
+pub use fakes::{
+    mock_backend, mock_backend_returning_ok, mock_backend_returning_outputs, MockBackend,
+};
 pub use fs::{temp_dir_with_git_repo, temp_session_dir, write_session_yaml};
 
 /// Convenience re-export so converted tests have one path for pretty diffs.

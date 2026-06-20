@@ -82,7 +82,6 @@ async fn graph_builder_creates_graph_with_edges() {
         .add_edge("t1", "t2")
         .build();
 
-
     // Then
     assert_eq!(graph.id, "test_graph");
     assert!(graph.get_task("t1").is_some());
@@ -172,7 +171,6 @@ async fn flow_runner_executes_single_task() {
     let runner = FlowRunner::new(graph, storage.clone());
     let result = runner.run("run1").await.unwrap();
 
-
     // Then
     assert_eq!(result.session_id, "run1");
     assert!(matches!(
@@ -225,7 +223,6 @@ async fn build_tdd_workflow_graph_creates_graph() {
     let backend = Arc::new(MockBackend::new());
     let graph = build_tdd_workflow_graph(backend.clone(), common::tdd_recipe());
 
-
     // Then
     assert_eq!(graph.id, "tdd_workflow");
 
@@ -277,7 +274,6 @@ async fn workflow_engine_run_goal_plan_completes() {
 
     let plan_gid = GoalId::new("plan");
     let result = engine.run_goal(&plan_gid, context_values).await.unwrap();
-
 
     // Then
     assert_eq!(result.session_id.len(), 36);
@@ -338,7 +334,6 @@ async fn workflow_engine_run_full_workflow_completes_with_stub() {
     context_values.insert("run_optional_step_x".to_string(), serde_json::json!(false));
 
     let result = engine.run_full_workflow(context_values).await.unwrap();
-
 
     // Then
     assert!(

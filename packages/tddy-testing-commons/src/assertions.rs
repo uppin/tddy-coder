@@ -28,11 +28,9 @@ pub trait InvokeResponseAssertions {
 impl InvokeResponseAssertions for InvokeResponse {
     fn assert_exit_code(&self, expected: i32) -> &Self {
         assert_eq!(
-            self.exit_code,
-            expected,
+            self.exit_code, expected,
             "expected exit code {}, was {}",
-            expected,
-            self.exit_code
+            expected, self.exit_code
         );
         self
     }

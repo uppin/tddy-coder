@@ -328,7 +328,8 @@ github:
     #[test]
     fn parse_config_tddy_data_dir() {
         // When
-        let config: Config = serde_yaml::from_str("tddy_data_dir: \"/tmp/tddy-sessions-root\"\n").unwrap();
+        let config: Config =
+            serde_yaml::from_str("tddy_data_dir: \"/tmp/tddy-sessions-root\"\n").unwrap();
         // Then
         assert_eq!(
             config.tddy_data_dir.as_ref(),
@@ -340,7 +341,8 @@ github:
     fn merge_config_tddy_data_dir_cli_precedence() {
         // Given
         let cli_base = std::path::PathBuf::from("/cli/sessions-root");
-        let config: Config = serde_yaml::from_str("tddy_data_dir: /config/sessions-root\n").unwrap();
+        let config: Config =
+            serde_yaml::from_str("tddy_data_dir: /config/sessions-root\n").unwrap();
         let mut args = Args {
             goal: None,
             session_dir: None,

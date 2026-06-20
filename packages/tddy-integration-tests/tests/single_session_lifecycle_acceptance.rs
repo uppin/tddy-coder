@@ -115,7 +115,6 @@ async fn plan_task_reuses_session_dir_when_present() {
         .await
         .expect("plan goal");
 
-
     // Then
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),
@@ -218,7 +217,6 @@ async fn before_plan_does_not_allocate_second_dir_when_session_id_bound() {
         .await
         .expect("plan");
     let after_global = count_dir_children(&isolated_home.join("sessions"));
-
 
     // Then
     assert!(
@@ -386,7 +384,6 @@ fn cli_invocation_creates_single_sessions_subtree() {
 
     let wrong_layout = create_session_dir_under(&base, &sid).unwrap();
     let cli_layout = create_session_dir_with_id(&base, &sid).unwrap();
-
 
     // Then
     assert_eq!(

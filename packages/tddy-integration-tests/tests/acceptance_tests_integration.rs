@@ -48,7 +48,6 @@ async fn acceptance_tests_workflow_reads_session_dir_and_invokes_backend_with_re
         .await
         .unwrap();
 
-
     // Then
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),
@@ -99,14 +98,12 @@ async fn acceptance_tests_workflow_transitions_through_acceptance_testing_to_rea
         .await
         .unwrap();
 
-
     // Then
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),
         "acceptance-tests should succeed: {:?}",
         result.status
     );
-
 
     // When
     let changeset = read_changeset(&session_dir).expect("changeset should exist");
@@ -140,7 +137,6 @@ async fn acceptance_tests_workflow_returns_error_when_session_dir_missing_prd() 
         .run_goal(&GoalId::new("acceptance-tests"), context)
         .await;
 
-
     // Then
     assert!(result.is_err(), "expected Error when PRD missing, got Ok");
 
@@ -167,7 +163,6 @@ async fn acceptance_tests_workflow_returns_error_when_session_file_missing() {
     let result = engine
         .run_goal(&GoalId::new("acceptance-tests"), context)
         .await;
-
 
     // Then
     assert!(
@@ -235,7 +230,6 @@ async fn plan_workflow_passes_goal_to_invoke_request() {
         storage_dir,
         Some(common::tdd_recipe().create_hooks(None)),
     );
-
 
     // When
     let _ = run_plan(&engine, "Build auth", &output_dir, None)
@@ -332,7 +326,6 @@ async fn plan_workflow_writes_session_file_to_output_directory() {
         storage_dir,
         Some(common::tdd_recipe().create_hooks(None)),
     );
-
 
     // When
     let (output_path, _) = run_plan(&engine, "Build auth", &output_dir, None)

@@ -224,7 +224,10 @@ mod tests {
         let status = activity_status_from_hook("PreToolUse", None);
 
         // Then
-        assert_eq!(status, None, "unrecognised hook event should produce no status");
+        assert_eq!(
+            status, None,
+            "unrecognised hook event should produce no status"
+        );
     }
 
     /// `Notification` with an unknown subtype (e.g. `banner`) returns `None` — no-op.
@@ -234,7 +237,10 @@ mod tests {
         let status = activity_status_from_hook("Notification", Some("banner"));
 
         // Then
-        assert_eq!(status, None, "unknown notification subtype should produce no status");
+        assert_eq!(
+            status, None,
+            "unknown notification subtype should produce no status"
+        );
     }
 
     /// `as_wire()` returns the stable strings that the daemon and web UI depend on.
@@ -243,8 +249,14 @@ mod tests {
         // Then
         assert_eq!(SessionActivityStatus::Started.as_wire(), "Started");
         assert_eq!(SessionActivityStatus::Running.as_wire(), "Running");
-        assert_eq!(SessionActivityStatus::ExecutingTool.as_wire(), "ExecutingTool");
-        assert_eq!(SessionActivityStatus::WaitingForInput.as_wire(), "WaitingForInput");
+        assert_eq!(
+            SessionActivityStatus::ExecutingTool.as_wire(),
+            "ExecutingTool"
+        );
+        assert_eq!(
+            SessionActivityStatus::WaitingForInput.as_wire(),
+            "WaitingForInput"
+        );
         assert_eq!(SessionActivityStatus::Done.as_wire(), "Done");
         assert_eq!(SessionActivityStatus::Ended.as_wire(), "Ended");
     }
@@ -292,7 +304,10 @@ mod tests {
         let ev = parse_hook_event(json).unwrap();
 
         // Then
-        assert_eq!(ev.activity_status(), Some(SessionActivityStatus::WaitingForInput));
+        assert_eq!(
+            ev.activity_status(),
+            Some(SessionActivityStatus::WaitingForInput)
+        );
     }
 
     /// `parse_hook_event` rejects JSON that is missing the required `hook_event_name` field.
@@ -305,6 +320,9 @@ mod tests {
         let result = parse_hook_event(json);
 
         // Then
-        assert!(result.is_err(), "missing hook_event_name must be a parse error");
+        assert!(
+            result.is_err(),
+            "missing hook_event_name must be a parse error"
+        );
     }
 }

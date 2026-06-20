@@ -14,8 +14,14 @@ fn bugfix_interview_system_prompt_requires_socket_backed_ask_contract() {
     let p = system_prompt();
 
     // Then
-    assert!(p.contains("tddy-tools ask"), "must require tddy-tools ask; got: {p:?}");
-    assert!(p.contains("TDDY_SOCKET"), "must mention TDDY_SOCKET; got: {p:?}");
+    assert!(
+        p.contains("tddy-tools ask"),
+        "must require tddy-tools ask; got: {p:?}"
+    );
+    assert!(
+        p.contains("TDDY_SOCKET"),
+        "must mention TDDY_SOCKET; got: {p:?}"
+    );
 }
 
 #[test]

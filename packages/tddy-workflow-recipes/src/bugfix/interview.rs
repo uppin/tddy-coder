@@ -227,7 +227,9 @@ mod tests {
     #[test]
     fn prose_probe_detects_numbered_questions() {
         // When / Then
-        assert!(prose_numbered_clarification_probe("1. What is the expected behavior?\n2. Which version fails?"));
+        assert!(prose_numbered_clarification_probe(
+            "1. What is the expected behavior?\n2. Which version fails?"
+        ));
         assert!(!prose_numbered_clarification_probe("no questions here"));
     }
 

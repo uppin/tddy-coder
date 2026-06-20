@@ -34,8 +34,14 @@ mod codegen_acceptance {
         let is_unary_bidi = server.is_bidi_stream("test.EchoService", "Echo");
 
         // Then — bidi methods are identified correctly and unary methods are not
-        assert!(is_bidi, "EchoBidiStream must be identified as a bidi stream method");
-        assert!(!is_unary_bidi, "Echo (unary) must not be identified as a bidi stream method");
+        assert!(
+            is_bidi,
+            "EchoBidiStream must be identified as a bidi stream method"
+        );
+        assert!(
+            !is_unary_bidi,
+            "Echo (unary) must not be identified as a bidi stream method"
+        );
     }
 
     #[tokio::test]

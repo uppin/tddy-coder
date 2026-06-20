@@ -84,7 +84,6 @@ async fn before_task_persists_planning_when_plan_starts() {
 
     hooks.before_task("plan", &ctx).expect("before_task plan");
 
-
     // When
     let cs = read_changeset(&session_dir).expect("read changeset");
 
@@ -120,7 +119,6 @@ async fn before_task_persists_acceptance_testing_when_acceptance_tests_start() {
         .before_task("acceptance-tests", &ctx)
         .expect("before_task acceptance-tests");
 
-
     // When
     let cs = read_changeset(&session_dir).expect("read changeset");
 
@@ -150,7 +148,6 @@ async fn before_task_persists_red_testing_when_red_starts() {
     ctx.set_sync("backend_name", "claude".to_string());
 
     hooks.before_task("red", &ctx).expect("before_task red");
-
 
     // When
     let cs = read_changeset(&session_dir).expect("read changeset");
@@ -182,7 +179,6 @@ async fn before_task_persists_green_implementing_when_green_starts() {
 
     hooks.before_task("green", &ctx).expect("before_task green");
 
-
     // When
     let cs = read_changeset(&session_dir).expect("read changeset");
 
@@ -213,7 +209,6 @@ async fn before_task_persists_demo_running_when_demo_starts() {
     ctx.set_sync("backend_name", "claude".to_string());
 
     hooks.before_task("demo", &ctx).expect("before_task demo");
-
 
     // When
     let cs = read_changeset(&session_dir).expect("read changeset");
@@ -248,7 +243,6 @@ async fn before_task_persists_validating_when_validate_starts() {
         .before_task("validate", &ctx)
         .expect("before_task validate");
 
-
     // When
     let cs = read_changeset(&session_dir).expect("read changeset");
 
@@ -282,7 +276,6 @@ async fn before_task_persists_refactoring_when_refactor_starts() {
         .before_task("refactor", &ctx)
         .expect("before_task refactor");
 
-
     // When
     let cs = read_changeset(&session_dir).expect("read changeset");
 
@@ -315,7 +308,6 @@ async fn before_task_persists_updating_docs_when_update_docs_starts() {
     hooks
         .before_task("update-docs", &ctx)
         .expect("before_task update-docs");
-
 
     // When
     let cs = read_changeset(&session_dir).expect("read changeset");

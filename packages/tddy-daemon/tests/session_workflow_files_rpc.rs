@@ -36,7 +36,11 @@ async fn list_session_workflow_files_returns_allowlisted_basenames() {
         .with_livekit_room("test-room")
         .build();
     write_session_yaml(&session_dir, &metadata);
-    std::fs::write(session_dir.join("changeset.yaml"), "goal: acceptance-list\n").unwrap();
+    std::fs::write(
+        session_dir.join("changeset.yaml"),
+        "goal: acceptance-list\n",
+    )
+    .unwrap();
     std::fs::write(session_dir.join(".session.yaml"), "session: fixture\n").unwrap();
     std::fs::write(session_dir.join("PRD.md"), "# Plan\n").unwrap();
     std::fs::write(session_dir.join("TODO.md"), "- [ ] item\n").unwrap();

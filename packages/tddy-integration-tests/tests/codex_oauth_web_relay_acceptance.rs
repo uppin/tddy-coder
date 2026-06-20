@@ -19,7 +19,6 @@ async fn browser_capture_emits_session_scoped_authorize_url() {
         .await
         .expect("BROWSER hook must emit structured capture with HTTPS authorize URL");
 
-
     // Then
     assert_eq!(cap.session_id, session);
     let parsed = Url::parse(&cap.authorize_url).expect("authorize URL must parse");
@@ -42,7 +41,6 @@ async fn callback_relay_completes_handshake_for_mock_codex_listener() {
     let delivery = relay_oauth_callback_to_registered_listener("sess-mock-1", &callback)
         .await
         .expect("callback must be delivered once to the session-registered Codex listener");
-
 
     // Then
     assert_eq!(delivery.session_id, "sess-mock-1");

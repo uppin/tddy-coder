@@ -85,7 +85,10 @@ fn invoke_blocking_returns_ok_with_exit_code_payload() {
     // Then
     match outcome {
         SessionActionInvokeOutcome::Blocking(BlockingOutcomeBody::Record(v)) => {
-            assert!(v.get("exit_code").is_some(), "record must expose exit_code for agent parity; got {v}");
+            assert!(
+                v.get("exit_code").is_some(),
+                "record must expose exit_code for agent parity; got {v}"
+            );
         }
         other => panic!("expected blocking record outcome; got {other:?}"),
     }
@@ -116,7 +119,10 @@ fn wait_without_timeout_returns_completed_disposition() {
 
     // Then
     assert!(
-        matches!(out, SessionActionWaitOutcome::Completed { .. } | SessionActionWaitOutcome::Failed { .. }),
+        matches!(
+            out,
+            SessionActionWaitOutcome::Completed { .. } | SessionActionWaitOutcome::Failed { .. }
+        ),
         "unbounded wait must end in Completed or Failed; got {out:?}"
     );
 }

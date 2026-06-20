@@ -560,9 +560,15 @@ mod tests {
             "argv should start with exec subcommand, got {:?}",
             args
         );
-        assert!(args.iter().any(|a| a == "--json"), "argv should include --json, got {:?}", args);
         assert!(
-            args.last().map(|s| s.contains("do the plan")).unwrap_or(false),
+            args.iter().any(|a| a == "--json"),
+            "argv should include --json, got {:?}",
+            args
+        );
+        assert!(
+            args.last()
+                .map(|s| s.contains("do the plan"))
+                .unwrap_or(false),
             "prompt should be present in argv, got {:?}",
             args
         );
@@ -581,7 +587,10 @@ mod tests {
         // Then
         let pos_json = args.iter().position(|a| a == "--json").expect("--json");
         let pos_resume = args.iter().position(|a| a == "resume").expect("resume");
-        let pos_sid = args.iter().position(|a| a == "sess-resume-99").expect("session id");
+        let pos_sid = args
+            .iter()
+            .position(|a| a == "sess-resume-99")
+            .expect("session id");
         assert!(
             pos_json < pos_resume && pos_resume < pos_sid,
             "exec-level --json before resume subcommand, then SESSION_ID; got {:?}",
@@ -623,7 +632,10 @@ mod tests {
         let args = build_codex_exec_argv(&req, &merged);
 
         // Then
-        let pos_m = args.iter().position(|a| a == "-m").expect("expected -m when model set");
+        let pos_m = args
+            .iter()
+            .position(|a| a == "-m")
+            .expect("expected -m when model set");
         assert_eq!(args.get(pos_m + 1).map(String::as_str), Some("gpt-5"));
     }
 
@@ -695,7 +707,10 @@ mod tests {
         let hint = super::codex_openai_auth_remediation(detail);
 
         // Then
-        assert!(hint.is_some(), "should produce a remediation hint for 401 Unauthorized");
+        assert!(
+            hint.is_some(),
+            "should produce a remediation hint for 401 Unauthorized"
+        );
     }
 
     #[test]
@@ -704,6 +719,9 @@ mod tests {
         let hint = super::codex_openai_auth_remediation("HTTP 401");
 
         // Then
-        assert!(hint.is_none(), "bare '401' without auth keywords should produce no hint");
+        assert!(
+            hint.is_none(),
+            "bare '401' without auth keywords should produce no hint"
+        );
     }
 }

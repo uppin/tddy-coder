@@ -9,9 +9,9 @@ pub mod envelope;
 pub mod participant;
 mod projects_registry;
 pub mod rpc_log;
-pub mod token;
 #[cfg(test)]
 pub mod test_util;
+pub mod token;
 
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/rpc.rs"));

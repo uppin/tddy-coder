@@ -14,10 +14,8 @@ fn resolve_log_defaults_returns_conversation_path_when_none() {
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
 
-
     // When
     let result = resolve_log_defaults(None, None::<&std::path::Path>, &tmp);
-
 
     // Then
     assert!(
@@ -52,7 +50,6 @@ fn resolve_log_defaults_returns_explicit_path_when_set() {
 
     // When
     let result = resolve_log_defaults(Some(explicit.clone()), None::<&std::path::Path>, &tmp);
-
 
     // Then
     assert_eq!(

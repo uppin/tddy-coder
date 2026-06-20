@@ -333,7 +333,10 @@ mod tests {
         let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
 
         // Then
-        assert!(matches!(intent, Some(UserIntent::ResumeFromError)), "index 0 must map to ResumeFromError");
+        assert!(
+            matches!(intent, Some(UserIntent::ResumeFromError)),
+            "index 0 must map to ResumeFromError"
+        );
     }
 
     #[test]
@@ -349,7 +352,10 @@ mod tests {
         let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
 
         // Then
-        assert!(matches!(intent, Some(UserIntent::ContinueWithAgent)), "index 1 must map to ContinueWithAgent");
+        assert!(
+            matches!(intent, Some(UserIntent::ContinueWithAgent)),
+            "index 1 must map to ContinueWithAgent"
+        );
     }
 
     #[test]
@@ -365,7 +371,10 @@ mod tests {
         let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
 
         // Then
-        assert!(matches!(intent, Some(UserIntent::Quit)), "index 2 must map to Quit");
+        assert!(
+            matches!(intent, Some(UserIntent::Quit)),
+            "index 2 must map to Quit"
+        );
     }
 
     #[test]

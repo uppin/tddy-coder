@@ -66,7 +66,11 @@ mod tests {
         let r = parse_post_green_review_response(GOLDEN);
 
         // Then
-        assert!(r.is_ok(), "merged post-green submit must parse: {:?}", r.err());
+        assert!(
+            r.is_ok(),
+            "merged post-green submit must parse: {:?}",
+            r.err()
+        );
     }
 
     #[test]

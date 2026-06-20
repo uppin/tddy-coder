@@ -19,11 +19,23 @@ fn recipe_resolve_accepts_free_prompting_and_rejects_unknown() {
     // Then
     assert!(err.contains("tdd"), "error must list 'tdd': {err}");
     assert!(err.contains("bugfix"), "error must list 'bugfix': {err}");
-    assert!(err.contains("free-prompting"), "error must list 'free-prompting': {err}");
-    assert!(err.contains("grill-me"), "error must list 'grill-me': {err}");
-    assert!(err.contains("tdd-small"), "error must list 'tdd-small': {err}");
+    assert!(
+        err.contains("free-prompting"),
+        "error must list 'free-prompting': {err}"
+    );
+    assert!(
+        err.contains("grill-me"),
+        "error must list 'grill-me': {err}"
+    );
+    assert!(
+        err.contains("tdd-small"),
+        "error must list 'tdd-small': {err}"
+    );
     assert!(err.contains("review"), "error must list 'review': {err}");
-    assert!(err.contains("merge-pr"), "error must list 'merge-pr': {err}");
+    assert!(
+        err.contains("merge-pr"),
+        "error must list 'merge-pr': {err}"
+    );
     assert!(
         workflow_recipe_and_manifest_from_cli_name(unknown).is_err(),
         "unknown names must not resolve"

@@ -631,8 +631,14 @@ mod start_session_repo_tests {
         let whitespace_only = "   ";
 
         // When / Then
-        assert!(resolve_start_session_repo(blank).is_err(), "empty string must be rejected");
-        assert!(resolve_start_session_repo(whitespace_only).is_err(), "whitespace-only string must be rejected");
+        assert!(
+            resolve_start_session_repo(blank).is_err(),
+            "empty string must be rejected"
+        );
+        assert!(
+            resolve_start_session_repo(whitespace_only).is_err(),
+            "whitespace-only string must be rejected"
+        );
     }
 
     #[test]

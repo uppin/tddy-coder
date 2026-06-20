@@ -109,8 +109,16 @@ mod tests {
         let p = grill_system_prompt();
 
         // Then
-        assert!(p.contains("tddy-tools ask"), "grill prompt must require tddy-tools ask: {}", p);
-        assert!(p.contains("TDDY_SOCKET"), "grill prompt must reference TDDY_SOCKET: {}", p);
+        assert!(
+            p.contains("tddy-tools ask"),
+            "grill prompt must require tddy-tools ask: {}",
+            p
+        );
+        assert!(
+            p.contains("TDDY_SOCKET"),
+            "grill prompt must reference TDDY_SOCKET: {}",
+            p
+        );
         assert!(
             p.contains("Grill") || p.contains("grill-me"),
             "grill prompt should identify phase: {}",

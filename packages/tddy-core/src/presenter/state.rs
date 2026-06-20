@@ -139,7 +139,10 @@ mod tests {
         // Then
         match action {
             ExitAction::ContinueWithAgent { ref session_id } => {
-                assert_eq!(session_id, "abc-123", "session_id must survive round-trip through ExitAction");
+                assert_eq!(
+                    session_id, "abc-123",
+                    "session_id must survive round-trip through ExitAction"
+                );
             }
         }
     }
@@ -165,7 +168,10 @@ mod tests {
         };
 
         // Then
-        assert!(state.exit_action.is_none(), "exit_action must be None on a freshly constructed PresenterState");
+        assert!(
+            state.exit_action.is_none(),
+            "exit_action must be None on a freshly constructed PresenterState"
+        );
     }
 
     #[test]
@@ -178,7 +184,10 @@ mod tests {
         // Then
         match mode {
             AppMode::ErrorRecovery { ref error_message } => {
-                assert_eq!(error_message, "backend timeout", "error message must be preserved in ErrorRecovery variant");
+                assert_eq!(
+                    error_message, "backend timeout",
+                    "error message must be preserved in ErrorRecovery variant"
+                );
             }
             _ => panic!("Expected ErrorRecovery variant"),
         }
@@ -218,7 +227,10 @@ mod tests {
             initial_selected, ..
         } = mode
         {
-            assert_eq!(initial_selected, 2, "initial_selected must be preserved in Select variant");
+            assert_eq!(
+                initial_selected, 2,
+                "initial_selected must be preserved in Select variant"
+            );
         } else {
             panic!("expected Select");
         }

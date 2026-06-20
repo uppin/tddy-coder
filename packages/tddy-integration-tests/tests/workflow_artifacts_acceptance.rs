@@ -71,7 +71,6 @@ async fn artifacts_subdir_used_for_new_sessions() {
         .await
         .expect("plan goal should not panic");
 
-
     // Then
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),
@@ -117,14 +116,12 @@ fn approval_content_matches_recipe_primary_artifact() {
     let primary_path = base.join("artifacts").join(&basename);
     std::fs::write(&primary_path, "PRIMARY_PLAN_BODY_FROM_RECIPE_PATH").unwrap();
 
-
     // When
     let resolved = resolve_existing_session_artifact(&base, &basename)
         .expect("resolver must find primary session document for approval / elicitation");
     let resolved_bytes = read_session_artifact_utf8(&base, &basename)
         .expect("read helper must load primary session document bytes");
     let recipe_bytes = std::fs::read_to_string(&primary_path).unwrap();
-
 
     // Then
     assert_eq!(

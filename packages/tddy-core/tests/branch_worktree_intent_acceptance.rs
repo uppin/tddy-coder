@@ -147,7 +147,10 @@ new_branch_name: feature/custom-from-intent
     );
     let tip = git(&repo, &["rev-parse", "origin/main"]);
     let merge_base = git(&wt, &["merge-base", "HEAD", "origin/main"]);
-    assert_eq!(merge_base, tip, "new branch must start from integration base tip");
+    assert_eq!(
+        merge_base, tip,
+        "new branch must start from integration base tip"
+    );
     let _ = fs::remove_dir_all(&base);
 }
 
@@ -194,7 +197,10 @@ selected_branch_to_work_on: main
     assert_eq!(git(&wt, &["branch", "--show-current"]), "main");
     let wt_head = git(&wt, &["rev-parse", "HEAD"]);
     let main_head = git(&repo, &["rev-parse", "main"]);
-    assert_eq!(wt_head, main_head, "worktree HEAD must match selected branch tip");
+    assert_eq!(
+        wt_head, main_head,
+        "worktree HEAD must match selected branch tip"
+    );
     let _ = fs::remove_dir_all(&base);
 }
 

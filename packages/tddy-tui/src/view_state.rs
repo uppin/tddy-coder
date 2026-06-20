@@ -1233,7 +1233,10 @@ mod tests {
         vs.on_mode_changed(&mode);
 
         // Then
-        assert_eq!(vs.error_recovery_selected, 0, "entering error recovery must reset selection to first option");
+        assert_eq!(
+            vs.error_recovery_selected, 0,
+            "entering error recovery must reset selection to first option"
+        );
     }
 
     #[test]
@@ -1248,17 +1251,26 @@ mod tests {
 
         // When / Then — forward cycle
         vs.handle_key_view_local(down, &mode, 0, false, None);
-        assert_eq!(vs.error_recovery_selected, 1, "Down from 0 (Resume) → 1 (Continue with agent)");
+        assert_eq!(
+            vs.error_recovery_selected, 1,
+            "Down from 0 (Resume) → 1 (Continue with agent)"
+        );
         vs.handle_key_view_local(down, &mode, 0, false, None);
         assert_eq!(vs.error_recovery_selected, 2, "Down from 1 → 2 (Exit)");
         vs.handle_key_view_local(down, &mode, 0, false, None);
-        assert_eq!(vs.error_recovery_selected, 0, "Down from 2 wraps to 0 (Resume)");
+        assert_eq!(
+            vs.error_recovery_selected, 0,
+            "Down from 2 wraps to 0 (Resume)"
+        );
 
         // When / Then — reverse cycle
         vs.handle_key_view_local(up, &mode, 0, false, None);
         assert_eq!(vs.error_recovery_selected, 2, "Up from 0 wraps to 2 (Exit)");
         vs.handle_key_view_local(up, &mode, 0, false, None);
-        assert_eq!(vs.error_recovery_selected, 1, "Up from 2 → 1 (Continue with agent)");
+        assert_eq!(
+            vs.error_recovery_selected, 1,
+            "Up from 2 → 1 (Continue with agent)"
+        );
         vs.handle_key_view_local(up, &mode, 0, false, None);
         assert_eq!(vs.error_recovery_selected, 0, "Up from 1 → 0 (Resume)");
     }

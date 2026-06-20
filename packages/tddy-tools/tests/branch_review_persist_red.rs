@@ -18,11 +18,7 @@ fn persist_review_md_from_submit_accepts_minimal_valid_json() {
     let r =
         tddy_tools::review_persist::persist_review_md_from_branch_review_json(dir.path(), &json);
     // Then
-    assert!(
-        r.is_ok(),
-        "must write review.md and return Ok; got {:?}",
-        r
-    );
+    assert!(r.is_ok(), "must write review.md and return Ok; got {:?}", r);
     let path: PathBuf = dir.path().join("review.md");
     assert!(path.is_file(), "expected {}", path.display());
 }

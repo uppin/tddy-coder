@@ -16,7 +16,6 @@ fn refactor_allowlist_includes_write_and_bash() {
 
     let list = refactor_allowlist();
 
-
     // Then
     assert!(
         list.iter().any(|t| t == "Write"),

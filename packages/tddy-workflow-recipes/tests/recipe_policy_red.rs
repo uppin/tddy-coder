@@ -13,11 +13,31 @@ fn supported_cli_names_includes_free_prompting_and_grill_me() {
     let names = approval_policy::supported_workflow_recipe_cli_names();
 
     // Then
-    assert!(names.contains(&"free-prompting"), "F5: must include free-prompting: {:?}", names);
-    assert!(names.contains(&"grill-me"), "F5: must include grill-me: {:?}", names);
-    assert!(names.contains(&"tdd-small"), "F5: must include tdd-small: {:?}", names);
-    assert!(names.contains(&"review"), "F5: must include review: {:?}", names);
-    assert!(names.contains(&"merge-pr"), "F5: must include merge-pr: {:?}", names);
+    assert!(
+        names.contains(&"free-prompting"),
+        "F5: must include free-prompting: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"grill-me"),
+        "F5: must include grill-me: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"tdd-small"),
+        "F5: must include tdd-small: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"review"),
+        "F5: must include review: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"merge-pr"),
+        "F5: must include merge-pr: {:?}",
+        names
+    );
 }
 
 #[test]
