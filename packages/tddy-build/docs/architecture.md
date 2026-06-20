@@ -34,12 +34,12 @@ Plugins that populate these fields participate in the content-addressed cache: i
 
 ## Pipeline
 
-Each stage emits structured `log::` output (`log` crate) at `debug` level so operators can observe what the engine is doing without modifying code.
+The engine instruments each seam with `log::` calls (discovery, lowering, cycle detection, cache hit/miss, execution). Set `RUST_LOG=tddy_build=debug` (or `trace`) to observe the full build graph.
 
-1. **discovery** — glob `**/{BUILD,build}.{yaml,yml}` under the repo root; parse each into a `BuildManifest`.
+1. **discovery** — glob `**/{BUILD,build}.{yaml,yml}` under the repo root; parse each into a `BuildManifest`. Discovered manifest count logged at `debug`.
 2. **lower** — `lower_target(target, &registry)` dispatches by `config.type`: `script`→declared command (built-in); `tool`/`group`→no own action (built-in); any other type→the registered `BuildPlugin` (`unknown target type: <name>` if none). Explicit `actions` are kept and run before the lowered one.
-3. **graph** — `BuildGraph::from_manifests` flattens targets (rejecting duplicate ids), detects target-level cycles (deps + group members, read from the open config), and exposes `build_order` (deps-first) and `waves(&registry)` (Kahn topological levels). Action-level edges are inferred from input-glob/output-path overlap — an edge is added when Action A declares an `output.path` that matches a glob in Action B's `inputs`; plugins must explicitly declare intermediates to enforce ordering.
-4. **cache** — `compute_cache_key` = `sha256:` over action id/type/command/working-dir/env(sorted)/input fingerprints(sorted)/outputs(sorted)/tool deps(sorted); order-independent. `lookup_cache` is a hit only when the recorded key matches and every declared output still exists. `persist_cache` writes atomically (tmp + `sync_all` + rename). `CacheMode`: `ReadWrite` (default) / `ReadOnly` / `Offline`.
+3. **graph** — `BuildGraph::from_manifests` flattens targets (rejecting duplicate ids), detects target-level cycles (deps + group members, read from the open config), and exposes `build_order` (deps-first) and `waves(&registry)` (Kahn topological levels). Cycle detection emits a `warn!` naming the offending target. Action-level edges are inferred from input-glob/output-path overlap — an edge is added when Action A declares an `output.path` that matches a glob in Action B's `inputs`; plugins must explicitly declare intermediates to enforce ordering.
+4. **cache** — `compute_cache_key` = `sha256:` over action id/type/command/working-dir/env(sorted)/input fingerprints(sorted)/outputs(sorted)/tool deps(sorted); order-independent. `lookup_cache` is a hit only when the recorded key matches and every declared output still exists. `persist_cache` writes atomically (tmp + `sync_all` + rename). `CacheMode`: `ReadWrite` (default) / `ReadOnly` / `Offline`. Plugins declare cacheable inputs/outputs via the `io` helper (`OutputSpec`, `srcs_to_inputs`, `outputs_to_decls`) in their open config; the executor glob-expands `srcs` patterns for fingerprinting.
 5. **executor** — `execute_target` builds dependencies/group members first, runs each target's actions wave-by-wave in parallel (`futures::join_all`), checks/populates the cache, supports `--dry-run` (emit argv only), prepends each `ToolTarget`'s `bin_dir` onto the action's `PATH`, and **creates declared output parent directories** before running the action (many tools — `docker build --iidfile`, `qemu-img convert`, most compilers — do not create intermediate directories themselves).
 
 ## Entry points (`service`)
@@ -60,9 +60,10 @@ Each crate ships an example `BUILD.yaml` under `examples/` and integration tests
 
 ## Consumers
 
-- **tddy-tools** `build` / `build-list` subcommands: run `tddy-build` locally, or relay over `TDDY_SOCKET`.
+- **tddy-tools** `build` / `build-list` subcommands: run `tddy-build` locally, or relay over `TDDY_SOCKET`. Assembles the plugin registry from `tddy-build-rust`, `tddy-build-typescript`, `tddy-build-docker`.
 - **tddy-core** `toolcall::BuildExecutor` trait + process-global registry + listener handlers for `build` / `build-list` — **no dependency on tddy-build** (returns "build support not enabled" when nothing is registered).
-- **tddy-coder** implements `BuildExecutor` on top of `tddy-build` and registers it before starting the toolcall listener, so relayed build requests run co-located with the worktree.
+- **tddy-coder** implements `BuildExecutor` on top of `tddy-build` and registers it before starting the toolcall listener, so relayed build requests run co-located with the worktree. Assembles the same plugin registry as `tddy-tools`.
+- **Workspace `BUILD.yaml` configs** — every package in the workspace ships a `packages/<pkg>/BUILD.yaml` (`rust_library`/`rust_binary` targets with deps chains and `srcs` globs); root `BUILD.yaml` provides an `all:build` group over the main deliverables (`tddy-coder`, `tddy-tools`, `tddy-daemon`, `tddy-web`). Run `tddy-tools build-list --repo-dir .` to enumerate all targets.
 
 ## Not yet implemented (v1)
 

@@ -1,0 +1,14 @@
+schema_version: 1
+targets:
+  - id: "tddy-acp-stub:bin"
+    name: "tddy-acp-stub"
+    config:
+      type: rust_binary
+      package: tddy-acp-stub
+      bin_name: tddy-acp-stub
+      srcs:
+        - "packages/tddy-acp-stub/src/**/*.rs"
+        - "packages/tddy-acp-stub/Cargo.toml"
+      outputs:
+        - path: "target/debug/tddy-acp-stub"
+          kind: file

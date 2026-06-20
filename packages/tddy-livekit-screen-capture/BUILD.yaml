@@ -1,0 +1,16 @@
+schema_version: 1
+targets:
+  - id: "tddy-livekit-screen-capture:bin"
+    name: "tddy-livekit-screen-capture"
+    deps:
+      - "tddy-livekit:lib"
+    config:
+      type: rust_binary
+      package: tddy-livekit-screen-capture
+      bin_name: tddy-livekit-screen-capture
+      srcs:
+        - "packages/tddy-livekit-screen-capture/src/**/*.rs"
+        - "packages/tddy-livekit-screen-capture/Cargo.toml"
+      outputs:
+        - path: "target/debug/tddy-livekit-screen-capture"
+          kind: file

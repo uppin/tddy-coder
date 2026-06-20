@@ -1,0 +1,27 @@
+schema_version: 1
+targets:
+  - id: "tddy-coder:bin"
+    name: "tddy-coder"
+    deps:
+      - "tddy-core:lib"
+      - "tddy-build:lib"
+      - "tddy-build-rust:lib"
+      - "tddy-build-typescript:lib"
+      - "tddy-build-docker:lib"
+      - "tddy-tui:lib"
+      - "tddy-workflow-recipes:lib"
+      - "tddy-rpc:lib"
+      - "tddy-service:lib"
+      - "tddy-livekit:lib"
+      - "tddy-connectrpc:lib"
+      - "tddy-github:lib"
+    config:
+      type: rust_binary
+      package: tddy-coder
+      bin_name: tddy-coder
+      srcs:
+        - "packages/tddy-coder/src/**/*.rs"
+        - "packages/tddy-coder/Cargo.toml"
+      outputs:
+        - path: "target/debug/tddy-coder"
+          kind: file

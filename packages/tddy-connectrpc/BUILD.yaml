@@ -1,0 +1,11 @@
+schema_version: 1
+targets:
+  - id: "tddy-connectrpc:lib"
+    name: "tddy-connectrpc"
+    deps: ["tddy-rpc:lib"]
+    config:
+      type: rust_library
+      package: tddy-connectrpc
+      srcs:
+        - "packages/tddy-connectrpc/src/**/*.rs"
+        - "packages/tddy-connectrpc/Cargo.toml"

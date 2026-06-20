@@ -1,0 +1,11 @@
+schema_version: 1
+targets:
+  - id: "tddy-build-typescript:lib"
+    name: "tddy-build-typescript"
+    deps: ["tddy-build:lib"]
+    config:
+      type: rust_library
+      package: tddy-build-typescript
+      srcs:
+        - "packages/tddy-build-typescript/src/**/*.rs"
+        - "packages/tddy-build-typescript/Cargo.toml"

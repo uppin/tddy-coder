@@ -1,0 +1,16 @@
+schema_version: 1
+targets:
+  - id: "tddy-service:lib"
+    name: "tddy-service"
+    deps:
+      - "tddy-core:lib"
+      - "tddy-workflow:lib"
+      - "tddy-workflow-recipes:lib"
+      - "tddy-rpc:lib"
+      - "tddy-tui:lib"
+    config:
+      type: rust_library
+      package: tddy-service
+      srcs:
+        - "packages/tddy-service/src/**/*.rs"
+        - "packages/tddy-service/Cargo.toml"

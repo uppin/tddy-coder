@@ -1,0 +1,16 @@
+schema_version: 1
+targets:
+  - id: "tddy-demo:bin"
+    name: "tddy-demo"
+    deps:
+      - "tddy-coder:bin"
+    config:
+      type: rust_binary
+      package: tddy-demo
+      bin_name: tddy-demo
+      srcs:
+        - "packages/tddy-demo/src/**/*.rs"
+        - "packages/tddy-demo/Cargo.toml"
+      outputs:
+        - path: "target/debug/tddy-demo"
+          kind: file
