@@ -372,7 +372,7 @@ artifacts: {}
 
 /// Red goal output includes marker definitions with JSON format and scope data.
 #[tokio::test]
-async fn red_goal_adds_logging_markers() {
+async fn adds_logging_markers() {
     // Given
     let session_dir = std::env::temp_dir().join("tddy-red-markers");
     let _ = std::fs::remove_dir_all(&session_dir);
@@ -420,7 +420,7 @@ async fn red_goal_adds_logging_markers() {
 
 /// Red goal verifies which markers were collected from test output.
 #[test]
-fn red_goal_verifies_marker_collection() {
+fn verifies_marker_collection() {
     // Given
 
     // When

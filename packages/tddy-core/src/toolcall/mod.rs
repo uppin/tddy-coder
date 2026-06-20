@@ -295,7 +295,7 @@ mod build_wire_tests {
     use serde_json::json;
 
     #[test]
-    fn build_list_request_wire_parses_full_and_minimal() {
+    fn build_list_request_wire_parses_fully_populated_fields() {
         // Given — a fully populated request
         let full: BuildListRequestWire = serde_json::from_value(json!({
             "type": "build-list", "repo_dir": "/repo", "query": "q", "limit": 5, "offset": 2
@@ -307,7 +307,10 @@ mod build_wire_tests {
         assert_eq!(full.query.as_deref(), Some("q"));
         assert_eq!(full.limit, Some(5));
         assert_eq!(full.offset, Some(2));
+    }
 
+    #[test]
+    fn build_list_request_wire_parses_minimal_with_only_required_fields() {
         // Given — a minimal request (only required fields)
         let minimal: BuildListRequestWire =
             serde_json::from_value(json!({ "type": "build-list", "repo_dir": "/repo" })).unwrap();
@@ -319,7 +322,7 @@ mod build_wire_tests {
     }
 
     #[test]
-    fn build_request_wire_parses_flags_with_defaults() {
+    fn build_request_wire_parses_flags_when_set_to_true() {
         // Given — explicit flags set to true
         let w: BuildRequestWire = serde_json::from_value(json!({
             "type": "build", "repo_dir": "/repo", "target": "pkg:bin", "no_cache": true, "dry_run": true
@@ -330,7 +333,10 @@ mod build_wire_tests {
         assert_eq!(w.target, "pkg:bin");
         assert!(w.no_cache, "expected no_cache to be true");
         assert!(w.dry_run, "expected dry_run to be true");
+    }
 
+    #[test]
+    fn build_request_wire_flags_default_to_false_when_absent() {
         // Given — no flags supplied (defaults)
         let defaults: BuildRequestWire = serde_json::from_value(json!({
             "type": "build", "repo_dir": "/repo", "target": "pkg:bin"

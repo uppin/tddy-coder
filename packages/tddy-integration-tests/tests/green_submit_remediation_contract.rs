@@ -29,7 +29,7 @@ fn setup_session_ready_for_green(session_dir: &std::path::Path) {
 }
 
 #[tokio::test]
-async fn green_missing_submit_is_followed_by_retry_invoke_carrying_error_and_successful_submit() {
+async fn missing_submit_is_followed_by_retry_invoke_carrying_error_and_successful_submit() {
     // Given
     let session_dir = std::env::temp_dir().join(format!(
         "tddy-green-submit-remediation-{}",

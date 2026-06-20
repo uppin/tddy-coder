@@ -415,9 +415,14 @@ mod agent_skills_unit_red {
     /// Lower-level red: parser must return structured frontmatter for valid SKILL.md.
     #[test]
     fn parse_skill_frontmatter_parses_minimal_yaml() {
+        // Given
         let src = "---\nname: foo\ndescription: Short desc\n---\n\n## Body\n";
+
+        // When
         let got =
             parse_skill_frontmatter(src).expect("expected Ok frontmatter for valid stub input");
+
+        // Then
         assert_eq!(got.name, "foo");
         assert_eq!(got.description, "Short desc");
     }
@@ -425,6 +430,7 @@ mod agent_skills_unit_red {
     /// Lower-level red: matching folder and `name` field must classify as match.
     #[test]
     fn folder_name_matches_frontmatter_accepts_matching_pair() {
+        // When / Then
         assert_eq!(
             folder_name_matches_frontmatter_name("foo", "foo"),
             Some(true),
@@ -435,6 +441,7 @@ mod agent_skills_unit_red {
     /// Lower-level red: mismatch must not be treated as match.
     #[test]
     fn folder_name_matches_frontmatter_rejects_mismatch() {
+        // When / Then
         assert_eq!(
             folder_name_matches_frontmatter_name("foo", "bar"),
             Some(false),
@@ -444,11 +451,14 @@ mod agent_skills_unit_red {
 
     #[test]
     fn compose_prompt_skill_reference_uses_at_qualified_skill_path() {
+        // When
         let out = compose_prompt_skill_reference(
             "my-skill",
             ".agents/skills/my-skill/SKILL.md",
             "Ship the feature.",
         );
+
+        // Then
         assert!(out.contains("[Skill: @.agents/skills/my-skill"));
         assert!(out.contains(".agents/skills/my-skill/SKILL.md"));
         assert!(out.contains("Ship the feature."));
@@ -461,11 +471,16 @@ mod agent_skills_unit_red {
     /// Lower-level red: cache token should exist when `.agents/skills` is present on disk.
     #[test]
     fn agents_skills_scan_cache_token_some_when_skills_dir_exists() {
+        // Given
         let root =
             std::env::temp_dir().join(format!("tddy-agent-skills-cache-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join(AGENTS_SKILLS_DIR).join("x")).expect("mkdir");
+
+        // When
         let token = agents_skills_scan_cache_token(&root);
+
+        // Then
         assert!(
             token.is_some(),
             "expected cache token when .agents/skills exists; got {token:?}"

@@ -84,6 +84,7 @@ mod tests {
     /// The generated settings must contain all six hook event keys.
     #[test]
     fn build_claude_hooks_settings_emits_all_six_events() {
+        // When
         let value = build_claude_hooks_settings(&test_params());
         let hooks = value
             .get("hooks")
@@ -110,7 +111,10 @@ mod tests {
     /// Each hook entry must be an array with one matcher group containing one command hook.
     #[test]
     fn each_event_has_one_matcher_group_with_one_command_hook() {
+        // When
         let value = build_claude_hooks_settings(&test_params());
+
+        // Then
         let hooks = value["hooks"].as_object().unwrap();
 
         for (event_name, entries) in hooks {
@@ -145,7 +149,10 @@ mod tests {
     /// Each hook command must embed the key identifying fields and the event name.
     #[test]
     fn hook_command_includes_session_token_daemon_event_and_os_user() {
+        // When
         let value = build_claude_hooks_settings(&test_params());
+
+        // Then
         let hooks = value["hooks"].as_object().unwrap();
 
         for (event_name, entries) in hooks {
@@ -183,7 +190,10 @@ mod tests {
     /// The hook command must start with the configured `tddy_tools_path`.
     #[test]
     fn hook_command_uses_provided_tddy_tools_path() {
+        // When
         let value = build_claude_hooks_settings(&test_params());
+
+        // Then
         let hooks = value["hooks"].as_object().unwrap();
 
         for (event_name, entries) in hooks {

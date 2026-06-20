@@ -959,6 +959,7 @@ pub fn session_chaining_phase2_tui_chain_parity_ready() -> bool {
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
+    use rstest::rstest;
 
     use super::*;
 
@@ -1239,40 +1240,31 @@ mod tests {
         );
     }
 
-    #[test]
-    fn error_recovery_up_down_cycles_through_three_options() {
+    #[rstest]
+    #[case::down_from_resume(0, KeyCode::Down, 1)]
+    #[case::down_from_continue(1, KeyCode::Down, 2)]
+    #[case::down_wraps_from_exit(2, KeyCode::Down, 0)]
+    #[case::up_wraps_from_resume(0, KeyCode::Up, 2)]
+    #[case::up_from_exit(2, KeyCode::Up, 1)]
+    #[case::up_from_continue(1, KeyCode::Up, 0)]
+    fn error_recovery_up_down_cycles_through_three_options(
+        #[case] start: usize,
+        #[case] key_code: KeyCode,
+        #[case] expected: usize,
+    ) {
         // Given
         let mut vs = ViewState::new();
+        vs.error_recovery_selected = start;
         let mode = AppMode::ErrorRecovery {
             error_message: "failed".to_string(),
         };
-        let down = KeyEvent::new(KeyCode::Down, KeyModifiers::empty());
-        let up = KeyEvent::new(KeyCode::Up, KeyModifiers::empty());
+        let key = KeyEvent::new(key_code, KeyModifiers::empty());
 
-        // When / Then — forward cycle
-        vs.handle_key_view_local(down, &mode, 0, false, None);
-        assert_eq!(
-            vs.error_recovery_selected, 1,
-            "Down from 0 (Resume) → 1 (Continue with agent)"
-        );
-        vs.handle_key_view_local(down, &mode, 0, false, None);
-        assert_eq!(vs.error_recovery_selected, 2, "Down from 1 → 2 (Exit)");
-        vs.handle_key_view_local(down, &mode, 0, false, None);
-        assert_eq!(
-            vs.error_recovery_selected, 0,
-            "Down from 2 wraps to 0 (Resume)"
-        );
+        // When
+        vs.handle_key_view_local(key, &mode, 0, false, None);
 
-        // When / Then — reverse cycle
-        vs.handle_key_view_local(up, &mode, 0, false, None);
-        assert_eq!(vs.error_recovery_selected, 2, "Up from 0 wraps to 2 (Exit)");
-        vs.handle_key_view_local(up, &mode, 0, false, None);
-        assert_eq!(
-            vs.error_recovery_selected, 1,
-            "Up from 2 → 1 (Continue with agent)"
-        );
-        vs.handle_key_view_local(up, &mode, 0, false, None);
-        assert_eq!(vs.error_recovery_selected, 0, "Up from 1 → 0 (Resume)");
+        // Then
+        assert_eq!(vs.error_recovery_selected, expected);
     }
 
     #[test]

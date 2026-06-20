@@ -118,17 +118,21 @@ mod tests {
 
     #[test]
     fn parse_bugfix() {
-        assert_eq!(
-            parse_feature_start_slash_line("/start-bugfix"),
-            Some(Ok("bugfix".to_string()))
-        );
+        // When
+        let result = parse_feature_start_slash_line("/start-bugfix");
+
+        // Then
+        assert_eq!(result, Some(Ok("bugfix".to_string())));
     }
 
     #[test]
     fn parse_unknown_lists_names() {
+        // When
         let e = parse_feature_start_slash_line("/start-nope")
             .unwrap()
             .unwrap_err();
+
+        // Then
         assert!(
             e.contains("tdd"),
             "expected error to contain 'tdd', was: {e}"
@@ -141,25 +145,28 @@ mod tests {
 
     #[test]
     fn parse_tdd_with_trailing_feature_text() {
-        assert_eq!(
-            parse_feature_start_slash_line("/start-tdd a todo app"),
-            Some(Ok("tdd".to_string()))
-        );
+        // When
+        let result = parse_feature_start_slash_line("/start-tdd a todo app");
+
+        // Then
+        assert_eq!(result, Some(Ok("tdd".to_string())));
     }
 
     #[test]
     fn parse_hyphenated_recipe_before_remainder() {
-        assert_eq!(
-            parse_feature_start_slash_line("/start-tdd-small run focused suite"),
-            Some(Ok("tdd-small".to_string()))
-        );
+        // When
+        let result = parse_feature_start_slash_line("/start-tdd-small run focused suite");
+
+        // Then
+        assert_eq!(result, Some(Ok("tdd-small".to_string())));
     }
 
     #[test]
     fn parse_free_prompting_with_remainder() {
-        assert_eq!(
-            parse_feature_start_slash_line("/start-free-prompting optional note"),
-            Some(Ok("free-prompting".to_string()))
-        );
+        // When
+        let result = parse_feature_start_slash_line("/start-free-prompting optional note");
+
+        // Then
+        assert_eq!(result, Some(Ok("free-prompting".to_string())));
     }
 }

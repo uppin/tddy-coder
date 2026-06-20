@@ -37,7 +37,7 @@ fn setup_session_ready_for_green(session_dir: &std::path::Path) {
 }
 
 #[tokio::test]
-async fn green_with_new_agent_session_does_not_resume_old_session() {
+async fn with_new_agent_session_does_not_resume_old_session() {
     // Given
     let session_dir = std::env::temp_dir().join(format!(
         "tddy-green-new-agent-session-{}",
@@ -93,7 +93,7 @@ async fn green_with_new_agent_session_does_not_resume_old_session() {
 }
 
 #[tokio::test]
-async fn green_without_new_agent_session_resumes_existing_session() {
+async fn without_new_agent_session_resumes_existing_session() {
     // Given
     let session_dir =
         std::env::temp_dir().join(format!("tddy-green-resume-existing-{}", std::process::id()));
@@ -153,7 +153,7 @@ async fn green_without_new_agent_session_resumes_existing_session() {
 }
 
 #[tokio::test]
-async fn green_new_agent_session_remediation_retries_also_start_fresh() {
+async fn new_agent_session_remediation_retries_also_start_fresh() {
     // Given
     let session_dir = std::env::temp_dir().join(format!(
         "tddy-green-new-session-remediation-{}",

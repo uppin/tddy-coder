@@ -11,6 +11,7 @@ use common::{
     ctx_acceptance_tests, ctx_green, ctx_plan, ctx_red, run_goal_until_done, run_plan,
     session_dir_for_new_session, temp_dir_with_git_repo, write_changeset_with_state,
 };
+use rstest::rstest;
 use std::sync::Arc;
 use tddy_core::changeset::{read_changeset, write_changeset, Changeset};
 use tddy_core::workflow::graph::ExecutionStatus;
@@ -174,40 +175,23 @@ async fn full_workflow_with_stub_backend_reaches_green_complete() {
 }
 
 /// next_goal_for_state maps each workflow state to the next goal.
-#[test]
-fn next_goal_for_state_maps_states_correctly() {
-    // Given
+#[rstest]
+#[case::init("Init", Some("interview"))]
+#[case::interview("Interview", Some("interview"))]
+#[case::planned("Planned", Some("acceptance-tests"))]
+#[case::acceptance_tests_ready("AcceptanceTestsReady", Some("red"))]
+#[case::red_tests_ready("RedTestsReady", Some("green"))]
+#[case::green_complete("GreenComplete", Some("demo"))]
+#[case::failed("Failed", None)]
+#[case::unknown("Unknown", Some("interview"))]
+fn next_goal_for_state_maps_states_correctly(
+    #[case] state: &str,
+    #[case] expected_goal: Option<&str>,
+) {
     let r = common::tdd_recipe();
-
-    // Then
     assert_eq!(
-        r.next_goal_for_state(&WorkflowState::new("Init")),
-        Some(GoalId::new("interview"))
-    );
-    assert_eq!(
-        r.next_goal_for_state(&WorkflowState::new("Interview")),
-        Some(GoalId::new("interview"))
-    );
-    assert_eq!(
-        r.next_goal_for_state(&WorkflowState::new("Planned")),
-        Some(GoalId::new("acceptance-tests"))
-    );
-    assert_eq!(
-        r.next_goal_for_state(&WorkflowState::new("AcceptanceTestsReady")),
-        Some(GoalId::new("red"))
-    );
-    assert_eq!(
-        r.next_goal_for_state(&WorkflowState::new("RedTestsReady")),
-        Some(GoalId::new("green"))
-    );
-    assert_eq!(
-        r.next_goal_for_state(&WorkflowState::new("GreenComplete")),
-        Some(GoalId::new("demo"))
-    );
-    assert_eq!(r.next_goal_for_state(&WorkflowState::new("Failed")), None);
-    assert_eq!(
-        r.next_goal_for_state(&WorkflowState::new("Unknown")),
-        Some(GoalId::new("interview"))
+        r.next_goal_for_state(&WorkflowState::new(state)),
+        expected_goal.map(GoalId::new)
     );
 }
 

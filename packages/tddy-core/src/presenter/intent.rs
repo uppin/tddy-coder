@@ -53,19 +53,28 @@ mod tests {
 
     #[test]
     fn user_intent_submit_feature_input() {
+        // When
         let intent = UserIntent::SubmitFeatureInput("Build auth".to_string());
+
+        // Then
         assert!(matches!(intent, UserIntent::SubmitFeatureInput(s) if s == "Build auth"));
     }
 
     #[test]
     fn user_intent_answer_select() {
+        // When
         let intent = UserIntent::AnswerSelect(2);
+
+        // Then
         assert!(matches!(intent, UserIntent::AnswerSelect(2)));
     }
 
     #[test]
     fn user_intent_queue_prompt() {
+        // When
         let intent = UserIntent::QueuePrompt("fix bug".to_string());
+
+        // Then
         assert!(matches!(intent, UserIntent::QueuePrompt(s) if s == "fix bug"));
     }
 }

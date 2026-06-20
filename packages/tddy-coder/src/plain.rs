@@ -119,19 +119,25 @@ mod tests {
 
     #[test]
     fn resolve_backend_selection_index_claude() {
+        // Given
         let q = backend_selection_question();
+        // When / Then
         assert_eq!(resolve_backend_selection_index(1, &q), "Claude");
     }
 
     #[test]
     fn resolve_backend_selection_index_cursor() {
+        // Given
         let q = backend_selection_question();
+        // When / Then
         assert_eq!(resolve_backend_selection_index(3, &q), "Cursor");
     }
 
     #[test]
     fn resolve_backend_selection_index_out_of_bounds_defaults_to_first() {
+        // Given
         let q = backend_selection_question();
+        // When / Then
         assert_eq!(resolve_backend_selection_index(99, &q), "Stub");
     }
 }

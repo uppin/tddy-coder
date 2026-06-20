@@ -494,6 +494,7 @@ mod tests {
 
     #[test]
     fn acp_error_suggests_retry_oauth_detects_auth() {
+        // When / Then
         assert!(acp_error_suggests_retry_oauth("authentication required"));
         assert!(acp_error_suggests_retry_oauth("HTTP 401"));
         assert!(!acp_error_suggests_retry_oauth("syntax error"));
@@ -501,12 +502,17 @@ mod tests {
 
     #[test]
     fn writes_https_oauth_url_to_session_file() {
+        // Given
         let tmp =
             std::env::temp_dir().join(format!("tddy-codex-acp-oauth-test-{}", std::process::id()));
         let _ = fs::create_dir_all(&tmp);
         let path = tmp.join(crate::backend::CODEX_OAUTH_AUTHORIZE_URL_FILENAME);
+
+        // When
         fs::write(&path, "https://auth.example.com/o?x=1\n").expect("write");
         let got = fs::read_to_string(&path).expect("read");
+
+        // Then
         assert!(got.trim().starts_with("https://"));
     }
 }

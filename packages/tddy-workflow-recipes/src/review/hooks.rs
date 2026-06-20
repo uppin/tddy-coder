@@ -126,7 +126,10 @@ mod tests {
 
     #[test]
     fn system_prompt_with_git_block_inspect_includes_scope_and_placeholder() {
+        // Given the inspect task id and a placeholder git block
         let p = system_prompt_with_git_block(TASK_INSPECT, "_diff_").expect("inspect");
+        // When the prompt is assembled
+        // Then it contains the scope header and the git block appended last
         assert!(
             p.contains("## Branch changes (deterministic scope)"),
             "expected scope header; got {}",
@@ -142,6 +145,9 @@ mod tests {
 
     #[test]
     fn system_prompt_with_git_block_branch_review_includes_scope() {
+        // Given the branch-review task id and a short git block
+        // When the prompt is assembled
+        // Then it contains the scope header and a branch-review reference
         let p = system_prompt_with_git_block(TASK_BRANCH_REVIEW, "x").expect("branch-review");
         assert!(p.contains("## Branch changes (deterministic scope)"));
         assert!(p.contains("branch-review") || p.contains("Branch review"));
@@ -149,6 +155,9 @@ mod tests {
 
     #[test]
     fn system_prompt_with_git_block_unknown_task_returns_none() {
+        // Given an unknown task id
+        // When the prompt is assembled
+        // Then None is returned
         assert!(system_prompt_with_git_block("end", "z").is_none());
     }
 }

@@ -339,7 +339,7 @@ fn invalid_validate_subagents_wrong_goal_fails() {
 }
 
 #[test]
-fn red_goal_schema_includes_source_file_field() {
+fn goal_schema_includes_source_file_field() {
     // When
     const RED_SCHEMA: &str =
         include_str!("../../tddy-workflow-recipes/generated/tdd/red.schema.json");

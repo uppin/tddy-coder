@@ -306,20 +306,14 @@ pub fn prepend_context_header(
 mod relocation_tests {
     use super::*;
     use std::fs;
-
-    fn temp_dir(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("tddy-wr-{}", label));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use tddy_testing_commons::temp_session_dir;
 
     // ── R4: valid suggestion moves directory ─────────────────────────────────
 
     #[test]
     fn relocate_moves_session_dir_to_the_suggested_path() {
         // Given
-        let root = temp_dir("relocate-valid");
+        let root = temp_session_dir("relocate-valid");
         fs::create_dir_all(root.join(".git")).unwrap();
         let output_dir = root.join("output");
         fs::create_dir_all(&output_dir).unwrap();
@@ -351,7 +345,7 @@ mod relocation_tests {
     #[test]
     fn relocate_falls_back_to_staging_when_suggestion_is_an_absolute_path() {
         // Given
-        let root = temp_dir("relocate-absolute");
+        let root = temp_session_dir("relocate-absolute");
         let output_dir = root.join("output");
         fs::create_dir_all(&output_dir).unwrap();
         let dir_name = "2026-03-08-my-feature";
@@ -372,7 +366,7 @@ mod relocation_tests {
     #[test]
     fn relocate_falls_back_to_staging_when_suggestion_contains_dotdot() {
         // Given
-        let root = temp_dir("relocate-dotdot");
+        let root = temp_session_dir("relocate-dotdot");
         let output_dir = root.join("output");
         fs::create_dir_all(&output_dir).unwrap();
         let dir_name = "2026-03-08-my-feature";
@@ -393,7 +387,7 @@ mod relocation_tests {
     #[test]
     fn relocate_falls_back_to_staging_when_suggestion_is_whitespace() {
         // Given
-        let root = temp_dir("relocate-empty");
+        let root = temp_session_dir("relocate-empty");
         let output_dir = root.join("output");
         fs::create_dir_all(&output_dir).unwrap();
         let dir_name = "2026-03-08-my-feature";
@@ -418,7 +412,7 @@ mod relocation_tests {
     fn relocate_returns_staging_unchanged_when_suggestion_resolves_to_same_path() {
         // Given — no .git here → find_git_root falls back to output_dir.parent() == root.
         // Suggestion "output/" → root / "output" / dir_name == staging → noop.
-        let root = temp_dir("relocate-same");
+        let root = temp_session_dir("relocate-same");
         let output_dir = root.join("output");
         fs::create_dir_all(&output_dir).unwrap();
         let dir_name = "2026-03-08-my-feature";
@@ -443,7 +437,7 @@ mod relocation_tests {
     #[test]
     fn find_git_root_returns_the_ancestor_containing_dot_git() {
         // Given
-        let root = temp_dir("git-root-find");
+        let root = temp_session_dir("git-root-find");
         fs::create_dir_all(root.join(".git")).unwrap();
         let nested = root.join("a/b/c");
         fs::create_dir_all(&nested).unwrap();
@@ -462,7 +456,7 @@ mod relocation_tests {
     fn find_git_root_falls_back_to_a_parent_directory_when_no_dot_git_exists() {
         // Given — `root` has no .git; temp dirs on supported platforms are outside any
         // git repo, so walking up from `nested` will not find one.
-        let root = temp_dir("git-root-fallback");
+        let root = temp_session_dir("git-root-fallback");
         let nested = root.join("a");
         fs::create_dir_all(&nested).unwrap();
 
@@ -481,25 +475,19 @@ mod relocation_tests {
 mod context_header_tests {
     use super::*;
     use std::fs;
+    use tddy_testing_commons::temp_session_dir;
 
     /// Test-only basenames (production passes manifest-derived basenames from the workflow-recipes layer).
     const CTX_TEST_PRIMARY_DOC: &[&str] = &["SessionDoc.md"];
     const CTX_TEST_PRIMARY_DOC_AND_AT: &[&str] = &["SessionDoc.md", "acceptance-tests.md"];
     const CTX_TEST_REFACTOR: &[&str] = &["refactoring-plan.md"];
 
-    fn temp_dir(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("tddy-ch-{}", label));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     // ── AC1: header lists existing .md files ─────────────────────────────────
 
     #[test]
     fn context_header_lists_existing_md_files() {
         // Given
-        let dir = temp_dir("lists-existing");
+        let dir = temp_session_dir("lists-existing");
         fs::write(dir.join("SessionDoc.md"), "# Doc").unwrap();
 
         // When
@@ -523,7 +511,7 @@ mod context_header_tests {
     #[test]
     fn context_header_omits_missing_files() {
         // Given — acceptance-tests.md is NOT created
-        let dir = temp_dir("omits-missing");
+        let dir = temp_session_dir("omits-missing");
         fs::write(dir.join("SessionDoc.md"), "# Doc").unwrap();
 
         // When
@@ -546,7 +534,7 @@ mod context_header_tests {
     #[test]
     fn context_header_is_empty_when_no_md_files_exist() {
         // Given — no .md files
-        let dir = temp_dir("empty-dir");
+        let dir = temp_session_dir("empty-dir");
 
         // When
         let header = build_context_header(Some(&dir), None, CTX_TEST_PRIMARY_DOC);
@@ -579,7 +567,7 @@ mod context_header_tests {
     #[test]
     fn context_header_uses_absolute_paths() {
         // Given
-        let dir = temp_dir("abs-paths");
+        let dir = temp_session_dir("abs-paths");
         fs::write(dir.join("SessionDoc.md"), "# Doc").unwrap();
 
         // When
@@ -609,7 +597,7 @@ mod context_header_tests {
     #[test]
     fn prepend_places_the_context_header_before_the_prompt() {
         // Given
-        let dir = temp_dir("prepend-adds");
+        let dir = temp_session_dir("prepend-adds");
         fs::write(dir.join("SessionDoc.md"), "# Doc").unwrap();
         let original = "Do the task.".to_string();
 
@@ -646,7 +634,7 @@ mod context_header_tests {
     #[test]
     fn prepend_wraps_the_header_in_context_reminder_tags() {
         // Given
-        let dir = temp_dir("wrap-tags");
+        let dir = temp_session_dir("wrap-tags");
         fs::write(dir.join("SessionDoc.md"), "# Doc").unwrap();
 
         // When
@@ -676,7 +664,7 @@ mod context_header_tests {
     #[test]
     fn context_header_includes_refactoring_plan_when_it_is_in_the_basename_list() {
         // Given
-        let dir = temp_dir("includes-refactoring-plan");
+        let dir = temp_session_dir("includes-refactoring-plan");
         fs::write(
             dir.join("refactoring-plan.md"),
             "# Refactoring Plan\n## Tasks\n- Rename",
@@ -701,7 +689,7 @@ mod context_header_tests {
     #[test]
     fn prepend_returns_the_original_prompt_unchanged_when_no_header_exists() {
         // Given — no .md files → build_context_header returns ""
-        let dir = temp_dir("prepend-noop");
+        let dir = temp_session_dir("prepend-noop");
         let original = "Do the task.".to_string();
 
         // When

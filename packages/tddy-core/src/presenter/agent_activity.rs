@@ -33,7 +33,10 @@ mod tests {
 
     #[test]
     fn visible_tail_matches_partial_buffer_without_newline() {
+        // Given
         let partial = "partial_without_newline";
+
+        // When / Then
         assert_eq!(
             visible_tail_for_incremental_log(partial),
             partial,
@@ -43,6 +46,7 @@ mod tests {
 
     #[test]
     fn dedup_policy_single_authoritative_channel_per_line() {
+        // When / Then
         assert_eq!(
             authoritative_channels_per_completed_line(),
             1,

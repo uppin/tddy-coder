@@ -134,6 +134,7 @@ pub fn parse_hook_event(stdin_json: &str) -> Result<HookEvent, serde_json::Error
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
     // --- Status mapping (one test per table row, happy paths first) ----------
 
@@ -244,21 +245,16 @@ mod tests {
     }
 
     /// `as_wire()` returns the stable strings that the daemon and web UI depend on.
-    #[test]
-    fn wire_strings_are_stable() {
-        // Then
-        assert_eq!(SessionActivityStatus::Started.as_wire(), "Started");
-        assert_eq!(SessionActivityStatus::Running.as_wire(), "Running");
-        assert_eq!(
-            SessionActivityStatus::ExecutingTool.as_wire(),
-            "ExecutingTool"
-        );
-        assert_eq!(
-            SessionActivityStatus::WaitingForInput.as_wire(),
-            "WaitingForInput"
-        );
-        assert_eq!(SessionActivityStatus::Done.as_wire(), "Done");
-        assert_eq!(SessionActivityStatus::Ended.as_wire(), "Ended");
+    #[rstest]
+    #[case::started(SessionActivityStatus::Started, "Started")]
+    #[case::running(SessionActivityStatus::Running, "Running")]
+    #[case::executing_tool(SessionActivityStatus::ExecutingTool, "ExecutingTool")]
+    #[case::waiting_for_input(SessionActivityStatus::WaitingForInput, "WaitingForInput")]
+    #[case::done(SessionActivityStatus::Done, "Done")]
+    #[case::ended(SessionActivityStatus::Ended, "Ended")]
+    fn wire_strings_are_stable(#[case] status: SessionActivityStatus, #[case] expected: &str) {
+        // When / Then
+        assert_eq!(status.as_wire(), expected);
     }
 
     // --- stdin JSON parsing --------------------------------------------------

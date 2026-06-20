@@ -215,10 +215,13 @@ mod post_workflow_elicitation_tests {
 
     #[test]
     fn github_pr_operator_pending_when_open_pr_true_and_no_status() {
+        // Given
         let wf = ChangesetWorkflow {
             post_workflow_open_github_pr: Some(true),
             ..Default::default()
         };
+
+        // When / Then
         assert!(post_workflow_github_pr_operator_elicitation_pending(Some(
             &wf
         )));
@@ -226,6 +229,7 @@ mod post_workflow_elicitation_tests {
 
     #[test]
     fn github_pr_operator_not_pending_when_phase_in_progress() {
+        // Given
         let wf = ChangesetWorkflow {
             post_workflow_open_github_pr: Some(true),
             github_pr_status: Some(GithubPrStatus {
@@ -234,6 +238,8 @@ mod post_workflow_elicitation_tests {
             }),
             ..Default::default()
         };
+
+        // When / Then
         assert!(!post_workflow_github_pr_operator_elicitation_pending(Some(
             &wf
         )));
@@ -241,6 +247,7 @@ mod post_workflow_elicitation_tests {
 
     #[test]
     fn session_worktree_pending_only_when_published_and_flag_true() {
+        // Given
         let wf = ChangesetWorkflow {
             post_workflow_remove_session_worktree: Some(true),
             github_pr_status: Some(GithubPrStatus {
@@ -249,6 +256,8 @@ mod post_workflow_elicitation_tests {
             }),
             ..Default::default()
         };
+
+        // When / Then
         assert!(post_workflow_session_worktree_elicitation_pending(
             Some(&wf),
             true
@@ -261,6 +270,7 @@ mod post_workflow_elicitation_tests {
 
     #[test]
     fn session_worktree_not_pending_after_operator_answer() {
+        // Given
         let wf = ChangesetWorkflow {
             post_workflow_remove_session_worktree: Some(true),
             github_pr_status: Some(GithubPrStatus {
@@ -270,6 +280,8 @@ mod post_workflow_elicitation_tests {
             operator_remove_session_worktree: Some(false),
             ..Default::default()
         };
+
+        // When / Then
         assert!(!post_workflow_session_worktree_elicitation_pending(
             Some(&wf),
             true

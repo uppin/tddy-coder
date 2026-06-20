@@ -32,7 +32,7 @@ fn setup_session_dir_with_red_output(session_dir: &std::path::Path) {
 }
 
 #[tokio::test]
-async fn green_workflow_reads_progress_md_and_invokes_backend() {
+async fn reads_progress_md_and_invokes_backend() {
     // Given
     let session_dir = std::env::temp_dir().join("tddy-green-plan-dir-1");
     setup_session_dir_with_red_output(&session_dir);
@@ -82,7 +82,7 @@ async fn green_workflow_reads_progress_md_and_invokes_backend() {
 }
 
 #[tokio::test]
-async fn green_workflow_transitions_to_green_complete_when_all_pass() {
+async fn transitions_to_green_complete_when_all_pass() {
     // Given
     let session_dir = std::env::temp_dir().join("tddy-green-plan-dir-2");
     setup_session_dir_with_red_output(&session_dir);
@@ -132,7 +132,7 @@ async fn green_workflow_transitions_to_green_complete_when_all_pass() {
 }
 
 #[tokio::test]
-async fn green_workflow_transitions_to_failed_when_tests_fail() {
+async fn transitions_to_failed_when_tests_fail() {
     // Given
     let session_dir = std::env::temp_dir().join("tddy-green-plan-dir-3");
     setup_session_dir_with_red_output(&session_dir);
@@ -177,7 +177,7 @@ async fn green_workflow_transitions_to_failed_when_tests_fail() {
 }
 
 #[tokio::test]
-async fn green_workflow_returns_error_when_progress_md_missing() {
+async fn returns_error_when_progress_md_missing() {
     // Given
     let session_dir = std::env::temp_dir().join("tddy-green-plan-dir-no-progress");
     setup_session_dir_with_red_output(&session_dir);
@@ -217,7 +217,7 @@ async fn green_workflow_returns_error_when_progress_md_missing() {
 }
 
 #[tokio::test]
-async fn green_workflow_returns_error_when_impl_session_missing() {
+async fn returns_error_when_impl_session_missing() {
     // Given
     let session_dir = std::env::temp_dir().join("tddy-green-plan-dir-no-impl-session");
     setup_session_dir_with_red_output(&session_dir);
@@ -271,7 +271,7 @@ artifacts: {}
 }
 
 #[tokio::test]
-async fn green_workflow_updates_progress_md_in_session_dir() {
+async fn updates_progress_md_in_session_dir() {
     // Given
     let session_dir = std::env::temp_dir().join("tddy-green-updates-progress");
     setup_session_dir_with_red_output(&session_dir);
@@ -317,7 +317,7 @@ async fn green_workflow_updates_progress_md_in_session_dir() {
 }
 
 #[tokio::test]
-async fn green_workflow_updates_acceptance_tests_md_in_session_dir() {
+async fn updates_acceptance_tests_md_in_session_dir() {
     // Given
     let session_dir = std::env::temp_dir().join("tddy-green-updates-at");
     setup_session_dir_with_red_output(&session_dir);
@@ -388,7 +388,7 @@ cargo test
 }
 
 #[tokio::test]
-async fn green_workflow_passes_goal_allowlist_to_invoke_request() {
+async fn passes_goal_allowlist_to_invoke_request() {
     // Given
     let session_dir = std::env::temp_dir().join("tddy-green-allowlist");
     setup_session_dir_with_red_output(&session_dir);
@@ -438,7 +438,7 @@ async fn green_workflow_passes_goal_allowlist_to_invoke_request() {
 }
 
 #[tokio::test]
-async fn green_workflow_resumes_session_from_impl_session_file() {
+async fn resumes_session_from_impl_session_file() {
     // Given
     let session_dir = std::env::temp_dir().join("tddy-green-resume-session");
     setup_session_dir_with_red_output(&session_dir);
@@ -497,7 +497,7 @@ async fn green_workflow_resumes_session_from_impl_session_file() {
 }
 
 #[tokio::test]
-async fn red_workflow_writes_impl_session_file_in_session_dir() {
+async fn writes_impl_session_file_in_session_dir() {
     // Given
     let session_dir = std::env::temp_dir().join("tddy-red-impl-session");
     setup_session_dir_with_red_output(&session_dir);
@@ -534,7 +534,7 @@ async fn red_workflow_writes_impl_session_file_in_session_dir() {
 }
 
 #[tokio::test]
-async fn green_goal_reports_demo_results() {
+async fn reports_demo_results() {
     // Given
     let session_dir = std::env::temp_dir().join("tddy-green-demo-results");
     setup_session_dir_with_red_output(&session_dir);
