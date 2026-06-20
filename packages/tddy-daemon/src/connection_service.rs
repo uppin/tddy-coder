@@ -52,7 +52,9 @@ use crate::user_sessions_path::{
 use crate::workspace_session;
 use crate::worktrees::{self, RemoveWorktreeError, WorktreeStatsCache};
 use tddy_service::proto::connection::{
-    ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse,
+    DemoVmState, ExecuteToolRequest, ExecuteToolResponse, GetDemoVmStatusRequest,
+    GetDemoVmStatusResponse, ListExecToolsRequest, ListExecToolsResponse, StartDemoVmRequest,
+    StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
 };
 
 /// Runs blocking clone/spawn work with a wall-clock cap so hung NSS/git/spawn cannot block RPCs forever.
@@ -169,6 +171,16 @@ impl Stream for MpscTerminalOutputStream {
 
 impl Unpin for MpscTerminalOutputStream {}
 
+/// Per-session QEMU demo VM lifecycle state.
+enum DemoVmHandle {
+    /// Boot has been requested; waiting for SSH port to become reachable.
+    Booting,
+    /// VM is up and accepting SSH connections.
+    Running(tddy_demo_runner::RunningVm),
+    /// Boot or shutdown failed.
+    Error(String),
+}
+
 /// ConnectionService implementation.
 pub struct ConnectionServiceImpl {
     config: DaemonConfig,
@@ -185,6 +197,8 @@ pub struct ConnectionServiceImpl {
     shell_jobs: Arc<ShellJobRegistry>,
     /// Optional idle-timeout tracker for relay mode — bumped on every RPC call.
     idle_tracker: Option<Arc<crate::relay_idle::IdleTimeoutTracker>>,
+    /// Per-session demo VM state — keyed by session_id.
+    demo_vm_state: Arc<tokio::sync::Mutex<std::collections::HashMap<String, DemoVmHandle>>>,
 }
 
 impl ConnectionServiceImpl {
@@ -209,6 +223,7 @@ impl ConnectionServiceImpl {
             worktrees::projects_stats_cache_root(),
         ));
         let shell_jobs = Arc::new(ShellJobRegistry::new());
+        let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         Self {
             config,
             sessions_base_for_user,
@@ -221,6 +236,7 @@ impl ConnectionServiceImpl {
             claude_cli_manager,
             shell_jobs,
             idle_tracker: None,
+            demo_vm_state,
         }
     }
 
@@ -2083,6 +2099,186 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         }
 
         Ok(Response::new(ReportSessionStatusResponse { ok: true }))
+    }
+
+    async fn start_demo_vm(
+        &self,
+        request: Request<StartDemoVmRequest>,
+    ) -> Result<Response<StartDemoVmResponse>, Status> {
+        let req = request.into_inner();
+        self.record_rpc_activity();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let sessions_base = (self.sessions_base_for_user)(os_user)
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+
+        // Read demo-plan.md from the session directory.
+        let demo_plan = tddy_workflow_recipes::writer::read_demo_plan_file(&session_dir)
+            .map_err(|e| Status::not_found(format!("demo-plan.md not found: {e}")))?;
+
+        let qcow2_path = demo_plan
+            .build_target
+            .ok_or_else(|| Status::failed_precondition("demo-plan.md has no build_target"))?;
+        // ssh_host_port defaults to 2222; the first hostfwd entry is the app port, not SSH.
+        let ssh_host_port: u16 = 2222;
+        let config = tddy_demo_runner::DemoVmConfig {
+            qcow2_path,
+            extra_hostfwd: demo_plan.hostfwd,
+            ssh_host_port,
+        };
+
+        // Reject if already booting/running for this session.
+        {
+            let state = self.demo_vm_state.lock().await;
+            if let Some(h) = state.get(&req.session_id) {
+                let (state_enum, msg) = match h {
+                    DemoVmHandle::Booting => (DemoVmState::DemoVmStateBooting, "already booting"),
+                    DemoVmHandle::Running(_) => {
+                        (DemoVmState::DemoVmStateRunning, "VM already running")
+                    }
+                    DemoVmHandle::Error(_) => {
+                        // Allow retry after error.
+                        return Ok(Response::new(StartDemoVmResponse {
+                            state: DemoVmState::DemoVmStateBooting as i32,
+                            message: "retrying after previous error".to_string(),
+                        }));
+                    }
+                };
+                return Ok(Response::new(StartDemoVmResponse {
+                    state: state_enum as i32,
+                    message: msg.to_string(),
+                }));
+            }
+        }
+
+        // Mark as booting and spawn the boot task.
+        {
+            let mut state = self.demo_vm_state.lock().await;
+            state.insert(req.session_id.clone(), DemoVmHandle::Booting);
+        }
+
+        let state_ref = Arc::clone(&self.demo_vm_state);
+        let session_id = req.session_id.clone();
+        tokio::spawn(async move {
+            use tddy_demo_runner::DemoVm as _;
+            let vm = tddy_demo_runner::QemuDemoVm;
+            match vm.boot(&config).await {
+                Ok(running_vm) => {
+                    let mut state = state_ref.lock().await;
+                    state.insert(session_id, DemoVmHandle::Running(running_vm));
+                }
+                Err(e) => {
+                    let mut state = state_ref.lock().await;
+                    state.insert(session_id, DemoVmHandle::Error(e.to_string()));
+                }
+            }
+        });
+
+        log::info!(
+            "start_demo_vm: booting VM for session_id={}",
+            req.session_id
+        );
+        Ok(Response::new(StartDemoVmResponse {
+            state: DemoVmState::DemoVmStateBooting as i32,
+            message: "booting".to_string(),
+        }))
+    }
+
+    async fn stop_demo_vm(
+        &self,
+        request: Request<StopDemoVmRequest>,
+    ) -> Result<Response<StopDemoVmResponse>, Status> {
+        let req = request.into_inner();
+        self.record_rpc_activity();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+
+        let handle = {
+            let mut state = self.demo_vm_state.lock().await;
+            state.remove(&req.session_id)
+        };
+
+        match handle {
+            Some(DemoVmHandle::Running(vm)) => {
+                use tddy_demo_runner::DemoVm as _;
+                let vm_impl = tddy_demo_runner::QemuDemoVm;
+                match vm_impl.shutdown(vm).await {
+                    Ok(()) => {
+                        log::info!("stop_demo_vm: shutdown ok session_id={}", req.session_id);
+                        Ok(Response::new(StopDemoVmResponse {
+                            ok: true,
+                            message: "shutdown".to_string(),
+                        }))
+                    }
+                    Err(e) => Err(Status::internal(format!("shutdown failed: {e}"))),
+                }
+            }
+            Some(DemoVmHandle::Booting) => Err(Status::failed_precondition(
+                "VM is still booting; wait until Running before stopping",
+            )),
+            Some(DemoVmHandle::Error(msg)) => Ok(Response::new(StopDemoVmResponse {
+                ok: true,
+                message: format!("VM was in error state ({msg}); cleared"),
+            })),
+            None => Ok(Response::new(StopDemoVmResponse {
+                ok: true,
+                message: "no VM running for this session".to_string(),
+            })),
+        }
+    }
+
+    async fn get_demo_vm_status(
+        &self,
+        request: Request<GetDemoVmStatusRequest>,
+    ) -> Result<Response<GetDemoVmStatusResponse>, Status> {
+        let req = request.into_inner();
+        self.record_rpc_activity();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+
+        let state = self.demo_vm_state.lock().await;
+        let resp = match state.get(&req.session_id) {
+            None => GetDemoVmStatusResponse {
+                state: DemoVmState::DemoVmStateStopped as i32,
+                ssh_host_port: 0,
+                message: "no VM for this session".to_string(),
+            },
+            Some(DemoVmHandle::Booting) => GetDemoVmStatusResponse {
+                state: DemoVmState::DemoVmStateBooting as i32,
+                ssh_host_port: 0,
+                message: "booting".to_string(),
+            },
+            Some(DemoVmHandle::Running(vm)) => GetDemoVmStatusResponse {
+                state: DemoVmState::DemoVmStateRunning as i32,
+                ssh_host_port: vm.ssh_host_port as u32,
+                message: "running".to_string(),
+            },
+            Some(DemoVmHandle::Error(msg)) => GetDemoVmStatusResponse {
+                state: DemoVmState::DemoVmStateError as i32,
+                ssh_host_port: 0,
+                message: msg.clone(),
+            },
+        };
+        Ok(Response::new(resp))
     }
 }
 

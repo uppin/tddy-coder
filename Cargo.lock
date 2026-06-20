@@ -6098,7 +6098,7 @@ dependencies = [
  "regex",
  "relative-path",
  "rustc_version",
- "syn 2.0.117",
+ "syn 2.0.118",
  "unicode-ident",
 ]
 
@@ -7191,6 +7191,7 @@ dependencies = [
  "tddy-coder",
  "tddy-connectrpc",
  "tddy-core",
+ "tddy-demo-runner",
  "tddy-github",
  "tddy-livekit",
  "tddy-livekit-testkit",

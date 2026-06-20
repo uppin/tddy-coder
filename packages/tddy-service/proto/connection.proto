@@ -30,6 +30,10 @@ service ConnectionService {
   // Per-worktree hooks (claude-cli sessions only) report granular activity status.
   // Auth: `hook_token` is a per-session random token written to .session.yaml at session start.
   rpc ReportSessionStatus(ReportSessionStatusRequest) returns (ReportSessionStatusResponse);
+  // Demo VM lifecycle — UI-driven QEMU boot/shutdown for the demo goal.
+  rpc StartDemoVm(StartDemoVmRequest) returns (StartDemoVmResponse);
+  rpc StopDemoVm(StopDemoVmRequest) returns (StopDemoVmResponse);
+  rpc GetDemoVmStatus(GetDemoVmStatusRequest) returns (GetDemoVmStatusResponse);
 }
 
 message ListToolsRequest {}
@@ -350,4 +354,46 @@ message ReportSessionStatusRequest {
 
 message ReportSessionStatusResponse {
   bool ok = 1;
+}
+
+// --- Demo VM lifecycle (UI-driven QEMU boot/shutdown for the demo goal) ---
+
+message StartDemoVmRequest {
+  string session_token = 1;
+  string session_id    = 2;
+}
+
+// State of the demo VM for a session.
+enum DemoVmState {
+  DEMO_VM_STATE_UNKNOWN = 0;
+  DEMO_VM_STATE_BOOTING = 1;
+  DEMO_VM_STATE_RUNNING = 2;
+  DEMO_VM_STATE_STOPPED = 3;
+  DEMO_VM_STATE_ERROR   = 4;
+}
+
+message StartDemoVmResponse {
+  DemoVmState state   = 1;
+  string      message = 2;
+}
+
+message StopDemoVmRequest {
+  string session_token = 1;
+  string session_id    = 2;
+}
+
+message StopDemoVmResponse {
+  bool   ok      = 1;
+  string message = 2;
+}
+
+message GetDemoVmStatusRequest {
+  string session_token = 1;
+  string session_id    = 2;
+}
+
+message GetDemoVmStatusResponse {
+  DemoVmState state        = 1;
+  uint32      ssh_host_port = 2;
+  string      message      = 3;
 }
