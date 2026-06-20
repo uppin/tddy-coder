@@ -13,5 +13,5 @@ pub mod vm;
 
 pub use mock::{BootCall, MockDemoVm};
 pub use orchestrator::{DemoOrchestrator, DemoResult, TelegramNotifier};
-pub use qemu::{QemuDemoVm, QemuVmArgs};
+pub use qemu::{send_monitor_command, wait_for_ssh_port, QemuDemoVm, QemuVmArgs};
 pub use vm::{DemoVm, DemoVmConfig, DemoVmError, ForwardHandle, RunningVm, VerifyResult};
