@@ -1,0 +1,18 @@
+[package]
+name = "tddy-build-buildroot"
+version = "0.1.0"
+edition = "2021"
+description = "Buildroot plugin for tddy-build: lowers buildroot_image targets to `make`."
+
+[lib]
+name = "tddy_build_buildroot"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-build = { path = "../tddy-build" }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }

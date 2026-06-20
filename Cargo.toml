@@ -6,6 +6,7 @@ members = [
     "packages/tddy-build-rust",
     "packages/tddy-build-typescript",
     "packages/tddy-build-docker",
+    "packages/tddy-build-buildroot",
     "packages/tddy-core",
     "packages/tddy-rpc",
     "packages/tddy-coder",
