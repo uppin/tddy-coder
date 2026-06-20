@@ -23,6 +23,25 @@ pub struct PlanningOutput {
     pub worktree_suggestion: Option<String>,
 }
 
+/// Demo execution mode: how the running app is presented to the user.
+///
+/// `PortForward` — HTTP port inside the guest is forwarded to a host port; share link is
+/// `http://localhost:<host_port>`. `ScreenShare` — VNC framebuffer → LiveKit H264 track;
+/// share link is a LiveKit viewer URL. Mode is decided by the `plan` step.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DemoMode {
+    PortForward,
+    ScreenShare,
+}
+
+/// A single host ↔ guest port mapping for QEMU slirp `hostfwd`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PortMap {
+    pub host_port: u16,
+    pub guest_port: u16,
+}
+
 /// Demo plan for presenting the feature to the user.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DemoPlan {
@@ -30,6 +49,21 @@ pub struct DemoPlan {
     pub setup_instructions: String,
     pub steps: Vec<DemoStep>,
     pub verification: String,
+    /// Execution mode for the demo (port-forward or screen-share). Decided during plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<DemoMode>,
+    /// Host ↔ guest port mappings for QEMU slirp hostfwd (beyond SSH).
+    #[serde(default)]
+    pub hostfwd: Vec<PortMap>,
+    /// Shell commands to run inside the guest (via SSH) after boot to deploy the app.
+    #[serde(default)]
+    pub deploy_steps: Vec<String>,
+    /// Command to run inside the guest to assert the app is healthy after deploy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_command: Option<String>,
+    /// The build target id (from BUILD.yaml) that produces the guest qcow2 image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_target: Option<String>,
 }
 
 /// A single demo step.
@@ -319,6 +353,9 @@ pub struct DemoOutput {
     pub demo_type: String,
     pub steps_completed: u32,
     pub verification: String,
+    /// Shareable URL produced by the demo (e.g. `http://localhost:8080` for PortForward,
+    /// or a LiveKit viewer URL for ScreenShare). `None` if the demo did not produce a link.
+    pub share_url: Option<String>,
 }
 
 /// Info about a single test result from the green goal.
@@ -1427,6 +1464,7 @@ pub fn parse_demo_response(s: &str) -> Result<DemoOutput, ParseError> {
         demo_type: parsed.demo_type.unwrap_or_else(|| "unknown".to_string()),
         steps_completed: parsed.steps_completed.unwrap_or(0),
         verification: parsed.verification.unwrap_or_default(),
+        share_url: parsed.share_url,
     })
 }
 
@@ -1517,4 +1555,5 @@ struct StructuredDemo {
     demo_type: Option<String>,
     steps_completed: Option<u32>,
     verification: Option<String>,
+    share_url: Option<String>,
 }

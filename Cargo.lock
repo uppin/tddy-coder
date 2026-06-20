@@ -7157,6 +7157,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-demo-runner"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "log",
+ "serde",
+ "serde_json",
+ "tddy-workflow-recipes",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-e2e"
 version = "0.1.0"
 dependencies = [
@@ -7351,7 +7365,9 @@ dependencies = [
  "serde_json",
  "serial_test",
  "tddy-build",
+ "tddy-build-buildroot",
  "tddy-build-docker",
+ "tddy-build-qemu",
  "tddy-build-rust",
  "tddy-build-typescript",
  "tddy-core",

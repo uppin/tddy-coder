@@ -547,9 +547,7 @@ pub fn run_list_actions(args: ListActionsArgs) -> Result<()> {
         relay_list_actions(std::path::Path::new(&socket_path), &args)?;
     } else {
         let session_dir = args.session_dir.as_deref().ok_or_else(|| {
-            anyhow::anyhow!(
-                "--session-dir is required when TDDY_SOCKET is not set"
-            )
+            anyhow::anyhow!("--session-dir is required when TDDY_SOCKET is not set")
         })?;
         session_actions_cli::run_list_actions(
             session_dir,
@@ -567,9 +565,7 @@ pub fn run_invoke_action(args: InvokeActionArgs) -> Result<()> {
         relay_invoke_action(std::path::Path::new(&socket_path), &args)?;
     } else {
         let session_dir = args.session_dir.as_deref().ok_or_else(|| {
-            anyhow::anyhow!(
-                "--session-dir is required when TDDY_SOCKET is not set"
-            )
+            anyhow::anyhow!("--session-dir is required when TDDY_SOCKET is not set")
         })?;
         session_actions_cli::run_invoke_action(session_dir, &args.action, &args.data)?;
     }
@@ -593,7 +589,11 @@ fn relay_list_actions(socket_path: &std::path::Path, args: &ListActionsArgs) -> 
         path_prefix: args.path.clone(),
         query: args.query.clone(),
         limit: args.limit,
-        offset: if args.offset > 0 { Some(args.offset) } else { None },
+        offset: if args.offset > 0 {
+            Some(args.offset)
+        } else {
+            None
+        },
     };
     let line = serde_json::to_string(&req)?;
     stream.write_all(line.as_bytes())?;
@@ -617,7 +617,10 @@ fn relay_list_actions(socket_path: &std::path::Path, args: &ListActionsArgs) -> 
         });
         println!("{}", serde_json::to_string(&out)?);
     } else {
-        let msg = response.message.as_deref().unwrap_or("list-actions relay failed");
+        let msg = response
+            .message
+            .as_deref()
+            .unwrap_or("list-actions relay failed");
         output_error(msg, 1);
     }
 
@@ -678,7 +681,10 @@ fn relay_invoke_action(socket_path: &std::path::Path, args: &InvokeActionArgs) -
             println!("{{}}");
         }
     } else {
-        let msg = response.message.as_deref().unwrap_or("invoke-action relay failed");
+        let msg = response
+            .message
+            .as_deref()
+            .unwrap_or("invoke-action relay failed");
         let exit_code = response.exit_code.unwrap_or(1);
         eprintln!("{}", msg);
         std::process::exit(exit_code);

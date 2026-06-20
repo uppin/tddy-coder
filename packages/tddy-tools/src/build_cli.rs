@@ -20,6 +20,8 @@ fn plugin_registry() -> PluginRegistry {
     registry.register(Arc::new(tddy_build_rust::RustPlugin));
     registry.register(Arc::new(tddy_build_typescript::TypeScriptPlugin));
     registry.register(Arc::new(tddy_build_docker::DockerPlugin));
+    registry.register(Arc::new(tddy_build_buildroot::BuildrootPlugin));
+    registry.register(Arc::new(tddy_build_qemu::QemuPlugin));
     registry
 }
 
