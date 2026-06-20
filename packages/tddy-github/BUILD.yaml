@@ -1,0 +1,13 @@
+schema_version: 1
+targets:
+  - id: "tddy-github:lib"
+    name: "tddy-github"
+    deps:
+      - "tddy-rpc:lib"
+      - "tddy-service:lib"
+    config:
+      type: rust_library
+      package: tddy-github
+      srcs:
+        - "packages/tddy-github/src/**/*.rs"
+        - "packages/tddy-github/Cargo.toml"

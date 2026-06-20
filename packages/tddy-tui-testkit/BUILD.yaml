@@ -1,0 +1,12 @@
+schema_version: 1
+targets:
+  - id: "tddy-tui-testkit:lib"
+    name: "tddy-tui-testkit"
+    deps:
+      - "tddy-service:lib"
+    config:
+      type: rust_library
+      package: tddy-tui-testkit
+      srcs:
+        - "packages/tddy-tui-testkit/src/**/*.rs"
+        - "packages/tddy-tui-testkit/Cargo.toml"
