@@ -17,6 +17,7 @@ use tddy_service::gen::{
 
 #[tokio::test]
 async fn clarification_flow_submit_answer_select_workflow_completes() {
+    // Given
     // Use initial_prompt so workflow starts immediately (matches presenter_integration).
     // SubmitFeatureInput path is covered by grpc_full_workflow.
     let (presenter_handle, port, shutdown) =
@@ -25,6 +26,8 @@ async fn clarification_flow_submit_answer_select_workflow_completes() {
     let mut client = connect_grpc(port).await.unwrap();
 
     let (tx, rx) = tokio::sync::mpsc::channel(64);
+
+    // When
     // Send benign intent to establish stream; workflow already has input from initial_prompt
     tx.send(ClientMessage {
         intent: Some(client_message::Intent::QueuePrompt(QueuePrompt {
@@ -151,6 +154,7 @@ async fn clarification_flow_submit_answer_select_workflow_completes() {
     shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
     let _ = presenter_handle.join();
 
+    // Then
     assert!(
         seen_select_mode,
         "Did not see Select mode - clarification question was not shown"

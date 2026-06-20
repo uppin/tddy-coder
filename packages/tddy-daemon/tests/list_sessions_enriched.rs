@@ -1,80 +1,28 @@
 //! Integration-style tests: `ListSessions` returns enriched workflow fields from on-disk fixtures.
 
-use std::path::PathBuf;
-use std::sync::Arc;
-
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_core::SessionMetadata;
-use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ListSessionsRequest,
 };
-
-type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
-type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
-
-fn test_config() -> DaemonConfig {
-    let yaml = r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
-"#;
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.yaml");
-    std::fs::write(&path, yaml).unwrap();
-    DaemonConfig::load(&path).unwrap()
-}
-
-fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
-    let config = test_config();
-    let sessions_base_resolver: SessionsBaseResolver =
-        Arc::new(move |_| Some(sessions_base.clone()));
-    let user_resolver: UserResolver = Arc::new(|token| {
-        if token == "valid-token" {
-            Some("testuser".to_string())
-        } else {
-            None
-        }
-    });
-    ConnectionServiceImpl::new(
-        config,
-        sessions_base_resolver,
-        user_resolver,
-        None,
-        None,
-        None,
-        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
-    )
-}
+use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
 #[tokio::test]
 async fn list_sessions_includes_workflow_fields_from_changeset() {
+    // Given
     let temp = tempfile::tempdir().unwrap();
     let sessions_base = temp.path().to_path_buf();
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join("enriched-sess-1");
     std::fs::create_dir_all(&session_dir).unwrap();
 
-    let metadata = SessionMetadata {
-        session_id: "enriched-sess-1".to_string(),
-        project_id: "proj-1".to_string(),
-        created_at: "2026-03-28T10:00:00Z".to_string(),
-        updated_at: "2026-03-28T12:00:00Z".to_string(),
-        status: "active".to_string(),
-        repo_path: Some("/tmp/repo".to_string()),
-        pid: Some(0),
-        tool: None,
-        livekit_room: None,
-        pending_elicitation: false,
-        previous_session_id: None,
-        session_type: None,
-        model: None,
-        activity_status: None,
-        hook_token: None,
-    };
-    tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
-
+    let metadata = a_session_metadata()
+        .with_session_id("enriched-sess-1")
+        .with_project_id("proj-1")
+        .with_repo_path("/tmp/repo")
+        .with_pid(0)
+        .build();
+    write_session_yaml(&session_dir, &metadata);
     std::fs::write(
         session_dir.join("changeset.yaml"),
         r"version: 1
@@ -97,29 +45,39 @@ state:
 ",
     )
     .unwrap();
-
     let service = test_service(sessions_base);
+
+    // When
     let response = service
         .list_sessions(Request::new(ListSessionsRequest {
-            session_token: "valid-token".to_string(),
+            session_token: TEST_TOKEN.to_string(),
         }))
         .await
         .expect("ListSessions RPC should succeed");
+
+    // Then
     let sessions = response.into_inner().sessions;
-    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions.len(), 1, "exactly one session must be listed");
     let s = &sessions[0];
     assert_eq!(s.session_id, "enriched-sess-1");
     assert_eq!(s.workflow_goal, "acceptance-tests");
     assert_eq!(s.workflow_state, "Red");
     assert_eq!(s.agent, "claude");
     assert_eq!(s.model, "sonnet-4");
-    assert!(!s.elapsed_display.is_empty());
-    assert_ne!(s.elapsed_display, "—");
+    assert!(
+        !s.elapsed_display.is_empty(),
+        "elapsed_display must not be empty"
+    );
+    assert_ne!(
+        s.elapsed_display, "—",
+        "elapsed_display must not be the placeholder dash"
+    );
 }
 
 /// Acceptance: `SessionEntry.pending_elicitation` must match `pending_elicitation` in `.session.yaml`.
 #[tokio::test]
 async fn list_sessions_sets_pending_elicitation_from_session_metadata() {
+    // Given
     let temp = tempfile::tempdir().unwrap();
     let sessions_base = temp.path().to_path_buf();
     let session_dir = sessions_base
@@ -127,37 +85,30 @@ async fn list_sessions_sets_pending_elicitation_from_session_metadata() {
         .join("elicitation-metadata-1");
     std::fs::create_dir_all(&session_dir).unwrap();
 
-    let metadata = SessionMetadata {
-        session_id: "elicitation-metadata-1".to_string(),
-        project_id: "proj-1".to_string(),
-        created_at: "2026-03-28T10:00:00Z".to_string(),
-        updated_at: "2026-03-28T12:00:00Z".to_string(),
-        status: "active".to_string(),
-        repo_path: Some("/tmp/repo".to_string()),
-        pid: Some(0),
-        tool: None,
-        livekit_room: None,
-        pending_elicitation: true,
-        previous_session_id: None,
-        session_type: None,
-        model: None,
-        activity_status: None,
-        hook_token: None,
-    };
-    tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
-
+    let metadata = a_session_metadata()
+        .with_session_id("elicitation-metadata-1")
+        .with_project_id("proj-1")
+        .with_repo_path("/tmp/repo")
+        .with_pid(0)
+        .with_pending_elicitation(true)
+        .build();
+    write_session_yaml(&session_dir, &metadata);
     let service = test_service(sessions_base);
+
+    // When
     let response = service
         .list_sessions(Request::new(ListSessionsRequest {
-            session_token: "valid-token".to_string(),
+            session_token: TEST_TOKEN.to_string(),
         }))
         .await
         .expect("ListSessions RPC should succeed");
+
+    // Then
     let sessions = response.into_inner().sessions;
     let s = sessions
         .iter()
         .find(|e| e.session_id == "elicitation-metadata-1")
-        .expect("session from fixture");
+        .expect("session from fixture must be present");
     assert!(
         s.pending_elicitation,
         "ListSessions must set pending_elicitation from authoritative session metadata"

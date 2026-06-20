@@ -62,6 +62,8 @@ async fn collect_output_window(
 async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Result<()> {
     std::env::set_var("TDDY_DISABLE_ANIMATIONS", "1");
     let _ = env_logger::builder().is_test(true).try_init();
+
+    // Given
     // SKIP_QUESTIONS: skip stub interview clarification so this test reaches acceptance-tests
     // permission Select without driving interview Select/MultiSelect over the terminal stream.
     let (_handle, port, shutdown) =
@@ -106,6 +108,7 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
         }
     });
 
+    // When
     let mut client = connect_terminal_grpc(port).await?;
 
     let (input_tx1, input_rx1) = tokio::sync::mpsc::channel::<TerminalInput>(64);
@@ -183,6 +186,7 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
     shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
     drop(input_tx2);
 
+    // Then
     const CLEAR_HOME: &[u8] = b"\x1b[2J\x1b[H";
     let reconnect_prefix_preview = {
         let lossy = String::from_utf8_lossy(&reconnect_burst);

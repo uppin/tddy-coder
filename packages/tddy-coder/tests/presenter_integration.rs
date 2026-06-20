@@ -144,10 +144,12 @@ fn create_asserting_repo_backend() -> SharedBackend {
 #[test]
 #[serial]
 fn full_workflow_completes_with_stub_backend() {
+    // Given
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-full");
 
+    // When
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
     presenter.start_workflow(
         backend,
@@ -180,6 +182,7 @@ fn full_workflow_completes_with_stub_backend() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
+    // Then
     assert!(
         presenter.is_done(),
         "workflow should complete within {} iterations; last mode: {:?}",
@@ -232,6 +235,7 @@ fn full_workflow_completes_with_stub_backend() {
 #[test]
 #[serial]
 fn tdd_workflow_starts_plan_after_feature_submit() {
+    // Given
     let sessions_base = std::env::temp_dir().join("tddy-presenter-tdd-feature-submit");
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
@@ -245,6 +249,7 @@ fn tdd_workflow_starts_plan_after_feature_submit() {
         backend, output_dir, None, None, None, None, false, None, None, None,
     );
 
+    // When
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
 
     let mut iterations = 0;
@@ -281,6 +286,7 @@ fn tdd_workflow_starts_plan_after_feature_submit() {
     }
 
     std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+    // Then
     assert!(
         saw_plan,
         "expected GoalStarted(plan) within {} polls; last mode {:?}, events: {:?}",
@@ -295,6 +301,7 @@ fn tdd_workflow_starts_plan_after_feature_submit() {
 #[test]
 #[serial]
 fn bugfix_workflow_starts_reproduce_after_feature_submit() {
+    // Given
     let sessions_base = std::env::temp_dir().join("tddy-presenter-bugfix-feature-submit");
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
@@ -308,6 +315,7 @@ fn bugfix_workflow_starts_reproduce_after_feature_submit() {
         backend, output_dir, None, None, None, None, false, None, None, None,
     );
 
+    // When
     presenter.handle_intent(UserIntent::SubmitFeatureInput(
         "repro the crash".to_string(),
     ));
@@ -346,6 +354,7 @@ fn bugfix_workflow_starts_reproduce_after_feature_submit() {
     }
 
     std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+    // Then
     assert!(
         saw_reproduce,
         "expected GoalStarted(reproduce) within {} polls; last mode {:?}, events: {:?}",
@@ -359,6 +368,7 @@ fn bugfix_workflow_starts_reproduce_after_feature_submit() {
 #[test]
 #[serial]
 fn bugfix_workflow_emits_interview_before_reproduce() {
+    // Given
     let sessions_base = std::env::temp_dir().join("tddy-presenter-bugfix-interview-order");
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
@@ -372,6 +382,7 @@ fn bugfix_workflow_emits_interview_before_reproduce() {
         backend, output_dir, None, None, None, None, false, None, None, None,
     );
 
+    // When
     presenter.handle_intent(UserIntent::SubmitFeatureInput(
         "repro the crash".to_string(),
     ));
@@ -410,6 +421,7 @@ fn bugfix_workflow_emits_interview_before_reproduce() {
     }
 
     std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
+    // Then
     assert!(
         saw_reproduce,
         "expected GoalStarted(reproduce); last mode {:?}, events: {:?}",
@@ -446,6 +458,7 @@ fn bugfix_workflow_emits_interview_before_reproduce() {
 #[test]
 #[serial]
 fn bugfix_preloaded_then_first_typed_submit_without_poll_spawns_extra_session_dir() {
+    // Given
     let sessions_base =
         std::env::temp_dir().join("tddy-presenter-bugfix-preload-first-submit-race");
     let _ = std::fs::remove_dir_all(&sessions_base);
@@ -479,6 +492,7 @@ fn bugfix_preloaded_then_first_typed_submit_without_poll_spawns_extra_session_di
         "precondition: WorkflowComplete must not be processed yet (no poll_workflow)"
     );
 
+    // When
     presenter.handle_intent(UserIntent::SubmitFeatureInput(
         "user first typed feature SKIP_QUESTIONS".to_string(),
     ));
@@ -504,6 +518,7 @@ fn bugfix_preloaded_then_first_typed_submit_without_poll_spawns_extra_session_di
         iterations
     );
 
+    // Then
     let sessions_subdir = sessions_base.join(SESSIONS_SUBDIR);
     let dir_count = std::fs::read_dir(&sessions_subdir)
         .expect("read sessions subdir")
@@ -529,6 +544,7 @@ fn bugfix_preloaded_then_first_typed_submit_without_poll_spawns_extra_session_di
 #[test]
 #[serial]
 fn bugfix_second_run_reuses_presenter_session_dir_after_workflow_complete() {
+    // Given
     let sessions_base = std::env::temp_dir().join("tddy-presenter-bugfix-reuse-fixed-session-dir");
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
@@ -576,6 +592,7 @@ fn bugfix_second_run_reuses_presenter_session_dir_after_workflow_complete() {
         .count();
     assert_eq!(first_ok_count, 1, "expected one WorkflowComplete(Ok)");
 
+    // When (second run)
     presenter.handle_intent(UserIntent::SubmitFeatureInput(
         "second run SKIP_QUESTIONS".to_string(),
     ));
@@ -599,6 +616,7 @@ fn bugfix_second_run_reuses_presenter_session_dir_after_workflow_complete() {
         presenter.state().mode
     );
 
+    // Then
     events.drain();
     let last_session_dir: Option<PathBuf> = events.events().iter().rev().find_map(|e| {
         if let TestEvent::WorkflowComplete(Ok(p)) = e {
@@ -623,10 +641,12 @@ fn bugfix_second_run_reuses_presenter_session_dir_after_workflow_complete() {
 #[test]
 #[serial]
 fn submit_feature_input_after_completion_restarts_workflow() {
+    // Given
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-restart");
 
+    // When (first workflow)
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
     presenter.start_workflow(
         backend.clone(),
@@ -659,6 +679,7 @@ fn submit_feature_input_after_completion_restarts_workflow() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
+    // Then (first)
     assert!(
         presenter.is_done(),
         "first workflow should complete within {} iterations; last mode: {:?}",
@@ -681,6 +702,7 @@ fn submit_feature_input_after_completion_restarts_workflow() {
         "expected exactly one WorkflowComplete(Ok) so far"
     );
 
+    // When (second workflow)
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth 2".to_string()));
 
     iterations = 0;
@@ -700,6 +722,7 @@ fn submit_feature_input_after_completion_restarts_workflow() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
+    // Then (second)
     assert!(
         presenter.is_done(),
         "second workflow should complete within {} iterations; last mode: {:?}",
@@ -724,6 +747,7 @@ fn submit_feature_input_after_completion_restarts_workflow() {
 #[test]
 #[serial]
 fn session_dir_under_sessions_base_when_output_dir_is_dot() {
+    // Given
     let sessions_base = std::env::temp_dir().join("tddy-session-dir-test-sessions");
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("create sessions base");
@@ -738,6 +762,7 @@ fn session_dir_under_sessions_base_when_output_dir_is_dot() {
     let original_cwd = std::env::current_dir().expect("cwd");
     std::env::set_current_dir(&repo_dir).expect("chdir to repo");
 
+    // When
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Auth feature".to_string()));
     presenter.start_workflow(
         backend,
@@ -772,6 +797,7 @@ fn session_dir_under_sessions_base_when_output_dir_is_dot() {
 
     let _ = std::env::set_current_dir(&original_cwd);
 
+    // Then
     assert!(
         presenter.is_done(),
         "workflow should complete within {} iterations; last mode: {:?}",
@@ -819,6 +845,7 @@ fn session_dir_under_sessions_base_when_output_dir_is_dot() {
 #[test]
 #[serial]
 fn session_dir_under_sessions_refine_uses_repo_as_working_dir() {
+    // Given
     let sessions_base = std::env::temp_dir().join("tddy-plan-refine-sessions");
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("create sessions base");
@@ -833,6 +860,7 @@ fn session_dir_under_sessions_refine_uses_repo_as_working_dir() {
     let original_cwd = std::env::current_dir().expect("cwd");
     std::env::set_current_dir(&repo_dir).expect("chdir to repo");
 
+    // When
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Auth feature".to_string()));
     presenter.start_workflow(
         backend,
@@ -883,6 +911,7 @@ fn session_dir_under_sessions_refine_uses_repo_as_working_dir() {
     let _ = std::fs::remove_dir_all(&sessions_base);
     let _ = std::fs::remove_dir_all(repo_dir.parent().unwrap_or(&repo_dir));
 
+    // Then
     assert!(
         !saw_error_recovery,
         "refine must use repo_path for output_dir when session_dir is under sessions; got ErrorRecovery: {:?}",
@@ -912,10 +941,12 @@ fn session_dir_under_sessions_refine_uses_repo_as_working_dir() {
 #[test]
 #[serial]
 fn clarification_roundtrip_sends_answers() {
+    // Given
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-clarify");
 
+    // When
     presenter.start_workflow(
         backend,
         output_dir,
@@ -947,6 +978,7 @@ fn clarification_roundtrip_sends_answers() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
+    // Then
     assert!(
         presenter.is_done(),
         "workflow should complete within {} iterations; last mode: {:?}",
@@ -977,11 +1009,13 @@ fn clarification_roundtrip_sends_answers() {
 #[test]
 #[serial]
 fn inbox_queue_and_dequeue() {
+    // Given
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-inbox");
 
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
+    // When
     presenter.start_workflow(
         backend,
         output_dir,
@@ -1018,6 +1052,7 @@ fn inbox_queue_and_dequeue() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
+    // Then
     assert!(
         presenter.is_done(),
         "workflow should complete within {} iterations; last mode: {:?}",
@@ -1038,10 +1073,12 @@ fn inbox_queue_and_dequeue() {
 #[test]
 #[serial]
 fn plan_approval_approve_proceeds_to_next_step() {
+    // Given
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-plan-approve");
 
+    // When
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
     presenter.start_workflow(
         backend,
@@ -1074,6 +1111,7 @@ fn plan_approval_approve_proceeds_to_next_step() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
+    // Then
     assert!(
         presenter.is_done(),
         "workflow should complete within {} iterations; last mode: {:?}",
@@ -1100,10 +1138,12 @@ fn plan_approval_approve_proceeds_to_next_step() {
 #[test]
 #[serial]
 fn plan_approval_view_then_approve() {
+    // Given
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-plan-view");
 
+    // When
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
     presenter.start_workflow(
         backend,
@@ -1146,6 +1186,7 @@ fn plan_approval_view_then_approve() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
+    // Then
     assert!(
         presenter.is_done(),
         "workflow should complete within {} iterations; last mode: {:?}",
@@ -1167,10 +1208,12 @@ fn plan_approval_view_then_approve() {
 #[test]
 #[serial]
 fn plan_view_refinement_submits_without_dismissing_markdown() {
+    // Given
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-refine-without-textinput");
 
+    // When
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
     presenter.start_workflow(
         backend,
@@ -1214,6 +1257,7 @@ fn plan_view_refinement_submits_without_dismissing_markdown() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
+    // Then
     assert!(
         triggered_refine,
         "expected to reach MarkdownViewer and issue RefineSessionDocument; last mode: {:?}",
@@ -1225,10 +1269,12 @@ fn plan_view_refinement_submits_without_dismissing_markdown() {
 #[test]
 #[serial]
 fn plan_approval_refine_re_shows_approval() {
+    // Given
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-plan-refine");
 
+    // When
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
     presenter.start_workflow(
         backend,
@@ -1272,6 +1318,7 @@ fn plan_approval_refine_re_shows_approval() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
+    // Then
     assert!(
         presenter.is_done(),
         "workflow should complete within {} iterations; last mode: {:?}",
@@ -1289,10 +1336,12 @@ fn plan_approval_refine_re_shows_approval() {
 #[test]
 #[serial]
 fn plan_approval_from_markdown_viewer() {
+    // Given
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-viewer-approve");
 
+    // When
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
     presenter.start_workflow(
         backend,
@@ -1332,6 +1381,7 @@ fn plan_approval_from_markdown_viewer() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
+    // Then
     assert!(
         presenter.is_done(),
         "workflow should complete after approving from viewer; last mode: {:?}",
@@ -1355,10 +1405,12 @@ fn plan_approval_from_markdown_viewer() {
 #[test]
 #[serial]
 fn workflow_error_propagates() {
+    // Given
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
     let output_dir = std::env::temp_dir().join("tddy-presenter-test-error");
 
+    // When
     presenter.handle_intent(UserIntent::SubmitFeatureInput(
         "FAIL_INVOKE test".to_string(),
     ));
@@ -1384,6 +1436,7 @@ fn workflow_error_propagates() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
+    // Then
     events.drain();
     let evs = events.events();
     assert!(
@@ -1415,6 +1468,7 @@ fn workflow_error_propagates() {
 #[test]
 #[serial]
 fn github_pr_post_workflow_elicitation_precedes_workflow_complete_when_opted_in() {
+    // Given
     let session_dir = common::isolated_presenter_session_dir("presenter-post-wf-pr");
     let session_id = session_dir
         .file_name()
@@ -1462,6 +1516,7 @@ fn github_pr_post_workflow_elicitation_precedes_workflow_complete_when_opted_in(
     let (mut presenter, mut events) = presenter_with_events();
     let backend = create_stub_backend();
 
+    // When
     presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
     presenter.start_workflow(
         backend,
@@ -1494,6 +1549,7 @@ fn github_pr_post_workflow_elicitation_precedes_workflow_complete_when_opted_in(
         std::thread::sleep(Duration::from_millis(10));
     }
 
+    // Then
     assert!(
         presenter.is_done(),
         "workflow should complete within {} iterations; last mode: {:?}",
@@ -1565,6 +1621,7 @@ const QUEUED_PROMPT_ACTIVITY_PREFIX: &str = "Queued: ";
 #[test]
 #[serial]
 fn submit_feature_input_appends_user_prompt_activity() {
+    // Given
     let sessions_base = std::env::temp_dir().join("tddy-presenter-user-prompt-activity");
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
@@ -1578,10 +1635,12 @@ fn submit_feature_input_appends_user_prompt_activity() {
         backend, output_dir, None, None, None, None, false, None, None, None,
     );
 
+    // When
     let prompt = "Build auth for acceptance test";
     presenter.handle_intent(UserIntent::SubmitFeatureInput(prompt.to_string()));
     events.drain();
 
+    // Then
     assert!(
         presenter
             .state()
@@ -1611,10 +1670,15 @@ fn submit_feature_input_appends_user_prompt_activity() {
 #[test]
 #[serial]
 fn queue_prompt_appends_queued_prompt_activity() {
+    // Given
     let (mut presenter, mut events) = presenter_with_events();
     let text = "follow-up prompt for activity log";
+
+    // When
     presenter.handle_intent(UserIntent::QueuePrompt(text.to_string()));
     events.drain();
+
+    // Then
 
     assert!(
         presenter.state().activity_log.iter().any(|e| {

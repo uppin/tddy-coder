@@ -219,15 +219,20 @@ mod tests {
 
     #[test]
     fn capture_handler_accepts_https_openai_authorize_url_and_matching_session() {
+        // Given
         let url =
             Url::parse("https://auth.openai.com/oauth/authorize?client_id=x&state=y").unwrap();
         let allowlist = CodexOAuthHostAllowlist::default();
+
+        // When
         let r = validate_codex_oauth_authorize_url(
             &url,
             "sess-correlation-1",
             Some("sess-correlation-1"),
             &allowlist,
         );
+
+        // Then
         assert!(
             r.is_ok(),
             "expected validated authorize URL for active session, got {r:?}"
@@ -236,13 +241,18 @@ mod tests {
 
     #[test]
     fn relay_delivers_callback_query_once_to_mock_listener() {
+        // Given
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("runtime");
         let url = Url::parse("http://127.0.0.1:9/callback?code=abc&state=xyz").unwrap();
+
+        // When
         let got = rt
             .block_on(async { relay_oauth_callback_to_registered_listener("sess-1", &url).await });
+
+        // Then
         assert!(
             got.is_ok(),
             "expected relay to deliver code/state to listener, got {got:?}"
@@ -254,9 +264,14 @@ mod tests {
 
     #[test]
     fn validate_rejects_http_scheme_before_allowlist_checks() {
+        // Given
         let url = Url::parse("http://auth.openai.com/oauth/authorize?state=x").unwrap();
         let allowlist = CodexOAuthHostAllowlist::default();
+
+        // When
         let r = validate_codex_oauth_authorize_url(&url, "s1", Some("s1"), &allowlist);
+
+        // Then
         assert!(
             matches!(
                 r,
@@ -270,15 +285,20 @@ mod tests {
 
     #[test]
     fn validate_rejects_correlation_id_mismatch_with_distinct_error() {
+        // Given
         let url =
             Url::parse("https://auth.openai.com/oauth/authorize?client_id=x&state=y").unwrap();
         let allowlist = CodexOAuthHostAllowlist::default();
+
+        // When
         let r = validate_codex_oauth_authorize_url(
             &url,
             "expected-session",
             Some("different-active-session"),
             &allowlist,
         );
+
+        // Then
         assert!(
             matches!(
                 r,

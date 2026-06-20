@@ -130,6 +130,7 @@ mod tests {
 
     #[test]
     fn prd_select_mode_is_not_agent_active_for_status() {
+        // When / Then
         assert!(
             !status_activity_is_agent_active(&select_mode()),
             "Select must be classified as user-wait (false)"
@@ -138,6 +139,7 @@ mod tests {
 
     #[test]
     fn prd_virtual_tui_periodic_interval_is_at_least_one_second_in_select_wait() {
+        // When / Then
         assert!(
             virtual_tui_periodic_render_interval(&select_mode()) >= Duration::from_millis(900),
             "idle clarification wait should use ~1s periodic tick"
@@ -146,12 +148,15 @@ mod tests {
 
     #[test]
     fn user_blocking_document_modes_match_clarification_virtual_tui_interval() {
+        // Given
         let doc_review = AppMode::DocumentReview {
             content: "# PRD".to_string(),
         };
         let md_viewer = AppMode::MarkdownViewer {
             content: "# PRD".to_string(),
         };
+
+        // When / Then
         assert!(
             virtual_tui_periodic_render_interval(&doc_review) >= Duration::from_millis(900),
             "DocumentReview (plan approval) should use clarification-interval VirtualTui cadence; got {:?}",
@@ -167,10 +172,13 @@ mod tests {
     /// Lower-level (PRD): idle heartbeat must vary across sub-second phase samples (≥2 distinct glyphs).
     #[test]
     fn idle_heartbeat_glyph_varies_across_subsecond_phases() {
+        // When
         let a = idle_heartbeat_glyph_for_elapsed(Duration::ZERO);
         let b = idle_heartbeat_glyph_for_elapsed(Duration::from_millis(120));
         let c = idle_heartbeat_glyph_for_elapsed(Duration::from_millis(240));
         let set: BTreeSet<char> = [a, b, c].into_iter().collect();
+
+        // Then
         assert!(
             set.len() >= 2,
             "expected idle heartbeat to vary across phases; glyphs=({a:?},{b:?},{c:?})"
@@ -181,14 +189,19 @@ mod tests {
     /// (≥3 distinct glyphs) and repeats over a few seconds of wall time.
     #[test]
     fn status_bar_idle_heartbeat_cycles_small_big_small() {
+        // Given
         let mode = select_mode();
         let dummy_spinner = ['|'];
+
+        // When
         let mut samples = Vec::new();
         for ms in (0..4000_u64).step_by(120) {
             let mut vs = ViewState::new();
             vs.idle_dot_animation_anchor = Some(Instant::now() - Duration::from_millis(ms));
             samples.push(activity_prefix_char_for_draw(&mode, &vs, &dummy_spinner));
         }
+
+        // Then
         let unique: BTreeSet<char> = samples.iter().copied().collect();
         assert!(
             unique.len() >= 3,

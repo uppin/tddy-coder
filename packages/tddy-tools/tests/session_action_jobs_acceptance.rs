@@ -82,10 +82,13 @@ fn parse_record(outcome: SessionActionInvokeOutcome) -> Value {
 ///    after the subprocess exits — never report success (`exit_code` et al.) before sentinel exists.
 #[test]
 fn session_action_blocking_matches_legacy_semantics() {
+    // Given
     let session_dir = session_with_bounded_sleep_touch_action();
     let sentinel = session_dir.join("job_done.marker");
     let repo: Option<PathBuf> = None;
     let t0 = std::time::Instant::now();
+
+    // When
     let outcome = invoke_session_action(
         &session_dir,
         repo.as_deref(),
@@ -95,6 +98,7 @@ fn session_action_blocking_matches_legacy_semantics() {
     )
     .expect("blocking invoke-session-action must succeed (parity with invoke-action)");
 
+    // Then
     assert!(
         t0.elapsed().as_secs_f64() >= 0.18,
         "blocking invoke must await subprocess work (sleeps ~0.25s); elapsed={:?}",
@@ -117,8 +121,10 @@ fn session_action_blocking_matches_legacy_semantics() {
 /// 2. Async admission must return stable `jobId`, log paths existing before return, initial `running` status.
 #[test]
 fn session_action_async_returns_job_and_log_paths() {
+    // Given
     let session_dir = session_with_bounded_sleep_touch_action();
 
+    // When / Then
     match invoke_session_action(
         &session_dir,
         None,
@@ -177,6 +183,7 @@ fn session_action_async_returns_job_and_log_paths() {
 /// 3. Wait without timeout must surface completed/failed terminal semantics matching sync exit.
 #[test]
 fn session_action_wait_until_complete_without_timeout() {
+    // Given
     let session_dir = session_with_bounded_sleep_touch_action();
 
     let job_id = match invoke_session_action(
@@ -192,9 +199,11 @@ fn session_action_wait_until_complete_without_timeout() {
         other => panic!("expected AsyncStarted for wait baseline; got {other:?}"),
     };
 
+    // When
     let wait_out = wait_session_action_job(&session_dir, &job_id, None)
         .expect("wait(jobId) without timeout must complete");
 
+    // Then
     match wait_out {
         SessionActionWaitOutcome::Completed { exit_code } => {
             assert_eq!(exit_code, Some(17));
@@ -216,6 +225,7 @@ fn session_action_wait_until_complete_without_timeout() {
 /// 4. Bounded wait surfaces `timed_out` while job stays running.
 #[test]
 fn session_action_wait_times_out_while_running() {
+    // Given
     let session_dir = session_with_bounded_sleep_touch_action();
 
     let job_id = match invoke_session_action(
@@ -231,6 +241,7 @@ fn session_action_wait_times_out_while_running() {
         other => panic!("expected AsyncStarted; got {other:?}"),
     };
 
+    // When / Then
     match wait_session_action_job(&session_dir, &job_id, Some(20))
         .expect("bounded wait API must succeed")
     {
@@ -259,6 +270,7 @@ fn session_action_wait_times_out_while_running() {
 /// 5. Stop cancels/cooperatively terminates running job while logs remain readable.
 #[test]
 fn session_action_stop_cancels_running_job() {
+    // Given
     let session_dir = session_with_bounded_sleep_touch_action();
 
     let (job_id, stdout_path) = match invoke_session_action(
@@ -274,8 +286,11 @@ fn session_action_stop_cancels_running_job() {
         other => panic!("expected AsyncStarted; got {other:?}"),
     };
 
+    // When
     let stop_out =
         stop_session_action_job(&session_dir, &job_id).expect("stop must succeed API-wise");
+
+    // Then
     assert!(
         matches!(stop_out, SessionActionStopOutcome::Stopped),
         "stop on running job must report Stopped; got {stop_out:?}"
@@ -296,6 +311,7 @@ fn session_action_stop_cancels_running_job() {
 /// 6. Stop after terminal state is classified `already_finished`/equivalent — no panic across crate boundary.
 #[test]
 fn session_action_stop_idempotent_after_terminal() {
+    // Given
     let session_dir = session_with_bounded_sleep_touch_action();
 
     let job_id = match invoke_session_action(
@@ -311,12 +327,14 @@ fn session_action_stop_idempotent_after_terminal() {
         other => panic!("expected AsyncStarted; got {other:?}"),
     };
 
+    // When
     wait_session_action_job(&session_dir, &job_id, Some(3500)).expect("let job settle");
 
     let first = stop_session_action_job(&session_dir, &job_id).expect("first stop succeeds");
     let second =
         stop_session_action_job(&session_dir, &job_id).expect("second stop must not crash");
 
+    // Then
     assert!(
         matches!(
             first,
@@ -336,11 +354,14 @@ fn session_action_stop_idempotent_after_terminal() {
 /// 7. Unknown `jobId` returns structured `unknown_job`, not unwind/panic across FFI boundary.
 #[test]
 fn session_action_unknown_job_returns_structured_error() {
+    // Given
     let session_dir = session_with_bounded_sleep_touch_action();
 
+    // When
     let err =
         stop_session_action_job(&session_dir, "definitely-not-a-registered-job-id").unwrap_err();
 
+    // Then
     assert!(
         matches!(err, SessionActionJobsError::UnknownJob(_)),
         "expected structured UnknownJob; got {err:?}"

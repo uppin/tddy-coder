@@ -24,7 +24,7 @@ fn temp_dir(label: &str) -> PathBuf {
 
 /// setup_worktree_for_session creates worktree from origin/master and updates changeset.
 #[test]
-fn test_setup_worktree_for_session_creates_from_origin_master_and_updates_changeset() {
+fn setup_worktree_for_session_creates_from_origin_master_and_updates_changeset() {
     let base = temp_dir("setup-session");
     let repo = base.join("repo");
     fs::create_dir_all(&repo).unwrap();
@@ -138,7 +138,7 @@ fn test_setup_worktree_for_session_creates_from_origin_master_and_updates_change
 
 /// build_context_header includes repo_dir when provided.
 #[test]
-fn test_context_header_includes_repo_dir() {
+fn context_header_includes_repo_dir() {
     let dir = temp_dir("ctx-repo-dir");
     fs::write(dir.join("PRD.md"), "# PRD").unwrap();
     let repo_dir = dir.join("repo");
@@ -168,7 +168,7 @@ fn test_context_header_includes_repo_dir() {
 
 /// prepend_context_header includes repo_dir in output when provided.
 #[test]
-fn test_prepend_context_header_includes_repo_dir() {
+fn prepend_context_header_includes_repo_dir() {
     let dir = temp_dir("prepend-repo-dir");
     fs::write(dir.join("PRD.md"), "# PRD").unwrap();
     let repo_dir = dir.join("repo");
@@ -190,7 +190,7 @@ fn test_prepend_context_header_includes_repo_dir() {
 
 /// setup_worktree_for_session retries with suffixed branch/worktree names when branch exists.
 #[test]
-fn test_setup_worktree_retries_with_suffix_when_branch_exists() {
+fn setup_worktree_retries_with_suffix_when_branch_name_conflicts() {
     let base = temp_dir("retry-suffix");
     let repo = base.join("repo");
     fs::create_dir_all(&repo).unwrap();
@@ -282,7 +282,7 @@ fn test_setup_worktree_retries_with_suffix_when_branch_exists() {
 
 /// create_worktree with start_point creates branch from origin/master.
 #[test]
-fn test_create_worktree_with_start_point_uses_origin_master() {
+fn create_worktree_branches_from_origin_master_when_start_point_given() {
     let base = temp_dir("create-start-point");
     let repo = base.join("repo");
     fs::create_dir_all(&repo).unwrap();

@@ -99,6 +99,7 @@ fn init_origin_and_clone_push(root: &Path) -> std::path::PathBuf {
 
 #[test]
 fn merge_pr_fails_on_unresolved_conflicts() {
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     init_conflict_worktree(tmp.path());
     let unmerged = git_ls_files_unmerged(tmp.path());
@@ -107,8 +108,11 @@ fn merge_pr_fails_on_unresolved_conflicts() {
         "fixture must leave unmerged paths (merge-pr must fail closed on this state)"
     );
 
+    // When
     let (recipe, _) = workflow_recipe_and_manifest_from_cli_name("merge-pr")
         .expect("merge-pr must register before conflict integration asserts");
+
+    // Then
     assert_eq!(recipe.start_goal().as_str(), TASK_ANALYZE);
     assert!(
         recipe
@@ -121,6 +125,7 @@ fn merge_pr_fails_on_unresolved_conflicts() {
 
 #[test]
 fn merge_pr_skips_github_when_no_token() {
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     let work = init_origin_and_clone_push(tmp.path());
 
@@ -130,23 +135,29 @@ fn merge_pr_skips_github_when_no_token() {
     git(&["commit", "-m", "push-check"], &work);
     git(&["push", "origin", "feature"], &work);
 
+    // When
     let (recipe, _) = workflow_recipe_and_manifest_from_cli_name("merge-pr")
         .expect("merge-pr must resolve for push-only degraded contract");
+
+    // Then
     assert_eq!(recipe.name(), "merge-pr");
     let _ = TASK_FINALIZE;
 }
 
 #[test]
 fn merge_pr_merges_pr_when_token_present() {
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     let work = init_origin_and_clone_push(tmp.path());
 
+    // When
     let (recipe, _) = workflow_recipe_and_manifest_from_cli_name("merge-pr")
         .expect("merge-pr must resolve before GitHub merge contract tests");
+
+    // Then
     assert!(
         recipe.goal_requires_tddy_tools_submit(&GoalId::new(TASK_FINALIZE)),
         "finalize submit carries merge outcome / API result metadata"
     );
-
     let _ = work;
 }

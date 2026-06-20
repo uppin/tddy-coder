@@ -31,15 +31,21 @@ fn make_request(prompt: &str, session: Option<SessionMode>) -> InvokeRequest {
 #[tokio::test]
 #[serial]
 async fn codex_acp_backend_has_correct_name() {
+    // Given
     let backend = CodexAcpBackend::new();
+
+    // Then
     assert_eq!(backend.name(), "codex-acp");
 }
 
 #[tokio::test]
 #[serial]
 async fn codex_acp_backend_with_stub_path_constructs() {
+    // Given
     let path = stub_agent_path();
     let _backend = CodexAcpBackend::with_agent_path(path);
+
+    // Then
     assert_eq!(
         CodexAcpBackend::with_agent_path(PathBuf::from("/tmp/no-such-stub")).name(),
         "codex-acp"
@@ -49,7 +55,10 @@ async fn codex_acp_backend_with_stub_path_constructs() {
 #[tokio::test(flavor = "current_thread")]
 #[serial]
 async fn codex_acp_backend_fresh_session_returns_session_id() {
+    // Given
     let path = stub_agent_path();
+
+    // Then
     assert!(
         path.exists(),
         "tddy-acp-stub not built. Run: cargo build -p tddy-acp-stub"
@@ -62,6 +71,8 @@ async fn codex_acp_backend_fresh_session_returns_session_id() {
     std::env::set_var("TDDY_ACP_SCENARIO", &scenario_path);
     let backend = CodexAcpBackend::with_agent_path(path);
     let req = make_request("Hello", Some(SessionMode::Fresh("sess-1".to_string())));
+
+    // When
     let result = tokio::time::timeout(std::time::Duration::from_secs(5), backend.invoke(req)).await;
     assert!(result.is_ok(), "invoke timed out");
     let resp = result.unwrap().expect("invoke");
@@ -74,7 +85,10 @@ async fn codex_acp_backend_fresh_session_returns_session_id() {
 #[tokio::test(flavor = "current_thread")]
 #[serial]
 async fn codex_acp_backend_resume_uses_load_session() {
+    // Given
     let path = stub_agent_path();
+
+    // Then
     assert!(
         path.exists(),
         "tddy-acp-stub not built. Run: cargo build -p tddy-acp-stub"
@@ -90,6 +104,8 @@ async fn codex_acp_backend_resume_uses_load_session() {
         "Continue",
         Some(SessionMode::Resume("thread-xyz".to_string())),
     );
+
+    // When
     let result = tokio::time::timeout(std::time::Duration::from_secs(5), backend.invoke(req)).await;
     assert!(result.is_ok(), "invoke timed out");
     let resp = result.unwrap().expect("invoke");
@@ -99,11 +115,17 @@ async fn codex_acp_backend_resume_uses_load_session() {
 
 #[test]
 fn default_codex_acp_binary_constant_matches_cli() {
+    // Given
+
+    // Then
     assert_eq!(DEFAULT_CODEX_ACP_BINARY, "codex-acp");
 }
 
 #[test]
 fn oauth_authorize_filename_matches_livekit_contract() {
+    // Given
+
+    // Then
     assert_eq!(
         CODEX_OAUTH_AUTHORIZE_URL_FILENAME,
         "codex_oauth_authorize.url"

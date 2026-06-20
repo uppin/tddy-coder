@@ -123,6 +123,7 @@ mod tests {
 
     #[tokio::test]
     async fn stream_bytes_forwards_ping_pong() {
+        // Given
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
 
@@ -151,6 +152,7 @@ mod tests {
             .unwrap();
         drop(in_tx);
 
+        // When
         let streaming = Streaming::new(ReceiverStream::new(in_rx));
         let svc = LoopbackTunnelServiceImpl;
         let resp = svc
@@ -163,6 +165,8 @@ mod tests {
             .await
             .expect("one chunk")
             .expect("ok");
+
+        // Then
         assert_eq!(chunk.data, b"pong");
     }
 }

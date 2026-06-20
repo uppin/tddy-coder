@@ -16,10 +16,12 @@ use std::path::PathBuf;
 /// fail to compile until the parameter is added.
 #[tokio::test]
 async fn run_server_exits_cleanly_when_external_shutdown_channel_fires() {
+    // Given
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
     // Fire shutdown immediately before the server loop runs.
     tx.send(()).expect("send must succeed");
 
+    // When
     let result = tddy_daemon::server::run_server(
         "127.0.0.1",
         0,              // ephemeral port
@@ -33,6 +35,7 @@ async fn run_server_exits_cleanly_when_external_shutdown_channel_fires() {
     )
     .await;
 
+    // Then
     assert!(
         result.is_ok(),
         "run_server must exit cleanly when external shutdown channel fires; got: {:?}",
@@ -50,6 +53,7 @@ async fn run_server_exits_cleanly_when_external_shutdown_channel_fires() {
 #[tokio::test]
 #[ignore = "compile-time proof: verifies the new None variant compiles; not run in CI since it would block on signal"]
 async fn run_server_with_no_external_shutdown_compiles_and_accepts_none() {
+    // Given / When
     // This test is #[ignore]'d so it never actually runs (it would block waiting for ctrl_c).
     // Its only purpose is to verify the function signature accepts `None` for the new param.
     let _future = tddy_daemon::server::run_server(
@@ -63,5 +67,6 @@ async fn run_server_with_no_external_shutdown_compiles_and_accepts_none() {
         None,
         None, // no external shutdown channel
     );
+    // Then
     // Don't .await — just prove it compiles.
 }

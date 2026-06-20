@@ -67,6 +67,7 @@ const EXPECTED_WITHOUT_DEMO: &[(&str, &str)] = &[
 /// gRPC events drive the flow; after each StateChanged, UI buffer is asserted.
 #[tokio::test]
 async fn pty_full_workflow_asserts_each_state_transition() {
+    // Given
     // None: do not auto-start the workflow — avoids broadcast events before the gRPC stream
     // subscribes (same as grpc_full_workflow). Feature text is sent via SubmitFeatureInput below.
     let (_presenter_handle, port, shutdown, screen_buffer) =
@@ -82,6 +83,7 @@ async fn pty_full_workflow_asserts_each_state_transition() {
         .unwrap()
         .into_inner();
 
+    // When — feature input is submitted to start the workflow
     // Start the workflow only after the gRPC stream is live so StateChanged events are not missed
     // relative to the UI buffer before the first `stream.message()` poll.
     tx.send(ClientMessage {
@@ -210,6 +212,7 @@ async fn pty_full_workflow_asserts_each_state_transition() {
     shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
     let _ = _presenter_handle.join();
 
+    // Then — workflow completed successfully with all expected state transitions
     assert!(
         seen_workflow_complete,
         "Expected WorkflowComplete event (got {} state transitions)",

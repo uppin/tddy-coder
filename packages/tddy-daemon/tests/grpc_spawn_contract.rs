@@ -4,7 +4,10 @@
 
 #[test]
 fn spawner_passes_verified_free_grpc_port_to_child() {
+    // Given
     let spawner_rs = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/spawner.rs"));
+
+    // When / Then
     assert!(
         spawner_rs.contains("verify_tcp_listen_port_free"),
         "spawner must verify the gRPC listen port is free before spawn"

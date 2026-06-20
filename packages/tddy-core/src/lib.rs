@@ -126,6 +126,7 @@ mod workflow_decouple_acceptance {
     /// After decoupling, the legacy session primary-document path helper must not be re-exported from the crate root.
     #[test]
     fn core_src_free_of_prd_path_helper() {
+        // Given
         let lib_rs = include_str!("lib.rs");
         let forbidden = [
             "pub ",
@@ -133,6 +134,8 @@ mod workflow_decouple_acceptance {
             "plan_prd_path_for_session_dir",
         ]
         .concat();
+
+        // Then
         assert!(
             !lib_rs.contains(&forbidden),
             "tddy-core lib.rs must not re-export the legacy session_plan_prd helper; use workflow manifest resolvers"

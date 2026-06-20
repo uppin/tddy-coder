@@ -73,41 +73,49 @@ mod tests {
 
     #[test]
     fn write_captures_bytes() {
+        // Given
         let captured = Arc::new(Mutex::new(Vec::new()));
         let captured_clone = captured.clone();
         let writer = CapturingWriter::new(Box::new(move |buf| {
             captured_clone.lock().unwrap().extend_from_slice(buf);
         }));
 
+        // When
         let mut w = writer;
         let _ = w.write_all(b"hello");
         let _ = w.flush();
 
+        // Then
         let data = captured.lock().unwrap();
         assert_eq!(&data[..], b"hello");
     }
 
     #[test]
     fn clone_shares_callback() {
+        // Given
         let count = Arc::new(AtomicUsize::new(0));
         let count_clone = count.clone();
         let writer = CapturingWriter::new(Box::new(move |_| {
             count_clone.fetch_add(1, Ordering::SeqCst);
         }));
-
         let mut w1 = writer.clone();
         let mut w2 = writer;
 
+        // When
         let _ = w1.write_all(b"a");
         let _ = w2.write_all(b"b");
 
+        // Then
         assert_eq!(count.load(Ordering::SeqCst), 2);
     }
 
     #[test]
     fn flush_delegates_to_stdout() {
+        // Given
         let writer = CapturingWriter::new(Box::new(|_| {}));
         let mut w = writer;
+
+        // When / Then
         let result = w.flush();
         assert!(result.is_ok());
     }

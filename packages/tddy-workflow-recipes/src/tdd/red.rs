@@ -71,7 +71,10 @@ mod tests {
 
     #[test]
     fn system_prompt_includes_red_goal_instructions() {
+        // When
         let prompt = system_prompt();
+
+        // Then
         assert!(
             prompt.contains("red") || prompt.contains("skeleton"),
             "system prompt must instruct Claude for red goal"
@@ -80,7 +83,10 @@ mod tests {
 
     #[test]
     fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
+        // When
         let prompt = system_prompt();
+
+        // Then
         assert!(
             prompt.contains("tddy-tools get-schema red"),
             "system prompt must reference get-schema for red"
@@ -94,7 +100,10 @@ mod tests {
     /// Red system prompt must forbid placing logging markers in test code (acceptance / PRD).
     #[test]
     fn system_prompt_forbids_markers_in_test_code() {
+        // When
         let prompt = system_prompt();
+
+        // Then
         assert!(
             prompt.contains("MUST NOT")
                 && prompt.contains("test code")

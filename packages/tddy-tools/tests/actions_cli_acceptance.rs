@@ -30,6 +30,7 @@ fn write_sample_action(session: &Path, filename: &str, body: &str) {
 /// with stable sorting by `id`.
 #[test]
 fn list_actions_discovers_session_yaml_manifests() {
+    // Given
     let dir = tempfile::tempdir().expect("tempdir");
     let session = dir.path();
     write_sample_action(
@@ -63,6 +64,7 @@ output_schema:
 "#,
     );
 
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args([
         "list-actions",
@@ -70,6 +72,7 @@ output_schema:
         session.to_str().expect("utf8"),
     ]);
     let out = cmd.assert().success();
+    // Then
     let stdout = String::from_utf8_lossy(&out.get_output().stdout);
     let v: Value = serde_json::from_str(stdout.trim()).expect("list-actions stdout must be JSON");
     let actions = v
@@ -119,6 +122,7 @@ output_schema:
 /// and must not run the action command (no marker file).
 #[test]
 fn invoke_action_validates_json_args_before_run() {
+    // Given
     let dir = tempfile::tempdir().expect("tempdir");
     let session = dir.path();
     let marker = session.join("must-not-be-created");
@@ -161,6 +165,7 @@ input_schema:
         ),
     );
 
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args([
         "invoke-action",
@@ -172,6 +177,8 @@ input_schema:
         "{}",
     ]);
     let assert = cmd.assert();
+
+    // Then
     assert!(
         !assert.get_output().status.success(),
         "invalid args must yield non-zero exit"
@@ -198,6 +205,7 @@ input_schema:
 
 #[test]
 fn invoke_action_returns_exit_code_and_stdout_stderr() {
+    // Given
     let dir = tempfile::tempdir().expect("tempdir");
     let session = dir.path();
     let stub_body = r#"#!/bin/sh
@@ -233,6 +241,7 @@ input_schema:
         ),
     );
 
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args([
         "invoke-action",
@@ -244,6 +253,8 @@ input_schema:
         "{}",
     ]);
     let out = cmd.assert().success();
+
+    // Then
     let stdout = String::from_utf8_lossy(&out.get_output().stdout);
     let v: Value = serde_json::from_str(stdout.trim()).expect("invoke-action stdout must be JSON");
     assert_eq!(v.get("exit_code").and_then(|c| c.as_i64()), Some(42));
@@ -254,6 +265,7 @@ input_schema:
 /// Action with `result_kind: test_summary` (or equivalent) parses stub output like `cargo test` totals.
 #[test]
 fn invoke_action_test_summary_includes_pass_fail_skip_totals() {
+    // Given
     let dir = tempfile::tempdir().expect("tempdir");
     let session = dir.path();
     let stub_body = r#"#!/bin/sh
@@ -293,6 +305,7 @@ input_schema:
         ),
     );
 
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args([
         "invoke-action",
@@ -304,6 +317,8 @@ input_schema:
         "{}",
     ]);
     let out = cmd.assert().success();
+
+    // Then
     let stdout = String::from_utf8_lossy(&out.get_output().stdout);
     let v: Value = serde_json::from_str(stdout.trim()).expect("invoke-action stdout must be JSON");
     let summary = v
@@ -317,6 +332,7 @@ input_schema:
 /// Path arguments or bindings outside the session tree / declared repo must fail closed (no command run).
 #[test]
 fn invoke_action_rejects_disallowed_path_patterns() {
+    // Given
     let dir = tempfile::tempdir().expect("tempdir");
     let session = dir.path();
     let repo = tempfile::tempdir().expect("repo temp");
@@ -366,6 +382,7 @@ input_schema:
         breakout.to_string_lossy().replace('\\', "\\\\")
     );
 
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args([
         "invoke-action",
@@ -377,6 +394,8 @@ input_schema:
         &payload,
     ]);
     let assert = cmd.assert();
+
+    // Then
     assert!(
         !assert.get_output().status.success(),
         "path traversal / escape must be rejected with non-zero exit"

@@ -73,11 +73,16 @@ fn write_projects_yaml(dir: &std::path::Path, n: usize) -> Result<()> {
 
 #[test]
 fn metadata_merge_preserves_codex_oauth_and_project_count() {
+    // Given a baseline metadata JSON with codex_oauth fields and an update with project count
     let baseline =
         r#"{"codex_oauth":{"pending":true,"authorize_url":"https://auth.example.com/oauth"}}"#;
     let update = format!(r#"{{"{key}":3}}"#, key = OWNED_PROJECT_COUNT_METADATA_KEY);
+
+    // When merging the update into the baseline
     let merged =
         merge_participant_metadata_json(baseline, &update).expect("merge returns JSON string");
+
+    // Then the result contains both the project count and the preserved codex_oauth fields
     let v: Value = serde_json::from_str(&merged).expect("merged parses as JSON");
     assert_eq!(
         v.get(OWNED_PROJECT_COUNT_METADATA_KEY)
@@ -101,6 +106,7 @@ fn metadata_merge_preserves_codex_oauth_and_project_count() {
 #[tokio::test]
 #[serial]
 async fn livekit_participant_metadata_includes_project_count() -> Result<()> {
+    // Given a LiveKit server with a server participant configured with 3 projects
     let tmp = tempfile::tempdir()?;
     let projects_dir = tmp.path();
     let expected: u64 = 3;
@@ -111,6 +117,7 @@ async fn livekit_participant_metadata_includes_project_count() -> Result<()> {
         .is_test(true)
         .try_init();
 
+    // When the server participant connects and a client observes its metadata
     let livekit = LiveKitTestkit::start().await?;
     let url = livekit.get_ws_url();
     let room_name = "acceptance-owned-project-count";
@@ -145,6 +152,7 @@ async fn livekit_participant_metadata_includes_project_count() -> Result<()> {
                     .get(OWNED_PROJECT_COUNT_METADATA_KEY)
                     .and_then(|x| x.as_u64())
                 {
+                    // Then the metadata project count matches the number of rows in projects.yaml
                     assert_eq!(
                         n, expected,
                         "{} must match read_projects row count for the session projects directory ({})",

@@ -19,7 +19,10 @@ fn telegram_session_control_rs() -> &'static str {
 /// `sessions_base`, and call [`TelegramSessionControlHarness::handle_chain_parent_callback`] (same as harness).
 #[test]
 fn live_telegram_bot_dispatches_tcp_chain_parent_callback() {
+    // Given
     let src = telegram_bot_rs();
+
+    // When / Then
     assert!(
         src.contains("parse_telegram_chain_parent_callback")
             && src.contains("handle_chain_parent_callback"),
@@ -38,7 +41,10 @@ fn live_telegram_bot_dispatches_tcp_chain_parent_callback() {
 /// so default flows match [`session_chain_acceptance`].
 #[test]
 fn telegram_chain_child_persists_parent_chain_base_on_default_flow() {
+    // Given
     let src = telegram_session_control_rs();
+
+    // When / Then
     assert!(
         src.contains("integrate_chain_base_into_session_worktree_bootstrap")
             || src.contains("resolve_chain_integration_base_ref_from_parent_session"),
@@ -56,7 +62,10 @@ fn telegram_chain_child_persists_parent_chain_base_on_default_flow() {
 /// chain applies.
 #[test]
 fn telegram_chain_explicit_branch_choice_not_silently_dropped() {
+    // Given
     let src = telegram_session_control_rs();
+
+    // When / Then
     assert!(
         src.contains("merge_chain_integration_base_with_explicit_operator_overrides"),
         "Implement documented merge of parent-derived chain base with explicit operator overrides; \

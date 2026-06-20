@@ -456,13 +456,17 @@ mod tests {
 
     #[test]
     fn submit_plain_text_unchanged_trimmed_tail() {
+        // Given
         let mut b = FeatureInputBuffer::new();
         b.set_plain_text("  hello  ");
+
+        // When / Then
         assert_eq!(b.submit_expanded(), "hello");
     }
 
     #[test]
     fn display_shows_slash_skill_submit_expands() {
+        // Given
         let mut b = FeatureInputBuffer::new();
         b.set_plain_text("do thing ");
         let trigger = b.cursor;
@@ -470,13 +474,18 @@ mod tests {
         assert_eq!(b.display(), "do thing /");
         b.accept_skill_token("foo", trigger);
         assert_eq!(b.display(), "do thing /foo");
+
+        // When
         let sub = b.submit_expanded();
+
+        // Then
         assert!(sub.contains("[Skill: @.agents/skills/foo"));
         assert!(sub.contains("do thing"));
     }
 
     #[test]
     fn backspace_after_skill_removes_whole_token() {
+        // Given
         let mut b = FeatureInputBuffer::new();
         b.set_plain_text("x ");
         let trigger = b.display().len();
@@ -484,24 +493,32 @@ mod tests {
         b.accept_skill_token("bar", trigger);
         assert_eq!(b.display(), "x /bar");
         b.cursor = b.display().len();
+
+        // When / Then
         assert!(b.backspace());
         assert_eq!(b.display(), "x ");
     }
 
     #[test]
     fn prompt_segments_split_text_and_skill() {
+        // Given
         let mut b = FeatureInputBuffer::new();
         b.set_plain_text("x ");
         let trigger = b.cursor;
         b.insert_char('/');
         b.accept_skill_token("foo", trigger);
+
+        // When
         let segs = b.prompt_segments();
+
+        // Then
         assert!(matches!(segs[0], FeaturePromptSegment::Plain(ref s) if s == "x "));
         assert!(matches!(segs[1], FeaturePromptSegment::SkillName(ref n) if n == "foo"));
     }
 
     #[test]
     fn left_skips_skill_in_one_step_from_after() {
+        // Given
         let mut b = FeatureInputBuffer::new();
         b.set_plain_text("a");
         let trigger = b.display().len();
@@ -510,6 +527,8 @@ mod tests {
         b.insert_char('b');
         assert_eq!(b.display(), "a/sb");
         b.cursor = b.display().len();
+
+        // When / Then
         b.move_left();
         assert_eq!(b.cursor, "a/s".len());
         b.move_left();

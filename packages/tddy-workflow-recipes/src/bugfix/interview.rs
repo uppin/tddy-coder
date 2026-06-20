@@ -226,14 +226,19 @@ mod tests {
 
     #[test]
     fn prose_probe_detects_numbered_questions() {
-        let s = "1. What is the expected behavior?\n2. Which version fails?";
-        assert!(prose_numbered_clarification_probe(s));
+        // When / Then
+        assert!(prose_numbered_clarification_probe(
+            "1. What is the expected behavior?\n2. Which version fails?"
+        ));
         assert!(!prose_numbered_clarification_probe("no questions here"));
     }
 
     #[test]
     fn prose_probe_rejects_numbered_non_questions() {
+        // Given
         let steps = "1. Clone the repo\n2. Run the failing test\n3. Capture logs";
+
+        // When / Then
         assert!(
             !prose_numbered_clarification_probe(steps),
             "numbered how-to steps without `?` must not trigger interview recovery"
@@ -242,8 +247,11 @@ mod tests {
 
     #[test]
     fn host_gate_skips_plain_numbered_steps() {
+        // Given
         let ctx = Context::new();
         ctx.set_sync("output", "1. Setup\n2. Build");
+
+        // When / Then
         assert!(host_gate_bugfix_interview_recovery_after_no_submit(
             &GoalId::new("interview"),
             &ctx

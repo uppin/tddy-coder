@@ -13,31 +13,31 @@ const VALID_PLAN_JSON: &str = r##"{"goal":"plan","prd":"# PRD\n\n## TODO\n\n- [ 
 
 #[tokio::test]
 async fn plan_task_retries_with_remediation_then_succeeds_on_second_invoke() {
+    // Given
     let output_dir =
         std::env::temp_dir().join(format!("tddy-plan-retry-ok-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create output dir");
     let session_dir = create_session_dir_in(&output_dir).expect("pre-create session dir");
-
     let backend = Arc::new(MockBackend::new());
     backend.push_ok_without_submit("agent finished without submit");
     backend.push_ok(VALID_PLAN_JSON);
-
     let task = PlanTask::new(backend.clone(), Arc::new(TddRecipe));
-
     let ctx = Context::new();
     ctx.set_sync("feature_input", "Feature X SKIP_QUESTIONS");
     ctx.set_sync("output_dir", output_dir.clone());
     ctx.set_sync("session_dir", session_dir.clone());
 
+    // When
     let result = task
         .run(ctx.clone())
         .await
         .expect("PlanTask should succeed");
+
+    // Then
     assert_eq!(result.task_id, "plan");
     assert!(matches!(result.next_action, NextAction::Continue));
     assert!(ctx.get_sync::<PlanningOutput>("parsed_planning").is_some());
-
     let invocations = backend.invocations();
     assert_eq!(
         invocations.len(),
@@ -55,35 +55,35 @@ async fn plan_task_retries_with_remediation_then_succeeds_on_second_invoke() {
 
 #[tokio::test]
 async fn plan_task_fails_after_eight_invokes_without_submit() {
+    // Given
     let output_dir =
         std::env::temp_dir().join(format!("tddy-plan-retry-fail-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir).expect("create output dir");
     let session_dir = create_session_dir_in(&output_dir).expect("pre-create session dir");
-
     let backend = Arc::new(MockBackend::new());
     for _ in 0..8 {
         backend.push_ok_without_submit("still no submit");
     }
-
     let task = PlanTask::new(backend.clone(), Arc::new(TddRecipe));
-
     let ctx = Context::new();
     ctx.set_sync("feature_input", "Feature Y SKIP_QUESTIONS");
     ctx.set_sync("output_dir", output_dir.clone());
     ctx.set_sync("session_dir", session_dir.clone());
 
+    // When
     let err = task
         .run(ctx)
         .await
         .expect_err("PlanTask should fail after max attempts");
+
+    // Then
     let inner = err.downcast_ref::<WorkflowError>().expect("WorkflowError");
     let msg = format!("{}", inner);
     assert!(
         msg.contains("8 attempts") || msg.contains("tddy-tools submit"),
         "unexpected error: {msg}"
     );
-
     assert_eq!(
         backend.invocations().len(),
         8,

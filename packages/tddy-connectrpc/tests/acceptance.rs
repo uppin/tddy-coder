@@ -31,8 +31,10 @@ impl TokenProvider for TestTokenProvider {
 /// Expect: 200 OK, Content-Type: application/proto, body = protobuf EchoResponse
 #[tokio::test]
 async fn unary_proto_echo_returns_200_with_echoed_message() {
+    // Given a connect_router wired to the echo bridge
     let app = connect_router(create_echo_bridge());
 
+    // When sending a unary Echo request with protobuf body
     let req = EchoRequest {
         message: "hello".to_string(),
     };
@@ -48,6 +50,7 @@ async fn unary_proto_echo_returns_200_with_echoed_message() {
 
     let response = app.oneshot(request).await.unwrap();
 
+    // Then the response is 200 with the echoed message
     assert_eq!(
         response.status(),
         StatusCode::OK,
@@ -72,8 +75,10 @@ async fn unary_proto_echo_returns_200_with_echoed_message() {
 /// Error format: unknown method returns Connect error JSON with code "not_found"
 #[tokio::test]
 async fn unknown_method_returns_connect_error_json() {
+    // Given a connect_router with the echo bridge
     let app = connect_router(create_echo_bridge());
 
+    // When calling an unregistered method
     let request = Request::builder()
         .method("POST")
         .uri("/rpc/test.EchoService/UnknownMethod")
@@ -84,6 +89,7 @@ async fn unknown_method_returns_connect_error_json() {
 
     let response = app.oneshot(request).await.unwrap();
 
+    // Then the response is 404 with a Connect-compatible JSON error body
     assert_eq!(
         response.status(),
         StatusCode::NOT_FOUND,
@@ -108,6 +114,7 @@ async fn unknown_method_returns_connect_error_json() {
 /// Server streaming: EchoServerStream returns envelope-framed stream
 #[tokio::test]
 async fn server_stream_returns_envelope_framed_messages() {
+    // Given a connect_router with the echo bridge
     let app = connect_router(create_echo_bridge());
 
     let req = EchoRequest {
@@ -128,8 +135,10 @@ async fn server_stream_returns_envelope_framed_messages() {
         .body(Body::from(body))
         .unwrap();
 
+    // When sending a server-stream request
     let response = app.oneshot(request).await.unwrap();
 
+    // Then the response is 200 with envelope-framed content
     assert_eq!(
         response.status(),
         StatusCode::OK,
@@ -157,6 +166,7 @@ async fn server_stream_returns_envelope_framed_messages() {
 /// Client streaming: EchoClientStream receives envelope-framed messages, returns joined response
 #[tokio::test]
 async fn client_stream_echo_returns_joined_message() {
+    // Given a connect_router with the echo bridge
     let app = connect_router(create_echo_bridge());
 
     let req1 = EchoRequest {
@@ -184,8 +194,10 @@ async fn client_stream_echo_returns_joined_message() {
         .body(Body::from(body))
         .unwrap();
 
+    // When sending envelope-framed client-stream messages
     let response = app.oneshot(request).await.unwrap();
 
+    // Then the response joins the messages with '|' separator
     assert_eq!(
         response.status(),
         StatusCode::OK,
@@ -212,6 +224,7 @@ async fn client_stream_echo_returns_joined_message() {
 /// Bidi streaming: EchoBidiStream receives envelope-framed messages, returns stream of echoes
 #[tokio::test]
 async fn bidi_stream_echo_returns_stream_of_echoes() {
+    // Given a connect_router with the echo bridge
     let app = connect_router(create_echo_bridge());
 
     let req1 = EchoRequest {
@@ -239,8 +252,10 @@ async fn bidi_stream_echo_returns_stream_of_echoes() {
         .body(Body::from(body))
         .unwrap();
 
+    // When sending bidi-stream messages
     let response = app.oneshot(request).await.unwrap();
 
+    // Then each message is echoed back with an incrementing counter suffix
     assert_eq!(
         response.status(),
         StatusCode::OK,
@@ -270,6 +285,7 @@ async fn bidi_stream_echo_returns_stream_of_echoes() {
 /// Expect: 200 OK, Content-Type: application/proto, body = protobuf GenerateTokenResponse
 #[tokio::test]
 async fn token_service_generate_token_returns_200_with_token_and_ttl() {
+    // Given a connect_router backed by the TestTokenProvider
     let token_service = TokenServiceImpl::new(TestTokenProvider);
     let token_server = TokenServiceServer::new(token_service);
     let app = connect_router(RpcBridge::new(token_server));
@@ -288,8 +304,10 @@ async fn token_service_generate_token_returns_200_with_token_and_ttl() {
         .body(Body::from(body_bytes))
         .unwrap();
 
+    // When calling GenerateToken
     let response = app.oneshot(request).await.unwrap();
 
+    // Then the response is 200 with the deterministic token and configured TTL
     assert_eq!(
         response.status(),
         StatusCode::OK,

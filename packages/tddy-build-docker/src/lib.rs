@@ -88,8 +88,11 @@ mod tests {
 
     #[test]
     fn docker_builds_with_dockerfile_tag_args_and_context() {
+        // Given / When
         let command =
             lower("dockerfile: Dockerfile\ncontext: ctx\ntag: img:latest\nbuild_args: [\"A=1\"]\n");
+
+        // Then
         assert_eq!(
             command,
             vec![
@@ -108,12 +111,16 @@ mod tests {
 
     #[test]
     fn docker_defaults_context_to_current_dir() {
+        // Given / When
         let command = lower("tag: img:latest\n");
+
+        // Then
         assert_eq!(command, vec!["docker", "build", "-t", "img:latest", "."]);
     }
 
     #[test]
     fn docker_emits_iidfile_inputs_and_outputs() {
+        // Given
         let config: serde_yaml::Value = serde_yaml::from_str(
             "tag: example-base\ndockerfile: base/Dockerfile\ncontext: base\n\
              srcs: [\"base/Dockerfile\"]\n\
@@ -127,7 +134,11 @@ mod tests {
             deps: &[],
             config: &config,
         };
+
+        // When
         let action = DockerPlugin.lower(&ctx).expect("lower").remove(0);
+
+        // Then
         assert_eq!(
             action.command,
             vec![

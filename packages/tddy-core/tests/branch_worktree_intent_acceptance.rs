@@ -80,15 +80,19 @@ fn git(repo: &Path, args: &[&str]) -> String {
 /// PRD: duplicate worktree path must surface explicit reuse confirmation (not only a bare error).
 #[test]
 fn worktree_reuse_confirmation_required_when_path_exists() {
+    // Given
     let base = scratch("reuse");
     let repo = base.join("repo");
     fs::create_dir_all(&repo).unwrap();
     init_repo_with_main(&repo);
-
     let _first =
         create_worktree(&repo, "dup", "feature/dup", Some("origin/main")).expect("first add");
+
+    // When
     let err = create_worktree(&repo, "dup", "feature/other", Some("origin/main")).unwrap_err();
     let _ = fs::remove_dir_all(&base);
+
+    // Then
     assert!(
         err.to_lowercase().contains("reuse") && err.to_lowercase().contains("confirm"),
         "PRD: when a worktree path already exists, the user must surface reuse + confirmation (not only a bare path error); got: {err}"
@@ -99,14 +103,13 @@ fn worktree_reuse_confirmation_required_when_path_exists() {
 /// `new_branch_name` / base ref (not silently ignore workflow intent).
 #[test]
 fn create_new_branch_intent_uses_base_ref_and_new_branch_name() {
+    // Given
     let base = scratch("new-branch-intent");
     let repo = base.join("repo");
     fs::create_dir_all(&repo).unwrap();
     init_repo_with_main(&repo);
-
     let session_dir = base.join("session");
     fs::create_dir_all(&session_dir).unwrap();
-
     let cs = Changeset {
         name: Some("Acceptance".into()),
         branch_suggestion: Some("feature/ignored-by-intent".into()),
@@ -114,7 +117,6 @@ fn create_new_branch_intent_uses_base_ref_and_new_branch_name() {
         ..Default::default()
     };
     write_changeset(&session_dir, &cs).unwrap();
-
     let workflow_yaml = r#"
 run_optional_step_x: false
 demo_options: []
@@ -133,9 +135,11 @@ new_branch_name: feature/custom-from-intent
     }
     fs::write(&path, raw).unwrap();
 
+    // When
     let wt = setup_worktree_for_session_with_integration_base(&repo, &session_dir, "origin/main")
         .expect("setup must succeed once intent-aware worktree creation exists");
 
+    // Then
     let branch = git(&wt, &["branch", "--show-current"]);
     assert_eq!(
         branch, "feature/custom-from-intent",
@@ -147,7 +151,6 @@ new_branch_name: feature/custom-from-intent
         merge_base, tip,
         "new branch must start from integration base tip"
     );
-
     let _ = fs::remove_dir_all(&base);
 }
 
@@ -155,14 +158,13 @@ new_branch_name: feature/custom-from-intent
 /// (existing branch), not a freshly created feature branch name.
 #[test]
 fn work_on_selected_branch_intent_checks_out_existing_branch_in_new_worktree() {
+    // Given
     let base = scratch("work-on-selected");
     let repo = base.join("repo");
     fs::create_dir_all(&repo).unwrap();
     init_repo_with_main(&repo);
-
     let session_dir = base.join("session");
     fs::create_dir_all(&session_dir).unwrap();
-
     let cs = Changeset {
         name: Some("WorkOnSelected".into()),
         branch_suggestion: Some("main".into()),
@@ -170,7 +172,6 @@ fn work_on_selected_branch_intent_checks_out_existing_branch_in_new_worktree() {
         ..Default::default()
     };
     write_changeset(&session_dir, &cs).unwrap();
-
     let workflow_yaml = r#"
 run_optional_step_x: false
 demo_options: []
@@ -188,9 +189,11 @@ selected_branch_to_work_on: main
     }
     fs::write(&path, raw).unwrap();
 
+    // When
     let wt = setup_worktree_for_session_with_integration_base(&repo, &session_dir, "origin/main")
         .expect("setup must attach worktree to existing branch per PRD");
 
+    // Then
     assert_eq!(git(&wt, &["branch", "--show-current"]), "main");
     let wt_head = git(&wt, &["rev-parse", "HEAD"]);
     let main_head = git(&repo, &["rev-parse", "main"]);
@@ -198,13 +201,13 @@ selected_branch_to_work_on: main
         wt_head, main_head,
         "worktree HEAD must match selected branch tip"
     );
-
     let _ = fs::remove_dir_all(&base);
 }
 
 /// PRD: RPC/proto must expose intent so web and daemon clients stay consistent with changeset.yaml.
 #[test]
 fn elicitation_payload_includes_intent_for_clients() {
+    // When / Then
     const REMOTE_PROTO: &str = include_str!("../../tddy-service/proto/tddy/v1/remote.proto");
     assert!(
         REMOTE_PROTO.contains("branch_worktree_intent")

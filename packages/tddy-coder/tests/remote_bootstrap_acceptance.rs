@@ -13,27 +13,24 @@ use tddy_coder::remote::{RemoteContextDir, REMOTE_APPENDIX};
 /// with `REMOTE_APPENDIX` appended to the end.
 #[test]
 fn remote_context_dir_appends_remote_appendix_to_claude_md() {
-    // Seed a source directory with CLAUDE.md.
+    // Given
     let source_dir = tempfile::tempdir().unwrap();
     let original_content = "# CLAUDE.md\n\nThis is the original instructions.\n";
     fs::write(source_dir.path().join("CLAUDE.md"), original_content)
         .expect("failed to write CLAUDE.md");
 
-    // RemoteContextDir copies source_dir contents into a new temp dir and appends the appendix.
+    // When
     let ctx =
         RemoteContextDir::create(source_dir.path()).expect("RemoteContextDir::create must succeed");
-
     let claude_md = fs::read_to_string(ctx.path().join("CLAUDE.md"))
         .expect("CLAUDE.md must exist in remote context dir");
 
-    // Original content must be preserved.
+    // Then
     assert!(
         claude_md.contains("This is the original instructions."),
         "CLAUDE.md must preserve original content; got:\n{}",
         claude_md
     );
-
-    // REMOTE_APPENDIX must be appended.
     assert!(
         claude_md.contains("mcp__tddy-tools__"),
         "CLAUDE.md must contain REMOTE_APPENDIX (with mcp__tddy-tools__ reference); got:\n{}",
@@ -52,17 +49,19 @@ fn remote_context_dir_appends_remote_appendix_to_claude_md() {
 fn remote_context_dir_files_are_read_only() {
     use std::os::unix::fs::PermissionsExt;
 
+    // Given
     let source_dir = tempfile::tempdir().unwrap();
     fs::write(source_dir.path().join("CLAUDE.md"), "# Test\n").expect("write source");
 
+    // When
     let ctx =
         RemoteContextDir::create(source_dir.path()).expect("RemoteContextDir::create must succeed");
-
     let claude_md_path = ctx.path().join("CLAUDE.md");
     let metadata = fs::metadata(&claude_md_path).expect("CLAUDE.md must exist");
 
+    // Then
     let mode = metadata.permissions().mode();
-    let writable_bits = mode & 0o222; // owner/group/other write bits
+    let writable_bits = mode & 0o222;
     assert_eq!(
         writable_bits, 0,
         "CLAUDE.md must be read-only (no write bits set); mode = {:o}",
@@ -73,15 +72,18 @@ fn remote_context_dir_files_are_read_only() {
 /// AC24: `RemoteContextDir` cleans up the temporary directory on Drop.
 #[test]
 fn remote_context_dir_cleaned_up_on_drop() {
+    // Given
     let source_dir = tempfile::tempdir().unwrap();
     fs::write(source_dir.path().join("CLAUDE.md"), "# Test\n").expect("write source");
 
+    // When
     let path = {
         let ctx = RemoteContextDir::create(source_dir.path())
             .expect("RemoteContextDir::create must succeed");
         ctx.path().to_path_buf()
     }; // ctx dropped here
 
+    // Then
     assert!(
         !path.exists(),
         "remote context dir must be cleaned up on Drop; path still exists: {}",
@@ -95,10 +97,13 @@ fn remote_context_dir_cleaned_up_on_drop() {
 fn build_remote_allowlist_prefixes_discovered_tools() {
     use tddy_coder::remote::build_remote_allowlist;
 
+    // Given
     let discovered_tools = ["Read", "Write", "Grep", "Shell"];
+
+    // When
     let allowlist = build_remote_allowlist(&discovered_tools);
 
-    // Each discovered tool must be prefixed.
+    // Then — each discovered tool must be prefixed
     for tool in &discovered_tools {
         let prefixed = format!("mcp__tddy-tools__{}", tool);
         assert!(
@@ -108,15 +113,11 @@ fn build_remote_allowlist_prefixes_discovered_tools() {
             allowlist
         );
     }
-
-    // AskUserQuestion must always be present.
     assert!(
         allowlist.contains(&"AskUserQuestion".to_string()),
         "allowlist must always include AskUserQuestion; got: {:?}",
         allowlist
     );
-
-    // No bare (unprefixed) dynamic tool names.
     for tool in &discovered_tools {
         assert!(
             !allowlist.contains(&tool.to_string()),
@@ -127,12 +128,12 @@ fn build_remote_allowlist_prefixes_discovered_tools() {
     }
 }
 
-/// AC25: `RemoteConfig` holds the CLI flags for remote mode (--remote-daemon-url, --remote-session-id,
-/// --remote-daemon-instance-id, --remote-session-token).
+/// AC25: `RemoteConfig` holds the CLI flags for remote mode.
 #[test]
 fn remote_config_holds_all_remote_flags() {
     use tddy_coder::config::RemoteConfig;
 
+    // Given
     let cfg = RemoteConfig {
         daemon_url: Some("http://relay.local:9000".to_string()),
         session_id: Some("sess-existing-123".to_string()),
@@ -140,6 +141,7 @@ fn remote_config_holds_all_remote_flags() {
         daemon_instance_id: Some("remote-daemon-id-xyz".to_string()),
     };
 
+    // Then
     assert_eq!(cfg.daemon_url.as_deref(), Some("http://relay.local:9000"));
     assert_eq!(cfg.session_id.as_deref(), Some("sess-existing-123"));
     assert_eq!(cfg.session_token.as_deref(), Some("tok-abc"));

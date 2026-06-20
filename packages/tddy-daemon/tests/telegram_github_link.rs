@@ -16,11 +16,16 @@ const AUTHORIZED_CHAT: i64 = 424_242;
 /// `telegram_oauth_state_roundtrip_binds_telegram_user`
 #[test]
 fn telegram_oauth_state_roundtrip_binds_telegram_user() {
+    // Given
     let signer = TelegramOAuthStateSigner::new(b"01234567890123456789012345678901");
     let uid = 99_887_766u64;
+
+    // When
     let state = signer
         .encode_telegram_user(uid)
         .expect("encode must succeed for a signed state");
+
+    // Then
     assert_eq!(
         signer
             .verify_and_extract_telegram_user(&state)
@@ -38,6 +43,7 @@ fn telegram_oauth_state_roundtrip_binds_telegram_user() {
 /// `telegram_link_persists_github_login_across_restart` (reload = new store instance, same path)
 #[test]
 fn telegram_link_persists_github_login_across_restart() {
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("telegram_github_mapping.json");
     let telegram_user_id = 77u64;
@@ -50,7 +56,10 @@ fn telegram_link_persists_github_login_across_restart() {
             .expect("persist mapping");
     }
 
+    // When
     let store2 = TelegramGithubMappingStore::open(&path).expect("reopen after simulated restart");
+
+    // Then
     assert_eq!(
         store2.get_github_login(telegram_user_id).as_deref(),
         Some(github_login),
@@ -61,6 +70,7 @@ fn telegram_link_persists_github_login_across_restart() {
 /// `telegram_start_workflow_uses_os_user_from_github_mapping`
 #[test]
 fn telegram_start_workflow_uses_os_user_from_github_mapping() {
+    // Given
     let mut config = DaemonConfig::default();
     config.users.push(UserMapping {
         github_user: "mapped-gh".to_string(),
@@ -74,6 +84,7 @@ fn telegram_start_workflow_uses_os_user_from_github_mapping() {
         .put(42, "mapped-gh")
         .expect("link telegram user to github login");
 
+    // When / Then
     assert_eq!(
         resolved_os_user_for_telegram_workflow(&config, &store, 42).as_deref(),
         Some("mapped-os"),
@@ -84,6 +95,7 @@ fn telegram_start_workflow_uses_os_user_from_github_mapping() {
 /// `telegram_unlinked_user_receives_explicit_error`
 #[tokio::test]
 async fn telegram_unlinked_user_receives_explicit_error() {
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     let sender = std::sync::Arc::new(InMemoryTelegramSender::new());
     let mapping_path = tmp.path().join("telegram_github_mapping.json");
@@ -100,6 +112,7 @@ async fn telegram_unlinked_user_receives_explicit_error() {
         prompt: "feature without github link".to_string(),
     };
 
+    // When / Then
     match harness.handle_start_workflow(cmd).await {
         Err(e) => {
             let s = e.to_string().to_lowercase();
@@ -120,6 +133,7 @@ async fn telegram_unlinked_user_receives_explicit_error() {
 /// `stub_github_exchange_maps_stub_login_for_telegram`
 #[test]
 fn stub_github_exchange_maps_stub_login_for_telegram() {
+    // Given
     let callback = "http://127.0.0.1:9/auth/callback";
     let stub = StubGitHubProvider::new_with_callback(callback, "stub-client-id");
     let login = "stubby-user";
@@ -138,6 +152,7 @@ fn stub_github_exchange_maps_stub_login_for_telegram() {
     let mut store = TelegramGithubMappingStore::open(&path).expect("open");
     let telegram_user_id = 500u64;
 
+    // When
     let resolved_login = complete_telegram_link_via_stub_exchange(
         &stub,
         "stub-code-1",
@@ -146,6 +161,7 @@ fn stub_github_exchange_maps_stub_login_for_telegram() {
     )
     .expect("stub exchange must complete linking like production OAuth");
 
+    // Then
     assert_eq!(resolved_login, login);
     assert_eq!(
         store.get_github_login(telegram_user_id).as_deref(),

@@ -9,12 +9,15 @@ use tddy_core::{redirect_debug_output, resolve_log_defaults};
 #[test]
 #[serial]
 fn resolve_log_defaults_returns_conversation_path_when_none() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-resolve-log-defaults");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
 
+    // When
     let result = resolve_log_defaults(None, None::<&std::path::Path>, &tmp);
 
+    // Then
     assert!(
         result.is_some(),
         "should return Some when conversation_output is None"
@@ -38,13 +41,17 @@ fn resolve_log_defaults_returns_conversation_path_when_none() {
 #[test]
 #[serial]
 fn resolve_log_defaults_returns_explicit_path_when_set() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-resolve-log-explicit");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
 
     let explicit = tmp.join("custom.jsonl");
+
+    // When
     let result = resolve_log_defaults(Some(explicit.clone()), None::<&std::path::Path>, &tmp);
 
+    // Then
     assert_eq!(
         result,
         Some(explicit),
@@ -56,6 +63,7 @@ fn resolve_log_defaults_returns_explicit_path_when_set() {
 #[test]
 #[serial]
 fn redirect_debug_output_writes_to_file() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-redirect-debug");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
@@ -67,6 +75,8 @@ fn redirect_debug_output_writes_to_file() {
     log::debug!("test redirect message");
 
     let content = std::fs::read_to_string(&log_file).unwrap_or_default();
+
+    // Then
     assert!(
         content.contains("test redirect message"),
         "log should be written to file, got: {}",

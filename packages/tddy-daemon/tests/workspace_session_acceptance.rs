@@ -93,6 +93,7 @@ fn register_project(projects_dir: &std::path::Path, repo_path: &std::path::Path)
 #[tokio::test]
 #[serial_test::serial]
 async fn workspace_session_creates_worktree_with_no_pty() {
+    // Given
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
 
@@ -105,6 +106,7 @@ async fn workspace_session_creates_worktree_with_no_pty() {
     let (_cfg_dir, config) = write_config();
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
+    // When
     let resp = service
         .start_session(Request::new(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -125,6 +127,7 @@ async fn workspace_session_creates_worktree_with_no_pty() {
         .await
         .expect("StartSession with session_type=workspace must succeed");
 
+    // Then
     let session_id = &resp.get_ref().session_id;
     assert!(!session_id.is_empty(), "must return a session_id");
 
@@ -171,6 +174,7 @@ async fn workspace_session_creates_worktree_with_no_pty() {
 #[tokio::test]
 #[serial_test::serial]
 async fn connect_session_workspace_returns_empty_livekit() {
+    // Given
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
 
@@ -183,6 +187,7 @@ async fn connect_session_workspace_returns_empty_livekit() {
     let (_cfg_dir, config) = write_config();
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
+    // When
     let start_resp = service
         .start_session(Request::new(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -194,6 +199,7 @@ async fn connect_session_workspace_returns_empty_livekit() {
         .expect("StartSession workspace must succeed");
     let session_id = start_resp.get_ref().session_id.clone();
 
+    // When
     let connect_resp = service
         .connect_session(Request::new(ConnectSessionRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -202,6 +208,7 @@ async fn connect_session_workspace_returns_empty_livekit() {
         .await
         .expect("ConnectSession workspace must succeed without error");
 
+    // Then
     assert!(
         connect_resp.get_ref().livekit_room.is_empty(),
         "ConnectSession workspace must return empty livekit_room"
@@ -217,6 +224,7 @@ async fn connect_session_workspace_returns_empty_livekit() {
 #[tokio::test]
 #[serial_test::serial]
 async fn workspace_session_execute_tool_write_then_read_round_trips() {
+    // Given
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
 
@@ -229,6 +237,7 @@ async fn workspace_session_execute_tool_write_then_read_round_trips() {
     let (_cfg_dir, config) = write_config();
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
+    // When
     let start_resp = service
         .start_session(Request::new(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -240,7 +249,7 @@ async fn workspace_session_execute_tool_write_then_read_round_trips() {
         .expect("StartSession workspace must succeed");
     let session_id = start_resp.get_ref().session_id.clone();
 
-    // Write a file via ExecuteTool.
+    // When — Write a file via ExecuteTool.
     let write_resp = service
         .execute_tool(Request::new(ExecuteToolRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -252,13 +261,14 @@ async fn workspace_session_execute_tool_write_then_read_round_trips() {
         .await
         .expect("ExecuteTool Write must not return an RPC error");
 
+    // Then
     assert!(
         !write_resp.get_ref().is_error,
         "Write must succeed (is_error=false), got error: {:?}",
         write_resp.get_ref().error_message
     );
 
-    // Read it back via ExecuteTool.
+    // When — Read it back via ExecuteTool.
     let read_resp = service
         .execute_tool(Request::new(ExecuteToolRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -270,6 +280,7 @@ async fn workspace_session_execute_tool_write_then_read_round_trips() {
         .await
         .expect("ExecuteTool Read must not return an RPC error");
 
+    // Then
     assert!(
         !read_resp.get_ref().is_error,
         "Read must succeed, got error: {:?}",

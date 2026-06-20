@@ -41,33 +41,72 @@ mod tests {
 
     #[test]
     fn validate_authorize_url_accepts_openai_auth() {
-        assert!(validate_authorize_url(
-            "https://auth.openai.com/oauth/authorize?client_id=x"
-        ));
+        // Given
+        let url = "https://auth.openai.com/oauth/authorize?client_id=x";
+
+        // When
+        let result = validate_authorize_url(url);
+
+        // Then
+        assert!(result, "HTTPS openai auth URL must be accepted");
     }
 
     #[test]
     fn validate_authorize_url_rejects_http() {
-        assert!(!validate_authorize_url(
-            "http://auth.openai.com/oauth/authorize"
-        ));
+        // Given
+        let url = "http://auth.openai.com/oauth/authorize";
+
+        // When
+        let result = validate_authorize_url(url);
+
+        // Then
+        assert!(!result, "HTTP (non-HTTPS) authorize URLs must be rejected");
     }
 
     #[test]
     fn validate_authorize_url_rejects_unknown_host() {
-        assert!(!validate_authorize_url("https://evil.com/callback"));
+        // Given
+        let url = "https://evil.com/callback";
+
+        // When
+        let result = validate_authorize_url(url);
+
+        // Then
+        assert!(!result, "URLs with non-allowlisted hosts must be rejected");
     }
 
     #[test]
     fn codex_callback_url_builds_query() {
-        let s = codex_callback_url(1455, "abc", "xyz").unwrap();
-        assert!(s.starts_with("http://127.0.0.1:1455/auth/callback?"));
-        assert!(s.contains("code=abc"));
-        assert!(s.contains("state=xyz"));
+        // Given
+        let port = 1455u16;
+
+        // When
+        let s = codex_callback_url(port, "abc", "xyz").unwrap();
+
+        // Then
+        assert!(
+            s.starts_with("http://127.0.0.1:1455/auth/callback?"),
+            "callback URL must use loopback address with /auth/callback path"
+        );
+        assert!(
+            s.contains("code=abc"),
+            "callback URL must include code query param"
+        );
+        assert!(
+            s.contains("state=xyz"),
+            "callback URL must include state query param"
+        );
     }
 
     #[test]
     fn codex_callback_url_rejects_empty_code() {
-        assert!(codex_callback_url(1, "", "x").is_err());
+        // Given
+        let empty_code = "";
+
+        // When
+        let result = codex_callback_url(1, empty_code, "x");
+
+        // Then
+        assert!(result.is_err(), "empty code must be rejected");
     }
 }

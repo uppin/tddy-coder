@@ -37,8 +37,13 @@ fn write_skill_md(
 /// **slash_menu_lists_builtin_when_agents_skills_missing** (granular)
 #[test]
 fn slash_menu_lists_builtin_when_agents_skills_missing() {
+    // Given
     let root = temp_project_root("no_agents_skills");
+
+    // When
     let items = slash_menu_items(&root);
+
+    // Then
     assert!(
         items
             .iter()
@@ -50,10 +55,14 @@ fn slash_menu_lists_builtin_when_agents_skills_missing() {
 /// **scan_records_invalid_skill_with_non_empty_reason** (granular)
 #[test]
 fn scan_records_invalid_skill_with_non_empty_reason() {
+    // Given
     let root = temp_project_root("invalid_reason");
     write_skill_md(&root, "foo", "bar", "mismatch", "## X\n");
 
+    // When
     let report = scan_skills_at_project_root(&root);
+
+    // Then
     let inv = report
         .invalid
         .iter()

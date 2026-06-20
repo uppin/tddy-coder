@@ -16,6 +16,7 @@ use common::{ctx_plan, session_dir_for_new_session, stub_invoke_request};
 /// CursorBackend spawns agent with -p, --output-format stream-json, --force, --trust.
 #[test]
 fn cursor_backend_spawns_cursor_agent_with_correct_flags() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cursor-backend-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -46,8 +47,11 @@ exit 0
 
     let result = tokio::runtime::Runtime::new()
         .unwrap()
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
+
+    // Then
     assert_eq!(result.exit_code, 0);
     assert_eq!(result.output, "output");
     assert_eq!(result.session_id.as_deref(), Some("cursor-thread-abc"));
@@ -94,6 +98,7 @@ exit 0
 /// CursorBackend does not pass --plan when goal is not Plan.
 #[test]
 fn cursor_backend_omits_plan_flag_when_goal_is_not_plan() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cursor-no-plan-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -122,9 +127,12 @@ exit 0
         let req = stub_invoke_request("Create tests", goal_id);
         let _ = tokio::runtime::Runtime::new()
             .unwrap()
+            // When
             .block_on(backend.invoke(req))
             .expect("invoke should succeed");
         let captured = fs::read_to_string(&args_file).expect("read captured args");
+
+        // Then
         assert!(
             !captured.contains("--plan"),
             "should not have --plan when goal is {}, got: {}",
@@ -137,6 +145,7 @@ exit 0
 /// Validate uses the same `agent` CLI path as other non-plan goals (parity with Claude).
 #[test]
 fn cursor_backend_invokes_validate_goal_like_other_non_plan_goals() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cursor-validate-invoke-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -165,8 +174,11 @@ exit 0
 
     let result = tokio::runtime::Runtime::new()
         .unwrap()
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke Goal::Validate must succeed like other goals");
+
+    // Then
     assert_eq!(result.exit_code, 0);
     assert_eq!(result.output, "validate-ok");
     assert_eq!(result.session_id.as_deref(), Some("val-sid"));
@@ -182,6 +194,7 @@ exit 0
 /// Refactor uses the same `agent` CLI path as other non-plan goals (parity with Claude).
 #[test]
 fn cursor_backend_invokes_refactor_goal_like_other_non_plan_goals() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cursor-refactor-invoke-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -210,8 +223,11 @@ exit 0
 
     let result = tokio::runtime::Runtime::new()
         .unwrap()
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke Goal::Refactor must succeed like other non-plan goals");
+
+    // Then
     assert_eq!(result.exit_code, 0);
     assert_eq!(result.output, "refactor-ok");
     assert_eq!(result.session_id.as_deref(), Some("ref-sid"));
@@ -227,6 +243,7 @@ exit 0
 /// Cursor `agent` does not accept `--session-id` for new chats; Fresh must not pass it.
 #[test]
 fn cursor_backend_omits_session_id_on_fresh_session() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cursor-fresh-no-sid-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -258,8 +275,11 @@ exit 0
 
     let result = tokio::runtime::Runtime::new()
         .unwrap()
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
+
+    // Then
     assert_eq!(result.session_id.as_deref(), Some("from-stream"));
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
@@ -278,6 +298,7 @@ exit 0
 /// CursorBackend adds --resume when session is SessionMode::Resume.
 #[test]
 fn cursor_backend_adds_resume_flag_on_followup() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cursor-resume-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -307,10 +328,13 @@ exit 0
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
+
+    // Then
     assert!(
         captured.contains("--resume"),
         "should have --resume on followup, got: {}",
@@ -326,7 +350,10 @@ exit 0
 /// CursorBackend returns name "cursor".
 #[test]
 fn cursor_backend_name_returns_cursor() {
+    // Given
     let backend = CursorBackend::new();
+
+    // Then
     assert_eq!(backend.name(), "cursor");
 }
 
@@ -350,6 +377,7 @@ fn prompt_from_captured_args(captured: &str) -> Option<String> {
 #[test]
 #[cfg(unix)]
 fn cursor_backend_includes_system_prompt_in_prompt_when_set() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cursor-sysprompt-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -376,11 +404,14 @@ exit 0
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
     let prompt = prompt_from_captured_args(&captured).expect("prompt should be present after -p");
+
+    // Then
     assert!(
         prompt.contains("You MUST output a <structured-response> block."),
         "prompt should include system_prompt content, got: {}",
@@ -397,6 +428,7 @@ exit 0
 #[test]
 #[cfg(unix)]
 fn cursor_backend_includes_system_prompt_path_content_in_prompt_when_set() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cursor-sysprompt-file-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -425,11 +457,14 @@ exit 0
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
     let prompt = prompt_from_captured_args(&captured).expect("prompt should be present after -p");
+
+    // Then
     assert!(
         prompt.contains("Output format: structured-response only."),
         "prompt should include system_prompt_path file content, got: {}",
@@ -446,6 +481,7 @@ exit 0
 #[test]
 #[cfg(unix)]
 fn cursor_backend_prefers_system_prompt_path_over_system_prompt() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cursor-sysprompt-prefer-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -475,11 +511,14 @@ exit 0
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
+        // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
     let prompt = prompt_from_captured_args(&captured).expect("prompt should be present after -p");
+
+    // Then
     assert!(
         prompt.contains("From file: use structured-response."),
         "prompt should use system_prompt_path content, got: {}",
@@ -500,6 +539,7 @@ exit 0
 #[cfg(unix)]
 #[ignore = "inline clarification-questions parsing removed; use tool events or tddy-tools ask"]
 async fn cursor_backend_plan_returns_clarification_needed_when_stream_has_questions() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cursor-clarification-plan");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
@@ -539,10 +579,13 @@ exit 0
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
     let ctx = ctx_plan("Feature X", tmp.clone(), session_dir.clone(), None, None);
     let plan_gid = GoalId::new("plan");
+
+    // When
     let result = engine.run_goal(&plan_gid, ctx).await.expect("run_goal");
 
     match &result.status {
         ExecutionStatus::WaitingForInput { .. } => {
+            // Then
             assert!(!result.session_id.is_empty(), "session_id should be set");
         }
         ExecutionStatus::Completed => {

@@ -29,19 +29,29 @@ fn read_web_dev() -> String {
 /// `USE_DAEMON` / `TDDY_USE_DAEMON` gate (PRD: single flow). (ShellCheck is not run here.)
 #[test]
 fn web_dev_bash_syntax_and_no_legacy_daemon_gate() {
-    verify_syntax_and_no_legacy_branch(&web_dev_path());
+    // Given
+    let path = web_dev_path();
+
+    // When / Then
+    verify_syntax_and_no_legacy_branch(&path);
 }
 
 /// Resolved backend must be `tddy-daemon` only; no `find_binary` path to `tddy-demo`.
 #[test]
 fn web_dev_always_targets_tddy_daemon_binary() {
+    // Given
     let contents = read_web_dev();
+
+    // When / Then
     verify_daemon_binary_only(&contents);
 }
 
 /// With `DAEMON_CONFIG` unset, default config file is `dev.daemon.yaml` at repo root (same as prior daemon branch).
 #[test]
 fn web_dev_default_config_is_dev_daemon_yaml() {
+    // Given
     let contents = read_web_dev();
+
+    // When / Then
     verify_default_dev_daemon_config(&contents);
 }

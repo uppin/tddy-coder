@@ -13,6 +13,7 @@ use tddy_core::toolcall::start_toolcall_listener;
 #[test]
 #[cfg(unix)]
 fn submit_exits_ok_when_presenter_never_polls() {
+    // Given
     let (socket_path, _hold_tool_rx) = start_toolcall_listener(None, None).expect("start listener");
     let sock = socket_path.clone();
     let bin = cargo_bin_cmd!("tddy-tools").get_program().to_owned();
@@ -20,6 +21,8 @@ fn submit_exits_ok_when_presenter_never_polls() {
     let data = json!({"goal": "plan", "prd": "# minimal"}).to_string();
 
     let (tx, rx) = mpsc::channel();
+
+    // When
     thread::spawn(move || {
         let out = Command::new(bin)
             .env("TDDY_SOCKET", &sock)
@@ -37,6 +40,7 @@ fn submit_exits_ok_when_presenter_never_polls() {
     });
     let child_out = child_result.expect("tddy-tools spawn");
 
+    // Then
     assert!(
         child_out.status.success(),
         "tddy-tools should exit 0; stderr={}",
@@ -44,7 +48,11 @@ fn submit_exits_ok_when_presenter_never_polls() {
     );
     let stdout = String::from_utf8_lossy(&child_out.stdout);
     assert!(
-        stdout.contains("\"status\":\"ok\"") && stdout.contains("\"goal\":\"plan\""),
-        "expected ok relay JSON on stdout; got: {stdout}"
+        stdout.contains("\"status\":\"ok\""),
+        "expected ok status in relay JSON on stdout; got: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"goal\":\"plan\""),
+        "expected goal=plan in relay JSON on stdout; got: {stdout}"
     );
 }

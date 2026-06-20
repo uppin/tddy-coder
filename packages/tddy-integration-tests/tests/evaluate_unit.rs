@@ -10,7 +10,10 @@ use tddy_workflow_recipes::parse_evaluate_response;
 /// Fails in Red because evaluate_allowlist calls todo!().
 #[test]
 fn evaluate_allowlist_returns_non_empty_list() {
+    // Given
     let list = evaluate_allowlist();
+
+    // Then
     assert!(!list.is_empty(), "evaluate_allowlist must return tools");
 }
 
@@ -18,7 +21,10 @@ fn evaluate_allowlist_returns_non_empty_list() {
 /// Fails in Red because evaluate_allowlist calls todo!().
 #[test]
 fn evaluate_allowlist_includes_read() {
+    // Given
     let list = evaluate_allowlist();
+
+    // Then
     assert!(
         list.iter().any(|t| t == "Read"),
         "evaluate_allowlist must include Read, got: {:?}",
@@ -30,7 +36,10 @@ fn evaluate_allowlist_includes_read() {
 /// Fails in Red because evaluate_allowlist calls todo!().
 #[test]
 fn evaluate_allowlist_includes_git_diff() {
+    // Given
     let list = evaluate_allowlist();
+
+    // Then
     assert!(
         list.iter().any(|t| t.contains("git diff")),
         "evaluate_allowlist must include Bash(git diff *), got: {:?}",
@@ -42,7 +51,12 @@ fn evaluate_allowlist_includes_git_diff() {
 /// Fails in Red because parse_evaluate_response calls todo!().
 #[test]
 fn parse_evaluate_response_fails_on_empty_input() {
+    // Given
+
+    // When
     let result = parse_evaluate_response("");
+
+    // Then
     assert!(
         result.is_err(),
         "parse_evaluate_response must fail on empty input"
@@ -53,7 +67,12 @@ fn parse_evaluate_response_fails_on_empty_input() {
 /// Fails in Red because parse_evaluate_response calls todo!().
 #[test]
 fn parse_evaluate_response_fails_on_missing_block() {
+    // Given
+
+    // When
     let result = parse_evaluate_response("no structured response here");
+
+    // Then
     assert!(
         result.is_err(),
         "parse_evaluate_response must fail when block is absent"

@@ -17,6 +17,7 @@ use tddy_workflow_recipes::TddRecipe;
 #[serial]
 #[cfg(unix)]
 fn debug_log_written_to_session_dir_when_plan_fails() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-debug-log-on-plan-fail");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
@@ -56,6 +57,8 @@ fn debug_log_written_to_session_dir_when_plan_fails() {
             error_msg = msg.clone();
         }
     }
+
+    // Then
     assert!(got_error, "should get a workflow error from plan failure");
 
     let session_dir = tmp

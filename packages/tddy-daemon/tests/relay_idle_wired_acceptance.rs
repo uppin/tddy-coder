@@ -40,11 +40,11 @@ fn minimal_service_with_tracker(tracker: Arc<IdleTimeoutTracker>) -> ConnectionS
 /// `should_shutdown()` returns false — the activity timestamp was bumped.
 #[tokio::test]
 async fn rpc_call_bumps_idle_tracker_so_shutdown_is_not_triggered() {
+    // Given
     // Use a 1ms timeout and let it expire before the RPC call.
     let tracker = Arc::new(IdleTimeoutTracker::new(Duration::from_millis(1)));
     std::thread::sleep(Duration::from_millis(10));
 
-    // Tracker is expired before the RPC.
     assert!(
         tracker.should_shutdown(),
         "precondition: tracker must be expired before the RPC call"
@@ -52,10 +52,11 @@ async fn rpc_call_bumps_idle_tracker_so_shutdown_is_not_triggered() {
 
     let service = minimal_service_with_tracker(Arc::clone(&tracker));
 
+    // When
     // Make any RPC — ListTools is the simplest (no auth required).
     let _ = service.list_tools(Request::new(ListToolsRequest {})).await;
 
-    // After the RPC, activity must have been recorded.
+    // Then
     assert!(
         !tracker.should_shutdown(),
         "idle tracker must be reset after an RPC call — should_shutdown must be false"
@@ -66,11 +67,14 @@ async fn rpc_call_bumps_idle_tracker_so_shutdown_is_not_triggered() {
 /// a tracker without changing the main `new()` signature (existing callers pass no tracker).
 #[tokio::test]
 async fn connection_service_accepts_idle_tracker_via_builder() {
+    // Given
     let tracker = Arc::new(IdleTimeoutTracker::new(Duration::from_secs(300)));
 
+    // When
     // This is purely a compile-time check — if `with_idle_tracker` doesn't exist, the test fails.
     let _service = minimal_service_with_tracker(Arc::clone(&tracker));
 
+    // Then
     assert!(
         !tracker.should_shutdown(),
         "fresh tracker must not indicate shutdown"

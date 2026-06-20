@@ -9,6 +9,7 @@ use tddy_e2e::{connect_terminal_grpc, spawn_presenter_with_terminal_service};
 
 #[tokio::test]
 async fn two_grpc_clients_get_independent_terminal_streams() {
+    // Given
     let (_handle, port, _shutdown) =
         spawn_presenter_with_terminal_service(Some("feature".to_string()));
 
@@ -21,6 +22,7 @@ async fn two_grpc_clients_get_independent_terminal_streams() {
     let mut c1 = client1.clone();
     let mut c2 = client2.clone();
 
+    // When — both clients open independent terminal streams
     tokio::spawn(async move {
         let mut stream = c1
             .stream_terminal_io(tokio_stream::iter(vec![]))
@@ -61,6 +63,7 @@ async fn two_grpc_clients_get_independent_terminal_streams() {
         }
     }
 
+    // Then — each client receives its own stream of ANSI bytes
     assert!(
         received1.len() > 50,
         "client1 should receive ANSI bytes, got {}",

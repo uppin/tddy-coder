@@ -77,6 +77,7 @@ fn harness_with_workflow_projects(
 /// `telegram_start_workflow_presents_recipe_keyboard_and_creates_session`
 #[tokio::test]
 async fn telegram_start_workflow_presents_recipe_keyboard_and_creates_session() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let (mut harness, sender) =
         harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
@@ -86,11 +87,14 @@ async fn telegram_start_workflow_presents_recipe_keyboard_and_creates_session() 
         user_id: 77,
         prompt: "implement Telegram session control".to_string(),
     };
+
+    // When
     let outcome = harness
         .handle_start_workflow(cmd)
         .await
         .expect("handler should return Ok in harness");
 
+    // Then
     assert!(
         !outcome.session_id.is_empty(),
         "start-workflow must create a daemon-backed session id"
@@ -131,6 +135,7 @@ async fn telegram_start_workflow_presents_recipe_keyboard_and_creates_session() 
 /// selection before project / recipe steps (message order).
 #[tokio::test]
 async fn telegram_chain_workflow_shows_parent_pick_first() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let _ = create_fake_sessions(tmp.path(), 2);
     let (mut harness, sender) =
@@ -141,10 +146,13 @@ async fn telegram_chain_workflow_shows_parent_pick_first() {
         user_id: 77,
         prompt: "stacked chain feature".to_string(),
     };
+
+    // When
     let outcome = harness.handle_chain_workflow(cmd).await.expect(
         "/chain-workflow must succeed: parent session picker first, then existing workflow steps",
     );
 
+    // Then
     assert!(
         !outcome.session_id.is_empty(),
         "chain-workflow must yield a session id"
@@ -173,6 +181,7 @@ async fn telegram_chain_workflow_shows_parent_pick_first() {
 /// `telegram_recipe_callback_persists_changeset_recipe_and_demo_options`
 #[tokio::test]
 async fn telegram_recipe_callback_persists_changeset_recipe_and_demo_options() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let session_dir = tmp.path().join("sess-1");
     std::fs::create_dir_all(&session_dir).unwrap();
@@ -185,11 +194,14 @@ async fn telegram_recipe_callback_persists_changeset_recipe_and_demo_options() {
         user_id: 77,
         callback_data: "recipe:tdd|demo_options:{run:true}".to_string(),
     };
+
+    // When
     harness
         .handle_recipe_callback(&session_dir, cb)
         .await
         .expect("recipe callback");
 
+    // Then
     let snap = read_changeset_routing_snapshot(&session_dir).expect("read changeset.yaml");
     assert_eq!(
         snap.recipe.as_deref(),
@@ -210,6 +222,7 @@ async fn telegram_recipe_callback_persists_changeset_recipe_and_demo_options() {
 /// Recipe selection after `/start-workflow` must keep `initial_prompt` alongside `recipe`.
 #[tokio::test]
 async fn telegram_recipe_callback_keeps_initial_prompt_from_start_workflow() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let (mut harness, _sender) =
         harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
@@ -230,11 +243,14 @@ async fn telegram_recipe_callback_keeps_initial_prompt_from_start_workflow() {
         user_id: 77,
         callback_data: format!("recipe:tdd|session:{}", outcome.session_id),
     };
+
+    // When
     harness
         .handle_recipe_callback(&session_dir, cb)
         .await
         .expect("recipe callback");
 
+    // Then
     let snap = read_changeset_routing_snapshot(&session_dir).expect("read changeset.yaml");
     assert_eq!(snap.recipe.as_deref(), Some("tdd"));
     assert_eq!(
@@ -246,6 +262,7 @@ async fn telegram_recipe_callback_keeps_initial_prompt_from_start_workflow() {
 /// `recipe:more` sends a follow-up message with additional recipe buttons (`mr:` callbacks).
 #[tokio::test]
 async fn telegram_more_recipes_sends_second_keyboard() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
     let session_dir = tmp.path().join(session_id);
@@ -258,11 +275,14 @@ async fn telegram_more_recipes_sends_second_keyboard() {
         user_id: 77,
         callback_data: format!("recipe:more|session:{session_id}"),
     };
+
+    // When
     harness
         .handle_recipe_callback(&session_dir, cb)
         .await
         .expect("more recipes callback");
 
+    // Then
     let sent = collect_outbound_messages(&sender, AUTHORIZED_CHAT);
     let last = sent.last().expect("must send more recipes message");
     assert!(
@@ -287,6 +307,7 @@ async fn telegram_more_recipes_sends_second_keyboard() {
 /// Compact `mr:` callback persists the mapped recipe name (e.g. grill-me).
 #[tokio::test]
 async fn telegram_mr_recipe_callback_persists_recipe_name() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
     let session_dir = tmp.path().join(session_id);
@@ -299,11 +320,14 @@ async fn telegram_mr_recipe_callback_persists_recipe_name() {
         user_id: 77,
         callback_data: format!("mr:3|{session_id}"),
     };
+
+    // When
     harness
         .handle_recipe_callback(&session_dir, cb)
         .await
         .expect("mr recipe callback");
 
+    // Then
     let snap = read_changeset_routing_snapshot(&session_dir).expect("read changeset.yaml");
     assert_eq!(
         snap.recipe.as_deref(),
@@ -315,6 +339,7 @@ async fn telegram_mr_recipe_callback_persists_recipe_name() {
 /// `telegram_plan_content_delivered_and_approval_callback_advances_workflow`
 #[tokio::test]
 async fn telegram_plan_content_delivered_and_approval_callback_advances_workflow() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let (mut harness, sender) =
         harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
@@ -326,11 +351,13 @@ async fn telegram_plan_content_delivered_and_approval_callback_advances_workflow
         callback_data: "plan_review:approve".to_string(),
     };
 
+    // When
     let (chunks, transition) = harness
         .handle_plan_review_phase("sess-plan-1", GOLDEN_PLAN, approval)
         .await
         .expect("plan review phase");
 
+    // Then
     let joined = chunks.join("");
     assert_eq!(
         joined, GOLDEN_PLAN,
@@ -351,6 +378,7 @@ async fn telegram_plan_content_delivered_and_approval_callback_advances_workflow
 /// `telegram_elicitation_choice_mapped_to_presenter_expected_input`
 #[tokio::test]
 async fn telegram_elicitation_choice_mapped_to_presenter_expected_input() {
+    // When / Then
     let payload = map_elicitation_callback_to_presenter_input("elicitation:single|opt-a");
     assert_eq!(
         payload.bytes,
@@ -362,6 +390,7 @@ async fn telegram_elicitation_choice_mapped_to_presenter_expected_input() {
 /// `telegram_unauthorized_start_workflow_is_silent`
 #[tokio::test]
 async fn telegram_unauthorized_start_workflow_is_silent() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let (harness, sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
 
@@ -370,11 +399,14 @@ async fn telegram_unauthorized_start_workflow_is_silent() {
         user_id: 1,
         prompt: "pwn".to_string(),
     };
+
+    // When
     let denial = harness
         .handle_start_workflow_unauthorized(cmd)
         .await
         .expect("unauthorized handler");
 
+    // Then
     assert!(
         denial.is_none(),
         "unauthorized chat must not get a captured denial message (silent ignore for multi-daemon)"
@@ -389,6 +421,7 @@ async fn telegram_unauthorized_start_workflow_is_silent() {
 /// `telegram_authorized_chat_returns_none_from_unauthorized_handler`
 #[tokio::test]
 async fn telegram_authorized_chat_returns_none_from_unauthorized_handler() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let (harness, _sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
     let cmd = StartWorkflowCommand {
@@ -396,10 +429,14 @@ async fn telegram_authorized_chat_returns_none_from_unauthorized_handler() {
         user_id: 1,
         prompt: "should return None".to_string(),
     };
+
+    // When
     let result = harness
         .handle_start_workflow_unauthorized(cmd)
         .await
         .expect("handler should succeed for authorized chat");
+
+    // Then
     assert!(
         result.is_none(),
         "authorized chat calling unauthorized handler must get None (caller should use handle_start_workflow)"
@@ -445,15 +482,18 @@ fn create_fake_sessions(base: &std::path::Path, count: usize) -> Vec<String> {
 /// `/sessions` with fewer than 10 sessions shows all and no "More" button.
 #[tokio::test]
 async fn telegram_list_sessions_shows_all_when_fewer_than_page_size() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let session_ids = create_fake_sessions(tmp.path(), 3);
     let (harness, sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
 
+    // When
     let page = harness
         .handle_list_sessions(AUTHORIZED_CHAT, 0)
         .await
         .expect("handle_list_sessions should succeed");
 
+    // Then
     assert_eq!(
         page.entries.len(),
         3,
@@ -515,15 +555,18 @@ async fn telegram_list_sessions_shows_all_when_fewer_than_page_size() {
 /// `/sessions` with more than 10 sessions paginates and shows "More" button.
 #[tokio::test]
 async fn telegram_list_sessions_paginates_with_more_button() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let _session_ids = create_fake_sessions(tmp.path(), 15);
     let (harness, sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
 
+    // When
     let page = harness
         .handle_list_sessions(AUTHORIZED_CHAT, 0)
         .await
         .expect("handle_list_sessions should succeed");
 
+    // Then
     assert_eq!(
         page.entries.len(),
         SESSIONS_PAGE_SIZE,
@@ -556,15 +599,18 @@ async fn telegram_list_sessions_paginates_with_more_button() {
 /// Second page of `/sessions` via offset returns remaining sessions.
 #[tokio::test]
 async fn telegram_list_sessions_second_page_returns_remaining() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let _session_ids = create_fake_sessions(tmp.path(), 15);
     let (harness, _sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
 
+    // When
     let page2 = harness
         .handle_list_sessions(AUTHORIZED_CHAT, SESSIONS_PAGE_SIZE)
         .await
         .expect("handle_list_sessions page 2 should succeed");
 
+    // Then
     assert_eq!(
         page2.entries.len(),
         5,
@@ -577,14 +623,17 @@ async fn telegram_list_sessions_second_page_returns_remaining() {
 /// `/sessions` with zero sessions returns empty page.
 #[tokio::test]
 async fn telegram_list_sessions_empty_shows_no_sessions_message() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let (harness, sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
 
+    // When
     let page = harness
         .handle_list_sessions(AUTHORIZED_CHAT, 0)
         .await
         .expect("handle_list_sessions should succeed for empty list");
 
+    // Then
     assert!(
         page.entries.is_empty(),
         "page must be empty when no sessions exist"
@@ -604,11 +653,14 @@ async fn telegram_list_sessions_empty_shows_no_sessions_message() {
 /// Unauthorized chat cannot list sessions.
 #[tokio::test]
 async fn telegram_list_sessions_unauthorized_is_denied() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let (harness, _sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
 
+    // When
     let result = harness.handle_list_sessions(UNAUTHORIZED_CHAT, 0).await;
 
+    // Then
     assert!(
         result.is_err(),
         "unauthorized chat must be denied listing sessions"
@@ -622,6 +674,7 @@ async fn telegram_list_sessions_unauthorized_is_denied() {
 /// `/delete <session_id>` removes the session and sends confirmation.
 #[tokio::test]
 async fn telegram_delete_session_removes_and_confirms() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let ids = create_fake_sessions(tmp.path(), 1);
     let target_id = &ids[0];
@@ -633,11 +686,13 @@ async fn telegram_delete_session_removes_and_confirms() {
 
     let (harness, sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
 
+    // When
     let outcome = harness
         .handle_delete_session(AUTHORIZED_CHAT, target_id)
         .await
         .expect("handle_delete_session should succeed");
 
+    // Then
     assert_eq!(
         outcome.session_id, *target_id,
         "outcome must reference the deleted session"
@@ -659,13 +714,16 @@ async fn telegram_delete_session_removes_and_confirms() {
 /// `/delete` with non-existent session id returns an error.
 #[tokio::test]
 async fn telegram_delete_nonexistent_session_returns_error() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let (harness, _sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
 
+    // When
     let result = harness
         .handle_delete_session(AUTHORIZED_CHAT, "no-such-session")
         .await;
 
+    // Then
     assert!(
         result.is_err(),
         "deleting a non-existent session must return an error"
@@ -675,14 +733,17 @@ async fn telegram_delete_nonexistent_session_returns_error() {
 /// Unauthorized chat cannot delete sessions.
 #[tokio::test]
 async fn telegram_delete_session_unauthorized_is_denied() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let ids = create_fake_sessions(tmp.path(), 1);
     let (harness, _sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
 
+    // When
     let result = harness
         .handle_delete_session(UNAUTHORIZED_CHAT, &ids[0])
         .await;
 
+    // Then
     assert!(
         result.is_err(),
         "unauthorized chat must be denied session deletion"
@@ -701,6 +762,7 @@ async fn telegram_delete_session_unauthorized_is_denied() {
 /// After recipe selection, intent keyboard exposes both intent callbacks.
 #[tokio::test]
 async fn telegram_intent_pick_shown_after_recipe() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
     let session_dir = unified_session_dir_path(tmp.path(), session_id);
@@ -718,6 +780,8 @@ async fn telegram_intent_pick_shown_after_recipe() {
         user_id: 77,
         callback_data: format!("recipe:tdd|session:{session_id}"),
     };
+
+    // When
     harness
         .handle_recipe_callback(&session_dir, cb)
         .await
@@ -727,6 +791,7 @@ async fn telegram_intent_pick_shown_after_recipe() {
         .await
         .expect("intent keyboard");
 
+    // Then
     let sent = collect_outbound_messages(&sender, AUTHORIZED_CHAT);
     let intent_msg = sent
         .iter()
@@ -752,6 +817,7 @@ async fn telegram_intent_pick_shown_after_recipe() {
 
 #[tokio::test]
 async fn telegram_intent_persists_to_changeset() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let session_id = "019d5c8f-71b0-79d1-8492-cfaf08fc6ab2";
     let session_dir = unified_session_dir_path(tmp.path(), session_id);
@@ -763,6 +829,8 @@ async fn telegram_intent_persists_to_changeset() {
     write_changeset(&session_dir, &cs).expect("write changeset");
 
     let (harness, _sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
+
+    // When
     harness
         .handle_telegram_intent_callback(
             AUTHORIZED_CHAT,
@@ -772,6 +840,7 @@ async fn telegram_intent_persists_to_changeset() {
         .await
         .expect("intent callback");
 
+    // Then
     let snap = read_changeset_routing_snapshot(&session_dir).expect("read changeset.yaml");
     assert_eq!(
         snap.workflow
@@ -783,6 +852,7 @@ async fn telegram_intent_persists_to_changeset() {
 
 #[tokio::test]
 async fn telegram_intent_then_project_pick_continues_flow() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let projects_dir = tmp.path().join("proj-registry");
     std::fs::create_dir_all(&projects_dir).unwrap();
@@ -815,6 +885,8 @@ async fn telegram_intent_then_project_pick_continues_flow() {
         tmp.path().to_path_buf(),
         projects_dir,
     );
+
+    // When
     harness
         .handle_telegram_intent_callback(
             AUTHORIZED_CHAT,
@@ -824,6 +896,7 @@ async fn telegram_intent_then_project_pick_continues_flow() {
         .await
         .expect("intent callback");
 
+    // Then
     let sent = collect_outbound_messages(&sender, AUTHORIZED_CHAT);
     let proj_msg = sent
         .iter()
@@ -844,6 +917,7 @@ async fn telegram_intent_then_project_pick_continues_flow() {
 /// Branch selection lists at most 10 remotes per page; more than 10 requires a **More…** row (`tbm:`).
 #[tokio::test]
 async fn telegram_branch_pick_shows_more_when_more_than_ten_remote_branches() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let projects_dir = tmp.path().join("proj-registry");
     std::fs::create_dir_all(&projects_dir).unwrap();
@@ -875,6 +949,8 @@ async fn telegram_branch_pick_shows_more_when_more_than_ten_remote_branches() {
         tmp.path().to_path_buf(),
         projects_dir,
     );
+
+    // When
     harness
         .handle_telegram_intent_callback(
             AUTHORIZED_CHAT,
@@ -888,6 +964,7 @@ async fn telegram_branch_pick_shows_more_when_more_than_ten_remote_branches() {
         .await
         .expect("project callback");
 
+    // Then
     let sent = collect_outbound_messages(&sender, AUTHORIZED_CHAT);
     let branch_msg = sent
         .iter()
@@ -903,6 +980,7 @@ async fn telegram_branch_pick_shows_more_when_more_than_ten_remote_branches() {
 
 #[tokio::test]
 async fn telegram_branch_pick_no_more_when_at_most_ten_remote_branches() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let projects_dir = tmp.path().join("proj-registry");
     std::fs::create_dir_all(&projects_dir).unwrap();
@@ -934,6 +1012,8 @@ async fn telegram_branch_pick_no_more_when_at_most_ten_remote_branches() {
         tmp.path().to_path_buf(),
         projects_dir,
     );
+
+    // When
     harness
         .handle_telegram_intent_callback(
             AUTHORIZED_CHAT,
@@ -947,6 +1027,7 @@ async fn telegram_branch_pick_no_more_when_at_most_ten_remote_branches() {
         .await
         .expect("project callback");
 
+    // Then
     let sent = collect_outbound_messages(&sender, AUTHORIZED_CHAT);
     let branch_msg = sent
         .iter()
@@ -967,17 +1048,20 @@ async fn telegram_branch_pick_no_more_when_at_most_ten_remote_branches() {
 /// "Enter" button connects to a session and shows workflow state.
 #[tokio::test]
 async fn telegram_enter_session_shows_workflow_state() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let ids = create_fake_sessions(tmp.path(), 1);
     let target_id = &ids[0];
 
     let (harness, sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
 
+    // When
     let outcome = harness
         .handle_enter_session(AUTHORIZED_CHAT, target_id)
         .await
         .expect("handle_enter_session should succeed");
 
+    // Then
     assert_eq!(
         outcome.session_id, *target_id,
         "outcome must reference the entered session"
@@ -997,13 +1081,16 @@ async fn telegram_enter_session_shows_workflow_state() {
 /// "Enter" on non-existent session returns error.
 #[tokio::test]
 async fn telegram_enter_nonexistent_session_returns_error() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let (harness, _sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
 
+    // When
     let result = harness
         .handle_enter_session(AUTHORIZED_CHAT, "no-such-session")
         .await;
 
+    // Then
     assert!(
         result.is_err(),
         "entering a non-existent session must return an error"
@@ -1013,14 +1100,17 @@ async fn telegram_enter_nonexistent_session_returns_error() {
 /// Unauthorized chat cannot enter sessions.
 #[tokio::test]
 async fn telegram_enter_session_unauthorized_is_denied() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let ids = create_fake_sessions(tmp.path(), 1);
     let (harness, _sender) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
 
+    // When
     let result = harness
         .handle_enter_session(UNAUTHORIZED_CHAT, &ids[0])
         .await;
 
+    // Then
     assert!(
         result.is_err(),
         "unauthorized chat must be denied entering a session"
@@ -1139,6 +1229,7 @@ fn harness_with_workflow_projects_and_agents(
 
 #[tokio::test]
 async fn telegram_branch_callback_work_on_selected_sets_selected_branch_to_work_on() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let sessions_base = tmp.path().join("sessions");
     std::fs::create_dir_all(&sessions_base).unwrap();
@@ -1190,6 +1281,7 @@ async fn telegram_branch_callback_work_on_selected_sets_selected_branch_to_work_
         .await
         .expect("intent callback");
 
+    // When
     // branch_idx=1 selects the first remote branch (origin/feature/test-branch);
     // the agent picker keyboard is shown instead of spawning (one allowed agent configured).
     harness
@@ -1197,6 +1289,7 @@ async fn telegram_branch_callback_work_on_selected_sets_selected_branch_to_work_
         .await
         .expect("branch callback");
 
+    // Then
     let cs = read_changeset(&session_dir).expect("read changeset after branch callback");
 
     assert!(
@@ -1225,6 +1318,7 @@ async fn telegram_branch_callback_work_on_selected_sets_selected_branch_to_work_
 
 #[tokio::test]
 async fn telegram_branch_callback_new_branch_from_base_sets_selected_integration_base_only() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let sessions_base = tmp.path().join("sessions");
     std::fs::create_dir_all(&sessions_base).unwrap();
@@ -1276,11 +1370,13 @@ async fn telegram_branch_callback_new_branch_from_base_sets_selected_integration
         .await
         .expect("intent callback");
 
+    // When
     harness
         .handle_telegram_branch_callback(AUTHORIZED_CHAT, 0, 0, 0, session_id)
         .await
         .expect("branch callback default integration base");
 
+    // Then
     let cs = read_changeset(&session_dir).expect("read changeset after branch callback");
     let wf = cs.workflow.as_ref().expect("workflow block");
     assert_eq!(
@@ -1303,6 +1399,7 @@ async fn telegram_branch_callback_new_branch_from_base_sets_selected_integration
 /// chain-base wiring.
 #[tokio::test]
 async fn telegram_chain_parent_tap_persists_previous_session_id_on_child() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let _ids = create_fake_sessions(tmp.path(), 2);
     let (mut harness, _sender) =
@@ -1331,6 +1428,7 @@ async fn telegram_chain_parent_tap_persists_previous_session_id_on_child() {
         callback_data: format!("tcp:p:{parent_tail}|s:{child_id}"),
     };
 
+    // When / Then
     harness
         .handle_chain_parent_callback(&child_dir, cb)
         .await
@@ -1339,9 +1437,12 @@ async fn telegram_chain_parent_tap_persists_previous_session_id_on_child() {
 
 #[test]
 fn parent_candidates_page_for_chain_picker_excludes_child_and_caps_page() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let ids = create_fake_sessions(tmp.path(), SESSIONS_PAGE_SIZE + 3);
     let exclude = &ids[2];
+
+    // When / Then
     let page = parent_candidates_page_for_chain_picker(tmp.path(), exclude.as_str())
         .expect("parent_candidates_page_for_chain_picker");
     assert_eq!(page.len(), SESSIONS_PAGE_SIZE);
@@ -1350,6 +1451,7 @@ fn parent_candidates_page_for_chain_picker_excludes_child_and_caps_page() {
 
 #[tokio::test]
 async fn telegram_chain_parent_callback_rejects_invalid_child_session_id_segment() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let (mut harness, _) = harness_with_sender(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf());
     let child_dir = unified_session_dir_path(tmp.path(), "child0001");
@@ -1361,6 +1463,7 @@ async fn telegram_chain_parent_callback_rejects_invalid_child_session_id_segment
         callback_data: "tcp:p:somtail|s:bad/id".to_string(),
     };
 
+    // When / Then
     let err = harness
         .handle_chain_parent_callback(&child_dir, cb)
         .await

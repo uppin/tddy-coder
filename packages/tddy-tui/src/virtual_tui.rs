@@ -901,6 +901,7 @@ mod tests {
 
     #[test]
     fn virtual_tui_cursor_only_frame_min_interval_avoids_flood() {
+        // When / Then
         assert!(
             virtual_tui_cursor_only_frame_min_interval() >= Duration::from_millis(50),
             "PRD: cursor-only frames must be throttled for Virtual Tui streams"
@@ -909,64 +910,96 @@ mod tests {
 
     #[test]
     fn parse_enter() {
+        // Given
         let mut buf = vec![b'\r'];
+
+        // When
         let (key, n) = parse_key_from_buf(&mut buf).unwrap();
+
+        // Then
         assert_eq!(n, 1);
         assert_eq!(key.code, KeyCode::Enter);
     }
 
     #[test]
     fn parse_page_up() {
+        // Given
         let mut buf = vec![0x1b, b'[', b'5', b'~'];
+
+        // When
         let (key, n) = parse_key_from_buf(&mut buf).unwrap();
+
+        // Then
         assert_eq!(n, 4);
         assert_eq!(key.code, KeyCode::PageUp);
     }
 
     #[test]
     fn parse_page_down() {
+        // Given
         let mut buf = vec![0x1b, b'[', b'6', b'~'];
+
+        // When
         let (key, n) = parse_key_from_buf(&mut buf).unwrap();
+
+        // Then
         assert_eq!(n, 4);
         assert_eq!(key.code, KeyCode::PageDown);
     }
 
     #[test]
     fn parse_backspace() {
+        // Given
         let mut buf = vec![0x7f];
+
+        // When
         let (key, n) = parse_key_from_buf(&mut buf).unwrap();
+
+        // Then
         assert_eq!(n, 1);
         assert_eq!(key.code, KeyCode::Backspace);
     }
 
     #[test]
     fn keys_after_backspace_are_still_parsed() {
+        // Given
         let mut buf = vec![0x7f, b'a'];
 
+        // When
         let (key1, consumed1) = parse_key_from_buf(&mut buf).unwrap();
         assert_eq!(key1.code, KeyCode::Backspace);
         buf.drain(..consumed1);
 
+        // Then
         let (key2, _) = parse_key_from_buf(&mut buf).unwrap();
         assert_eq!(key2.code, KeyCode::Char('a'));
     }
 
     #[test]
     fn parse_tab() {
+        // Given
         let mut buf = vec![b'\t'];
+
+        // When
         let (key, n) = parse_key_from_buf(&mut buf).unwrap();
+
+        // Then
         assert_eq!(n, 1);
         assert_eq!(key.code, KeyCode::Tab);
     }
 
     #[test]
     fn parse_resize_sequence() {
-        // \x1b]resize;120;30\x07
+        // Given — \x1b]resize;120;30\x07
         let buf = vec![
             0x1b, b']', b'r', b'e', b's', b'i', b'z', b'e', b';', b'1', b'2', b'0', b';', b'3',
             b'0', 0x07,
         ];
+
+        // When
         let (cols, rows, consumed) = parse_resize_from_buf(&buf).unwrap();
+
+        // Then
         assert_eq!(cols, 120);
         assert_eq!(rows, 30);
         assert_eq!(consumed, 16);
@@ -974,11 +1007,15 @@ mod tests {
 
     #[test]
     fn parse_sgr_mouse_press() {
-        // ESC [ < 0 ; 10 ; 5 M (left click at col 10, row 5)
+        // Given — ESC [ < 0 ; 10 ; 5 M (left click at col 10, row 5)
         let buf = vec![
             0x1b, b'[', b'<', b'0', b';', b'1', b'0', b';', b'5', b' ', b'M',
         ];
+
+        // When
         let (event, consumed) = parse_mouse_from_buf(&buf).unwrap();
+
+        // Then
         assert_eq!(consumed, 11);
         assert_eq!(event.row, 4); // 0-based
         assert_eq!(event.column, 9); // 0-based
@@ -990,11 +1027,15 @@ mod tests {
 
     #[test]
     fn parse_sgr_mouse_scroll_down() {
-        // ESC [ < 65 ; 1 ; 1 M (scroll down)
+        // Given — ESC [ < 65 ; 1 ; 1 M (scroll down)
         let buf = vec![
             0x1b, b'[', b'<', b'6', b'5', b';', b'1', b';', b'1', b' ', b'M',
         ];
+
+        // When
         let (event, consumed) = parse_mouse_from_buf(&buf).unwrap();
+
+        // Then
         assert_eq!(consumed, 11);
         assert!(matches!(
             event.kind,
@@ -1007,13 +1048,16 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::{TerminalOptions, Viewport};
 
+        // Given
         let backend = TestBackend::new(80, 24);
         let viewport = Viewport::Fixed(Rect::new(0, 0, 80, 24));
         let mut terminal = Terminal::with_options(backend, TerminalOptions { viewport }).unwrap();
-
         let mut prev_frame = vec![1u8, 2, 3];
+
+        // When
         apply_resize(&mut terminal, &mut prev_frame, 60, 12);
 
+        // Then
         assert!(
             prev_frame.is_empty(),
             "apply_resize must clear prev_frame so next render sends full frame"
@@ -1026,15 +1070,14 @@ mod tests {
         use ratatui::widgets::Paragraph;
         use ratatui::{TerminalOptions, Viewport};
 
-        // Use Fixed viewport (like virtual_tui) so resize() updates dimensions.
-        // Verifies resize+clear+draw contract: frame area matches resized dimensions.
+        // Given — Fixed viewport (like virtual_tui) so resize() updates dimensions.
         let backend = TestBackend::new(80, 24);
         let viewport = Viewport::Fixed(Rect::new(0, 0, 80, 24));
         let mut terminal = Terminal::with_options(backend, TerminalOptions { viewport }).unwrap();
 
+        // When
         terminal.resize(Rect::new(0, 0, 60, 12)).unwrap();
         terminal.clear().unwrap();
-
         let mut frame_area = Rect::default();
         terminal
             .draw(|f| {
@@ -1043,17 +1086,20 @@ mod tests {
             })
             .unwrap();
 
+        // Then
         assert_eq!(frame_area.width, 60, "frame width should match resize");
         assert_eq!(frame_area.height, 12, "frame height should match resize");
     }
 
     #[test]
     fn keys_after_mouse_release_are_still_parsed() {
+        // Given
         let mut buf = vec![
             0x1b, b'[', b'<', b'0', b';', b'1', b'0', b';', b'5', b' ', b'M', 0x1b, b'[', b'<',
             b'0', b';', b'1', b'0', b';', b'5', b' ', b'm', b'a',
         ];
 
+        // When / Then
         let (mouse1, consumed1) = parse_mouse_from_buf(&buf).unwrap();
         assert!(matches!(
             mouse1.kind,
@@ -1094,7 +1140,7 @@ mod tests {
         const TOTAL_LEN: usize = 1000;
         const NUM_SEGMENTS: usize = 10;
 
-        // Build segmented payload: "#SEG-0:aaa…#SEG-1:aaa…" totalling TOTAL_LEN chars.
+        // Given — segmented payload "#SEG-0:aaa…#SEG-1:aaa…" totalling TOTAL_LEN chars.
         let headers: Vec<String> = (0..NUM_SEGMENTS).map(|i| format!("#SEG-{}:", i)).collect();
         let header_chars: usize = headers.iter().map(|s| s.chars().count()).sum();
         let body_total = TOTAL_LEN - header_chars;
@@ -1135,20 +1181,20 @@ mod tests {
         let mut vs = ViewState::new();
         vs.feature_edit.set_plain_text(&input);
 
+        // When
         terminal
             .draw(|frame| draw(frame, &state, &mut vs, false, None))
             .unwrap();
 
         let buf = terminal.backend().buffer().clone();
 
-        // Determine prompt bar start row from layout (mirrors draw()'s own calculation).
+        // Then — every segment marker must appear in the rendered prompt bar.
         let area = ratatui::layout::Rect::new(0, 0, COLS, ROWS);
         let prompt_text = format!("> {}", input);
         let text_len = prompt_text.chars().count().min(u16::MAX as usize) as u16;
         let prompt_h = prompt_chunk_height_including_rule(text_len, COLS, ROWS);
         let (_, _, _, _, _, _, prompt_bar, _) = layout_chunks_with_inbox(area, 0, 0, prompt_h);
 
-        // Collect prompt text rows (exclude bottom horizontal-rule row) without whitespace.
         let prompt_compact: String = (prompt_bar.y
             ..prompt_bar.y + prompt_bar.height.saturating_sub(1))
             .flat_map(|row| {
@@ -1161,7 +1207,6 @@ mod tests {
             .filter(|c| !c.is_whitespace())
             .collect();
 
-        // Every segment marker must appear in the rendered prompt bar.
         for (i, header) in headers.iter().enumerate() {
             assert!(
                 prompt_compact.contains(header.as_str()),
@@ -1188,9 +1233,8 @@ mod tests {
         use tddy_core::presenter::{ActivityEntry, ActivityKind};
         use tddy_core::CriticalPresenterState;
 
+        // Given
         let (tx, mut rx) = tokio::sync::broadcast::channel(256);
-
-        // Shared critical state — the presenter keeps this up to date
         let critical_state = Arc::new(Mutex::new(CriticalPresenterState {
             current_goal: Some("acceptance-tests".to_string()),
             current_state: None,
@@ -1199,7 +1243,6 @@ mod tests {
         // GoalStarted is sent first (e.g. new TDD phase begins)
         tx.send(PresenterEvent::GoalStarted("acceptance-tests".to_string()))
             .unwrap();
-
         // Then a burst of 300 ActivityLogged events pushes GoalStarted out of the buffer
         for i in 0..300 {
             tx.send(PresenterEvent::ActivityLogged(ActivityEntry {
@@ -1228,6 +1271,7 @@ mod tests {
         let mut view = TuiView::new();
         let mut agent_output_merge = AgentOutputActivityLogMerge::new();
 
+        // When
         drain_presenter_broadcast(
             &mut rx,
             &mut state,
@@ -1236,6 +1280,7 @@ mod tests {
             &mut agent_output_merge,
         );
 
+        // Then
         assert_eq!(
             state.current_goal.as_deref(),
             Some("acceptance-tests"),

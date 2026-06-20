@@ -49,6 +49,7 @@ fn init_origin_master_repo(repo: &Path) {
 /// acceptance tests).
 #[test]
 fn chain_base_resolved_from_parent_session_changeset_branch() {
+    // Given
     let base = temp_dir("resolve-base");
     let repo = base.join("repo");
     init_origin_master_repo(&repo);
@@ -69,6 +70,8 @@ fn chain_base_resolved_from_parent_session_changeset_branch() {
         },
         ..Changeset::default()
     };
+
+    // When
     write_changeset(&parent_dir, &cs).unwrap();
 
     let origin_ref = resolve_chain_integration_base_ref_from_parent_session(
@@ -78,6 +81,7 @@ fn chain_base_resolved_from_parent_session_changeset_branch() {
     )
     .expect("must resolve origin/<branch> from parent session changeset + validate repo match");
 
+    // Then
     assert_eq!(origin_ref, "origin/feature/parent-stack");
 
     let _ = fs::remove_dir_all(&base);
@@ -87,6 +91,7 @@ fn chain_base_resolved_from_parent_session_changeset_branch() {
 /// fallback to default integration base).
 #[test]
 fn chain_rejected_when_parent_has_no_branch() {
+    // Given
     let base = temp_dir("no-branch");
     let repo = base.join("repo");
     init_origin_master_repo(&repo);
@@ -106,6 +111,8 @@ fn chain_rejected_when_parent_has_no_branch() {
         },
         ..Changeset::default()
     };
+
+    // When
     write_changeset(&parent_dir, &cs).unwrap();
 
     let err = resolve_chain_integration_base_ref_from_parent_session(
@@ -116,6 +123,8 @@ fn chain_rejected_when_parent_has_no_branch() {
     .expect_err("parent without branch must be rejected for chain workflow");
 
     let msg = err.to_string();
+
+    // Then
     assert!(
         msg.contains(
             "PRD acceptance copy: parent session must record a branch before chaining (operators: push or persist branch name)"
@@ -130,6 +139,7 @@ fn chain_rejected_when_parent_has_no_branch() {
 /// selected project repository; resolver must reject (stricter guard — changeset outstanding).
 #[test]
 fn chain_rejects_when_parent_changeset_omits_repo_path() {
+    // Given
     let base = temp_dir("no-repo-path");
     let repo = base.join("repo");
     init_origin_master_repo(&repo);
@@ -149,6 +159,8 @@ fn chain_rejects_when_parent_changeset_omits_repo_path() {
         },
         ..Changeset::default()
     };
+
+    // When
     write_changeset(&parent_dir, &cs).unwrap();
 
     let got = resolve_chain_integration_base_ref_from_parent_session(
@@ -156,6 +168,8 @@ fn chain_rejects_when_parent_changeset_omits_repo_path() {
         parent_id,
         &repo_canon,
     );
+
+    // Then
     assert!(
         got.is_err(),
         "expected rejection when parent changeset omits repo_path; got {got:?}"

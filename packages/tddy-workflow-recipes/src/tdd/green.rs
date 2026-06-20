@@ -97,7 +97,10 @@ mod tests {
 
     #[test]
     fn system_prompt_includes_green_goal_instructions() {
+        // When
         let prompt = system_prompt(true);
+
+        // Then
         assert!(
             prompt.contains("green") || prompt.contains("Implement"),
             "system prompt must instruct Claude for green goal"
@@ -106,7 +109,10 @@ mod tests {
 
     #[test]
     fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
+        // When
         let prompt = system_prompt(true);
+
+        // Then
         assert!(
             prompt.contains("tddy-tools get-schema green"),
             "system prompt must reference get-schema for green"

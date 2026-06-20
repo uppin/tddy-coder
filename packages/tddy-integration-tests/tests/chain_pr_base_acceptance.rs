@@ -91,6 +91,7 @@ fn merge_base_is_ancestor(repo: &Path, tip: &str, ancestor: &str) -> bool {
 /// effective ref for observability (same string as `resolve_default_integration_base_ref`).
 #[test]
 fn chain_pr_worktree_defaults_unchanged_when_base_not_selected() {
+    // Given
     let base = temp_dir("defaults-unchanged");
     let repo = base.join("repo");
     init_origin_master_repo(&repo);
@@ -98,6 +99,8 @@ fn chain_pr_worktree_defaults_unchanged_when_base_not_selected() {
     let session_dir = base.join("plan");
     fs::create_dir_all(&session_dir).unwrap();
     let cs = session_with_suggestions("Chain Default", "feature/chain-def", "feature-chain-def");
+
+    // When
     write_changeset(&session_dir, &cs).unwrap();
     fs::write(session_dir.join("PRD.md"), "# PRD\n## TODO\n- [ ] x\n").unwrap();
 
@@ -115,6 +118,8 @@ fn chain_pr_worktree_defaults_unchanged_when_base_not_selected() {
         .current_dir(&repo)
         .output()
         .unwrap();
+
+    // Then
     assert_eq!(
         String::from_utf8_lossy(&head_opt.stdout).trim(),
         String::from_utf8_lossy(&base_rev.stdout).trim(),
@@ -137,6 +142,7 @@ fn chain_pr_worktree_defaults_unchanged_when_base_not_selected() {
 /// the chosen `origin/...` ref (here `origin/feature/pr-base`), not only `origin/master`.
 #[test]
 fn chain_pr_worktree_branches_from_selected_origin_ref() {
+    // Given
     let base = temp_dir("branch-from-selected");
     let repo = base.join("repo");
     init_origin_master_and_feature_pr_base(&repo);
@@ -144,6 +150,8 @@ fn chain_pr_worktree_branches_from_selected_origin_ref() {
     let session_dir = base.join("plan");
     fs::create_dir_all(&session_dir).unwrap();
     let cs = session_with_suggestions("Chain Child", "feature/chain-child", "feature-chain-child");
+
+    // When
     write_changeset(&session_dir, &cs).unwrap();
     fs::write(session_dir.join("PRD.md"), "# PRD\n").unwrap();
 
@@ -166,6 +174,8 @@ fn chain_pr_worktree_branches_from_selected_origin_ref() {
         .output()
         .unwrap();
     let pr_base_s = String::from_utf8_lossy(&pr_base.stdout).trim().to_string();
+
+    // Then
     assert_eq!(
         head_s, pr_base_s,
         "worktree HEAD must equal the selected remote-tracking ref"
@@ -181,6 +191,7 @@ fn chain_pr_worktree_branches_from_selected_origin_ref() {
 /// **changeset_persists_worktree_base_choice** — User-selected base is written to `changeset.yaml`.
 #[test]
 fn chain_pr_changeset_persists_worktree_base_choice() {
+    // Given
     let base = temp_dir("persist-choice");
     let repo = base.join("repo");
     init_origin_master_and_feature_pr_base(&repo);
@@ -188,6 +199,8 @@ fn chain_pr_changeset_persists_worktree_base_choice() {
     let session_dir = base.join("plan");
     fs::create_dir_all(&session_dir).unwrap();
     let cs = session_with_suggestions("Persist", "feature/persist", "feature-persist");
+
+    // When
     write_changeset(&session_dir, &cs).unwrap();
     fs::write(session_dir.join("PRD.md"), "# PRD\n").unwrap();
 
@@ -199,6 +212,8 @@ fn chain_pr_changeset_persists_worktree_base_choice() {
     .expect("setup with chain base must succeed");
 
     let yaml = fs::read_to_string(session_dir.join("changeset.yaml")).unwrap();
+
+    // Then
     assert!(
         yaml.contains("worktree_integration_base_ref:") && yaml.contains("origin/feature/pr-base"),
         "changeset must persist canonical user-selected base ref; got:\n{}",
@@ -217,6 +232,9 @@ fn chain_pr_changeset_persists_worktree_base_choice() {
 /// **invalid_base_ref_rejected** — Multi-segment refs must be accepted when safe; empty rejected.
 #[test]
 fn chain_pr_invalid_base_ref_rejected() {
+    // Given
+
+    // Then
     assert!(
         validate_chain_pr_integration_base_ref("origin/feature/foo").is_ok(),
         "chain PRs require multi-segment origin refs"
@@ -230,6 +248,7 @@ fn chain_pr_invalid_base_ref_rejected() {
 /// **resume_uses_persisted_base** — Resume must not silently fall back to default main when a chain base was stored.
 #[test]
 fn chain_pr_resume_uses_persisted_base() {
+    // Given
     let base = temp_dir("resume-base");
     let repo = base.join("repo");
     init_origin_master_and_feature_pr_base(&repo);
@@ -239,12 +258,16 @@ fn chain_pr_resume_uses_persisted_base() {
     let mut cs = session_with_suggestions("Resume", "feature/resume", "feature-resume");
     cs.effective_worktree_integration_base_ref = Some("origin/feature/pr-base".to_string());
     cs.worktree_integration_base_ref = Some("origin/feature/pr-base".to_string());
+
+    // When
     write_changeset(&session_dir, &cs).unwrap();
     fs::write(session_dir.join("PRD.md"), "# PRD\n").unwrap();
 
     let resolved = resolve_persisted_worktree_integration_base_for_session(&session_dir, &repo)
         .expect("resume must resolve persisted integration base");
     let default = resolve_default_integration_base_ref(&repo).unwrap();
+
+    // Then
     assert_ne!(
         resolved, default,
         "after persisting a chain base, resume must not equal bare default resolution"

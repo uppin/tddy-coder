@@ -83,9 +83,14 @@ mod tests {
 
     #[test]
     fn tdd_small_graph_task_count_matches_full_topology() {
+        // Given
         let backend = Arc::new(StubBackend::new());
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddSmallRecipe);
+
+        // When
         let g = build_tdd_small_workflow_graph(backend, recipe);
+
+        // Then
         assert_eq!(
             g.task_ids().count(),
             7,

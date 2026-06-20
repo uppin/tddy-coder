@@ -208,6 +208,7 @@ pub fn run_event_loop(
 mod tests {
     #[test]
     fn local_tui_editing_cursor_policy_is_visible_for_text_edits() {
+        // When / Then
         assert_eq!(
             super::local_tui_editing_cursor_policy(),
             "visible",

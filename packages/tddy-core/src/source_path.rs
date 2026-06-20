@@ -67,6 +67,7 @@ mod tests {
 
     #[test]
     fn classify_integration_tests_tree_is_test_only() {
+        // When / Then
         assert_eq!(
             classify_rust_source_path("crates/foo/tests/bar.rs"),
             RustSourcePathKind::Test
@@ -75,6 +76,7 @@ mod tests {
 
     #[test]
     fn classify_src_lib_rs_is_production() {
+        // When / Then
         assert_eq!(
             classify_rust_source_path("packages/tddy-core/src/lib.rs"),
             RustSourcePathKind::Production

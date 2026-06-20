@@ -4,7 +4,10 @@ use tddy_workflow_recipes::schema_pipeline;
 
 #[test]
 fn each_expected_proto_file_exists_under_proto_root() {
+    // Given
     let root = schema_pipeline::proto_root();
+
+    // Then
     assert!(
         root.is_dir(),
         "expected proto root directory at {}",
@@ -22,7 +25,10 @@ fn each_expected_proto_file_exists_under_proto_root() {
 
 #[test]
 fn generated_schema_manifest_path_exists_after_pipeline() {
+    // When
     let p = schema_pipeline::generated_manifest_path();
+
+    // Then
     assert!(
         p.is_file(),
         "expected generated manifest at {} (PRD F2)",

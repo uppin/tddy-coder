@@ -55,6 +55,7 @@ fn presenter_with_recipe() -> Presenter {
 #[test]
 #[serial]
 fn skill_discovery_loads_agents_skills_directories() {
+    // Given
     let root = temp_project_root("discover");
     write_skill_md(
         &root,
@@ -64,7 +65,10 @@ fn skill_discovery_loads_agents_skills_directories() {
         "## UniqueHeading\n",
     );
 
+    // When
     let report = scan_skills_at_project_root(&root);
+
+    // Then
     assert_eq!(
         report.valid.len(),
         1,
@@ -87,6 +91,7 @@ fn skill_discovery_loads_agents_skills_directories() {
 #[test]
 #[serial]
 fn skill_frontmatter_rejects_name_folder_mismatch() {
+    // Given
     let root = temp_project_root("mismatch");
     write_skill_md(
         &root,
@@ -96,7 +101,10 @@ fn skill_frontmatter_rejects_name_folder_mismatch() {
         "## Body\n",
     );
 
+    // When
     let report = scan_skills_at_project_root(&root);
+
+    // Then
     assert!(
         !report.valid.iter().any(|s| s.name == "bar"),
         "must never expose mismatched frontmatter name as a valid skill: {:?}",
@@ -114,10 +122,14 @@ fn skill_frontmatter_rejects_name_folder_mismatch() {
 #[test]
 #[serial]
 fn slash_menu_lists_builtin_recipe_and_skills() {
+    // Given
     let root = temp_project_root("slash_menu");
     write_skill_md(&root, "foo", "foo", "Skill desc", "## SkillContent\n");
 
+    // When
     let items = slash_menu_items(&root);
+
+    // Then
     assert!(
         items
             .iter()
@@ -138,7 +150,10 @@ fn slash_menu_lists_builtin_recipe_and_skills() {
 #[test]
 #[serial]
 fn composed_prompt_tags_skill_and_path_without_inlining_body() {
+    // When
     let out = compose_prompt_skill_reference("foo", ".agents/skills/foo/SKILL.md", "Add login.");
+
+    // Then
     assert!(
         out.contains("[Skill: @.agents/skills/foo"),
         "composed prompt must use fully-qualified @.agents/skills/<name>; got:\n{out}"
@@ -165,7 +180,10 @@ fn composed_prompt_tags_skill_and_path_without_inlining_body() {
 #[test]
 #[serial]
 fn compose_prompt_with_selected_skill_still_inlines_body_when_requested() {
+    // Given
     let body = "## UniqueSkillBodyMarker\nDo the thing.\n";
+
+    // When
     let out = compose_prompt_with_selected_skill(
         "foo",
         ".agents/skills/foo/SKILL.md",
@@ -183,14 +201,17 @@ fn compose_prompt_with_selected_skill_still_inlines_body_when_requested() {
 #[test]
 #[serial]
 fn recipe_slash_triggers_recipe_selection_intent_or_mode() {
+    // Given
     let mut presenter = presenter_with_recipe();
     assert!(
         matches!(presenter.state().mode, AppMode::FeatureInput),
         "precondition: feature input mode"
     );
 
+    // When
     presenter.apply_feature_slash_builtin_recipe();
 
+    // Then
     let active = presenter.recipe_slash_selection_active();
     let mode = presenter.state().mode.clone();
     assert!(

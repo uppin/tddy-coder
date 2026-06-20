@@ -64,6 +64,7 @@ fn init_repo_with_main(repo: &Path) {
 
 #[test]
 fn work_on_selected_reuses_existing_worktree_at_branch_tip_instead_of_second_add() {
+    // Given
     let base = scratch("prefer");
     let repo = base.join("repo");
     fs::create_dir_all(&repo).unwrap();
@@ -110,7 +111,6 @@ fn work_on_selected_reuses_existing_worktree_at_branch_tip_instead_of_second_add
 
     let session_dir = base.join("session");
     fs::create_dir_all(&session_dir).unwrap();
-
     let cs = Changeset {
         name: Some("MergePR".into()),
         worktree_suggestion: Some("merge-pr-would-use-this-basename".into()),
@@ -135,17 +135,16 @@ selected_branch_to_work_on: origin/feature/oauth-test
     }
     fs::write(&path, raw).unwrap();
 
+    // When
     let wt = setup_worktree_for_session_with_integration_base(&repo, &session_dir, "origin/main")
         .expect("setup must reuse pre-existing worktree at same tip as selected ref");
 
+    // Then
     assert_eq!(
         wt.canonicalize().unwrap_or_else(|_| wt.clone()),
-        pre_existing
-            .canonicalize()
-            .unwrap_or_else(|_| pre_existing.clone()),
+        pre_existing.canonicalize().unwrap_or_else(|_| pre_existing.clone()),
         "must not create a second worktree under a new basename when one already holds the branch tip"
     );
-
     let list = Command::new("git")
         .args(["worktree", "list"])
         .current_dir(&repo)
@@ -163,6 +162,7 @@ selected_branch_to_work_on: origin/feature/oauth-test
 
 #[test]
 fn optional_chain_base_path_reuses_existing_worktree_for_work_on_selected() {
+    // Given
     let base = scratch("optional-chain");
     let repo = base.join("repo");
     fs::create_dir_all(&repo).unwrap();
@@ -209,7 +209,6 @@ fn optional_chain_base_path_reuses_existing_worktree_for_work_on_selected() {
 
     let session_dir = base.join("session");
     fs::create_dir_all(&session_dir).unwrap();
-
     let cs = Changeset {
         name: Some("MergePR".into()),
         worktree_suggestion: Some("merge-pr-would-use-this-basename".into()),
@@ -234,17 +233,16 @@ selected_branch_to_work_on: origin/feature/oauth-chain
     }
     fs::write(&path, raw).unwrap();
 
+    // When
     let wt = setup_worktree_for_session_with_optional_chain_base(&repo, &session_dir, None)
         .expect("optional-chain setup must reuse pre-existing worktree");
 
+    // Then
     assert_eq!(
         wt.canonicalize().unwrap_or_else(|_| wt.clone()),
-        pre_existing
-            .canonicalize()
-            .unwrap_or_else(|_| pre_existing.clone()),
+        pre_existing.canonicalize().unwrap_or_else(|_| pre_existing.clone()),
         "merge-pr-style entrypoint must not add a second worktree when one already matches the branch tip"
     );
-
     let list = Command::new("git")
         .args(["worktree", "list"])
         .current_dir(&repo)

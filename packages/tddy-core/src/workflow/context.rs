@@ -125,10 +125,15 @@ mod merge_json_tests {
 
     #[test]
     fn merge_json_object_sync_inserts_keys() {
+        // Given
         let ctx = Context::new();
         let mut map = serde_json::Map::new();
         map.insert("run_optional_step_x".to_string(), json!(true));
+
+        // When
         ctx.merge_json_object_sync(&map);
+
+        // Then
         assert_eq!(
             ctx.get_sync::<bool>("run_optional_step_x"),
             Some(true),

@@ -75,3 +75,6 @@ changeset.yaml
 # Optional workflow phase-2 scratch artifacts at repo root (local validation / harness output)
 /phase2-*
 .local-install/
+tmp
+local.bun.lock
+

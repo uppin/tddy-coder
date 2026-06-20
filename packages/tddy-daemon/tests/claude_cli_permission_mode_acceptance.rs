@@ -142,6 +142,7 @@ async fn wait_for_capture_contains(handle: &Arc<PtyHandle>, needle: &str, timeou
 /// the argv must contain `--permission-mode` followed by `auto`.
 #[test]
 fn build_claude_argv_default_permission_mode_is_auto() {
+    // When / Then
     let argv = ClaudeCliSessionManager::build_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
@@ -166,6 +167,7 @@ fn build_claude_argv_default_permission_mode_is_auto() {
 /// as-is to the `--permission-mode` flag.
 #[test]
 fn build_claude_argv_explicit_bypass_permissions() {
+    // When / Then
     let argv = ClaudeCliSessionManager::build_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
@@ -189,6 +191,7 @@ fn build_claude_argv_explicit_bypass_permissions() {
 /// **build_claude_argv_accept_edits_mode**: `Some("acceptEdits")` is passed as-is.
 #[test]
 fn build_claude_argv_accept_edits_mode() {
+    // When / Then
     let argv = ClaudeCliSessionManager::build_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
@@ -213,6 +216,7 @@ fn build_claude_argv_accept_edits_mode() {
 /// `None` — the mode defaults to `"auto"`.
 #[test]
 fn build_claude_argv_empty_string_defaults_to_auto() {
+    // When / Then
     let argv = ClaudeCliSessionManager::build_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
@@ -237,6 +241,7 @@ fn build_claude_argv_empty_string_defaults_to_auto() {
 /// trimmed to empty and defaults to `"auto"`.
 #[test]
 fn build_claude_argv_whitespace_defaults_to_auto() {
+    // When / Then
     let argv = ClaudeCliSessionManager::build_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
@@ -262,6 +267,7 @@ fn build_claude_argv_whitespace_defaults_to_auto() {
 /// argument so the `claude` binary parses flags before positional args.
 #[test]
 fn build_claude_argv_permission_mode_before_positional_prompt() {
+    // When / Then
     let argv = ClaudeCliSessionManager::build_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
@@ -291,6 +297,7 @@ fn build_claude_argv_permission_mode_before_positional_prompt() {
 /// must appear exactly once in the built argv — no duplicate flags.
 #[test]
 fn build_claude_argv_permission_mode_appears_once() {
+    // When / Then
     let argv = ClaudeCliSessionManager::build_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
@@ -316,11 +323,13 @@ fn build_claude_argv_permission_mode_appears_once() {
 /// its `$@`.
 #[tokio::test]
 async fn claude_cli_session_pty_argv_includes_default_permission_mode() {
+    // Given
     let stub_dir = tempfile::tempdir().unwrap();
     let stub_path = write_echo_argv_script(stub_dir.path());
     let worktree_dir = tempfile::tempdir().unwrap();
     let manager = ClaudeCliSessionManager::new();
 
+    // When
     let handle = manager
         .start(
             "perm-mode-default-pty",
@@ -333,6 +342,7 @@ async fn claude_cli_session_pty_argv_includes_default_permission_mode() {
         .await
         .expect("start with echo-argv stub and no permission_mode must succeed");
 
+    // Then
     let found = wait_for_capture_contains(&handle, "ARGV:", 2000).await;
     assert!(
         found,
@@ -358,11 +368,13 @@ async fn claude_cli_session_pty_argv_includes_default_permission_mode() {
 /// `--permission-mode bypassPermissions` in its `$@`.
 #[tokio::test]
 async fn claude_cli_session_pty_argv_includes_explicit_permission_mode() {
+    // Given
     let stub_dir = tempfile::tempdir().unwrap();
     let stub_path = write_echo_argv_script(stub_dir.path());
     let worktree_dir = tempfile::tempdir().unwrap();
     let manager = ClaudeCliSessionManager::new();
 
+    // When
     let handle = manager
         .start(
             "perm-mode-bypass-pty",
@@ -375,6 +387,7 @@ async fn claude_cli_session_pty_argv_includes_explicit_permission_mode() {
         .await
         .expect("start with bypassPermissions must succeed");
 
+    // Then
     let found = wait_for_capture_contains(&handle, "ARGV:", 2000).await;
     assert!(found, "stub script must write ARGV: within 2s");
 
@@ -397,6 +410,7 @@ async fn claude_cli_session_pty_argv_includes_explicit_permission_mode() {
 #[tokio::test]
 #[serial_test::serial]
 async fn start_session_rpc_threads_permission_mode_to_pty() {
+    // Given
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
 
@@ -418,6 +432,7 @@ async fn start_session_rpc_threads_permission_mode_to_pty() {
         Arc::clone(&shared_manager),
     );
 
+    // When
     let resp = service
         .start_session(Request::new(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -438,6 +453,7 @@ async fn start_session_rpc_threads_permission_mode_to_pty() {
         .await
         .expect("StartSession with permission_mode must succeed");
 
+    // Then
     let session_id = resp.into_inner().session_id;
     let handle = shared_manager
         .get(&session_id)
@@ -465,6 +481,7 @@ async fn start_session_rpc_threads_permission_mode_to_pty() {
 /// Defines the canonical arg order: binary --model m --session-id id --permission-mode auto
 #[test]
 fn build_claude_argv_exact_structure_default_mode_no_prompt() {
+    // When / Then
     let argv = ClaudeCliSessionManager::build_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
@@ -492,6 +509,7 @@ fn build_claude_argv_exact_structure_default_mode_no_prompt() {
 /// the prompt comes last after all flags.
 #[test]
 fn build_claude_argv_exact_structure_bypass_with_prompt() {
+    // When / Then
     let argv = ClaudeCliSessionManager::build_claude_argv(
         "claude",
         "claude-opus-4-8",
@@ -520,6 +538,7 @@ fn build_claude_argv_exact_structure_bypass_with_prompt() {
 /// --permission-mode is still present.
 #[test]
 fn build_claude_argv_exact_structure_no_model() {
+    // When / Then
     let argv = ClaudeCliSessionManager::build_claude_argv(
         "claude",
         "", // empty model → --model flag omitted
@@ -544,6 +563,7 @@ fn build_claude_argv_exact_structure_no_model() {
 /// **build_claude_argv_plan_mode**: `"plan"` (read-only, no execution) is passed through.
 #[test]
 fn build_claude_argv_plan_mode() {
+    // When / Then
     let argv = ClaudeCliSessionManager::build_claude_argv(
         "claude",
         "claude-opus-4-8",
@@ -568,6 +588,7 @@ fn build_claude_argv_plan_mode() {
 /// prompts before every tool use) is distinct from `None` (which becomes `"auto"`).
 #[test]
 fn build_claude_argv_default_mode_string() {
+    // When / Then
     let argv_explicit_default = ClaudeCliSessionManager::build_claude_argv(
         "claude",
         "claude-opus-4-8",
@@ -614,6 +635,7 @@ fn build_claude_argv_default_mode_string() {
 /// This test verifies resume does not accidentally replay the initial permission_mode.
 #[tokio::test]
 async fn resume_pty_argv_uses_default_permission_mode() {
+    // Given
     let stub_dir = tempfile::tempdir().unwrap();
     let stub_path = write_echo_argv_script(stub_dir.path());
     let worktree_dir = tempfile::tempdir().unwrap();
@@ -632,7 +654,7 @@ async fn resume_pty_argv_uses_default_permission_mode() {
         .await
         .expect("initial start with bypassPermissions must succeed");
 
-    // Resume — resume() signature has no permission_mode parameter; always uses the default.
+    // When — resume() signature has no permission_mode parameter; always uses the default.
     let handle2 = manager
         .resume(
             "perm-resume-test",
@@ -643,6 +665,7 @@ async fn resume_pty_argv_uses_default_permission_mode() {
         .await
         .expect("resume must succeed without permission_mode");
 
+    // Then
     let found = wait_for_capture_contains(&handle2, "ARGV:", 2000).await;
     assert!(found, "stub script must write ARGV: within 2s on resume");
 

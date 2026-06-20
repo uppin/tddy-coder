@@ -488,47 +488,75 @@ mod tests {
 
     #[test]
     fn build_args_includes_model_when_set() {
+        // Given
         let request = minimal_request("plan", Some("composer-2"), "test", hints_tdd_plan_goal());
+
+        // When
         let args = build_cursor_cli_args(&request, "test prompt");
+
+        // Then
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"composer-2".to_string()));
     }
 
     #[test]
     fn build_args_omits_model_when_none() {
+        // Given
         let request = minimal_request("plan", None, "test", hints_tdd_plan_goal());
+
+        // When
         let args = build_cursor_cli_args(&request, "test prompt");
+
+        // Then
         assert!(!args.contains(&"--model".to_string()));
     }
 
     #[test]
     fn build_args_plan_includes_plan_flag_when_recipe_sets_planning_intent() {
+        // Given
         let request = minimal_request("plan", None, "x", hints_tdd_plan_goal());
+
+        // When
         let args = build_cursor_cli_args(&request, "p");
+
+        // Then
         assert!(args.contains(&"--plan".to_string()));
     }
 
     #[test]
     fn build_args_session_fresh_omits_session_flags() {
+        // Given
         let mut request = minimal_request("red", None, "x", hints_tdd_red_goal());
         request.session = Some(SessionMode::Fresh("sid-1".to_string()));
+
+        // When
         let args = build_cursor_cli_args(&request, "p");
+
+        // Then
         assert!(!args.iter().any(|a| a == "--session-id"));
         assert!(!args.iter().any(|a| a == "--resume"));
     }
 
     #[test]
     fn build_args_session_resume_includes_resume() {
+        // Given
         let mut request = minimal_request("red", None, "x", hints_tdd_red_goal());
         request.session = Some(SessionMode::Resume("resume-id".to_string()));
+
+        // When
         let args = build_cursor_cli_args(&request, "p");
+
+        // Then
         assert!(args.iter().any(|a| a == "--resume"));
         assert!(args.contains(&"resume-id".to_string()));
     }
 
     #[test]
     fn default_cursor_cli_binary_on_path_is_agent() {
+        // When
         let backend = CursorBackend::new();
+
+        // Then
         assert_eq!(
             backend.binary_path,
             std::path::PathBuf::from("agent"),

@@ -959,11 +959,13 @@ pub fn session_chaining_phase2_tui_chain_parity_ready() -> bool {
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
+    use rstest::rstest;
 
     use super::*;
 
     #[test]
     fn feature_input_ctrl_c_not_inserted_as_text() {
+        // Given
         let mut vs = ViewState::new();
         vs.on_mode_changed(&AppMode::FeatureInput);
         let ctrl_c = KeyEvent::new_with_kind(
@@ -971,6 +973,8 @@ mod tests {
             KeyModifiers::CONTROL,
             KeyEventKind::Press,
         );
+
+        // When / Then
         assert!(
             !vs.handle_key_view_local(ctrl_c, &AppMode::FeatureInput, 0, false, None),
             "Ctrl+C must not be consumed as text; key_map handles Quit"
@@ -980,7 +984,10 @@ mod tests {
 
     #[test]
     fn view_state_default() {
+        // When
         let vs = ViewState::new();
+
+        // Then
         assert_eq!(vs.scroll_offset, 0);
         assert!(vs.feature_edit.display().is_empty());
         assert_eq!(vs.feature_edit.cursor, 0);
@@ -988,26 +995,35 @@ mod tests {
 
     #[test]
     fn view_state_on_mode_changed_feature_input() {
+        // Given
         let mut vs = ViewState::new();
         vs.feature_edit.set_plain_text("old");
+
+        // When
         vs.on_mode_changed(&AppMode::FeatureInput);
+
+        // Then
         assert!(vs.feature_edit.display().is_empty());
         assert_eq!(vs.feature_edit.cursor, 0);
     }
 
     #[test]
     fn feature_input_handles_multi_byte_utf8() {
+        // Given
         let mut vs = ViewState::new();
         vs.on_mode_changed(&AppMode::FeatureInput);
         // Emoji is 4 bytes in UTF-8; cursor was incremented by 1 before fix, causing panic on next insert
         let emoji = KeyEvent::new(KeyCode::Char('😀'), KeyModifiers::empty());
         let a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty());
+
+        // When
         assert!(vs.handle_key_view_local(emoji, &AppMode::FeatureInput, 0, false, None));
         assert_eq!(vs.feature_edit.display(), "😀");
         assert_eq!(vs.feature_edit.cursor, 4); // byte index
         assert!(vs.handle_key_view_local(a, &AppMode::FeatureInput, 0, false, None));
         assert_eq!(vs.feature_edit.display(), "😀a");
-        // Backspace removes 'a', Left moves to start of emoji
+
+        // Then — Backspace removes 'a', Left moves to start of emoji
         let backspace = KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty());
         assert!(vs.handle_key_view_local(backspace, &AppMode::FeatureInput, 0, false, None));
         assert_eq!(vs.feature_edit.display(), "😀");
@@ -1018,17 +1034,23 @@ mod tests {
 
     #[test]
     fn page_down_scrolls_markdown_viewer_body() {
+        // Given
         let mut vs = ViewState::new();
         let mode = AppMode::MarkdownViewer {
             content: "test content".to_string(),
         };
         let pg = KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty());
+
+        // When
         vs.handle_key_view_local(pg, &mode, 0, false, None);
+
+        // Then
         assert_eq!(vs.markdown_scroll_offset, 10);
     }
 
     #[test]
     fn markdown_viewer_inserts_plain_a_into_refinement_buffer() {
+        // Given
         let mut vs = ViewState::new();
         let mode = AppMode::MarkdownViewer {
             content: "# p".to_string(),
@@ -1038,12 +1060,15 @@ mod tests {
             KeyModifiers::empty(),
             KeyEventKind::Press,
         );
+
+        // When / Then
         assert!(vs.handle_key_view_local(key, &mode, 0, false, None));
         assert_eq!(vs.plan_refinement_input, "a");
     }
 
     #[test]
     fn markdown_viewer_inserts_plain_r_into_refinement_buffer() {
+        // Given
         let mut vs = ViewState::new();
         let mode = AppMode::MarkdownViewer {
             content: "# p".to_string(),
@@ -1053,12 +1078,15 @@ mod tests {
             KeyModifiers::empty(),
             KeyEventKind::Press,
         );
+
+        // When / Then
         assert!(vs.handle_key_view_local(key, &mode, 0, false, None));
         assert_eq!(vs.plan_refinement_input, "r");
     }
 
     #[test]
     fn markdown_viewer_accepts_text_for_refinement_while_prd_stays_open() {
+        // Given
         let mut vs = ViewState::new();
         let mode = AppMode::MarkdownViewer {
             content: "# My PRD".to_string(),
@@ -1068,6 +1096,8 @@ mod tests {
             KeyModifiers::empty(),
             KeyEventKind::Press,
         );
+
+        // When / Then
         assert!(
             vs.handle_key_view_local(key, &mode, 0, false, None),
             "printable keys should update the refinement buffer while the PRD remains visible"
@@ -1077,6 +1107,7 @@ mod tests {
 
     #[test]
     fn markdown_viewer_backspace_edits_refinement_buffer_without_pending_flag() {
+        // Given
         let mut vs = ViewState::new();
         vs.plan_refinement_input = "hi".to_string();
         vs.plan_refinement_cursor = 2;
@@ -1088,6 +1119,8 @@ mod tests {
             KeyModifiers::empty(),
             KeyEventKind::Press,
         );
+
+        // When / Then
         assert!(vs.handle_key_view_local(bs, &mode, 0, false, None));
         assert_eq!(vs.plan_refinement_input, "h");
         assert_eq!(vs.plan_refinement_cursor, 1);
@@ -1095,6 +1128,7 @@ mod tests {
 
     #[test]
     fn markdown_viewer_space_inserts_into_refinement_buffer_without_pending_flag() {
+        // Given
         let mut vs = ViewState::new();
         vs.plan_refinement_input = "a".to_string();
         vs.plan_refinement_cursor = 1;
@@ -1106,6 +1140,8 @@ mod tests {
             KeyModifiers::empty(),
             KeyEventKind::Press,
         );
+
+        // When / Then
         assert!(vs.handle_key_view_local(sp, &mode, 0, false, None));
         assert_eq!(vs.plan_refinement_input, "a ");
         assert_eq!(vs.plan_refinement_cursor, 2);
@@ -1114,12 +1150,15 @@ mod tests {
 
     #[test]
     fn markdown_viewer_scroll_does_not_use_space_or_line_arrows() {
+        // Given
         let mut vs = ViewState::new();
         vs.markdown_at_end = false;
         vs.markdown_scroll_offset = 100;
         let mode = AppMode::MarkdownViewer {
             content: "# p".to_string(),
         };
+
+        // When / Then
         let space = KeyEvent::new_with_kind(
             KeyCode::Char(' '),
             KeyModifiers::empty(),
@@ -1149,18 +1188,24 @@ mod tests {
 
     #[test]
     fn down_arrow_navigates_buttons_when_at_end() {
+        // Given
         let mut vs = ViewState::new();
         vs.markdown_at_end = true;
         let mode = AppMode::MarkdownViewer {
             content: "test content".to_string(),
         };
         let down = KeyEvent::new(KeyCode::Down, KeyModifiers::empty());
+
+        // When
         vs.handle_key_view_local(down, &mode, 0, false, None);
+
+        // Then
         assert_eq!(vs.markdown_end_button_selected, 1);
     }
 
     #[test]
     fn up_arrow_navigates_buttons_when_at_end() {
+        // Given
         let mut vs = ViewState::new();
         vs.markdown_at_end = true;
         vs.markdown_end_button_selected = 1;
@@ -1168,64 +1213,73 @@ mod tests {
             content: "test content".to_string(),
         };
         let up = KeyEvent::new(KeyCode::Up, KeyModifiers::empty());
+
+        // When
         vs.handle_key_view_local(up, &mode, 0, false, None);
+
+        // Then
         assert_eq!(vs.markdown_end_button_selected, 0);
     }
 
     #[test]
-    fn test_error_recovery_view_state_reset() {
+    fn error_recovery_mode_change_resets_selection_index_to_zero() {
+        // Given
         let mut vs = ViewState::new();
         vs.error_recovery_selected = 1;
         let mode = AppMode::ErrorRecovery {
             error_message: "failed".to_string(),
         };
+
+        // When
         vs.on_mode_changed(&mode);
-        assert_eq!(vs.error_recovery_selected, 0);
+
+        // Then
+        assert_eq!(
+            vs.error_recovery_selected, 0,
+            "entering error recovery must reset selection to first option"
+        );
     }
 
-    #[test]
-    fn test_error_recovery_up_down_three_options() {
+    #[rstest]
+    #[case::down_from_resume(0, KeyCode::Down, 1)]
+    #[case::down_from_continue(1, KeyCode::Down, 2)]
+    #[case::down_wraps_from_exit(2, KeyCode::Down, 0)]
+    #[case::up_wraps_from_resume(0, KeyCode::Up, 2)]
+    #[case::up_from_exit(2, KeyCode::Up, 1)]
+    #[case::up_from_continue(1, KeyCode::Up, 0)]
+    fn error_recovery_up_down_cycles_through_three_options(
+        #[case] start: usize,
+        #[case] key_code: KeyCode,
+        #[case] expected: usize,
+    ) {
+        // Given
         let mut vs = ViewState::new();
+        vs.error_recovery_selected = start;
         let mode = AppMode::ErrorRecovery {
             error_message: "failed".to_string(),
         };
-        let down = KeyEvent::new(KeyCode::Down, KeyModifiers::empty());
-        let up = KeyEvent::new(KeyCode::Up, KeyModifiers::empty());
+        let key = KeyEvent::new(key_code, KeyModifiers::empty());
 
-        // Start at 0 (Resume), Down → 1 (Continue with agent)
-        vs.handle_key_view_local(down, &mode, 0, false, None);
-        assert_eq!(vs.error_recovery_selected, 1);
+        // When
+        vs.handle_key_view_local(key, &mode, 0, false, None);
 
-        // Down → 2 (Exit)
-        vs.handle_key_view_local(down, &mode, 0, false, None);
-        assert_eq!(vs.error_recovery_selected, 2);
-
-        // Down → wraps to 0
-        vs.handle_key_view_local(down, &mode, 0, false, None);
-        assert_eq!(vs.error_recovery_selected, 0);
-
-        // Up from 0 → wraps to 2
-        vs.handle_key_view_local(up, &mode, 0, false, None);
-        assert_eq!(vs.error_recovery_selected, 2);
-
-        // Up from 2 → 1
-        vs.handle_key_view_local(up, &mode, 0, false, None);
-        assert_eq!(vs.error_recovery_selected, 1);
-
-        // Up from 1 → 0
-        vs.handle_key_view_local(up, &mode, 0, false, None);
-        assert_eq!(vs.error_recovery_selected, 0);
+        // Then
+        assert_eq!(vs.error_recovery_selected, expected);
     }
 
     #[test]
     fn feature_slash_opens_at_line_start_lists_recipe() {
         use std::fs;
+
+        // Given
         let mut vs = ViewState::new();
         let root = std::env::temp_dir().join(format!("tddy-slash-ui-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join(".agents/skills")).expect("mkdir");
         vs.on_mode_changed(&AppMode::FeatureInput);
         let slash = KeyEvent::new(KeyCode::Char('/'), KeyModifiers::empty());
+
+        // When
         assert!(vs.handle_key_view_local(
             slash,
             &AppMode::FeatureInput,
@@ -1233,6 +1287,8 @@ mod tests {
             false,
             Some(root.as_path())
         ));
+
+        // Then
         assert!(vs.feature_slash_open);
         assert!(
             vs.feature_slash_entries
@@ -1257,6 +1313,8 @@ mod tests {
     #[test]
     fn tui_chain_slash_offers_recent_sessions() {
         use std::fs;
+
+        // Given
         let mut vs = ViewState::new();
         let root =
             std::env::temp_dir().join(format!("tddy-chain-slash-menu-{}", std::process::id()));
@@ -1264,6 +1322,8 @@ mod tests {
         fs::create_dir_all(root.join(".agents/skills")).expect("mkdir skills");
         vs.on_mode_changed(&AppMode::FeatureInput);
         let slash = KeyEvent::new(KeyCode::Char('/'), KeyModifiers::empty());
+
+        // When
         assert!(vs.handle_key_view_local(
             slash,
             &AppMode::FeatureInput,
@@ -1271,6 +1331,8 @@ mod tests {
             false,
             Some(root.as_path())
         ));
+
+        // Then
         assert!(vs.feature_slash_open);
         assert!(
             vs.feature_slash_entries.iter().any(|e| matches!(
@@ -1285,8 +1347,11 @@ mod tests {
 
     #[test]
     fn feature_slash_mid_word_does_not_open() {
+        // Given
         let mut vs = ViewState::new();
         vs.on_mode_changed(&AppMode::FeatureInput);
+
+        // When
         vs.handle_key_view_local(
             KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty()),
             &AppMode::FeatureInput,
@@ -1301,11 +1366,14 @@ mod tests {
             false,
             None,
         );
+
+        // Then
         assert!(!vs.feature_slash_open);
     }
 
     #[test]
     fn feature_slash_enter_on_parsed_start_line_yields_submit_not_menu_confirm() {
+        // Given
         let mut vs = ViewState::new();
         vs.on_mode_changed(&AppMode::FeatureInput);
         vs.feature_edit.set_plain_text("/start-tdd a todo app");
@@ -1314,6 +1382,8 @@ mod tests {
         vs.feature_slash_trigger_byte = 0;
         let enter =
             KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::empty(), KeyEventKind::Press);
+
+        // When / Then
         assert!(
             !vs.handle_key_view_local(enter, &AppMode::FeatureInput, 0, false, None),
             "Enter must propagate to SubmitFeatureInput when the buffer is a full /start- line"

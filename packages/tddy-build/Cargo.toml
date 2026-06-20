@@ -23,5 +23,10 @@ uuid = { version = "1", features = ["v7"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "fs", "sync", "time", "io-util"] }
 futures = "0.3"
 
+[dev-dependencies]
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }
+tddy-testing-commons = { path = "../tddy-testing-commons" }
+
 [build-dependencies]
 prost-build = "0.13"

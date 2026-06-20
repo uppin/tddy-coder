@@ -32,6 +32,7 @@ mod livekit_tests {
     #[tokio::test]
     #[serial]
     async fn server_connects_via_token_generator() -> Result<()> {
+        // Given
         let livekit = LiveKitTestkit::start().await?;
         let url = livekit.get_ws_url();
 
@@ -43,6 +44,7 @@ mod livekit_tests {
             Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
         );
 
+        // When — server connects using TokenGenerator (not a pre-generated token)
         let shutdown = Arc::new(AtomicBool::new(false));
         let server_handle = tokio::spawn({
             let url = url.clone();
@@ -80,6 +82,7 @@ mod livekit_tests {
 
         server_handle.abort();
 
+        // Then — the server participant is visible in the room
         assert!(
             client_room.remote_participants().contains_key(&target),
             "Server participant should be visible when connecting via TokenGenerator"

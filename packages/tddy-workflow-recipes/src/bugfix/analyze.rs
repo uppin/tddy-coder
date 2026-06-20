@@ -153,6 +153,7 @@ mod tests {
 
     #[test]
     fn apply_analyze_submit_errors_on_empty_response() {
+        // Given
         let dir = temp_session_dir("bugfix-empty-resp");
         let tr = TaskResult {
             response: String::new(),
@@ -160,7 +161,11 @@ mod tests {
             task_id: "analyze".into(),
             status_message: None,
         };
+
+        // When
         let err = apply_analyze_submit_to_changeset(&dir, &tr).unwrap_err();
+
+        // Then
         assert!(
             err.to_string().contains("empty"),
             "expected empty response error, got {:?}",
@@ -170,6 +175,7 @@ mod tests {
 
     #[test]
     fn apply_analyze_submit_errors_on_invalid_json() {
+        // Given
         let dir = temp_session_dir("bugfix-bad-json");
         let tr = TaskResult {
             response: "not json".into(),
@@ -177,11 +183,14 @@ mod tests {
             task_id: "analyze".into(),
             status_message: None,
         };
+
+        // When / Then
         assert!(apply_analyze_submit_to_changeset(&dir, &tr).is_err());
     }
 
     #[test]
     fn apply_analyze_submit_persists_summary_artifact() {
+        // Given
         let dir = temp_session_dir("bugfix-summary-art");
         let tr = TaskResult {
             response: r#"{"goal":"analyze","branch_suggestion":"b","worktree_suggestion":"w","summary":"One-line triage"}"#
@@ -190,8 +199,12 @@ mod tests {
             task_id: "analyze".into(),
             status_message: None,
         };
+
+        // When
         apply_analyze_submit_to_changeset(&dir, &tr).expect("apply");
         let cs = read_changeset(&dir).expect("read");
+
+        // Then
         assert_eq!(
             cs.artifacts.get("analyze_summary").map(String::as_str),
             Some("One-line triage")

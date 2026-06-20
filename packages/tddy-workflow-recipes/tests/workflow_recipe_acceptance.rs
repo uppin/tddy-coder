@@ -10,20 +10,34 @@ use tddy_workflow_recipes::{
 
 #[test]
 fn recipe_resolve_accepts_free_prompting_and_rejects_unknown() {
-    let err = unknown_workflow_recipe_error("totally-unknown-recipe");
+    // Given
+    let unknown = "totally-unknown-recipe";
+
+    // When
+    let err = unknown_workflow_recipe_error(unknown);
+
+    // Then
+    assert!(err.contains("tdd"), "error must list 'tdd': {err}");
+    assert!(err.contains("bugfix"), "error must list 'bugfix': {err}");
     assert!(
-        err.contains("tdd")
-            && err.contains("bugfix")
-            && err.contains("free-prompting")
-            && err.contains("grill-me")
-            && err.contains("tdd-small")
-            && err.contains("review")
-            && err.contains("merge-pr"),
-        "unknown recipe errors must list every supported workflow recipe: {}",
-        err
+        err.contains("free-prompting"),
+        "error must list 'free-prompting': {err}"
     );
     assert!(
-        workflow_recipe_and_manifest_from_cli_name("totally-unknown-recipe").is_err(),
+        err.contains("grill-me"),
+        "error must list 'grill-me': {err}"
+    );
+    assert!(
+        err.contains("tdd-small"),
+        "error must list 'tdd-small': {err}"
+    );
+    assert!(err.contains("review"), "error must list 'review': {err}");
+    assert!(
+        err.contains("merge-pr"),
+        "error must list 'merge-pr': {err}"
+    );
+    assert!(
+        workflow_recipe_and_manifest_from_cli_name(unknown).is_err(),
         "unknown names must not resolve"
     );
     let resolved = workflow_recipe_and_manifest_from_cli_name("free-prompting");
@@ -36,8 +50,11 @@ fn recipe_resolve_accepts_free_prompting_and_rejects_unknown() {
 
 #[test]
 fn free_prompting_recipe_resolves_and_reports_prompting_state() {
+    // When
     let (recipe, _manifest) = workflow_recipe_and_manifest_from_cli_name("free-prompting")
         .expect("free-prompting must resolve");
+
+    // Then
     assert_eq!(recipe.name(), "free-prompting");
     assert_eq!(
         recipe.start_goal().as_str(),
@@ -53,8 +70,11 @@ fn free_prompting_recipe_resolves_and_reports_prompting_state() {
 
 #[test]
 fn grill_me_recipe_resolves_and_reports_grill_me_state() {
+    // When
     let (recipe, manifest) =
         workflow_recipe_and_manifest_from_cli_name("grill-me").expect("grill-me must resolve");
+
+    // Then
     assert_eq!(recipe.name(), "grill-me");
     assert_eq!(recipe.start_goal().as_str(), "grill");
     assert_eq!(recipe.initial_state().as_str(), "Grill");
@@ -75,17 +95,22 @@ fn grill_me_recipe_resolves_and_reports_grill_me_state() {
 /// PRD: `tdd-small` resolves to a distinct recipe + manifest; `recipe.name()` is `tdd-small`.
 #[test]
 fn resolve_tdd_small_recipe() {
-    let resolved = workflow_recipe_and_manifest_from_cli_name("tdd-small");
-    let (recipe, _manifest) =
-        resolved.expect("tdd-small must resolve via workflow_recipe_and_manifest_from_cli_name");
+    // When
+    let (recipe, _manifest) = workflow_recipe_and_manifest_from_cli_name("tdd-small")
+        .expect("tdd-small must resolve via workflow_recipe_and_manifest_from_cli_name");
+
+    // Then
     assert_eq!(recipe.name(), "tdd-small");
 }
 
 /// PRD: `workflow_recipe_and_manifest_from_cli_name("review")` succeeds; `ReviewRecipe` contract for name, manifest, elicitation vs submit.
 #[test]
 fn workflow_recipe_resolves_review() {
+    // When
     let (recipe, manifest) =
         workflow_recipe_and_manifest_from_cli_name("review").expect("review must resolve");
+
+    // Then
     assert_eq!(recipe.name(), "review");
     assert!(
         !recipe.start_goal().as_str().is_empty(),
@@ -104,8 +129,11 @@ fn workflow_recipe_resolves_review() {
 /// PRD: first turn is elicitation (no structured submit), like grill-me **Grill**; completion uses `branch-review` submit.
 #[test]
 fn review_recipe_elicitation_parity_with_grill_me() {
+    // Given
     let (recipe, _) =
         workflow_recipe_and_manifest_from_cli_name("review").expect("review must resolve");
+
+    // Then
     assert!(
         !recipe.goal_requires_tddy_tools_submit(&recipe.start_goal()),
         "review start goal must allow elicitation without structured submit (grill-me parity)"

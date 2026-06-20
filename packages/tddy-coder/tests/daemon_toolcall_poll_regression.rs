@@ -19,7 +19,10 @@ fn run_daemon_source() -> &'static str {
 
 #[test]
 fn run_daemon_presenter_loop_polls_tool_calls() {
+    // When
     let body = run_daemon_source();
+
+    // Then
     assert!(
         body.contains("p.poll_tool_calls()"),
         "run_daemon's presenter thread must call Presenter::poll_tool_calls() the same way as \

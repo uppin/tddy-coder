@@ -1251,6 +1251,7 @@ mod tests {
 
     #[test]
     fn resolve_response_identity_uses_sender_identity_from_request_when_present() {
+        // Given a request with sender_identity set and multiple remote participants
         let request = RpcRequest {
             request_id: 1,
             request_message: vec![],
@@ -1265,7 +1266,11 @@ mod tests {
         };
         let event_participant = Some("client2".to_string().into());
         let remote_identities = vec!["client1".to_string().into(), "client2".to_string().into()];
+
+        // When resolving the response identity
         let result = resolve_response_identity(&request, event_participant, &remote_identities);
+
+        // Then it uses sender_identity from the request (not event participant or sole remote)
         assert_eq!(
             result.as_ref().map(|p| p.as_str()),
             Some("client1"),
@@ -1275,10 +1280,15 @@ mod tests {
 
     #[test]
     fn merge_participant_metadata_json_retains_baseline_keys_on_partial_update() {
+        // Given existing metadata with multiple keys
         let baseline = r#"{"codex_oauth":{"pending":false},"legacy":1}"#;
         let update = format!(r#"{{"{key}":9}}"#, key = OWNED_PROJECT_COUNT_METADATA_KEY);
+
+        // When merging with a partial update (only owned_project_count)
         let merged = merge_participant_metadata_json(baseline, &update).expect("merge");
         let v: Value = serde_json::from_str(&merged).expect("merged JSON");
+
+        // Then baseline-only keys are retained and the new key is written
         assert!(
             v.get("legacy").is_some(),
             "baseline-only keys must remain after merge; got {merged}"

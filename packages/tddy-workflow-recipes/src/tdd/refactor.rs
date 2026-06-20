@@ -52,7 +52,10 @@ mod tests {
 
     #[test]
     fn system_prompt_references_schema() {
+        // When
         let prompt = system_prompt();
+
+        // Then
         assert!(
             prompt.contains("tddy-tools get-schema refactor"),
             "system prompt must reference get-schema for refactor"
@@ -65,7 +68,10 @@ mod tests {
 
     #[test]
     fn build_prompt_includes_plan_content() {
+        // When
         let prompt = build_prompt("## Tasks\n- Rename method");
+
+        // Then
         assert!(
             prompt.contains("Rename method"),
             "prompt must include plan content"

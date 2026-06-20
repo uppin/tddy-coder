@@ -384,6 +384,7 @@ mod tests {
 
     #[test]
     fn action_fingerprint_canonicalization() {
+        // Given
         let loosened = ActionFingerprintParts {
             goal_id: "acceptance-tests".to_string(),
             effective_prompt: "  SAME PROMPT BODY  ".to_string(),
@@ -402,19 +403,22 @@ mod tests {
             system_prompt: None,
             model: None,
         };
+
+        // When
         let fa = fingerprint_action_inputs(&loosened).expect(
             "fingerprint_action_inputs must be implemented for deterministic action cache keys",
         );
         let fb = fingerprint_action_inputs(&tight).expect(
             "fingerprint_action_inputs must be implemented for deterministic action cache keys",
         );
+        let fd = fingerprint_action_inputs(&divergent_prompt).expect(
+            "fingerprint_action_inputs must be implemented for deterministic action cache keys",
+        );
+
+        // Then
         assert_eq!(
             fa, fb,
             "logical prompt equivalence must produce identical fingerprints (whitespace trimming etc.)",
-        );
-
-        let fd = fingerprint_action_inputs(&divergent_prompt).expect(
-            "fingerprint_action_inputs must be implemented for deterministic action cache keys",
         );
         assert_ne!(
             fa, fd,
@@ -424,8 +428,11 @@ mod tests {
 
     #[test]
     fn action_cache_opt_out_reflects_disable_action_cache_flag() {
+        // Given
         let ctx = Context::new();
         ctx.set_sync("disable_action_cache", true);
+
+        // When / Then
         assert!(
             action_cache_disabled(&ctx),
             "disable_action_cache on context disables read/write for that execution",
@@ -434,6 +441,7 @@ mod tests {
 
     #[test]
     fn action_cache_opt_out_reflects_tddy_disable_env() {
+        // Given
         unsafe { std::env::set_var("TDDY_DISABLE_ACTION_CACHE", "1") };
         struct Guard;
         impl Drop for Guard {
@@ -443,6 +451,8 @@ mod tests {
         }
         let _g = Guard;
         let ctx = Context::new();
+
+        // When / Then
         assert!(
             action_cache_disabled(&ctx),
             "TDDY_DISABLE_ACTION_CACHE=1 disables action cache reads and writes",
@@ -451,10 +461,15 @@ mod tests {
 
     #[test]
     fn action_stable_identity_key_documents_graph_task_goal() {
+        // Given
         let graph = "action_cache_invoke_graph";
         let task = "accept_invoke";
         let goal = "acceptance-tests";
+
+        // When
         let key = stable_action_cache_key(graph, task, goal);
+
+        // Then
         assert!(
             key.contains(graph),
             "`action_key` must include graph identity (got {:?})",
@@ -474,13 +489,12 @@ mod tests {
 
     #[test]
     fn lookup_reads_matching_disk_placeholder_entry() {
+        // Given
         let dir = temp_dot_workflow("lookup");
         let path = action_cache_file_path(&dir);
-
         let expected_output = "{\"goal\":\"submit\",\"stub\":true}".to_string();
         let fingerprint = "fp-red-placeholder";
         let action_key_full = stable_action_cache_key("g-test", "t-test", "goal-test");
-
         let doc_on_disk = json!({
             "schema_version": ACTION_CACHE_SCHEMA_VERSION,
             "entries": {
@@ -491,21 +505,23 @@ mod tests {
                 }
             }
         });
-
         fs::write(&path, serde_json::to_string_pretty(&doc_on_disk).unwrap()).unwrap();
 
+        // When
         let got = lookup_cached_completed_submit(&dir, &action_key_full, fingerprint);
+
+        // Then
         assert_eq!(
             got.as_deref(),
             Some(expected_output.as_str()),
             "`lookup_cached_completed_submit` returns stored submit JSON verbatim",
         );
-
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn merge_stub_inserts_requested_entry_under_storage_key() {
+        // Given
         let mut doc = ActionCacheDocument {
             schema_version: ACTION_CACHE_SCHEMA_VERSION,
             entries: std::collections::HashMap::from([
@@ -513,20 +529,25 @@ mod tests {
                 ("beta".to_string(), json!({"keep": 1})),
             ]),
         };
+
+        // When
         merge_action_cache_entry_stub(&mut doc, "gamma", "ak", "fp", "goal-z", r#"{"ok":true}"#);
 
+        // Then
         assert!(
             doc.entries.contains_key("gamma"),
-            "GREEN merge must introduce `gamma` without dropping neighbouring keys ({:?})",
+            "merge must introduce `gamma` without dropping neighbouring keys ({:?})",
             doc.entries.keys().collect::<Vec<_>>(),
         );
     }
 
     #[test]
     fn persist_writes_action_cache_adjacent_to_session_storage() {
+        // Given
         let dir = temp_dot_workflow("persist-write");
         let path = action_cache_file_path(&dir);
 
+        // When
         persist_successful_submit_to_action_cache(
             &dir,
             "acceptance-tests",
@@ -536,12 +557,12 @@ mod tests {
         )
         .unwrap();
 
+        // Then
         assert!(
             path.exists(),
             "`persist_successful_submit_to_action_cache` must emit {:?}",
             path
         );
-
         let raw = fs::read_to_string(&path).unwrap();
         assert!(
             raw.contains("\"action_key\""),

@@ -27,13 +27,9 @@ const POST_GREEN_REVIEW_GOLDEN: &str = r#"{
 /// PRD: graph has plan → red → … → end; no `demo`, no standalone `acceptance-tests`, no separate evaluate/validate tasks.
 #[test]
 fn tdd_small_graph_excludes_demo_and_acceptance_tests_nodes() {
+    // Given
     let backend = Arc::new(StubBackend::new());
-    let graph = TddSmallRecipe.build_graph(backend);
-
-    assert_eq!(graph.id, "tdd_small_workflow");
-
-    let ids: BTreeSet<String> = graph.task_ids().cloned().collect();
-    let expected: BTreeSet<String> = [
+    let expected_ids: BTreeSet<String> = [
         "plan",
         "red",
         "green",
@@ -46,62 +42,77 @@ fn tdd_small_graph_excludes_demo_and_acceptance_tests_nodes() {
     .map(String::from)
     .collect();
 
-    assert_eq!(
-        ids, expected,
-        "tdd-small must expose exactly this task id set (merged red; single post-green step)"
-    );
+    // When
+    let graph = TddSmallRecipe.build_graph(backend);
+    let ids: BTreeSet<String> = graph.task_ids().cloned().collect();
+    let ctx = Context::new();
 
+    // Then
+    assert_eq!(graph.id, "tdd_small_workflow");
+    assert_eq!(
+        ids, expected_ids,
+        "tdd-small must expose exactly this task id set"
+    );
     assert!(
         !ids.contains("demo"),
         "tdd-small must not include demo task id"
     );
     assert!(
         !ids.contains("acceptance-tests"),
-        "tdd-small must not include standalone acceptance-tests task id"
+        "tdd-small must not include acceptance-tests task id"
     );
     assert!(
-        !ids.contains("evaluate") && !ids.contains("validate"),
-        "tdd-small must not include separate evaluate/validate task ids"
+        !ids.contains("evaluate"),
+        "tdd-small must not include separate evaluate task id"
     );
-
-    let ctx = Context::new();
+    assert!(
+        !ids.contains("validate"),
+        "tdd-small must not include separate validate task id"
+    );
     assert_eq!(
         graph.next_task_id("plan", &ctx),
         Some("red".to_string()),
-        "plan must edge directly to merged red"
+        "plan must edge to merged red"
     );
     assert_eq!(
         graph.next_task_id("green", &ctx),
         Some("post-green-review".to_string()),
-        "green must have a single successor: merged post-green step"
+        "green must edge to post-green-review"
     );
 }
 
 /// PRD: merged evaluate+validate JSON round-trips without losing required fields.
 #[test]
 fn tdd_small_merged_submit_schema_round_trip() {
+    // When
     let parsed: PostGreenReviewOutput =
         parse_post_green_review_response(POST_GREEN_REVIEW_GOLDEN).expect("parse merged submit");
 
+    // Then
     assert_eq!(parsed.goal, "post-green-review");
-    assert!(!parsed.summary.is_empty());
+    assert!(!parsed.summary.is_empty(), "summary must be non-empty");
     assert_eq!(parsed.risk_level, "medium");
-    assert!(!parsed.validity_assessment.is_empty());
+    assert!(
+        !parsed.validity_assessment.is_empty(),
+        "validity_assessment must be non-empty"
+    );
 
     let again = serde_json::to_string(&parsed).expect("serialize");
     let back: PostGreenReviewOutput = serde_json::from_str(&again).expect("deserialize");
-    assert_eq!(parsed, back);
+    assert_eq!(parsed, back, "round-trip must produce identical struct");
 }
 
 /// PRD: merged `red` prompts and single post-green submit path are recipe-specific (not verbatim classic `tdd` red).
 #[test]
 fn tdd_small_hooks_merged_red_and_single_submit() {
+    // When
     let merged = merged_red_system_prompt();
+
+    // Then
     assert!(
         merged.contains("tdd-small merged red"),
         "merged red system prompt must identify the tdd-small recipe (not alias classic tdd red text)"
     );
-
     parse_post_green_review_response(POST_GREEN_REVIEW_GOLDEN)
         .expect("post-green single submit must parse");
 }

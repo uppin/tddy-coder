@@ -44,6 +44,7 @@ fn scratch_repo_with_feature_x(base: &Path) -> std::path::PathBuf {
 
 #[test]
 fn phase2_live_tcp_dispatch_ready_is_false_until_green() {
+    // When / Then
     tddy_daemon::telegram_bot::chain_phase2_tcp_dispatch_marker_probe();
     assert!(
         tddy_daemon::telegram_bot::session_chaining_phase2_live_tcp_dispatch_ready(),
@@ -53,6 +54,7 @@ fn phase2_live_tcp_dispatch_ready_is_false_until_green() {
 
 #[test]
 fn phase2_chain_base_merge_ready_is_false_until_green() {
+    // When / Then
     assert!(
         tddy_daemon::telegram_session_control::session_chaining_phase2_chain_base_merge_ready(),
         "GREEN: chain base merge wired for Telegram spawn"
@@ -61,6 +63,7 @@ fn phase2_chain_base_merge_ready_is_false_until_green() {
 
 #[test]
 fn merge_chain_integration_base_returns_ok_for_placeholder_paths_in_green() {
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     let repo = scratch_repo_with_feature_x(tmp.path());
     let repo_canon = repo.canonicalize().expect("canon");
@@ -85,6 +88,7 @@ fn merge_chain_integration_base_returns_ok_for_placeholder_paths_in_green() {
     };
     write_changeset(&child_dir, &child_cs).expect("child changeset");
 
+    // When / Then
     tddy_daemon::telegram_session_control::merge_chain_integration_base_with_explicit_operator_overrides(
         session_base,
         parent_id,

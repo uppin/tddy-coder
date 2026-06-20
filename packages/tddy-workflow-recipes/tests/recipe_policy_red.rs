@@ -9,20 +9,40 @@ use tddy_workflow_recipes::{FreePromptingRecipe, GrillMeRecipe};
 
 #[test]
 fn supported_cli_names_includes_free_prompting_and_grill_me() {
+    // When
     let names = approval_policy::supported_workflow_recipe_cli_names();
+
+    // Then
     assert!(
-        names.contains(&"free-prompting")
-            && names.contains(&"grill-me")
-            && names.contains(&"tdd-small")
-            && names.contains(&"review")
-            && names.contains(&"merge-pr"),
-        "F5: supported CLI names must include free-prompting, grill-me, tdd-small, review, and merge-pr for resolver/daemon parity: {:?}",
+        names.contains(&"free-prompting"),
+        "F5: must include free-prompting: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"grill-me"),
+        "F5: must include grill-me: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"tdd-small"),
+        "F5: must include tdd-small: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"review"),
+        "F5: must include review: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"merge-pr"),
+        "F5: must include merge-pr: {:?}",
         names
     );
 }
 
 #[test]
 fn free_prompting_skips_session_document_approval_per_policy_table() {
+    // When / Then
     assert!(
         approval_policy::recipe_should_skip_session_document_approval("free-prompting"),
         "free-prompting must skip session document approval when policy says so (F2/F3)"
@@ -31,6 +51,7 @@ fn free_prompting_skips_session_document_approval_per_policy_table() {
 
 #[test]
 fn grill_me_skips_session_document_approval_per_policy_table() {
+    // When / Then
     assert!(
         approval_policy::recipe_should_skip_session_document_approval("grill-me"),
         "grill-me v1 must skip session document approval (same class as free-prompting)"
@@ -39,6 +60,7 @@ fn grill_me_skips_session_document_approval_per_policy_table() {
 
 #[test]
 fn review_skips_session_document_approval_per_policy_table() {
+    // When / Then
     assert!(
         approval_policy::recipe_should_skip_session_document_approval("review"),
         "review must skip primary session document approval (grill-me class)"
@@ -47,7 +69,10 @@ fn review_skips_session_document_approval_per_policy_table() {
 
 #[test]
 fn free_prompting_recipe_exposes_prompting_goal_and_state() {
+    // Given
     let r = FreePromptingRecipe;
+
+    // Then
     assert_eq!(r.name(), "free-prompting");
     assert_eq!(
         r.start_goal().as_str(),
@@ -67,7 +92,10 @@ fn free_prompting_recipe_exposes_prompting_goal_and_state() {
 
 #[test]
 fn grill_me_recipe_exposes_grill_me_goal_and_state() {
+    // Given
     let r = GrillMeRecipe;
+
+    // Then
     assert_eq!(r.name(), "grill-me");
     assert_eq!(r.start_goal().as_str(), "grill");
     assert_eq!(r.initial_state().as_str(), "Grill");

@@ -158,6 +158,9 @@ mod tests {
 
     #[test]
     fn all_allowlists_include_ask_user_question() {
+        // Given — all allowlist functions are called with their names
+
+        // When / Then — each allowlist must include ask_user_question
         assert_allowlist_contains_ask_user_question(&plan_allowlist(), "plan");
         assert_allowlist_contains_ask_user_question(
             &acceptance_tests_allowlist(),

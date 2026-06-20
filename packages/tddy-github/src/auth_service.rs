@@ -150,11 +150,14 @@ mod tests {
 
     #[tokio::test]
     async fn full_auth_flow_via_rpc() {
+        // Given an auth service wired to a stub provider with a pre-registered code
         let (stub, user) = setup();
         stub.register_code("test-code", user);
         let service = AuthServiceImpl::new(stub);
         let server = AuthServiceServer::new(service);
         let bridge = RpcBridge::new(server);
+
+        // When executing the full OAuth flow: GetAuthUrl → ExchangeCode → GetAuthStatus → Logout → GetAuthStatus
 
         // 1. GetAuthUrl
         let get_url_req = GetAuthUrlRequest {};
@@ -247,6 +250,7 @@ mod tests {
             tddy_rpc::ResponseBody::Complete(c) => c,
             _ => panic!("expected Complete"),
         };
+        // Then after logout the session is no longer authenticated
         let status_resp =
             <GetAuthStatusResponse as prost::Message>::decode(&chunks[0][..]).unwrap();
         assert!(!status_resp.authenticated);
@@ -255,11 +259,13 @@ mod tests {
 
     #[tokio::test]
     async fn get_auth_status_with_invalid_session() {
+        // Given an auth service with no active sessions
         let (stub, _) = setup();
         let service = AuthServiceImpl::new(stub);
         let server = AuthServiceServer::new(service);
         let bridge = RpcBridge::new(server);
 
+        // When checking status for a non-existent session token
         let req = GetAuthStatusRequest {
             session_token: "nonexistent-token".to_string(),
         };
@@ -275,6 +281,8 @@ mod tests {
             tddy_rpc::ResponseBody::Complete(c) => c,
             _ => panic!("expected Complete"),
         };
+
+        // Then the response indicates not authenticated
         let status_resp =
             <GetAuthStatusResponse as prost::Message>::decode(&chunks[0][..]).unwrap();
         assert!(!status_resp.authenticated);

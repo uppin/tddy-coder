@@ -96,7 +96,10 @@ mod tests {
 
     #[test]
     fn system_prompt_includes_testing_plan_requirements() {
+        // When
         let prompt = system_prompt();
+
+        // Then
         assert!(
             prompt.contains("Testing Plan") || prompt.to_lowercase().contains("testing plan"),
             "system prompt must require Testing Plan section in PRD"
@@ -105,7 +108,10 @@ mod tests {
 
     #[test]
     fn system_prompt_references_schema_and_includes_tddy_tools_submit() {
+        // When
         let prompt = system_prompt();
+
+        // Then
         assert!(
             prompt.contains("tddy-tools get-schema plan"),
             "system prompt must reference get-schema for plan"
@@ -122,7 +128,10 @@ mod tests {
     /// Fails until `plan_dir_suggestion` is removed from the prompt and `name` guidance is added.
     #[test]
     fn system_prompt_requires_inline_prd_not_file_path() {
+        // When
         let prompt = system_prompt();
+
+        // Then
         assert!(
             !prompt.contains("path to an MD file")
                 && !prompt.contains("write the PRD to a file first"),
@@ -136,8 +145,11 @@ mod tests {
     }
 
     #[test]
-    fn test_planning_prompt_mentions_name_not_plan_dir_suggestion() {
+    fn planning_prompt_mentions_name_not_plan_dir_suggestion() {
+        // When
         let prompt = system_prompt();
+
+        // Then
         assert!(
             !prompt.contains("plan_dir_suggestion"),
             "system prompt must not reference 'plan_dir_suggestion' after R2 removal; \

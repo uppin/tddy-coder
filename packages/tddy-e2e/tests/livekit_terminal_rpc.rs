@@ -71,6 +71,7 @@ mod livekit_tests {
     #[tokio::test]
     #[serial]
     async fn livekit_terminal_io_receives_ansi_output() -> anyhow::Result<()> {
+        // Given
         let livekit = LiveKitTestkit::start().await?;
         let url = livekit.get_ws_url();
         let room_name = "terminal-rpc-receive-test";
@@ -104,6 +105,7 @@ mod livekit_tests {
 
         let rpc_client = RpcClient::new(client_room, SERVER_IDENTITY.to_string(), rpc_events);
 
+        // When — client opens a StreamTerminalIO server-stream with empty init
         let request = TerminalInput { data: vec![] };
         let request_bytes = request.encode_to_vec();
 
@@ -135,6 +137,7 @@ mod livekit_tests {
 
         server_handle.abort();
 
+        // Then — client receives ANSI output containing recognisable TUI content
         assert!(
             received.len() > 50,
             "Expected ANSI output from VirtualTui, got {} bytes",
@@ -196,6 +199,8 @@ mod livekit_tests {
     #[serial]
     async fn livekit_terminal_io_keyboard_input_affects_output() -> anyhow::Result<()> {
         let _ = env_logger::builder().is_test(true).try_init();
+
+        // Given
         let livekit = LiveKitTestkit::start().await?;
         let url = livekit.get_ws_url();
         let room_name = "terminal-rpc-keyboard-test";
@@ -233,7 +238,7 @@ mod livekit_tests {
             .start_bidi_stream("terminal.TerminalService", "StreamTerminalIO")
             .map_err(|e| anyhow::anyhow!("start bidi: {}", e))?;
 
-        // Phase 1: send init, wait for LiveKit roundtrip, drain initial TUI output.
+        // When — Phase 1: send init, wait for LiveKit roundtrip, drain initial TUI output.
         // All sends use end_of_stream=false to keep the bidi session alive —
         // end_of_stream=true would tear down the session before VirtualTui processes
         // the last key (the shutdown propagates through the input chain).
@@ -253,6 +258,7 @@ mod livekit_tests {
             &initial_text[..initial_text.floor_char_boundary(300)]
         );
 
+        // Then — Phase 1: initial TUI renders before any keyboard input
         assert!(
             initial_text.contains("State:") || initial_text.contains("Scope"),
             "Initial TUI should render before any keyboard input; got (len {}): {:?}",
@@ -260,7 +266,7 @@ mod livekit_tests {
             &initial_text[..initial_text.floor_char_boundary(300)]
         );
 
-        // Phase 2: send keyboard inputs, drain output after each.
+        // When — Phase 2: send keyboard inputs to advance the workflow.
         // Enter answers scope → PlanReview. Down → Approve. Enter → approve.
         let inputs: &[(&[u8], &str)] = &[
             (keys::ENTER, "Enter (answer scope)"),
@@ -296,6 +302,7 @@ mod livekit_tests {
             &text[..text.floor_char_boundary(500)]
         );
 
+        // Then — Phase 2: workflow advanced past the initial screen
         assert!(
             text.contains("State:") || text.contains("Scope"),
             "Should receive initial TUI output; got (len {}): {:?}",
@@ -333,6 +340,7 @@ mod livekit_tests {
 
         let _ = env_logger::builder().is_test(true).try_init();
 
+        // Given
         const COLS: u16 = 80;
         const ROWS: u16 = 10000;
         const TOTAL_LEN: usize = 1000;
@@ -415,6 +423,7 @@ mod livekit_tests {
             }
         });
 
+        // When — resize terminal, send init, then stream all 1000 chars byte-by-byte
         // Resize to COLS×ROWS so the prompt bar can fit the entire payload.
         sender
             .send(
@@ -441,7 +450,7 @@ mod livekit_tests {
                 .map_err(|e| anyhow::anyhow!("send byte: {}", e))?;
         }
 
-        // Wait for the full segmented echo to appear in the vt100-parsed output.
+        // Then — the full segmented echo appears in the vt100-parsed output
         // LiveKit has higher per-chunk latency than gRPC; use a longer timeout than gRPC e2e.
         eventually_segmented_echo(
             &buf,
@@ -484,6 +493,7 @@ mod livekit_tests {
     #[tokio::test]
     #[serial]
     async fn livekit_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
+        // Given
         let livekit = LiveKitTestkit::start().await?;
         let url = livekit.get_ws_url();
         let room_name = "ghostty-virtual-terminal-e2e";
@@ -523,7 +533,7 @@ mod livekit_tests {
 
         let mut viewer = ScreenParser::new(24, 80);
 
-        // Phase 1: send init, drain initial TUI output.
+        // When — Phase 1: send init, drain initial TUI output
         sender
             .send(TerminalInput { data: vec![] }.encode_to_vec(), false)
             .await
@@ -535,6 +545,7 @@ mod livekit_tests {
         }
         let initial_text = ansi_to_text(&initial_output);
 
+        // Then — Phase 1: initial TUI renders before keyboard input
         assert!(
             initial_text.contains("State:") || initial_text.contains("Scope"),
             "Initial TUI should render before any keyboard input; got (len {}): {:?}",
@@ -542,7 +553,7 @@ mod livekit_tests {
             &initial_text[..initial_text.floor_char_boundary(300)]
         );
 
-        // Phase 2: send keyboard inputs, drain output after each.
+        // When — Phase 2: send keyboard inputs to advance the workflow.
         // Enter answers scope → PlanReview. Down → Approve. Enter → approve.
         let inputs: &[(&[u8], &str)] = &[
             (keys::ENTER, "Enter (answer scope)"),
@@ -567,6 +578,7 @@ mod livekit_tests {
         shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
         server_handle.abort();
 
+        // Then — Phase 2: workflow advanced past the initial screen
         let visible = ansi_to_text(&all_raw);
         let progressed = visible.contains("Session dir:")
             || visible.contains("AcceptanceTesting")

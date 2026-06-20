@@ -17,11 +17,13 @@ fn tddy_tools_bin() -> Command {
 /// AC: `tddy-tools remote --help` lists `start-session` as a subcommand.
 #[test]
 fn remote_start_session_subcommand_exists_in_help() {
+    // When
     let output = tddy_tools_bin()
         .args(["remote", "--help"])
         .output()
         .expect("tddy-tools remote --help must not crash");
 
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("start-session"),
@@ -33,11 +35,13 @@ fn remote_start_session_subcommand_exists_in_help() {
 /// AC: `tddy-tools remote --help` lists `connect-session` as a subcommand.
 #[test]
 fn remote_connect_session_subcommand_exists_in_help() {
+    // When
     let output = tddy_tools_bin()
         .args(["remote", "--help"])
         .output()
         .expect("tddy-tools remote --help must not crash");
 
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("connect-session"),
@@ -49,11 +53,13 @@ fn remote_connect_session_subcommand_exists_in_help() {
 /// AC: `tddy-tools remote --help` lists `sync-context` as a subcommand.
 #[test]
 fn remote_sync_context_subcommand_exists_in_help() {
+    // When
     let output = tddy_tools_bin()
         .args(["remote", "--help"])
         .output()
         .expect("tddy-tools remote --help must not crash");
 
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("sync-context"),
@@ -72,7 +78,7 @@ fn remote_sync_context_subcommand_exists_in_help() {
 // server task (the subprocess would connect but never get a response) and hang.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remote_list_tools_fetches_catalog_from_relay_daemon_not_from_discovery_file() {
-    // Start a minimal HTTP server that responds to the ListExecTools endpoint.
+    // Given — start a minimal HTTP server that responds to the ListExecTools endpoint.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
 
@@ -109,12 +115,14 @@ async fn remote_list_tools_fetches_catalog_from_relay_daemon_not_from_discovery_
     )
     .unwrap();
 
+    // When
     let output = tddy_tools_bin()
         .args(["remote", "list-tools"])
         .env("TDDY_RELAY_BASE_DIR", relay_dir.path())
         .output()
         .expect("tddy-tools remote list-tools must not panic");
 
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         output.status.success(),

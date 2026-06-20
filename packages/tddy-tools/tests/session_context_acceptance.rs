@@ -16,6 +16,7 @@ fn tddy_tools_bin() -> Command {
 /// graph resolution can read merged keys.
 #[test]
 fn tddy_tools_new_command_sets_session_variables_and_persists_for_next_transition() {
+    // Given
     let dir = tempfile::tempdir().expect("tempdir");
     let wf = dir.path().join(".workflow");
     std::fs::create_dir_all(&wf).expect("mkdir .workflow");
@@ -25,6 +26,7 @@ fn tddy_tools_new_command_sets_session_variables_and_persists_for_next_transitio
     );
     std::fs::write(wf.join(format!("{session_id}.session.json")), initial).expect("write session");
 
+    // When
     let payload = r#"{"run_optional_step_x":true}"#;
     let mut cmd = tddy_tools_bin();
     cmd.env("TDDY_SESSION_DIR", dir.path());
@@ -32,6 +34,7 @@ fn tddy_tools_new_command_sets_session_variables_and_persists_for_next_transitio
     cmd.args(["set-session-context", "--data", payload]);
     cmd.assert().success();
 
+    // Then
     let path = wf.join(format!("{session_id}.session.json"));
     let json = std::fs::read_to_string(&path).expect("read session after tool");
     let v: Value = serde_json::from_str(&json).expect("session json");
@@ -48,6 +51,7 @@ fn tddy_tools_new_command_sets_session_variables_and_persists_for_next_transitio
 /// Testing Plan (4): Merging new keys must not drop existing context entries (resume / reload).
 #[test]
 fn resume_session_preserves_conditional_context_keys() {
+    // Given
     let dir = tempfile::tempdir().expect("tempdir");
     let wf = dir.path().join(".workflow");
     std::fs::create_dir_all(&wf).expect("mkdir .workflow");
@@ -57,6 +61,7 @@ fn resume_session_preserves_conditional_context_keys() {
     );
     std::fs::write(wf.join(format!("{session_id}.session.json")), initial).expect("write session");
 
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.env("TDDY_SESSION_DIR", dir.path());
     cmd.env("TDDY_WORKFLOW_SESSION_ID", session_id);
@@ -67,6 +72,7 @@ fn resume_session_preserves_conditional_context_keys() {
     ]);
     cmd.assert().success();
 
+    // Then
     let json =
         std::fs::read_to_string(wf.join(format!("{session_id}.session.json"))).expect("read");
     let v: Value = serde_json::from_str(&json).expect("session json");
@@ -87,8 +93,10 @@ fn resume_session_preserves_conditional_context_keys() {
 /// Testing Plan (5): Non-object JSON must fail with non-zero exit and a clear validation message.
 #[test]
 fn invalid_session_var_payload_rejected_with_clear_error() {
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args(["set-session-context", "--data", "[]"]);
+    // Then
     let assert = cmd.assert().failure();
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);

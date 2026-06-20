@@ -31,21 +31,27 @@ mod tests {
 
     #[test]
     fn key_is_ctrl_c_press_true_for_control_c() {
+        // Given
         let key = KeyEvent::new_with_kind(
             KeyCode::Char('c'),
             KeyModifiers::CONTROL,
             KeyEventKind::Press,
         );
+
+        // When / Then
         assert!(key_is_ctrl_c_press(&key));
     }
 
     #[test]
     fn key_is_ctrl_c_press_false_for_plain_c() {
+        // Given
         let key = KeyEvent::new_with_kind(
             KeyCode::Char('c'),
             KeyModifiers::empty(),
             KeyEventKind::Press,
         );
+
+        // When / Then
         assert!(!key_is_ctrl_c_press(&key));
     }
 }
@@ -71,7 +77,10 @@ mod interrupt_session_contract_tests {
     #[test]
     #[serial]
     fn ctrl_c_interrupt_session_is_no_op_when_no_tracked_child() {
+        // Given
         let _guard = lock_and_clear_child_pid();
+
+        // When / Then
         ctrl_c_interrupt_session();
         assert_eq!(get_child_pid(), 0);
     }
@@ -79,25 +88,25 @@ mod interrupt_session_contract_tests {
     #[test]
     #[serial]
     fn ctrl_c_interrupt_session_kills_tracked_agent_child_and_does_not_end_test_process() {
+        // Given
         let _guard = lock_and_clear_child_pid();
         let tddy_pid = std::process::id();
-
         let mut child = std::process::Command::new("sleep")
             .arg("60")
             .spawn()
             .expect("spawn sleep stand-in for agent/backend child");
         set_child_pid(child.id());
 
+        // When
         ctrl_c_interrupt_session();
 
+        // Then
         assert_eq!(get_child_pid(), 0, "child pid slot cleared after kill");
-
         assert_eq!(
             std::process::id(),
             tddy_pid,
             "tddy process must not exit — only the tracked child is killed"
         );
-
         let status = child.wait().expect("reap child");
         assert!(
             !status.success(),

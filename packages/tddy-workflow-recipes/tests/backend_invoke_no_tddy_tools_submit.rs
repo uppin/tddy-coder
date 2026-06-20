@@ -37,30 +37,33 @@ impl CodingBackend for OutputOnlyBackend {
 
 #[tokio::test]
 async fn grill_me_backend_invoke_waits_for_host_gate_without_relayed_ask_answers() {
+    // Given
     let recipe: Arc<dyn WorkflowRecipe> = Arc::new(GrillMeRecipe);
     let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
     let task =
         BackendInvokeTask::from_recipe("grill", GoalId::new("grill"), recipe.clone(), backend);
-
     let ctx = Context::new();
     ctx.set_sync("feature_input", "hello");
     ctx.set_sync("output_dir", std::env::temp_dir());
 
+    // When
     let result = task
         .run(ctx)
         .await
         .expect("task should succeed without submit");
+
+    // Then
     assert_eq!(result.response, "agent reply without submit");
     assert!(matches!(result.next_action, NextAction::WaitForInput));
 }
 
 #[tokio::test]
 async fn grill_me_backend_invoke_continues_when_grill_ask_answers_file_present() {
+    // Given
     let recipe: Arc<dyn WorkflowRecipe> = Arc::new(GrillMeRecipe);
     let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
     let task =
         BackendInvokeTask::from_recipe("grill", GoalId::new("grill"), recipe.clone(), backend);
-
     let tmp = std::env::temp_dir().join(format!("grill-gate-relay-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(tmp.join(".workflow")).unwrap();
@@ -69,16 +72,18 @@ async fn grill_me_backend_invoke_continues_when_grill_ask_answers_file_present()
         "from tddy-tools ask relay",
     )
     .unwrap();
-
     let ctx = Context::new();
     ctx.set_sync("feature_input", "hello");
     ctx.set_sync("output_dir", std::env::temp_dir());
     ctx.set_sync("session_dir", tmp.clone());
 
+    // When
     let result = task
         .run(ctx)
         .await
         .expect("task should succeed without submit");
+
+    // Then
     assert_eq!(result.response, "agent reply without submit");
     assert!(matches!(result.next_action, NextAction::Continue));
     let _ = std::fs::remove_dir_all(&tmp);
@@ -86,6 +91,7 @@ async fn grill_me_backend_invoke_continues_when_grill_ask_answers_file_present()
 
 #[tokio::test]
 async fn tdd_interview_backend_invoke_completes_without_tddy_tools_submit() {
+    // Given
     let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddRecipe);
     let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
     let task = BackendInvokeTask::from_recipe(
@@ -94,22 +100,25 @@ async fn tdd_interview_backend_invoke_completes_without_tddy_tools_submit() {
         recipe.clone(),
         backend,
     );
-
     let ctx = Context::new();
     ctx.set_sync("feature_input", "hello");
     ctx.set_sync("prompt", "elicitation turn");
     ctx.set_sync("output_dir", std::env::temp_dir());
 
+    // When
     let result = task
         .run(ctx)
         .await
         .expect("interview task should succeed without submit");
+
+    // Then
     assert_eq!(result.response, "agent reply without submit");
     assert!(matches!(result.next_action, NextAction::Continue));
 }
 
 #[tokio::test]
 async fn free_prompting_backend_invoke_completes_without_tddy_tools_submit() {
+    // Given
     let recipe: Arc<dyn WorkflowRecipe> = Arc::new(FreePromptingRecipe);
     let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
     let task = BackendInvokeTask::from_recipe(
@@ -118,22 +127,27 @@ async fn free_prompting_backend_invoke_completes_without_tddy_tools_submit() {
         recipe.clone(),
         backend,
     );
-
     let ctx = Context::new();
     ctx.set_sync("feature_input", "hello");
     ctx.set_sync("output_dir", std::env::temp_dir());
 
+    // When
     let result = task
         .run(ctx)
         .await
         .expect("task should succeed without submit");
+
+    // Then
     assert_eq!(result.response, "agent reply without submit");
     assert!(matches!(result.next_action, NextAction::Continue));
 }
 
 #[test]
 fn free_prompting_prompting_goal_opted_out_of_tddy_tools_submit() {
+    // Given
     let recipe = FreePromptingRecipe;
+
+    // Then
     assert!(
         !recipe.goal_requires_tddy_tools_submit(&GoalId::new("prompting")),
         "prompting is open chat: recipe must not require structured submit"
@@ -142,7 +156,10 @@ fn free_prompting_prompting_goal_opted_out_of_tddy_tools_submit() {
 
 #[test]
 fn grill_me_goal_opted_out_of_tddy_tools_submit() {
+    // Given
     let recipe = GrillMeRecipe;
+
+    // Then
     assert!(
         !recipe.goal_requires_tddy_tools_submit(&GoalId::new("grill")),
         "grill goal must not require structured submit"
@@ -151,7 +168,10 @@ fn grill_me_goal_opted_out_of_tddy_tools_submit() {
 
 #[test]
 fn tdd_plan_goal_still_requires_tddy_tools_submit() {
+    // Given
     let recipe = tddy_workflow_recipes::TddRecipe;
+
+    // Then
     assert!(
         recipe.goal_requires_tddy_tools_submit(&GoalId::new("plan")),
         "TDD plan must keep structured submit contract"
@@ -160,7 +180,10 @@ fn tdd_plan_goal_still_requires_tddy_tools_submit() {
 
 #[test]
 fn tdd_interview_goal_opted_out_of_tddy_tools_submit() {
+    // Given
     let recipe = TddRecipe;
+
+    // Then
     assert!(
         !recipe.goal_requires_tddy_tools_submit(&GoalId::new("interview")),
         "interview is elicitation: recipe must not require structured submit (grill-me parity)"

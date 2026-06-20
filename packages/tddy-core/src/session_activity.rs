@@ -134,111 +134,127 @@ pub fn parse_hook_event(stdin_json: &str) -> Result<HookEvent, serde_json::Error
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
     // --- Status mapping (one test per table row, happy paths first) ----------
 
     /// `SessionStart` maps to `Started`.
     #[test]
     fn session_start_event_maps_to_started() {
-        assert_eq!(
-            activity_status_from_hook("SessionStart", None),
-            Some(SessionActivityStatus::Started)
-        );
+        // When
+        let status = activity_status_from_hook("SessionStart", None);
+
+        // Then
+        assert_eq!(status, Some(SessionActivityStatus::Started));
     }
 
     /// `UserPromptSubmit` maps to `Running`.
     #[test]
     fn user_prompt_submit_maps_to_running() {
-        assert_eq!(
-            activity_status_from_hook("UserPromptSubmit", None),
-            Some(SessionActivityStatus::Running)
-        );
+        // When
+        let status = activity_status_from_hook("UserPromptSubmit", None);
+
+        // Then
+        assert_eq!(status, Some(SessionActivityStatus::Running));
     }
 
     /// `PostToolUse` maps to `ExecutingTool`.
     #[test]
     fn post_tool_use_maps_to_executing_tool() {
-        assert_eq!(
-            activity_status_from_hook("PostToolUse", None),
-            Some(SessionActivityStatus::ExecutingTool)
-        );
+        // When
+        let status = activity_status_from_hook("PostToolUse", None);
+
+        // Then
+        assert_eq!(status, Some(SessionActivityStatus::ExecutingTool));
     }
 
     /// `Notification` with `notification_type = permission_prompt` → `WaitingForInput`.
     #[test]
     fn notification_permission_prompt_maps_to_waiting_for_input() {
-        assert_eq!(
-            activity_status_from_hook("Notification", Some("permission_prompt")),
-            Some(SessionActivityStatus::WaitingForInput)
-        );
+        // When
+        let status = activity_status_from_hook("Notification", Some("permission_prompt"));
+
+        // Then
+        assert_eq!(status, Some(SessionActivityStatus::WaitingForInput));
     }
 
     /// `Notification` with `notification_type = elicitation_dialog` → `WaitingForInput`.
     #[test]
     fn notification_elicitation_dialog_maps_to_waiting_for_input() {
-        assert_eq!(
-            activity_status_from_hook("Notification", Some("elicitation_dialog")),
-            Some(SessionActivityStatus::WaitingForInput)
-        );
+        // When
+        let status = activity_status_from_hook("Notification", Some("elicitation_dialog"));
+
+        // Then
+        assert_eq!(status, Some(SessionActivityStatus::WaitingForInput));
     }
 
     /// `Notification` with `notification_type = idle_prompt` → `WaitingForInput`.
     #[test]
     fn notification_idle_prompt_maps_to_waiting_for_input() {
-        assert_eq!(
-            activity_status_from_hook("Notification", Some("idle_prompt")),
-            Some(SessionActivityStatus::WaitingForInput)
-        );
+        // When
+        let status = activity_status_from_hook("Notification", Some("idle_prompt"));
+
+        // Then
+        assert_eq!(status, Some(SessionActivityStatus::WaitingForInput));
     }
 
     /// `Stop` maps to `Done`.
     #[test]
     fn stop_event_maps_to_done() {
-        assert_eq!(
-            activity_status_from_hook("Stop", None),
-            Some(SessionActivityStatus::Done)
-        );
+        // When
+        let status = activity_status_from_hook("Stop", None);
+
+        // Then
+        assert_eq!(status, Some(SessionActivityStatus::Done));
     }
 
     /// `SessionEnd` maps to `Ended`.
     #[test]
     fn session_end_maps_to_ended() {
-        assert_eq!(
-            activity_status_from_hook("SessionEnd", None),
-            Some(SessionActivityStatus::Ended)
-        );
+        // When
+        let status = activity_status_from_hook("SessionEnd", None);
+
+        // Then
+        assert_eq!(status, Some(SessionActivityStatus::Ended));
     }
 
     /// Unknown events (e.g. `PreToolUse`) return `None` — no-op, no daemon call.
     #[test]
     fn unknown_event_is_noop() {
-        assert_eq!(activity_status_from_hook("PreToolUse", None), None);
+        // When
+        let status = activity_status_from_hook("PreToolUse", None);
+
+        // Then
+        assert_eq!(
+            status, None,
+            "unrecognised hook event should produce no status"
+        );
     }
 
     /// `Notification` with an unknown subtype (e.g. `banner`) returns `None` — no-op.
     #[test]
     fn notification_unknown_subtype_is_noop() {
+        // When
+        let status = activity_status_from_hook("Notification", Some("banner"));
+
+        // Then
         assert_eq!(
-            activity_status_from_hook("Notification", Some("banner")),
-            None
+            status, None,
+            "unknown notification subtype should produce no status"
         );
     }
 
     /// `as_wire()` returns the stable strings that the daemon and web UI depend on.
-    #[test]
-    fn wire_strings_are_stable() {
-        assert_eq!(SessionActivityStatus::Started.as_wire(), "Started");
-        assert_eq!(SessionActivityStatus::Running.as_wire(), "Running");
-        assert_eq!(
-            SessionActivityStatus::ExecutingTool.as_wire(),
-            "ExecutingTool"
-        );
-        assert_eq!(
-            SessionActivityStatus::WaitingForInput.as_wire(),
-            "WaitingForInput"
-        );
-        assert_eq!(SessionActivityStatus::Done.as_wire(), "Done");
-        assert_eq!(SessionActivityStatus::Ended.as_wire(), "Ended");
+    #[rstest]
+    #[case::started(SessionActivityStatus::Started, "Started")]
+    #[case::running(SessionActivityStatus::Running, "Running")]
+    #[case::executing_tool(SessionActivityStatus::ExecutingTool, "ExecutingTool")]
+    #[case::waiting_for_input(SessionActivityStatus::WaitingForInput, "WaitingForInput")]
+    #[case::done(SessionActivityStatus::Done, "Done")]
+    #[case::ended(SessionActivityStatus::Ended, "Ended")]
+    fn wire_strings_are_stable(#[case] status: SessionActivityStatus, #[case] expected: &str) {
+        // When / Then
+        assert_eq!(status.as_wire(), expected);
     }
 
     // --- stdin JSON parsing --------------------------------------------------
@@ -246,8 +262,13 @@ mod tests {
     /// Parse a `SessionStart` hook event with full fields; unknown fields are ignored.
     #[test]
     fn parses_session_start_event() {
+        // Given
         let json = r#"{"hook_event_name":"SessionStart","session_id":"abc123","cwd":"/repo","transcript_path":"/tmp/t.jsonl"}"#;
+
+        // When
         let ev = parse_hook_event(json).expect("must parse SessionStart event");
+
+        // Then
         assert_eq!(ev.hook_event_name, "SessionStart");
         assert_eq!(ev.session_id.as_deref(), Some("abc123"));
         assert_eq!(ev.cwd.as_deref(), Some("/repo"));
@@ -257,8 +278,13 @@ mod tests {
     /// Parse a `Notification` event; `notification_type` must be captured.
     #[test]
     fn parses_notification_event_with_type() {
+        // Given
         let json = r#"{"hook_event_name":"Notification","notification_type":"permission_prompt","session_id":"x","cwd":"/r","message":"run: Bash"}"#;
+
+        // When
         let ev = parse_hook_event(json).expect("must parse Notification event");
+
+        // Then
         assert_eq!(ev.hook_event_name, "Notification");
         assert_eq!(ev.notification_type.as_deref(), Some("permission_prompt"));
     }
@@ -267,8 +293,13 @@ mod tests {
     /// method — proves `HookEvent::activity_status()` wires parse → map correctly.
     #[test]
     fn parsed_notification_event_maps_to_waiting_for_input() {
+        // Given
         let json = r#"{"hook_event_name":"Notification","notification_type":"permission_prompt","session_id":"s1","cwd":"/w"}"#;
+
+        // When
         let ev = parse_hook_event(json).unwrap();
+
+        // Then
         assert_eq!(
             ev.activity_status(),
             Some(SessionActivityStatus::WaitingForInput)
@@ -278,9 +309,15 @@ mod tests {
     /// `parse_hook_event` rejects JSON that is missing the required `hook_event_name` field.
     #[test]
     fn parse_rejects_missing_hook_event_name() {
+        // Given
         let json = r#"{"session_id":"s","cwd":"/r"}"#;
+
+        // When
+        let result = parse_hook_event(json);
+
+        // Then
         assert!(
-            parse_hook_event(json).is_err(),
+            result.is_err(),
             "missing hook_event_name must be a parse error"
         );
     }

@@ -75,12 +75,14 @@ fn lower_via(registry: &PluginRegistry, type_name: &str) -> Vec<String> {
 
 #[test]
 fn register_maps_each_declared_type_name() {
+    // Given
     let mut registry = PluginRegistry::new();
     registry.register(Arc::new(Marker {
         types: &["alpha", "beta"],
         tag: "AB",
     }));
 
+    // When / Then
     assert!(registry.get("alpha").is_some(), "alpha must be registered");
     assert!(registry.get("beta").is_some(), "beta must be registered");
     assert_eq!(lower_via(&registry, "alpha"), vec!["AB".to_string()]);
@@ -89,12 +91,16 @@ fn register_maps_each_declared_type_name() {
 
 #[test]
 fn get_returns_none_for_unregistered_type() {
+    // Given
     let registry = PluginRegistry::new();
+
+    // When / Then
     assert!(registry.get("missing").is_none());
 }
 
 #[test]
 fn duplicate_type_registration_last_wins() {
+    // Given
     let mut registry = PluginRegistry::new();
     registry.register(Arc::new(Marker {
         types: &["x"],
@@ -105,6 +111,7 @@ fn duplicate_type_registration_last_wins() {
         tag: "second",
     }));
 
+    // When / Then
     assert_eq!(
         lower_via(&registry, "x"),
         vec!["second".to_string()],
@@ -114,19 +121,24 @@ fn duplicate_type_registration_last_wins() {
 
 #[test]
 fn registered_types_lists_all_mapped_names() {
+    // Given
     let mut registry = PluginRegistry::new();
     registry.register(Arc::new(Marker {
         types: &["alpha", "beta"],
         tag: "AB",
     }));
 
+    // When
     let mut names: Vec<String> = registry.registered_types().map(str::to_string).collect();
     names.sort();
+
+    // Then
     assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
 }
 
 #[test]
 fn lower_context_exposes_target_metadata() {
+    // Given
     let yaml = r#"
 schema_version: 1
 targets:
@@ -146,9 +158,12 @@ targets:
     let mut registry = PluginRegistry::new();
     registry.register(Arc::new(RecordingPlugin));
 
+    // When
     let actions = graph
         .actions_for("rec:t", &registry)
         .expect("plugin lowers target");
+
+    // Then
     assert_eq!(
         actions[0].command,
         vec![

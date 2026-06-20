@@ -4,6 +4,7 @@
 /// [`tddy_daemon::telegram_session_control::TelegramSessionControlHarness::handle_chain_workflow`].
 #[test]
 fn telegram_bot_rs_dispatches_chain_workflow_command() {
+    // When / Then
     let src = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/telegram_bot.rs"));
     assert!(
         src.contains("parse_chain_workflow_prompt") && src.contains("handle_chain_workflow"),

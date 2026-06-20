@@ -359,6 +359,7 @@ mod red_unit_tests {
     #[test]
     #[serial]
     fn github_rest_recorded_request_includes_bearer_and_accept_headers() {
+        // Given
         std::env::set_var("GITHUB_TOKEN", "ghp_unit_test_token");
         let _clear = ClearGithubEnvOnDrop;
         let mut transport = MockGithubTransport::new();
@@ -370,7 +371,11 @@ mod red_unit_tests {
             base: "main".into(),
             body: "b".into(),
         };
+
+        // When
         create_pull_request(&mut transport, &params).expect("authenticated create");
+
+        // Then
         let req = transport.requests.first().expect("one request");
         let auth = req
             .headers
@@ -399,6 +404,7 @@ mod red_unit_tests {
 
     #[test]
     fn registered_github_pr_mcp_tool_names_includes_create_and_update() {
+        // When / Then
         let names = registered_github_pr_mcp_tool_names();
         assert_eq!(
             names,
@@ -430,6 +436,7 @@ mod red_unit_tests {
             }
         }
 
+        // Given
         let _restore = RestoreEnv {
             github: std::env::var("GITHUB_TOKEN").ok(),
             gh: std::env::var("GH_TOKEN").ok(),
@@ -446,7 +453,11 @@ mod red_unit_tests {
             base: "b".into(),
             body: "x".into(),
         };
+
+        // When
         let result = create_pull_request(&mut transport, &params);
+
+        // Then
         assert!(result.is_err(), "expected auth error, got {result:?}");
         assert!(matches!(result, Err(GithubPrError::AuthenticationRequired)));
         assert!(transport.requests.is_empty());
@@ -455,6 +466,7 @@ mod red_unit_tests {
     #[test]
     #[serial]
     fn create_pull_request_json_body_matches_github_pulls_contract() {
+        // Given
         std::env::set_var("GITHUB_TOKEN", "ghp_unit");
         let _clear = ClearGithubEnvOnDrop;
         let mut transport = MockGithubTransport::new();
@@ -466,7 +478,11 @@ mod red_unit_tests {
             base: "main".into(),
             body: "BB".into(),
         };
+
+        // When
         create_pull_request(&mut transport, &params).unwrap();
+
+        // Then
         assert_eq!(
             transport.requests[0].body,
             json!({

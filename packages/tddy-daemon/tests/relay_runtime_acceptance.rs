@@ -13,11 +13,13 @@ fn tddy_daemon_bin() -> Command {
 /// Phase 3 AC: `tddy-daemon --help` lists `--relay` as an accepted flag.
 #[test]
 fn relay_flag_appears_in_daemon_help() {
+    // When
     let output = tddy_daemon_bin()
         .arg("--help")
         .output()
         .expect("tddy-daemon --help must not crash");
 
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("--relay"),
@@ -32,6 +34,7 @@ fn relay_flag_appears_in_daemon_help() {
 fn relay_mode_config_validate_does_not_require_web_bundle() {
     use tddy_daemon::config::DaemonConfig;
 
+    // Given
     let yaml = r#"
 relay:
   idle_timeout_secs: 300
@@ -46,6 +49,7 @@ daemon_instance_id: "relay-test"
         "web_bundle_path must be absent"
     );
 
+    // When / Then
     // validate_for_relay must return Ok — no web_bundle_path required in relay mode.
     cfg.validate_for_relay()
         .expect("validate_for_relay must succeed without web_bundle_path");
@@ -56,6 +60,7 @@ daemon_instance_id: "relay-test"
 fn non_relay_config_validate_for_relay_returns_err() {
     use tddy_daemon::config::DaemonConfig;
 
+    // Given
     let yaml = r#"
 listen:
   web_port: 0
@@ -63,6 +68,7 @@ listen:
     let cfg: DaemonConfig = serde_yaml::from_str(yaml).expect("must parse");
     assert!(cfg.relay.is_none(), "relay must be absent");
 
+    // When / Then
     let result = cfg.validate_for_relay();
     assert!(
         result.is_err(),
@@ -76,9 +82,13 @@ fn idle_timeout_tracker_not_expired_when_recently_active() {
     use std::time::Duration;
     use tddy_daemon::relay_idle::IdleTimeoutTracker;
 
+    // Given
     let tracker = IdleTimeoutTracker::new(Duration::from_secs(300));
+
+    // When
     tracker.record_activity();
 
+    // Then
     assert!(
         !tracker.should_shutdown(),
         "should_shutdown must be false immediately after activity"
@@ -91,10 +101,14 @@ fn idle_timeout_tracker_expired_after_timeout_duration() {
     use std::time::Duration;
     use tddy_daemon::relay_idle::IdleTimeoutTracker;
 
+    // Given
     // Use a 1ms timeout — any real code path will exceed it.
     let tracker = IdleTimeoutTracker::new(Duration::from_millis(1));
+
+    // When
     std::thread::sleep(Duration::from_millis(10));
 
+    // Then
     assert!(
         tracker.should_shutdown(),
         "should_shutdown must be true after idle timeout expires"
@@ -110,6 +124,7 @@ fn relay_mode_startup_config_check_skips_bundle_path() {
     use tddy_daemon::config::DaemonConfig;
     use tddy_daemon::startup::startup_config_check;
 
+    // Given
     let yaml = r#"
 relay:
   idle_timeout_secs: 300
@@ -123,7 +138,10 @@ listen:
         "precondition: no bundle path"
     );
 
+    // When
     let result = startup_config_check(&config, true);
+
+    // Then
     assert!(
         result.is_ok(),
         "startup_config_check(relay=true) must not require web_bundle_path; got: {:?}",
@@ -144,6 +162,7 @@ fn non_relay_startup_config_check_requires_bundle_path() {
     use tddy_daemon::config::DaemonConfig;
     use tddy_daemon::startup::startup_config_check;
 
+    // Given
     let yaml = r#"
 listen:
   web_port: 8080
@@ -154,7 +173,10 @@ listen:
         "precondition: no bundle path"
     );
 
+    // When
     let result = startup_config_check(&config, false);
+
+    // Then
     assert!(
         result.is_err(),
         "startup_config_check(relay=false) must require web_bundle_path; got Ok"

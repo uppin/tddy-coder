@@ -61,6 +61,7 @@ fn init_repo_with_main(repo: &Path) {
 
 #[test]
 fn setup_worktree_reuses_existing_linked_worktree_when_changeset_omits_worktree_path() {
+    // Given
     let base = scratch("reuse");
     let repo = base.join("repo");
     fs::create_dir_all(&repo).unwrap();
@@ -68,7 +69,6 @@ fn setup_worktree_reuses_existing_linked_worktree_when_changeset_omits_worktree_
 
     let session_dir = base.join("session");
     fs::create_dir_all(&session_dir).unwrap();
-
     let cs = Changeset {
         name: Some("ResumeReuse".into()),
         branch_suggestion: Some("main".into()),
@@ -98,17 +98,20 @@ selected_branch_to_work_on: main
         setup_worktree_for_session_with_integration_base(&repo, &session_dir, "origin/main")
             .expect("first worktree setup");
 
+    // Simulate resume: strip worktree path from changeset
     let mut cs = read_changeset(&session_dir).unwrap();
     cs.worktree = None;
     cs.repo_path = None;
     write_changeset(&session_dir, &cs).unwrap();
 
+    // When
     let wt_second =
         setup_worktree_for_session_with_integration_base(&repo, &session_dir, "origin/main")
             .expect(
                 "must reuse existing git worktree when the directory is already linked; got error",
             );
 
+    // Then
     assert_eq!(
         wt_first.canonicalize().unwrap_or_else(|_| wt_first.clone()),
         wt_second

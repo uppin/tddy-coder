@@ -53,6 +53,7 @@ mod livekit_tests {
     #[tokio::test]
     #[serial]
     async fn token_service_generate_returns_valid_jwt() -> Result<()> {
+        // Given
         let livekit = LiveKitTestkit::start().await?;
         let url = livekit.get_ws_url();
 
@@ -97,6 +98,7 @@ mod livekit_tests {
 
         let rpc_client = RpcClient::new(client_room, SERVER_IDENTITY.to_string(), rpc_events);
 
+        // When — client calls GenerateToken RPC for a new participant
         let request = GenerateTokenRequest {
             room: ROOM_NAME.to_string(),
             identity: "new-participant".to_string(),
@@ -110,6 +112,7 @@ mod livekit_tests {
 
         server_handle.abort();
 
+        // Then — response contains a valid JWT with the expected TTL
         let resp = GenerateTokenResponse::decode(&response_bytes[..])?;
         assert!(!resp.token.is_empty(), "token should not be empty");
         assert!(

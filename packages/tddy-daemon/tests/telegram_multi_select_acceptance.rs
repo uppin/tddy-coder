@@ -81,6 +81,7 @@ fn assert_all_callbacks_within_telegram_limit(rows: &InlineKeyboardRows) {
 /// PRD: synthetic MultiSelect ModeChanged produces outbound shortcut buttons + compact callbacks.
 #[tokio::test]
 async fn telegram_multi_select_shortcuts_emit_expected_callbacks() {
+    // Given
     let mut watcher = TelegramSessionWatcher::new();
     let cfg = telegram_config();
     let mem = InMemoryTelegramSender::new();
@@ -89,11 +90,13 @@ async fn telegram_multi_select_shortcuts_emit_expected_callbacks() {
 
     watcher.bind_telegram_tracked_session_for_chat(AUTHORIZED_CHAT, sid);
 
+    // When
     watcher
         .on_server_message(&cfg, &mem, sid, &msg)
         .await
         .expect("watcher accepts ModeChanged");
 
+    // Then
     let keyboards = keyboards_for_chat(&mem, AUTHORIZED_CHAT);
     assert!(
         !keyboards.is_empty(),
@@ -127,7 +130,10 @@ async fn telegram_multi_select_shortcuts_emit_expected_callbacks() {
 /// PRD: inbound Choose-none shortcuts must decode for the same compact wire encoding as outbound.
 #[test]
 fn telegram_choose_none_submits_empty_multi_via_presenter() {
+    // Given
     let sid = "01900000-0000-7000-8000-0000000000aa";
+
+    // When / Then
     let cb = tddy_daemon::telegram_multi_select_shortcuts::compose_choose_none_callback(sid, 0);
     assert!(
         parse_elicitation_multi_select_shortcut(&cb).is_some(),
@@ -138,9 +144,11 @@ fn telegram_choose_none_submits_empty_multi_via_presenter() {
 /// PRD: omit Choose recommended when metadata absent; emit when recommended_other populated.
 #[tokio::test]
 async fn telegram_choose_recommended_requires_metadata() {
+    // Given
     let cfg = telegram_config();
     let sid = "01900000-0000-7000-8000-0000000000cc";
 
+    // When (without recommended_other)
     let mut watcher_a = TelegramSessionWatcher::new();
     let mem_a = InMemoryTelegramSender::new();
     let without = multi_select_mode_changed("");
@@ -148,6 +156,8 @@ async fn telegram_choose_recommended_requires_metadata() {
         .on_server_message(&cfg, &mem_a, sid, &without)
         .await
         .unwrap();
+
+    // Then (no recommended button)
     let flat_a: Vec<(String, String)> = keyboards_for_chat(&mem_a, AUTHORIZED_CHAT)
         .iter()
         .flatten()
@@ -159,6 +169,7 @@ async fn telegram_choose_recommended_requires_metadata() {
         "Choose recommended callback must be absent when recommended_other is empty; got {flat_a:?}"
     );
 
+    // When (with recommended_other)
     let mut watcher_b = TelegramSessionWatcher::new();
     let mem_b = InMemoryTelegramSender::new();
     let with_rec = multi_select_mode_changed("Use this recommendation");
@@ -167,6 +178,8 @@ async fn telegram_choose_recommended_requires_metadata() {
         .on_server_message(&cfg, &mem_b, sid, &with_rec)
         .await
         .unwrap();
+
+    // Then (recommended button present)
     let flat_b: Vec<(String, String)> = keyboards_for_chat(&mem_b, AUTHORIZED_CHAT)
         .iter()
         .flatten()

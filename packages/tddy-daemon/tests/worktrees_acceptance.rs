@@ -73,6 +73,7 @@ fn worktree_list_contains_path(repo: &Path, needle: &Path) -> bool {
 /// Acceptance: after first refresh, repeated list does not invoke diff/stat again (counter).
 #[test]
 fn stats_cache_persists_and_is_served_without_re_diff_on_each_list_call() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let prev = std::env::var("TDDY_PROJECTS_STATS_ROOT").ok();
     std::env::set_var(
@@ -93,6 +94,7 @@ fn stats_cache_persists_and_is_served_without_re_diff_on_each_list_call() {
     let project_id = "proj-acceptance-1";
     let (_guard, main_repo, _wt) = init_repo_with_secondary_worktree();
 
+    // When
     cache.refresh_stats_for_project(project_id, &main_repo);
     let after_refresh = cache.test_git_diff_invocations.load(Ordering::SeqCst);
     assert_eq!(after_refresh, 1);
@@ -100,6 +102,7 @@ fn stats_cache_persists_and_is_served_without_re_diff_on_each_list_call() {
     cache.list_cached_stats(project_id);
     cache.list_cached_stats(project_id);
 
+    // Then
     assert_eq!(
         cache.test_git_diff_invocations.load(Ordering::SeqCst),
         1,
@@ -110,13 +113,17 @@ fn stats_cache_persists_and_is_served_without_re_diff_on_each_list_call() {
 /// Acceptance: successful remove drops worktree from `git worktree list`; repeat remove fails.
 #[test]
 fn remove_worktree_drops_listing_and_repeat_fails() {
+    // Given
     let (_tmp, repo, wt_path) = init_repo_with_secondary_worktree();
     assert!(
         worktree_list_contains_path(&repo, &wt_path),
         "precondition: secondary worktree must exist"
     );
 
+    // When
     let res = remove_worktree_under_repo(&repo, &wt_path);
+
+    // Then
     assert!(res.is_ok(), "remove worktree should succeed: {:?}", res);
 
     assert!(
@@ -124,7 +131,10 @@ fn remove_worktree_drops_listing_and_repeat_fails() {
         "git worktree list should no longer list removed path"
     );
 
+    // When
     let second = remove_worktree_under_repo(&repo, &wt_path);
+
+    // Then
     assert!(
         second.is_err(),
         "second delete should be not-found / failed precondition"
