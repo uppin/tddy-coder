@@ -1,0 +1,11 @@
+schema_version: 1
+targets:
+  - id: "tddy-build-docker:lib"
+    name: "tddy-build-docker"
+    deps: ["tddy-build:lib"]
+    config:
+      type: rust_library
+      package: tddy-build-docker
+      srcs:
+        - "packages/tddy-build-docker/src/**/*.rs"
+        - "packages/tddy-build-docker/Cargo.toml"

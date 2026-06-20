@@ -1,0 +1,15 @@
+schema_version: 1
+targets:
+  - id: "tddy-integration-tests:lib"
+    name: "tddy-integration-tests"
+    deps:
+      - "tddy-core:lib"
+      - "tddy-workflow:lib"
+      - "tddy-workflow-recipes:lib"
+      - "tddy-daemon:bin"
+    config:
+      type: rust_library
+      package: tddy-integration-tests
+      srcs:
+        - "packages/tddy-integration-tests/src/**/*.rs"
+        - "packages/tddy-integration-tests/Cargo.toml"

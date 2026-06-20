@@ -1,0 +1,23 @@
+schema_version: 1
+targets:
+  - id: "tddy-tools:bin"
+    name: "tddy-tools"
+    deps:
+      - "tddy-core:lib"
+      - "tddy-build:lib"
+      - "tddy-build-rust:lib"
+      - "tddy-build-typescript:lib"
+      - "tddy-build-docker:lib"
+      - "tddy-workflow-recipes:lib"
+      - "tddy-service:lib"
+      - "tddy-livekit:lib"
+    config:
+      type: rust_binary
+      package: tddy-tools
+      bin_name: tddy-tools
+      srcs:
+        - "packages/tddy-tools/src/**/*.rs"
+        - "packages/tddy-tools/Cargo.toml"
+      outputs:
+        - path: "target/debug/tddy-tools"
+          kind: file

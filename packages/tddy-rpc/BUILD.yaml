@@ -1,0 +1,10 @@
+schema_version: 1
+targets:
+  - id: "tddy-rpc:lib"
+    name: "tddy-rpc"
+    config:
+      type: rust_library
+      package: tddy-rpc
+      srcs:
+        - "packages/tddy-rpc/src/**/*.rs"
+        - "packages/tddy-rpc/Cargo.toml"

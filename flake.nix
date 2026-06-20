@@ -54,6 +54,8 @@
             pkgs.bun
             pkgs.nodejs_20
             pkgs.util-linux
+            pkgs.gnumake
+            pkgs.qemu
           ];
           shellHook = ''
             echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer, bun, node"

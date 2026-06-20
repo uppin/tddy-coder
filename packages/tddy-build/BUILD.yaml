@@ -1,0 +1,10 @@
+schema_version: 1
+targets:
+  - id: "tddy-build:lib"
+    name: "tddy-build"
+    config:
+      type: rust_library
+      package: tddy-build
+      srcs:
+        - "packages/tddy-build/src/**/*.rs"
+        - "packages/tddy-build/Cargo.toml"

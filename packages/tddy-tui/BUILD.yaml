@@ -1,0 +1,11 @@
+schema_version: 1
+targets:
+  - id: "tddy-tui:lib"
+    name: "tddy-tui"
+    deps: ["tddy-core:lib"]
+    config:
+      type: rust_library
+      package: tddy-tui
+      srcs:
+        - "packages/tddy-tui/src/**/*.rs"
+        - "packages/tddy-tui/Cargo.toml"
