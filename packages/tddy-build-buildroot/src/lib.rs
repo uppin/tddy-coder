@@ -95,7 +95,7 @@ fn relative_path(from_dir: &str, to_path: &str) -> String {
     let common = from.iter().zip(to.iter()).take_while(|(a, b)| a == b).count();
     let ups = from.len() - common;
     let down = &to[common..];
-    let mut parts: Vec<&str> = std::iter::repeat("..").take(ups).collect();
+    let mut parts: Vec<&str> = std::iter::repeat_n("..", ups).collect();
     parts.extend(down.iter().copied());
     if parts.is_empty() { ".".to_string() } else { parts.join("/") }
 }
