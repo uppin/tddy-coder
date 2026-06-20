@@ -1,7 +1,9 @@
 //! `tddy-build` plugin: lowers `buildroot_image` targets to `make`.
 //!
-//! `buildroot_image` → `make O=<output_dir> <defconfig>` then `make O=<output_dir>`,
-//! run in `buildroot_dir` (repo-root-relative, resolved by the executor).
+//! `buildroot_image` → `make O=<o_rel> <defconfig>` then `make O=<o_rel>`,
+//! run in `buildroot_dir`. `o_rel` is `output_dir` expressed relative to `buildroot_dir`
+//! so that `make` writes to the correct repo-root-relative location. Output paths in
+//! `BuildAction` remain repo-root-relative (as required by the executor).
 
 use serde::Deserialize;
 
@@ -37,7 +39,8 @@ impl BuildPlugin for BuildrootPlugin {
             ));
         }
 
-        let o_arg = format!("O={}", cfg.output_dir);
+        let o_rel = relative_path(&cfg.buildroot_dir, &cfg.output_dir);
+        let o_arg = format!("O={o_rel}");
         let config_path = format!("{}/.config", cfg.output_dir);
 
         let final_outputs = if cfg.outputs.is_empty() {
@@ -82,6 +85,21 @@ impl BuildPlugin for BuildrootPlugin {
     }
 }
 
+/// Compute the relative path from `from_dir` to `to_path`, both repo-root-relative.
+///
+/// Used to pass `O=<rel>` to `make` so it writes to the correct location when
+/// running inside `buildroot_dir` rather than the repo root.
+fn relative_path(from_dir: &str, to_path: &str) -> String {
+    let from: Vec<&str> = from_dir.split('/').filter(|s| !s.is_empty()).collect();
+    let to: Vec<&str> = to_path.split('/').filter(|s| !s.is_empty()).collect();
+    let common = from.iter().zip(to.iter()).take_while(|(a, b)| a == b).count();
+    let ups = from.len() - common;
+    let down = &to[common..];
+    let mut parts: Vec<&str> = std::iter::repeat("..").take(ups).collect();
+    parts.extend(down.iter().copied());
+    if parts.is_empty() { ".".to_string() } else { parts.join("/") }
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct BuildrootImage {
@@ -122,10 +140,12 @@ mod tests {
 
     #[test]
     fn defconfig_action_has_correct_argv() {
+        // O= is relative from buildroot_dir to output_dir so make writes to the
+        // correct repo-root-relative location (external/buildroot/../../build/br-out).
         let actions = lower("defconfig: qemu_x86_64_defconfig\nbuildroot_dir: external/buildroot\noutput_dir: build/br-out\n");
         assert_eq!(
             actions[0].command,
-            vec!["make", "O=build/br-out", "qemu_x86_64_defconfig"]
+            vec!["make", "O=../../build/br-out", "qemu_x86_64_defconfig"]
         );
         assert_eq!(actions[0].id, "buildroot-defconfig");
         assert_eq!(actions[0].working_dir, "external/buildroot");
@@ -134,9 +154,19 @@ mod tests {
     #[test]
     fn build_action_has_correct_argv() {
         let actions = lower("defconfig: qemu_x86_64_defconfig\nbuildroot_dir: external/buildroot\noutput_dir: build/br-out\n");
-        assert_eq!(actions[1].command, vec!["make", "O=build/br-out"]);
+        assert_eq!(actions[1].command, vec!["make", "O=../../build/br-out"]);
         assert_eq!(actions[1].id, "buildroot-build");
         assert_eq!(actions[1].working_dir, "external/buildroot");
+    }
+
+    #[test]
+    fn relative_path_crosses_directory_boundary() {
+        assert_eq!(relative_path("external/buildroot", "build/br-out"), "../../build/br-out");
+    }
+
+    #[test]
+    fn relative_path_nested_under_from() {
+        assert_eq!(relative_path("external/br", "external/br/output"), "output");
     }
 
     #[test]
