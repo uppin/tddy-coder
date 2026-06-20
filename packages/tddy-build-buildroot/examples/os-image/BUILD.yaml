@@ -1,0 +1,10 @@
+schema_version: 1
+targets:
+  - id: "my-os:rootfs"
+    name: "Buildroot rootfs"
+    config:
+      type: buildroot_image
+      defconfig: qemu_x86_64_defconfig
+      buildroot_dir: "external/buildroot"
+      output_dir: "build/br-out"
+      srcs: ["board/my-os/"]

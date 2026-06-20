@@ -1,0 +1,7 @@
+schema_version: 1
+targets:
+  - id: "my-os:qcow2"
+    name: "QEMU disk image"
+    config:
+      type: qemu_disk_image
+      input: "build/br-out/images/rootfs.ext4"

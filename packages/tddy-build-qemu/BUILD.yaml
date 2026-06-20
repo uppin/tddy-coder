@@ -1,0 +1,11 @@
+schema_version: 1
+targets:
+  - id: "tddy-build-qemu:lib"
+    name: "tddy-build-qemu"
+    deps: ["tddy-build:lib"]
+    config:
+      type: rust_library
+      package: tddy-build-qemu
+      srcs:
+        - "packages/tddy-build-qemu/src/**/*.rs"
+        - "packages/tddy-build-qemu/Cargo.toml"
