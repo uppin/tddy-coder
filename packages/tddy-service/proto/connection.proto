@@ -393,7 +393,9 @@ message GetDemoVmStatusRequest {
 }
 
 message GetDemoVmStatusResponse {
-  DemoVmState state        = 1;
+  DemoVmState state         = 1;
   uint32      ssh_host_port = 2;
-  string      message      = 3;
+  string      message       = 3;
+  // Present when state = RUNNING and an app port is configured (e.g. "http://localhost:8080").
+  string      share_url     = 4;
 }

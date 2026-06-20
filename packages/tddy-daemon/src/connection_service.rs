@@ -176,7 +176,11 @@ enum DemoVmHandle {
     /// Boot has been requested; waiting for SSH port to become reachable.
     Booting,
     /// VM is up and accepting SSH connections.
-    Running(tddy_demo_runner::RunningVm),
+    /// `share_url` is the first app port forward URL (e.g. "http://localhost:8080"), if any.
+    Running {
+        vm: tddy_demo_runner::RunningVm,
+        share_url: String,
+    },
     /// Boot or shutdown failed.
     Error(String),
 }
@@ -2140,7 +2144,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             if let Some(h) = state.get(&req.session_id) {
                 let (state_enum, msg) = match h {
                     DemoVmHandle::Booting => (DemoVmState::DemoVmStateBooting, "already booting"),
-                    DemoVmHandle::Running(_) => {
+                    DemoVmHandle::Running { .. } => {
                         (DemoVmState::DemoVmStateRunning, "VM already running")
                     }
                     DemoVmHandle::Error(_) => {
@@ -2164,15 +2168,22 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             state.insert(req.session_id.clone(), DemoVmHandle::Booting);
         }
 
+        // Build the share URL from the first app hostfwd entry (not the SSH port itself).
+        let share_url = config
+            .extra_hostfwd
+            .first()
+            .map(|p| format!("http://localhost:{}", p.host_port))
+            .unwrap_or_default();
+
         let state_ref = Arc::clone(&self.demo_vm_state);
         let session_id = req.session_id.clone();
         tokio::spawn(async move {
             use tddy_demo_runner::DemoVm as _;
-            let vm = tddy_demo_runner::QemuDemoVm;
-            match vm.boot(&config).await {
-                Ok(running_vm) => {
+            let vm_impl = tddy_demo_runner::QemuDemoVm;
+            match vm_impl.boot(&config).await {
+                Ok(vm) => {
                     let mut state = state_ref.lock().await;
-                    state.insert(session_id, DemoVmHandle::Running(running_vm));
+                    state.insert(session_id, DemoVmHandle::Running { vm, share_url });
                 }
                 Err(e) => {
                     let mut state = state_ref.lock().await;
@@ -2212,7 +2223,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         };
 
         match handle {
-            Some(DemoVmHandle::Running(vm)) => {
+            Some(DemoVmHandle::Running { vm, .. }) => {
                 use tddy_demo_runner::DemoVm as _;
                 let vm_impl = tddy_demo_runner::QemuDemoVm;
                 match vm_impl.shutdown(vm).await {
@@ -2261,21 +2272,25 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 state: DemoVmState::DemoVmStateStopped as i32,
                 ssh_host_port: 0,
                 message: "no VM for this session".to_string(),
+                share_url: String::new(),
             },
             Some(DemoVmHandle::Booting) => GetDemoVmStatusResponse {
                 state: DemoVmState::DemoVmStateBooting as i32,
                 ssh_host_port: 0,
                 message: "booting".to_string(),
+                share_url: String::new(),
             },
-            Some(DemoVmHandle::Running(vm)) => GetDemoVmStatusResponse {
+            Some(DemoVmHandle::Running { vm, share_url }) => GetDemoVmStatusResponse {
                 state: DemoVmState::DemoVmStateRunning as i32,
                 ssh_host_port: vm.ssh_host_port as u32,
                 message: "running".to_string(),
+                share_url: share_url.clone(),
             },
             Some(DemoVmHandle::Error(msg)) => GetDemoVmStatusResponse {
                 state: DemoVmState::DemoVmStateError as i32,
                 ssh_host_port: 0,
                 message: msg.clone(),
+                share_url: String::new(),
             },
         };
         Ok(Response::new(resp))
