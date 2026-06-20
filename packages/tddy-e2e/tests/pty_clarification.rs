@@ -19,6 +19,7 @@ fn tddy_demo_binary() -> PathBuf {
 #[tokio::test]
 #[ignore = "PTY test: run with --ignored; requires tddy-demo binary (cargo build -p tddy-demo)"]
 async fn clarification_question_appears_on_screen() {
+    // Given
     let bin = tddy_demo_binary();
     if !bin.exists() {
         eprintln!("Skipping: tddy-demo not built. Run: cargo build -p tddy-demo");
@@ -31,12 +32,13 @@ async fn clarification_question_appears_on_screen() {
         .await
         .expect("spawn tddy-demo");
 
-    // Wait for clarification question to appear (Scope: Which authentication method...)
+    // When — workflow starts and reaches the clarification question
     term.expect("Which authentication method")
         .timeout(Duration::from_secs(10))
         .await
         .expect("clarification question should appear");
 
+    // Then — both answer options are visible on screen
     let screen = term.screen().await;
     assert!(
         screen.contains("Email/password"),
@@ -49,10 +51,10 @@ async fn clarification_question_appears_on_screen() {
         screen.text()
     );
 
-    // Select first option (Enter)
+    // When — user selects the first option
     term.enter().await.expect("send Enter");
 
-    // Wait for workflow to proceed (plan goal or state change)
+    // Then — workflow proceeds past the clarification step
     term.expect("plan")
         .timeout(Duration::from_secs(15))
         .await

@@ -9,11 +9,13 @@ use tddy_core::write_changeset;
 /// PRD: dedicated CLI path writes validated workflow JSON into changeset (atomic, schema-checked).
 #[test]
 fn tddy_tools_writes_demo_workflow_fields_to_changeset() {
+    // Given
     let dir = std::env::temp_dir().join(format!("tddy-persist-cw-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("mkdir");
     write_changeset(&dir, &Changeset::default()).expect("seed changeset");
 
+    // When
     let status = Command::new(env!("CARGO_BIN_EXE_tddy-tools"))
         .args([
             "persist-changeset-workflow",
@@ -24,6 +26,8 @@ fn tddy_tools_writes_demo_workflow_fields_to_changeset() {
         ])
         .status()
         .expect("spawn tddy-tools");
+
+    // Then
     assert!(
         status.success(),
         "persist-changeset-workflow must write workflow fields to changeset.yaml (exit 0); got {:?}",

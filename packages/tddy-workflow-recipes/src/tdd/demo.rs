@@ -29,7 +29,10 @@ mod tests {
 
     #[test]
     fn system_prompt_includes_submit_and_schema_for_demo_goal() {
+        // When
         let prompt = system_prompt();
+
+        // Then
         assert!(
             !prompt.is_empty(),
             "demo system prompt must not be empty so agents receive submit instructions"

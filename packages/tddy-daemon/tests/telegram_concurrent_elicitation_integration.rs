@@ -127,6 +127,7 @@ fn telegram_config() -> tddy_daemon::config::DaemonConfig {
 /// promoted session is re-notified with a primary `eli:s:` keyboard.
 #[tokio::test]
 async fn telegram_queue_advances_when_head_leaves_elicitation_without_telegram() {
+    // Given
     let mut watcher = TelegramSessionWatcher::new();
     let cfg = telegram_config();
     let mem = InMemoryTelegramSender::new();
@@ -153,12 +154,14 @@ async fn telegram_queue_advances_when_head_leaves_elicitation_without_telegram()
         "only session A should have a primary clarification keyboard initially"
     );
 
+    // When
     let running_a = running_mode_message();
     watcher
         .on_server_message(&cfg, &mem, sid_a, &running_a)
         .await
         .unwrap();
 
+    // Then
     let primary_after = count_eli_s_primary_keyboards(&mem, AUTHORIZED_CHAT);
     assert!(
         primary_after >= 2,
@@ -170,6 +173,7 @@ async fn telegram_queue_advances_when_head_leaves_elicitation_without_telegram()
 /// `telegram_single_chat_two_sessions_second_prompt_is_queued_or_deferred`
 #[tokio::test]
 async fn telegram_single_chat_two_sessions_second_prompt_is_queued_or_deferred() {
+    // Given
     let mut watcher = TelegramSessionWatcher::new();
     let cfg = telegram_config();
     let mem = InMemoryTelegramSender::new();
@@ -179,6 +183,7 @@ async fn telegram_single_chat_two_sessions_second_prompt_is_queued_or_deferred()
     let msg_a = select_elicitation_message("Question from session A", "X", "Y");
     let msg_b = select_elicitation_message("Question from session B", "P", "Q");
 
+    // When
     watcher
         .on_server_message(&cfg, &mem, sid_a, &msg_a)
         .await
@@ -188,6 +193,7 @@ async fn telegram_single_chat_two_sessions_second_prompt_is_queued_or_deferred()
         .await
         .unwrap();
 
+    // Then
     let primary_keyboards = count_eli_s_primary_keyboards(&mem, AUTHORIZED_CHAT);
     assert!(
         primary_keyboards <= 1,
@@ -200,13 +206,17 @@ async fn telegram_single_chat_two_sessions_second_prompt_is_queued_or_deferred()
 /// `telegram_active_session_token_routes_plain_text_answer_correctly`
 #[tokio::test]
 async fn telegram_active_session_token_routes_plain_text_answer_correctly() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let sender = Arc::new(InMemoryTelegramSender::new());
     let harness =
         TelegramSessionControlHarness::new(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf(), sender);
 
+    // When
     let sid_active = "01900000-0000-7000-8000-0000000000aa";
     harness.register_elicitation_surface_request(AUTHORIZED_CHAT, sid_active.to_string());
+
+    // Then
     assert_eq!(
         harness.active_elicitation_session_for_chat(AUTHORIZED_CHAT),
         Some(sid_active.to_string()),
@@ -218,6 +228,7 @@ async fn telegram_active_session_token_routes_plain_text_answer_correctly() {
 /// `telegram_callback_for_non_active_session_is_rejected_or_ignored_per_policy`
 #[tokio::test]
 async fn telegram_callback_for_non_active_session_is_rejected_or_ignored_per_policy() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let sender = Arc::new(InMemoryTelegramSender::new());
     let harness =
@@ -227,6 +238,8 @@ async fn telegram_callback_for_non_active_session_is_rejected_or_ignored_per_pol
     let sid_other = "01900000-0000-7000-8000-0000000000bb";
     harness.register_elicitation_surface_request(AUTHORIZED_CHAT, sid_active.to_string());
     harness.register_elicitation_surface_request(AUTHORIZED_CHAT, sid_other.to_string());
+
+    // Then
     assert!(
         harness.elicitation_callback_permitted(AUTHORIZED_CHAT, sid_active),
         "callback for the active session must be permitted"
@@ -240,6 +253,7 @@ async fn telegram_callback_for_non_active_session_is_rejected_or_ignored_per_pol
 /// `telegram_active_token_transfers_when_session_completes_elicitation`
 #[tokio::test]
 async fn telegram_active_token_transfers_when_session_completes_elicitation() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let sender = Arc::new(InMemoryTelegramSender::new());
     let mut harness =
@@ -251,7 +265,10 @@ async fn telegram_active_token_transfers_when_session_completes_elicitation() {
     harness.register_elicitation_surface_request(AUTHORIZED_CHAT, sid_a.to_string());
     harness.register_elicitation_surface_request(AUTHORIZED_CHAT, sid_b.to_string());
 
+    // When
     let next = harness.advance_after_elicitation_completion(AUTHORIZED_CHAT, sid_a);
+
+    // Then
     assert_eq!(
         next.as_deref(),
         Some(sid_b),
@@ -262,13 +279,17 @@ async fn telegram_active_token_transfers_when_session_completes_elicitation() {
 /// `telegram_regression_single_session_elicitation_still_works`
 #[tokio::test]
 async fn telegram_regression_single_session_elicitation_still_works() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let sender = Arc::new(InMemoryTelegramSender::new());
     let harness =
         TelegramSessionControlHarness::new(vec![AUTHORIZED_CHAT], tmp.path().to_path_buf(), sender);
 
+    // When
     let only_sid = "01900000-0000-7000-8000-0000000000cc";
     harness.register_elicitation_surface_request(AUTHORIZED_CHAT, only_sid.to_string());
+
+    // Then
     assert_eq!(
         harness.active_elicitation_session_for_chat(AUTHORIZED_CHAT),
         Some(only_sid.to_string()),
@@ -278,6 +299,7 @@ async fn telegram_regression_single_session_elicitation_still_works() {
 
 #[tokio::test]
 async fn telegram_wrong_tracked_outbound_elicitation_does_not_block_tracked_session_fifo() {
+    // Given
     let mut watcher = TelegramSessionWatcher::new();
     let cfg = telegram_config();
     let mem = InMemoryTelegramSender::new();
@@ -289,6 +311,7 @@ async fn telegram_wrong_tracked_outbound_elicitation_does_not_block_tracked_sess
     let msg_a = select_elicitation_message("Question from session A", "X", "Y");
     let msg_b = select_elicitation_message("Question from tracked session B", "P", "Q");
 
+    // When
     watcher
         .on_server_message(&cfg, &mem, sid_a, &msg_a)
         .await
@@ -298,6 +321,7 @@ async fn telegram_wrong_tracked_outbound_elicitation_does_not_block_tracked_sess
         .await
         .unwrap();
 
+    // Then
     let queued_snippet = "elicitation queued";
     let any_queued = mem
         .recorded()
@@ -318,6 +342,7 @@ async fn telegram_wrong_tracked_outbound_elicitation_does_not_block_tracked_sess
 /// PRD MultiSelect: concurrent shortcut keyboards obey single primary interactive surface per chat.
 #[tokio::test]
 async fn telegram_concurrent_queue_unchanged_guarantees() {
+    // Given
     let mut watcher = TelegramSessionWatcher::new();
     let cfg = telegram_config();
     let mem = InMemoryTelegramSender::new();
@@ -344,12 +369,14 @@ async fn telegram_concurrent_queue_unchanged_guarantees() {
         "FIFO head must own the lone primary MultiSelect shortcut keyboard for this chat"
     );
 
+    // When
     let running_a = running_mode_message();
     watcher
         .on_server_message(&cfg, &mem, sid_a, &running_a)
         .await
         .unwrap();
 
+    // Then
     let total_shortcut_surfaces = count_primary_multi_shortcut_keyboards(&mem, AUTHORIZED_CHAT);
     assert!(
         total_shortcut_surfaces >= 2,

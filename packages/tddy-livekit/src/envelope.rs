@@ -58,6 +58,7 @@ mod tests {
 
     #[test]
     fn envelope_encode_decode_roundtrip() {
+        // Given an RpcRequest with all standard fields set
         let request = RpcRequest {
             request_id: 42,
             request_message: b"hello".to_vec(),
@@ -70,8 +71,12 @@ mod tests {
             abort: false,
             sender_identity: None,
         };
+
+        // When encoding then decoding
         let encoded = encode_request(request).expect("encode");
         let decoded = decode_request(&encoded).expect("decode");
+
+        // Then all fields survive the roundtrip
         assert_eq!(decoded.request_id, 42);
         assert_eq!(decoded.request_message, b"hello");
         assert_eq!(
@@ -82,6 +87,7 @@ mod tests {
 
     #[test]
     fn envelope_encode_decode_preserves_sender_identity() {
+        // Given a request with sender_identity set
         let request = RpcRequest {
             request_id: 1,
             request_message: b"test".to_vec(),
@@ -94,8 +100,12 @@ mod tests {
             abort: false,
             sender_identity: Some("client".to_string()),
         };
+
+        // When encoding then decoding
         let encoded = encode_request(request).expect("encode");
         let decoded = decode_request(&encoded).expect("decode");
+
+        // Then sender_identity is preserved
         assert_eq!(decoded.sender_identity.as_deref(), Some("client"));
     }
 }

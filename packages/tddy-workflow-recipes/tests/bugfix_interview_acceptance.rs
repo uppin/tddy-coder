@@ -18,11 +18,13 @@ const BUGFIX_INTERVIEW_HANDOFF_RELATIVE: &str = ".workflow/bugfix_interview_hand
 /// PRD: **interview → analyze → reproduce → end**; `next_task_id(interview) == analyze`.
 #[test]
 fn bugfix_graph_orders_interview_before_analyze() {
+    // Given
     let backend = Arc::new(StubBackend::new());
     let recipe = BugfixRecipe;
     let graph = recipe.build_graph(backend);
-
     let ctx = Context::new();
+
+    // Then
     assert!(
         graph.get_task("interview").is_some(),
         "bugfix graph must register an `interview` BackendInvokeTask (shared goal id with TDD where safe)"
@@ -79,8 +81,11 @@ fn bugfix_graph_orders_interview_before_analyze() {
 /// PRD: `goal_requires_tddy_tools_submit(interview) == false`; interview is a first-class elicitation goal with hints.
 #[test]
 fn bugfix_interview_goal_opted_out_of_structured_submit() {
+    // Given
     let r: Arc<dyn WorkflowRecipe> = Arc::new(BugfixRecipe);
     let gid = GoalId::new("interview");
+
+    // Then
     assert!(
         !r.goal_requires_tddy_tools_submit(&gid),
         "interview must complete without structured tddy-tools submit (like TDD interview)"
@@ -122,12 +127,16 @@ fn bugfix_interview_goal_opted_out_of_structured_submit() {
 /// PRD: combined interview system + user prompt contract (`tddy-tools ask`, persistence, demo fields).
 #[test]
 fn bugfix_interview_prompt_requires_demo_and_persistence_contract() {
+    // Given
     let hooks = BugfixWorkflowHooks::new(None);
     let ctx = Context::new();
+
+    // When
     hooks
         .before_task("interview", &ctx)
         .expect("before_task interview must succeed");
 
+    // Then
     let system = ctx
         .get_sync::<String>("system_prompt")
         .expect("interview before_task must set system_prompt on context");
@@ -151,6 +160,7 @@ fn bugfix_interview_prompt_requires_demo_and_persistence_contract() {
 /// PRD: relay `.workflow/bugfix_interview_handoff.txt` merged into analyze context in `before_task(analyze)`.
 #[test]
 fn bugfix_interview_handoff_visible_to_analyze_context() {
+    // Given
     let tmp = std::env::temp_dir().join(format!(
         "tddy-bugfix-interview-handoff-accept-{}",
         std::process::id()
@@ -159,7 +169,6 @@ fn bugfix_interview_handoff_visible_to_analyze_context() {
     fs::create_dir_all(tmp.join(".workflow")).unwrap();
     const MARKER: &str = "BUGFIX_INTERVIEW_HANDOFF_ACCEPTANCE_XYZZY";
     fs::write(tmp.join(BUGFIX_INTERVIEW_HANDOFF_RELATIVE), MARKER).unwrap();
-
     let hooks = BugfixWorkflowHooks::new(None);
     let ctx = Context::new();
     ctx.set_sync("session_dir", tmp.clone());
@@ -170,10 +179,12 @@ fn bugfix_interview_handoff_visible_to_analyze_context() {
     ctx.set_sync("feature_input", "repro: flaky test when …");
     ctx.set_sync("prompt", "original user bug text before merge");
 
+    // When
     hooks
         .before_task("analyze", &ctx)
         .expect("before_task analyze must succeed");
 
+    // Then
     let prompt = ctx.get_sync::<String>("prompt").unwrap_or_default();
     assert!(
         prompt.contains(MARKER),

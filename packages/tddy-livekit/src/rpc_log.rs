@@ -100,6 +100,7 @@ mod tests {
 
     #[test]
     fn rpc_traffic_collector_creates_log_file() {
+        // Given a temp directory and a no-op inner logger
         let dir = std::env::temp_dir().join(format!("rpc_log_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -112,7 +113,10 @@ mod tests {
             fn flush(&self) {}
         }
 
+        // When wrapping the inner logger with RpcTrafficCollector
         let collector = RpcTrafficCollector::wrap(&dir, Box::new(Noop)).unwrap();
+
+        // Then rpc-traffic.log is created in the directory
         assert!(dir.join("rpc-traffic.log").exists());
         drop(collector);
         let _ = std::fs::remove_dir_all(&dir);

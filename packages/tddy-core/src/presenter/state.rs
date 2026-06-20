@@ -104,36 +104,49 @@ mod tests {
 
     #[test]
     fn app_mode_feature_input() {
+        // When
         let mode = AppMode::FeatureInput;
+
+        // Then
         assert!(matches!(mode, AppMode::FeatureInput));
     }
 
     #[test]
     fn app_mode_running() {
+        // When
         let mode = AppMode::Running;
+
+        // Then
         assert!(matches!(mode, AppMode::Running));
     }
 
     #[test]
     fn app_mode_done() {
+        // When
         let mode = AppMode::Done;
+
+        // Then
         assert!(matches!(mode, AppMode::Done));
     }
 
     #[test]
-    fn test_exit_action_continue_with_agent() {
+    fn exit_action_stores_continue_with_agent_session_id() {
+        // Given
         let action = ExitAction::ContinueWithAgent {
             session_id: "abc-123".to_string(),
         };
+
+        // Then
         match action {
             ExitAction::ContinueWithAgent { ref session_id } => {
-                assert_eq!(session_id, "abc-123");
+                assert_eq!(session_id, "abc-123", "session_id must survive round-trip through ExitAction");
             }
         }
     }
 
     #[test]
-    fn test_presenter_state_exit_action_default_none() {
+    fn presenter_state_has_no_exit_action_by_default() {
+        // Given
         let state = PresenterState {
             agent: "test".to_string(),
             model: "test".to_string(),
@@ -150,17 +163,22 @@ mod tests {
             skills_project_root: None,
             active_worktree_display: None,
         };
-        assert!(state.exit_action.is_none());
+
+        // Then
+        assert!(state.exit_action.is_none(), "exit_action must be None on a freshly constructed PresenterState");
     }
 
     #[test]
-    fn test_app_mode_error_recovery_construction() {
+    fn error_recovery_mode_carries_the_error_message() {
+        // Given
         let mode = AppMode::ErrorRecovery {
             error_message: "backend timeout".to_string(),
         };
+
+        // Then
         match mode {
             AppMode::ErrorRecovery { ref error_message } => {
-                assert_eq!(error_message, "backend timeout");
+                assert_eq!(error_message, "backend timeout", "error message must be preserved in ErrorRecovery variant");
             }
             _ => panic!("Expected ErrorRecovery variant"),
         }
@@ -168,16 +186,20 @@ mod tests {
 
     #[test]
     fn activity_entry_has_text_and_kind() {
+        // Given
         let entry = ActivityEntry {
             text: "Tool: Read".to_string(),
             kind: ActivityKind::ToolUse,
         };
+
+        // Then
         assert_eq!(entry.text, "Tool: Read");
         assert_eq!(entry.kind, ActivityKind::ToolUse);
     }
 
     #[test]
     fn app_mode_select_has_initial_selected() {
+        // Given
         let mode = AppMode::Select {
             question: ClarificationQuestion {
                 header: "test".to_string(),
@@ -190,11 +212,13 @@ mod tests {
             total_questions: 1,
             initial_selected: 2,
         };
+
+        // Then
         if let AppMode::Select {
             initial_selected, ..
         } = mode
         {
-            assert_eq!(initial_selected, 2);
+            assert_eq!(initial_selected, 2, "initial_selected must be preserved in Select variant");
         } else {
             panic!("expected Select");
         }

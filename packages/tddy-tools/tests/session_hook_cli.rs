@@ -18,6 +18,7 @@ fn tddy_tools_bin() -> Command {
 /// operators can discover it.
 #[test]
 fn session_hook_appears_in_help() {
+    // When / Then
     tddy_tools_bin()
         .arg("--help")
         .assert()
@@ -28,10 +29,13 @@ fn session_hook_appears_in_help() {
 /// `session-hook --help` must describe all required and optional flags.
 #[test]
 fn session_hook_help_lists_required_flags() {
+    // When
     let output = tddy_tools_bin()
         .args(["session-hook", "--help"])
         .output()
         .expect("failed to run tddy-tools session-hook --help");
+
+    // Then
     let combined = format!(
         "{}{}",
         String::from_utf8_lossy(&output.stdout),
@@ -62,6 +66,7 @@ fn session_hook_help_lists_required_flags() {
 /// Running `session-hook` without `--session` must exit with clap error code 2.
 #[test]
 fn session_hook_requires_session_flag() {
+    // When / Then
     tddy_tools_bin()
         .args([
             "session-hook",
@@ -86,6 +91,7 @@ fn session_hook_requires_session_flag() {
 /// call is attempted at all.
 #[test]
 fn session_hook_noop_event_exits_zero_without_daemon() {
+    // When / Then
     tddy_tools_bin()
         .args([
             "session-hook",
@@ -112,6 +118,7 @@ fn session_hook_noop_event_exits_zero_without_daemon() {
 /// the hook must never propagate the error upward (it would block Claude Code).
 #[test]
 fn session_hook_unreachable_daemon_exits_zero() {
+    // When / Then
     tddy_tools_bin()
         .args([
             "session-hook",

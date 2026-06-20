@@ -2162,17 +2162,22 @@ mod tests {
     }
 
     #[test]
-    fn test_error_recovery_prompt_text() {
+    fn error_recovery_prompt_text_shows_navigation_hint() {
+        // Given
         let state = make_state(AppMode::ErrorRecovery {
             error_message: "timeout".to_string(),
         });
         let vs = ViewState::new();
+
+        // When
         let text = prompt_text(&state, &vs);
-        assert_eq!(text, "Up/Down navigate  Enter select");
+
+        // Then
+        assert_eq!(text, "Up/Down navigate  Enter select", "error recovery must show navigation hint in prompt");
     }
 
     #[test]
-    fn test_render_error_recovery_shows_three_options() {
+    fn error_recovery_render_shows_three_options() {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 

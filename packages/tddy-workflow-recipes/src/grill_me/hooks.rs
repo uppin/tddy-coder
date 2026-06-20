@@ -161,6 +161,7 @@ mod tests {
 
     #[test]
     fn grill_after_task_loads_grill_ask_answers_into_context() {
+        // Given
         let tmp =
             std::env::temp_dir().join(format!("grill-ask-answers-hook-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
@@ -170,10 +171,8 @@ mod tests {
             "line1\nline2",
         )
         .unwrap();
-
         let ctx = Context::new();
         ctx.set_sync("session_dir", tmp.clone());
-
         let hooks = GrillMeWorkflowHooks::new(None);
         let result = TaskResult {
             response: String::new(),
@@ -181,8 +180,11 @@ mod tests {
             task_id: "grill".to_string(),
             status_message: None,
         };
+
+        // When
         hooks.after_task("grill", &ctx, &result).unwrap();
 
+        // Then
         assert_eq!(
             ctx.get_sync::<String>("answers").as_deref(),
             Some("line1\nline2")

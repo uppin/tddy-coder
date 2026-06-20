@@ -24,6 +24,7 @@ fn count_dirs(path: &std::path::Path) -> usize {
 #[tokio::test]
 #[serial]
 async fn plan_goal_does_not_allocate_second_session_dir_under_sessions_root() {
+    // Given
     let base = common::unique_tddy_data_dir_for_test();
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(&base).unwrap();
@@ -32,6 +33,8 @@ async fn plan_goal_does_not_allocate_second_session_dir_under_sessions_root() {
     std::fs::create_dir_all(&sessions_root).unwrap();
 
     let pre_created = create_session_dir_in(&base).expect("common code creates session dir");
+
+    // Then
     assert_eq!(
         count_dirs(&sessions_root),
         1,
@@ -42,6 +45,8 @@ async fn plan_goal_does_not_allocate_second_session_dir_under_sessions_root() {
         initial_prompt: Some("preloaded".to_string()),
         ..Changeset::default()
     };
+
+    // When
     write_changeset(&pre_created, &init_cs).expect("write changeset");
 
     let repo = std::env::temp_dir().join(format!(

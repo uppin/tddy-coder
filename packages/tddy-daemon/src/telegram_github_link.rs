@@ -285,25 +285,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unit_mapping_store_put_get_roundtrip() {
+    fn mapping_store_put_get_roundtrip() {
+        // Given
         let tmp = tempfile::tempdir().expect("tempdir");
         let path = tmp.path().join("m.json");
         let mut store = TelegramGithubMappingStore::open(&path).expect("open");
+
+        // When
         store.put(1, "u").expect("put must persist mapping");
+
+        // Then
         assert_eq!(store.get_github_login(1).as_deref(), Some("u"));
     }
 
     #[test]
-    fn unit_oauth_encode_returns_opaque_state() {
+    fn oauth_encode_returns_opaque_state() {
+        // Given
         let s = TelegramOAuthStateSigner::new(&[0u8; 32]);
+
+        // When
+        let encoded = s.encode_telegram_user(42).expect("encode");
+
+        // Then
         assert!(
-            s.encode_telegram_user(42).expect("encode").len() >= 8,
+            encoded.len() >= 8,
             "encoded state should be non-trivial"
         );
     }
 
     #[test]
-    fn unit_stub_exchange_updates_mapping_store() {
+    fn stub_exchange_updates_mapping_store() {
+        // Given
         let stub = tddy_github::StubGitHubProvider::new("https://github.com", "cid");
         stub.register_code(
             "c1",
@@ -316,8 +328,12 @@ mod tests {
         );
         let tmp = tempfile::tempdir().expect("tempdir");
         let mut store = TelegramGithubMappingStore::open(tmp.path().join("x.json")).expect("open");
+
+        // When
         let login =
             complete_telegram_link_via_stub_exchange(&stub, "c1", 9, &mut store).expect("link");
+
+        // Then
         assert_eq!(login, "login-a");
         assert_eq!(store.get_github_login(9).as_deref(), Some("login-a"));
     }

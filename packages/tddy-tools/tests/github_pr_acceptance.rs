@@ -54,6 +54,7 @@ impl Drop for EnvUnsetGithubTokens {
 #[test]
 #[serial]
 fn github_tools_reject_when_token_missing() {
+    // Given
     let _env = EnvUnsetGithubTokens::new();
     assert!(
         github_token_from_env().is_none(),
@@ -70,7 +71,10 @@ fn github_tools_reject_when_token_missing() {
         body: "b".into(),
     };
 
+    // When
     let result = create_pull_request(&mut transport, &params);
+
+    // Then
     assert!(
         result.is_err(),
         "expected authentication error when token missing, got: {result:?}"
@@ -90,6 +94,7 @@ fn github_tools_reject_when_token_missing() {
 #[test]
 #[serial]
 fn github_tools_create_pr_sends_expected_rest_payload() {
+    // Given
     std::env::set_var("GITHUB_TOKEN", "ghp_testtoken_not_real");
     let _clear = ClearEnvOnDrop;
     let mut transport = MockGithubTransport::new();
@@ -102,8 +107,10 @@ fn github_tools_create_pr_sends_expected_rest_payload() {
         body: "Body text".into(),
     };
 
+    // When
     create_pull_request(&mut transport, &params).expect("create PR with token");
 
+    // Then
     assert_eq!(transport.requests.len(), 1);
     let req = &transport.requests[0];
     assert_eq!(req.method, "POST");
@@ -122,6 +129,7 @@ fn github_tools_create_pr_sends_expected_rest_payload() {
 #[test]
 #[serial]
 fn github_tools_update_pr_sends_expected_rest_payload() {
+    // Given
     std::env::set_var("GITHUB_TOKEN", "ghp_testtoken_not_real");
     let _clear = ClearEnvOnDrop;
     let mut transport = MockGithubTransport::new();
@@ -134,8 +142,10 @@ fn github_tools_update_pr_sends_expected_rest_payload() {
         draft: Some(true),
     };
 
+    // When
     update_pull_request(&mut transport, &params).expect("update PR with token");
 
+    // Then
     assert_eq!(transport.requests.len(), 1);
     let req = &transport.requests[0];
     assert_eq!(req.method, "PATCH");
@@ -161,6 +171,7 @@ impl Drop for ClearEnvOnDrop {
 #[test]
 #[serial]
 fn mcp_server_lists_github_pr_tools() {
+    // When / Then
     let names = registered_github_pr_mcp_tool_names();
     assert!(
         names.contains(&GITHUB_CREATE_PULL_REQUEST_MCP_NAME),

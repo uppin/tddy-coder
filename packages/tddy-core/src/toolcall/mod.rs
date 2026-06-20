@@ -296,17 +296,23 @@ mod build_wire_tests {
 
     #[test]
     fn build_list_request_wire_parses_full_and_minimal() {
+        // Given — a fully populated request
         let full: BuildListRequestWire = serde_json::from_value(json!({
             "type": "build-list", "repo_dir": "/repo", "query": "q", "limit": 5, "offset": 2
         }))
         .unwrap();
+
+        // Then — all fields are captured
         assert_eq!(full.repo_dir, "/repo");
         assert_eq!(full.query.as_deref(), Some("q"));
         assert_eq!(full.limit, Some(5));
         assert_eq!(full.offset, Some(2));
 
+        // Given — a minimal request (only required fields)
         let minimal: BuildListRequestWire =
             serde_json::from_value(json!({ "type": "build-list", "repo_dir": "/repo" })).unwrap();
+
+        // Then — optional fields default to None
         assert_eq!(minimal.query, None);
         assert_eq!(minimal.limit, None);
         assert_eq!(minimal.offset, None);
@@ -314,38 +320,56 @@ mod build_wire_tests {
 
     #[test]
     fn build_request_wire_parses_flags_with_defaults() {
+        // Given — explicit flags set to true
         let w: BuildRequestWire = serde_json::from_value(json!({
             "type": "build", "repo_dir": "/repo", "target": "pkg:bin", "no_cache": true, "dry_run": true
         }))
         .unwrap();
-        assert_eq!(w.target, "pkg:bin");
-        assert!(w.no_cache && w.dry_run);
 
+        // Then
+        assert_eq!(w.target, "pkg:bin");
+        assert!(w.no_cache, "expected no_cache to be true");
+        assert!(w.dry_run, "expected dry_run to be true");
+
+        // Given — no flags supplied (defaults)
         let defaults: BuildRequestWire = serde_json::from_value(json!({
             "type": "build", "repo_dir": "/repo", "target": "pkg:bin"
         }))
         .unwrap();
-        assert!(!defaults.no_cache && !defaults.dry_run);
+
+        // Then — flags default to false
+        assert!(!defaults.no_cache, "expected no_cache to be false by default");
+        assert!(!defaults.dry_run, "expected dry_run to be false by default");
     }
 
     #[test]
     fn build_json_response_ensures_status_ok() {
-        let line = ToolCallResponse::BuildJson {
+        // Given
+        let response = ToolCallResponse::BuildJson {
             value: json!({ "targets": [], "total": 0 }),
-        }
-        .to_json_line();
+        };
+
+        // When
+        let line = response.to_json_line();
         let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+
+        // Then
         assert_eq!(v["status"], "ok");
         assert_eq!(v["total"], 0);
     }
 
     #[test]
     fn build_json_response_preserves_existing_status() {
-        let line = ToolCallResponse::BuildJson {
+        // Given
+        let response = ToolCallResponse::BuildJson {
             value: json!({ "status": "error", "message": "boom" }),
-        }
-        .to_json_line();
+        };
+
+        // When
+        let line = response.to_json_line();
         let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+
+        // Then — pre-existing status field is not overwritten
         assert_eq!(v["status"], "error");
         assert_eq!(v["message"], "boom");
     }
@@ -354,6 +378,11 @@ mod build_wire_tests {
     fn build_executor_unset_by_default_in_this_crate() {
         // tddy-core never registers an executor (that happens in tddy-coder), so the
         // relay handler reports "build support not enabled" here.
-        assert!(build_executor().is_none());
+
+        // When
+        let executor = build_executor();
+
+        // Then
+        assert!(executor.is_none(), "no executor should be registered in tddy-core");
     }
 }

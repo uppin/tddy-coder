@@ -29,10 +29,15 @@ fn request_with_both_prompts(system_prompt: &str, user_prompt: &str) -> InvokeRe
 
 #[test]
 fn build_claude_args_includes_output_format_stream_json() {
+    // Given
     let req = request_with_both_prompts("Sys", "User");
     let config = plan_config();
+
+    // When
     let args = build_claude_args(&req, &config, None);
 
+
+    // Then
     assert!(
         args.contains(&"--output-format".to_string()),
         "should include --output-format"
@@ -47,12 +52,17 @@ fn build_claude_args_includes_output_format_stream_json() {
 
 #[test]
 fn build_claude_args_includes_session_id_on_first_call() {
+    // Given
     let mut req = request_with_both_prompts("Sys", "User");
     req.session = Some(tddy_core::SessionMode::Fresh("abc-123".to_string()));
 
     let config = plan_config();
+
+    // When
     let args = build_claude_args(&req, &config, None);
 
+
+    // Then
     assert!(args.contains(&"--session-id".to_string()));
     let sid_idx = args.iter().position(|a| a == "--session-id").unwrap();
     assert_eq!(args.get(sid_idx + 1), Some(&"abc-123".to_string()));
@@ -60,12 +70,17 @@ fn build_claude_args_includes_session_id_on_first_call() {
 
 #[test]
 fn build_claude_args_includes_resume_on_followup_call() {
+    // Given
     let mut req = request_with_both_prompts("Sys", "User");
     req.session = Some(tddy_core::SessionMode::Resume("abc-123".to_string()));
 
     let config = plan_config();
+
+    // When
     let args = build_claude_args(&req, &config, None);
 
+
+    // Then
     assert!(args.contains(&"--resume".to_string()));
     let resume_idx = args.iter().position(|a| a == "--resume").unwrap();
     assert_eq!(args.get(resume_idx + 1), Some(&"abc-123".to_string()));
@@ -73,11 +88,14 @@ fn build_claude_args_includes_resume_on_followup_call() {
 
 #[test]
 fn user_prompt_follows_print_flag() {
+    // Given
     let req = request_with_both_prompts(
         "You are a technical planning assistant.",
         "Create a PRD for: user auth",
     );
     let config = plan_config();
+
+    // When
     let args = build_claude_args(&req, &config, None);
 
     // Per CLI docs (claude -p "query"), prompt must come immediately after -p
@@ -85,6 +103,8 @@ fn user_prompt_follows_print_flag() {
         .iter()
         .position(|a| a == "-p")
         .expect("-p should be present");
+
+    // Then
     assert_eq!(
         args.get(p_idx + 1),
         Some(&"Create a PRD for: user auth".to_string())
@@ -93,10 +113,13 @@ fn user_prompt_follows_print_flag() {
 
 #[test]
 fn system_prompt_and_user_prompt_are_separate_arguments() {
+    // Given
     let sys = "System instructions here";
     let user = "User query here";
     let req = request_with_both_prompts(sys, user);
     let config = plan_config();
+
+    // When
     let args = build_claude_args(&req, &config, None);
 
     let sys_idx = args
@@ -104,6 +127,8 @@ fn system_prompt_and_user_prompt_are_separate_arguments() {
         .position(|a| a == "--append-system-prompt")
         .expect("--append-system-prompt should be present");
     let sys_value_idx = sys_idx + 1;
+
+    // Then
     assert!(
         sys_value_idx < args.len(),
         "value for --append-system-prompt should exist"
@@ -119,15 +144,20 @@ fn system_prompt_and_user_prompt_are_separate_arguments() {
 
 #[test]
 fn no_single_arg_contains_both_system_and_user_prompt_content() {
+    // Given
     let sys = "SYSTEM_MARKER";
     let user = "USER_MARKER";
     let req = request_with_both_prompts(sys, user);
     let config = plan_config();
+
+    // When
     let args = build_claude_args(&req, &config, None);
 
     for arg in &args {
         let has_sys = arg.contains("SYSTEM_MARKER");
         let has_user = arg.contains("USER_MARKER");
+
+    // Then
         assert!(
             !(has_sys && has_user),
             "no arg should contain both system and user content: {:?}",
@@ -138,10 +168,13 @@ fn no_single_arg_contains_both_system_and_user_prompt_content() {
 
 #[test]
 fn append_system_prompt_receives_exactly_one_argument() {
+    // Given
     let sys = "Single system prompt value";
     let user = "User prompt";
     let req = request_with_both_prompts(sys, user);
     let config = plan_config();
+
+    // When
     let args = build_claude_args(&req, &config, None);
 
     let append_idx = args
@@ -149,6 +182,8 @@ fn append_system_prompt_receives_exactly_one_argument() {
         .position(|a| a == "--append-system-prompt")
         .expect("--append-system-prompt should be present");
     let value_idx = append_idx + 1;
+
+    // Then
     assert_eq!(args[value_idx], sys);
     assert_eq!(
         args.get(1).map(|s| s.as_str()),
@@ -159,10 +194,13 @@ fn append_system_prompt_receives_exactly_one_argument() {
 
 #[test]
 fn multiline_system_prompt_passed_as_single_arg() {
+    // Given
     let sys = "Line 1\nLine 2\nLine 3";
     let user = "Create PRD for feature X";
     let req = request_with_both_prompts(sys, user);
     let config = plan_config();
+
+    // When
     let args = build_claude_args(&req, &config, None);
 
     let sys_idx = args
@@ -170,6 +208,8 @@ fn multiline_system_prompt_passed_as_single_arg() {
         .position(|a| a == "--append-system-prompt")
         .unwrap()
         + 1;
+
+    // Then
     assert_eq!(args[sys_idx], sys);
     assert_eq!(
         args.get(1).map(|s| s.as_str()),
@@ -180,6 +220,7 @@ fn multiline_system_prompt_passed_as_single_arg() {
 
 #[test]
 fn request_without_system_prompt_has_user_prompt_after_p() {
+    // Given
     let req = common::stub_invoke_request("Just the user prompt", "plan");
     let config = ClaudeInvokeConfig {
         permission_mode: PermissionMode::Default,
@@ -187,8 +228,12 @@ fn request_without_system_prompt_has_user_prompt_after_p() {
         permission_prompt_tool: None,
         mcp_config_path: None,
     };
+
+    // When
     let args = build_claude_args(&req, &config, None);
 
+
+    // Then
     assert!(!args.contains(&"--append-system-prompt".to_string()));
     assert!(!args.contains(&"--append-system-prompt-file".to_string()));
     assert_eq!(args.get(1), Some(&"Just the user prompt".to_string()));
@@ -198,13 +243,18 @@ fn request_without_system_prompt_has_user_prompt_after_p() {
 /// to avoid argument length limits and parsing issues with newlines/special chars.
 #[test]
 fn system_prompt_passed_via_file_when_path_provided() {
+    // Given
     let sys = "System instructions with newlines\nand special chars";
     let user = "User prompt";
     let req = request_with_both_prompts(sys, user);
     let config = plan_config();
     let path = std::path::Path::new("/tmp/sys-prompt.txt");
+
+    // When
     let args = build_claude_args(&req, &config, Some(path));
 
+
+    // Then
     assert!(
         args.contains(&"--append-system-prompt-file".to_string()),
         "should use --append-system-prompt-file when path provided"
@@ -222,6 +272,7 @@ fn system_prompt_passed_via_file_when_path_provided() {
 /// build_claude_args includes --allowedTools for each entry when config.allowed_tools is set.
 #[test]
 fn build_claude_args_includes_allowed_tools_when_set() {
+    // Given
     let req = request_with_both_prompts("Sys", "User");
     let mut config = plan_config();
     config.allowed_tools = vec![
@@ -230,6 +281,8 @@ fn build_claude_args_includes_allowed_tools_when_set() {
         "Bash(cargo *)".to_string(),
     ];
 
+
+    // When
     let args = build_claude_args(&req, &config, None);
 
     let allowed_tools_indices: Vec<usize> = args
@@ -238,6 +291,8 @@ fn build_claude_args_includes_allowed_tools_when_set() {
         .filter(|(_, a)| *a == "--allowedTools")
         .map(|(i, _)| i)
         .collect();
+
+    // Then
     assert_eq!(
         allowed_tools_indices.len(),
         3,
@@ -265,13 +320,18 @@ fn build_claude_args_includes_allowed_tools_when_set() {
 /// build_claude_args includes --permission-prompt-tool and --mcp-config when both are set.
 #[test]
 fn build_claude_args_includes_permission_prompt_tool_and_mcp_config_when_set() {
+    // Given
     let req = request_with_both_prompts("Sys", "User");
     let mut config = plan_config();
     config.permission_prompt_tool = Some("approval_prompt".to_string());
     config.mcp_config_path = Some(std::path::PathBuf::from("/tmp/mcp.json"));
 
+
+    // When
     let args = build_claude_args(&req, &config, None);
 
+
+    // Then
     assert!(
         args.contains(&"--permission-prompt-tool".to_string()),
         "should include --permission-prompt-tool"
@@ -304,6 +364,7 @@ fn build_claude_args_includes_permission_prompt_tool_and_mcp_config_when_set() {
 /// instead of falling back to interactive approval (which fails in headless mode).
 #[test]
 fn invoke_plan_goal_includes_permission_prompt_tool_and_mcp_config() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-backend-permission-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -332,10 +393,14 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n\n## TODO\n\n
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
+
+    // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
+
+    // Then
     assert!(
         captured.contains("--permission-prompt-tool"),
         "plan goal must include --permission-prompt-tool for headless permission handling, got: {}",
@@ -353,6 +418,7 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n\n## TODO\n\n
 /// UI-only prompts that break headless runs.
 #[test]
 fn invoke_green_goal_without_socket_includes_permission_prompt_and_mcp_config() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-backend-permission-green-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -381,10 +447,14 @@ printf '%s\n' '{{"type":"result","result":"ok","session_id":"test-session"}}'
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
+
+    // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
+
+    // Then
     assert!(
         captured.contains("--permission-prompt-tool"),
         "green goal must include --permission-prompt-tool so permissions can be resolved like plan, got: {}",
@@ -401,6 +471,7 @@ printf '%s\n' '{{"type":"result","result":"ok","session_id":"test-session"}}'
 /// relay so Bash/tool approvals reach the Virtual TUI instead of Claude Code UI-only prompts.
 #[test]
 fn invoke_acceptance_tests_with_socket_includes_permission_prompt_and_mcp_config() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-backend-permission-accept-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -430,10 +501,14 @@ printf '%s\n' '{{"type":"result","result":"ok","session_id":"test-session"}}'
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
+
+    // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
+
+    // Then
     assert!(
         captured.contains("--permission-prompt-tool"),
         "acceptance-tests with TDDY_SOCKET must include --permission-prompt-tool for headless approval, got: {}",
@@ -450,6 +525,7 @@ printf '%s\n' '{{"type":"result","result":"ok","session_id":"test-session"}}'
 /// to avoid argument length limits and shell parsing issues.
 #[test]
 fn invoke_uses_system_prompt_file_not_inline() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-backend-args-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -478,10 +554,14 @@ printf '%s\n' '{{"type":"result","result":"---PRD_START---\n# PRD\n\n## TODO\n\n
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
+
+    // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
+
+    // Then
     assert!(
         captured.contains("--append-system-prompt-file"),
         "invoke should use --append-system-prompt-file (not inline), got: {}",

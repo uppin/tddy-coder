@@ -46,6 +46,7 @@ fn setup_red_session_dir(session_dir: &std::path::Path) {
 
 #[tokio::test]
 async fn red_workflow_reads_prd_and_acceptance_tests_md_invokes_backend() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-red-plan-dir-1");
     setup_red_session_dir(&session_dir);
 
@@ -62,8 +63,12 @@ async fn red_workflow_reads_prd_and_acceptance_tests_md_invokes_backend() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let result = engine.run_goal(&GoalId::new("red"), ctx).await.unwrap();
 
+
+    // Then
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),
         "red should succeed"
@@ -87,6 +92,7 @@ async fn red_workflow_reads_prd_and_acceptance_tests_md_invokes_backend() {
 
 #[tokio::test]
 async fn red_workflow_transitions_through_red_testing_to_ready_states() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-red-plan-dir-2");
     setup_red_session_dir(&session_dir);
 
@@ -103,9 +109,13 @@ async fn red_workflow_transitions_through_red_testing_to_ready_states() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let result = engine.run_goal(&GoalId::new("red"), ctx).await.unwrap();
 
     // Run once: red completes, returns Paused (next would be green). State is RedTestsReady.
+
+    // Then
     assert!(
         matches!(result.status, ExecutionStatus::Paused { .. }),
         "red should return Paused after completing"
@@ -124,6 +134,7 @@ async fn red_workflow_transitions_through_red_testing_to_ready_states() {
 /// Red goal writes red-output.md to the plan directory after successful completion.
 #[tokio::test]
 async fn red_workflow_writes_red_output_md_to_session_dir() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-red-writes-md");
     setup_red_session_dir(&session_dir);
 
@@ -145,9 +156,13 @@ async fn red_workflow_writes_red_output_md_to_session_dir() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let _ = run_goal_until_done(&engine, "red", ctx).await.unwrap();
 
     let md_path = session_dir.join("red-output.md");
+
+    // Then
     assert!(
         md_path.exists(),
         "red-output.md should be written to plan directory, path: {}",
@@ -181,6 +196,7 @@ async fn red_workflow_writes_red_output_md_to_session_dir() {
 /// Red goal writes progress.md with unfilled checkboxes for failed tests and skeletons.
 #[tokio::test]
 async fn red_workflow_writes_progress_md_to_session_dir() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-red-progress-md");
     setup_red_session_dir(&session_dir);
 
@@ -197,9 +213,13 @@ async fn red_workflow_writes_progress_md_to_session_dir() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let _ = engine.run_goal(&GoalId::new("red"), ctx).await.unwrap(); // Run red only; green would overwrite progress
 
     let progress_path = session_dir.join("progress.md");
+
+    // Then
     assert!(
         progress_path.exists(),
         "progress.md should be written to plan directory, path: {}",
@@ -232,6 +252,7 @@ async fn red_workflow_writes_progress_md_to_session_dir() {
 
 #[tokio::test]
 async fn red_workflow_returns_error_when_acceptance_tests_md_missing() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-red-plan-dir-no-at");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
@@ -249,8 +270,12 @@ async fn red_workflow_returns_error_when_acceptance_tests_md_missing() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let result = run_goal_until_done(&engine, "red", ctx).await;
 
+
+    // Then
     assert!(
         result.is_err(),
         "red should fail when acceptance-tests.md missing"
@@ -269,6 +294,7 @@ async fn red_workflow_returns_error_when_acceptance_tests_md_missing() {
 
 #[tokio::test]
 async fn red_workflow_passes_goal_allowlist_to_invoke_request() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-red-allowlist-test");
     setup_red_session_dir(&session_dir);
 
@@ -290,6 +316,8 @@ async fn red_workflow_passes_goal_allowlist_to_invoke_request() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let _ = run_goal_until_done(&engine, "red", ctx).await.unwrap();
 
     let invocations = backend.invocations();
@@ -297,6 +325,8 @@ async fn red_workflow_passes_goal_allowlist_to_invoke_request() {
         .iter()
         .find(|r| r.goal_id == GoalId::new("red"))
         .expect("red invocation should exist");
+
+    // Then
     assert_eq!(
         red_inv.goal_id,
         GoalId::new("red"),
@@ -311,6 +341,7 @@ async fn red_workflow_passes_goal_allowlist_to_invoke_request() {
 #[tokio::test]
 #[ignore = "BackendInvokeTask does not implement schema validation retry; Workflow does"]
 async fn red_workflow_retries_on_schema_validation_failure_and_succeeds() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-red-retry-ok");
     setup_red_session_dir(&session_dir);
 
@@ -335,6 +366,8 @@ async fn red_workflow_retries_on_schema_validation_failure_and_succeeds() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let result = run_goal_until_done(&engine, "red", ctx).await;
 
     let _ = result.expect("red should succeed after retry");
@@ -345,6 +378,7 @@ async fn red_workflow_retries_on_schema_validation_failure_and_succeeds() {
 #[tokio::test]
 #[ignore = "BackendInvokeTask does not implement schema validation retry; Workflow does"]
 async fn red_workflow_transitions_to_failed_when_retry_also_fails_validation() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-red-retry-fail");
     setup_red_session_dir(&session_dir);
 
@@ -376,8 +410,12 @@ async fn red_workflow_transitions_to_failed_when_retry_also_fails_validation() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let result = run_goal_until_done(&engine, "red", ctx).await;
 
+
+    // Then
     assert!(result.is_err());
     let _ = std::fs::remove_dir_all(&session_dir);
 }

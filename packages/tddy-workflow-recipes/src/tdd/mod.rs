@@ -318,7 +318,10 @@ mod planning_intent_tests {
     /// Backends must use [`tddy_core::backend::GoalHints::agent_cli_plan_mode`] (not goal id) for vendor plan-mode CLI flags.
     #[test]
     fn agent_cli_plan_mode_is_true_only_for_plan_goal() {
+        // Given
         let r = TddRecipe;
+
+        // When / Then
         assert!(
             r.goal_hints(&GoalId::new("plan"))
                 .unwrap()
@@ -349,7 +352,10 @@ mod planning_intent_tests {
     /// Plan refinement (PRD feedback) must target **`plan`**, not the entry **`interview`** step.
     #[test]
     fn plan_refinement_goal_is_plan_not_interview() {
+        // Given
         let r = TddRecipe;
+
+        // When / Then
         assert_eq!(r.plan_refinement_goal(), GoalId::new("plan"));
         assert_ne!(r.plan_refinement_goal(), r.start_goal());
     }

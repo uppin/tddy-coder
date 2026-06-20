@@ -17,6 +17,7 @@ use tddy_daemon::livekit_peer_discovery::{
     classify_peer_route, LiveKitDiscoveryHandles, PeerRoute,
 };
 use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
+use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, ListExecToolsRequest,
@@ -25,7 +26,6 @@ use tddy_service::proto::connection::{
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-const VALID_TOKEN: &str = "valid-token";
 const LOCAL_INSTANCE_ID: &str = "local-relay";
 const REMOTE_PEER_ID: &str = "remote-peer-1";
 /// A valid UUID-format session_id (doesn't exist in any session dir).
@@ -67,7 +67,7 @@ fn sessions_resolver(base: PathBuf) -> SessionsBaseResolver {
 
 fn user_resolver_valid() -> UserResolver {
     Arc::new(|token| {
-        if token == VALID_TOKEN {
+        if token == TEST_TOKEN {
             Some("testuser".to_string())
         } else {
             None
@@ -102,6 +102,7 @@ fn service_with_known_remote_peer(
 /// AC: `classify_peer_route` with an empty `requested_instance_id` routes `Local`.
 #[test]
 fn classify_peer_route_empty_requested_id_routes_local() {
+    // When / Then
     let result = classify_peer_route(LOCAL_INSTANCE_ID, "", &[]);
     assert_eq!(
         result,
@@ -114,6 +115,7 @@ fn classify_peer_route_empty_requested_id_routes_local() {
 /// AC: `classify_peer_route` when requested id matches local id routes `Local`.
 #[test]
 fn classify_peer_route_requested_matches_local_routes_local() {
+    // When / Then
     let result = classify_peer_route(LOCAL_INSTANCE_ID, LOCAL_INSTANCE_ID, &[]);
     assert_eq!(
         result,
@@ -126,7 +128,10 @@ fn classify_peer_route_requested_matches_local_routes_local() {
 /// AC: `classify_peer_route` with a known remote id routes `Forward { peer_instance_id }`.
 #[test]
 fn classify_peer_route_known_remote_id_routes_forward() {
+    // Given
     let eligible = vec![REMOTE_PEER_ID.to_string()];
+
+    // When / Then
     let result = classify_peer_route(LOCAL_INSTANCE_ID, REMOTE_PEER_ID, &eligible);
     assert_eq!(
         result,
@@ -141,6 +146,7 @@ fn classify_peer_route_known_remote_id_routes_forward() {
 /// AC: `classify_peer_route` with an unknown id (not in eligible list) returns `Err`.
 #[test]
 fn classify_peer_route_unknown_id_returns_err() {
+    // When / Then
     let result = classify_peer_route(LOCAL_INSTANCE_ID, "unknown-daemon-xyz", &[]);
     assert!(
         result.is_err(),
@@ -164,12 +170,14 @@ fn classify_peer_route_unknown_id_returns_err() {
 /// lookup, which returns `not_found` (wrong). After the fix it returns `failed_precondition`.
 #[tokio::test]
 async fn execute_tool_with_known_remote_instance_id_returns_failed_precondition_without_room() {
+    // Given — service knows about a remote peer but has no LiveKit room connected
     let sessions_tmp = tempfile::tempdir().unwrap();
     let service = service_with_known_remote_peer(test_config(), sessions_tmp.path().to_path_buf());
 
+    // When
     let status = service
         .execute_tool(Request::new(ExecuteToolRequest {
-            session_token: VALID_TOKEN.to_string(),
+            session_token: TEST_TOKEN.to_string(),
             session_id: NONEXISTENT_SESSION_ID.to_string(),
             tool_name: "Read".to_string(),
             args_json: r#"{"path":"file.txt"}"#.to_string(),
@@ -178,6 +186,7 @@ async fn execute_tool_with_known_remote_instance_id_returns_failed_precondition_
         .await
         .expect_err("execute_tool must fail when forwarding a known remote peer with no room");
 
+    // Then
     assert_eq!(
         status.code(),
         tddy_rpc::Code::FailedPrecondition,
@@ -194,8 +203,8 @@ async fn execute_tool_with_known_remote_instance_id_returns_failed_precondition_
 /// Currently it falls through to local session lookup (wrong code).
 #[tokio::test]
 async fn execute_tool_with_unknown_remote_instance_id_returns_invalid_argument() {
+    // Given — service has no eligible daemon source (only local is reachable)
     let sessions_tmp = tempfile::tempdir().unwrap();
-    // No eligible_daemon_source → only local is reachable.
     let service = ConnectionServiceImpl::new(
         test_config(),
         sessions_resolver(sessions_tmp.path().to_path_buf()),
@@ -206,9 +215,10 @@ async fn execute_tool_with_unknown_remote_instance_id_returns_invalid_argument()
         Arc::new(ClaudeCliSessionManager::new()),
     );
 
+    // When
     let status = service
         .execute_tool(Request::new(ExecuteToolRequest {
-            session_token: VALID_TOKEN.to_string(),
+            session_token: TEST_TOKEN.to_string(),
             session_id: NONEXISTENT_SESSION_ID.to_string(),
             tool_name: "Read".to_string(),
             args_json: r#"{"path":"file.txt"}"#.to_string(),
@@ -217,6 +227,7 @@ async fn execute_tool_with_unknown_remote_instance_id_returns_invalid_argument()
         .await
         .expect_err("execute_tool must fail for unknown daemon_instance_id");
 
+    // Then
     assert_eq!(
         status.code(),
         tddy_rpc::Code::InvalidArgument,
@@ -235,12 +246,14 @@ async fn execute_tool_with_unknown_remote_instance_id_returns_invalid_argument()
 /// Currently `list_exec_tools` ignores `daemon_instance_id` and returns the local catalog (wrong).
 #[tokio::test]
 async fn list_exec_tools_with_known_remote_instance_id_returns_failed_precondition_without_room() {
+    // Given — service knows about a remote peer but has no LiveKit room connected
     let sessions_tmp = tempfile::tempdir().unwrap();
     let service = service_with_known_remote_peer(test_config(), sessions_tmp.path().to_path_buf());
 
+    // When
     let status = service
         .list_exec_tools(Request::new(ListExecToolsRequest {
-            session_token: VALID_TOKEN.to_string(),
+            session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: REMOTE_PEER_ID.to_string(), // known peer, no room
         }))
         .await
@@ -248,6 +261,7 @@ async fn list_exec_tools_with_known_remote_instance_id_returns_failed_preconditi
             "list_exec_tools must fail when forwarding to a known remote peer with no room",
         );
 
+    // Then
     assert_eq!(
         status.code(),
         tddy_rpc::Code::FailedPrecondition,
@@ -263,6 +277,7 @@ async fn list_exec_tools_with_known_remote_instance_id_returns_failed_preconditi
 /// Currently it returns Ok with the local tool catalog (routing is not applied).
 #[tokio::test]
 async fn list_exec_tools_with_unknown_instance_id_returns_invalid_argument() {
+    // Given — service has no eligible daemon source
     let sessions_tmp = tempfile::tempdir().unwrap();
     let service = ConnectionServiceImpl::new(
         test_config(),
@@ -274,14 +289,16 @@ async fn list_exec_tools_with_unknown_instance_id_returns_invalid_argument() {
         Arc::new(ClaudeCliSessionManager::new()),
     );
 
+    // When
     let status = service
         .list_exec_tools(Request::new(ListExecToolsRequest {
-            session_token: VALID_TOKEN.to_string(),
+            session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: "totally-unknown-daemon".to_string(),
         }))
         .await
         .expect_err("list_exec_tools must fail for unknown daemon_instance_id");
 
+    // Then
     assert_eq!(
         status.code(),
         tddy_rpc::Code::InvalidArgument,

@@ -92,10 +92,13 @@ mod tests {
 
     #[test]
     fn script_passes_command_env_and_working_dir() {
-        let action = script_action(&yaml(
-            "command: [echo, hi]\nenv: { K: V }\nworking_dir_rel: [sub, dir]\n",
-        ))
-        .expect("script lowers");
+        // Given
+        let config = yaml("command: [echo, hi]\nenv: { K: V }\nworking_dir_rel: [sub, dir]\n");
+
+        // When
+        let action = script_action(&config).expect("script lowers");
+
+        // Then
         assert_eq!(action.command, vec!["echo".to_string(), "hi".to_string()]);
         assert_eq!(action.working_dir, "sub/dir");
         assert_eq!(action.env.get("K").map(String::as_str), Some("V"));
@@ -104,21 +107,37 @@ mod tests {
 
     #[test]
     fn tool_extracts_bin_dir() {
-        let bin_dir = tool_bin_dir(&yaml("bin_dir: tools/bin\ncommands: { greet: greet }\n"))
-            .expect("tool parses");
+        // Given
+        let config = yaml("bin_dir: tools/bin\ncommands: { greet: greet }\n");
+
+        // When
+        let bin_dir = tool_bin_dir(&config).expect("tool parses");
+
+        // Then
         assert_eq!(bin_dir, "tools/bin");
     }
 
     #[test]
     fn group_extracts_member_ids() {
-        let members = group_member_ids(&yaml("member_ids: [a, b]\n")).expect("group parses");
+        // Given
+        let config = yaml("member_ids: [a, b]\n");
+
+        // When
+        let members = group_member_ids(&config).expect("group parses");
+
+        // Then
         assert_eq!(members, vec!["a".to_string(), "b".to_string()]);
     }
 
     #[test]
     fn unknown_builtin_field_is_rejected() {
-        let err = script_action(&yaml("command: [echo]\nbogus: 1\n"))
-            .expect_err("unknown field must error");
+        // Given
+        let config = yaml("command: [echo]\nbogus: 1\n");
+
+        // When
+        let err = script_action(&config).expect_err("unknown field must error");
+
+        // Then
         assert!(matches!(err, BuildError::Manifest(_)));
     }
 }

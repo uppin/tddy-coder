@@ -132,18 +132,25 @@ pub fn status_bar_style_for_goal(goal: Option<&str>) -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
-    #[test]
-    fn test_elapsed_time_format() {
-        assert_eq!(format_elapsed(Duration::ZERO), "0s");
-        assert_eq!(format_elapsed(Duration::from_secs(60)), "1m 0s");
-        assert_eq!(format_elapsed(Duration::from_secs(3600)), "1h 0m");
+    #[rstest]
+    #[case::zero_seconds(Duration::ZERO, "0s")]
+    #[case::one_minute(Duration::from_secs(60), "1m 0s")]
+    #[case::one_hour(Duration::from_secs(3600), "1h 0m")]
+    fn formats_elapsed_time(#[case] input: Duration, #[case] expected: &str) {
+        // When
+        let result = format_elapsed(input);
+
+        // Then
+        assert_eq!(result, expected);
     }
 
     /// Display segment is the first two hyphen-separated UUID fields (`time_low` and first
     /// `time_mid` nibble group), lowercased — e.g. `019d390c-ac3e`.
     #[test]
     fn workflow_session_segment_includes_first_two_uuid_fields() {
+        // When / Then
         assert_eq!(
             first_hyphen_segment_of_workflow_session_id(Some(
                 "550e8400-e29b-41d4-a716-446655440000"
@@ -154,6 +161,7 @@ mod tests {
 
     #[test]
     fn workflow_session_segment_uuid_v7_includes_second_field() {
+        // When / Then
         assert_eq!(
             first_hyphen_segment_of_workflow_session_id(Some(
                 "019d390c-ac3e-74b1-97fb-86ea64b8ca8d"
@@ -164,6 +172,7 @@ mod tests {
 
     #[test]
     fn first_hyphen_segment_none_or_empty_returns_placeholder() {
+        // When / Then
         assert_eq!(
             first_hyphen_segment_of_workflow_session_id(None),
             SESSION_SEGMENT_PLACEHOLDER
@@ -180,6 +189,7 @@ mod tests {
 
     #[test]
     fn first_hyphen_segment_malformed_or_opaque_returns_placeholder() {
+        // When / Then
         assert_eq!(
             first_hyphen_segment_of_workflow_session_id(Some("not-a-uuid")),
             SESSION_SEGMENT_PLACEHOLDER
@@ -192,6 +202,7 @@ mod tests {
 
     #[test]
     fn first_hyphen_segment_uppercase_uuid_normalizes() {
+        // When / Then
         assert_eq!(
             first_hyphen_segment_of_workflow_session_id(Some(
                 "550E8400-E29B-41D4-A716-446655440000"
@@ -202,6 +213,7 @@ mod tests {
 
     #[test]
     fn format_status_bar_idle_matches_running_tail_shape() {
+        // When / Then
         let idle = format_status_bar_idle("a", "m");
         assert!(idle.starts_with("Goal: — │ State: — │ Ready │ a m │"));
     }
@@ -209,6 +221,7 @@ mod tests {
     /// Granular Red: composed line must start with the spinner frame (stub omits it).
     #[test]
     fn format_status_bar_with_activity_prefix_leads_with_spinner_frame() {
+        // When / Then
         let line = format_status_bar_with_activity_prefix(
             '|',
             "\u{2014}",
@@ -228,6 +241,7 @@ mod tests {
     /// segment or placeholder, `Goal:`.
     #[test]
     fn status_bar_text_orders_spinner_segment_then_goal() {
+        // When
         let line = format_status_bar_with_activity_prefix(
             '/',
             "550e8400-e29b",
@@ -237,6 +251,8 @@ mod tests {
             "agent",
             "model",
         );
+
+        // Then
         let spin = line.find('/').expect("spinner frame");
         let seg = line.find("550e8400-e29b").expect("session segment");
         let goal = line.find("Goal:").expect("Goal:");

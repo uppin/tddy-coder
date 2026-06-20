@@ -218,9 +218,14 @@ mod tests {
 
     #[test]
     fn key_is_deterministic_and_sha256_prefixed() {
+        // Given
         let action = sample_action();
+
+        // When
         let k1 = compute_cache_key(&action, &fps());
         let k2 = compute_cache_key(&action, &fps());
+
+        // Then
         assert_eq!(k1, k2);
         assert!(k1.starts_with("sha256:"));
         assert_eq!(k1.len(), "sha256:".len() + 64);
@@ -228,15 +233,20 @@ mod tests {
 
     #[test]
     fn key_is_independent_of_input_and_env_ordering() {
+        // Given
         let mut a = sample_action();
         a.env = HashMap::from([
             ("Z".to_string(), "1".to_string()),
             ("A".to_string(), "2".to_string()),
         ]);
         let mut fps_forward = fps();
+
+        // When
         let key_forward = compute_cache_key(&a, &fps_forward);
         fps_forward.reverse();
         let key_reversed = compute_cache_key(&a, &fps_forward);
+
+        // Then
         assert_eq!(
             key_forward, key_reversed,
             "input order must not affect the key"
@@ -245,30 +255,35 @@ mod tests {
 
     #[test]
     fn key_changes_when_input_fingerprint_changes() {
+        // Given
         let action = sample_action();
         let base = compute_cache_key(&action, &fps());
         let mut changed = fps();
         changed[0].size = 999;
+
+        // When / Then
         assert_ne!(base, compute_cache_key(&action, &changed));
     }
 
     #[test]
     fn key_changes_with_command_or_outputs() {
+        // Given
         let action = sample_action();
         let base = compute_cache_key(&action, &fps());
         let mut other = sample_action();
         other.command.push("--extra-arg".to_string());
+
+        // When / Then
         assert_ne!(base, compute_cache_key(&other, &fps()));
     }
 
     #[test]
     fn persist_then_lookup_round_trips_and_leaves_no_tmp_file() {
+        // Given
         let repo = tempfile::tempdir().unwrap();
         let root = repo.path();
-        // The declared output must exist for a lookup to count as a hit.
         std::fs::create_dir_all(root.join("out")).unwrap();
         std::fs::write(root.join("out/bin"), b"x").unwrap();
-
         let action = sample_action();
         let key = compute_cache_key(&action, &fps());
         let entry = ActionCacheEntry {
@@ -279,12 +294,13 @@ mod tests {
             target_id: "pkg:bin".to_string(),
             ..Default::default()
         };
+
+        // When
         persist_cache(root, "pkg:bin", &entry).expect("persist");
-
         let hit = lookup_cache(root, "pkg:bin", &action.id, &key);
-        assert!(hit.is_some(), "matching key with existing output is a hit");
 
-        // No leftover .tmp staging files.
+        // Then
+        assert!(hit.is_some(), "matching key with existing output is a hit");
         let cache_dir = root.join(CACHE_DIR).join("pkg_bin");
         let tmp = std::fs::read_dir(&cache_dir)
             .unwrap()
@@ -295,6 +311,7 @@ mod tests {
 
     #[test]
     fn lookup_misses_on_key_mismatch_or_missing_output() {
+        // Given
         let repo = tempfile::tempdir().unwrap();
         let root = repo.path();
         std::fs::create_dir_all(root.join("out")).unwrap();
@@ -311,6 +328,7 @@ mod tests {
         };
         persist_cache(root, "pkg:bin", &entry).unwrap();
 
+        // When / Then
         assert!(
             lookup_cache(root, "pkg:bin", &action.id, "sha256:deadbeef").is_none(),
             "stale key must miss"
@@ -324,6 +342,7 @@ mod tests {
 
     #[test]
     fn cache_mode_write_policy() {
+        // Given / When / Then
         assert!(CacheMode::ReadWrite.writes());
         assert!(!CacheMode::ReadOnly.writes());
         assert!(!CacheMode::Offline.writes());

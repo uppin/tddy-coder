@@ -79,6 +79,7 @@ livekit:
 /// causing `run_server` to exit cleanly — the full chain mirrors what `main.rs` wires in relay mode.
 #[tokio::test]
 async fn relay_idle_monitor_triggers_server_shutdown() {
+    // Given
     let tracker = Arc::new(IdleTimeoutTracker::new(Duration::from_millis(50)));
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
 
@@ -94,6 +95,7 @@ async fn relay_idle_monitor_triggers_server_shutdown() {
         }
     });
 
+    // When
     let result = tddy_daemon::server::run_server(
         "127.0.0.1",
         0,              // ephemeral port
@@ -107,6 +109,7 @@ async fn relay_idle_monitor_triggers_server_shutdown() {
     )
     .await;
 
+    // Then
     assert!(
         result.is_ok(),
         "relay server must exit cleanly when idle monitor fires the shutdown channel; got: {:?}",
@@ -122,25 +125,32 @@ async fn relay_idle_monitor_triggers_server_shutdown() {
 /// is functional by driving the tracker directly and verifying it does not fire prematurely.
 #[tokio::test]
 async fn relay_activity_defers_idle_shutdown() {
+    // Given
     let tracker = Arc::new(IdleTimeoutTracker::new(Duration::from_millis(80)));
 
-    // Record activity — resets the clock.
+    // When
     tracker.record_activity();
+
+    // Then
     assert!(
         !tracker.should_shutdown(),
         "tracker must not expire immediately after record_activity"
     );
 
-    // Wait half the timeout — still alive.
+    // When
     tokio::time::sleep(Duration::from_millis(40)).await;
     tracker.record_activity();
+
+    // Then
     assert!(
         !tracker.should_shutdown(),
         "tracker must not expire after activity was just recorded mid-interval"
     );
 
-    // Wait past the full timeout from the last activity.
+    // When
     tokio::time::sleep(Duration::from_millis(120)).await;
+
+    // Then
     assert!(
         tracker.should_shutdown(),
         "tracker must expire after full idle period with no activity"
@@ -157,6 +167,7 @@ async fn relay_activity_defers_idle_shutdown() {
 #[tokio::test]
 #[serial]
 async fn relay_forwards_list_exec_tools_to_remote_peer() {
+    // Given
     let livekit = LiveKitTestkit::start()
         .await
         .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
@@ -226,6 +237,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         Arc::new(ClaudeCliSessionManager::new()),
     );
 
+    // When
     // Wait until A's discovery sees B in the common room.
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
@@ -246,6 +258,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     .await
     .expect("timeout: B should appear in A's eligible-daemon list");
 
+    // Then
     // A forwards ListExecTools to B — the relay must route to B and return B's catalog.
     let resp = service_a
         .list_exec_tools(Request::new(ListExecToolsRequest {

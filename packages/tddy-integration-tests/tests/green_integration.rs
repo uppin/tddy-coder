@@ -33,6 +33,7 @@ fn setup_session_dir_with_red_output(session_dir: &std::path::Path) {
 
 #[tokio::test]
 async fn green_workflow_reads_progress_md_and_invokes_backend() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-green-plan-dir-1");
     setup_session_dir_with_red_output(&session_dir);
 
@@ -51,10 +52,14 @@ async fn green_workflow_reads_progress_md_and_invokes_backend() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let _ = engine.run_goal(&GoalId::new("red"), ctx).await.unwrap();
 
     let ctx = ctx_green(session_dir.clone(), None, false);
     let result = engine.run_goal(&GoalId::new("green"), ctx).await.unwrap();
+
+    // Then
     assert!(
         matches!(result.status, ExecutionStatus::Paused { .. }),
         "green: {:?}",
@@ -78,6 +83,7 @@ async fn green_workflow_reads_progress_md_and_invokes_backend() {
 
 #[tokio::test]
 async fn green_workflow_transitions_to_green_complete_when_all_pass() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-green-plan-dir-2");
     setup_session_dir_with_red_output(&session_dir);
 
@@ -95,7 +101,11 @@ async fn green_workflow_transitions_to_green_complete_when_all_pass() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let r = engine.run_goal(&GoalId::new("red"), ctx).await.unwrap();
+
+    // Then
     assert!(
         matches!(r.status, ExecutionStatus::Paused { .. }),
         "red: {:?}",
@@ -123,6 +133,7 @@ async fn green_workflow_transitions_to_green_complete_when_all_pass() {
 
 #[tokio::test]
 async fn green_workflow_transitions_to_failed_when_tests_fail() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-green-plan-dir-3");
     setup_session_dir_with_red_output(&session_dir);
 
@@ -140,10 +151,14 @@ async fn green_workflow_transitions_to_failed_when_tests_fail() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let _ = engine.run_goal(&GoalId::new("red"), ctx).await.unwrap();
 
     let ctx = ctx_green(session_dir.clone(), None, false);
     let result = engine.run_goal(&GoalId::new("green"), ctx).await.unwrap();
+
+    // Then
     assert!(
         matches!(result.status, ExecutionStatus::Paused { .. }),
         "green: {:?}",
@@ -163,6 +178,7 @@ async fn green_workflow_transitions_to_failed_when_tests_fail() {
 
 #[tokio::test]
 async fn green_workflow_returns_error_when_progress_md_missing() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-green-plan-dir-no-progress");
     setup_session_dir_with_red_output(&session_dir);
 
@@ -180,12 +196,16 @@ async fn green_workflow_returns_error_when_progress_md_missing() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let _ = engine.run_goal(&GoalId::new("red"), ctx).await.unwrap();
     std::fs::remove_file(session_dir.join("progress.md")).expect("remove progress.md");
 
     let ctx = ctx_green(session_dir.clone(), None, false);
     let result = engine.run_goal(&GoalId::new("green"), ctx).await;
 
+
+    // Then
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
     assert!(
@@ -199,6 +219,7 @@ async fn green_workflow_returns_error_when_progress_md_missing() {
 
 #[tokio::test]
 async fn green_workflow_returns_error_when_impl_session_missing() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-green-plan-dir-no-impl-session");
     setup_session_dir_with_red_output(&session_dir);
 
@@ -216,6 +237,8 @@ async fn green_workflow_returns_error_when_impl_session_missing() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let _ = engine.run_goal(&GoalId::new("red"), ctx).await.unwrap();
 
     let changeset_no_impl = r#"version: 1
@@ -236,6 +259,8 @@ artifacts: {}
     let ctx = ctx_green(session_dir.clone(), None, false);
     let result = engine.run_goal(&GoalId::new("green"), ctx).await;
 
+
+    // Then
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
     assert!(
@@ -249,6 +274,7 @@ artifacts: {}
 
 #[tokio::test]
 async fn green_workflow_updates_progress_md_in_session_dir() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-green-updates-progress");
     setup_session_dir_with_red_output(&session_dir);
 
@@ -267,10 +293,14 @@ async fn green_workflow_updates_progress_md_in_session_dir() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let _ = engine.run_goal(&GoalId::new("red"), ctx).await.unwrap();
 
     let ctx = ctx_green(session_dir.clone(), None, false);
     let r = engine.run_goal(&GoalId::new("green"), ctx).await.unwrap();
+
+    // Then
     assert!(
         matches!(r.status, ExecutionStatus::Paused { .. }),
         "green: {:?}",
@@ -290,6 +320,7 @@ async fn green_workflow_updates_progress_md_in_session_dir() {
 
 #[tokio::test]
 async fn green_workflow_updates_acceptance_tests_md_in_session_dir() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-green-updates-at");
     setup_session_dir_with_red_output(&session_dir);
     let at_content = r#"# Acceptance Tests
@@ -304,6 +335,8 @@ cargo test
 
 ### auth_service_validates_email
 
+
+    // When
 - **File**: packages/auth/src/service.rs
 - **Line**: 42
 - **Status**: failing
@@ -338,6 +371,8 @@ cargo test
 
     let ctx = ctx_green(session_dir.clone(), None, false);
     let r = engine.run_goal(&GoalId::new("green"), ctx).await.unwrap();
+
+    // Then
     assert!(
         matches!(r.status, ExecutionStatus::Paused { .. }),
         "green: {:?}",
@@ -356,6 +391,7 @@ cargo test
 
 #[tokio::test]
 async fn green_workflow_passes_goal_allowlist_to_invoke_request() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-green-allowlist");
     setup_session_dir_with_red_output(&session_dir);
 
@@ -374,10 +410,14 @@ async fn green_workflow_passes_goal_allowlist_to_invoke_request() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let _ = engine.run_goal(&GoalId::new("red"), ctx).await.unwrap();
 
     let ctx = ctx_green(session_dir.clone(), None, false);
     let r = engine.run_goal(&GoalId::new("green"), ctx).await.unwrap();
+
+    // Then
     assert!(
         matches!(r.status, ExecutionStatus::Paused { .. }),
         "green: {:?}",
@@ -401,6 +441,7 @@ async fn green_workflow_passes_goal_allowlist_to_invoke_request() {
 
 #[tokio::test]
 async fn green_workflow_resumes_session_from_impl_session_file() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-green-resume-session");
     setup_session_dir_with_red_output(&session_dir);
 
@@ -419,6 +460,8 @@ async fn green_workflow_resumes_session_from_impl_session_file() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let _ = engine.run_goal(&GoalId::new("red"), ctx).await.unwrap();
 
     let invocations_before_green = backend.invocations();
@@ -429,6 +472,8 @@ async fn green_workflow_resumes_session_from_impl_session_file() {
 
     let ctx = ctx_green(session_dir.clone(), Some(""), false);
     let r = engine.run_goal(&GoalId::new("green"), ctx).await.unwrap();
+
+    // Then
     assert!(
         matches!(r.status, ExecutionStatus::Paused { .. }),
         "green: {:?}",
@@ -455,6 +500,7 @@ async fn green_workflow_resumes_session_from_impl_session_file() {
 
 #[tokio::test]
 async fn red_workflow_writes_impl_session_file_in_session_dir() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-red-impl-session");
     setup_session_dir_with_red_output(&session_dir);
 
@@ -471,9 +517,13 @@ async fn red_workflow_writes_impl_session_file_in_session_dir() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let _ = engine.run_goal(&GoalId::new("red"), ctx).await.unwrap();
 
     let changeset_path = session_dir.join("changeset.yaml");
+
+    // Then
     assert!(
         changeset_path.exists(),
         "changeset.yaml should be written by red goal"
@@ -487,6 +537,7 @@ async fn red_workflow_writes_impl_session_file_in_session_dir() {
 
 #[tokio::test]
 async fn green_goal_reports_demo_results() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-green-demo-results");
     setup_session_dir_with_red_output(&session_dir);
     std::fs::write(
@@ -495,6 +546,8 @@ async fn green_goal_reports_demo_results() {
     )
     .expect("write demo-plan.md");
 
+
+    // When
     const GREEN_OUTPUT_WITH_DEMO: &str = r#"{"goal":"green","summary":"Implemented. All tests passing. Demo verified.","tests":[{"name":"auth_service_validates_email","file":"packages/auth/src/service.rs","line":42,"status":"passing"},{"name":"auth_service_rejects_empty_email","file":"packages/auth/src/service.rs","line":55,"status":"passing"},{"name":"session_store_persists_token","file":"packages/auth/tests/session_it.rs","line":22,"status":"passing"}],"implementations":[{"name":"AuthService","file":"packages/auth/src/service.rs","line":10,"kind":"struct"}],"demo_results":{"summary":"Demo executed successfully","steps_completed":1}}"#;
 
     let backend = Arc::new(MockBackend::new());
@@ -515,6 +568,8 @@ async fn green_goal_reports_demo_results() {
 
     let ctx = ctx_green(session_dir.clone(), None, true);
     let result = engine.run_goal(&GoalId::new("green"), ctx).await.unwrap();
+
+    // Then
     assert!(
         matches!(result.status, ExecutionStatus::Paused { .. }),
         "green: {:?}",

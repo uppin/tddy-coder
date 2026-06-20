@@ -172,9 +172,11 @@ mod tests {
 
     #[test]
     fn truncate_utf8_prefix_respects_char_boundary() {
-        // "a" (1) + "é" U+00E9 (2 UTF-8 bytes) + "b" (1) = 4 bytes total
+        // Given — "a" (1) + "é" U+00E9 (2 UTF-8 bytes) + "b" (1) = 4 bytes total
         let s = "aéb";
         assert_eq!(s.len(), 4);
+
+        // When / Then
         assert_eq!(truncate_utf8_prefix(s, 1), "a");
         assert_eq!(truncate_utf8_prefix(s, 2), "a");
         assert_eq!(truncate_utf8_prefix(s, 3), "aé");

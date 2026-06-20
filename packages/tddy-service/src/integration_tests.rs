@@ -13,6 +13,9 @@ mod codegen_acceptance {
 
     #[test]
     fn echo_service_server_has_name_constant() {
+        // Given — the generated EchoServiceServer wrapper
+        // When — reading its NAME constant
+        // Then — it matches the fully-qualified proto service name
         assert_eq!(
             EchoServiceServer::<crate::EchoServiceImpl>::NAME,
             "test.EchoService"
@@ -22,13 +25,22 @@ mod codegen_acceptance {
     #[test]
     fn echo_service_server_implements_rpc_service() {
         use tddy_rpc::RpcService;
+
+        // Given — a wrapped EchoServiceServer
         let server = EchoServiceServer::new(crate::EchoServiceImpl);
-        assert!(server.is_bidi_stream("test.EchoService", "EchoBidiStream"));
-        assert!(!server.is_bidi_stream("test.EchoService", "Echo"));
+
+        // When — querying stream type for known methods
+        let is_bidi = server.is_bidi_stream("test.EchoService", "EchoBidiStream");
+        let is_unary_bidi = server.is_bidi_stream("test.EchoService", "Echo");
+
+        // Then — bidi methods are identified correctly and unary methods are not
+        assert!(is_bidi, "EchoBidiStream must be identified as a bidi stream method");
+        assert!(!is_unary_bidi, "Echo (unary) must not be identified as a bidi stream method");
     }
 
     #[tokio::test]
     async fn echo_bridge_handles_unary_echo() {
+        // Given — a bridge wrapping EchoServiceServer and a single Echo request
         let bridge = create_echo_bridge();
         let req = EchoRequest {
             message: "hello".to_string(),
@@ -39,10 +51,12 @@ mod codegen_acceptance {
             metadata: RequestMetadata::default(),
         };
 
+        // When — routing the message through the bridge
         let result = bridge
             .handle_messages("test.EchoService", "Echo", &[msg])
             .await;
 
+        // Then — the response echoes the input message
         let body = result.expect("handle_messages should succeed");
         let chunks = match body {
             tddy_rpc::ResponseBody::Complete(c) => c,
@@ -55,31 +69,37 @@ mod codegen_acceptance {
 
     #[tokio::test]
     async fn echo_bridge_returns_not_found_for_unknown_method() {
+        // Given — a bridge and a message routed to a method that does not exist
         let bridge = create_echo_bridge();
         let msg = RpcMessage {
             payload: vec![],
             metadata: RequestMetadata::default(),
         };
 
+        // When — dispatching to an unknown method name
         let result = bridge
             .handle_messages("test.EchoService", "UnknownMethod", &[msg])
             .await;
 
+        // Then — the bridge returns an error
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn echo_bridge_returns_not_found_for_unknown_service() {
+        // Given — a bridge and a message addressed to a service that was never registered
         let bridge = create_echo_bridge();
         let msg = RpcMessage {
             payload: vec![],
             metadata: RequestMetadata::default(),
         };
 
+        // When — routing to an unregistered service name
         let result = bridge
             .handle_messages("nonexistent.Service", "Echo", &[msg])
             .await;
 
+        // Then — the error message identifies the unknown service
         match &result {
             Err(status) => assert!(
                 status.message.contains("Unknown service"),
@@ -92,6 +112,7 @@ mod codegen_acceptance {
 
     #[tokio::test]
     async fn start_bidi_stream_echoes_all_messages_through_single_handler() {
+        // Given — a bridge and a channel pre-loaded with three messages
         let bridge = create_echo_bridge();
         let (tx, rx) = tokio::sync::mpsc::channel::<RpcMessage>(64);
 
@@ -108,6 +129,7 @@ mod codegen_acceptance {
         }
         drop(tx);
 
+        // When — opening a bidi stream and draining all responses
         let result = bridge
             .start_bidi_stream("test.EchoService", "EchoBidiStream", rx)
             .await;
@@ -124,13 +146,18 @@ mod codegen_acceptance {
             let resp = EchoResponse::decode(&bytes[..]).expect("decode response");
             received.push(resp.message);
         }
+
+        // Then — each message is echoed back with a sequential counter suffix
         assert_eq!(received, vec!["alpha #1", "beta #2", "gamma #3"]);
     }
 
     #[tokio::test]
     async fn start_bidi_stream_returns_not_found_for_unknown_service() {
+        // Given — a bridge and a channel addressed to an unregistered service
         let bridge = create_echo_bridge();
         let (_tx, rx) = tokio::sync::mpsc::channel::<RpcMessage>(1);
+
+        // When / Then — opening the stream immediately returns an error naming the unknown service
         match bridge.start_bidi_stream("unknown.Svc", "Foo", rx).await {
             Err(status) => assert!(
                 status.message.contains("Unknown service"),
@@ -143,8 +170,11 @@ mod codegen_acceptance {
 
     #[tokio::test]
     async fn start_bidi_stream_returns_not_found_for_unknown_method() {
+        // Given — a bridge and a channel addressed to a method that does not exist on the service
         let bridge = create_echo_bridge();
         let (_tx, rx) = tokio::sync::mpsc::channel::<RpcMessage>(1);
+
+        // When / Then — opening the stream immediately returns an error naming the unknown method
         match bridge
             .start_bidi_stream("test.EchoService", "NonExistent", rx)
             .await
@@ -245,6 +275,7 @@ mod bidi_session_tests {
 
     #[tokio::test]
     async fn single_bidi_handler_processes_all_messages_sequentially() {
+        // Given — a CountingEchoService and a channel with three messages queued
         let handler_count = Arc::new(AtomicUsize::new(0));
         let service = CountingEchoService {
             bidi_handler_count: handler_count.clone(),
@@ -265,6 +296,7 @@ mod bidi_session_tests {
         }
         drop(tx);
 
+        // When — opening a single bidi stream and draining all responses
         let handle = bridge
             .start_bidi_stream("test.EchoService", "EchoBidiStream", rx)
             .await
@@ -282,6 +314,7 @@ mod bidi_session_tests {
             received.push(resp.message);
         }
 
+        // Then — exactly one handler was instantiated and all messages carry handler=1 with ascending seq numbers
         assert_eq!(
             handler_count.load(Ordering::SeqCst),
             1,
@@ -295,12 +328,14 @@ mod bidi_session_tests {
 
     #[tokio::test]
     async fn two_separate_bidi_sessions_get_independent_handlers() {
+        // Given — a CountingEchoService shared across two independent bidi session calls
         let handler_count = Arc::new(AtomicUsize::new(0));
         let service = CountingEchoService {
             bidi_handler_count: handler_count.clone(),
         };
         let bridge = Arc::new(tddy_rpc::RpcBridge::new(EchoServiceServer::new(service)));
 
+        // When — opening two separate bidi streams sequentially and draining each
         let mut all_received = Vec::new();
         for session_msgs in [&["a", "b"][..], &["x", "y"]] {
             let (tx, rx) = mpsc::channel::<RpcMessage>(64);
@@ -336,6 +371,7 @@ mod bidi_session_tests {
             all_received.push(session_received);
         }
 
+        // Then — two distinct handlers were created and each session's messages carry its own handler id
         assert_eq!(
             handler_count.load(Ordering::SeqCst),
             2,
@@ -370,6 +406,9 @@ mod token_service_acceptance {
 
     #[test]
     fn token_service_server_has_name_constant() {
+        // Given — the generated TokenServiceServer wrapper
+        // When — reading its NAME constant
+        // Then — it matches the fully-qualified proto service name
         assert_eq!(
             TokenServiceServer::<TokenServiceImpl<MockTokenProvider>>::NAME,
             "token.TokenService"
@@ -378,6 +417,7 @@ mod token_service_acceptance {
 
     #[tokio::test]
     async fn token_service_generate_token_returns_token_and_ttl() {
+        // Given — a bridge wrapping TokenServiceServer with MockTokenProvider
         let server = TokenServiceServer::new(TokenServiceImpl::new(MockTokenProvider));
         let bridge = tddy_rpc::RpcBridge::new(server);
 
@@ -390,10 +430,12 @@ mod token_service_acceptance {
             metadata: RequestMetadata::default(),
         };
 
+        // When — calling GenerateToken via the bridge
         let result = bridge
             .handle_messages("token.TokenService", "GenerateToken", &[msg])
             .await;
 
+        // Then — the response contains a mock token and the configured TTL
         let body = result.expect("handle_messages should succeed");
         let chunks = match body {
             tddy_rpc::ResponseBody::Complete(c) => c,
@@ -407,6 +449,7 @@ mod token_service_acceptance {
 
     #[tokio::test]
     async fn token_service_refresh_token_returns_token_and_ttl() {
+        // Given — a bridge wrapping TokenServiceServer with MockTokenProvider
         let server = TokenServiceServer::new(TokenServiceImpl::new(MockTokenProvider));
         let bridge = tddy_rpc::RpcBridge::new(server);
 
@@ -419,10 +462,12 @@ mod token_service_acceptance {
             metadata: RequestMetadata::default(),
         };
 
+        // When — calling RefreshToken via the bridge
         let result = bridge
             .handle_messages("token.TokenService", "RefreshToken", &[msg])
             .await;
 
+        // Then — the response contains a fresh mock token and the configured TTL
         let body = result.expect("handle_messages should succeed");
         let chunks = match body {
             tddy_rpc::ResponseBody::Complete(c) => c,
@@ -461,7 +506,8 @@ mod tests {
     use crate::test_util::spawn_server_and_connect;
 
     #[tokio::test]
-    async fn test_submit_feature_input_triggers_goal_started_and_mode_changed() {
+    async fn submit_feature_input_triggers_goal_started_and_mode_changed() {
+        // Given — a Presenter with StubBackend running in a background thread, wired to a live gRPC server
         let (event_tx, _) = broadcast::channel(256);
         let (intent_tx, intent_rx) = mpsc::channel();
         let handle = PresenterHandle {
@@ -501,6 +547,7 @@ mod tests {
         let router = Server::builder().add_service(TddyRemoteServer::new(service));
         let mut client = spawn_server_and_connect(router).await;
 
+        // When — streaming a SubmitFeatureInput intent to the server
         let request = async_stream::stream! {
             yield ClientMessage {
                 intent: Some(client_message::Intent::SubmitFeatureInput(
@@ -516,6 +563,7 @@ mod tests {
             .unwrap()
             .into_inner();
 
+        // Then — the event stream eventually emits both GoalStarted and ModeChanged
         let mut events = Vec::new();
         for _ in 0..50 {
             match tokio::time::timeout(Duration::from_millis(200), stream.message()).await {
@@ -595,6 +643,7 @@ mod daemon_tests {
 
     #[tokio::test]
     async fn get_session_returns_status_from_disk() {
+        // Given — a session directory on disk with a changeset in Planned state
         let base = temp_sessions_dir("get-session");
         let session_dir = base.join(SESSIONS_SUBDIR).join("session-1");
         fs::create_dir_all(&session_dir).unwrap();
@@ -618,6 +667,7 @@ mod daemon_tests {
         let router = Server::builder().add_service(TddyRemoteServer::new(service));
         let mut client = spawn_server_and_connect(router).await;
 
+        // When — requesting that session by id
         let response = client
             .get_session(Request::new(GetSessionRequest {
                 session_id: "session-1".to_string(),
@@ -626,6 +676,7 @@ mod daemon_tests {
             .unwrap()
             .into_inner();
 
+        // Then — the response reflects the on-disk changeset fields
         let session = response.session.expect("session should be present");
         assert_eq!(session.session_id, "session-1");
         assert_eq!(session.status, "Active");
@@ -637,6 +688,7 @@ mod daemon_tests {
 
     #[tokio::test]
     async fn get_session_rejects_invalid_session_id() {
+        // Given — a DaemonService with no sessions on disk
         let base = temp_sessions_dir("get-session-invalid");
         let backend = tddy_core::SharedBackend::from_any(tddy_core::AnyBackend::Stub(
             tddy_core::StubBackend::new(),
@@ -645,6 +697,7 @@ mod daemon_tests {
         let router = Server::builder().add_service(TddyRemoteServer::new(service));
         let mut client = spawn_server_and_connect(router).await;
 
+        // When — requesting a session id containing a path traversal segment
         let err = client
             .get_session(Request::new(GetSessionRequest {
                 session_id: "../escape".to_string(),
@@ -652,6 +705,7 @@ mod daemon_tests {
             .await
             .unwrap_err();
 
+        // Then — the server rejects the request with InvalidArgument
         assert_eq!(err.code(), Code::InvalidArgument);
 
         let _ = fs::remove_dir_all(&base);
@@ -659,6 +713,7 @@ mod daemon_tests {
 
     #[tokio::test]
     async fn list_sessions_only_sees_unified_sessions_subdir() {
+        // Given — a base dir with one legacy flat session (directly under base) and one unified session (under sessions/)
         let base = temp_sessions_dir("list-legacy-skip");
         // Legacy-style tree: changeset directly under base (not under sessions/) — must not appear in list.
         let legacy = base.join("legacy-flat-session");
@@ -679,6 +734,7 @@ mod daemon_tests {
         let router = Server::builder().add_service(TddyRemoteServer::new(service));
         let mut client = spawn_server_and_connect(router).await;
 
+        // When — listing sessions
         let response = client
             .list_sessions(Request::new(ListSessionsRequest {
                 repo_root: String::new(),
@@ -687,6 +743,7 @@ mod daemon_tests {
             .unwrap()
             .into_inner();
 
+        // Then — only the unified-subdir session is returned; the legacy flat entry is ignored
         assert_eq!(response.sessions.len(), 1);
         assert_eq!(response.sessions[0].session_id, "unified-one");
 
@@ -695,6 +752,7 @@ mod daemon_tests {
 
     #[tokio::test]
     async fn list_sessions_returns_all_sessions() {
+        // Given — three sessions on disk with different workflow states
         let base = temp_sessions_dir("list-sessions");
         for (name, state) in [("s1", "Planned"), ("s2", "Completed"), ("s3", "Init")] {
             let dir = base.join(SESSIONS_SUBDIR).join(name);
@@ -712,6 +770,7 @@ mod daemon_tests {
         let router = Server::builder().add_service(TddyRemoteServer::new(service));
         let mut client = spawn_server_and_connect(router).await;
 
+        // When — listing all sessions
         let response = client
             .list_sessions(Request::new(ListSessionsRequest {
                 repo_root: String::new(),
@@ -720,6 +779,7 @@ mod daemon_tests {
             .unwrap()
             .into_inner();
 
+        // Then — all three sessions are returned
         assert_eq!(response.sessions.len(), 3, "should list all 3 sessions");
 
         let _ = fs::remove_dir_all(&base_canonical);
@@ -727,21 +787,25 @@ mod daemon_tests {
 
     #[tokio::test]
     async fn daemon_starts_and_listens() {
+        // Given — a DaemonService bound to a temporary directory
         let base = temp_sessions_dir("daemon-starts");
         let backend = tddy_core::SharedBackend::from_any(tddy_core::AnyBackend::Stub(
             tddy_core::StubBackend::new(),
         ));
         let service = DaemonService::new(base.clone(), backend);
         let router = Server::builder().add_service(TddyRemoteServer::new(service));
-        let client = spawn_server_and_connect(router).await;
 
+        // When — a client connects and then disconnects
+        let client = spawn_server_and_connect(router).await;
         drop(client);
 
+        // Then — no panic; the server accepted the connection and shut down cleanly
         let _ = fs::remove_dir_all(&base);
     }
 
     #[tokio::test]
     async fn start_session_creates_worktree_and_runs_workflow() {
+        // Given — a git-initialised repo dir and a DaemonService connected via gRPC
         let base = temp_sessions_dir("start-session");
         let repo = base.join("repo");
         fs::create_dir_all(&repo).unwrap();
@@ -762,6 +826,7 @@ mod daemon_tests {
         use crate::gen::ClientMessage;
         use async_stream::stream;
 
+        // When — sending a StartSession intent with a feature prompt
         let request = stream! {
             yield ClientMessage {
                 intent: Some(client_message::Intent::StartSession(crate::gen::StartSession {
@@ -777,6 +842,8 @@ mod daemon_tests {
             .await
             .unwrap()
             .into_inner();
+
+        // Then — the first event is either SessionCreated or ModeChanged (plan-approval step)
         let first: Result<Option<crate::gen::ServerMessage>, _> = stream.message().await;
         assert!(first.is_ok(), "should receive response");
         let msg_opt = first.unwrap();
@@ -801,12 +868,15 @@ mod daemon_tests {
     /// `{tddy_data_dir}/<session_id>/` path.
     #[test]
     fn daemon_or_rpc_start_session_matches_single_dir_contract() {
+        // Given — a fresh base directory and a session id
         let base = temp_sessions_dir("single-dir-contract");
         let sid = uuid::Uuid::now_v7().to_string();
 
+        // When — creating the session directory via both the daemon-style and CLI-style helpers
         let daemon_style = tddy_core::output::create_session_dir_under(&base, &sid).unwrap();
         let cli_style = tddy_core::output::create_session_dir_with_id(&base, &sid).unwrap();
 
+        // Then — both helpers resolve to the same path (sessions/<id> under the base)
         assert_eq!(
             daemon_style, cli_style,
             "daemon/RPC session directory must match CLI: use sessions/{{id}} under the sessions base"
@@ -817,6 +887,7 @@ mod daemon_tests {
     /// the spawned workflow and UI can resolve `tdd` vs `bugfix`.
     #[tokio::test]
     async fn daemon_start_session_passes_recipe_to_workflow() {
+        // Given — a git-initialised repo and a DaemonService wired to a gRPC client
         let base = temp_sessions_dir("start-session-recipe");
         let repo = base.join("repo");
         fs::create_dir_all(&repo).unwrap();
@@ -837,6 +908,7 @@ mod daemon_tests {
         use crate::gen::ClientMessage;
         use async_stream::stream;
 
+        // When — sending StartSession with recipe = "bugfix" and waiting for SessionCreated
         let repo_root_str = repo.to_string_lossy().to_string();
         let repo_root_for_stream = repo_root_str.clone();
         let request = stream! {
@@ -865,6 +937,7 @@ mod daemon_tests {
             }
         }
 
+        // Then — the persisted changeset records "bugfix" and the session metadata is fully populated
         let session_dir = session_dir.expect("expected SessionCreated with session_id");
         let cs = read_changeset(&session_dir).expect("changeset.yaml must exist after start");
         assert_eq!(
@@ -906,6 +979,7 @@ mod daemon_tests {
         use crate::PresenterObserverService;
         use tddy_core::PresenterEvent;
 
+        // Given — a PresenterObserverService with a broadcast channel, and a connected observer client
         let (event_tx, _) = broadcast::channel(256);
         let service = PresenterObserverService::new(event_tx.clone());
         let router = Server::builder().add_service(PresenterObserverServer::new(service));
@@ -918,9 +992,11 @@ mod daemon_tests {
             .unwrap()
             .into_inner();
 
+        // When — publishing a GoalStarted event on the broadcast channel
         let _ = event_tx.send(PresenterEvent::GoalStarted("unit-test-goal".into()));
         tokio::task::yield_now().await;
 
+        // Then — the observer stream delivers the event with the correct goal text
         let msg = tokio::time::timeout(Duration::from_secs(2), stream.message())
             .await
             .expect("timeout")
@@ -943,7 +1019,10 @@ mod daemon_tests {
 mod workflow_artifact_acceptance {
     #[test]
     fn daemon_start_session_no_prd_constant() {
+        // Given — the source text of daemon_service.rs embedded at compile time
         let src = include_str!("daemon_service.rs");
+
+        // Then — it must not hard-code the PRD filename constant
         assert!(
             !src.contains("PRD_FILENAME"),
             "daemon_service must not reference PRD_FILENAME; resolve primary planning artifact via workflow manifest"
@@ -1031,6 +1110,9 @@ mod reflection_acceptance {
     #[test]
     fn service_descriptor_set_embeds_all_registered_services() {
         use prost_types::FileDescriptorSet;
+
+        // Given — the compiled-in SERVICE_DESCRIPTOR_BYTES blob
+        // When — decoding it as a FileDescriptorSet
         let fds = FileDescriptorSet::decode(SERVICE_DESCRIPTOR_BYTES)
             .expect("SERVICE_DESCRIPTOR_BYTES must decode as a valid FileDescriptorSet");
         let filenames: Vec<_> = fds
@@ -1038,6 +1120,8 @@ mod reflection_acceptance {
             .iter()
             .map(|f| f.name.as_deref().unwrap_or(""))
             .collect();
+
+        // Then — the set contains at minimum echo, token, and connection service proto files
         // Must contain at minimum echo, token, auth, terminal, connection service files.
         assert!(
             filenames.iter().any(|n| n.contains("echo")),
@@ -1058,12 +1142,14 @@ mod reflection_acceptance {
 
     #[tokio::test]
     async fn reflection_list_services_returns_only_registered() {
+        // Given — a reflection bridge registered with exactly two services
         let bridge = make_reflection_bridge(&["test.EchoService", "token.TokenService"]);
         let (tx, rx) = mpsc::channel::<RpcMessage>(8);
 
         tx.send(list_services_request()).await.unwrap();
         drop(tx);
 
+        // When — streaming a ListServices reflection request
         let handle = bridge
             .start_bidi_stream(
                 "grpc.reflection.v1.ServerReflection",
@@ -1085,6 +1171,7 @@ mod reflection_acceptance {
         let bytes = chunk.expect("response chunk must not be an error");
         let resp = decode_response(&bytes);
 
+        // Then — exactly the two registered services are listed, no extras
         let services = match resp.message_response {
             Some(MessageResponse::ListServicesResponse(r)) => r,
             other => panic!("expected ListServicesResponse, got: {:?}", other),
@@ -1112,6 +1199,8 @@ mod reflection_acceptance {
     #[tokio::test]
     async fn reflection_file_containing_symbol_returns_file_and_deps() {
         use prost_types::FileDescriptorProto;
+
+        // Given — a reflection bridge and a FileContainingSymbol request for test.EchoService
         let bridge = make_reflection_bridge(&["test.EchoService"]);
         let (tx, rx) = mpsc::channel::<RpcMessage>(8);
 
@@ -1120,6 +1209,7 @@ mod reflection_acceptance {
             .unwrap();
         drop(tx);
 
+        // When — streaming the reflection request through the bidi stream
         let handle = bridge
             .start_bidi_stream(
                 "grpc.reflection.v1.ServerReflection",
@@ -1141,6 +1231,7 @@ mod reflection_acceptance {
             .expect("no error");
         let resp = decode_response(&chunk);
 
+        // Then — the response contains one or more valid FileDescriptorProtos
         let file_bytes = match resp.message_response {
             Some(MessageResponse::FileDescriptorResponse(r)) => r,
             Some(MessageResponse::ErrorResponse(e)) => panic!(
@@ -1164,6 +1255,8 @@ mod reflection_acceptance {
     #[tokio::test]
     async fn reflection_file_by_filename_returns_requested_file() {
         use prost_types::FileDescriptorProto;
+
+        // Given — a reflection bridge and a FileByFilename request for the echo service proto
         let bridge = make_reflection_bridge(&["test.EchoService"]);
         let (tx, rx) = mpsc::channel::<RpcMessage>(8);
 
@@ -1173,6 +1266,7 @@ mod reflection_acceptance {
             .unwrap();
         drop(tx);
 
+        // When — streaming the reflection request through the bidi stream
         let handle = bridge
             .start_bidi_stream(
                 "grpc.reflection.v1.ServerReflection",
@@ -1194,6 +1288,7 @@ mod reflection_acceptance {
             .expect("no error");
         let resp = decode_response(&chunk);
 
+        // Then — the response contains the echo service FileDescriptorProto
         let file_bytes = match resp.message_response {
             Some(MessageResponse::FileDescriptorResponse(r)) => r,
             other => panic!("expected FileDescriptorResponse, got: {:?}", other),
@@ -1214,6 +1309,7 @@ mod reflection_acceptance {
 
     #[tokio::test]
     async fn reflection_unknown_symbol_returns_error_response() {
+        // Given — a reflection bridge and a FileContainingSymbol request for a symbol that does not exist
         let bridge = make_reflection_bridge(&["test.EchoService"]);
         let (tx, rx) = mpsc::channel::<RpcMessage>(8);
 
@@ -1224,6 +1320,7 @@ mod reflection_acceptance {
         .unwrap();
         drop(tx);
 
+        // When — streaming the reflection request through the bidi stream
         let handle = bridge
             .start_bidi_stream(
                 "grpc.reflection.v1.ServerReflection",
@@ -1245,6 +1342,7 @@ mod reflection_acceptance {
             .expect("no error");
         let resp = decode_response(&chunk);
 
+        // Then — the response is an ErrorResponse with NOT_FOUND (code 5)
         match resp.message_response {
             Some(MessageResponse::ErrorResponse(e)) => {
                 // gRPC reflection uses code 5 = NOT_FOUND for unknown symbols.

@@ -83,7 +83,10 @@ targets:
 
 #[test]
 fn manifest_round_trips_builtin_and_plugin_configs() {
+    // When
     let manifest = load_build_manifest(MIXED_YAML).expect("manifest must parse");
+
+    // Then
     assert_eq!(manifest.schema_version, 1);
     assert_eq!(manifest.targets.len(), 4);
 
@@ -118,13 +121,17 @@ fn manifest_round_trips_builtin_and_plugin_configs() {
 
 #[test]
 fn registered_plugin_lowers_target_actions() {
+    // Given
     let manifest = load_build_manifest(MIXED_YAML).expect("parse manifest");
     let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
     let registry = registry_with_demo();
 
+    // When
     let actions = graph
         .actions_for("demo:thing", &registry)
         .expect("registered plugin must lower its target");
+
+    // Then
     assert_eq!(actions.len(), 1, "demo plugin lowers to one action");
     assert_eq!(
         actions[0].command,
@@ -135,14 +142,18 @@ fn registered_plugin_lowers_target_actions() {
 
 #[test]
 fn unknown_target_type_without_plugin_errors() {
+    // Given
     let manifest = load_build_manifest(MIXED_YAML).expect("parse manifest");
     let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
     let empty = PluginRegistry::new(); // no `demo` plugin registered
 
+    // When
     let err = graph
         .actions_for("demo:thing", &empty)
         .expect_err("an unregistered, non-built-in type must error");
     let message = err.to_string();
+
+    // Then
     assert!(
         message.contains("unknown target type"),
         "error must explain the cause, got: {message}"
@@ -155,11 +166,12 @@ fn unknown_target_type_without_plugin_errors() {
 
 #[test]
 fn builtin_script_tool_group_lower_without_any_plugin() {
+    // Given
     let manifest = load_build_manifest(MIXED_YAML).expect("parse manifest");
     let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
     let empty = PluginRegistry::new();
 
-    // `script` is the engine's generic command escape hatch.
+    // When / Then — `script` is the engine's generic command escape hatch.
     let script = graph
         .actions_for("foo:script", &empty)
         .expect("script is built-in");
@@ -188,9 +200,11 @@ fn builtin_script_tool_group_lower_without_any_plugin() {
 
 #[test]
 fn group_membership_drives_build_order_without_plugins() {
+    // Given
     let manifest = load_build_manifest(MIXED_YAML).expect("parse manifest");
     let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
 
+    // When
     let order = graph
         .build_order("all:group")
         .expect("group build order resolves");
@@ -200,6 +214,8 @@ fn group_membership_drives_build_order_without_plugins() {
             .position(|t| t == id)
             .unwrap_or_else(|| panic!("{id} missing from build order: {order:?}"))
     };
+
+    // Then
     assert!(
         pos("foo:script") < pos("all:group"),
         "group members build before the group"
@@ -212,6 +228,7 @@ fn group_membership_drives_build_order_without_plugins() {
 
 #[tokio::test]
 async fn tool_bin_dir_is_prepended_to_action_path() {
+    // Given
     let yaml = r#"
 schema_version: 1
 targets:
@@ -243,10 +260,10 @@ targets:
         std::fs::set_permissions(&greet, std::fs::Permissions::from_mode(0o755))
             .expect("chmod greet");
     }
-
     let manifest = load_build_manifest(yaml).expect("parse manifest");
     let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
 
+    // When
     let record = execute_target(
         root,
         &graph,
@@ -256,6 +273,8 @@ targets:
     )
     .await
     .expect("run tool-dependent target");
+
+    // Then
     assert!(
         record.actions[0].stdout.contains("GREETED-BY-TOOL"),
         "built-in tool bin_dir must be on PATH, got: {:?}",
@@ -265,20 +284,22 @@ targets:
 
 #[test]
 fn service_list_reports_raw_type_string_for_plugin_target() {
+    // Given
     let repo = tempfile::tempdir().expect("tempdir");
     std::fs::write(repo.path().join("BUILD.yaml"), MIXED_YAML).expect("write BUILD.yaml");
 
-    // Listing reads the `type` tag directly — it neither lowers nor needs a registry.
+    // When — listing reads the `type` tag directly — it neither lowers nor needs a registry.
     let value = build_list_json(repo.path(), &BuildListQuery::default()).expect("list targets");
     let targets = value
         .get("targets")
         .and_then(|t| t.as_array())
         .expect("list output must have a `targets` array");
-
     let demo = targets
         .iter()
         .find(|t| t.get("id").and_then(|v| v.as_str()) == Some("demo:thing"))
         .expect("demo:thing must be listed");
+
+    // Then
     assert_eq!(
         demo.get("type").and_then(|v| v.as_str()),
         Some("demo"),
@@ -288,11 +309,14 @@ fn service_list_reports_raw_type_string_for_plugin_target() {
 
 #[test]
 fn build_manifest_rejects_unknown_fields() {
+    // Given
     let yaml = r#"
 schema_version: 1
 bogus_top_level_key: 123
 targets: []
 "#;
+
+    // When / Then
     let result = load_build_manifest(yaml);
     assert!(
         result.is_err(),
@@ -302,6 +326,7 @@ targets: []
 
 #[test]
 fn cache_key_is_deterministic() {
+    // Given
     let action = BuildAction {
         id: "compile".to_string(),
         description: String::new(),
@@ -319,8 +344,11 @@ fn cache_key_is_deterministic() {
         mtime_ms: 123,
     }];
 
+    // When
     let k1 = compute_cache_key(&action, &fingerprints);
     let k2 = compute_cache_key(&action, &fingerprints);
+
+    // Then
     assert_eq!(k1, k2, "same action + inputs must produce the same key");
     assert!(
         k1.starts_with("sha256:"),
@@ -350,6 +378,7 @@ targets:
 
 #[tokio::test]
 async fn cache_hit_skips_execution() {
+    // Given
     let repo = tempfile::tempdir().expect("tempdir");
     let root = repo.path();
     std::fs::write(root.join("input.txt"), "seed").expect("seed input");
@@ -358,22 +387,28 @@ async fn cache_hit_skips_execution() {
     let opts = ExecuteOptions::default();
     let registry = PluginRegistry::new();
 
+    // When
     let first = execute_target(root, &graph, "cache:demo", &opts, &registry)
         .await
         .expect("first run");
+
+    // Then
     assert!(!first.actions[0].cached, "first run must execute");
 
+    // When
     let second = execute_target(root, &graph, "cache:demo", &opts, &registry)
         .await
         .expect("second run");
-    assert!(second.actions[0].cached, "second run must be a cache hit");
 
+    // Then
+    assert!(second.actions[0].cached, "second run must be a cache hit");
     let marker = std::fs::read_to_string(root.join("marker.txt")).expect("marker.txt");
     assert_eq!(marker.lines().count(), 1, "script must run exactly once");
 }
 
 #[tokio::test]
 async fn cache_miss_on_input_mtime_change() {
+    // Given
     let repo = tempfile::tempdir().expect("tempdir");
     let root = repo.path();
     std::fs::write(root.join("input.txt"), "seed").expect("seed input");
@@ -382,22 +417,27 @@ async fn cache_miss_on_input_mtime_change() {
     let opts = ExecuteOptions::default();
     let registry = PluginRegistry::new();
 
+    // When
     let first = execute_target(root, &graph, "cache:demo", &opts, &registry)
         .await
         .expect("first run");
+
+    // Then
     assert!(!first.actions[0].cached);
 
-    // Change the input so its fingerprint differs.
+    // Given — change the input so its fingerprint differs.
     std::fs::write(root.join("input.txt"), "seed-changed-larger").expect("rewrite input");
 
+    // When
     let second = execute_target(root, &graph, "cache:demo", &opts, &registry)
         .await
         .expect("second run");
+
+    // Then
     assert!(
         !second.actions[0].cached,
         "changed input must invalidate the cache"
     );
-
     let marker = std::fs::read_to_string(root.join("marker.txt")).expect("marker.txt");
     assert_eq!(
         marker.lines().count(),
@@ -408,6 +448,7 @@ async fn cache_miss_on_input_mtime_change() {
 
 #[tokio::test]
 async fn build_executes_script_target() {
+    // Given
     let yaml = r#"
 schema_version: 1
 targets:
@@ -421,6 +462,7 @@ targets:
     let manifest = load_build_manifest(yaml).expect("parse manifest");
     let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
 
+    // When
     let record = execute_target(
         repo.path(),
         &graph,
@@ -430,6 +472,8 @@ targets:
     )
     .await
     .expect("run script target");
+
+    // Then
     assert_eq!(record.actions[0].exit_code, 0);
     assert!(
         record.actions[0].stdout.contains("hello-from-script"),
@@ -440,6 +484,7 @@ targets:
 
 #[test]
 fn cycle_detection_returns_error() {
+    // Given
     let yaml = r#"
 schema_version: 1
 targets:
@@ -457,13 +502,15 @@ targets:
       command: ["true"]
 "#;
     let manifest = load_build_manifest(yaml).expect("parse manifest");
+
+    // When / Then
     let result = BuildGraph::from_manifests(vec![manifest]);
     assert!(result.is_err(), "a↔b dependency cycle must be rejected");
 }
 
 #[test]
 fn build_action_dag_parallel_wave_ordering() {
-    // A and B are independent (parallel); C consumes both their outputs.
+    // Given — A and B are independent (parallel); C consumes both their outputs.
     let yaml = r#"
 schema_version: 1
 targets:
@@ -494,8 +541,11 @@ targets:
 "#;
     let manifest = load_build_manifest(yaml).expect("parse manifest");
     let graph = BuildGraph::from_manifests(vec![manifest]).expect("build graph");
+
+    // When
     let waves = graph.waves(&PluginRegistry::new()).expect("compute waves");
 
+    // Then
     assert_eq!(waves.len(), 2, "expected two waves: [a,b] then [c]");
     assert_eq!(
         waves[0].len(),

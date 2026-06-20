@@ -132,7 +132,10 @@ mod tests {
 
     #[test]
     fn build_followup_prompt_includes_stub_answer_marker() {
+        // When
         let p = build_followup_prompt("feat", "a1\na2");
+
+        // Then
         assert!(
             p.to_uppercase().contains("HERE ARE THE USER'S ANSWERS"),
             "StubBackend and planning follow-ups use this substring after uppercasing; got: {p:?}"
@@ -141,7 +144,10 @@ mod tests {
 
     #[test]
     fn system_prompt_requires_tddy_tools_ask_and_forbids_chat_only_questions() {
+        // When
         let p = system_prompt();
+
+        // Then
         assert!(
             p.contains("tddy-tools ask") && p.contains("TDDY_SOCKET"),
             "interview prompt must require socket-backed ask: {p}"

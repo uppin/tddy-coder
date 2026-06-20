@@ -15,6 +15,7 @@ fn tddy_coder_bin() -> Command {
 #[test]
 #[cfg(unix)]
 fn cli_runs_full_workflow_when_goal_omitted() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cli-full-workflow-test");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
@@ -25,8 +26,10 @@ fn cli_runs_full_workflow_when_goal_omitted() {
         .args(["--agent", "stub", "--prompt", "SKIP_QUESTIONS Build auth"])
         .write_stdin("a\n");
 
+    // When
     let output = cmd.output().expect("run tddy-coder");
 
+    // Then
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         !stderr.contains("the following required arguments were not provided")
@@ -41,6 +44,7 @@ fn cli_runs_full_workflow_when_goal_omitted() {
 #[test]
 #[cfg(unix)]
 fn cli_accepts_goal_plan() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cli-goal-test");
     let _ = std::fs::create_dir_all(&tmp);
 
@@ -57,8 +61,10 @@ fn cli_accepts_goal_plan() {
         ])
         .write_stdin("a\n");
 
+    // When
     let output = cmd.output().expect("run tddy-coder");
 
+    // Then
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         !stderr.contains("unrecognized") && !stderr.contains("unknown"),
@@ -73,6 +79,7 @@ fn cli_accepts_goal_plan() {
 #[test]
 #[cfg(unix)]
 fn cli_plain_mode_plan_approval_approve_proceeds() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cli-plan-approval-test");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
@@ -92,8 +99,10 @@ fn cli_plain_mode_plan_approval_approve_proceeds() {
         ])
         .write_stdin("a\n");
 
+    // When
     let output = cmd.output().expect("run tddy-coder");
 
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
@@ -127,6 +136,7 @@ fn cli_plain_mode_plan_approval_approve_proceeds() {
 #[test]
 #[cfg(unix)]
 fn cli_displays_agent_and_model_before_goal_execution() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cli-agent-model-display");
     let _ = std::fs::remove_dir_all(&tmp);
     let _ = std::fs::create_dir_all(&tmp);
@@ -147,6 +157,7 @@ fn cli_displays_agent_and_model_before_goal_execution() {
     let config_path = tmp.join("config.yaml");
     std::fs::write(&config_path, config_yaml).expect("write config");
 
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
         .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
@@ -171,6 +182,7 @@ fn cli_displays_agent_and_model_before_goal_execution() {
         String::from_utf8_lossy(&output.stderr)
     );
 
+    // Then
     let logs = fs::read_to_string(&log_file).unwrap_or_default();
     assert!(
         logs.contains("agent") && logs.contains("stub"),
@@ -191,6 +203,7 @@ fn cli_displays_agent_and_model_before_goal_execution() {
 #[test]
 #[cfg(unix)]
 fn cli_displays_state_transitions() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cli-state-transitions");
     let _ = std::fs::remove_dir_all(&tmp);
     let _ = std::fs::create_dir_all(&tmp);
@@ -211,6 +224,7 @@ fn cli_displays_state_transitions() {
     let config_path = tmp.join("config.yaml");
     std::fs::write(&config_path, config_yaml).expect("write config");
 
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
         .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
@@ -235,6 +249,7 @@ fn cli_displays_state_transitions() {
         String::from_utf8_lossy(&output.stderr)
     );
 
+    // Then
     let logs = fs::read_to_string(&log_file).unwrap_or_default();
     let has_state_info = logs.contains("Init")
         || logs.contains("Planning")
@@ -252,6 +267,7 @@ fn cli_displays_state_transitions() {
 #[test]
 #[cfg(unix)]
 fn cli_accepts_prompt_flag_instead_of_stdin() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cli-prompt-flag-test");
     let _ = std::fs::create_dir_all(&tmp);
 
@@ -270,8 +286,10 @@ fn cli_accepts_prompt_flag_instead_of_stdin() {
         ])
         .write_stdin("a\n");
 
+    // When
     let output = cmd.output().expect("run tddy-coder");
 
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         output.status.success(),
@@ -293,11 +311,12 @@ fn cli_accepts_prompt_flag_instead_of_stdin() {
 
 #[test]
 fn cli_accepts_model_flag() {
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.arg("--help");
-
     let output = cmd.output().expect("run tddy-coder --help");
 
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("--model") || stdout.contains("-m"),
@@ -308,11 +327,12 @@ fn cli_accepts_model_flag() {
 
 #[test]
 fn cli_accepts_prompt_flag_in_help() {
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.arg("--help");
-
     let output = cmd.output().expect("run tddy-coder --help");
 
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("--prompt"),
@@ -323,11 +343,12 @@ fn cli_accepts_prompt_flag_in_help() {
 
 #[test]
 fn cli_accepts_agent_flag() {
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.arg("--help");
-
     let output = cmd.output().expect("run tddy-coder --help");
 
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("--agent"),
@@ -344,6 +365,7 @@ fn cli_accepts_agent_flag() {
 #[test]
 #[cfg(unix)]
 fn cli_q_and_a_flow_produces_prd_after_answers() {
+    // Given
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let id = COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -365,8 +387,10 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
         ])
         .write_stdin("Email/password\nQ2 2025\na\n");
 
+    // When
     let output = cmd.output().expect("run tddy-coder");
 
+    // Then
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
@@ -407,6 +431,7 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
 #[test]
 #[cfg(unix)]
 fn cli_accepts_goal_acceptance_tests_with_session_dir() {
+    // Given
     let (output_dir, session_dir) = common::temp_dir_with_git_repo("at-goal-test");
     std::fs::create_dir_all(session_dir.join("artifacts")).expect("create artifacts");
     std::fs::write(
@@ -416,6 +441,7 @@ fn cli_accepts_goal_acceptance_tests_with_session_dir() {
     .expect("write PRD");
     common::write_changeset_for_session(&session_dir, "fake-sess", &output_dir);
 
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
         .env(
@@ -436,6 +462,7 @@ fn cli_accepts_goal_acceptance_tests_with_session_dir() {
 
     let output = cmd.output().expect("run tddy-coder");
 
+    // Then
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -456,6 +483,7 @@ fn cli_accepts_goal_acceptance_tests_with_session_dir() {
 #[test]
 #[cfg(unix)]
 fn cli_accepts_goal_red_with_session_dir() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cli-red-goal-test");
     let _ = std::fs::create_dir_all(&tmp);
 
@@ -473,6 +501,7 @@ fn cli_accepts_goal_red_with_session_dir() {
     )
     .expect("write acceptance-tests.md");
 
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
         .env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap())
@@ -489,6 +518,7 @@ fn cli_accepts_goal_red_with_session_dir() {
 
     let output = cmd.output().expect("run tddy-coder");
 
+    // Then
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -509,6 +539,7 @@ fn cli_accepts_goal_red_with_session_dir() {
 #[test]
 #[cfg(unix)]
 fn cli_accepts_goal_green_with_session_dir() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cli-green-goal-test");
     let _ = std::fs::create_dir_all(&tmp);
 
@@ -540,6 +571,7 @@ fn cli_accepts_goal_green_with_session_dir() {
             session_dir.to_str().unwrap(),
         ]);
 
+    // When (red phase)
     let output = cmd.output().expect("run tddy-coder red");
     assert!(
         output.status.success(),
@@ -561,6 +593,7 @@ fn cli_accepts_goal_green_with_session_dir() {
             session_dir.to_str().unwrap(),
         ]);
 
+    // When (green phase) / Then
     let output2 = cmd2.output().expect("run tddy-coder green");
 
     let stderr = String::from_utf8_lossy(&output2.stderr);
@@ -586,6 +619,7 @@ fn cli_accepts_goal_green_with_session_dir() {
 /// Uses WorkflowEngine + MockBackend to verify the chain without subprocess/sandbox issues.
 #[tokio::test]
 async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
+    // Given
     use std::collections::HashMap;
     use std::sync::Arc;
     use tddy_core::changeset::read_changeset;
@@ -651,11 +685,13 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
     );
     ctx.insert("run_optional_step_x".to_string(), serde_json::json!(false));
 
+    // When
     let result = engine
         .run_workflow_from(&GoalId::new("acceptance-tests"), ctx)
         .await
         .expect("run workflow");
 
+    // Then
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),
         "workflow should not error: {:?}",
@@ -692,12 +728,12 @@ async fn full_workflow_plain_calls_validate_and_refactor_after_evaluate() {
 /// Uses TDDY_SESSIONS_DIR to a temp dir so tests do not write to production ~/.tddy.
 #[test]
 #[cfg(unix)]
-fn test_plan_goal_cli_creates_session_under_home_tddy() {
+fn plan_goal_without_output_dir_creates_session_under_tddy_sessions_dir() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cli-session-dir-home-test");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
 
-    // Use TDDY_SESSIONS_DIR so we do not pollute the real ~/.tddy
     let sessions_base = tmp.join("fake-sessions-base");
     std::fs::create_dir_all(&sessions_base).expect("create sessions base");
 
@@ -716,10 +752,12 @@ fn test_plan_goal_cli_creates_session_under_home_tddy() {
         ])
         .write_stdin("a\n");
 
+    // When
     let output = cmd.output().expect("run tddy-coder");
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
+    // Then
     assert!(
         output.status.success(),
         "plan without --output-dir should succeed and place session under TDDY_SESSIONS_DIR/sessions/; \
@@ -788,6 +826,7 @@ fn test_plan_goal_cli_creates_session_under_home_tddy() {
 #[test]
 #[cfg(unix)]
 fn cli_bugfix_plain_keeps_explicit_session_dir_when_fix_plan_missing() {
+    // Given
     let (repo_dir, _) = common::temp_dir_with_git_repo("cli-bugfix-explicit-sid");
 
     let sessions_root =
@@ -799,6 +838,7 @@ fn cli_bugfix_plain_keeps_explicit_session_dir_when_fix_plan_missing() {
     let session_path = sessions_root.join(SESSIONS_SUBDIR).join(sid);
     std::fs::create_dir_all(session_path.join("logs")).expect("session logs");
 
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
         .current_dir(&repo_dir)
@@ -816,6 +856,8 @@ fn cli_bugfix_plain_keeps_explicit_session_dir_when_fix_plan_missing() {
 
     let output = cmd.output().expect("run tddy-coder bugfix plain");
     let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Then
     assert!(
         output.status.success(),
         "bugfix plain with explicit session-dir should exit 0; stderr={}",
@@ -851,6 +893,7 @@ fn cli_bugfix_plain_keeps_explicit_session_dir_when_fix_plan_missing() {
 #[test]
 #[cfg(unix)]
 fn cli_bugfix_resume_clears_stale_session_config_goal_plan() {
+    // Given
     let (repo_dir, _) = common::temp_dir_with_git_repo("cli-bugfix-resume-stale-goal");
 
     let sessions_root = std::env::temp_dir().join(format!(
@@ -869,6 +912,7 @@ fn cli_bugfix_resume_clears_stale_session_config_goal_plan() {
     )
     .expect("write session coder-config");
 
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
         .current_dir(&repo_dir)
@@ -886,6 +930,8 @@ fn cli_bugfix_resume_clears_stale_session_config_goal_plan() {
 
     let output = cmd.output().expect("run tddy-coder bugfix resume");
     let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Then
     assert!(
         output.status.success(),
         "bugfix resume with stale goal: plan in session coder-config should still start; stderr={}",

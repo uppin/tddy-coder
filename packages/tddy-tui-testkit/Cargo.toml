@@ -17,3 +17,5 @@ tddy-core = { path = "../tddy-core" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 uuid = { version = "1", features = ["v4"] }
 env_logger = "0.11"
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }

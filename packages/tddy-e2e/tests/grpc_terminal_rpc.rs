@@ -283,6 +283,7 @@ async fn count_terminal_chunks_in_window(
 
 #[tokio::test]
 async fn grpc_terminal_io_receives_ansi_output() -> anyhow::Result<()> {
+    // Given
     let (_handle, port, _shutdown) =
         spawn_presenter_with_terminal_service(Some("Build auth".to_string()));
 
@@ -296,11 +297,13 @@ async fn grpc_terminal_io_receives_ansi_output() -> anyhow::Result<()> {
         .await?
         .into_inner();
 
+    // When
     input_tx.send(TerminalInput { data: vec![] }).await?;
     drop(input_tx);
 
     let received = drain_output(&mut stream, Duration::from_millis(500), "ansi-init").await?;
 
+    // Then
     assert!(
         received.len() > 50,
         "Expected ANSI output from VirtualTui, got {} bytes",
@@ -325,6 +328,8 @@ async fn grpc_terminal_io_receives_ansi_output() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn grpc_terminal_io_keyboard_input_affects_output() -> anyhow::Result<()> {
     let _ = env_logger::builder().is_test(true).try_init();
+
+    // Given
     let (_handle, port, shutdown) =
         spawn_presenter_with_terminal_service(Some("Build auth".to_string()));
     let _approve = spawn_pr_document_approve(port);
@@ -339,6 +344,7 @@ async fn grpc_terminal_io_keyboard_input_affects_output() -> anyhow::Result<()> 
         .await?
         .into_inner();
 
+    // When
     // Spawn input sender task — runs concurrently with output collection.
     // After scope question → PlanReview appears (View / Approve / Refine).
     // Enter answers scope, Down navigates to "Approve", Enter approves.
@@ -391,6 +397,7 @@ async fn grpc_terminal_io_keyboard_input_affects_output() -> anyhow::Result<()> 
         utf8_preview(&text, 500)
     );
 
+    // Then
     assert!(
         initial_tui_visible(&text),
         "Should receive initial TUI output; got (len {}): {:?}",
@@ -412,6 +419,7 @@ async fn grpc_terminal_io_keyboard_input_affects_output() -> anyhow::Result<()> 
 /// interactions. Asserts on visible terminal content like GhosttyTerminalLiveKit.
 #[tokio::test]
 async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
+    // Given
     let (_handle, port, shutdown) =
         spawn_presenter_with_terminal_service(Some("Build auth".to_string()));
     let _approve = spawn_pr_document_approve(port);
@@ -428,7 +436,7 @@ async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
 
     let mut viewer = ScreenParser::new(24, 80);
 
-    // Phase 1: send init, drain ALL initial TUI render output into vt100
+    // When — Phase 1: send init, drain ALL initial TUI render output into vt100
     input_tx.send(TerminalInput { data: vec![] }).await?;
 
     let initial_output =
@@ -439,6 +447,8 @@ async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
     let initial_text = ansi_to_text(&initial_output);
 
     let preview_300: String = initial_text.chars().take(300).collect();
+
+    // Then — Phase 1: initial TUI renders before any keyboard input
     assert!(
         initial_tui_visible(&initial_text),
         "Initial TUI should render before any keyboard input; got (len {}): {:?}",
@@ -446,7 +456,7 @@ async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
         preview_300
     );
 
-    // Phase 2: send keyboard inputs, collect output after each.
+    // When — Phase 2: send keyboard inputs, collect output after each.
     // Enter answers scope → PlanReview. Down → Approve. Enter → approve.
     let inputs: &[(&[u8], &str)] = &[
         (keys::ENTER, "Enter (answer scope)"),
@@ -473,6 +483,7 @@ async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
 
     let visible = ansi_to_text(&all_raw);
 
+    // Then — Phase 2: keyboard inputs advanced the workflow
     assert!(
         stub_workflow_progressed(&visible),
         "Keyboard inputs should advance the workflow; stripped text (len {}): {:?}",
@@ -493,6 +504,8 @@ async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn grpc_virtual_tui_refreshes_autonomously_without_input() -> anyhow::Result<()> {
     let _ = env_logger::builder().is_test(true).try_init();
+
+    // Given
     let (_handle, port, shutdown) =
         spawn_presenter_with_terminal_service(Some("Build auth".to_string()));
 
@@ -506,6 +519,7 @@ async fn grpc_virtual_tui_refreshes_autonomously_without_input() -> anyhow::Resu
         .await?
         .into_inner();
 
+    // When — send init and let the workflow reach Select mode
     // Send init to start the stream.
     input_tx.send(TerminalInput { data: vec![] }).await?;
 
@@ -537,6 +551,7 @@ async fn grpc_virtual_tui_refreshes_autonomously_without_input() -> anyhow::Resu
     shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
     drop(input_tx);
 
+    // Then
     assert!(
         chunk_count > 0,
         "VirtualTui should still emit occasional frames during Select wait (responsive UI), \
@@ -556,6 +571,8 @@ async fn grpc_virtual_tui_refreshes_autonomously_without_input() -> anyhow::Resu
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn grpc_virtual_tui_idle_animation_cadence() -> anyhow::Result<()> {
     let _ = env_logger::builder().is_test(true).try_init();
+
+    // Given
     let (_handle, port, shutdown) =
         spawn_presenter_with_terminal_service(Some("Build auth".to_string()));
 
@@ -569,6 +586,7 @@ async fn grpc_virtual_tui_idle_animation_cadence() -> anyhow::Result<()> {
         .await?
         .into_inner();
 
+    // When — connect and wait for Select mode, then observe cadence without sending input
     input_tx.send(TerminalInput { data: vec![] }).await?;
 
     let initial = drain_output(&mut stream, Duration::from_millis(500), "init-burst").await?;
@@ -591,6 +609,7 @@ async fn grpc_virtual_tui_idle_animation_cadence() -> anyhow::Result<()> {
     shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
     drop(input_tx);
 
+    // Then
     assert!(
         chunks <= 12,
         "PRD: VirtualTui idle animation should not emit ~200ms spinner-driven frames in \
@@ -608,6 +627,8 @@ async fn grpc_virtual_tui_idle_animation_cadence() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow::Result<()> {
     let _ = env_logger::builder().is_test(true).try_init();
+
+    // Given
     let (_handle, port, shutdown) =
         spawn_presenter_with_terminal_service(Some("SKIP_QUESTIONS Build auth".to_string()));
     let _approve = spawn_pr_document_approve(port);
@@ -652,6 +673,7 @@ async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow:
         before_screen
     );
 
+    // When
     input_tx
         .send(TerminalInput {
             data: keys::DOWN.to_vec(),
@@ -697,6 +719,7 @@ async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow:
     shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
     drop(input_tx);
 
+    // Then
     assert!(
         after_screen.contains("> No"),
         "After pressing Down, the selection should persist on 'No' across periodic renders. \
@@ -726,6 +749,7 @@ async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow:
 /// it to appear multiple times in the visible output.
 #[tokio::test]
 async fn grpc_resize_shrink_grow_shows_pgup_pgdn_scroll_exactly_once() -> anyhow::Result<()> {
+    // Given
     let (_handle, port, shutdown) =
         spawn_presenter_with_terminal_service(Some("Build auth".to_string()));
 
@@ -747,6 +771,7 @@ async fn grpc_resize_shrink_grow_shows_pgup_pgdn_scroll_exactly_once() -> anyhow
 
     let mut all_output = drain_output(&mut stream, Duration::from_millis(500), "init").await?;
 
+    // When — shrink terminal by 10 rows then grow back
     input_tx
         .send(TerminalInput {
             data: encode_resize(80, 14),
@@ -766,6 +791,7 @@ async fn grpc_resize_shrink_grow_shows_pgup_pgdn_scroll_exactly_once() -> anyhow
     shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
     drop(input_tx);
 
+    // Then
     let mut parser = ScreenParser::new(24, 80);
     parser.feed(&all_output);
     let visible = parser.contents();
@@ -784,6 +810,8 @@ async fn grpc_resize_shrink_grow_shows_pgup_pgdn_scroll_exactly_once() -> anyhow
 #[allow(clippy::await_holding_lock)]
 async fn grpc_virtual_tui_rpc_large_echo_char_by_char() -> anyhow::Result<()> {
     let _ = env_logger::builder().is_test(true).try_init();
+
+    // Given
     std::env::set_var("TDDY_E2E_NO_ENTER_AFFORDANCE", "1");
 
     const COLS: u16 = 80;
@@ -826,6 +854,7 @@ async fn grpc_virtual_tui_rpc_large_echo_char_by_char() -> anyhow::Result<()> {
             Ok::<(), anyhow::Error>(())
         });
 
+        // When — send resize, init, then each byte of the large payload char-by-char
         input_tx
             .send(TerminalInput {
                 data: encode_resize(COLS, ROWS),
@@ -860,6 +889,7 @@ async fn grpc_virtual_tui_rpc_large_echo_char_by_char() -> anyhow::Result<()> {
         all_output
     };
 
+    // Then
     assert_segmented_echo(
         &all_output,
         &expected,
@@ -878,6 +908,7 @@ async fn grpc_virtual_tui_rpc_large_echo_char_by_char() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[allow(clippy::await_holding_lock)]
 async fn virtual_tui_large_echo_char_by_char_direct_vt100() -> anyhow::Result<()> {
+    // Given
     std::env::set_var("TDDY_E2E_NO_ENTER_AFFORDANCE", "1");
 
     const COLS: u16 = 80;
@@ -916,6 +947,7 @@ async fn virtual_tui_large_echo_char_by_char_direct_vt100() -> anyhow::Result<()
             }
         });
 
+        // When — send resize, init, then each byte of the large payload char-by-char via direct channels
         input_tx
             .send(encode_resize(COLS, ROWS))
             .await
@@ -956,6 +988,7 @@ async fn virtual_tui_large_echo_char_by_char_direct_vt100() -> anyhow::Result<()
         all_output
     };
 
+    // Then
     assert_segmented_echo(
         &all_output,
         &expected,

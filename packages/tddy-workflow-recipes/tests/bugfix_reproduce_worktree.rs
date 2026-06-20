@@ -24,6 +24,7 @@ fn temp_dir(label: &str) -> PathBuf {
 
 #[test]
 fn bugfix_reproduce_stub_sets_worktree_dir_from_output_dir() {
+    // Given
     let base = temp_dir("stub");
     let session_dir = base.join("session");
     fs::create_dir_all(&session_dir).unwrap();
@@ -38,17 +39,18 @@ fn bugfix_reproduce_stub_sets_worktree_dir_from_output_dir() {
         ..Default::default()
     };
     write_changeset(&session_dir, &cs).unwrap();
-
     let hooks = BugfixWorkflowHooks::new(None);
     let ctx = Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
     ctx.set_sync("output_dir", base.clone());
     ctx.set_sync("backend_name", "stub".to_string());
 
+    // When
     hooks
         .before_task("reproduce", &ctx)
         .expect("reproduce before_task should succeed with stub backend");
 
+    // Then
     let wt: PathBuf = ctx
         .get_sync("worktree_dir")
         .expect("reproduce hook must set worktree_dir (stub uses output_dir)");
@@ -57,10 +59,10 @@ fn bugfix_reproduce_stub_sets_worktree_dir_from_output_dir() {
 
 #[test]
 fn bugfix_reproduce_creates_git_worktree_when_backend_not_stub() {
+    // Given
     let base = temp_dir("git");
     let repo = base.join("repo");
     fs::create_dir_all(&repo).unwrap();
-
     std::process::Command::new("git")
         .args(["init"])
         .current_dir(&repo)
@@ -102,7 +104,6 @@ fn bugfix_reproduce_creates_git_worktree_when_backend_not_stub() {
         .current_dir(&repo)
         .output()
         .unwrap();
-
     let session_dir = base.join("plan");
     fs::create_dir_all(&session_dir).unwrap();
     let cs = Changeset {
@@ -116,22 +117,22 @@ fn bugfix_reproduce_creates_git_worktree_when_backend_not_stub() {
         ..Default::default()
     };
     write_changeset(&session_dir, &cs).unwrap();
-
     let hooks = BugfixWorkflowHooks::new(None);
     let ctx = Context::new();
     ctx.set_sync("session_dir", session_dir.clone());
     ctx.set_sync("output_dir", repo.clone());
     ctx.set_sync("backend_name", "claude".to_string());
 
+    // When
     hooks
         .before_task("reproduce", &ctx)
         .expect("reproduce before_task should create worktree");
 
+    // Then
     let wt: PathBuf = ctx
         .get_sync("worktree_dir")
         .expect("reproduce hook must set worktree_dir");
     assert!(wt.exists(), "worktree path should exist: {}", wt.display());
-
     let cs_after = read_changeset(&session_dir).expect("read changeset");
     assert!(
         cs_after.worktree.is_some(),
@@ -141,6 +142,7 @@ fn bugfix_reproduce_creates_git_worktree_when_backend_not_stub() {
 
 #[test]
 fn bugfix_reproduce_reuses_existing_linked_worktree_when_branch_tip_matches_suggestion() {
+    // Given
     let base = temp_dir("reuse-existing");
     let repo = base.join("repo");
     fs::create_dir_all(&repo).unwrap();
@@ -246,10 +248,12 @@ fn bugfix_reproduce_reuses_existing_linked_worktree_when_branch_tip_matches_sugg
     ctx.set_sync("output_dir", repo.clone());
     ctx.set_sync("backend_name", "claude".to_string());
 
+    // When
     hooks
         .before_task("reproduce", &ctx)
         .expect("reproduce before_task");
 
+    // Then
     let wt: PathBuf = ctx
         .get_sync("worktree_dir")
         .expect("reproduce must set worktree_dir");

@@ -46,6 +46,7 @@ fn assert_uuid_v7(label: &str, s: &str) {
 /// Affected code: `packages/tddy-daemon/src/spawner.rs` line 375.
 #[test]
 fn daemon_spawner_session_id_must_be_uuid_v7() {
+    // Given
     // Matches spawner::spawn_as_user for new sessions:
     //   .unwrap_or_else(|| Uuid::now_v7().to_string())
     let session_id = uuid::Uuid::now_v7().to_string();
@@ -63,6 +64,7 @@ fn daemon_spawner_session_id_must_be_uuid_v7() {
 /// The session directory should be determined once at session start and reused throughout.
 #[tokio::test]
 async fn session_yaml_and_changeset_yaml_must_be_in_same_directory() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLANNING_OUTPUT);
 
@@ -97,6 +99,8 @@ async fn session_yaml_and_changeset_yaml_must_be_in_same_directory() {
     )
     .expect("write .session.yaml");
 
+
+    // Then
     assert!(
         daemon_session_dir.join(SESSION_METADATA_FILENAME).exists(),
         ".session.yaml must exist in daemon session dir"
@@ -185,6 +189,7 @@ async fn session_yaml_and_changeset_yaml_must_be_in_same_directory() {
 /// is lost if the process crashes between prompt submission and before_plan execution.
 #[tokio::test]
 async fn changeset_yaml_must_be_written_on_prompt_submission_not_deferred_to_before_plan() {
+    // Given
     let tddy_data_dir = unique_tddy_data_dir_for_test();
     std::fs::create_dir_all(&tddy_data_dir).unwrap();
 
@@ -217,10 +222,14 @@ async fn changeset_yaml_must_be_written_on_prompt_submission_not_deferred_to_bef
         initial_prompt: Some(initial_prompt.to_string()),
         ..Changeset::default()
     };
+
+    // When
     write_changeset(&session_dir, &init_cs).expect("write changeset on first prompt");
 
     // CONTRACT: changeset.yaml must exist in the session directory immediately after the
     // prompt is received — before the workflow engine starts processing.
+
+    // Then
     assert!(
         session_dir.join("changeset.yaml").exists(),
         "changeset.yaml must exist in session dir ({}) immediately after first prompt submission",

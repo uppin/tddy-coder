@@ -63,19 +63,29 @@ fn load(root: &std::path::Path) -> BuildGraph {
 
 #[test]
 fn rust_targets_depend_on_each_other_deps_first() {
+    // Given
     let graph = load(&example_root());
+
+    // When
     let order = graph.build_order("mathapp:bin").expect("order");
     let pos = |id: &str| order.iter().position(|t| t == id).expect("present");
+
+    // Then
     assert!(pos("mathcore:lib") < pos("mathutil:lib"));
     assert!(pos("mathutil:lib") < pos("mathapp:bin"));
 }
 
 #[test]
 fn rust_plugin_lowers_expected_cargo_argv() {
+    // Given
     let graph = load(&example_root());
+
+    // When
     let actions = graph
         .actions_for("mathapp:bin", &registry())
         .expect("lower");
+
+    // Then
     assert_eq!(
         actions[0].command,
         vec!["cargo", "build", "-p", "mathapp", "--bin", "mathapp"]
@@ -88,8 +98,12 @@ async fn rust_workspace_builds_with_real_cargo() {
         eprintln!("SKIP: cargo not available");
         return;
     }
+
+    // Given
     let dir = staged();
     let graph = load(dir.path());
+
+    // When
     let record = execute_target(
         dir.path(),
         &graph,
@@ -99,6 +113,8 @@ async fn rust_workspace_builds_with_real_cargo() {
     )
     .await
     .expect("cargo build");
+
+    // Then
     assert_eq!(
         record.actions[0].exit_code, 0,
         "stderr: {}",
@@ -116,21 +132,30 @@ async fn rust_cache_hits_then_misses_after_source_edit() {
         eprintln!("SKIP: cargo not available");
         return;
     }
+
+    // Given
     let dir = staged();
     let opts = ExecuteOptions::default();
     let reg = registry();
     let graph = load(dir.path());
 
+    // When
     let first = execute_target(dir.path(), &graph, "mathcore:lib", &opts, &reg)
         .await
         .expect("first");
+
+    // Then
     assert!(!first.actions[0].cached);
 
+    // When (rerun without changes)
     let second = execute_target(dir.path(), &graph, "mathcore:lib", &opts, &reg)
         .await
         .expect("second");
+
+    // Then
     assert!(second.actions[0].cached, "rerun is a cache hit");
 
+    // When (source file edited)
     std::fs::write(
         dir.path().join("mathcore/src/lib.rs"),
         "pub fn add(a: i64, b: i64) -> i64 { a + b + 0 }\n",
@@ -139,6 +164,8 @@ async fn rust_cache_hits_then_misses_after_source_edit() {
     let third = execute_target(dir.path(), &graph, "mathcore:lib", &opts, &reg)
         .await
         .expect("third");
+
+    // Then
     assert!(
         !third.actions[0].cached,
         "source edit invalidates the cache"
@@ -147,6 +174,7 @@ async fn rust_cache_hits_then_misses_after_source_edit() {
 
 #[test]
 fn rust_typed_cycle_is_detected() {
+    // Given
     let yaml = r#"
 schema_version: 1
 targets:
@@ -160,6 +188,8 @@ targets:
     config: { type: rust_library, package: y }
 "#;
     let manifest = tddy_build::load_build_manifest(yaml).expect("parse");
+
+    // When / Then
     assert!(
         BuildGraph::from_manifests(vec![manifest]).is_err(),
         "a cycle between plugin-typed targets must be rejected"

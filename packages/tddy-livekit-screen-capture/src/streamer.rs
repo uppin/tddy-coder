@@ -163,8 +163,13 @@ mod tests {
 
     #[test]
     fn rgba_to_abgr_roundtrip_len() {
+        // Given a 2x2 RGBA image (4 pixels × 4 bytes each = 16 bytes)
         let img: RgbaImage = ImageBuffer::from_fn(2, 2, |_, _| Rgba([1, 2, 3, 4]));
+
+        // When converting to ABGR
         let abgr = rgba_to_abgr(&img);
+
+        // Then the output has the same byte count as the input
         assert_eq!(abgr.len(), 16);
     }
 }

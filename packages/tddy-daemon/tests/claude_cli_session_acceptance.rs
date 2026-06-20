@@ -154,6 +154,7 @@ async fn wait_for_capture_contains(handle: &Arc<PtyHandle>, needle: &str, timeou
 #[tokio::test]
 #[serial_test::serial]
 async fn claude_cli_session_metadata_fields_persisted() {
+    // Given
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
 
@@ -168,6 +169,7 @@ async fn claude_cli_session_metadata_fields_persisted() {
     let (_cfg_dir, config) = write_config_with_claude_cli_binary("/bin/cat");
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
+    // When
     let resp = service
         .start_session(Request::new(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -188,6 +190,7 @@ async fn claude_cli_session_metadata_fields_persisted() {
         .await
         .expect("StartSession with session_type=claude-cli must succeed");
 
+    // Then
     let session_id = resp.into_inner().session_id;
     assert!(!session_id.is_empty(), "session_id must be non-empty");
 
@@ -242,6 +245,7 @@ async fn claude_cli_session_metadata_fields_persisted() {
 #[tokio::test]
 #[serial_test::serial]
 async fn claude_cli_session_livekit_fields_empty() {
+    // Given
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
 
@@ -254,6 +258,7 @@ async fn claude_cli_session_livekit_fields_empty() {
     let (_cfg_dir, config) = write_config_with_claude_cli_binary("/bin/cat");
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
+    // When
     let inner = service
         .start_session(Request::new(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -275,6 +280,7 @@ async fn claude_cli_session_livekit_fields_empty() {
         .expect("StartSession must succeed")
         .into_inner();
 
+    // Then
     assert!(
         inner.livekit_room.is_empty(),
         "livekit_room must be empty for claude-cli sessions; got: {}",
@@ -297,6 +303,7 @@ async fn claude_cli_session_livekit_fields_empty() {
 /// must return `agent = "claude-cli"` and `model` from the metadata — not placeholder dashes.
 #[tokio::test]
 async fn claude_cli_session_enrichment_reads_from_metadata() {
+    // Given
     let sessions_tmp = tempfile::tempdir().unwrap();
     let session_id = "01900000-0000-7000-8000-000000000001";
     let session_dir = sessions_tmp
@@ -340,6 +347,7 @@ users:
     let sessions_base = sessions_tmp.path().join("testuser");
     let service = minimal_service(config, sessions_base);
 
+    // When
     let sessions = service
         .list_sessions(Request::new(ListSessionsRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -349,6 +357,7 @@ users:
         .into_inner()
         .sessions;
 
+    // Then
     let entry = sessions
         .iter()
         .find(|s| s.session_id == session_id)
@@ -377,6 +386,7 @@ users:
 /// existing worktree and mark the session active again.
 #[tokio::test]
 async fn claude_cli_session_resume_relaunches_in_worktree() {
+    // Given
     let worktree_dir = tempfile::tempdir().unwrap();
     let sessions_tmp = tempfile::tempdir().unwrap();
     let session_id = "01900000-0000-7000-8000-000000000002";
@@ -411,6 +421,7 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
     let sessions_base = sessions_tmp.path().join("testuser");
     let service = minimal_service(config, sessions_base);
 
+    // When
     let resp = service
         .resume_session(Request::new(ResumeSessionRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -419,6 +430,7 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
         .await
         .expect("ResumeSession must succeed for an inactive claude-cli session");
 
+    // Then
     let inner = resp.into_inner();
     assert_eq!(
         inner.session_id, session_id,
@@ -446,6 +458,7 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
 /// and an empty `model` must return `INVALID_ARGUMENT`.
 #[tokio::test]
 async fn claude_cli_start_session_requires_model() {
+    // Given
     let sessions_tmp = tempfile::tempdir().unwrap();
     let config_yaml = r#"
 users:
@@ -458,6 +471,7 @@ users:
     let config = DaemonConfig::load(&cfg_path).unwrap();
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
+    // When
     let err = service
         .start_session(Request::new(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -478,6 +492,7 @@ users:
         .await
         .expect_err("StartSession with claude-cli and empty model must fail");
 
+    // Then
     assert_eq!(
         err.code,
         Code::InvalidArgument,
@@ -496,6 +511,7 @@ users:
 #[tokio::test]
 #[serial_test::serial]
 async fn claude_cli_start_session_requires_project() {
+    // Given
     // Point TDDY_PROJECTS_DIR at an empty temp dir so find_project returns None cleanly.
     let projects_tmp = tempfile::tempdir().unwrap();
     std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
@@ -505,7 +521,7 @@ async fn claude_cli_start_session_requires_project() {
     let (_cfg_dir, config) = write_config_with_claude_cli_binary("/bin/cat");
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
-    // Empty project_id → InvalidArgument.
+    // When — Empty project_id → InvalidArgument.
     let err = service
         .start_session(Request::new(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -526,13 +542,14 @@ async fn claude_cli_start_session_requires_project() {
         .await
         .expect_err("StartSession with empty project_id must fail");
 
+    // Then
     assert_eq!(
         err.code,
         Code::InvalidArgument,
         "empty project_id for claude-cli must yield INVALID_ARGUMENT"
     );
 
-    // Unknown project_id → NotFound.
+    // When — Unknown project_id → NotFound.
     let err2 = service
         .start_session(Request::new(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -553,6 +570,7 @@ async fn claude_cli_start_session_requires_project() {
         .await
         .expect_err("StartSession with unknown project_id must fail");
 
+    // Then
     assert_eq!(
         err2.code,
         Code::NotFound,
@@ -568,6 +586,7 @@ async fn claude_cli_start_session_requires_project() {
 /// the initial prompt as the last positional argument when non-empty.
 #[test]
 fn build_claude_argv_includes_positional_prompt_when_present() {
+    // When / Then
     let argv = ClaudeCliSessionManager::build_claude_argv(
         "/usr/local/bin/claude",
         "claude-opus-4-8",
@@ -596,6 +615,7 @@ fn build_claude_argv_includes_positional_prompt_when_present() {
 /// all produce the same argv without a trailing positional argument.
 #[test]
 fn build_claude_argv_omits_when_empty_or_none() {
+    // Given
     let expected = vec![
         "/usr/local/bin/claude".to_string(),
         "--model".to_string(),
@@ -606,6 +626,7 @@ fn build_claude_argv_omits_when_empty_or_none() {
         "auto".to_string(),
     ];
 
+    // When / Then
     assert_eq!(
         ClaudeCliSessionManager::build_claude_argv(
             "/usr/local/bin/claude",
@@ -645,12 +666,14 @@ fn build_claude_argv_omits_when_empty_or_none() {
 /// results in the prompt appearing in the child process's `$@`.
 #[tokio::test]
 async fn claude_cli_session_passes_initial_prompt_as_positional_arg() {
+    // Given
     let stub_dir = tempfile::tempdir().unwrap();
     let stub_path = write_echo_argv_script(stub_dir.path());
 
     let worktree_dir = tempfile::tempdir().unwrap();
     let manager = ClaudeCliSessionManager::new();
 
+    // When
     let handle = manager
         .start(
             "test-session-with-prompt",
@@ -663,6 +686,7 @@ async fn claude_cli_session_passes_initial_prompt_as_positional_arg() {
         .await
         .expect("start with echo-argv stub and initial_prompt must succeed");
 
+    // Then
     let found = wait_for_capture_contains(&handle, "ARGV:", 2000).await;
     assert!(
         found,
@@ -687,12 +711,14 @@ async fn claude_cli_session_passes_initial_prompt_as_positional_arg() {
 /// as `None` — no empty positional arg appended.
 #[tokio::test]
 async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
+    // Given
     let stub_dir = tempfile::tempdir().unwrap();
     let stub_path = write_echo_argv_script(stub_dir.path());
 
     let worktree_dir = tempfile::tempdir().unwrap();
     let manager = ClaudeCliSessionManager::new();
 
+    // When
     let handle = manager
         .start(
             "test-session-empty-prompt",
@@ -705,6 +731,7 @@ async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
         .await
         .expect("start with empty initial_prompt must succeed");
 
+    // Then
     let found = wait_for_capture_contains(&handle, "ARGV:", 2000).await;
     assert!(
         found,
@@ -739,6 +766,7 @@ async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
 #[tokio::test]
 #[serial_test::serial]
 async fn start_session_claude_cli_threads_initial_prompt_from_request() {
+    // Given
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
 
@@ -760,6 +788,7 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
         Arc::clone(&shared_manager),
     );
 
+    // When
     let resp = service
         .start_session(Request::new(StartSessionRequest {
             session_token: VALID_TOKEN.to_string(),
@@ -780,6 +809,7 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
         .await
         .expect("StartSession with initial_prompt must succeed");
 
+    // Then
     let session_id = resp.into_inner().session_id;
     assert!(!session_id.is_empty(), "session_id must be non-empty");
 
@@ -810,6 +840,7 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
 /// duplicate user turn in the claude session history).
 #[tokio::test]
 async fn resume_does_not_replay_initial_prompt() {
+    // Given
     let stub_dir = tempfile::tempdir().unwrap();
     let stub_path = write_echo_argv_script(stub_dir.path());
 
@@ -829,7 +860,7 @@ async fn resume_does_not_replay_initial_prompt() {
         .await
         .expect("initial start must succeed");
 
-    // Resume — must NOT replay the initial_prompt.
+    // When — must NOT replay the initial_prompt.
     let handle2 = manager
         .resume(
             "test-session-resume-noreplay",
@@ -840,6 +871,7 @@ async fn resume_does_not_replay_initial_prompt() {
         .await
         .expect("resume must succeed");
 
+    // Then
     let found = wait_for_capture_contains(&handle2, "ARGV:", 2000).await;
     assert!(found, "stub script must write ARGV: within 2s on resume");
 

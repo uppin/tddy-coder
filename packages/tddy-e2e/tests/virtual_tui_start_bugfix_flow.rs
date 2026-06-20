@@ -14,6 +14,7 @@ use tddy_tui_testkit::TuiTestkit;
 async fn virtual_tui_start_bugfix_slash_reaches_bugfix_questions() {
     let _ = env_logger::builder().is_test(true).try_init();
 
+    // Given
     let (_presenter_join, factory, shutdown) = spawn_presenter_with_view_factory(None);
     let session = start_virtual_tui_session(&*factory, false).expect("VirtualTui session");
     let tk = TuiTestkit::new(session, 80, 24);
@@ -22,11 +23,13 @@ async fn virtual_tui_start_bugfix_slash_reaches_bugfix_questions() {
         .await
         .expect("feature input prompt");
 
+    // When — user submits /start-bugfix with a bug description
     tk.type_text("/start-bugfix Login page crashes on submit")
         .await
         .expect("type start-bugfix line");
     tk.press_enter().await.expect("submit feature line");
 
+    // Then — the bugfix recipe elicitation begins with Question 1
     tk.wait_for_text("Question 1", Duration::from_secs(15))
         .await
         .expect("bugfix recipe should elicit after /start-bugfix + remainder");

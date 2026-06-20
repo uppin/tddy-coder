@@ -38,6 +38,7 @@ fn clarification_questions() -> Vec<ClarificationQuestion> {
 
 #[tokio::test]
 async fn planning_workflow_produces_prd_and_todo_in_output_directory() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_JSON_OUTPUT);
 
@@ -58,6 +59,8 @@ async fn planning_workflow_produces_prd_and_todo_in_output_directory() {
         Some(hooks),
     );
 
+
+    // When
     let (output_path, _) = run_plan(
         &engine,
         "Build a user authentication system with login and logout",
@@ -67,6 +70,8 @@ async fn planning_workflow_produces_prd_and_todo_in_output_directory() {
     .await
     .expect("planning should succeed");
 
+
+    // Then
     assert!(output_path.is_dir(), "output should be a directory");
 
     let prd_path = output_path.join("artifacts").join("PRD.md");
@@ -98,6 +103,7 @@ async fn planning_workflow_produces_prd_and_todo_in_output_directory() {
 
 #[tokio::test]
 async fn planning_workflow_invokes_backend_with_plan_permission_mode() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_JSON_OUTPUT);
 
@@ -118,11 +124,15 @@ async fn planning_workflow_invokes_backend_with_plan_permission_mode() {
         Some(hooks),
     );
 
+
+    // When
     let (session_dir, _) = run_plan(&engine, "Feature X", &output_dir, None)
         .await
         .expect("plan should succeed");
 
     let changeset = read_changeset(&session_dir).expect("changeset should exist");
+
+    // Then
     assert_eq!(
         changeset.state.current,
         WorkflowState::new("Planned"),
@@ -135,6 +145,7 @@ async fn planning_workflow_invokes_backend_with_plan_permission_mode() {
 
 #[tokio::test]
 async fn planning_workflow_with_stub_backend_transitions_to_planned() {
+    // Given
     let backend = Arc::new(StubBackend::new());
     let output_dir = std::env::temp_dir().join("tddy-planning-stub-test");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -153,7 +164,11 @@ async fn planning_workflow_with_stub_backend_transitions_to_planned() {
         Some(hooks),
     );
 
+
+    // When
     let first = run_plan(&engine, "Add a feature", &output_dir, None).await;
+
+    // Then
     assert!(
         first.is_err()
             && first
@@ -193,6 +208,7 @@ async fn planning_workflow_with_stub_backend_transitions_to_planned() {
 
 #[tokio::test]
 async fn planning_workflow_transitions_to_failed_when_backend_errors() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_err("simulated backend failure");
 
@@ -213,8 +229,12 @@ async fn planning_workflow_transitions_to_failed_when_backend_errors() {
         Some(hooks),
     );
 
+
+    // When
     let result = run_plan(&engine, "Feature Y", &output_dir, None).await;
 
+
+    // Then
     assert!(result.is_err(), "planning should fail");
     if let Ok((session_dir, _)) = result {
         if let Ok(cs) = read_changeset(&session_dir) {
@@ -232,6 +252,7 @@ async fn planning_workflow_transitions_to_failed_when_backend_errors() {
 
 #[tokio::test]
 async fn planning_workflow_returns_clarification_needed_when_backend_returns_questions() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok_with_questions("", "sess-qa", clarification_questions());
 
@@ -252,8 +273,12 @@ async fn planning_workflow_returns_clarification_needed_when_backend_returns_que
         Some(hooks),
     );
 
+
+    // When
     let result = run_plan(&engine, "Feature Z", &output_dir, None).await;
 
+
+    // Then
     assert!(
         result.is_err(),
         "expected ClarificationNeeded (WaitingForInput), got {:?}",
@@ -272,6 +297,7 @@ async fn planning_workflow_returns_clarification_needed_when_backend_returns_que
 
 #[tokio::test]
 async fn planning_workflow_returns_clarification_needed_with_structured_questions() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok_with_questions(
         "",
@@ -320,8 +346,12 @@ async fn planning_workflow_returns_clarification_needed_with_structured_question
         Some(hooks),
     );
 
+
+    // When
     let result = run_plan(&engine, "Feature Z", &output_dir, None).await;
 
+
+    // Then
     assert!(
         result.is_err(),
         "expected ClarificationNeeded with structured questions"
@@ -333,6 +363,7 @@ async fn planning_workflow_returns_clarification_needed_with_structured_question
 
 #[tokio::test]
 async fn planning_workflow_produces_prd_after_clarification_answers() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok_with_questions("", "sess-qa", clarification_questions());
     backend.push_ok(PLAN_JSON_OUTPUT);
@@ -354,7 +385,11 @@ async fn planning_workflow_produces_prd_after_clarification_answers() {
         Some(hooks),
     );
 
+
+    // When
     let first = run_plan(&engine, "Feature Z", &output_dir, None).await;
+
+    // Then
     assert!(
         first.is_err(),
         "first call should return ClarificationNeeded"
@@ -381,6 +416,7 @@ async fn planning_workflow_produces_prd_after_clarification_answers() {
 
 #[tokio::test]
 async fn planning_workflow_stub_backend_clarification_roundtrip() {
+    // Given
     let backend = Arc::new(StubBackend::new());
     let output_dir = std::env::temp_dir().join("tddy-planning-stub-clarify");
     let _ = std::fs::remove_dir_all(&output_dir);
@@ -399,7 +435,11 @@ async fn planning_workflow_stub_backend_clarification_roundtrip() {
         Some(hooks),
     );
 
+
+    // When
     let first = run_plan(&engine, "test feature", &output_dir, None).await;
+
+    // Then
     assert!(
         first.is_err(),
         "first call should return ClarificationNeeded"
@@ -425,6 +465,7 @@ async fn planning_workflow_stub_backend_clarification_roundtrip() {
 /// Backend that returns JSON with whitespace-only prd should not produce PRD.md.
 #[tokio::test]
 async fn planning_workflow_rejects_json_with_whitespace_only_prd() {
+    // Given
     let json_noop = r#"{"goal":"plan","prd":"   "}"#;
 
     let backend = Arc::new(MockBackend::new());
@@ -447,7 +488,11 @@ async fn planning_workflow_rejects_json_with_whitespace_only_prd() {
         Some(hooks),
     );
 
+
+    // When
     let result = run_plan(&engine, "another feature", &output_dir, None).await;
+
+    // Then
     assert!(
         result.is_err(),
         "planning should fail when prd is whitespace-only, got: {:?}",

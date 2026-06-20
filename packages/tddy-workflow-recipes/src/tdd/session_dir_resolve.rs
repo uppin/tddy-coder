@@ -52,17 +52,21 @@ mod tests {
 
     #[test]
     fn resolves_session_dir_when_present_and_is_dir() {
+        // Given
         let tmp = std::env::temp_dir().join(format!("tddy-sdr-session-dir-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         let ctx = Context::new();
         ctx.set_sync("session_dir", tmp.clone());
+
+        // When / Then
         assert_eq!(resolve_existing_session_dir_for_plan(&ctx).unwrap(), tmp);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn resolves_from_session_base_and_id_when_dir_exists() {
+        // Given
         let base = std::env::temp_dir().join(format!("tddy-sdr-base-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let sid = "019d357e-48ee-7c11-bd44-a967873f58b2";
@@ -71,6 +75,8 @@ mod tests {
         let ctx = Context::new();
         ctx.set_sync("session_base", base.clone());
         ctx.set_sync("session_id", sid.to_string());
+
+        // When / Then
         assert_eq!(
             resolve_existing_session_dir_for_plan(&ctx).unwrap(),
             expected
@@ -80,6 +86,7 @@ mod tests {
 
     #[test]
     fn errs_when_session_base_id_path_missing() {
+        // Given
         let base = std::env::temp_dir().join(format!("tddy-sdr-missing-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
@@ -89,6 +96,8 @@ mod tests {
             "session_id",
             "019d357e-48ee-7c11-bd44-a967873f58b2".to_string(),
         );
+
+        // When / Then
         assert!(resolve_existing_session_dir_for_plan(&ctx).is_err());
         let _ = std::fs::remove_dir_all(&base);
     }

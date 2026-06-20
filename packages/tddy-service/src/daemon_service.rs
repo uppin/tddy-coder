@@ -626,13 +626,21 @@ mod start_session_repo_tests {
 
     #[test]
     fn empty_repo_root_is_rejected() {
-        assert!(resolve_start_session_repo("").is_err());
-        assert!(resolve_start_session_repo("   ").is_err());
+        // Given
+        let blank = "";
+        let whitespace_only = "   ";
+
+        // When / Then
+        assert!(resolve_start_session_repo(blank).is_err(), "empty string must be rejected");
+        assert!(resolve_start_session_repo(whitespace_only).is_err(), "whitespace-only string must be rejected");
     }
 
     #[test]
     fn non_empty_repo_root_is_accepted() {
+        // Given
         let p = PathBuf::from("/tmp/tddy-test-repo-root");
+
+        // When / Then
         assert_eq!(
             resolve_start_session_repo("/tmp/tddy-test-repo-root").unwrap(),
             p

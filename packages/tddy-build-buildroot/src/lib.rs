@@ -140,9 +140,12 @@ mod tests {
 
     #[test]
     fn defconfig_action_has_correct_argv() {
+        // Given / When
+        let actions = lower("defconfig: qemu_x86_64_defconfig\nbuildroot_dir: external/buildroot\noutput_dir: build/br-out\n");
+
+        // Then
         // O= is relative from buildroot_dir to output_dir so make writes to the
         // correct repo-root-relative location (external/buildroot/../../build/br-out).
-        let actions = lower("defconfig: qemu_x86_64_defconfig\nbuildroot_dir: external/buildroot\noutput_dir: build/br-out\n");
         assert_eq!(
             actions[0].command,
             vec!["make", "O=../../build/br-out", "qemu_x86_64_defconfig"]
@@ -153,7 +156,10 @@ mod tests {
 
     #[test]
     fn build_action_has_correct_argv() {
+        // Given / When
         let actions = lower("defconfig: qemu_x86_64_defconfig\nbuildroot_dir: external/buildroot\noutput_dir: build/br-out\n");
+
+        // Then
         assert_eq!(actions[1].command, vec!["make", "O=../../build/br-out"]);
         assert_eq!(actions[1].id, "buildroot-build");
         assert_eq!(actions[1].working_dir, "external/buildroot");
@@ -161,37 +167,49 @@ mod tests {
 
     #[test]
     fn relative_path_crosses_directory_boundary() {
+        // Given / When / Then
         assert_eq!(relative_path("external/buildroot", "build/br-out"), "../../build/br-out");
     }
 
     #[test]
     fn relative_path_nested_under_from() {
+        // Given / When / Then
         assert_eq!(relative_path("external/br", "external/br/output"), "output");
     }
 
     #[test]
     fn intermediate_config_wires_defconfig_to_build() {
+        // Given / When
         let actions = lower("defconfig: qemu_x86_64_defconfig\nbuildroot_dir: external/buildroot\noutput_dir: build/br-out\n");
+
+        // Then
         assert_eq!(actions[0].outputs[0].path, "build/br-out/.config");
         assert_eq!(actions[1].inputs[0].include, vec!["build/br-out/.config"]);
     }
 
     #[test]
     fn inferred_output_defaults_to_rootfs_ext4() {
+        // Given / When
         let actions = lower("defconfig: qemu_x86_64_defconfig\nbuildroot_dir: external/buildroot\noutput_dir: build/br-out\n");
+
+        // Then
         assert_eq!(actions[1].outputs[0].path, "build/br-out/images/rootfs.ext4");
     }
 
     #[test]
     fn explicit_outputs_override_default() {
+        // Given / When
         let actions = lower(
             "defconfig: qemu_x86_64_defconfig\nbuildroot_dir: external/buildroot\noutput_dir: build/br-out\noutputs:\n  - path: build/br-out/images/rootfs.img\n    kind: file\n",
         );
+
+        // Then
         assert_eq!(actions[1].outputs[0].path, "build/br-out/images/rootfs.img");
     }
 
     #[test]
     fn missing_defconfig_is_rejected() {
+        // Given / When / Then
         assert!(matches!(
             lower_err("buildroot_dir: external/buildroot\noutput_dir: build/br-out\n"),
             BuildError::Manifest(_)
@@ -200,6 +218,7 @@ mod tests {
 
     #[test]
     fn missing_buildroot_dir_is_rejected() {
+        // Given / When / Then
         assert!(matches!(
             lower_err("defconfig: qemu_x86_64_defconfig\noutput_dir: build/br-out\n"),
             BuildError::Manifest(_)
@@ -208,6 +227,7 @@ mod tests {
 
     #[test]
     fn missing_output_dir_is_rejected() {
+        // Given / When / Then
         assert!(matches!(
             lower_err("defconfig: qemu_x86_64_defconfig\nbuildroot_dir: external/buildroot\n"),
             BuildError::Manifest(_)
@@ -216,6 +236,7 @@ mod tests {
 
     #[test]
     fn unknown_field_is_rejected() {
+        // Given / When / Then
         assert!(matches!(
             lower_err("defconfig: x\nbuildroot_dir: d\noutput_dir: o\nbogus: 1\n"),
             BuildError::Manifest(_)

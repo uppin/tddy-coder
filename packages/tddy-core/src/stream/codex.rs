@@ -174,43 +174,60 @@ mod tests {
 
     #[test]
     fn codex_jsonl_parser_reads_completed_item_text() {
+        // Given
         let lines = vec![
             r#"{"type":"session","session_id":"codex-sess-xyz"}"#.to_string(),
             r#"{"type":"item.completed","item":{"text":"assistant-visible reply"}}"#.to_string(),
         ];
+
+        // When
         let got = parse_codex_jsonl_output(&lines);
+
+        // Then
         assert_eq!(got.session_id.as_deref(), Some("codex-sess-xyz"));
         assert_eq!(got.result_text, "assistant-visible reply");
     }
 
     #[test]
     fn codex_jsonl_parser_reads_thread_started_thread_id() {
+        // Given
         let lines = vec![
             r#"{"type":"thread.started","thread_id":"019d73e9-5b90-7ea2-aae8-67aec4c248ed"}"#
                 .to_string(),
             r#"{"type":"item.completed","item":{"text":"ok"}}"#.to_string(),
         ];
+
+        // When
         let got = parse_codex_jsonl_output(&lines);
-        assert_eq!(
-            got.session_id.as_deref(),
-            Some("019d73e9-5b90-7ea2-aae8-67aec4c248ed")
-        );
+
+        // Then
+        assert_eq!(got.session_id.as_deref(), Some("019d73e9-5b90-7ea2-aae8-67aec4c248ed"));
     }
 
     #[test]
     fn codex_jsonl_parser_session_overrides_thread_started() {
+        // Given
         let lines = vec![
             r#"{"type":"thread.started","thread_id":"thread-a"}"#.to_string(),
             r#"{"type":"session","session_id":"session-b"}"#.to_string(),
         ];
+
+        // When
         let got = parse_codex_jsonl_output(&lines);
+
+        // Then — later `session` event supersedes earlier `thread.started`
         assert_eq!(got.session_id.as_deref(), Some("session-b"));
     }
 
     #[test]
-    fn codex_jsonl_parser_fails_malformed_line() {
+    fn codex_jsonl_parser_surfaces_error_for_malformed_line() {
+        // Given
         let lines = vec!["not-json {{{".to_string()];
+
+        // When
         let got = parse_codex_jsonl_output(&lines);
+
+        // Then — parse failure must surface in result_text (not silently swallowed)
         assert!(
             !got.result_text.is_empty() || got.session_id.is_some(),
             "malformed JSONL should be rejected or surfaced, got empty parse"
@@ -219,25 +236,33 @@ mod tests {
 
     #[test]
     fn codex_jsonl_last_error_message_prefers_last_turn_failed() {
+        // Given
         let lines = vec![
             r#"{"type":"error","message":"Reconnecting... 1/5"}"#.to_string(),
             r#"{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: no token"}}"#
                 .to_string(),
         ];
-        assert_eq!(
-            codex_jsonl_last_error_message(&lines).as_deref(),
-            Some("unexpected status 401 Unauthorized: no token")
-        );
+
+        // When
+        let message = codex_jsonl_last_error_message(&lines);
+
+        // Then
+        assert_eq!(message.as_deref(), Some("unexpected status 401 Unauthorized: no token"));
     }
 
     #[test]
     fn codex_stderr_brief_strips_tracing_and_keeps_tail() {
+        // Given
         let stderr =
             "2026-04-09T20:27:23.543178Z ERROR codex_api::endpoint::responses_websocket: a\n\
-                  2026-04-09T20:27:24.424463Z ERROR codex_api::endpoint::responses_websocket: a\n\
-                  2026-04-09T20:27:25.555500Z ERROR codex_api::endpoint::responses_websocket: b";
-        let got = codex_stderr_brief_for_user(stderr).expect("some");
+             2026-04-09T20:27:24.424463Z ERROR codex_api::endpoint::responses_websocket: a\n\
+             2026-04-09T20:27:25.555500Z ERROR codex_api::endpoint::responses_websocket: b";
+
+        // When
+        let got = codex_stderr_brief_for_user(stderr).expect("non-empty stderr should produce a brief");
+
+        // Then
         assert_eq!(got, "a → b");
-        assert!(!got.starts_with("2026-"), "got {:?}", got);
+        assert!(!got.starts_with("2026-"), "tracing timestamp should be stripped, got {:?}", got);
     }
 }

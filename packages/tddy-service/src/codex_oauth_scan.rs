@@ -117,24 +117,32 @@ mod tests {
 
     #[test]
     fn from_authorize_url_only_defaults_port_and_state() {
-        let d = codex_oauth_from_authorize_url_only(
-            "https://auth.openai.com/oauth/authorize?state=xyz&client_id=a",
-        )
-        .expect("detected");
-        assert_eq!(d.callback_port, 1455);
-        assert_eq!(d.state, "xyz");
+        // Given
+        let url = "https://auth.openai.com/oauth/authorize?state=xyz&client_id=a";
+
+        // When
+        let d = codex_oauth_from_authorize_url_only(url).expect("detected");
+
+        // Then
+        assert_eq!(d.callback_port, 1455, "port must default to 1455 when not in terminal output");
+        assert_eq!(d.state, "xyz", "state must be extracted from authorize URL query param");
     }
 
     #[test]
     fn scan_finds_authorize_and_port() {
+        // Given
         let mut b = String::new();
         let chunk = br#"Visit https://auth.openai.com/oauth/authorize?state=abc&client_id=x
 Listening on http://127.0.0.1:8765/auth/callback
 "#;
         append_terminal_scan_buffer(&mut b, chunk, 4096);
+
+        // When
         let d = scan_codex_oauth_from_buffer(&b).expect("detected");
-        assert!(d.authorize_url.contains("auth.openai.com"));
-        assert_eq!(d.callback_port, 8765);
-        assert_eq!(d.state, "abc");
+
+        // Then
+        assert!(d.authorize_url.contains("auth.openai.com"), "authorize URL must point to openai auth host");
+        assert_eq!(d.callback_port, 8765, "callback port must be extracted from the loopback URL");
+        assert_eq!(d.state, "abc", "state must be extracted from the authorize URL query param");
     }
 }

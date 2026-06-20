@@ -137,17 +137,20 @@ async fn join_second_daemon_participant(livekit: &LiveKitTestkit) -> Room {
 #[tokio::test]
 #[serial]
 async fn list_eligible_daemons_includes_discovered_peer_when_second_daemon_in_common_room() {
+    // Given
     let livekit = LiveKitTestkit::start()
         .await
         .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
     let (_cfg_dir, cfg_path) = write_livekit_config(&livekit.get_ws_url());
     let config = DaemonConfig::load(&cfg_path).expect("daemon yaml");
     let (service, _sessions_tmp) = connection_service_with_livekit_discovery(config);
-
     let _peer = join_second_daemon_participant(&livekit).await;
     wait_until_peer_listed(&service, PEER_INSTANCE_ID).await;
 
+    // When
     let daemons = list_eligible(&service).await;
+
+    // Then
     let peer = daemons.iter().find(|d| d.instance_id == PEER_INSTANCE_ID);
     assert!(
         peer.is_some(),
@@ -173,17 +176,20 @@ async fn list_eligible_daemons_includes_discovered_peer_when_second_daemon_in_co
 #[tokio::test]
 #[serial]
 async fn list_eligible_daemons_local_exactly_one_is_local() {
+    // Given
     let livekit = LiveKitTestkit::start()
         .await
         .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
     let (_cfg_dir, cfg_path) = write_livekit_config(&livekit.get_ws_url());
     let config = DaemonConfig::load(&cfg_path).expect("daemon yaml");
     let (service, _sessions_tmp) = connection_service_with_livekit_discovery(config);
-
     let _peer = join_second_daemon_participant(&livekit).await;
     wait_until_peer_listed(&service, PEER_INSTANCE_ID).await;
 
+    // When
     let daemons = list_eligible(&service).await;
+
+    // Then
     let n_local = daemons.iter().filter(|d| d.is_local).count();
     assert_eq!(
         n_local,
@@ -209,15 +215,14 @@ async fn list_eligible_daemons_local_exactly_one_is_local() {
 #[tokio::test]
 #[serial]
 async fn peer_list_removes_entry_after_simulated_disconnect() {
+    // Given
     let livekit = LiveKitTestkit::start()
         .await
         .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
     let (_cfg_dir, cfg_path) = write_livekit_config(&livekit.get_ws_url());
     let config = DaemonConfig::load(&cfg_path).expect("daemon yaml");
     let (service, _sessions_tmp) = connection_service_with_livekit_discovery(config);
-
     let peer_room = join_second_daemon_participant(&livekit).await;
-
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let daemons = list_eligible(&service).await;
@@ -230,8 +235,10 @@ async fn peer_list_removes_entry_after_simulated_disconnect() {
     .await
     .expect("peer should appear in ListEligibleDaemons while connected");
 
+    // When
     let _ = peer_room.close().await;
 
+    // Then
     tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             let daemons = list_eligible(&service).await;

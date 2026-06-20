@@ -158,6 +158,7 @@ fn install_telegram_traffic_capture_logger() {
 #[tokio::test]
 #[serial_test::serial]
 async fn telegram_untracked_chat_suppresses_workflow_keyboards_shows_enter_only() {
+    // Given
     let sid = "01900000-0000-7000-8000-0000000000aa";
     let mut watcher = TelegramSessionWatcher::new();
     let secret_token = "acceptance-test-bot-token-do-not-log-raw";
@@ -165,11 +166,13 @@ async fn telegram_untracked_chat_suppresses_workflow_keyboards_shows_enter_only(
     let mem = InMemoryTelegramSender::new();
     let msg = select_elicitation_server_message("Tracked-session gate question", "A", "B");
 
+    // When
     watcher
         .on_server_message(&cfg, &mem, sid, &msg)
         .await
         .unwrap();
 
+    // Then
     let callbacks = all_callbacks_for_chat(&mem, AUTHORIZED_CHAT);
     let forbidden: Vec<&str> = callbacks
         .iter()
@@ -214,6 +217,7 @@ async fn telegram_untracked_chat_suppresses_workflow_keyboards_shows_enter_only(
 #[tokio::test]
 #[serial_test::serial]
 async fn telegram_start_workflow_binds_tracked_chat_so_first_elicitation_shows_option_buttons() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let opts: ElicitationSelectOptionsCache = Arc::new(std::sync::Mutex::new(HashMap::new()));
     let coord: SharedActiveElicitationCoordinator =
@@ -242,6 +246,7 @@ async fn telegram_start_workflow_binds_tracked_chat_so_first_elicitation_shows_o
     );
     harness.connect_telegram_elicitation_replay_bridge(cfg.clone(), watcher_arc.clone());
 
+    // When — start workflow then receive first elicitation
     let outcome = harness
         .handle_start_workflow(StartWorkflowCommand {
             chat_id: AUTHORIZED_CHAT,
@@ -264,6 +269,7 @@ async fn telegram_start_workflow_binds_tracked_chat_so_first_elicitation_shows_o
             .expect("on_server_message ModeChanged");
     }
 
+    // Then
     let recorded = sender.recorded_with_keyboards();
     let has_eli_s = recorded.iter().any(|(_, _, rows)| {
         rows.iter()
@@ -282,6 +288,7 @@ async fn telegram_start_workflow_binds_tracked_chat_so_first_elicitation_shows_o
 #[tokio::test]
 #[serial_test::serial]
 async fn telegram_enter_session_tracks_chat_and_replays_elicitation_with_full_keyboard() {
+    // Given
     let tmp = tempfile::tempdir().unwrap();
     let sid = "01900000-0000-7000-8000-0000000000dd";
     write_minimal_running_session(tmp.path(), sid);
@@ -313,6 +320,7 @@ async fn telegram_enter_session_tracks_chat_and_replays_elicitation_with_full_ke
     );
     harness.connect_telegram_elicitation_replay_bridge(cfg.clone(), watcher_arc.clone());
 
+    // A pending elicitation arrives before Enter session is called.
     let msg = select_elicitation_server_message("Replay after Enter", "P", "Q");
 
     {
@@ -322,12 +330,14 @@ async fn telegram_enter_session_tracks_chat_and_replays_elicitation_with_full_ke
             .unwrap();
     }
 
+    // When
     let before_len = sender.recorded_with_keyboards().len();
     harness
         .handle_enter_session(AUTHORIZED_CHAT, sid)
         .await
         .expect("enter existing session");
 
+    // Then
     let recorded = sender.recorded_with_keyboards();
     let tail = &recorded[before_len..];
     let replayed_eli_s = tail
@@ -345,6 +355,7 @@ async fn telegram_enter_session_tracks_chat_and_replays_elicitation_with_full_ke
 #[tokio::test]
 #[serial_test::serial]
 async fn telegram_inbound_outbound_log_lines_include_chat_id_and_direction() {
+    // Given
     install_telegram_traffic_capture_logger();
     let lines = Arc::new(Mutex::new(Vec::new()));
     {
@@ -359,11 +370,13 @@ async fn telegram_inbound_outbound_log_lines_include_chat_id_and_direction() {
     let mem = InMemoryTelegramSender::new();
     let msg = select_elicitation_server_message("Logging probe", "U", "V");
 
+    // When
     watcher
         .on_server_message(&cfg, &mem, sid, &msg)
         .await
         .unwrap();
 
+    // Then
     let snapshot = lines.lock().expect("lines").join("\n");
 
     {

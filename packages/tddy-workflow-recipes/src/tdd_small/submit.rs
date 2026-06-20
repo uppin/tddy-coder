@@ -60,22 +60,29 @@ mod tests {
 
     #[test]
     fn post_green_review_parser_accepts_minimal_valid_json() {
+        // Given — GOLDEN is a valid post-green-review JSON payload
+
+        // When
         let r = parse_post_green_review_response(GOLDEN);
-        assert!(
-            r.is_ok(),
-            "merged post-green submit must parse: {:?}",
-            r.err()
-        );
+
+        // Then
+        assert!(r.is_ok(), "merged post-green submit must parse: {:?}", r.err());
     }
 
     #[test]
     fn post_green_review_parser_rejects_invalid_json() {
+        // Given — input is not valid JSON
+
+        // When
         let err = parse_post_green_review_response("not json").expect_err("malformed");
+
+        // Then
         assert!(matches!(err, ParseError::Malformed(_)));
     }
 
     #[test]
     fn post_green_review_parser_rejects_wrong_goal_field() {
+        // Given
         let bad = r#"{
   "goal": "evaluate-changes",
   "summary": "x",
@@ -85,11 +92,15 @@ mod tests {
   "prod_ready_report_written": false,
   "clean_code_report_written": true
 }"#;
+
+        // When
         let r = parse_post_green_review_response(bad);
         assert!(r.is_err());
         let ParseError::Malformed(msg) = r.expect_err("wrong goal") else {
             panic!("expected Malformed");
         };
+
+        // Then
         assert!(
             msg.contains("post-green-review"),
             "message should mention expected goal: {msg}"

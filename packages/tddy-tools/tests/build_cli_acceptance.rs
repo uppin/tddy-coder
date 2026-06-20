@@ -37,10 +37,15 @@ fn write_repo() -> tempfile::TempDir {
 
 #[test]
 fn build_list_outputs_json_with_all_targets() {
+    // Given
     let dir = write_repo();
+
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args(["build-list", "--repo-dir", dir.path().to_str().unwrap()]);
     let assert = cmd.assert().success();
+
+    // Then
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
 
     let v: Value = serde_json::from_str(&stdout).expect("stdout must be JSON");
@@ -54,7 +59,10 @@ fn build_list_outputs_json_with_all_targets() {
 
 #[test]
 fn build_cli_executes_script_target() {
+    // Given
     let dir = write_repo();
+
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args([
         "build",
@@ -64,6 +72,8 @@ fn build_cli_executes_script_target() {
         "hello:script",
     ]);
     let assert = cmd.assert().success();
+
+    // Then
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
     assert!(
         stdout.contains("hello-from-cli"),
@@ -73,7 +83,10 @@ fn build_cli_executes_script_target() {
 
 #[test]
 fn build_cli_dry_run_prints_plan_without_executing() {
+    // Given
     let dir = write_repo();
+
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.args([
         "build",
@@ -84,6 +97,8 @@ fn build_cli_dry_run_prints_plan_without_executing() {
         "--dry-run",
     ]);
     let assert = cmd.assert().success();
+
+    // Then
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
     assert!(
         stdout.contains("cargo"),

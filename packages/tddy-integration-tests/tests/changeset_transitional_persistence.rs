@@ -69,6 +69,7 @@ fn write_session_dir_green_ready(session_dir: &Path) {
 /// Starting `plan` must persist `Planning` so the manifest matches the active goal.
 #[tokio::test]
 async fn before_task_persists_planning_when_plan_starts() {
+    // Given
     let session_dir =
         std::env::temp_dir().join(format!("tddy-cs-trans-plan-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&session_dir);
@@ -83,7 +84,11 @@ async fn before_task_persists_planning_when_plan_starts() {
 
     hooks.before_task("plan", &ctx).expect("before_task plan");
 
+
+    // When
     let cs = read_changeset(&session_dir).expect("read changeset");
+
+    // Then
     assert_eq!(
         cs.state.current,
         WorkflowState::new("Planning"),
@@ -96,6 +101,7 @@ async fn before_task_persists_planning_when_plan_starts() {
 /// Starting `acceptance-tests` must persist `AcceptanceTesting`.
 #[tokio::test]
 async fn before_task_persists_acceptance_testing_when_acceptance_tests_start() {
+    // Given
     let output_dir =
         std::env::temp_dir().join(format!("tddy-cs-trans-at-out-{}", std::process::id()));
     let session_dir = output_dir.join("feat-slug");
@@ -114,7 +120,11 @@ async fn before_task_persists_acceptance_testing_when_acceptance_tests_start() {
         .before_task("acceptance-tests", &ctx)
         .expect("before_task acceptance-tests");
 
+
+    // When
     let cs = read_changeset(&session_dir).expect("read changeset");
+
+    // Then
     assert_eq!(
         cs.state.current,
         WorkflowState::new("AcceptanceTesting"),
@@ -127,6 +137,7 @@ async fn before_task_persists_acceptance_testing_when_acceptance_tests_start() {
 /// Starting `red` must persist `RedTesting`.
 #[tokio::test]
 async fn before_task_persists_red_testing_when_red_starts() {
+    // Given
     let session_dir =
         std::env::temp_dir().join(format!("tddy-cs-trans-red-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&session_dir);
@@ -140,7 +151,11 @@ async fn before_task_persists_red_testing_when_red_starts() {
 
     hooks.before_task("red", &ctx).expect("before_task red");
 
+
+    // When
     let cs = read_changeset(&session_dir).expect("read changeset");
+
+    // Then
     assert_eq!(
         cs.state.current,
         WorkflowState::new("RedTesting"),
@@ -153,6 +168,7 @@ async fn before_task_persists_red_testing_when_red_starts() {
 /// Starting `green` must persist `GreenImplementing`.
 #[tokio::test]
 async fn before_task_persists_green_implementing_when_green_starts() {
+    // Given
     let session_dir =
         std::env::temp_dir().join(format!("tddy-cs-trans-green-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&session_dir);
@@ -166,7 +182,11 @@ async fn before_task_persists_green_implementing_when_green_starts() {
 
     hooks.before_task("green", &ctx).expect("before_task green");
 
+
+    // When
     let cs = read_changeset(&session_dir).expect("read changeset");
+
+    // Then
     assert_eq!(
         cs.state.current,
         WorkflowState::new("GreenImplementing"),
@@ -179,6 +199,7 @@ async fn before_task_persists_green_implementing_when_green_starts() {
 /// Starting `demo` must persist `DemoRunning`.
 #[tokio::test]
 async fn before_task_persists_demo_running_when_demo_starts() {
+    // Given
     let session_dir =
         std::env::temp_dir().join(format!("tddy-cs-trans-demo-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&session_dir);
@@ -193,7 +214,11 @@ async fn before_task_persists_demo_running_when_demo_starts() {
 
     hooks.before_task("demo", &ctx).expect("before_task demo");
 
+
+    // When
     let cs = read_changeset(&session_dir).expect("read changeset");
+
+    // Then
     assert_eq!(
         cs.state.current,
         WorkflowState::new("DemoRunning"),
@@ -206,6 +231,7 @@ async fn before_task_persists_demo_running_when_demo_starts() {
 /// Starting `validate` must persist `Validating`.
 #[tokio::test]
 async fn before_task_persists_validating_when_validate_starts() {
+    // Given
     let session_dir =
         std::env::temp_dir().join(format!("tddy-cs-trans-val-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&session_dir);
@@ -222,7 +248,11 @@ async fn before_task_persists_validating_when_validate_starts() {
         .before_task("validate", &ctx)
         .expect("before_task validate");
 
+
+    // When
     let cs = read_changeset(&session_dir).expect("read changeset");
+
+    // Then
     assert_eq!(
         cs.state.current,
         WorkflowState::new("Validating"),
@@ -235,6 +265,7 @@ async fn before_task_persists_validating_when_validate_starts() {
 /// Starting `refactor` must persist `Refactoring`.
 #[tokio::test]
 async fn before_task_persists_refactoring_when_refactor_starts() {
+    // Given
     let session_dir =
         std::env::temp_dir().join(format!("tddy-cs-trans-ref-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&session_dir);
@@ -251,7 +282,11 @@ async fn before_task_persists_refactoring_when_refactor_starts() {
         .before_task("refactor", &ctx)
         .expect("before_task refactor");
 
+
+    // When
     let cs = read_changeset(&session_dir).expect("read changeset");
+
+    // Then
     assert_eq!(
         cs.state.current,
         WorkflowState::new("Refactoring"),
@@ -264,6 +299,7 @@ async fn before_task_persists_refactoring_when_refactor_starts() {
 /// Starting `update-docs` must persist `UpdatingDocs`.
 #[tokio::test]
 async fn before_task_persists_updating_docs_when_update_docs_starts() {
+    // Given
     let session_dir =
         std::env::temp_dir().join(format!("tddy-cs-trans-docs-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&session_dir);
@@ -280,7 +316,11 @@ async fn before_task_persists_updating_docs_when_update_docs_starts() {
         .before_task("update-docs", &ctx)
         .expect("before_task update-docs");
 
+
+    // When
     let cs = read_changeset(&session_dir).expect("read changeset");
+
+    // Then
     assert_eq!(
         cs.state.current,
         WorkflowState::new("UpdatingDocs"),

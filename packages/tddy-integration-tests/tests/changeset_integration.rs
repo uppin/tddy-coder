@@ -20,6 +20,7 @@ use fixtures::*;
 /// .session should NOT exist; changeset.yaml should exist with correct structure.
 #[tokio::test]
 async fn changeset_yaml_replaces_session_files() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_JSON);
 
@@ -36,10 +37,12 @@ async fn changeset_yaml_replaces_session_files() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
+    // When
     let (output_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
         .await
         .expect("planning should succeed");
 
+    // Then
     let session_path = output_path.join(".session");
     let changeset_path = output_path.join("changeset.yaml");
 
@@ -79,6 +82,7 @@ async fn changeset_yaml_replaces_session_files() {
 /// Plan output includes discovery section with toolchain versions and scripts.
 #[tokio::test]
 async fn plan_discovery_includes_toolchain_and_scripts() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_JSON_WITH_DISCOVERY);
 
@@ -95,10 +99,12 @@ async fn plan_discovery_includes_toolchain_and_scripts() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
+    // When
     let (output_path, _) = run_plan(&engine, "Build auth toolchain", &output_dir, None)
         .await
         .expect("planning should succeed");
 
+    // Then
     let changeset_path = output_path.join("changeset.yaml");
     assert!(changeset_path.exists(), "changeset.yaml should exist");
     let content = std::fs::read_to_string(&changeset_path).expect("read changeset");
@@ -117,6 +123,7 @@ async fn plan_discovery_includes_toolchain_and_scripts() {
 /// Plan output identifies documentation locations and suggests plan directory.
 #[tokio::test]
 async fn plan_discovery_identifies_doc_locations() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_JSON_WITH_DISCOVERY);
 
@@ -133,12 +140,16 @@ async fn plan_discovery_identifies_doc_locations() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
+
+    // When
     let (output_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
         .await
         .expect("planning should succeed");
 
     let changeset_path = output_path.join("changeset.yaml");
     let content = std::fs::read_to_string(&changeset_path).expect("read changeset");
+
+    // Then
     assert!(
         content.contains("docs") || content.contains("doc_locations"),
         "changeset discovery should include doc_locations"
@@ -150,6 +161,7 @@ async fn plan_discovery_identifies_doc_locations() {
 /// Plan goal agent decides PRD name; changeset.yaml contains one-liner `name` field.
 #[tokio::test]
 async fn changeset_yaml_contains_prd_name() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_JSON_WITH_NAME);
 
@@ -166,12 +178,16 @@ async fn changeset_yaml_contains_prd_name() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
+
+    // When
     let (output_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
         .await
         .expect("planning should succeed");
 
     let changeset_path = output_path.join("changeset.yaml");
     let content = std::fs::read_to_string(&changeset_path).expect("read changeset.yaml");
+
+    // Then
     assert!(
         content.contains("name:") || content.contains("name :"),
         "changeset.yaml should have name field"
@@ -187,6 +203,7 @@ async fn changeset_yaml_contains_prd_name() {
 /// Plan goal produces demo-plan.md with demo type, steps, and verification.
 #[tokio::test]
 async fn plan_goal_creates_demo_plan() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_JSON_WITH_DISCOVERY);
 
@@ -203,11 +220,15 @@ async fn plan_goal_creates_demo_plan() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
+
+    // When
     let (output_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
         .await
         .expect("planning should succeed");
 
     let demo_plan_path = output_path.join("demo-plan.md");
+
+    // Then
     assert!(
         demo_plan_path.exists(),
         "demo-plan.md should be created by plan goal"
@@ -220,6 +241,7 @@ async fn plan_goal_creates_demo_plan() {
 /// Initial state is AcceptanceTestsReady; after red runs, state should become RedTestsReady.
 #[tokio::test]
 async fn changeset_yaml_persists_workflow_state() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-changeset-state");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
@@ -266,10 +288,14 @@ artifacts: {}
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let _ = run_goal_until_done(&engine, "red", ctx).await.unwrap();
 
     let content =
         std::fs::read_to_string(session_dir.join("changeset.yaml")).expect("read changeset");
+
+    // Then
     assert!(
         content.contains("RedTestsReady"),
         "changeset.yaml state should be updated to RedTestsReady after red goal"
@@ -282,6 +308,7 @@ artifacts: {}
 /// CLI --model overrides changeset.yaml.
 #[tokio::test]
 async fn changeset_yaml_model_resolution() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-changeset-model");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
@@ -326,6 +353,8 @@ artifacts: {}
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let _ = run_goal_until_done(&engine, "red", ctx).await.unwrap();
 
     let invocations = backend.invocations();
@@ -333,6 +362,8 @@ artifacts: {}
         .iter()
         .find(|r| r.goal_id == tddy_core::GoalId::new("red"))
         .expect("red invocation should exist");
+
+    // Then
     assert_eq!(
         red_inv.model.as_deref(),
         Some("sonnet"),
@@ -345,6 +376,7 @@ artifacts: {}
 /// Red goal output includes marker definitions with JSON format and scope data.
 #[tokio::test]
 async fn red_goal_adds_logging_markers() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-red-markers");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
@@ -373,10 +405,14 @@ async fn red_goal_adds_logging_markers() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let _ = run_goal_until_done(&engine, "red", ctx).await.unwrap();
 
     let red_output_path = session_dir.join("red-output.md");
     let content = std::fs::read_to_string(&red_output_path).expect("read red-output.md");
+
+    // Then
     assert!(
         content.contains("M001") || content.contains("marker") || content.contains("tddy"),
         "red-output.md should document logging markers"
@@ -388,10 +424,15 @@ async fn red_goal_adds_logging_markers() {
 /// Red goal verifies which markers were collected from test output.
 #[test]
 fn red_goal_verifies_marker_collection() {
+    // Given
+
+    // When
     use tddy_workflow_recipes::parse_red_response;
 
     let out =
         parse_red_response(RED_JSON_WITH_LOGGING_MARKERS).expect("parse red output with markers");
+
+    // Then
     assert!(
         !out.skeletons.is_empty(),
         "red output should have skeletons"
@@ -402,6 +443,7 @@ fn red_goal_verifies_marker_collection() {
 #[tokio::test]
 #[ignore = "PlanTask does not write system-prompt-plan.md to plan dir; Workflow does"]
 async fn system_prompt_stored_in_session_dir() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_JSON_WITH_DISCOVERY);
 
@@ -418,11 +460,15 @@ async fn system_prompt_stored_in_session_dir() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
+
+    // When
     let (output_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
         .await
         .expect("planning should succeed");
 
     let system_prompt_path = output_path.join("system-prompt-plan.md");
+
+    // Then
     assert!(
         system_prompt_path.exists(),
         "system prompt should be written to plan dir, not temp file: {}",
@@ -447,6 +493,7 @@ async fn system_prompt_stored_in_session_dir() {
 /// Session entry has system_prompt_file; system prompt reference is per-session, not global.
 #[tokio::test]
 async fn session_object_has_system_prompt_file() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok_with_questions(PLAN_JSON_WITH_DISCOVERY, "sess-plan-123", vec![]);
 
@@ -463,6 +510,8 @@ async fn session_object_has_system_prompt_file() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
+
+    // When
     let (output_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
         .await
         .expect("planning should succeed");
@@ -473,6 +522,8 @@ async fn session_object_has_system_prompt_file() {
         .iter()
         .find(|s| s.tag == "plan")
         .expect("plan session should exist");
+
+    // Then
     assert!(
         plan_session.system_prompt_file.is_some(),
         "plan session should have system_prompt_file"
@@ -489,6 +540,7 @@ async fn session_object_has_system_prompt_file() {
 /// Changeset stores initial user prompt; clarification_qa empty when no questions asked.
 #[tokio::test]
 async fn changeset_contains_initial_prompt() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_JSON_WITH_DISCOVERY);
 
@@ -506,11 +558,15 @@ async fn changeset_contains_initial_prompt() {
     );
 
     let input = "Build auth with JWT and session management";
+
+    // When
     let (output_path, _) = run_plan(&engine, input, &output_dir, None)
         .await
         .expect("planning should succeed");
 
     let changeset = read_changeset(&output_path).expect("read changeset");
+
+    // Then
     assert!(
         changeset.initial_prompt.is_some(),
         "changeset should have initial_prompt"
@@ -532,6 +588,7 @@ async fn changeset_contains_initial_prompt() {
 #[tokio::test]
 #[ignore = "Engine plan after_task does not merge clarification_qa into changeset yet"]
 async fn changeset_contains_clarification_qa() {
+    // Given
     use std::collections::HashMap;
     use tddy_core::backend::ClarificationQuestion;
     use tddy_core::workflow::graph::ExecutionStatus;
@@ -590,8 +647,12 @@ async fn changeset_contains_clarification_qa() {
     let session_dir = session_dir_for_new_session();
     std::fs::create_dir_all(&session_dir).unwrap();
     let ctx = ctx_plan(input, output_dir.clone(), session_dir.clone(), None, None);
+
+    // When
     let result = engine.run_goal(&GoalId::new("plan"), ctx).await.unwrap();
 
+
+    // Then
     assert!(
         matches!(&result.status, ExecutionStatus::WaitingForInput { .. }),
         "first call should return WaitingForInput (ClarificationNeeded), got {:?}",
@@ -670,6 +731,7 @@ async fn changeset_contains_clarification_qa() {
 /// After plan + acceptance-tests + red, sessions array has 3 entries with correct tags.
 #[tokio::test]
 async fn changeset_yaml_sessions_array_tracks_all_sessions() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLAN_JSON);
     backend.push_ok(ACCEPTANCE_TESTS_JSON_MINIMAL);
@@ -700,6 +762,8 @@ async fn changeset_yaml_sessions_array_tracks_all_sessions() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
+
+    // When
     let (plan_path, _) = run_plan(&engine, "Build auth", &output_dir, None)
         .await
         .expect("plan should succeed");
@@ -719,6 +783,8 @@ async fn changeset_yaml_sessions_array_tracks_all_sessions() {
     let _ = run_goal_until_done(&engine, "red", ctx).await.unwrap();
 
     let changeset_path = plan_path.join("changeset.yaml");
+
+    // Then
     assert!(
         changeset_path.exists(),
         "changeset.yaml should exist after full pipeline"
@@ -753,6 +819,7 @@ async fn changeset_yaml_sessions_array_tracks_all_sessions() {
 #[tokio::test]
 #[ignore = "PlanTask uses session_dir as working_dir; CheckingBackend expects parent with subdirs"]
 async fn changeset_written_before_plan_agent() {
+    // Given
     use std::sync::{Arc, Mutex};
     use tddy_core::changeset::read_changeset;
     use tddy_core::{BackendError, CodingBackend, InvokeRequest, InvokeResponse};
@@ -774,6 +841,8 @@ async fn changeset_written_before_plan_agent() {
                         let path = entry.path();
                         if path.is_dir() && path.join("changeset.yaml").exists() {
                             *self.session_dir_captured.lock().unwrap() = Some(path.clone());
+
+    // When
                             if let Ok(cs) = read_changeset(&path) {
                                 *self.changeset_state_at_invoke.lock().unwrap() =
                                     Some(cs.state.current.to_string());
@@ -830,6 +899,8 @@ async fn changeset_written_before_plan_agent() {
     let _ = engine.run_goal(&GoalId::new("plan"), ctx).await;
 
     let captured_state = changeset_state.lock().unwrap().clone();
+
+    // Then
     assert_eq!(
         captured_state,
         Some("Init".to_string()),
@@ -856,17 +927,22 @@ async fn changeset_written_before_plan_agent() {
 /// Fails until `plan_dir_suggestion` field is removed from `DiscoveryData` struct.
 /// Uses YAML deserialization (no struct literal) so the test compiles after removal too.
 #[test]
-fn test_discovery_data_without_plan_dir_suggestion() {
+fn discovery_data_omits_plan_dir_suggestion_when_not_set() {
+    // Given
     use tddy_core::changeset::DiscoveryData;
 
     // Minimal YAML that does NOT include plan_dir_suggestion
     let yaml_input = "toolchain: {}\nscripts: {}\ndoc_locations: []\nrelevant_code: []\n";
+
+    // When
     let discovery: DiscoveryData = serde_yaml::from_str(yaml_input)
         .expect("DiscoveryData should deserialize when plan_dir_suggestion is absent");
 
     // Re-serializing must not emit the plan_dir_suggestion key
     let yaml_output =
         serde_yaml::to_string(&discovery).expect("DiscoveryData should serialize back to YAML");
+
+    // Then
     assert!(
         !yaml_output.contains("plan_dir_suggestion"),
         "serialized DiscoveryData must not contain 'plan_dir_suggestion' key after R2 removal; \

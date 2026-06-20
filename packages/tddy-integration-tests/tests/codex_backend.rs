@@ -47,6 +47,7 @@ use tokio::process::Command;
 #[test]
 #[cfg(unix)]
 fn codex_backend_spawns_exec_with_json_and_prompt() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-codex-backend-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -75,8 +76,12 @@ exit 0
 
     let result = tokio::runtime::Runtime::new()
         .unwrap()
+
+    // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
+
+    // Then
     assert_eq!(result.exit_code, 0);
     assert_eq!(result.output, "parsed output");
     assert_eq!(result.session_id.as_deref(), Some("codex-sess-1"));
@@ -113,6 +118,7 @@ exit 0
 #[test]
 #[cfg(unix)]
 fn codex_backend_resume_subcommand_ordering() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-codex-resume-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -141,6 +147,8 @@ exit 0
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
+
+    // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
@@ -153,6 +161,8 @@ exit 0
         .iter()
         .position(|l| *l == "prev-codex-session")
         .expect("session id");
+
+    // Then
     assert!(
         pos_exec < pos_json && pos_json < pos_resume && pos_resume < pos_sid,
         "expected exec … --json … resume … SESSION_ID; got {:?}",
@@ -164,6 +174,7 @@ exit 0
 #[test]
 #[cfg(unix)]
 fn codex_backend_includes_model_flag_when_set() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-codex-model-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -192,12 +203,16 @@ exit 0
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
+
+    // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
     let lines: Vec<&str> = captured.lines().collect();
     let mpos = lines.iter().position(|l| *l == "-m").expect("-m flag");
+
+    // Then
     assert_eq!(lines.get(mpos + 1).copied(), Some("gpt-5"));
 }
 
@@ -205,6 +220,7 @@ exit 0
 #[test]
 #[cfg(unix)]
 fn codex_backend_merges_system_prompt_like_cursor() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-codex-sysprompt-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -233,10 +249,14 @@ exit 0
 
     let _ = tokio::runtime::Runtime::new()
         .unwrap()
+
+    // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
 
     let captured = fs::read_to_string(&args_file).expect("read captured args");
+
+    // Then
     assert!(
         captured.contains("SYSTEM_BLOCK_A") && captured.contains("user task text"),
         "merged argv should include system then user like Cursor, got:\n{}",
@@ -248,6 +268,7 @@ exit 0
 #[test]
 #[cfg(unix)]
 fn codex_backend_nonzero_exit_returns_err_with_jsonl_detail() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-codex-exit-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -276,11 +297,15 @@ exit 7
 
     let err = tokio::runtime::Runtime::new()
         .unwrap()
+
+    // When
         .block_on(backend.invoke(req))
         .expect_err("nonzero exit should fail invoke for non-plan goals");
 
     match err {
         BackendError::InvocationFailed(msg) => {
+
+    // Then
             assert!(
                 msg.contains("code 7") && msg.contains("integration stub exit 7"),
                 "expected exit code and JSONL error in message, got: {}",
@@ -295,6 +320,7 @@ exit 7
 #[test]
 #[cfg(unix)]
 fn codex_backend_parses_thread_started_as_session_id() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-codex-thread-started-test");
     let _ = std::fs::create_dir_all(&tmp);
     let tmp_abs = tmp.canonicalize().unwrap_or(tmp.clone());
@@ -323,8 +349,12 @@ exit 0
 
     let result = tokio::runtime::Runtime::new()
         .unwrap()
+
+    // When
         .block_on(backend.invoke(req))
         .expect("invoke should succeed");
+
+    // Then
     assert_eq!(result.session_id.as_deref(), Some("thread-from-jsonl"));
     let _ = fs::read_to_string(&args_file).expect("read captured args");
 }
@@ -332,17 +362,22 @@ exit 0
 #[test]
 #[cfg(unix)]
 fn codex_backend_reports_binary_not_found() {
+    // Given
     let missing = tmp_abs_join_codex_missing();
     let backend = CodexBackend::with_path(missing);
     let req = stub_invoke_request("noop", "plan");
 
     let err = tokio::runtime::Runtime::new()
         .unwrap()
+
+    // When
         .block_on(backend.invoke(req))
         .expect_err("expected BinaryNotFound for missing codex binary");
 
     match err {
         BackendError::BinaryNotFound(msg) => {
+
+    // Then
             assert!(
                 msg.contains("codex") || msg.to_lowercase().contains("not found"),
                 "message should name the binary or not-found: {}",
@@ -381,6 +416,9 @@ fn resolve_tddy_coder_exe_for_tests() -> PathBuf {
 #[cfg(unix)]
 #[ignore = "requires real codex CLI, network, and TDDY_CODEX_LOGIN_E2E=1; see module docs"]
 async fn codex_login_e2e_captures_authorize_url_for_livekit_web_metadata() {
+    // Given
+
+    // Then
     assert_eq!(
         std::env::var("TDDY_CODEX_LOGIN_E2E").as_deref(),
         Ok("1"),
@@ -395,6 +433,8 @@ async fn codex_login_e2e_captures_authorize_url_for_livekit_web_metadata() {
     let session_dir = session_dir.canonicalize().unwrap_or(session_dir);
 
     let url_path = session_dir.join(CODEX_OAUTH_AUTHORIZE_URL_FILENAME);
+
+    // When
     let tddy_coder = resolve_tddy_coder_exe_for_tests();
     assert!(
         tddy_coder.exists(),

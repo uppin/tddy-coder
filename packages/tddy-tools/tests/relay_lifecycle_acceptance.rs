@@ -19,8 +19,10 @@ fn tddy_tools_bin() -> Command {
 /// Full relay-up success path is covered by integration tests that require a real tddy-daemon.
 #[test]
 fn remote_list_tools_reads_catalog_from_relay() {
+    // Given
     let relay_dir = tempfile::tempdir().unwrap();
 
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.env("TDDY_RELAY_BASE_DIR", relay_dir.path());
     cmd.args(["remote", "list-tools"]);
@@ -30,6 +32,7 @@ fn remote_list_tools_reads_catalog_from_relay() {
         .output()
         .expect("tddy-tools remote list-tools must not crash");
 
+    // Then
     assert!(
         !output.status.success(),
         "remote list-tools must exit non-zero when no relay is running"
@@ -52,6 +55,7 @@ fn remote_list_tools_reads_catalog_from_relay() {
 /// tddy-daemon binary.
 #[test]
 fn remote_list_tools_does_not_double_start_relay() {
+    // Given
     let relay_dir = tempfile::tempdir().unwrap();
 
     let run = || -> std::process::Output {
@@ -62,10 +66,11 @@ fn remote_list_tools_does_not_double_start_relay() {
             .expect("tddy-tools remote list-tools must not crash")
     };
 
+    // When
     let first = run();
     let second = run();
 
-    // Both runs must exit non-zero (no relay available) and must not panic.
+    // Then — both runs must exit non-zero (no relay available) and must not panic.
     assert!(
         !first.status.success(),
         "first run must exit non-zero when no relay is running"
@@ -96,14 +101,16 @@ fn remote_list_tools_does_not_double_start_relay() {
 /// by integration tests that require a real tddy-daemon binary.
 #[test]
 fn remote_list_tools_writes_persistent_discovery_file() {
+    // Given
     let relay_dir = tempfile::tempdir().unwrap();
 
+    // When
     let mut cmd = tddy_tools_bin();
     cmd.env("TDDY_RELAY_BASE_DIR", relay_dir.path());
     cmd.args(["remote", "list-tools"]);
     let output = cmd.output().expect("must not crash");
 
-    // Without a real relay the command must fail non-zero and not panic.
+    // Then — without a real relay the command must fail non-zero and not panic.
     assert!(
         !output.status.success(),
         "remote list-tools must exit non-zero when no relay is running"

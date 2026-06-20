@@ -5,6 +5,7 @@ use tddy_workflow_recipes::schema_pipeline;
 
 #[test]
 fn goals_json_matches_manifest_goal_count_and_names() {
+    // Given
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let goals_raw = fs::read_to_string(manifest_dir.join("goals.json")).expect("read goals.json");
     let goals_root: serde_json::Value = serde_json::from_str(&goals_raw).expect("parse goals.json");
@@ -13,7 +14,6 @@ fn goals_json_matches_manifest_goal_count_and_names() {
         .iter()
         .map(|g| g["name"].as_str().expect("name").to_string())
         .collect();
-
     let man_raw = fs::read_to_string(schema_pipeline::generated_manifest_path()).expect("manifest");
     let man: serde_json::Value = serde_json::from_str(&man_raw).expect("parse manifest");
     let mut from_manifest: Vec<String> = man["goals"]
@@ -22,9 +22,10 @@ fn goals_json_matches_manifest_goal_count_and_names() {
         .iter()
         .map(|g| g["name"].as_str().expect("name").to_string())
         .collect();
-
     from_goals.sort();
     from_manifest.sort();
+
+    // Then
     assert_eq!(
         from_goals, from_manifest,
         "goals.json and generated/schema-manifest.json must list the same goal names"
@@ -40,6 +41,7 @@ const KNOWN_RECIPES: &[&str] = &["tdd"];
 
 #[test]
 fn goals_json_includes_merge_pr_report_goal() {
+    // Given
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let goals_raw = fs::read_to_string(manifest_dir.join("goals.json")).expect("read goals.json");
     let goals_root: serde_json::Value = serde_json::from_str(&goals_raw).expect("parse goals.json");
@@ -49,6 +51,8 @@ fn goals_json_includes_merge_pr_report_goal() {
         .iter()
         .filter_map(|g| g["name"].as_str())
         .collect();
+
+    // Then
     assert!(
         names.contains(&"merge-pr-report"),
         "goals.json must register merge-pr-report for structured finalize submit (PRD schema contract); got {:?}",
@@ -63,21 +67,20 @@ fn goals_json_includes_merge_pr_report_goal() {
 
 #[test]
 fn generated_schemas_are_namespaced_by_recipe() {
+    // Given
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let generated = manifest_dir.join("generated");
+    let goals_raw = fs::read_to_string(manifest_dir.join("goals.json")).expect("read goals.json");
+    let goals_root: serde_json::Value = serde_json::from_str(&goals_raw).expect("parse goals.json");
+    let goals_arr = goals_root["goals"].as_array().expect("goals array");
 
+    // Then
     for recipe in KNOWN_RECIPES {
         let recipe_dir = generated.join(recipe);
         assert!(
             recipe_dir.is_dir(),
             "generated/{recipe}/ directory must exist — schemas should be namespaced under their recipe"
         );
-
-        let goals_raw =
-            fs::read_to_string(manifest_dir.join("goals.json")).expect("read goals.json");
-        let goals_root: serde_json::Value =
-            serde_json::from_str(&goals_raw).expect("parse goals.json");
-        let goals_arr = goals_root["goals"].as_array().expect("goals array");
         for g in goals_arr {
             let schema = g["schema"].as_str().expect("schema field");
             let namespaced = recipe_dir.join(schema);
@@ -92,9 +95,11 @@ fn generated_schemas_are_namespaced_by_recipe() {
 
 #[test]
 fn generated_root_has_no_flat_schema_files() {
+    // Given
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let generated = manifest_dir.join("generated");
 
+    // When
     let flat_schemas: Vec<String> = fs::read_dir(&generated)
         .expect("read generated/")
         .filter_map(|e| e.ok())
@@ -105,6 +110,7 @@ fn generated_root_has_no_flat_schema_files() {
         .map(|e| e.file_name().to_string_lossy().to_string())
         .collect();
 
+    // Then
     assert!(
         flat_schemas.is_empty(),
         "generated/ root must not contain flat schema files — found {:?}; \

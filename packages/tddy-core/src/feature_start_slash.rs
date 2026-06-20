@@ -129,7 +129,8 @@ mod tests {
         let e = parse_feature_start_slash_line("/start-nope")
             .unwrap()
             .unwrap_err();
-        assert!(e.contains("tdd") && e.contains("bugfix"));
+        assert!(e.contains("tdd"), "expected error to contain 'tdd', was: {e}");
+        assert!(e.contains("bugfix"), "expected error to contain 'bugfix', was: {e}");
     }
 
     #[test]

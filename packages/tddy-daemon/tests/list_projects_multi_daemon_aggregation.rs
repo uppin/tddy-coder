@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles;
+use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
@@ -40,7 +41,7 @@ fn test_service(
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver = Arc::new(|token| {
-        if token == "valid-token" {
+        if token == TEST_TOKEN {
             Some("testuser".to_string())
         } else {
             None
@@ -78,7 +79,7 @@ impl EligibleDaemonSource for TestPeerProjectsSource {
     }
 
     fn peer_project_entries(&self, session_token: &str) -> Vec<ProtoProjectEntry> {
-        if session_token != "valid-token" {
+        if session_token != TEST_TOKEN {
             return vec![];
         }
         let marker = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
@@ -103,21 +104,24 @@ impl EligibleDaemonSource for TestPeerProjectsSource {
 
 #[tokio::test]
 async fn list_projects_merges_entries_tagged_with_daemon_instance_id() {
+    // Given
     let os_user = std::env::var("USER").expect("USER must be set for passwd-backed projects path");
     let service = test_service(
         tempfile::tempdir().unwrap().path().to_path_buf(),
         &os_user,
         Arc::new(TestPeerProjectsSource),
     );
-
     let marker = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+
+    // When
     let response = service
         .list_projects(Request::new(ListProjectsRequest {
-            session_token: "valid-token".to_string(),
+            session_token: TEST_TOKEN.to_string(),
         }))
         .await
         .expect("list_projects succeeds");
 
+    // Then
     let rows: Vec<_> = response
         .into_inner()
         .projects

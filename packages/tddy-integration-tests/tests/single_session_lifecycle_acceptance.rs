@@ -52,6 +52,7 @@ fn count_dir_children(dir: &Path) -> usize {
 /// session id when `session_dir` is already bound; backend agent id must not replace it.
 #[tokio::test]
 async fn plan_task_reuses_session_dir_when_present() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_response(Ok(InvokeResponse {
         output: PLANNING_OUTPUT.to_string(),
@@ -71,6 +72,8 @@ async fn plan_task_reuses_session_dir_when_present() {
         initial_prompt: Some("feature".to_string()),
         ..Default::default()
     };
+
+    // When
     let _ = tddy_core::changeset::write_changeset(&session_dir, &init_cs);
 
     let storage_dir = std::env::temp_dir().join(format!(
@@ -112,6 +115,8 @@ async fn plan_task_reuses_session_dir_when_present() {
         .await
         .expect("plan goal");
 
+
+    // Then
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),
         "plan should succeed: {:?}",
@@ -157,6 +162,7 @@ async fn plan_task_reuses_session_dir_when_present() {
 #[tokio::test]
 #[serial]
 async fn before_plan_does_not_allocate_second_dir_when_session_id_bound() {
+    // Given
     let isolated_home =
         std::env::temp_dir().join(format!("tddy-hooks-no-second-dir-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&isolated_home);
@@ -213,6 +219,8 @@ async fn before_plan_does_not_allocate_second_dir_when_session_id_bound() {
         .expect("plan");
     let after_global = count_dir_children(&isolated_home.join("sessions"));
 
+
+    // Then
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),
         "plan should succeed: {:?}",
@@ -254,6 +262,7 @@ async fn before_plan_does_not_allocate_second_dir_when_session_id_bound() {
 /// `session_id` must stay the canonical id even when the backend reports another.
 #[tokio::test]
 async fn workflow_runner_avoids_new_session_dir_fallback_after_successful_plan() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok_without_submit("interview turn complete");
     backend.push_response(Ok(InvokeResponse {
@@ -280,6 +289,8 @@ async fn workflow_runner_avoids_new_session_dir_fallback_after_successful_plan()
         initial_prompt: Some("SKIP_QUESTIONS full workflow session contract".to_string()),
         ..Default::default()
     };
+
+    // When
     tddy_core::changeset::write_changeset(&session_path, &init_cs).expect("write changeset");
 
     let mut ctx = HashMap::new();
@@ -313,6 +324,8 @@ async fn workflow_runner_avoids_new_session_dir_fallback_after_successful_plan()
     );
 
     let before = count_dir_children(&base.join("sessions"));
+
+    // Then
     assert_eq!(
         before, 1,
         "precondition: one pre-created session directory under session_base/sessions/"
@@ -362,6 +375,7 @@ async fn workflow_runner_avoids_new_session_dir_fallback_after_successful_plan()
 /// `{TDDY_SESSIONS_DIR}/<session_id>/` path.
 #[test]
 fn cli_invocation_creates_single_sessions_subtree() {
+    // Given
     let base = std::env::temp_dir().join(format!(
         "tddy-cli-single-session-contract-{}",
         std::process::id()
@@ -373,6 +387,8 @@ fn cli_invocation_creates_single_sessions_subtree() {
     let wrong_layout = create_session_dir_under(&base, &sid).unwrap();
     let cli_layout = create_session_dir_with_id(&base, &sid).unwrap();
 
+
+    // Then
     assert_eq!(
         wrong_layout, cli_layout,
         "CLI must resolve session_dir to the same path as create_session_dir_with_id (sessions/{{id}})"

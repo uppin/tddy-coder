@@ -556,24 +556,35 @@ mod tests {
 
     #[test]
     fn mcp_server_get_info_mentions_github_pr_tools() {
+        // When
         let info = PermissionServer::new().get_info();
         let text = info
             .instructions
             .as_deref()
             .expect("server instructions must be set");
+
+        // Then
         assert!(
-            text.contains("github_create_pull_request")
-                && text.contains("github_update_pull_request"),
-            "MCP server instructions must name GitHub PR tools; got: {text}"
+            text.contains("github_create_pull_request"),
+            "MCP server instructions must name github_create_pull_request; got: {text}"
+        );
+        assert!(
+            text.contains("github_update_pull_request"),
+            "MCP server instructions must name github_update_pull_request; got: {text}"
         );
     }
 
     #[test]
     fn approval_prompt_allows_bash_tddy_tools_submit() {
+        // Given
         let input = serde_json::json!({
             "command": "tddy-tools submit --goal plan --data '{\"goal\":\"plan\",\"prd\":\"# PRD\"}'"
         });
+
+        // When
         let result = PermissionServer::new().decide("Bash", &input);
+
+        // Then
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(
             parsed["behavior"], "allow",
@@ -584,10 +595,15 @@ mod tests {
 
     #[test]
     fn approval_prompt_allows_bash_tddy_tools_ask() {
+        // Given
         let input = serde_json::json!({
             "command": "tddy-tools ask --data '{\"questions\":[]}'"
         });
+
+        // When
         let result = PermissionServer::new().decide("Bash", &input);
+
+        // Then
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(
             parsed["behavior"], "allow",
@@ -598,10 +614,15 @@ mod tests {
 
     #[test]
     fn approval_prompt_allows_bash_tddy_tools_get_schema() {
+        // Given
         let input = serde_json::json!({
             "command": "tddy-tools get-schema plan"
         });
+
+        // When
         let result = PermissionServer::new().decide("Bash", &input);
+
+        // Then
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(
             parsed["behavior"], "allow",
@@ -612,11 +633,16 @@ mod tests {
 
     #[test]
     fn approval_prompt_allows_mcp_tddy_tools_tool_calls() {
+        // Given
         let input = serde_json::json!({
             "goal": "plan",
             "data": "{}"
         });
+
+        // When
         let result = PermissionServer::new().decide("mcp__tddy-tools__submit", &input);
+
+        // Then
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(
             parsed["behavior"], "allow",
@@ -627,10 +653,15 @@ mod tests {
 
     #[test]
     fn approval_prompt_allows_mcp_tddy_tools_get_schema() {
+        // Given
         let input = serde_json::json!({
             "goal": "plan"
         });
+
+        // When
         let result = PermissionServer::new().decide("mcp__tddy-tools__get_schema", &input);
+
+        // Then
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(
             parsed["behavior"], "allow",
@@ -641,8 +672,13 @@ mod tests {
 
     #[test]
     fn approval_prompt_denies_mcp_from_unknown_server() {
+        // Given
         let input = serde_json::json!({ "query": "drop tables" });
+
+        // When
         let result = PermissionServer::new().decide("mcp__evil-server__destroy", &input);
+
+        // Then
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(
             parsed["behavior"], "deny",
@@ -654,6 +690,7 @@ mod tests {
     #[test]
     #[serial]
     fn approval_prompt_pre_allows_paths_in_repo_dir() {
+        // Given
         let dir = std::env::temp_dir().join("tddy-preallow-test");
         std::fs::create_dir_all(&dir).unwrap();
         let repo = std::fs::canonicalize(&dir).unwrap();
@@ -662,6 +699,8 @@ mod tests {
         let subdir = std::fs::canonicalize(&subdir).unwrap();
 
         std::env::set_var("TDDY_REPO_DIR", &repo);
+
+        // When
         let result = {
             let input = serde_json::json!({
                 "command": format!("ls -la {} | grep -E '\\.rs$'", subdir.display())
@@ -671,6 +710,7 @@ mod tests {
         std::env::remove_var("TDDY_REPO_DIR");
         std::fs::remove_dir_all(&dir).ok();
 
+        // Then
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(
             parsed["behavior"], "allow",
@@ -682,6 +722,7 @@ mod tests {
     #[test]
     #[serial]
     fn approval_prompt_pre_allows_mkdir_for_nonexistent_path_in_repo() {
+        // Given
         let dir = std::env::temp_dir().join("tddy-mkdir-preallow");
         std::fs::create_dir_all(&dir).unwrap();
         let repo = std::fs::canonicalize(&dir).unwrap();
@@ -690,6 +731,8 @@ mod tests {
         let mkdir_target = repo.join("packages").join("tddy-github").join("src");
 
         std::env::set_var("TDDY_REPO_DIR", &repo);
+
+        // When
         let result = {
             let input = serde_json::json!({
                 "command": format!("mkdir -p {}", mkdir_target.display())
@@ -699,6 +742,7 @@ mod tests {
         std::env::remove_var("TDDY_REPO_DIR");
         std::fs::remove_dir_all(&dir).ok();
 
+        // Then
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(
             parsed["behavior"], "allow",
@@ -710,6 +754,7 @@ mod tests {
     #[test]
     #[serial]
     fn approval_prompt_pre_allows_write_in_repo_dir() {
+        // Given
         let dir = std::env::temp_dir().join("tddy-write-preallow");
         std::fs::create_dir_all(&dir).unwrap();
         let repo = std::fs::canonicalize(&dir).unwrap();
@@ -717,6 +762,8 @@ mod tests {
         std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
 
         std::env::set_var("TDDY_REPO_DIR", &repo);
+
+        // When
         let result = {
             let input = serde_json::json!({
                 "file_path": file_path.display().to_string(),
@@ -727,6 +774,7 @@ mod tests {
         std::env::remove_var("TDDY_REPO_DIR");
         std::fs::remove_dir_all(&dir).ok();
 
+        // Then
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(
             parsed["behavior"], "allow",
@@ -738,11 +786,14 @@ mod tests {
     #[test]
     #[serial]
     fn approval_prompt_pre_allows_exit_plan_mode() {
+        // Given
         let dir = std::env::temp_dir().join("tddy-exitplan");
         std::fs::create_dir_all(&dir).unwrap();
         let repo = std::fs::canonicalize(&dir).unwrap();
 
         std::env::set_var("TDDY_REPO_DIR", &repo);
+
+        // When
         let result = {
             let input = serde_json::json!({
                 "plan": "# PRD\n\n## Summary\nTest",
@@ -753,6 +804,7 @@ mod tests {
         std::env::remove_var("TDDY_REPO_DIR");
         std::fs::remove_dir_all(&dir).ok();
 
+        // Then
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(
             parsed["behavior"], "allow",
@@ -769,11 +821,14 @@ mod tests {
     #[test]
     #[serial]
     fn approval_prompt_pre_allows_ask_user_question() {
+        // Given
         let dir = std::env::temp_dir().join("tddy-askuser");
         std::fs::create_dir_all(&dir).unwrap();
         let repo = std::fs::canonicalize(&dir).unwrap();
 
         std::env::set_var("TDDY_REPO_DIR", &repo);
+
+        // When
         let result = {
             let input = serde_json::json!({
                 "questions": [{"header": "Scope", "question": "Which?", "options": [], "multiSelect": false}]
@@ -783,6 +838,7 @@ mod tests {
         std::env::remove_var("TDDY_REPO_DIR");
         std::fs::remove_dir_all(&dir).ok();
 
+        // Then
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(
             parsed["behavior"], "allow",
@@ -793,10 +849,15 @@ mod tests {
 
     #[test]
     fn approval_prompt_denies_arbitrary_bash_commands() {
+        // Given
         let input = serde_json::json!({
             "command": "rm -rf /important/data"
         });
+
+        // When
         let result = PermissionServer::new().decide("Bash", &input);
+
+        // Then
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(
             parsed["behavior"], "deny",

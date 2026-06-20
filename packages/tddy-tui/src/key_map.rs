@@ -254,8 +254,11 @@ mod tests {
 
     #[test]
     fn feature_input_enter_with_text_returns_submit() {
+        // Given
         let mut vs = ViewState::new();
         vs.feature_edit.set_plain_text("Build auth");
+
+        // When / Then
         let intent = key_event_to_intent(enter_key(), &AppMode::FeatureInput, &vs, false);
         assert!(matches!(
             intent,
@@ -265,85 +268,115 @@ mod tests {
 
     #[test]
     fn feature_input_enter_empty_returns_none() {
+        // Given
         let vs = ViewState::new();
+
+        // When / Then
         let intent = key_event_to_intent(enter_key(), &AppMode::FeatureInput, &vs, false);
         assert!(intent.is_none());
     }
 
     #[test]
     fn enter_at_end_approve_returns_approve_session_document() {
+        // Given
         let mut vs = ViewState::new();
         vs.markdown_at_end = true;
         vs.markdown_end_button_selected = 0;
         let mode = AppMode::MarkdownViewer {
             content: "plan content".to_string(),
         };
+
+        // When / Then
         let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
         assert!(matches!(intent, Some(UserIntent::ApproveSessionDocument)));
     }
 
     #[test]
     fn enter_at_end_refine_returns_refine_session_document() {
+        // Given
         let mut vs = ViewState::new();
         vs.markdown_at_end = true;
         vs.markdown_end_button_selected = 1;
         let mode = AppMode::MarkdownViewer {
             content: "plan content".to_string(),
         };
+
+        // When / Then
         let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
         assert!(matches!(intent, Some(UserIntent::RefineSessionDocument)));
     }
 
     #[test]
     fn enter_when_not_at_end_returns_none() {
+        // Given
         let mut vs = ViewState::new();
         vs.markdown_at_end = false;
         let mode = AppMode::MarkdownViewer {
             content: "plan content".to_string(),
         };
+
+        // When / Then
         let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
         assert!(intent.is_none());
     }
 
     #[test]
-    fn test_error_recovery_key_resume() {
+    fn enter_on_resume_option_maps_to_resume_from_error_intent() {
+        // Given
         let mut vs = ViewState::new();
         vs.error_recovery_selected = 0;
         let mode = AppMode::ErrorRecovery {
             error_message: "some error".to_string(),
         };
+
+        // When
         let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
-        assert!(matches!(intent, Some(UserIntent::ResumeFromError)));
+
+        // Then
+        assert!(matches!(intent, Some(UserIntent::ResumeFromError)), "index 0 must map to ResumeFromError");
     }
 
     #[test]
-    fn test_error_recovery_key_continue_with_agent() {
+    fn enter_on_continue_with_agent_option_maps_to_continue_with_agent_intent() {
+        // Given
         let mut vs = ViewState::new();
         vs.error_recovery_selected = 1;
         let mode = AppMode::ErrorRecovery {
             error_message: "some error".to_string(),
         };
+
+        // When
         let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
-        assert!(matches!(intent, Some(UserIntent::ContinueWithAgent)));
+
+        // Then
+        assert!(matches!(intent, Some(UserIntent::ContinueWithAgent)), "index 1 must map to ContinueWithAgent");
     }
 
     #[test]
-    fn test_error_recovery_key_exit() {
+    fn enter_on_exit_option_maps_to_quit_intent() {
+        // Given
         let mut vs = ViewState::new();
         vs.error_recovery_selected = 2;
         let mode = AppMode::ErrorRecovery {
             error_message: "some error".to_string(),
         };
+
+        // When
         let intent = key_event_to_intent(enter_key(), &mode, &vs, false);
-        assert!(matches!(intent, Some(UserIntent::Quit)));
+
+        // Then
+        assert!(matches!(intent, Some(UserIntent::Quit)), "index 2 must map to Quit");
     }
 
     #[test]
     fn markdown_viewer_approval_and_refine_use_alt_modifier() {
+        // Given
         let vs = ViewState::new();
         let mode = AppMode::MarkdownViewer {
             content: "# PRD".to_string(),
         };
+
+        // When / Then
         let plain_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty());
         assert!(
             key_event_to_intent(plain_a, &mode, &vs, false).is_none(),

@@ -9,6 +9,7 @@ use tddy_daemon::session_reader;
 /// Acceptance: Daemon loads YAML config with users and allowed_tools.
 #[test]
 fn acceptance_config_loads_users_and_tools() {
+    // Given
     let yaml = r#"
 listen:
   web_port: 8899
@@ -26,7 +27,11 @@ allowed_tools:
 "#;
     let path = std::env::temp_dir().join("tddy-daemon-acceptance-config.yaml");
     std::fs::write(&path, yaml).unwrap();
+
+    // When
     let config = DaemonConfig::load(&path).expect("config should load");
+
+    // Then
     assert_eq!(config.users.len(), 2);
     assert_eq!(config.users[0].github_user, "octocat");
     assert_eq!(config.users[0].os_user, "dev1");
@@ -41,6 +46,7 @@ allowed_tools:
 /// Acceptance: livekit.common_room is parsed for shared presence room.
 #[test]
 fn acceptance_config_livekit_common_room() {
+    // Given
     let yaml = r#"
 listen:
   web_port: 8899
@@ -54,7 +60,11 @@ users:
 "#;
     let path = std::env::temp_dir().join("tddy-daemon-acceptance-common-room.yaml");
     std::fs::write(&path, yaml).unwrap();
+
+    // When
     let config = DaemonConfig::load(&path).expect("config should load");
+
+    // Then
     assert_eq!(
         config.livekit.as_ref().unwrap().common_room.as_deref(),
         Some("tddy-lobby")
@@ -64,6 +74,7 @@ users:
 /// Acceptance: codex_oauth_loopback_proxy_eligible can be disabled in YAML.
 #[test]
 fn acceptance_config_codex_oauth_loopback_proxy_eligible_false() {
+    // Given
     let yaml = r#"
 users:
   - github_user: "a"
@@ -72,13 +83,18 @@ codex_oauth_loopback_proxy_eligible: false
 "#;
     let path = std::env::temp_dir().join("tddy-daemon-acceptance-oauth-proxy.yaml");
     std::fs::write(&path, yaml).unwrap();
+
+    // When
     let config = DaemonConfig::load(&path).expect("config should load");
+
+    // Then
     assert!(!config.codex_oauth_loopback_proxy_eligible);
 }
 
 /// Acceptance: spawn_mouse can be disabled in YAML.
 #[test]
 fn acceptance_config_spawn_mouse_false() {
+    // Given
     let yaml = r#"
 users:
   - github_user: "a"
@@ -87,13 +103,18 @@ spawn_mouse: false
 "#;
     let path = std::env::temp_dir().join("tddy-daemon-acceptance-mouse.yaml");
     std::fs::write(&path, yaml).unwrap();
+
+    // When
     let config = DaemonConfig::load(&path).expect("config should load");
+
+    // Then
     assert!(!config.spawn_mouse);
 }
 
 /// Acceptance: GitHub user maps to OS user; unmapped returns None.
 #[test]
 fn acceptance_user_mapping_github_to_os() {
+    // Given
     let yaml = r#"
 users:
   - github_user: "octocat"
@@ -102,6 +123,8 @@ users:
     let path = std::env::temp_dir().join("tddy-daemon-acceptance-mapping.yaml");
     std::fs::write(&path, yaml).unwrap();
     let config = DaemonConfig::load(&path).unwrap();
+
+    // When / Then
     assert_eq!(config.os_user_for_github("octocat"), Some("dev1"));
     assert_eq!(config.os_user_for_github("unknown"), None);
 }
@@ -109,6 +132,7 @@ users:
 /// Acceptance: Session reader returns sessions from directory containing .session.yaml.
 #[test]
 fn acceptance_session_reader_lists_sessions_from_dir() {
+    // Given
     let temp = tempfile::tempdir().unwrap();
     let sessions_base = temp.path().to_path_buf();
     let session_dir =
@@ -127,7 +151,10 @@ livekit_room: "daemon-session-123"
 "#;
     std::fs::write(session_dir.join(".session.yaml"), metadata).unwrap();
 
+    // When
     let sessions = session_reader::list_sessions_in_dir(sessions_base.as_path()).unwrap();
+
+    // Then
     assert!(
         !sessions.is_empty(),
         "expected at least one session when .session.yaml exists"
@@ -140,6 +167,7 @@ livekit_room: "daemon-session-123"
 /// Acceptance: project_storage round-trips projects.yaml.
 #[test]
 fn acceptance_project_storage_roundtrip() {
+    // Given
     let temp = tempfile::tempdir().unwrap();
     let projects_dir = temp.path().join("projects");
     let p = tddy_daemon::project_storage::ProjectData {
@@ -150,8 +178,12 @@ fn acceptance_project_storage_roundtrip() {
         main_branch_ref: None,
         host_repo_paths: std::collections::HashMap::new(),
     };
+
+    // When
     tddy_daemon::project_storage::add_project(&projects_dir, p.clone()).unwrap();
     let list = tddy_daemon::project_storage::read_projects(&projects_dir).unwrap();
+
+    // Then
     assert_eq!(list.len(), 1);
     assert_eq!(list[0], p);
 }
@@ -159,6 +191,7 @@ fn acceptance_project_storage_roundtrip() {
 /// Acceptance: Daemon config parses repos_base_path.
 #[test]
 fn acceptance_config_loads_repos_base_path() {
+    // Given
     let yaml = r#"
 repos_base_path: "repos"
 users:
@@ -167,7 +200,11 @@ users:
 "#;
     let path = std::env::temp_dir().join("tddy-daemon-acceptance-repos.yaml");
     std::fs::write(&path, yaml).unwrap();
+
+    // When
     let config = DaemonConfig::load(&path).expect("config should load");
+
+    // Then
     assert_eq!(config.repos_base_path.as_deref(), Some("repos"));
     assert_eq!(config.repos_base_path_or_default(), "repos");
 }
@@ -175,6 +212,7 @@ users:
 /// Smoke: tddy-daemon starts and serves /api/config with daemon_mode: true.
 #[test]
 fn acceptance_daemon_starts_and_serves_config() {
+    // Given
     let tddy_daemon = std::env::var("CARGO_BIN_EXE_tddy-daemon")
         .unwrap_or_else(|_| "target/debug/tddy-daemon".to_string());
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -239,6 +277,7 @@ allowed_agents:
     );
     std::fs::write(&config_path2, config2).unwrap();
 
+    // When
     drop(guard);
     let daemon2 = std::process::Command::new(&daemon_bin)
         .arg("-c")
@@ -253,6 +292,7 @@ allowed_agents:
         let _ = p.wait();
     });
 
+    // Then
     let url = format!("http://127.0.0.1:{}/api/config", port);
     for _ in 0..30 {
         if let Ok(resp) = reqwest::blocking::get(&url) {

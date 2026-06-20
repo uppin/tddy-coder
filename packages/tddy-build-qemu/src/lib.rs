@@ -129,7 +129,10 @@ mod tests {
 
     #[test]
     fn convert_action_has_correct_argv() {
+        // Given / When
         let action = lower("input: build/br-out/images/rootfs.ext4\n");
+
+        // Then
         assert_eq!(
             action.command,
             vec![
@@ -148,38 +151,52 @@ mod tests {
 
     #[test]
     fn inferred_output_swaps_extension_to_qcow2() {
+        // Given / When
         let action = lower("input: build/br-out/images/rootfs.ext4\n");
+
+        // Then
         assert_eq!(action.outputs[0].path, "build/br-out/images/rootfs.qcow2");
     }
 
     #[test]
     fn explicit_outputs_override_default() {
+        // Given / When
         let action = lower(
             "input: build/br-out/images/rootfs.ext4\noutputs:\n  - path: build/my-os.qcow2\n    kind: file\n",
         );
+
+        // Then
         assert_eq!(action.outputs[0].path, "build/my-os.qcow2");
         assert_eq!(action.command.last().unwrap(), "build/my-os.qcow2");
     }
 
     #[test]
     fn custom_input_format_is_used() {
+        // Given / When
         let action = lower("input: build/rootfs.qcow2\ninput_format: qcow2\n");
+
+        // Then
         assert_eq!(action.command[3], "qcow2");
     }
 
     #[test]
     fn default_input_format_is_raw() {
+        // Given / When
         let action = lower("input: build/rootfs.ext4\n");
+
+        // Then
         assert_eq!(action.command[3], "raw");
     }
 
     #[test]
     fn missing_input_is_rejected() {
+        // Given / When / Then
         assert!(matches!(lower_err("\n"), BuildError::Manifest(_)));
     }
 
     #[test]
     fn unknown_field_is_rejected() {
+        // Given / When / Then
         assert!(matches!(
             lower_err("input: x.ext4\nbogus: 1\n"),
             BuildError::Manifest(_)

@@ -5,10 +5,12 @@ use tddy_workflow_recipes::tdd::interview;
 /// PRD: system and user prompts must mandate demo yes/no and options elicitation (no silent skip).
 #[test]
 fn interview_prompt_requires_demo_elicitation() {
+    // Given
     let system = interview::system_prompt();
     let user = interview::build_interview_user_prompt("Example feature for demo routing");
-
     let combined = format!("{system}\n{user}");
+
+    // Then
     for needle in [
         "demo",
         "tddy-tools ask",

@@ -241,18 +241,28 @@ mod tests {
     fn embedded_descriptor_set_decodes() {
         // Constructing without panicking proves SERVICE_DESCRIPTOR_BYTES is a valid
         // FileDescriptorSet produced by the build script.
+
+        // When
         let svc = build();
+
+        // Then
         assert!(svc.files_by_symbol.contains_key("test.EchoService"));
     }
 
     #[test]
     fn list_services_returns_only_registered_names() {
+        // Given
         let svc = build();
         let req = ServerReflectionRequest {
             host: String::new(),
             message_request: Some(MessageRequest::ListServices(String::new())),
         };
-        match svc.respond(&req) {
+
+        // When
+        let response = svc.respond(&req);
+
+        // Then
+        match response {
             MessageResponse::ListServicesResponse(resp) => {
                 let names: Vec<_> = resp.service.iter().map(|s| s.name.as_str()).collect();
                 assert_eq!(names, vec!["test.EchoService"]);
@@ -263,6 +273,7 @@ mod tests {
 
     #[test]
     fn file_containing_symbol_returns_descriptor_with_deps() {
+        // Given
         let svc = build();
         let req = ServerReflectionRequest {
             host: String::new(),
@@ -270,7 +281,12 @@ mod tests {
                 "test.EchoService".to_string(),
             )),
         };
-        match svc.respond(&req) {
+
+        // When
+        let response = svc.respond(&req);
+
+        // Then
+        match response {
             MessageResponse::FileDescriptorResponse(resp) => {
                 assert!(!resp.file_descriptor_proto.is_empty());
                 // Each entry must be a decodable FileDescriptorProto.
@@ -285,6 +301,7 @@ mod tests {
 
     #[test]
     fn unknown_symbol_returns_not_found() {
+        // Given
         let svc = build();
         let req = ServerReflectionRequest {
             host: String::new(),
@@ -292,7 +309,12 @@ mod tests {
                 "does.not.Exist".to_string(),
             )),
         };
-        match svc.respond(&req) {
+
+        // When
+        let response = svc.respond(&req);
+
+        // Then
+        match response {
             MessageResponse::ErrorResponse(err) => {
                 assert_eq!(err.error_code, 5);
                 assert_eq!(err.error_message, "Symbol not found.");

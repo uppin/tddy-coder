@@ -85,6 +85,7 @@ async fn wait_until_room_slot_populated(
 #[tokio::test]
 #[serial]
 async fn common_room_room_slot_stays_populated_after_metadata_publish_with_peer_in_room() {
+    // Given
     let livekit = LiveKitTestkit::start()
         .await
         .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
@@ -95,15 +96,15 @@ async fn common_room_room_slot_stays_populated_after_metadata_publish_with_peer_
     let (_pre_room, _pre_ev) = Room::connect(&url, &pre_token, RoomOptions::default())
         .await
         .expect("pre-join participant enters common room");
-
     let (_cfg_dir, cfg_path) = write_livekit_config(&url);
     let config = DaemonConfig::load(&cfg_path).expect("daemon yaml");
     let room_slot = spawn_common_room_discovery(config);
 
+    // When
     wait_until_room_slot_populated(&room_slot, Duration::from_secs(60)).await;
-
     tokio::time::sleep(Duration::from_secs(12)).await;
 
+    // Then
     assert!(
         room_slot.read().await.is_some(),
         "room_slot cleared within 12s after initial fill — expect stable discovery (regression: set_metadata signaling timeout reconnect loop)"

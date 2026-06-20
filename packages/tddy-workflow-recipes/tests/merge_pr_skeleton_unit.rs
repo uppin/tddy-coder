@@ -11,9 +11,14 @@ const RED_SYNC_MSG: &str = "merge-pr RED skeleton: sync_feature_with_origin_main
 
 #[test]
 fn merge_pr_hooks_before_task_ok_for_analyze() {
+    // Given
     let h = MergePrWorkflowHooks::new(None);
     let ctx = Context::new();
+
+    // When
     h.before_task("analyze", &ctx).expect("before_task");
+
+    // Then
     let prompt = ctx
         .get_sync::<String>("system_prompt")
         .expect("system_prompt");
@@ -29,10 +34,14 @@ fn merge_pr_hooks_before_task_ok_for_analyze() {
 
 #[test]
 fn merge_pr_hooks_before_task_ok_for_sync_main_no_worktree() {
+    // Given
     let h = MergePrWorkflowHooks::new(None);
     let ctx = Context::new();
-    // sync-main without session_dir skips worktree setup but still sets prompt
+
+    // When — sync-main without session_dir skips worktree setup but still sets prompt
     h.before_task("sync-main", &ctx).expect("before_task");
+
+    // Then
     assert!(
         ctx.get_sync::<String>("system_prompt")
             .map(|p| p.contains("merge-pr") && p.contains("Merge"))
@@ -43,8 +52,11 @@ fn merge_pr_hooks_before_task_ok_for_sync_main_no_worktree() {
 
 #[test]
 fn merge_pr_git_sync_errors_without_session_worktree() {
+    // When
     let r = git_ops::sync_feature_with_origin_main(&MergePrGitConfig::default());
     let err = r.unwrap_err();
+
+    // Then
     assert!(
         !err.contains(RED_SYNC_MSG),
         "must not use RED skeleton message; got {err}"
@@ -57,19 +69,26 @@ fn merge_pr_git_sync_errors_without_session_worktree() {
 
 #[test]
 fn merge_pr_git_clean_tempdir_has_no_unmerged_paths() {
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
+
+    // When / Then — must not error
     git_ops::ensure_no_unmerged_paths(tmp.path()).expect("no unmerged paths in non-repo");
 }
 
 #[test]
 fn merge_pr_github_merge_errors_when_token_missing() {
+    // Given
     let prev_github = std::env::var("GITHUB_TOKEN").ok();
     let prev_gh = std::env::var("GH_TOKEN").ok();
     std::env::remove_var("GITHUB_TOKEN");
     std::env::remove_var("GH_TOKEN");
 
+    // When
     let r = github::merge_open_pr_for_branch(MergePrGithubParams::default());
     let err = r.unwrap_err();
+
+    // Then
     assert!(
         err.contains("GITHUB_TOKEN") || err.contains("GH_TOKEN") || err.contains("credential"),
         "expected missing credential message; got {err}"
@@ -85,13 +104,18 @@ fn merge_pr_github_merge_errors_when_token_missing() {
 
 #[test]
 fn merge_pr_git_sync_errors_when_path_not_a_git_repo() {
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     let cfg = MergePrGitConfig {
         session_worktree: Some(tmp.path().to_path_buf()),
         ..Default::default()
     };
+
+    // When
     let r = git_ops::sync_feature_with_origin_main(&cfg);
     let err = r.unwrap_err();
+
+    // Then
     assert!(
         !err.contains(RED_SYNC_MSG),
         "must not use RED skeleton; got {err}"
@@ -123,8 +147,8 @@ fn git_run(args: &[&str], cwd: &std::path::Path) {
 /// happens to be on.
 #[test]
 fn merge_pr_analyze_reads_changeset_branch_intent() {
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
-
     let bare = tmp.path().join("origin.git");
     let clone = tmp.path().join("work");
     git_run(&["init", "--bare", bare.to_str().unwrap()], tmp.path());
@@ -142,7 +166,6 @@ fn merge_pr_analyze_reads_changeset_branch_intent() {
     git_run(&["commit", "-m", "other"], &clone);
     git_run(&["push", "-u", "origin", "feature/other"], &clone);
     git_run(&["checkout", "master"], &clone);
-
     let session_dir = tmp.path().join("session");
     std::fs::create_dir_all(&session_dir).unwrap();
     let cs = Changeset {
@@ -156,18 +179,18 @@ fn merge_pr_analyze_reads_changeset_branch_intent() {
         ..Default::default()
     };
     write_changeset(&session_dir, &cs).expect("write changeset");
-
     let h = MergePrWorkflowHooks::new(None);
     let ctx = Context::new();
     ctx.set_sync("output_dir", clone.clone());
     ctx.set_sync("session_dir", session_dir);
 
+    // When
     h.before_task("analyze", &ctx).expect("before_task");
 
+    // Then
     let prompt = ctx
         .get_sync::<String>("system_prompt")
         .expect("system_prompt must be set");
-
     assert!(
         prompt.contains("feature/other"),
         "analyze system prompt must reference the intended branch from changeset \

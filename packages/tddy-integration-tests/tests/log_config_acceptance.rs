@@ -12,6 +12,7 @@ use tddy_core::{
 
 #[test]
 fn log_config_parses_from_yaml_with_all_selector_types() {
+    // Given
     let yaml = r#"
 loggers:
   default:
@@ -48,7 +49,11 @@ policies:
         message_contains: ".cc:"
     logger: muted
 "#;
+
+    // When
     let config: LogConfig = serde_yaml::from_str(yaml).expect("parse log config");
+
+    // Then
     assert_eq!(config.default.level, log::LevelFilter::Info);
     assert_eq!(config.default.logger, "default");
     assert_eq!(config.policies.len(), 4);
@@ -76,6 +81,7 @@ policies:
 #[test]
 #[serial]
 fn output_file_writes_log_to_path_with_target_in_format() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-log-config-file");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
@@ -105,6 +111,8 @@ fn output_file_writes_log_to_path_with_target_in_format() {
     log::debug!(target: "test_target", "file output message");
 
     let content = std::fs::read_to_string(&log_file).unwrap_or_default();
+
+    // Then
     assert!(content.contains("file output message"), "got: {}", content);
     assert!(
         content.contains("[test_target]"),
@@ -118,6 +126,7 @@ fn output_file_writes_log_to_path_with_target_in_format() {
 #[test]
 #[serial]
 fn output_mute_discards_logs() {
+    // Given
     let mut loggers = HashMap::new();
     loggers.insert(
         "default".to_string(),
@@ -143,6 +152,7 @@ fn output_mute_discards_logs() {
 #[test]
 #[serial]
 fn log_rotation_renames_existing_file_with_timestamp() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-log-rotation");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
@@ -182,6 +192,8 @@ fn log_rotation_renames_existing_file_with_timestamp() {
             s.starts_with("debug.") && s.ends_with(".log") && s != "debug.log"
         })
         .collect();
+
+    // Then
     assert_eq!(rotated.len(), 1, "should have one rotated file");
     let rotated_content = std::fs::read_to_string(rotated[0].path()).unwrap_or_default();
     assert!(rotated_content.contains("old content"));
@@ -195,6 +207,7 @@ fn log_rotation_renames_existing_file_with_timestamp() {
 #[test]
 #[serial]
 fn log_rotation_prunes_beyond_max_rotated() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-log-rotation-prune");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
@@ -241,6 +254,8 @@ fn log_rotation_prunes_beyond_max_rotated() {
             s.starts_with("x.") && s.ends_with(".log") && s != "x.log"
         })
         .count();
+
+    // Then
     assert!(
         rotated_count <= 3,
         "should keep at most 3 rotated files, got {}",
@@ -253,10 +268,13 @@ fn log_rotation_prunes_beyond_max_rotated() {
 #[test]
 #[serial]
 fn default_log_config_matches_current_behavior() {
+    // Given
     std::env::remove_var("TDDY_QUIET");
     std::env::remove_var("RUST_LOG");
 
     let config = default_log_config(None, None);
+
+    // Then
     assert_eq!(config.default.level, log::LevelFilter::Info);
     assert_eq!(config.default.logger, "default");
     let default_logger = config.loggers.get("default").unwrap();
@@ -270,15 +288,21 @@ fn default_log_config_matches_current_behavior() {
 #[test]
 #[serial]
 fn default_log_config_uses_tddy_quiet_buffer_when_set() {
+    // Given
     std::env::set_var("TDDY_QUIET", "1");
     let config = default_log_config(None, None);
     let default_logger = config.loggers.get("default").unwrap();
+
+    // Then
     assert!(matches!(default_logger.output, LogOutput::Buffer));
     std::env::remove_var("TDDY_QUIET");
 }
 
 #[test]
 fn default_log_config_respects_log_level_override() {
+    // Given
     let config = default_log_config(Some(log::LevelFilter::Trace), None);
+
+    // Then
     assert_eq!(config.default.level, log::LevelFilter::Trace);
 }

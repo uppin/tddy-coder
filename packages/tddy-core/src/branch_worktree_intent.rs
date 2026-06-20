@@ -168,7 +168,7 @@ mod tests {
     }
 
     #[test]
-    fn green_resolves_new_branch_from_base_to_named_branch() {
+    fn resolves_new_branch_from_base_to_named_branch() {
         let plan = resolve_branch_and_worktree_plan(&changeset_with_new_branch_intent())
             .expect("GREEN: intent resolves to a worktree branch plan");
         assert_eq!(plan.checkout_branch, "feature/custom-from-intent");

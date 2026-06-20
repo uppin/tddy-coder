@@ -10,17 +10,20 @@ use tddy_workflow_recipes::free_prompting::FreePromptingWorkflowHooks;
 
 #[test]
 fn free_prompting_hooks_wire_agent_output_sink_to_workflow_events() {
+    // Given
     let (tx, rx) = mpsc::channel::<WorkflowEvent>();
     let hooks = FreePromptingWorkflowHooks::new(Some(tx));
     let sink = hooks
         .agent_output_sink()
         .expect("free-prompting hooks must expose AgentOutputSink so assistant streaming reaches the activity pane");
+
+    // When
     sink.emit("streamed assistant fragment");
 
+    // Then
     let ev = rx
         .recv_timeout(Duration::from_secs(2))
         .expect("sink emit must deliver WorkflowEvent::AgentOutput to the presenter channel");
-
     assert!(
         matches!(ev, WorkflowEvent::AgentOutput(ref s) if s == "streamed assistant fragment"),
         "expected AgentOutput with streamed text, got {:?}",

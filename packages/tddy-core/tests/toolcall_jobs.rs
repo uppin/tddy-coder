@@ -46,7 +46,10 @@ input_schema:
 /// PRD: registry loads under the session dir and supports terminal transitions (`running → completed`, etc.).
 #[test]
 fn job_registry_round_trip_load_and_terminal_transition() {
+    // Given
     let session = unique_jobs_session_root("registry");
+
+    // When / Then
     SessionActionJobRegistry::load(session.as_path())
         .expect("job registry load must succeed and return a typed handle");
 }
@@ -54,7 +57,10 @@ fn job_registry_round_trip_load_and_terminal_transition() {
 /// PRD §2 (unit slice): timeout bookkeeping yields deterministic bounded waits (no flaky long sleeps).
 #[test]
 fn job_registry_timeout_bookkeeping_exposes_bounded_wait_deadline() {
+    // Given
     let session = unique_jobs_session_root("timeout_bookkeeping");
+
+    // When / Then
     SessionActionJobRegistry::load(session.as_path())
         .expect("registry must initialize timeout metadata for bounded wait operations");
 }
@@ -62,8 +68,11 @@ fn job_registry_timeout_bookkeeping_exposes_bounded_wait_deadline() {
 /// Green: blocking invoke returns `Ok(Blocking(Record { exit_code: … }))` after subprocess terminal state.
 #[test]
 fn invoke_blocking_returns_ok_with_exit_code_payload() {
+    // Given
     let session = unique_jobs_session_root("invoke_blocking_unit");
     write_fixture_unit_action(&session);
+
+    // When
     let outcome = invoke_session_action(
         session.as_path(),
         None,
@@ -73,12 +82,10 @@ fn invoke_blocking_returns_ok_with_exit_code_payload() {
     )
     .expect("blocking invoke must succeed with structured terminal record");
 
+    // Then
     match outcome {
         SessionActionInvokeOutcome::Blocking(BlockingOutcomeBody::Record(v)) => {
-            assert!(
-                v.get("exit_code").is_some(),
-                "record must expose exit_code for agent parity; got {v}"
-            );
+            assert!(v.get("exit_code").is_some(), "record must expose exit_code for agent parity; got {v}");
         }
         other => panic!("expected blocking record outcome; got {other:?}"),
     }
@@ -87,6 +94,7 @@ fn invoke_blocking_returns_ok_with_exit_code_payload() {
 /// Green: `wait(job_id, None)` resolves to a completed/failed terminal disposition (not `NotImplemented`).
 #[test]
 fn wait_without_timeout_returns_completed_disposition() {
+    // Given
     let session = unique_jobs_session_root("wait_unit");
     write_fixture_unit_action(&session);
     let job_id = match invoke_session_action(
@@ -101,14 +109,14 @@ fn wait_without_timeout_returns_completed_disposition() {
         SessionActionInvokeOutcome::AsyncStarted(b) => b.job_id,
         other => panic!("expected AsyncStarted; got {other:?}"),
     };
+
+    // When
     let out = wait_session_action_job(session.as_path(), &job_id, None)
         .expect("wait API must surface terminal disposition once jobs run");
 
+    // Then
     assert!(
-        matches!(
-            out,
-            SessionActionWaitOutcome::Completed { .. } | SessionActionWaitOutcome::Failed { .. }
-        ),
+        matches!(out, SessionActionWaitOutcome::Completed { .. } | SessionActionWaitOutcome::Failed { .. }),
         "unbounded wait must end in Completed or Failed; got {out:?}"
     );
 }
@@ -116,8 +124,13 @@ fn wait_without_timeout_returns_completed_disposition() {
 /// Green: unknown job id on `stop` maps to [`SessionActionJobsError::UnknownJob`] (stable `unknown_job` code).
 #[test]
 fn stop_unknown_job_id_returns_structured_unknown_job_error() {
+    // Given
     let session = unique_jobs_session_root("stop_unknown_unit");
+
+    // When
     let err = stop_session_action_job(session.as_path(), "not-a-registered-job").unwrap_err();
+
+    // Then
     assert!(
         matches!(err, SessionActionJobsError::UnknownJob(_)),
         "expected UnknownJob for unregistered id; got {err:?}"

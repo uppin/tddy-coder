@@ -2,86 +2,20 @@
 //!
 //! These verify filesystem-safe deletion: inactive sessions, and active sessions after the
 //! daemon terminates the recorded PID (SIGTERM then SIGKILL).
-//!
-use std::path::PathBuf;
-use std::sync::Arc;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::SessionMetadata;
-use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, DeleteSessionRequest,
 };
-
-type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
-type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
-
-fn test_config() -> DaemonConfig {
-    let yaml = r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
-"#;
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.yaml");
-    std::fs::write(&path, yaml).unwrap();
-    DaemonConfig::load(&path).unwrap()
-}
-
-fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
-    let config = test_config();
-    let sessions_base_resolver: SessionsBaseResolver =
-        Arc::new(move |_| Some(sessions_base.clone()));
-    let user_resolver: UserResolver = Arc::new(|token| {
-        if token == "valid-token" {
-            Some("testuser".to_string())
-        } else {
-            None
-        }
-    });
-    ConnectionServiceImpl::new(
-        config,
-        sessions_base_resolver,
-        user_resolver,
-        None,
-        None,
-        None,
-        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
-    )
-}
-
-fn write_session_yaml(session_dir: &std::path::Path, pid: u32) {
-    let session_id = session_dir
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
-    let metadata = SessionMetadata {
-        session_id,
-        project_id: "proj-1".to_string(),
-        created_at: "2026-03-21T10:00:00Z".to_string(),
-        updated_at: "2026-03-21T10:00:00Z".to_string(),
-        status: "active".to_string(),
-        repo_path: Some("/tmp".to_string()),
-        pid: Some(pid),
-        tool: Some("test-tool".to_string()),
-        livekit_room: Some("test-room".to_string()),
-        pending_elicitation: false,
-        previous_session_id: None,
-        session_type: None,
-        model: None,
-        activity_status: None,
-        hook_token: None,
-    };
-    tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
-}
+use tddy_testing_commons::builders::a_session_metadata;
+use tddy_testing_commons::fs::write_session_yaml;
 
 /// Acceptance: DeleteSession removes the on-disk session directory when the session is inactive.
 #[tokio::test]
-async fn daemon_delete_removes_inactive_session_directory() {
+async fn removes_inactive_session_directory() {
+    // Given
     let mut child = std::process::Command::new("true")
         .spawn()
         .expect("spawn true");
@@ -92,25 +26,37 @@ async fn daemon_delete_removes_inactive_session_directory() {
     let sessions_base = temp.path().to_path_buf();
     let session_dir = unified_session_dir_path(&sessions_base, "inactive-delete-me");
     std::fs::create_dir_all(&session_dir).unwrap();
-    write_session_yaml(&session_dir, pid);
+    let metadata = a_session_metadata()
+        .with_session_id("inactive-delete-me")
+        .with_pid(pid)
+        .with_repo_path("/tmp")
+        .with_tool("test-tool")
+        .with_livekit_room("test-room")
+        .build();
+    write_session_yaml(&session_dir, &metadata);
 
     let service = test_service(sessions_base);
+
+    // When
     let request = Request::new(DeleteSessionRequest {
-        session_token: "valid-token".to_string(),
+        session_token: TEST_TOKEN.to_string(),
         session_id: "inactive-delete-me".to_string(),
     });
     let response = service
         .delete_session(request)
         .await
         .expect("DeleteSession should succeed for an inactive session");
+
+    // Then
     assert!(response.into_inner().ok);
     assert!(
         !session_dir.exists(),
         "session directory should be removed after successful delete"
     );
 
+    // Second delete should fail — session is gone from this daemon
     let second = Request::new(DeleteSessionRequest {
-        session_token: "valid-token".to_string(),
+        session_token: TEST_TOKEN.to_string(),
         session_id: "inactive-delete-me".to_string(),
     });
     let repeat = service.delete_session(second).await;
@@ -128,7 +74,8 @@ async fn daemon_delete_removes_inactive_session_directory() {
 /// Acceptance: DeleteSession terminates a live PID then removes the session directory.
 #[cfg(unix)]
 #[tokio::test]
-async fn daemon_delete_terminates_active_session_then_removes_directory() {
+async fn terminates_active_session_then_removes_directory() {
+    // Given
     let mut child = std::process::Command::new("sleep")
         .arg("60")
         .spawn()
@@ -139,17 +86,28 @@ async fn daemon_delete_terminates_active_session_then_removes_directory() {
     let sessions_base = temp.path().to_path_buf();
     let session_dir = unified_session_dir_path(&sessions_base, "active-delete-me");
     std::fs::create_dir_all(&session_dir).unwrap();
-    write_session_yaml(&session_dir, pid);
+    let metadata = a_session_metadata()
+        .with_session_id("active-delete-me")
+        .with_pid(pid)
+        .with_repo_path("/tmp")
+        .with_tool("test-tool")
+        .with_livekit_room("test-room")
+        .build();
+    write_session_yaml(&session_dir, &metadata);
 
-    let service = test_service(sessions_base.clone());
+    let service = test_service(sessions_base);
+
+    // When
     let request = Request::new(DeleteSessionRequest {
-        session_token: "valid-token".to_string(),
+        session_token: TEST_TOKEN.to_string(),
         session_id: "active-delete-me".to_string(),
     });
     let response = service
         .delete_session(request)
         .await
         .expect("DeleteSession should terminate the process and remove the directory");
+
+    // Then
     assert!(response.into_inner().ok);
     assert!(
         !session_dir.exists(),

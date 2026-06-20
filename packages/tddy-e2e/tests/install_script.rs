@@ -32,42 +32,75 @@ fn read_install() -> String {
 /// `bash -n` must accept `install`.
 #[test]
 fn install_bash_syntax() {
-    verify_syntax(&install_path());
+    // Given
+    let path = install_path();
+
+    // When / Then
+    verify_syntax(&path);
 }
 
 #[test]
 fn install_requires_systemd_flag() {
-    verify_requires_systemd_flag(&read_install());
+    // Given
+    let script = read_install();
+
+    // When / Then
+    verify_requires_systemd_flag(&script);
 }
 
 #[test]
 fn install_respects_env_overrides() {
-    verify_env_override_references(&read_install());
+    // Given
+    let script = read_install();
+
+    // When / Then
+    verify_env_override_references(&script);
 }
 
 #[test]
 fn install_has_root_check() {
-    verify_root_check(&read_install());
+    // Given
+    let script = read_install();
+
+    // When / Then
+    verify_root_check(&script);
 }
 
 #[test]
 fn install_overwrite_systemd_unit_documented() {
-    verify_install_overwrite_systemd_unit(&read_install());
+    // Given
+    let script = read_install();
+
+    // When / Then
+    verify_install_overwrite_systemd_unit(&script);
 }
 
 #[test]
 fn install_no_systemctl_support() {
-    verify_no_systemctl_support(&read_install());
+    // Given
+    let script = read_install();
+
+    // When / Then
+    verify_no_systemctl_support(&script);
 }
 
 #[test]
 fn install_build_flag_accepted() {
-    verify_build_flag_invokes_release(&read_install());
+    // Given
+    let script = read_install();
+
+    // When / Then
+    verify_build_flag_invokes_release(&script);
 }
 
 #[test]
 fn install_full_contract_orchestration() {
-    verify_install_script_contracts(&install_path(), &daemon_yaml_production_path());
+    // Given
+    let path = install_path();
+    let yaml = daemon_yaml_production_path();
+
+    // When / Then
+    verify_install_script_contracts(&path, &yaml);
 }
 
 fn copy_install_tree(dest: &Path) {
@@ -163,17 +196,18 @@ fn run_install_in(root: &Path, env: &[(&str, &str)]) -> std::process::ExitStatus
 
 #[test]
 fn install_copies_binaries_to_custom_dir() {
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     copy_install_tree(root);
     write_fake_release_binaries(root);
     write_fake_codex_acp_native(root);
-
     let bin_dir = root.join("custom-bin");
     let cfg_dir = root.join("custom-etc");
     let sys_dir = root.join("custom-systemd");
     let web_dir = root.join("custom-web");
 
+    // When
     let st = run_install_in(
         root,
         &[
@@ -184,18 +218,15 @@ fn install_copies_binaries_to_custom_dir() {
             ("INSTALL_WEB_BUNDLE_DIR", web_dir.to_str().unwrap()),
         ],
     );
-    assert!(
-        st.success(),
-        "install should succeed with test env; got {st:?}"
-    );
 
+    // Then
+    assert!(st.success(), "install should succeed with test env; got {st:?}");
     for name in ["tddy-daemon", "tddy-coder", "tddy-tools"] {
         let p = bin_dir.join(name);
         assert!(p.is_file(), "expected {} installed", p.display());
         let body = fs::read_to_string(&p).unwrap();
         assert_eq!(body, "fake-binary\n");
     }
-
     if codex_acp_platform_pkg_dir().is_some() {
         let cap = bin_dir.join("codex-acp");
         assert!(cap.is_file(), "expected {} installed", cap.display());
@@ -206,17 +237,16 @@ fn install_copies_binaries_to_custom_dir() {
 
 #[test]
 fn install_creates_config_only_if_absent() {
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     copy_install_tree(root);
     write_fake_release_binaries(root);
     write_fake_codex_acp_native(root);
-
     let bin_dir = root.join("b");
     let cfg_dir = root.join("c");
     let sys_dir = root.join("s");
     let web_dir = root.join("w");
-
     let env = [
         ("INSTALL_NO_SYSTEMCTL", "1"),
         ("INSTALL_BIN_DIR", bin_dir.to_str().unwrap()),
@@ -225,36 +255,41 @@ fn install_creates_config_only_if_absent() {
         ("INSTALL_WEB_BUNDLE_DIR", web_dir.to_str().unwrap()),
     ];
 
+    // When — first install
     let st = run_install_in(root, &env);
+
+    // Then — config is created
     assert!(st.success(), "first install: {st:?}");
     let cfg = cfg_dir.join("daemon.yaml");
     let first = fs::read_to_string(&cfg).unwrap();
-    assert!(first.contains(bin_dir.to_str().unwrap()));
+    assert!(first.contains(bin_dir.to_str().unwrap()), "config must reference bin_dir");
 
+    // Given — pre-existing custom config
     fs::write(&cfg, "custom: preserved\n").unwrap();
 
+    // When — second install
     let st2 = run_install_in(root, &env);
+
+    // Then — custom config is preserved
     assert!(st2.success(), "second install: {st2:?}");
     let after = fs::read_to_string(&cfg).unwrap();
-    assert_eq!(
-        after, "custom: preserved\n",
-        "config must not be overwritten"
-    );
+    assert_eq!(after, "custom: preserved\n", "config must not be overwritten");
 }
 
 #[test]
 fn install_generates_unit_with_correct_paths() {
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     copy_install_tree(root);
     write_fake_release_binaries(root);
     write_fake_codex_acp_native(root);
-
     let bin_dir = root.join("mybin");
     let cfg_dir = root.join("mycfg");
     let sys_dir = root.join("mysystemd");
     let web_dir = root.join("myweb");
 
+    // When
     let st = run_install_in(
         root,
         &[
@@ -265,8 +300,9 @@ fn install_generates_unit_with_correct_paths() {
             ("INSTALL_WEB_BUNDLE_DIR", web_dir.to_str().unwrap()),
         ],
     );
-    assert!(st.success(), "install: {st:?}");
 
+    // Then
+    assert!(st.success(), "install: {st:?}");
     let unit = fs::read_to_string(sys_dir.join("tddy-daemon.service")).unwrap();
     let cfg_file = cfg_dir.join("daemon.yaml");
     let want_exec = format!(
@@ -274,25 +310,21 @@ fn install_generates_unit_with_correct_paths() {
         bin_dir.display(),
         cfg_file.display()
     );
-    assert!(
-        unit.contains(&want_exec),
-        "unit file missing expected ExecStart line.\nGot:\n{unit}"
-    );
+    assert!(unit.contains(&want_exec), "unit file missing expected ExecStart line.\nGot:\n{unit}");
 }
 
 #[test]
 fn install_preserves_systemd_unit_unless_overwrite_env() {
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     copy_install_tree(root);
     write_fake_release_binaries(root);
     write_fake_codex_acp_native(root);
-
     let bin_dir = root.join("bin");
     let cfg_dir = root.join("etc");
     let sys_dir = root.join("systemd");
     let web_dir = root.join("web");
-
     let base_env = [
         ("INSTALL_NO_SYSTEMCTL", "1"),
         ("INSTALL_BIN_DIR", bin_dir.to_str().unwrap()),
@@ -301,60 +333,53 @@ fn install_preserves_systemd_unit_unless_overwrite_env() {
         ("INSTALL_WEB_BUNDLE_DIR", web_dir.to_str().unwrap()),
     ];
 
+    // When — first install creates the unit
     let st = run_install_in(root, &base_env);
-    assert!(st.success(), "first install: {st:?}");
 
+    // Then — unit is created; add a custom marker
+    assert!(st.success(), "first install: {st:?}");
     let unit_path = sys_dir.join("tddy-daemon.service");
     let mut unit = fs::read_to_string(&unit_path).unwrap();
-    assert!(
-        !unit.contains("User=preserve_test"),
-        "template should not contain marker yet"
-    );
+    assert!(!unit.contains("User=preserve_test"), "template should not contain marker yet");
     unit.push_str("\nUser=preserve_test\n");
     fs::write(&unit_path, &unit).unwrap();
 
+    // When — second install without overwrite flag
     let st2 = run_install_in(root, &base_env);
+
+    // Then — unit is preserved
     assert!(st2.success(), "second install: {st2:?}");
     let after = fs::read_to_string(&unit_path).unwrap();
-    assert!(
-        after.contains("User=preserve_test"),
-        "unit must not be overwritten on reinstall; got:\n{after}"
-    );
+    assert!(after.contains("User=preserve_test"), "unit must not be overwritten on reinstall; got:\n{after}");
 
+    // When — third install with INSTALL_OVERWRITE_SYSTEMD_UNIT=1
     let mut env_overwrite: Vec<(&str, &str)> = base_env.to_vec();
     env_overwrite.push(("INSTALL_OVERWRITE_SYSTEMD_UNIT", "1"));
     let st3 = run_install_in(root, &env_overwrite);
+
+    // Then — unit is replaced
     assert!(st3.success(), "third install with overwrite: {st3:?}");
     let final_unit = fs::read_to_string(&unit_path).unwrap();
-    assert!(
-        !final_unit.contains("User=preserve_test"),
-        "INSTALL_OVERWRITE_SYSTEMD_UNIT=1 should replace unit; got:\n{final_unit}"
-    );
+    assert!(!final_unit.contains("User=preserve_test"), "INSTALL_OVERWRITE_SYSTEMD_UNIT=1 should replace unit; got:\n{final_unit}");
     let cfg_file = cfg_dir.join("daemon.yaml");
-    let want_exec = format!(
-        "ExecStart={}/tddy-daemon -c {}",
-        bin_dir.display(),
-        cfg_file.display()
-    );
-    assert!(
-        final_unit.contains(&want_exec),
-        "fresh unit should contain ExecStart; got:\n{final_unit}"
-    );
+    let want_exec = format!("ExecStart={}/tddy-daemon -c {}", bin_dir.display(), cfg_file.display());
+    assert!(final_unit.contains(&want_exec), "fresh unit should contain ExecStart; got:\n{final_unit}");
 }
 
 #[test]
 fn install_fails_without_binaries() {
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     copy_install_tree(root);
     let rel = root.join("target").join("release");
     fs::create_dir_all(&rel).unwrap();
 
+    // When
     let st = run_install_in(root, &[("INSTALL_NO_SYSTEMCTL", "1")]);
-    assert!(
-        !st.success(),
-        "install should fail when release binaries are missing"
-    );
+
+    // Then
+    assert!(!st.success(), "install should fail when release binaries are missing");
 }
 
 #[test]
@@ -362,11 +387,12 @@ fn install_succeeds_without_codex_acp_native_when_not_required() {
     let Some(_) = codex_acp_platform_pkg_dir() else {
         return;
     };
+
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     copy_install_tree(root);
     write_fake_release_binaries(root);
-
     let bin_dir = root.join("bin");
     let cfg_dir = root.join("etc");
     let sys_dir = root.join("systemd");
@@ -376,6 +402,7 @@ fn install_succeeds_without_codex_acp_native_when_not_required() {
     fs::create_dir_all(&sys_dir).unwrap();
     fs::create_dir_all(&web_dir).unwrap();
 
+    // When
     let st = run_install_in(
         root,
         &[
@@ -386,10 +413,9 @@ fn install_succeeds_without_codex_acp_native_when_not_required() {
             ("INSTALL_WEB_BUNDLE_DIR", web_dir.to_str().unwrap()),
         ],
     );
-    assert!(
-        st.success(),
-        "install should succeed when codex-acp is not required and node_modules native is absent; got {st:?}"
-    );
+
+    // Then
+    assert!(st.success(), "install should succeed when codex-acp is not required and node_modules native is absent; got {st:?}");
 }
 
 #[test]
@@ -397,11 +423,12 @@ fn install_fails_when_config_lists_codex_acp_without_native() {
     let Some(_) = codex_acp_platform_pkg_dir() else {
         return;
     };
+
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     copy_install_tree(root);
     write_fake_release_binaries(root);
-
     let cfg_dir = root.join("custom-etc");
     fs::create_dir_all(&cfg_dir).unwrap();
     fs::write(
@@ -410,6 +437,7 @@ fn install_fails_when_config_lists_codex_acp_without_native() {
     )
     .unwrap();
 
+    // When
     let st = run_install_in(
         root,
         &[
@@ -417,10 +445,9 @@ fn install_fails_when_config_lists_codex_acp_without_native() {
             ("INSTALL_CONFIG_DIR", cfg_dir.to_str().unwrap()),
         ],
     );
-    assert!(
-        !st.success(),
-        "install should fail when allowed_agents lists codex-acp but native package is missing"
-    );
+
+    // Then
+    assert!(!st.success(), "install should fail when allowed_agents lists codex-acp but native package is missing");
 }
 
 #[test]
@@ -428,11 +455,14 @@ fn install_fails_when_install_bundle_codex_acp_without_native() {
     let Some(_) = codex_acp_platform_pkg_dir() else {
         return;
     };
+
+    // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     copy_install_tree(root);
     write_fake_release_binaries(root);
 
+    // When
     let st = run_install_in(
         root,
         &[
@@ -440,8 +470,7 @@ fn install_fails_when_install_bundle_codex_acp_without_native() {
             ("INSTALL_BUNDLE_CODEX_ACP", "1"),
         ],
     );
-    assert!(
-        !st.success(),
-        "install should fail when INSTALL_BUNDLE_CODEX_ACP=1 but native package is missing"
-    );
+
+    // Then
+    assert!(!st.success(), "install should fail when INSTALL_BUNDLE_CODEX_ACP=1 but native package is missing");
 }

@@ -9,6 +9,7 @@ use url::Url;
 
 #[tokio::test]
 async fn browser_capture_emits_session_scoped_authorize_url() {
+    // Given
     let session = "7b3e2f10-0000-7000-8000-000000000001";
     let argv = vec![
         "tddy-browser-hook".into(),
@@ -18,6 +19,8 @@ async fn browser_capture_emits_session_scoped_authorize_url() {
         .await
         .expect("BROWSER hook must emit structured capture with HTTPS authorize URL");
 
+
+    // Then
     assert_eq!(cap.session_id, session);
     let parsed = Url::parse(&cap.authorize_url).expect("authorize URL must parse");
     assert_eq!(parsed.scheme(), "https");
@@ -32,6 +35,7 @@ async fn browser_capture_emits_session_scoped_authorize_url() {
 
 #[tokio::test]
 async fn callback_relay_completes_handshake_for_mock_codex_listener() {
+    // Given
     let callback =
         Url::parse("http://127.0.0.1:54321/oauth/callback?code=mock-code&state=mock-state")
             .expect("callback URL");
@@ -39,6 +43,8 @@ async fn callback_relay_completes_handshake_for_mock_codex_listener() {
         .await
         .expect("callback must be delivered once to the session-registered Codex listener");
 
+
+    // Then
     assert_eq!(delivery.session_id, "sess-mock-1");
     assert_eq!(
         delivery.query.get("code").map(String::as_str),
@@ -52,6 +58,7 @@ async fn callback_relay_completes_handshake_for_mock_codex_listener() {
 
 #[test]
 fn capture_validation_enforces_https_scheme_allowlisted_host_and_session_correlation() {
+    // Given
     let authorize = Url::parse("https://auth.openai.com/oauth/authorize?state=st").unwrap();
     let allowlist = CodexOAuthHostAllowlist::default();
     validate_codex_oauth_authorize_url(

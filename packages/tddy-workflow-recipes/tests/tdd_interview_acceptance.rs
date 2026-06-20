@@ -15,7 +15,15 @@ use tddy_workflow_recipes::TddRecipe;
 
 #[test]
 fn tdd_recipe_start_goal_is_interview() {
+    // Given
     let recipe = TddRecipe;
+    let ids: Vec<String> = recipe
+        .goal_ids()
+        .into_iter()
+        .map(|g| g.to_string())
+        .collect();
+
+    // Then
     assert_eq!(
         recipe.initial_state().as_str(),
         "Interview",
@@ -26,36 +34,28 @@ fn tdd_recipe_start_goal_is_interview() {
         GoalId::new("interview"),
         "TDD workflow entry goal must be interview (before plan)"
     );
-    let ids: Vec<String> = recipe
-        .goal_ids()
-        .into_iter()
-        .map(|g| g.to_string())
-        .collect();
     assert_eq!(
         ids.first().map(String::as_str),
         Some("interview"),
         "goal_ids must list interview first"
     );
-    assert!(
-        ids.contains(&"interview".to_string()) && ids.contains(&"plan".to_string()),
-        "goal_ids must include both interview and plan"
-    );
+    assert!(ids.contains(&"interview".to_string()), "goal_ids must include interview");
+    assert!(ids.contains(&"plan".to_string()), "goal_ids must include plan");
 }
 
 #[test]
 fn tdd_interview_goal_hints_and_submit_policy() {
+    // Given
     let recipe = TddRecipe;
     let gid = GoalId::new("interview");
+
+    // When
     let hints = recipe.goal_hints(&gid);
-    assert!(
-        hints.is_some(),
-        "TddRecipe must expose GoalHints for interview (elicitation step)"
-    );
-    let h = hints.expect("checked");
-    assert!(
-        h.agent_output,
-        "interview should surface agent output (grill-me-style elicitation)"
-    );
+
+    // Then
+    assert!(hints.is_some(), "TddRecipe must expose GoalHints for interview (elicitation step)");
+    let h = hints.expect("checked above");
+    assert!(h.agent_output, "interview should surface agent output (grill-me-style elicitation)");
     assert_eq!(
         h.permission,
         PermissionHint::ReadOnly,
@@ -71,6 +71,7 @@ fn tdd_interview_goal_hints_and_submit_policy() {
 async fn tdd_interview_handoff_populates_plan_context() {
     const HANDOFF_MARKER: &str = "TDD_INTERVIEW_HANDOFF_CANNED_ANSWER_XYZZY";
 
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok_without_submit("interview turn complete");
     let plan_json = r##"{"goal":"plan","prd":"# PRD\n\n## TODO\n\n- [ ] Task","todo_items":[{"id":"1","title":"Task","done":false}]}"##;
@@ -78,11 +79,7 @@ async fn tdd_interview_handoff_populates_plan_context() {
 
     let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddRecipe);
     let graph = Arc::new(build_tdd_workflow_graph(backend.clone(), recipe.clone()));
-
-    assert!(
-        graph.get_task("interview").is_some(),
-        "graph must include interview before handoff can be verified"
-    );
+    assert!(graph.get_task("interview").is_some(), "graph must include interview task");
 
     let hooks = recipe.create_hooks(None);
     let dir = std::env::temp_dir().join(format!("tdd-interview-handoff-{}", std::process::id()));
@@ -94,31 +91,22 @@ async fn tdd_interview_handoff_populates_plan_context() {
     std::fs::create_dir_all(&repo).expect("repo root");
     let session_base = dir.join("session_base");
     let session_dir = create_session_dir_in(&session_base).expect("session dir");
-    let init_cs = Changeset {
-        initial_prompt: Some("feature blurb SKIP_QUESTIONS".to_string()),
-        ..Changeset::default()
-    };
+    let init_cs = Changeset { initial_prompt: Some("feature blurb SKIP_QUESTIONS".to_string()), ..Changeset::default() };
     let _ = write_changeset(&session_dir, &init_cs);
 
-    let session = Session::new_from_task(
-        "handoff1".to_string(),
-        "tdd_workflow".to_string(),
-        "interview".to_string(),
-    );
-    session
-        .context
-        .set_sync("feature_input", "feature blurb SKIP_QUESTIONS".to_string());
+    let session = Session::new_from_task("handoff1".to_string(), "tdd_workflow".to_string(), "interview".to_string());
+    session.context.set_sync("feature_input", "feature blurb SKIP_QUESTIONS".to_string());
     session.context.set_sync("output_dir", repo);
     session.context.set_sync("session_dir", session_dir.clone());
-    session
-        .context
-        .set_sync("answers", HANDOFF_MARKER.to_string());
-
+    session.context.set_sync("answers", HANDOFF_MARKER.to_string());
     storage.save(&session).await.expect("save session");
 
     let runner = FlowRunner::new_with_hooks(graph, storage.clone(), Some(hooks));
 
+    // When
     let r1 = runner.run("handoff1").await.expect("run interview");
+
+    // Then
     assert_eq!(
         r1.current_task_id,
         Some("plan".to_string()),
@@ -126,7 +114,6 @@ async fn tdd_interview_handoff_populates_plan_context() {
     );
 
     let _r2 = runner.run("handoff1").await.expect("run plan");
-
     let invocations = backend.invocations();
     let plan_invoke = invocations
         .iter()

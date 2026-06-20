@@ -23,7 +23,10 @@ fn classify_source_path_rust_test_vs_prod() {
 /// When `source_file` points at a test-only path, red output must be rejected with a clear error.
 #[test]
 fn parse_red_response_rejects_marker_when_source_is_test_file() {
+    // Given
     let json = include_str!("fixtures/invalid/red_marker_source_in_tests_tree.json");
+
+    // When / Then
     let err =
         parse_red_response(json).expect_err("marker in tests/ must not parse as valid red output");
     let msg = err.to_string();
@@ -36,7 +39,12 @@ fn parse_red_response_rejects_marker_when_source_is_test_file() {
 /// Valid red JSON with markers only on production paths parses and passes placement validation.
 #[test]
 fn valid_red_json_markers_on_production_paths_only() {
+    // Given
     let json = include_str!("fixtures/valid/red_production_only_markers.json");
+
+    // When
     let output = parse_red_response(json).expect("valid production-only fixture should parse");
+
+    // Then
     validate_red_marker_source_paths(&output).expect("production-only markers should validate");
 }

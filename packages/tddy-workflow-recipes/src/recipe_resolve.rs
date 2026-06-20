@@ -117,18 +117,24 @@ mod tests {
 
     #[test]
     fn resolved_recipes_are_distinct_by_name() {
+        // When
         let (bugfix, _) =
             workflow_recipe_and_manifest_from_cli_name("bugfix").expect("resolve bugfix");
         let (tdd, _) = workflow_recipe_and_manifest_from_cli_name("tdd").expect("resolve tdd");
+
+        // Then
         assert_ne!(bugfix.name(), tdd.name());
     }
 
     #[test]
     fn resolver_matches_free_function_for_tdd() {
+        // When
         let a = resolve_workflow_recipe_from_cli_name("tdd").expect("tdd");
         let b = workflow_recipe_and_manifest_from_cli_name("tdd")
             .expect("pair")
             .0;
+
+        // Then
         assert_eq!(a.name(), b.name());
         let ga = a.start_goal();
         let gb = b.start_goal();
@@ -137,21 +143,30 @@ mod tests {
 
     #[test]
     fn manifest_matches_recipe_for_tdd() {
+        // When
         let (recipe, manifest) = workflow_recipe_and_manifest_from_cli_name("tdd").expect("tdd");
+
+        // Then
         assert_eq!(recipe.name(), "tdd");
         assert!(!manifest.known_artifacts().is_empty());
     }
 
     #[test]
     fn resolver_resolves_free_prompting() {
+        // When
         let (r, _) = workflow_recipe_and_manifest_from_cli_name("free-prompting").expect("resolve");
+
+        // Then
         assert_eq!(r.name(), "free-prompting");
         assert_eq!(r.start_goal().as_str(), "prompting");
     }
 
     #[test]
     fn resolver_resolves_grill_me() {
+        // When
         let (r, _) = workflow_recipe_and_manifest_from_cli_name("grill-me").expect("resolve");
+
+        // Then
         assert_eq!(r.name(), "grill-me");
         assert_eq!(r.start_goal().as_str(), "grill");
     }

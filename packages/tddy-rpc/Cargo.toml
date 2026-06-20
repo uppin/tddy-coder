@@ -17,3 +17,7 @@ tonic = { version = "0.11", optional = true }
 [features]
 default = []
 tonic = ["dep:tonic"]
+
+[dev-dependencies]
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }

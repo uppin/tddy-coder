@@ -8,12 +8,17 @@ use tddy_core::{CodingBackend, MockBackend};
 
 #[tokio::test]
 async fn mock_backend_invoke_is_async() {
+    // Given
     let backend = MockBackend::new();
     backend.push_ok("test output");
 
     let req = common::stub_invoke_request("test", "plan");
 
+
+    // When
     let result = backend.invoke(req).await;
+
+    // Then
     assert!(result.is_ok());
     let resp = result.unwrap();
     assert_eq!(resp.output, "test output");

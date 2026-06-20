@@ -37,6 +37,7 @@ const UPDATE_DOCS_OUTPUT: &str =
 /// evaluate() invokes backend with Goal::Evaluate (renamed from Goal::Validate).
 #[tokio::test]
 async fn evaluate_workflow_invokes_backend_with_evaluate_goal() {
+    // Given
     let working_dir = std::env::temp_dir().join("tddy-evaluate-goal-test");
     let session_dir = std::env::temp_dir().join("tddy-evaluate-goal-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -54,8 +55,11 @@ async fn evaluate_workflow_invokes_backend_with_evaluate_goal() {
 
     let ctx = ctx_evaluate(session_dir.clone(), Some(working_dir.clone()));
     let eval_gid = GoalId::new("evaluate");
+
+    // When
     let result = engine.run_goal(&eval_gid, ctx).await;
 
+    // Then
     assert!(result.is_ok(), "evaluate should succeed, got: {:?}", result);
 
     let invocations = backend.invocations();
@@ -74,6 +78,7 @@ async fn evaluate_workflow_invokes_backend_with_evaluate_goal() {
 /// evaluate() transitions workflow to Evaluated state on success.
 #[tokio::test]
 async fn evaluate_workflow_transitions_to_evaluated_state() {
+    // Given
     let working_dir = std::env::temp_dir().join("tddy-evaluate-state-test");
     let session_dir = std::env::temp_dir().join("tddy-evaluate-state-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -91,8 +96,11 @@ async fn evaluate_workflow_transitions_to_evaluated_state() {
 
     let ctx = ctx_evaluate(session_dir.clone(), Some(working_dir.clone()));
     let eval_gid = GoalId::new("evaluate");
+
+    // When
     let _ = engine.run_goal(&eval_gid, ctx).await.unwrap();
 
+    // Then
     let changeset = read_changeset(&session_dir).expect("changeset");
     assert_eq!(
         changeset.state.current,
@@ -108,6 +116,7 @@ async fn evaluate_workflow_transitions_to_evaluated_state() {
 /// evaluate() writes evaluation-report.md to session_dir, NOT to working_dir.
 #[tokio::test]
 async fn evaluate_workflow_writes_evaluation_report_to_session_dir() {
+    // Given
     let working_dir = std::env::temp_dir().join("tddy-evaluate-writes-working");
     let session_dir = std::env::temp_dir().join("tddy-evaluate-writes-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -127,8 +136,11 @@ async fn evaluate_workflow_writes_evaluation_report_to_session_dir() {
     let engine = common::tdd_engine(SharedBackend::from_arc(backend), storage_dir);
 
     let ctx = ctx_evaluate(session_dir.clone(), Some(working_dir.clone()));
+
+    // When
     let _ = run_goal_until_done(&engine, "evaluate", ctx).await.unwrap();
 
+    // Then
     let report_in_plan = session_dir.join("evaluation-report.md");
     assert!(
         report_in_plan.exists(),
@@ -155,6 +167,7 @@ async fn evaluate_workflow_writes_evaluation_report_to_session_dir() {
 /// evaluate() without session_dir returns an error (session_dir is required).
 #[tokio::test]
 async fn evaluate_workflow_requires_session_dir() {
+    // Given
     let working_dir = std::env::temp_dir().join("tddy-evaluate-no-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
     std::fs::create_dir_all(&working_dir).expect("create working dir");
@@ -167,8 +180,11 @@ async fn evaluate_workflow_requires_session_dir() {
     let engine = common::tdd_engine(SharedBackend::from_arc(backend), storage_dir);
 
     let ctx = std::collections::HashMap::new();
+
+    // When
     let result = run_goal_until_done(&engine, "evaluate", ctx).await;
 
+    // Then
     assert!(
         result.is_err(),
         "evaluate should fail when session_dir is None — session_dir is required for evaluate-changes"
@@ -180,6 +196,7 @@ async fn evaluate_workflow_requires_session_dir() {
 /// evaluate() report includes a Changed Files section listing all changed files.
 #[tokio::test]
 async fn evaluate_workflow_includes_changed_files_in_report() {
+    // Given
     let working_dir = std::env::temp_dir().join("tddy-evaluate-changed-files");
     let session_dir = std::env::temp_dir().join("tddy-evaluate-changed-files-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -199,8 +216,11 @@ async fn evaluate_workflow_includes_changed_files_in_report() {
     let engine = common::tdd_engine(SharedBackend::from_arc(backend), storage_dir);
 
     let ctx = ctx_evaluate(session_dir.clone(), Some(working_dir.clone()));
+
+    // When
     let result = run_goal_until_done(&engine, "evaluate", ctx).await;
 
+    // Then
     assert!(result.is_ok(), "evaluate should succeed, got: {:?}", result);
 
     let report = std::fs::read_to_string(session_dir.join("evaluation-report.md"))
@@ -219,6 +239,7 @@ async fn evaluate_workflow_includes_changed_files_in_report() {
 /// evaluate() report includes an Affected Tests section.
 #[tokio::test]
 async fn evaluate_workflow_includes_affected_tests_in_report() {
+    // Given
     let working_dir = std::env::temp_dir().join("tddy-evaluate-affected-tests");
     let session_dir = std::env::temp_dir().join("tddy-evaluate-affected-tests-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -238,8 +259,11 @@ async fn evaluate_workflow_includes_affected_tests_in_report() {
     let engine = common::tdd_engine(SharedBackend::from_arc(backend), storage_dir);
 
     let ctx = ctx_evaluate(session_dir.clone(), Some(working_dir.clone()));
+
+    // When
     let result = run_goal_until_done(&engine, "evaluate", ctx).await;
 
+    // Then
     assert!(result.is_ok(), "evaluate should succeed, got: {:?}", result);
 
     let report = std::fs::read_to_string(session_dir.join("evaluation-report.md"))
@@ -260,6 +284,7 @@ async fn evaluate_workflow_includes_affected_tests_in_report() {
 /// evaluate() report includes a Validity Assessment section.
 #[tokio::test]
 async fn evaluate_workflow_includes_validity_assessment() {
+    // Given
     let working_dir = std::env::temp_dir().join("tddy-evaluate-validity");
     let session_dir = std::env::temp_dir().join("tddy-evaluate-validity-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -279,8 +304,11 @@ async fn evaluate_workflow_includes_validity_assessment() {
     let engine = common::tdd_engine(SharedBackend::from_arc(backend), storage_dir);
 
     let ctx = ctx_evaluate(session_dir.clone(), Some(working_dir.clone()));
+
+    // When
     let result = run_goal_until_done(&engine, "evaluate", ctx).await;
 
+    // Then
     assert!(result.is_ok(), "evaluate should succeed, got: {:?}", result);
 
     let report = std::fs::read_to_string(session_dir.join("evaluation-report.md"))
@@ -301,6 +329,7 @@ async fn evaluate_workflow_includes_validity_assessment() {
 /// evaluate() includes PRD/changeset context in prompt when session_dir is provided.
 #[tokio::test]
 async fn evaluate_workflow_includes_session_dir_context_when_provided() {
+    // Given
     let working_dir = std::env::temp_dir().join("tddy-evaluate-with-plan-dir");
     let session_dir = std::env::temp_dir().join("tddy-evaluate-plan-context");
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -324,8 +353,11 @@ async fn evaluate_workflow_includes_session_dir_context_when_provided() {
 
     let ctx = ctx_evaluate(session_dir.clone(), Some(working_dir.clone()));
     let eval_gid = GoalId::new("evaluate");
+
+    // When
     let result = engine.run_goal(&eval_gid, ctx).await;
 
+    // Then
     assert!(
         result.is_ok(),
         "evaluate with session_dir should succeed, got: {:?}",
@@ -350,6 +382,7 @@ async fn evaluate_workflow_includes_session_dir_context_when_provided() {
 /// evaluate_allowlist() contains required read, git and cargo tools.
 #[test]
 fn evaluate_allowlist_contains_required_tools() {
+    // When / Then
     let allowlist = evaluate_allowlist();
 
     assert!(
@@ -385,6 +418,7 @@ fn evaluate_allowlist_contains_required_tools() {
 /// failure before relay), the workflow fails with an explicit error instead of hanging.
 #[tokio::test]
 async fn evaluate_workflow_fails_when_agent_finished_without_submit() {
+    // Given
     let working_dir = std::env::temp_dir().join("tddy-evaluate-no-submit");
     let session_dir = std::env::temp_dir().join("tddy-evaluate-no-submit-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -405,8 +439,11 @@ async fn evaluate_workflow_fails_when_agent_finished_without_submit() {
     let engine = common::tdd_engine(SharedBackend::from_arc(backend), storage_dir);
 
     let ctx = ctx_evaluate(session_dir.clone(), Some(working_dir.clone()));
+
+    // When
     let result = run_goal_until_done(&engine, "evaluate", ctx).await;
 
+    // Then
     assert!(
         result.is_err(),
         "evaluate should fail when no submit was delivered, got: {:?}",
@@ -427,6 +464,7 @@ async fn evaluate_workflow_fails_when_agent_finished_without_submit() {
 /// evaluate() returns ParseError when backend returns a response with no structured-response block.
 #[tokio::test]
 async fn evaluate_workflow_returns_parse_error_on_malformed_response() {
+    // Given
     let working_dir = std::env::temp_dir().join("tddy-evaluate-parse-error");
     let session_dir = std::env::temp_dir().join("tddy-evaluate-parse-error-plan");
     let _ = std::fs::remove_dir_all(&working_dir);
@@ -442,8 +480,11 @@ async fn evaluate_workflow_returns_parse_error_on_malformed_response() {
     let engine = common::tdd_engine(SharedBackend::from_arc(backend), storage_dir);
 
     let ctx = ctx_evaluate(session_dir.clone(), Some(working_dir.clone()));
+
+    // When
     let result = run_goal_until_done(&engine, "evaluate", ctx).await;
 
+    // Then
     assert!(
         result.is_err(),
         "evaluate should fail on malformed response (missing structured-response block)"
@@ -468,6 +509,7 @@ async fn evaluate_workflow_returns_parse_error_on_malformed_response() {
 /// continues at the wrong goal instead of evaluate.
 #[tokio::test]
 async fn entering_evaluate_persists_evaluating_in_changeset_for_resume() {
+    // Given
     let session_dir = std::env::temp_dir().join(format!(
         "tddy-evaluate-persist-state-{}",
         std::process::id()
@@ -482,10 +524,12 @@ async fn entering_evaluate_persists_evaluating_in_changeset_for_resume() {
     ctx.set_sync("session_dir", session_dir.clone());
     ctx.set_sync("backend_name", "claude".to_string());
 
+    // When
     hooks
         .before_task("evaluate", &ctx)
         .expect("before_task evaluate");
 
+    // Then
     let cs = read_changeset(&session_dir).expect("read changeset");
     assert_eq!(
         cs.state.current,

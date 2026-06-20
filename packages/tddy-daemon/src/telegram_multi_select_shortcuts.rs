@@ -86,8 +86,13 @@ mod telegram_multi_select_shortcuts_red_tests {
 
     #[test]
     fn build_shortcut_keyboard_yields_compact_rows_for_primary_elicitation() {
+        // Given
         let sid = "01900000-0000-7000-8000-0000000000aa";
+
+        // When
         let rows = build_multi_select_shortcut_keyboard_rows(sid, 0, "fixture recommendation");
+
+        // Then
         assert!(
             rows.as_ref().is_some_and(|r| !r.is_empty()),
             "GREEN must attach shortcut rows containing Choose none (+ recommended when meta present); got {:?}",

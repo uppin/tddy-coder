@@ -21,7 +21,8 @@ const ACCEPTANCE_TESTS_JSON: &str = r#"{"goal":"acceptance-tests","summary":"Cre
 
 /// Acceptance-tests prompt must start with the context header when PRD.md exists.
 #[tokio::test]
-async fn acceptance_tests_prompt_includes_context_header_when_prd_exists() {
+async fn prompt_includes_context_header_when_prd_exists() {
+    // Given
     let (output_dir, session_dir) = temp_dir_with_git_repo("ctx-hdr-at-prd");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_session(&session_dir, "sess-ctx-hdr-1");
@@ -45,6 +46,8 @@ async fn acceptance_tests_prompt_includes_context_header_when_prd_exists() {
         .unwrap();
 
     let invocations = backend.invocations();
+
+    // Then
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let prompt = &invocations[0].prompt;
 
@@ -65,7 +68,8 @@ async fn acceptance_tests_prompt_includes_context_header_when_prd_exists() {
 
 /// Context header must list PRD.md with an absolute path.
 #[tokio::test]
-async fn acceptance_tests_prompt_header_lists_prd_md_with_absolute_path() {
+async fn prompt_header_lists_prd_md_with_absolute_path() {
+    // Given
     let (output_dir, session_dir) = temp_dir_with_git_repo("ctx-hdr-at-abs");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_session(&session_dir, "sess-ctx-hdr-2");
@@ -91,6 +95,8 @@ async fn acceptance_tests_prompt_header_lists_prd_md_with_absolute_path() {
     let invocations = backend.invocations();
     let prompt = &invocations[0].prompt;
 
+
+    // Then
     assert!(
         prompt.contains("PRD.md:"),
         "header must contain a PRD.md: entry"
@@ -120,7 +126,8 @@ async fn acceptance_tests_prompt_header_lists_prd_md_with_absolute_path() {
 
 /// Context header must NOT mention artifacts that don't exist yet.
 #[tokio::test]
-async fn acceptance_tests_prompt_header_omits_missing_artifacts() {
+async fn prompt_header_omits_missing_artifacts() {
+    // Given
     let (output_dir, session_dir) = temp_dir_with_git_repo("ctx-hdr-at-omit");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_session(&session_dir, "sess-ctx-hdr-3");
@@ -146,6 +153,8 @@ async fn acceptance_tests_prompt_header_omits_missing_artifacts() {
     let invocations = backend.invocations();
     let prompt = &invocations[0].prompt;
 
+
+    // Then
     assert!(
         !prompt.contains("TODO.md:"),
         "header must NOT list TODO.md when it does not exist"
@@ -162,7 +171,8 @@ async fn acceptance_tests_prompt_header_omits_missing_artifacts() {
 
 /// Header block must be followed by a blank line before the original prompt content.
 #[tokio::test]
-async fn acceptance_tests_prompt_header_separated_from_body_by_blank_line() {
+async fn prompt_header_is_separated_from_body_by_a_blank_line() {
+    // Given
     let (output_dir, session_dir) = temp_dir_with_git_repo("ctx-hdr-at-blank");
     std::fs::write(session_dir.join("PRD.md"), "# PRD\n## Testing Plan").expect("write PRD");
     write_changeset_for_session(&session_dir, "sess-ctx-hdr-blank");
@@ -188,6 +198,8 @@ async fn acceptance_tests_prompt_header_separated_from_body_by_blank_line() {
     let invocations = backend.invocations();
     let prompt = &invocations[0].prompt;
 
+
+    // Then
     assert!(
         prompt.contains("</context-reminder>"),
         "prompt must contain closing context-reminder tag"
@@ -217,7 +229,8 @@ async fn acceptance_tests_prompt_header_separated_from_body_by_blank_line() {
 
 /// Red phase prompt must include context header listing PRD.md and acceptance-tests.md.
 #[tokio::test]
-async fn red_prompt_includes_context_header_with_multiple_artifacts() {
+async fn prompt_includes_context_header_when_multiple_artifacts_are_present() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-ctx-hdr-red");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create plan dir");
@@ -241,9 +254,13 @@ async fn red_prompt_includes_context_header_with_multiple_artifacts() {
     );
 
     let ctx = ctx_red(session_dir.clone(), None);
+
+    // When
     let _ = engine.run_goal(&GoalId::new("red"), ctx).await.unwrap();
 
     let invocations = backend.invocations();
+
+    // Then
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let prompt = &invocations[0].prompt;
 
@@ -272,7 +289,8 @@ async fn red_prompt_includes_context_header_with_multiple_artifacts() {
 /// Plan prompt with a fresh (empty) output dir must NOT have a context header,
 /// since no .md artifacts exist at prompt-construction time.
 #[tokio::test]
-async fn plan_prompt_has_no_context_header_for_empty_output_dir() {
+async fn prompt_has_no_context_header_when_output_dir_is_empty() {
+    // Given
     let output_dir = std::env::temp_dir().join("tddy-ctx-hdr-plan-empty");
     let _ = std::fs::remove_dir_all(&output_dir);
 
@@ -288,11 +306,15 @@ async fn plan_prompt_has_no_context_header_for_empty_output_dir() {
         Some(common::tdd_recipe().create_hooks(None)),
     );
 
+
+    // When
     let _ = run_plan(&engine, "A feature", &output_dir, None)
         .await
         .expect("plan should succeed");
 
     let invocations = backend.invocations();
+
+    // Then
     assert!(!invocations.is_empty(), "backend should have been invoked");
     let prompt = &invocations[0].prompt;
 

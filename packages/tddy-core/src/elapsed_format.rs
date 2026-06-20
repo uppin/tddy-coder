@@ -23,11 +23,17 @@ pub fn format_elapsed_compact(duration: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
-    #[test]
-    fn format_elapsed_compact_matches_tui_cases() {
-        assert_eq!(format_elapsed_compact(Duration::ZERO), "0s");
-        assert_eq!(format_elapsed_compact(Duration::from_secs(60)), "1m 0s");
-        assert_eq!(format_elapsed_compact(Duration::from_secs(3600)), "1h 0m");
+    #[rstest]
+    #[case::zero_seconds(Duration::ZERO, "0s")]
+    #[case::one_minute(Duration::from_secs(60), "1m 0s")]
+    #[case::one_hour(Duration::from_secs(3600), "1h 0m")]
+    fn formats_duration_compactly(#[case] input: Duration, #[case] expected: &str) {
+        // When
+        let result = format_elapsed_compact(input);
+
+        // Then
+        assert_eq!(result, expected);
     }
 }

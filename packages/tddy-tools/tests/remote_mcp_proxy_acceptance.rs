@@ -17,6 +17,7 @@ use tddy_tools::server::{build_dynamic_tool_list, static_tool_names};
 /// This tests the merging logic independently of the relay transport.
 #[tokio::test]
 async fn dynamic_tool_list_merges_catalog_with_static_tools() {
+    // Given
     let catalog = vec![
         tddy_tools::server::RemoteToolDef {
             name: "Read".to_string(),
@@ -32,10 +33,12 @@ async fn dynamic_tool_list_merges_catalog_with_static_tools() {
         },
     ];
 
+    // When
     let tools = build_dynamic_tool_list(&catalog)
         .await
         .expect("build_dynamic_tool_list must not fail");
 
+    // Then
     let names: HashSet<String> = tools.iter().map(|t| t.name.to_string()).collect();
 
     // Static tools must always be present.
@@ -68,6 +71,7 @@ async fn dynamic_tool_list_merges_catalog_with_static_tools() {
 /// AC16: renaming a catalog entry causes the new name to appear and the old name to disappear.
 #[tokio::test]
 async fn dynamic_tool_list_reflects_catalog_renames() {
+    // Given
     let catalog_v1 = vec![tddy_tools::server::RemoteToolDef {
         name: "OldName".to_string(),
         description: "A tool".to_string(),
@@ -79,6 +83,7 @@ async fn dynamic_tool_list_reflects_catalog_renames() {
         input_schema_json: r#"{"type":"object"}"#.to_string(),
     }];
 
+    // When
     let tools_v1 = build_dynamic_tool_list(&catalog_v1)
         .await
         .expect("v1 build_dynamic_tool_list must not fail");
@@ -89,6 +94,7 @@ async fn dynamic_tool_list_reflects_catalog_renames() {
         .expect("v2 build_dynamic_tool_list must not fail");
     let names_v2: HashSet<String> = tools_v2.iter().map(|t| t.name.to_string()).collect();
 
+    // Then
     assert!(names_v1.contains("OldName"), "v1 must advertise OldName");
     assert!(
         !names_v1.contains("NewName"),
@@ -106,6 +112,7 @@ async fn dynamic_tool_list_reflects_catalog_renames() {
 /// catalog, and their `call_tool` dispatch must be handled locally (not forwarded to a relay).
 #[test]
 fn static_tool_names_always_includes_approval_prompt_and_submit() {
+    // When / Then
     let names = static_tool_names();
     assert!(
         names.contains(&"approval_prompt"),
@@ -123,13 +130,15 @@ fn static_tool_names_always_includes_approval_prompt_and_submit() {
 /// catalog returns only the static tools (no dynamic tools, no error).
 #[tokio::test]
 async fn dynamic_tool_list_without_remote_env_returns_only_static_tools() {
-    // Ensure the env var is absent.
+    // Given
     std::env::remove_var("TDDY_REMOTE_SESSION_ID");
 
+    // When
     let tools = build_dynamic_tool_list(&[])
         .await
         .expect("build_dynamic_tool_list with empty catalog must not fail");
 
+    // Then
     let names: HashSet<String> = tools.iter().map(|t| t.name.to_string()).collect();
     let expected: HashSet<String> = static_tool_names().iter().map(|s| s.to_string()).collect();
 
@@ -145,15 +154,16 @@ async fn dynamic_tool_list_without_remote_env_returns_only_static_tools() {
 /// return an error result explaining the missing configuration — not a panic or RPC error.
 #[tokio::test]
 async fn call_dynamic_tool_without_remote_env_returns_error_result() {
+    // Given
     std::env::remove_var("TDDY_REMOTE_SESSION_ID");
     std::env::remove_var("TDDY_REMOTE_DAEMON_URL");
 
-    // The `dispatch_dynamic_tool` function handles calls for non-static tools.
-    // Without remote env vars, it must return an error-shaped JSON, not panic.
+    // When — dispatch_dynamic_tool must return an error-shaped JSON, not panic.
     let result =
         tddy_tools::server::dispatch_dynamic_tool("Read", serde_json::json!({"path":"any.txt"}))
             .await;
 
+    // Then
     let result_value: Value =
         serde_json::from_str(&result).expect("dispatch_dynamic_tool must return valid JSON");
 

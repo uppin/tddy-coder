@@ -188,10 +188,12 @@ pub fn layout_chunks_with_inbox_maybe_top(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
     use tddy_core::{ClarificationQuestion, QuestionOption};
 
     #[test]
-    fn test_question_height_select_mode() {
+    fn question_height_counts_header_question_options_and_other_in_select_mode() {
+        // Given — two options + allow_other = 5 rows total (header + question + 2 opts + Other)
         let q = ClarificationQuestion {
             header: "Scope".to_string(),
             question: "Which authentication?".to_string(),
@@ -214,99 +216,104 @@ mod tests {
             total_questions: 1,
             initial_selected: 0,
         };
-        assert_eq!(question_height(&mode), 5); // 2 (header+question) + 2 options + 1 Other
+
+        // When / Then
+        assert_eq!(question_height(&mode), 5, "2 (header+question) + 2 options + 1 Other");
     }
 
     #[test]
-    fn test_question_height_text_input_mode() {
+    fn question_height_returns_two_for_text_input_mode() {
+        // Given
         let mode = AppMode::TextInput {
             prompt: "Type your answer".to_string(),
         };
+
+        // When / Then
         assert_eq!(question_height(&mode), 2);
     }
 
     #[test]
-    fn test_question_height_running_mode() {
-        let mode = AppMode::Running;
-        assert_eq!(question_height(&mode), 0);
+    fn question_height_returns_zero_for_running_mode() {
+        // When / Then
+        assert_eq!(question_height(&AppMode::Running), 0);
     }
 
+
     #[test]
-    fn test_layout_chunks_returns_four_regions() {
+    fn layout_chunks_returns_four_non_zero_regions() {
+        // Given
         let area = Rect::new(0, 0, 80, 24);
+
+        // When
         let (activity, spacer, status, prompt) = layout_chunks(area);
 
-        assert!(activity.width > 0);
-        assert!(activity.height > 0);
-        assert_eq!(spacer.height, 1);
-        assert_eq!(status.height, 1);
-        assert!(prompt.height >= 1);
+        // Then
+        assert!(activity.width > 0, "activity region must have non-zero width");
+        assert!(activity.height > 0, "activity region must have non-zero height");
+        assert_eq!(spacer.height, 1, "spacer is one row");
+        assert_eq!(status.height, 1, "status bar is one row");
+        assert!(prompt.height >= 1, "prompt must have at least one row");
+    }
+
+    #[rstest]
+    #[case::zero_items_visible(0, true, 0)]
+    #[case::items_present_but_not_visible(3, false, 0)]
+    #[case::one_item_visible(1, true, 1)]
+    #[case::ten_items_capped_at_five(10, true, 5)]
+    fn inbox_height_returns_zero_when_empty_or_not_visible(
+        #[case] count: usize,
+        #[case] visible: bool,
+        #[case] expected: u16,
+    ) {
+        // When / Then
+        assert_eq!(inbox_height(count, visible), expected);
+    }
+
+    #[rstest]
+    #[case::fits_in_one_line(40, 80, 10, 1)]
+    #[case::exactly_fills_width(80, 80, 10, 1)]
+    #[case::exceeds_width_by_one(81, 80, 10, 2)]
+    #[case::triple_width_text(240, 80, 10, 3)]
+    #[case::capped_at_max(1000, 80, 5, 5)]
+    #[case::zero_width(50, 0, 10, 1)]
+    #[case::empty_text(0, 80, 10, 1)]
+    fn prompt_height_wraps_correctly(
+        #[case] text_len: u16,
+        #[case] width: u16,
+        #[case] max_h: u16,
+        #[case] expected: u16,
+    ) {
+        // When / Then
+        assert_eq!(prompt_height(text_len, width, max_h), expected);
     }
 
     #[test]
-    fn test_inbox_not_rendered_when_empty() {
-        assert_eq!(inbox_height(0, true), 0);
-        assert_eq!(inbox_height(3, false), 0);
-        assert_eq!(inbox_height(1, true), 1);
-        assert_eq!(inbox_height(10, true), 5);
-    }
-
-    // Acceptance tests for prompt_height (AC1–AC5, FR2)
-
-    #[test]
-    fn test_prompt_height_single_line() {
-        assert_eq!(prompt_height(40, 80, 10), 1);
-    }
-
-    #[test]
-    fn test_prompt_height_exact_width() {
-        assert_eq!(prompt_height(80, 80, 10), 1);
-    }
-
-    #[test]
-    fn test_prompt_height_wraps_to_two_lines() {
-        assert_eq!(prompt_height(81, 80, 10), 2);
-    }
-
-    #[test]
-    fn test_prompt_height_wraps_to_three_lines() {
-        assert_eq!(prompt_height(240, 80, 10), 3);
-    }
-
-    #[test]
-    fn test_prompt_height_capped_at_max() {
-        assert_eq!(prompt_height(1000, 80, 5), 5);
-    }
-
-    #[test]
-    fn test_prompt_height_zero_width_edge_case() {
-        assert_eq!(prompt_height(50, 0, 10), 1);
-    }
-
-    #[test]
-    fn test_prompt_height_empty_text() {
-        assert_eq!(prompt_height(0, 80, 10), 1);
-    }
-
-    #[test]
-    fn test_question_height_error_recovery_mode() {
+    fn question_height_returns_five_for_error_recovery_mode() {
+        // Given
         let mode = AppMode::ErrorRecovery {
             error_message: "test error".to_string(),
         };
+
+        // When / Then
         assert_eq!(
             question_height(&mode),
             5,
-            "ErrorRecovery should have height 5: error + blank + 3 options"
+            "ErrorRecovery: error message row + blank + 3 option rows"
         );
     }
 
     #[test]
-    fn test_layout_prompt_bar_height_matches_param() {
+    fn layout_chunks_prompt_bar_height_matches_given_parameter() {
+        // Given
         let area = Rect::new(0, 0, 80, 24);
         let prompt_h: u16 = 3;
+
+        // When
         let (_activity, _spacer, _dynamic, _status, _gap, _debug, prompt, _footer) =
             layout_chunks_with_inbox(area, 0, 0, prompt_h);
-        assert_eq!(prompt.height, prompt_h);
+
+        // Then
+        assert_eq!(prompt.height, prompt_h, "prompt bar height must match the given parameter");
     }
 
     /// PRD (plan approval activity pane): PRD + footer live in the activity region; the dynamic
@@ -348,6 +355,7 @@ mod tests {
 
     #[test]
     fn clarification_questions_top_is_true_for_select_with_height() {
+        // Given
         let q = ClarificationQuestion {
             header: "H".to_string(),
             question: "Q?".to_string(),
@@ -364,15 +372,22 @@ mod tests {
             total_questions: 1,
             initial_selected: 0,
         };
+
+        // When / Then
         assert!(clarification_questions_top(&mode));
     }
 
     #[test]
     fn questions_top_layout_places_dynamic_strip_at_top() {
+        // Given
         let area = Rect::new(0, 0, 80, 24);
         let dynamic_h = 7u16;
+
+        // When
         let (activity, _spacer, dynamic, status, _gap, _debug, prompt, _footer) =
             layout_chunks_with_inbox_maybe_top(area, dynamic_h, 0, 1, true);
+
+        // Then
         assert_eq!(dynamic.y, 0);
         assert!(
             activity.y > dynamic.y,
@@ -386,8 +401,13 @@ mod tests {
     /// PRD AC2: footer adds exactly one row to bottom chrome (status + prompt + **footer**).
     #[test]
     fn layout_footer_adds_exactly_one_row_to_bottom_chrome() {
+        // Given
         let area = Rect::new(0, 0, 80, 24);
+
+        // When
         let (_, _, _, status, _, _, prompt, footer) = layout_chunks_with_inbox(area, 0, 0, 1);
+
+        // Then
         assert_eq!(
             footer.height,
             1,
@@ -404,8 +424,14 @@ mod tests {
     #[test]
     fn prompt_bar_width_reserves_margin_and_enter_columns() {
         use crate::mouse_map::right_chrome_reserve_cols;
+
+        // Given
         let area = Rect::new(0, 0, 80, 24);
+
+        // When
         let (_, _, _, _, _, _, prompt_bar, _) = layout_chunks_with_inbox(area, 0, 0, 1);
+
+        // Then
         let expected = area
             .width
             .saturating_sub(right_chrome_reserve_cols(area.width));
@@ -416,8 +442,14 @@ mod tests {
     #[test]
     fn prompt_bar_width_enter_only_when_too_narrow_for_stop() {
         use crate::mouse_map::{right_chrome_reserve_cols, ENTER_RESERVE_COLS};
+
+        // Given
         let area = Rect::new(0, 0, 8, 24);
+
+        // When
         let (_, _, _, _, _, _, prompt_bar, _) = layout_chunks_with_inbox(area, 0, 0, 1);
+
+        // Then
         assert_eq!(right_chrome_reserve_cols(area.width), ENTER_RESERVE_COLS);
         let expected = area.width.saturating_sub(ENTER_RESERVE_COLS);
         assert_eq!(prompt_bar.width, expected);

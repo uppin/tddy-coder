@@ -170,10 +170,13 @@ mod tests {
 
     #[test]
     fn rust_binary_builds_cargo_argv_with_features_profile_and_triple() {
+        // Given / When
         let command = lower(
             "rust_binary",
             "package: app\nbin_name: app\nfeatures: [a, b]\nprofile: release\ntarget_triple: x86_64-unknown-linux-gnu\n",
         );
+
+        // Then
         assert_eq!(
             command,
             vec![
@@ -194,18 +197,25 @@ mod tests {
 
     #[test]
     fn rust_library_omits_release_for_debug_profile() {
+        // Given / When
         let command = lower("rust_library", "package: core\nprofile: debug\n");
+
+        // Then
         assert_eq!(command, vec!["cargo", "build", "-p", "core"]);
     }
 
     #[test]
     fn rust_binary_omits_bin_features_and_triple_when_absent() {
+        // Given / When
         let command = lower("rust_binary", "package: app\nprofile: debug\n");
+
+        // Then
         assert_eq!(command, vec!["cargo", "build", "-p", "app"]);
     }
 
     #[test]
     fn unknown_field_in_config_is_rejected() {
+        // Given
         let config: serde_yaml::Value = serde_yaml::from_str("package: app\nbogus: 1\n").unwrap();
         let ctx = LowerContext {
             type_name: "rust_binary",
@@ -214,6 +224,8 @@ mod tests {
             deps: &[],
             config: &config,
         };
+
+        // When / Then
         assert!(matches!(
             RustPlugin.lower(&ctx),
             Err(BuildError::Manifest(_))
@@ -222,6 +234,7 @@ mod tests {
 
     #[test]
     fn rust_binary_emits_declared_inputs_and_outputs() {
+        // Given
         let config: serde_yaml::Value = serde_yaml::from_str(
             "package: mathapp\nbin_name: mathapp\nprofile: debug\n\
              srcs: [\"mathapp/src/main.rs\", \"mathapp/Cargo.toml\"]\n\
@@ -235,8 +248,12 @@ mod tests {
             deps: &[],
             config: &config,
         };
+
+        // When
         let actions = RustPlugin.lower(&ctx).expect("lower");
         let action = &actions[0];
+
+        // Then
         assert_eq!(
             action.command,
             vec!["cargo", "build", "-p", "mathapp", "--bin", "mathapp"]

@@ -274,6 +274,7 @@ mod tests {
 
     #[test]
     fn parse_full_config() {
+        // Given
         let yaml = r#"
 agent: stub
 daemon: true
@@ -296,7 +297,9 @@ github:
   client_secret: my-secret
   redirect_uri: http://localhost:8888/auth/callback
 "#;
+        // When
         let config: Config = serde_yaml::from_str(yaml).unwrap();
+        // Then
         assert_eq!(config.agent.as_deref(), Some("stub"));
         assert_eq!(config.daemon, Some(true));
         assert_eq!(config.model.as_deref(), Some("sonnet"));
@@ -316,15 +319,17 @@ github:
 
     #[test]
     fn parse_config_recipe() {
-        let yaml = "recipe: bugfix\n";
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        // When
+        let config: Config = serde_yaml::from_str("recipe: bugfix\n").unwrap();
+        // Then
         assert_eq!(config.recipe.as_deref(), Some("bugfix"));
     }
 
     #[test]
     fn parse_config_tddy_data_dir() {
-        let yaml = "tddy_data_dir: \"/tmp/tddy-sessions-root\"\n";
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        // When
+        let config: Config = serde_yaml::from_str("tddy_data_dir: \"/tmp/tddy-sessions-root\"\n").unwrap();
+        // Then
         assert_eq!(
             config.tddy_data_dir.as_ref(),
             Some(&std::path::PathBuf::from("/tmp/tddy-sessions-root"))
@@ -333,9 +338,9 @@ github:
 
     #[test]
     fn merge_config_tddy_data_dir_cli_precedence() {
+        // Given
         let cli_base = std::path::PathBuf::from("/cli/sessions-root");
-        let yaml = "tddy_data_dir: /config/sessions-root\n";
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let config: Config = serde_yaml::from_str("tddy_data_dir: /config/sessions-root\n").unwrap();
         let mut args = Args {
             goal: None,
             session_dir: None,
@@ -379,14 +384,16 @@ github:
             remote_daemon_id: None,
             tddy_data_dir: Some(cli_base.clone()),
         };
+        // When
         merge_config_into_args(&mut args, config);
+        // Then
         assert_eq!(args.tddy_data_dir.as_ref(), Some(&cli_base));
     }
 
     #[test]
     fn merge_config_applies_tddy_data_dir_when_cli_unset() {
-        let yaml = "tddy_data_dir: /from/config\n";
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        // Given
+        let config: Config = serde_yaml::from_str("tddy_data_dir: /from/config\n").unwrap();
         let mut args = Args {
             goal: None,
             session_dir: None,
@@ -430,7 +437,9 @@ github:
             remote_daemon_id: None,
             tddy_data_dir: None,
         };
+        // When
         merge_config_into_args(&mut args, config);
+        // Then
         assert_eq!(
             args.tddy_data_dir.as_ref(),
             Some(&std::path::PathBuf::from("/from/config"))
@@ -439,6 +448,7 @@ github:
 
     #[test]
     fn merge_config_recipe_cli_precedence() {
+        // Given
         let config: Config = serde_yaml::from_str("recipe: bugfix\n").unwrap();
         let mut args = Args {
             goal: None,
@@ -483,12 +493,15 @@ github:
             remote_daemon_id: None,
             tddy_data_dir: None,
         };
+        // When
         merge_config_into_args(&mut args, config);
+        // Then
         assert_eq!(args.recipe.as_deref(), Some("tdd"));
     }
 
     #[test]
     fn merge_config_applies_recipe_when_cli_unset() {
+        // Given
         let config: Config = serde_yaml::from_str("recipe: bugfix\n").unwrap();
         let mut args = Args {
             goal: None,
@@ -533,27 +546,33 @@ github:
             remote_daemon_id: None,
             tddy_data_dir: None,
         };
+        // When
         merge_config_into_args(&mut args, config);
+        // Then
         assert_eq!(args.recipe.as_deref(), Some("bugfix"));
     }
 
     #[test]
     fn parse_minimal_config() {
-        let yaml = "daemon: true\n";
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        // When
+        let config: Config = serde_yaml::from_str("daemon: true\n").unwrap();
+        // Then
         assert_eq!(config.daemon, Some(true));
         assert!(config.livekit.is_none());
     }
 
     #[test]
     fn parse_stub_config() {
+        // Given
         let yaml = r#"
 daemon: true
 github:
   stub: true
   stub_codes: "test-code:testuser"
 "#;
+        // When
         let config: Config = serde_yaml::from_str(yaml).unwrap();
+        // Then
         let gh = config.github.unwrap();
         assert!(gh.stub.unwrap());
         assert_eq!(gh.stub_codes.as_deref(), Some("test-code:testuser"));
@@ -561,6 +580,7 @@ github:
 
     #[test]
     fn parse_log_config() {
+        // Given
         let yaml = r#"
 log:
   loggers:

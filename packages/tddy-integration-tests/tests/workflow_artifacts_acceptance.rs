@@ -23,6 +23,7 @@ const PLANNING_OUTPUT: &str = r##"{"goal":"plan","name":"Auth Feature","prd":"# 
 /// `session_dir/artifacts/`, not the session directory root.
 #[tokio::test]
 async fn artifacts_subdir_used_for_new_sessions() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLANNING_OUTPUT);
 
@@ -70,6 +71,8 @@ async fn artifacts_subdir_used_for_new_sessions() {
         .await
         .expect("plan goal should not panic");
 
+
+    // Then
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),
         "plan goal should succeed when session_base is provided: {:?}",
@@ -102,6 +105,7 @@ async fn artifacts_subdir_used_for_new_sessions() {
 /// on disk (under `artifacts/` for the default TDD recipe), not a legacy flat `PRD.md` path.
 #[test]
 fn approval_content_matches_recipe_primary_artifact() {
+    // Given
     let base = std::env::temp_dir().join(format!("tddy-approval-primary-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(base.join("artifacts")).unwrap();
@@ -113,12 +117,16 @@ fn approval_content_matches_recipe_primary_artifact() {
     let primary_path = base.join("artifacts").join(&basename);
     std::fs::write(&primary_path, "PRIMARY_PLAN_BODY_FROM_RECIPE_PATH").unwrap();
 
+
+    // When
     let resolved = resolve_existing_session_artifact(&base, &basename)
         .expect("resolver must find primary session document for approval / elicitation");
     let resolved_bytes = read_session_artifact_utf8(&base, &basename)
         .expect("read helper must load primary session document bytes");
     let recipe_bytes = std::fs::read_to_string(&primary_path).unwrap();
 
+
+    // Then
     assert_eq!(
         resolved,
         primary_path,
@@ -139,6 +147,7 @@ fn approval_content_matches_recipe_primary_artifact() {
 /// session `artifacts/` root), not only from hard-coded filenames at the session root.
 #[test]
 fn context_header_uses_recipe_artifact_basenames() {
+    // Given
     let recipe = TddRecipe;
     let basenames: Vec<&str> = recipe.context_header_filenames();
 
@@ -148,6 +157,8 @@ fn context_header_uses_recipe_artifact_basenames() {
     std::fs::write(dir.join("artifacts").join("PRD.md"), "# PRD").unwrap();
 
     let header = build_context_header(Some(&dir), None, &basenames);
+
+    // Then
     assert!(
         header.contains("PRD.md:"),
         "build_context_header must list PRD.md when present under session_dir/artifacts/ per recipe basenames; got: {:?}",

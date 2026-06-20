@@ -310,32 +310,47 @@ mod tests {
 
     #[test]
     fn duplicate_target_ids_are_rejected() {
-        let err = BuildGraph::from_manifests(vec![manifest(vec![
+        // Given
+        let manifests = vec![manifest(vec![
             script_target("dup", vec![]),
             script_target("dup", vec![]),
-        ])])
-        .expect_err("duplicate ids must error");
+        ])];
+
+        // When
+        let err = BuildGraph::from_manifests(manifests).expect_err("duplicate ids must error");
+
+        // Then
         assert!(matches!(err, BuildError::Manifest(_)));
     }
 
     #[test]
     fn dependency_cycle_is_detected() {
-        let err = BuildGraph::from_manifests(vec![manifest(vec![
+        // Given
+        let manifests = vec![manifest(vec![
             script_target("a", vec!["b"]),
             script_target("b", vec!["a"]),
-        ])])
-        .expect_err("a<->b cycle must error");
+        ])];
+
+        // When
+        let err = BuildGraph::from_manifests(manifests).expect_err("a<->b cycle must error");
+
+        // Then
         assert!(matches!(err, BuildError::Cycle(_)));
     }
 
     #[test]
     fn build_order_lists_dependencies_before_dependents() {
+        // Given
         let graph = BuildGraph::from_manifests(vec![manifest(vec![
             script_target("app", vec!["core"]),
             script_target("core", vec![]),
         ])])
         .unwrap();
+
+        // When
         let order = graph.build_order("app").unwrap();
+
+        // Then
         let core = order.iter().position(|t| t == "core").unwrap();
         let app = order.iter().position(|t| t == "app").unwrap();
         assert!(core < app, "core must build before app: {order:?}");
@@ -343,6 +358,7 @@ mod tests {
 
     #[test]
     fn group_members_are_treated_as_build_order_predecessors() {
+        // Given
         let group = BuildTarget {
             id: "all".to_string(),
             config: Some(config("group", "member_ids: [core]")),
@@ -351,7 +367,11 @@ mod tests {
         let graph =
             BuildGraph::from_manifests(vec![manifest(vec![group, script_target("core", vec![])])])
                 .unwrap();
+
+        // When
         let order = graph.build_order("all").unwrap();
+
+        // Then
         assert!(
             order.iter().position(|t| t == "core").unwrap()
                 < order.iter().position(|t| t == "all").unwrap()
@@ -360,8 +380,11 @@ mod tests {
 
     #[test]
     fn unknown_target_build_order_errors() {
+        // Given
         let graph =
             BuildGraph::from_manifests(vec![manifest(vec![script_target("a", vec![])])]).unwrap();
+
+        // When / Then
         assert!(matches!(
             graph.build_order("missing"),
             Err(BuildError::UnknownTarget(_))
@@ -370,13 +393,17 @@ mod tests {
 
     #[test]
     fn action_waves_group_parallel_then_dependent() {
-        // a, b independent; c consumes both outputs.
+        // Given
         let actions = vec![
             action("a", &[], &["a.out"]),
             action("b", &[], &["b.out"]),
             action("c", &["a.out", "b.out"], &["c.out"]),
         ];
+
+        // When
         let waves = action_waves(&actions).unwrap();
+
+        // Then
         assert_eq!(waves.len(), 2);
         assert_eq!(waves[0], vec![0, 1]);
         assert_eq!(waves[1], vec![2]);
@@ -384,16 +411,19 @@ mod tests {
 
     #[test]
     fn action_waves_detect_internal_cycle() {
-        // Two actions each consuming the other's output.
+        // Given
         let actions = vec![
             action("x", &["y.out"], &["x.out"]),
             action("y", &["x.out"], &["y.out"]),
         ];
+
+        // When / Then
         assert!(matches!(action_waves(&actions), Err(BuildError::Cycle(_))));
     }
 
     #[test]
     fn global_waves_span_all_target_actions() {
+        // Given
         let graph = BuildGraph::from_manifests(vec![manifest(vec![BuildTarget {
             id: "fan".to_string(),
             actions: vec![
@@ -404,7 +434,11 @@ mod tests {
             ..Default::default()
         }])])
         .unwrap();
+
+        // When
         let waves = graph.waves(&PluginRegistry::new()).unwrap();
+
+        // Then
         assert_eq!(waves.len(), 2);
         assert_eq!(waves[0].len(), 2);
         assert_eq!(waves[1].len(), 1);

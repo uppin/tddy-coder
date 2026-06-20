@@ -15,6 +15,7 @@ use tokio::time::timeout;
 #[tokio::test]
 #[cfg(unix)]
 async fn relay_accepts_submit_when_presenter_never_polls() {
+    // Given
     let (socket_path, _hold_tool_rx) = start_toolcall_listener(None, None).expect("start listener");
 
     let path = socket_path.clone();
@@ -40,12 +41,16 @@ async fn relay_accepts_submit_when_presenter_never_polls() {
 
     let deadline = Duration::from_secs(2);
     let wrapped = timeout(deadline, client).await;
+
+    // Then
     assert!(
         wrapped.is_ok(),
         "relay must return a line within {:?} when presenter never polls (stuck case); client hung waiting for response",
         deadline
     );
     let line = wrapped.unwrap().expect("join client task");
+
+    // When
     let v: Value = serde_json::from_str(line.trim()).expect("response is JSON");
     assert_eq!(v["status"], "ok", "expected ok status, got: {}", line);
     assert_eq!(v["goal"], "plan");

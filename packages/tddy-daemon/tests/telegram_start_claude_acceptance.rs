@@ -177,6 +177,10 @@ async fn start_claude_creates_session_with_initial_prompt_and_marker() {
         Arc::clone(&manager),
     );
 
+    // Given
+    // (harness and sender already set up above)
+
+    // When
     let outcome = harness
         .handle_start_claude(StartClaudeCommand {
             chat_id: AUTHORIZED_CHAT,
@@ -186,6 +190,7 @@ async fn start_claude_creates_session_with_initial_prompt_and_marker() {
         .await
         .expect("handle_start_claude must succeed");
 
+    // Then
     assert!(
         !outcome.session_id.is_empty(),
         "handle_start_claude must assign a session_id"
@@ -266,6 +271,7 @@ async fn start_claude_project_then_branch_routes_to_model_keyboard() {
     let stub_path = write_echo_argv_script(stub_dir.path());
     let manager = Arc::new(ClaudeCliSessionManager::new());
 
+    // Given
     let (mut harness, sender) = build_harness(
         sessions_tmp.path().to_path_buf(),
         stub_path.to_str().unwrap(),
@@ -284,7 +290,7 @@ async fn start_claude_project_then_branch_routes_to_model_keyboard() {
 
     let session_id = outcome.session_id.clone();
 
-    // Simulate project keyboard selection (project index 0).
+    // When — select project
     harness
         .handle_telegram_project_callback(AUTHORIZED_CHAT, 0, &session_id)
         .await
@@ -293,13 +299,13 @@ async fn start_claude_project_then_branch_routes_to_model_keyboard() {
     // Record how many messages have been sent so far, so we can slice to only the new ones.
     let msg_count_before_branch = sender.len();
 
-    // Simulate branch selection (branch index 0 = main, list_offset 0, proj_idx 0).
+    // When — select branch
     harness
         .handle_telegram_branch_callback(AUTHORIZED_CHAT, 0, 0, 0, &session_id)
         .await
         .expect("branch callback must succeed");
 
-    // After branch callback with session_type=claude-cli, the reply must be the model keyboard.
+    // Then — after branch callback with session_type=claude-cli, the reply must be the model keyboard.
     // Skip messages that were sent before the branch callback.
     let all_msgs = collect_outbound_messages(&sender, AUTHORIZED_CHAT);
     let sent_after_branch: Vec<_> = all_msgs.into_iter().skip(msg_count_before_branch).collect();
@@ -327,7 +333,7 @@ async fn start_claude_project_then_branch_routes_to_model_keyboard() {
         "model keyboard must have one button per CLAUDE_CLI_MODELS entry"
     );
 
-    // Changeset must still have session_type=claude-cli and the branch intent written.
+    // Then — changeset must still have session_type=claude-cli and the branch intent written.
     let session_dir = unified_session_dir_path(sessions_tmp.path(), &session_id);
     let snap = read_changeset_routing_snapshot(&session_dir)
         .expect("changeset.yaml must be readable after branch callback");
@@ -367,6 +373,7 @@ async fn start_claude_model_callback_launches_claude_cli() {
     let stub_path = write_echo_argv_script(stub_dir.path());
     let manager = Arc::new(ClaudeCliSessionManager::new());
 
+    // Given
     let (mut harness, _sender) = build_harness(
         sessions_tmp.path().to_path_buf(),
         stub_path.to_str().unwrap(),
@@ -374,7 +381,7 @@ async fn start_claude_model_callback_launches_claude_cli() {
         Arc::clone(&manager),
     );
 
-    // /start-claude → project → branch → model
+    // When — /start-claude → project → branch → model
     let outcome = harness
         .handle_start_claude(StartClaudeCommand {
             chat_id: AUTHORIZED_CHAT,
@@ -401,6 +408,7 @@ async fn start_claude_model_callback_launches_claude_cli() {
         .await
         .expect("model callback must succeed: spawns claude-cli");
 
+    // Then
     let session_dir = unified_session_dir_path(sessions_tmp.path(), &session_id);
 
     // .session.yaml must be written with claude-cli metadata.
@@ -472,6 +480,7 @@ async fn start_claude_uses_shared_manager() {
     let stub_path = write_echo_argv_script(stub_dir.path());
     let manager = Arc::new(ClaudeCliSessionManager::new());
 
+    // Given
     let (mut harness, _sender) = build_harness(
         sessions_tmp.path().to_path_buf(),
         stub_path.to_str().unwrap(),
@@ -479,6 +488,7 @@ async fn start_claude_uses_shared_manager() {
         Arc::clone(&manager),
     );
 
+    // When — /start-claude → project → branch → model
     let outcome = harness
         .handle_start_claude(StartClaudeCommand {
             chat_id: AUTHORIZED_CHAT,
@@ -504,7 +514,7 @@ async fn start_claude_uses_shared_manager() {
         .await
         .expect("model callback must succeed");
 
-    // The shared manager must now contain the session (proves attachability via terminal RPCs).
+    // Then — the shared manager must now contain the session (proves attachability via terminal RPCs).
     let handle = manager
         .get(&session_id)
         .await

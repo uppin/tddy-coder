@@ -3,7 +3,6 @@
 //! These assert routing, per-host project paths, and cross-daemon safety.
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
@@ -11,10 +10,10 @@ use std::time::Duration;
 
 use livekit::prelude::RoomOptions;
 use serial_test::serial;
-use tddy_core::SessionMetadata;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::livekit_peer_discovery::DaemonAdvertisement;
+use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, Request};
@@ -22,6 +21,7 @@ use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ListEligibleDaemonsRequest,
     ListSessionsRequest, StartSessionRequest,
 };
+use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
 const REMOTE_ACCEPTANCE_ROOM: &str = "acceptance-common-room";
 const REMOTE_PEER_INSTANCE_ID: &str = "acceptance-daemon-b";
@@ -82,57 +82,15 @@ impl Drop for RestoreTddyProjectsDirEnv {
     }
 }
 
-fn test_config() -> DaemonConfig {
-    let yaml = r#"
-users:
-  - github_user: "testuser"
-    os_user: "testdev"
-"#;
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    tmp.write_all(yaml.as_bytes()).unwrap();
-    DaemonConfig::load(tmp.path()).unwrap()
-}
-
-fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
-    let config = test_config();
-    let sessions_base_resolver: SessionsBaseResolver =
-        Arc::new(move |_| Some(sessions_base.clone()));
-    let user_resolver: UserResolver = Arc::new(|token| {
-        if token == "valid-token" {
-            Some("testuser".to_string())
-        } else {
-            None
-        }
-    });
-    ConnectionServiceImpl::new(
-        config,
-        sessions_base_resolver,
-        user_resolver,
-        None,
-        None,
-        None,
-        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
-    )
-}
-
 fn write_exited_session(session_dir: &std::path::Path, session_id: &str, pid: u32) {
-    let metadata = SessionMetadata {
-        session_id: session_id.to_string(),
-        project_id: "proj-1".to_string(),
-        created_at: "2026-03-21T10:00:00Z".to_string(),
-        updated_at: "2026-03-21T10:00:00Z".to_string(),
-        status: "exited".to_string(),
-        repo_path: Some("/tmp".to_string()),
-        pid: Some(pid),
-        tool: Some("tddy-coder".to_string()),
-        livekit_room: Some("room".to_string()),
-        pending_elicitation: false,
-        previous_session_id: None,
-        session_type: None,
-        model: None,
-        activity_status: None,
-        hook_token: None,
-    };
+    let metadata = a_session_metadata()
+        .with_session_id(session_id)
+        .with_status("exited")
+        .with_repo_path("/tmp")
+        .with_pid(pid)
+        .with_tool("tddy-coder")
+        .with_livekit_room("room")
+        .build();
     tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
 }
 
@@ -140,6 +98,7 @@ fn write_exited_session(session_dir: &std::path::Path, session_id: &str, pid: u3
 #[test]
 #[serial]
 fn per_host_project_path_roundtrip() {
+    // Given — a project with distinct checkout paths on two hosts
     let temp = tempfile::tempdir().unwrap();
     let projects_dir = temp.path().join("projects");
     std::fs::create_dir_all(&projects_dir).unwrap();
@@ -158,6 +117,7 @@ fn per_host_project_path_roundtrip() {
     };
     tddy_daemon::project_storage::write_projects(&projects_dir, &[project]).unwrap();
 
+    // When
     let path_a = tddy_daemon::project_storage::main_repo_path_for_host(
         &projects_dir,
         "proj-same-id",
@@ -171,6 +131,7 @@ fn per_host_project_path_roundtrip() {
     )
     .unwrap();
 
+    // Then
     assert_eq!(
         path_a.as_deref(),
         Some("/home/alice/repos/app"),
@@ -188,10 +149,15 @@ fn per_host_project_path_roundtrip() {
 #[test]
 #[serial]
 fn start_session_targets_selected_daemon_identity() {
+    // Given
     let session_id = "sess-new-7f3a";
     let selected = "host-west";
     let expected = format!("daemon-{selected}-{session_id}");
+
+    // When
     let got = tddy_daemon::spawner::livekit_server_identity_for_session(Some(selected), session_id);
+
+    // Then
     assert_eq!(
         got, expected,
         "livekit_server_identity must match the selected daemon naming scheme"
@@ -203,12 +169,15 @@ fn start_session_targets_selected_daemon_identity() {
 #[tokio::test]
 #[serial]
 async fn start_session_unknown_daemon_instance_id_returns_clear_error() {
+    // Given
     let temp = tempfile::tempdir().unwrap();
     let sessions_base = temp.path().join("sessions");
     std::fs::create_dir_all(&sessions_base).unwrap();
     let service = test_service(sessions_base);
+
+    // When
     let request = Request::new(StartSessionRequest {
-        session_token: "valid-token".to_string(),
+        session_token: TEST_TOKEN.to_string(),
         tool_path: "/bin/true".to_string(),
         project_id: "not-consulted-before-daemon-routing".to_string(),
         agent: String::new(),
@@ -223,6 +192,7 @@ async fn start_session_unknown_daemon_instance_id_returns_clear_error() {
         initial_prompt: String::new(),
         permission_mode: String::new(),
     });
+    // Then
     let err = service
         .start_session(request)
         .await
@@ -254,6 +224,7 @@ async fn start_session_unknown_daemon_instance_id_returns_clear_error() {
 #[tokio::test]
 #[serial]
 async fn start_session_remote_daemon_instance_id_routes_to_peer() {
+    // Given — two daemons in a common LiveKit room; daemon B (peer) advertises itself
     let livekit = LiveKitTestkit::start()
         .await
         .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
@@ -300,7 +271,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     let config_b = DaemonConfig::load(&path_b).unwrap();
 
     let user_resolver: UserResolver = Arc::new(|token| {
-        if token == "valid-token" {
+        if token == TEST_TOKEN {
             Some("testuser".to_string())
         } else {
             None
@@ -379,7 +350,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         loop {
             let daemons = service_a
                 .list_eligible_daemons(Request::new(ListEligibleDaemonsRequest {
-                    session_token: "valid-token".to_string(),
+                    session_token: TEST_TOKEN.to_string(),
                 }))
                 .await
                 .expect("ListEligibleDaemons")
@@ -397,8 +368,9 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     .await
     .expect("timeout waiting for peer daemon in eligible list");
 
+    // When — daemon A routes StartSession to the discovered peer
     let request = Request::new(StartSessionRequest {
-        session_token: "valid-token".to_string(),
+        session_token: TEST_TOKEN.to_string(),
         tool_path: true_bin().to_string(),
         project_id: REMOTE_ROUTING_PROJECT_ID.to_string(),
         agent: String::new(),
@@ -419,6 +391,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
             e.code, e.message
         )
     });
+    // Then
     let inner = response.into_inner();
     assert!(!inner.session_id.is_empty());
     let expected_identity = tddy_daemon::spawner::livekit_server_identity_for_session(
@@ -434,6 +407,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
 #[tokio::test]
 #[serial]
 async fn session_entry_includes_daemon_instance_id() {
+    // Given
     let temp = tempfile::tempdir().unwrap();
     let sessions_base = temp.path().to_path_buf();
     let session_id = "sess-host-check";
@@ -441,15 +415,17 @@ async fn session_entry_includes_daemon_instance_id() {
         tddy_core::session_lifecycle::unified_session_dir_path(&sessions_base, session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
     write_exited_session(&session_dir, session_id, 99999);
-
     let service = test_service(sessions_base);
-    let request = Request::new(ListSessionsRequest {
-        session_token: "valid-token".to_string(),
-    });
+
+    // When
     let response = service
-        .list_sessions(request)
+        .list_sessions(Request::new(ListSessionsRequest {
+            session_token: TEST_TOKEN.to_string(),
+        }))
         .await
         .expect("ListSessions must not return an error");
+
+    // Then
     let sessions = &response.into_inner().sessions;
     assert!(!sessions.is_empty(), "must list the written session");
     let entry = sessions
@@ -467,6 +443,7 @@ async fn session_entry_includes_daemon_instance_id() {
 #[tokio::test]
 #[serial]
 async fn cross_daemon_session_operation_rejected() {
+    // Given — session exists only on daemon A's sessions base
     let mut child = std::process::Command::new("true")
         .spawn()
         .expect("spawn true");
@@ -480,17 +457,18 @@ async fn cross_daemon_session_operation_rejected() {
     let session_dir_a = sessions_base_a.join(session_id);
     std::fs::create_dir_all(&session_dir_a).unwrap();
     write_exited_session(&session_dir_a, session_id, pid);
-
     let service_b = test_service(sessions_base_b);
-    let request = Request::new(DeleteSessionRequest {
-        session_token: "valid-token".to_string(),
-        session_id: session_id.to_string(),
-    });
+
+    // When — daemon B attempts to delete daemon A's session
     let err = service_b
-        .delete_session(request)
+        .delete_session(Request::new(DeleteSessionRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: session_id.to_string(),
+        }))
         .await
         .expect_err("delete on non-owning daemon must not succeed");
 
+    // Then
     assert_eq!(
         err.code,
         tddy_rpc::Code::FailedPrecondition,

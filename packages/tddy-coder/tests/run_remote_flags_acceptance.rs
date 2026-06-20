@@ -24,11 +24,14 @@ fn tddy_coder_bin() -> Command {
 /// Currently the flag does not exist — it must be added to `Args`/`CoderArgs`.
 #[test]
 fn help_lists_remote_daemon_url_flag() {
+    // When
     let output = tddy_coder_bin()
         .arg("--help")
         .output()
         .expect("tddy-coder --help must not crash");
     let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Then
     assert!(
         stdout.contains("remote-daemon-url"),
         "--remote-daemon-url must appear in --help output; got: {}",
@@ -39,11 +42,14 @@ fn help_lists_remote_daemon_url_flag() {
 /// AC: `tddy-coder --help` lists `--remote-session-token` as an accepted flag.
 #[test]
 fn help_lists_remote_session_token_flag() {
+    // When
     let output = tddy_coder_bin()
         .arg("--help")
         .output()
         .expect("tddy-coder --help must not crash");
     let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Then
     assert!(
         stdout.contains("remote-session-token"),
         "--remote-session-token must appear in --help output; got: {}",
@@ -54,11 +60,14 @@ fn help_lists_remote_session_token_flag() {
 /// AC: `tddy-coder --help` lists `--remote-daemon-id` as an accepted flag.
 #[test]
 fn help_lists_remote_daemon_id_flag() {
+    // When
     let output = tddy_coder_bin()
         .arg("--help")
         .output()
         .expect("tddy-coder --help must not crash");
     let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Then
     assert!(
         stdout.contains("remote-daemon-id"),
         "--remote-daemon-id must appear in --help output; got: {}",
@@ -75,6 +84,7 @@ fn help_lists_remote_daemon_id_flag() {
 /// the daemon, the relay, or the session — NOT the old placeholder text.
 #[test]
 fn remote_with_daemon_url_dispatches_to_run_remote_not_placeholder() {
+    // When
     let output = tddy_coder_bin()
         .args([
             "--remote",
@@ -94,7 +104,7 @@ fn remote_with_daemon_url_dispatches_to_run_remote_not_placeholder() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let combined = format!("{stderr}{stdout}");
 
-    // Must fail (no real daemon).
+    // Then — must fail (no real daemon).
     assert!(
         !output.status.success(),
         "tddy-coder --remote with unreachable daemon must exit non-zero"
@@ -130,6 +140,7 @@ fn remote_with_daemon_url_dispatches_to_run_remote_not_placeholder() {
 /// confusing error). After the fix, it should immediately error about missing daemon URL.
 #[test]
 fn remote_without_daemon_url_fails_with_missing_url_error() {
+    // When
     let output = tddy_coder_bin()
         .args(["--remote", "--recipe", "free-prompting", "--prompt", "test"])
         .output()
@@ -139,7 +150,7 @@ fn remote_without_daemon_url_fails_with_missing_url_error() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let combined = format!("{stderr}{stdout}");
 
-    // Must fail.
+    // Then — must fail.
     assert!(
         !output.status.success(),
         "tddy-coder --remote without --remote-daemon-url must exit non-zero"

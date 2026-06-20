@@ -34,10 +34,15 @@ fn write_projects_yaml(dir: &Path, n: usize) -> anyhow::Result<()> {
 
 #[test]
 fn owned_project_count_for_projects_dir_matches_projects_yaml_row_count() {
+    // Given a temp directory with a projects.yaml containing 4 rows
     let tmp = tempfile::tempdir().expect("tempdir");
     let expected: u64 = 4;
     write_projects_yaml(tmp.path(), expected as usize).expect("write projects.yaml");
+
+    // When counting owned projects from the directory
     let got = owned_project_count_for_projects_dir(tmp.path()).expect("count");
+
+    // Then the count matches the number of rows written to projects.yaml
     assert_eq!(
         got,
         expected,

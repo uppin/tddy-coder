@@ -48,6 +48,7 @@ fn service_with_config(config: DaemonConfig, sessions_base: PathBuf) -> Connecti
 /// unknown fields under an agent entry are rejected (`deny_unknown_fields`).
 #[test]
 fn daemon_config_allowed_agents_deserializes() {
+    // Given
     let yaml = r#"
 users:
   - github_user: "gh1"
@@ -61,7 +62,11 @@ allowed_agents:
   - id: custom-b
 "#;
     let (_dir, path) = write_config(yaml);
+
+    // When
     let config = DaemonConfig::load(&path).expect("config with allowed_agents must parse");
+
+    // Then
     assert_eq!(config.allowed_agents.len(), 2);
     assert_eq!(config.allowed_agents[0].id, "custom-a");
     assert_eq!(config.allowed_agents[0].label.as_deref(), Some("Custom A"));
@@ -87,6 +92,7 @@ allowed_agents:
 /// hardcoded defaults such as `claude` must not appear when absent from config.
 #[tokio::test]
 async fn connection_service_list_agents_returns_config() {
+    // Given
     let yaml = r#"
 users:
   - github_user: "u"
@@ -104,11 +110,15 @@ allowed_tools:
     let _sessions_tmp = tempfile::tempdir().unwrap();
     let sessions_base = _sessions_tmp.path().to_path_buf();
     let service = service_with_config(config, sessions_base);
+
+    // When
     let response = service
         .list_agents(Request::new(ListAgentsRequest {}))
         .await
         .expect("ListAgents must succeed");
     let agents = response.into_inner().agents;
+
+    // Then
     assert_eq!(agents.len(), 2);
     assert_eq!(agents[0].id, "zebra-backend");
     assert_eq!(agents[0].label, "Zebra");
@@ -124,6 +134,7 @@ allowed_tools:
 /// not change `ListTools` mapping.
 #[tokio::test]
 async fn list_tools_unchanged_with_new_config_field() {
+    // Given
     let yaml = r#"
 users:
   - github_user: "u"
@@ -141,11 +152,15 @@ allowed_agents:
     let _sessions_tmp = tempfile::tempdir().unwrap();
     let sessions_base = _sessions_tmp.path().to_path_buf();
     let service = service_with_config(config, sessions_base);
+
+    // When
     let response = service
         .list_tools(Request::new(ListToolsRequest {}))
         .await
         .expect("ListTools must succeed");
     let tools = response.into_inner().tools;
+
+    // Then
     assert_eq!(tools.len(), 2);
     assert_eq!(tools[0].path, "/first/tool");
     assert_eq!(tools[0].label, "First");
@@ -157,6 +172,7 @@ allowed_agents:
 /// fail before LiveKit/project resolution with an actionable `invalid_argument` status.
 #[tokio::test]
 async fn start_session_unknown_agent_rejected() {
+    // Given
     let yaml = r#"
 users:
   - github_user: "testuser"
@@ -186,10 +202,14 @@ allowed_agents:
         initial_prompt: String::new(),
         permission_mode: String::new(),
     });
+
+    // When
     let err = service
         .start_session(request)
         .await
         .expect_err("unknown agent must be rejected");
+
+    // Then
     assert_eq!(err.code, Code::InvalidArgument);
     let msg = err.message.to_ascii_lowercase();
     assert!(

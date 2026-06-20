@@ -168,6 +168,9 @@ mod tests {
 
     #[test]
     fn parse_monitor_target() {
+        // Given valid monitor target strings (with and without whitespace)
+        // When parsing
+        // Then TargetSpec::Monitor is returned with the correct index
         assert_eq!(parse_target("monitor:0").unwrap(), TargetSpec::Monitor(0));
         assert_eq!(
             parse_target("  monitor:12 ").unwrap(),
@@ -177,11 +180,17 @@ mod tests {
 
     #[test]
     fn parse_window_target() {
+        // Given a valid window target string
+        // When parsing
+        // Then TargetSpec::Window is returned with the correct id
         assert_eq!(parse_target("window:42").unwrap(), TargetSpec::Window(42));
     }
 
     #[test]
     fn parse_rejects_garbage() {
+        // Given invalid target strings (unknown prefix or empty)
+        // When parsing
+        // Then an error is returned
         assert!(parse_target("screen:1").is_err());
         assert!(parse_target("").is_err());
     }

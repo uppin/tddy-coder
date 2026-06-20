@@ -20,9 +20,12 @@ use tddy_workflow_recipes::tdd::graph::build_tdd_workflow_graph;
 
 #[tokio::test]
 async fn context_stores_and_retrieves_values() {
+    // Given
     let ctx = Context::new();
     ctx.set_sync("key", "value");
     let v: Option<String> = ctx.get_sync("key");
+
+    // Then
     assert_eq!(v, Some("value".to_string()));
 
     ctx.set_sync("num", 42_i32);
@@ -32,14 +35,18 @@ async fn context_stores_and_retrieves_values() {
 
 #[tokio::test]
 async fn context_async_get_set() {
+    // Given
     let ctx = Context::new();
     ctx.set("async_key", "async_value").await;
     let v: Option<String> = ctx.get("async_key").await;
+
+    // Then
     assert_eq!(v, Some("async_value".to_string()));
 }
 
 #[tokio::test]
 async fn next_action_variants_exist() {
+    // Given
     let _ = NextAction::Continue;
     let _ = NextAction::ContinueAndExecute;
     let _ = NextAction::WaitForInput;
@@ -50,11 +57,14 @@ async fn next_action_variants_exist() {
 
 #[tokio::test]
 async fn echo_task_runs_and_returns_result() {
+    // Given
     let task = EchoTask::new("echo");
     let ctx = Context::new();
     ctx.set_sync("input", "hello");
 
     let result = task.run(ctx).await.unwrap();
+
+    // Then
     assert_eq!(result.response, "hello");
     assert_eq!(result.task_id, "echo");
     assert!(matches!(result.next_action, NextAction::Continue));
@@ -62,6 +72,7 @@ async fn echo_task_runs_and_returns_result() {
 
 #[tokio::test]
 async fn graph_builder_creates_graph_with_edges() {
+    // Given
     let t1 = Arc::new(EchoTask::new("t1"));
     let t2 = Arc::new(EchoTask::new("t2"));
 
@@ -71,6 +82,8 @@ async fn graph_builder_creates_graph_with_edges() {
         .add_edge("t1", "t2")
         .build();
 
+
+    // Then
     assert_eq!(graph.id, "test_graph");
     assert!(graph.get_task("t1").is_some());
     assert!(graph.get_task("t2").is_some());
@@ -82,6 +95,7 @@ async fn graph_builder_creates_graph_with_edges() {
 
 #[tokio::test]
 async fn graph_builder_supports_conditional_edges() {
+    // Given
     let t1 = Arc::new(EchoTask::new("t1"));
     let t2 = Arc::new(EchoTask::new("t2"));
     let t3 = Arc::new(EchoTask::new("t3"));
@@ -100,6 +114,8 @@ async fn graph_builder_supports_conditional_edges() {
 
     let ctx = Context::new();
     ctx.set_sync("use_t2", true);
+
+    // Then
     assert_eq!(graph.next_task_id("t1", &ctx), Some("t2".to_string()));
 
     ctx.set_sync("use_t2", false);
@@ -108,6 +124,7 @@ async fn graph_builder_supports_conditional_edges() {
 
 #[tokio::test]
 async fn session_storage_saves_and_loads() {
+    // Given
     let dir = std::env::temp_dir().join("tddy-session-test");
     let _ = std::fs::remove_dir_all(&dir);
     let storage = FileSessionStorage::new(dir.clone());
@@ -122,6 +139,8 @@ async fn session_storage_saves_and_loads() {
         .await
         .unwrap()
         .expect("session should exist");
+
+    // Then
     assert_eq!(loaded.id, "s1");
     assert_eq!(loaded.current_task_id, "start");
     let v: Option<String> = loaded.context.get_sync("foo");
@@ -132,6 +151,7 @@ async fn session_storage_saves_and_loads() {
 
 #[tokio::test]
 async fn flow_runner_executes_single_task() {
+    // Given
     let dir = std::env::temp_dir().join("tddy-flowrunner-test");
     let _ = std::fs::remove_dir_all(&dir);
     let storage = Arc::new(FileSessionStorage::new(dir.clone()));
@@ -152,6 +172,8 @@ async fn flow_runner_executes_single_task() {
     let runner = FlowRunner::new(graph, storage.clone());
     let result = runner.run("run1").await.unwrap();
 
+
+    // Then
     assert_eq!(result.session_id, "run1");
     assert!(matches!(
         result.status,
@@ -163,6 +185,7 @@ async fn flow_runner_executes_single_task() {
 
 #[tokio::test]
 async fn flow_runner_chains_two_tasks() {
+    // Given
     let dir = std::env::temp_dir().join("tddy-flowrunner-chain");
     let _ = std::fs::remove_dir_all(&dir);
     let storage = Arc::new(FileSessionStorage::new(dir.clone()));
@@ -186,6 +209,8 @@ async fn flow_runner_chains_two_tasks() {
     let runner = FlowRunner::new(graph, storage.clone());
 
     let r1 = runner.run("chain1").await.unwrap();
+
+    // Then
     assert_eq!(r1.current_task_id, Some("t2".to_string()));
 
     let r2 = runner.run("chain1").await.unwrap();
@@ -196,9 +221,12 @@ async fn flow_runner_chains_two_tasks() {
 
 #[tokio::test]
 async fn build_tdd_workflow_graph_creates_graph() {
+    // Given
     let backend = Arc::new(MockBackend::new());
     let graph = build_tdd_workflow_graph(backend.clone(), common::tdd_recipe());
 
+
+    // Then
     assert_eq!(graph.id, "tdd_workflow");
 
     let ctx = Context::new();
@@ -215,6 +243,7 @@ async fn build_tdd_workflow_graph_creates_graph() {
 
 #[tokio::test]
 async fn workflow_engine_run_goal_plan_completes() {
+    // Given
     let storage_dir = std::env::temp_dir().join("tddy-engine-plan-test");
     let _ = std::fs::remove_dir_all(&storage_dir);
     let output_dir = storage_dir.join("plan-output");
@@ -225,6 +254,8 @@ async fn workflow_engine_run_goal_plan_completes() {
         initial_prompt: Some("SKIP_QUESTIONS feature".to_string()),
         ..Changeset::default()
     };
+
+    // When
     let _ = write_changeset(&session_dir, &init_cs);
 
     let backend: SharedBackend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
@@ -247,6 +278,8 @@ async fn workflow_engine_run_goal_plan_completes() {
     let plan_gid = GoalId::new("plan");
     let result = engine.run_goal(&plan_gid, context_values).await.unwrap();
 
+
+    // Then
     assert_eq!(result.session_id.len(), 36);
     assert!(
         matches!(
@@ -271,6 +304,7 @@ async fn workflow_engine_run_goal_plan_completes() {
 
 #[tokio::test]
 async fn workflow_engine_run_full_workflow_completes_with_stub() {
+    // Given
     let storage_dir = std::env::temp_dir().join("tddy-engine-full-test");
     let _ = std::fs::remove_dir_all(&storage_dir);
     let output_dir = storage_dir.join("plan-output");
@@ -281,6 +315,8 @@ async fn workflow_engine_run_full_workflow_completes_with_stub() {
         initial_prompt: Some("SKIP_QUESTIONS feature".to_string()),
         ..Changeset::default()
     };
+
+    // When
     let _ = write_changeset(&session_dir, &init_cs);
 
     let backend: SharedBackend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
@@ -303,6 +339,8 @@ async fn workflow_engine_run_full_workflow_completes_with_stub() {
 
     let result = engine.run_full_workflow(context_values).await.unwrap();
 
+
+    // Then
     assert!(
         matches!(
             result.status,

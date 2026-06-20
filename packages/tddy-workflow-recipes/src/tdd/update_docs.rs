@@ -63,7 +63,10 @@ mod tests {
 
     #[test]
     fn system_prompt_references_schema() {
+        // When
         let prompt = system_prompt();
+
+        // Then
         assert!(
             prompt.contains("tddy-tools get-schema update-docs"),
             "system prompt must reference get-schema for update-docs"
@@ -76,7 +79,10 @@ mod tests {
 
     #[test]
     fn build_prompt_includes_artifacts() {
+        // When
         let prompt = build_prompt("PRD.md: Product requirements");
+
+        // Then
         assert!(
             prompt.contains("PRD.md"),
             "prompt must include artifact content"

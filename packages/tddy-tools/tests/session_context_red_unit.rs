@@ -6,6 +6,7 @@ use tempfile::tempdir;
 
 #[test]
 fn apply_session_context_merge_completes_without_error_when_session_exists() {
+    // Given
     let dir = tempdir().expect("tempdir");
     let wf = dir.path().join(".workflow");
     std::fs::create_dir_all(&wf).expect("mkdir");
@@ -15,8 +16,11 @@ fn apply_session_context_merge_completes_without_error_when_session_exists() {
     );
     std::fs::write(wf.join(format!("{session_id}.session.json")), initial).expect("write");
 
+    // When
     let patch = json!({"run_optional_step_x": true});
     let result = apply_session_context_merge(&wf, session_id, &patch);
+
+    // Then
     assert!(
         result.is_ok(),
         "merge must succeed and persist; got {:?}",

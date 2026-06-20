@@ -36,13 +36,17 @@ fn parse_planning_response_resolves_prd_path_to_file_content() {
 /// Expected behavior: the parser rejects the unresolvable file reference.
 #[test]
 fn parse_planning_response_rejects_unresolvable_prd_file_path() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-parse-prd-missing-file-test");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create dir");
 
     let json = r##"{"goal":"plan","prd":"PRD.md"}"##;
+
+    // When
     let result = parse_planning_response_with_base(json, Path::new(&session_dir));
 
+    // Then
     assert!(
         result.is_err(),
         "parser should reject prd='PRD.md' when the file doesn't exist at session_dir, \
@@ -55,30 +59,46 @@ fn parse_planning_response_rejects_unresolvable_prd_file_path() {
 
 #[test]
 fn parse_planning_response_accepts_valid_json() {
+    // Given
     let input = "{\"goal\":\"plan\",\"prd\":\"# PRD\\n\\n## Summary\\nFeature X\\n\\n## TODO\\n\\n- [ ] Task 1\"}";
+
+    // When
     let out = parse_planning_response(input).expect("should parse");
+
+    // Then
     assert!(out.prd.contains("Feature X"));
     assert!(out.prd.contains("Task 1"));
 }
 
 #[test]
 fn parse_planning_response_rejects_non_json() {
+    // Given
     let input = "Some text without JSON";
+
+    // When / Then
     let err = parse_planning_response(input).unwrap_err();
     assert!(matches!(err, tddy_core::ParseError::Malformed(_)));
 }
 
 #[test]
 fn parse_update_docs_response_extracts_valid_output() {
+    // Given
     let input = r#"{"goal":"update-docs","summary":"Updated 3 docs.","docs_updated":3}"#;
+
+    // When
     let out = parse_update_docs_response(input).expect("should parse");
+
+    // Then
     assert_eq!(out.summary, "Updated 3 docs.");
     assert_eq!(out.docs_updated, 3);
 }
 
 #[test]
 fn parse_update_docs_response_rejects_wrong_goal() {
+    // Given
     let input = r#"{"goal":"refactor","summary":"Updated docs.","docs_updated":2}"#;
+
+    // When / Then
     let err = parse_update_docs_response(input).unwrap_err();
     assert!(
         err.to_string().contains("goal") || err.to_string().contains("update-docs"),
@@ -91,13 +111,17 @@ fn parse_update_docs_response_rejects_wrong_goal() {
 /// Parser must handle these fields; writers must include them in markdown.
 #[test]
 fn enhanced_test_instructions_include_sequential_and_logging() {
+    // Given
     let at_input = r#"{"goal":"acceptance-tests","summary":"Created tests.","tests":[{"name":"t1","file":"t.rs","line":1,"status":"failing"}],"test_command":"cargo test","sequential_command":"cargo test -- --test-threads=1","logging_command":"RUST_LOG=debug cargo test"}"#;
+    let red_input = r#"{"goal":"red","summary":"Created.","tests":[{"name":"t1","file":"t.rs","line":1,"status":"failing"}],"skeletons":[],"sequential_command":"cargo test -- --test-threads=1","logging_command":"RUST_LOG=debug cargo test"}"#;
+
+    // When
     let at_out = parse_acceptance_tests_response(at_input).expect("parse acceptance tests");
+    let red_out = parse_red_response(red_input).expect("parse red");
+
+    // Then
     assert_eq!(at_out.tests.len(), 1);
     assert_eq!(at_out.tests[0].name, "t1");
-
-    let red_input = r#"{"goal":"red","summary":"Created.","tests":[{"name":"t1","file":"t.rs","line":1,"status":"failing"}],"skeletons":[],"sequential_command":"cargo test -- --test-threads=1","logging_command":"RUST_LOG=debug cargo test"}"#;
-    let red_out = parse_red_response(red_input).expect("parse red");
     assert_eq!(red_out.tests.len(), 1);
 }
 
@@ -106,6 +130,7 @@ fn enhanced_test_instructions_include_sequential_and_logging() {
 fn write_artifacts_rejects_empty_prd() {
     use tddy_workflow_recipes::{write_artifacts, PlanningOutput};
 
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-write-empty-prd-test");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create dir");
@@ -118,6 +143,8 @@ fn write_artifacts_rejects_empty_prd() {
         branch_suggestion: None,
         worktree_suggestion: None,
     };
+
+    // When / Then
     let result = write_artifacts(&session_dir, &planning, "PRD.md");
     assert!(
         result.is_err(),
@@ -132,6 +159,7 @@ fn write_artifacts_rejects_empty_prd() {
 fn write_artifacts_rejects_whitespace_only_prd() {
     use tddy_workflow_recipes::{write_artifacts, PlanningOutput};
 
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-write-ws-prd-test");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create dir");
@@ -144,6 +172,8 @@ fn write_artifacts_rejects_whitespace_only_prd() {
         branch_suggestion: None,
         worktree_suggestion: None,
     };
+
+    // When / Then
     let result = write_artifacts(&session_dir, &planning, "PRD.md");
     assert!(
         result.is_err(),
@@ -158,6 +188,7 @@ fn write_artifacts_rejects_whitespace_only_prd() {
 fn markdown_cross_references_added() {
     use tddy_workflow_recipes::{write_artifacts, PlanningOutput};
 
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-crossref-test");
     let _ = std::fs::remove_dir_all(&session_dir);
     std::fs::create_dir_all(&session_dir).expect("create dir");
@@ -170,8 +201,11 @@ fn markdown_cross_references_added() {
         branch_suggestion: None,
         worktree_suggestion: None,
     };
+
+    // When
     write_artifacts(&session_dir, &planning, "PRD.md").expect("write artifacts");
 
+    // Then
     let prd_content =
         std::fs::read_to_string(session_dir.join("artifacts").join("PRD.md")).expect("read PRD");
     assert!(
@@ -185,9 +219,13 @@ fn markdown_cross_references_added() {
 /// parse_evaluate_response() extracts summary, risk_level, issues, and build_results correctly.
 #[test]
 fn parse_evaluate_response_extracts_all_fields() {
+    // Given
     let input = r#"{"goal":"evaluate-changes","summary":"Analyzed 2 files. Risk: low.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[{"severity":"warning","category":"code_quality","file":"src/lib.rs","line":10,"description":"Magic number","suggestion":"Use a named constant"}],"changeset_sync":{"status":"synced","items_updated":1,"items_added":0},"files_analyzed":[{"file":"src/lib.rs","lines_changed":5,"changeset_item":"auth-login"}],"test_impact":{"tests_affected":1,"new_tests_needed":0},"changed_files":[],"affected_tests":[],"validity_assessment":"Ready"}"#;
 
+    // When
     let out = parse_evaluate_response(input).expect("parse_evaluate_response should succeed");
+
+    // Then
     assert!(
         out.summary.contains("Analyzed"),
         "summary should contain 'Analyzed', got: {}",
@@ -221,9 +259,13 @@ fn parse_evaluate_response_extracts_all_fields() {
 /// parse_evaluate_response() extracts evaluate-changes JSON.
 #[test]
 fn parse_evaluate_response_extracts_evaluate_json() {
+    // Given
     let input = r#"{"goal":"evaluate-changes","summary":"Analyzed 1 file.","risk_level":"low","build_results":[{"package":"tddy-core","status":"pass","notes":null}],"issues":[],"changeset_sync":{"status":"not_found","items_updated":0,"items_added":0},"files_analyzed":[{"file":"src/main.rs","lines_changed":5,"changeset_item":null}],"test_impact":{"tests_affected":0,"new_tests_needed":0},"changed_files":[],"affected_tests":[],"validity_assessment":"Ready"}"#;
 
+    // When
     let out = parse_evaluate_response(input).expect("parse_evaluate_response should succeed");
+
+    // Then
     assert_eq!(out.summary, "Analyzed 1 file.");
     assert_eq!(out.risk_level, "low");
 }
@@ -232,10 +274,15 @@ fn parse_evaluate_response_extracts_evaluate_json() {
 /// unused numeric fields should default so agents are not forced to invent counts.
 #[test]
 fn parse_evaluate_response_accepts_changeset_sync_with_only_status() {
+    // Given
     let input =
         r#"{"goal":"evaluate-changes","summary":"Done.","changeset_sync":{"status":"skipped"}}"#;
+
+    // When
     let out = parse_evaluate_response(input)
         .expect("parse_evaluate_response should accept partial changeset_sync");
+
+    // Then
     let sync = out
         .changeset_sync
         .as_ref()
@@ -248,8 +295,10 @@ fn parse_evaluate_response_accepts_changeset_sync_with_only_status() {
 /// parse_evaluate_response() returns ParseError::Malformed when the goal field is not "evaluate-changes".
 #[test]
 fn parse_evaluate_response_fails_on_wrong_goal_field() {
+    // Given
     let input = r#"{"goal":"plan","summary":"This is a plan, not an evaluation.","risk_level":"low","build_results":[],"issues":[],"changeset_sync":null,"files_analyzed":[],"test_impact":null,"changed_files":[],"affected_tests":[],"validity_assessment":""}"#;
 
+    // When / Then
     let err = parse_evaluate_response(input).expect_err("should fail on wrong goal");
     assert!(
         matches!(err, tddy_core::ParseError::Malformed(_)),

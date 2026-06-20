@@ -48,10 +48,8 @@ fn create_fake_tddy_tools(dir: &Path) -> std::io::Result<()> {
 /// `--recipe tdd|bugfix|free-prompting|grill-me|review` is accepted; invalid values are rejected.
 #[test]
 fn cli_accepts_recipe_flag() {
-    let mut cmd = tddy_coder_bin();
-    cmd.arg("--help");
-
-    let output = cmd.output().expect("run tddy-coder --help");
+    // When
+    let output = tddy_coder_bin().arg("--help").output().expect("run tddy-coder --help");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("--recipe"),
@@ -62,15 +60,11 @@ fn cli_accepts_recipe_flag() {
         .split("--recipe <RECIPE>")
         .nth(1)
         .expect("--recipe must appear in --help");
-    assert!(
-        recipe_help.contains("tdd")
-            && recipe_help.contains("bugfix")
-            && recipe_help.contains("free-prompting")
-            && recipe_help.contains("grill-me")
-            && recipe_help.contains("review"),
-        "help --recipe section must list shipped recipes including review; got:{}",
-        recipe_help
-    );
+    assert!(recipe_help.contains("tdd"), "help --recipe must list 'tdd'; got:{}", recipe_help);
+    assert!(recipe_help.contains("bugfix"), "help --recipe must list 'bugfix'; got:{}", recipe_help);
+    assert!(recipe_help.contains("free-prompting"), "help --recipe must list 'free-prompting'; got:{}", recipe_help);
+    assert!(recipe_help.contains("grill-me"), "help --recipe must list 'grill-me'; got:{}", recipe_help);
+    assert!(recipe_help.contains("review"), "help --recipe must list 'review'; got:{}", recipe_help);
 
     let mut cmd_bad = tddy_coder_bin();
     cmd_bad.args(["--recipe", "unknown-recipe"]);
@@ -88,6 +82,7 @@ fn cli_accepts_recipe_flag() {
 /// Help and `--recipe` validation include **`review`** with other shipped recipes.
 #[test]
 fn cli_accepts_recipe_review() {
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.arg("--help");
     let output = cmd.output().expect("run tddy-coder --help");
@@ -96,6 +91,7 @@ fn cli_accepts_recipe_review() {
         .split("--recipe <RECIPE>")
         .nth(1)
         .expect("--recipe must appear in --help");
+    // Then
     assert!(
         recipe_help.contains("review"),
         "--help --recipe section must list review; got:{}",
@@ -117,11 +113,13 @@ fn cli_accepts_recipe_review() {
 /// Codex agent is accepted on the CLI (`--agent codex`) once wired in clap + create_backend.
 #[test]
 fn cli_accepts_agent_codex() {
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.args(["--agent", "codex", "--goal", "plan"]);
-
     let output = cmd.output().expect("run tddy-coder");
     let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Then
 
     assert!(
         !stderr.contains("invalid value 'codex'")
@@ -134,11 +132,13 @@ fn cli_accepts_agent_codex() {
 /// Acceptance: --mouse flag is accepted by CLI for enabling mouse/touch mode in TUI.
 #[test]
 fn cli_accepts_mouse_flag() {
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.arg("--help");
-
     let output = cmd.output().expect("run tddy-coder --help");
     let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Then
     assert!(
         stdout.contains("--mouse") || stdout.contains("mouse"),
         "--mouse flag should appear in help output, stdout: {}",
@@ -149,11 +149,13 @@ fn cli_accepts_mouse_flag() {
 /// AC4: CLI argument parsing accepts `--goal evaluate`.
 #[test]
 fn cli_accepts_evaluate_goal() {
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.args(["--goal", "evaluate"]);
-
     let output = cmd.output().expect("run tddy-coder");
     let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Then
 
     // The command may fail for other reasons (e.g. missing --session-dir),
     // but it should NOT fail because "evaluate" is an invalid goal value.
@@ -173,6 +175,7 @@ fn cli_accepts_evaluate_goal() {
 #[test]
 #[cfg(unix)]
 fn standalone_demo_goal() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cli-demo-standalone");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
@@ -192,6 +195,7 @@ fn standalone_demo_goal() {
         tmp.display(),
         std::env::var("PATH").unwrap_or_default()
     );
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.env("PATH", &path);
     cmd.args([
@@ -204,7 +208,7 @@ fn standalone_demo_goal() {
     let output = cmd.output().expect("run tddy-coder");
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // Should NOT fail because "demo" is an invalid goal value.
+    // Then — should NOT fail because "demo" is an invalid goal value.
     assert!(
         !stderr.contains("invalid value 'demo'") && !stderr.contains("'demo' isn't a valid value"),
         "--goal demo should be accepted by the CLI parser, stderr: {}",
@@ -221,9 +225,11 @@ fn standalone_demo_goal() {
 /// - "validate-refactor" is removed from the value_parser
 #[test]
 fn cli_accepts_validate_goal() {
+    // Given
     let session_dir = std::env::temp_dir().join("tddy-cli-validate-test");
     let _ = std::fs::create_dir_all(&session_dir);
-    // --goal validate should be recognized by the argument parser
+
+    // When -- validate should be recognized by the argument parser
     let mut cmd = tddy_coder_bin();
     cmd.args([
         "--goal",
@@ -235,6 +241,7 @@ fn cli_accepts_validate_goal() {
     let output = cmd.output().expect("run tddy-coder");
     let stderr = String::from_utf8_lossy(&output.stderr);
 
+    // Then
     assert!(
         !stderr.contains("invalid value 'validate'")
             && !stderr.contains("'validate' isn't a valid value"),
@@ -260,6 +267,7 @@ fn cli_accepts_validate_goal() {
 #[test]
 #[cfg(unix)]
 fn cli_accepts_update_docs_goal() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cli-update-docs-test");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
@@ -274,6 +282,8 @@ fn cli_accepts_update_docs_goal() {
         tmp.display(),
         std::env::var("PATH").unwrap_or_default()
     );
+
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.env("PATH", &path);
     cmd.args([
@@ -286,6 +296,7 @@ fn cli_accepts_update_docs_goal() {
     let output = cmd.output().expect("run tddy-coder");
     let stderr = String::from_utf8_lossy(&output.stderr);
 
+    // Then
     assert!(
         !stderr.contains("invalid value 'update-docs'")
             && !stderr.contains("'update-docs' isn't a valid value"),
@@ -317,6 +328,7 @@ fn cli_accepts_update_docs_goal() {
 #[test]
 #[cfg(unix)]
 fn cli_accepts_refactor_goal() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-cli-refactor-test");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
@@ -336,6 +348,7 @@ fn cli_accepts_refactor_goal() {
         tmp.display(),
         std::env::var("PATH").unwrap_or_default()
     );
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.env("PATH", &path);
     cmd.args([
@@ -348,6 +361,7 @@ fn cli_accepts_refactor_goal() {
     let output = cmd.output().expect("run tddy-coder");
     let stderr = String::from_utf8_lossy(&output.stderr);
 
+    // Then
     assert!(
         !stderr.contains("invalid value 'refactor'")
             && !stderr.contains("'refactor' isn't a valid value"),
@@ -362,6 +376,7 @@ fn cli_accepts_refactor_goal() {
 #[test]
 #[cfg(unix)]
 fn log_config_file_output_redirects_logs() {
+    // Given
     let tmp = std::env::temp_dir().join("tddy-log-config-file-test");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create tmp");
@@ -399,6 +414,7 @@ exit 0
 
     create_fake_tddy_tools(&tmp).expect("create fake tddy-tools");
 
+    // When
     let mut cmd = tddy_coder_bin();
     let path = format!(
         "{}:{}",
@@ -419,6 +435,7 @@ exit 0
 
     let _output = cmd.output().expect("run tddy-coder");
 
+    // Then
     assert!(debug_file.exists(), "log output file should be created");
     let content = std::fs::read_to_string(&debug_file).expect("read log file");
     assert!(
@@ -433,6 +450,7 @@ exit 0
 /// --livekit-token and --livekit-api-key/--livekit-api-secret are mutually exclusive.
 #[test]
 fn livekit_token_and_api_key_mutually_exclusive() {
+    // When
     let mut cmd = tddy_coder_bin();
     cmd.args([
         "--daemon",
@@ -453,6 +471,7 @@ fn livekit_token_and_api_key_mutually_exclusive() {
     let output = cmd.output().expect("run tddy-coder");
     let stderr = String::from_utf8_lossy(&output.stderr);
 
+    // Then
     assert!(
         !output.status.success(),
         "providing both --livekit-token and --livekit-api-key/secret should fail"

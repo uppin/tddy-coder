@@ -132,6 +132,7 @@ fn tracked_with_bound_chat() -> SharedTelegramTrackedSessionCoordinator {
 /// sent to that chat. The message must mention input or needs.
 #[tokio::test]
 async fn waiting_for_input_transition_alerts_tracked_chat() {
+    // Given
     let sessions_tmp = tempfile::tempdir().unwrap();
     // unified_session_dir_path appends "sessions/<id>" under the sessions_base the resolver returns.
     let session_dir = sessions_tmp.path().join("sessions").join(SESSION_ID);
@@ -144,6 +145,7 @@ async fn waiting_for_input_transition_alerts_tracked_chat() {
         tracked_with_bound_chat(),
     );
 
+    // When
     let response = service
         .report_session_status(Request::new(ReportSessionStatusRequest {
             session_id: SESSION_ID.to_string(),
@@ -154,6 +156,7 @@ async fn waiting_for_input_transition_alerts_tracked_chat() {
         .await
         .expect("report_session_status must succeed for valid claude-cli session");
 
+    // Then
     assert!(response.into_inner().ok, "response.ok must be true");
 
     let recorded = sender.recorded();
@@ -178,6 +181,7 @@ async fn waiting_for_input_transition_alerts_tracked_chat() {
 /// text mentions finished or turn.
 #[tokio::test]
 async fn done_transition_alerts_tracked_chat() {
+    // Given
     let sessions_tmp = tempfile::tempdir().unwrap();
     let session_dir = sessions_tmp.path().join("sessions").join(SESSION_ID);
     write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN, Some("Running"));
@@ -189,6 +193,7 @@ async fn done_transition_alerts_tracked_chat() {
         tracked_with_bound_chat(),
     );
 
+    // When
     service
         .report_session_status(Request::new(ReportSessionStatusRequest {
             session_id: SESSION_ID.to_string(),
@@ -199,6 +204,7 @@ async fn done_transition_alerts_tracked_chat() {
         .await
         .expect("report_session_status must succeed");
 
+    // Then
     let recorded = sender.recorded();
     assert_eq!(
         recorded.len(),
@@ -216,6 +222,7 @@ async fn done_transition_alerts_tracked_chat() {
 /// `WaitingForInput` (no change in between) must produce exactly one Telegram message.
 #[tokio::test]
 async fn repeated_same_status_does_not_realert() {
+    // Given
     let sessions_tmp = tempfile::tempdir().unwrap();
     let session_dir = sessions_tmp.path().join("sessions").join(SESSION_ID);
     write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN, Some("Running"));
@@ -227,6 +234,7 @@ async fn repeated_same_status_does_not_realert() {
         tracked_with_bound_chat(),
     );
 
+    // When
     for _ in 0..2 {
         service
             .report_session_status(Request::new(ReportSessionStatusRequest {
@@ -239,6 +247,7 @@ async fn repeated_same_status_does_not_realert() {
             .expect("report_session_status must succeed");
     }
 
+    // Then
     assert_eq!(
         sender.recorded().len(),
         1,
@@ -252,6 +261,7 @@ async fn repeated_same_status_does_not_realert() {
 /// return `ok = true`.
 #[tokio::test]
 async fn no_alert_when_no_chat_tracks_session() {
+    // Given
     let sessions_tmp = tempfile::tempdir().unwrap();
     let session_dir = sessions_tmp.path().join("sessions").join(SESSION_ID);
     write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN, Some("Running"));
@@ -267,6 +277,7 @@ async fn no_alert_when_no_chat_tracks_session() {
         tracked,
     );
 
+    // When
     let resp = service
         .report_session_status(Request::new(ReportSessionStatusRequest {
             session_id: SESSION_ID.to_string(),
@@ -277,6 +288,7 @@ async fn no_alert_when_no_chat_tracks_session() {
         .await
         .expect("report_session_status must succeed even when session is untracked");
 
+    // Then
     assert!(resp.into_inner().ok, "response.ok must be true");
     assert!(
         sender.recorded().is_empty(),
@@ -289,6 +301,7 @@ async fn no_alert_when_no_chat_tracks_session() {
 /// `report_session_status` with `Running` must not produce any Telegram message.
 #[tokio::test]
 async fn running_status_does_not_alert() {
+    // Given
     let sessions_tmp = tempfile::tempdir().unwrap();
     let session_dir = sessions_tmp.path().join("sessions").join(SESSION_ID);
     write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN, Some("Started"));
@@ -300,6 +313,7 @@ async fn running_status_does_not_alert() {
         tracked_with_bound_chat(),
     );
 
+    // When
     service
         .report_session_status(Request::new(ReportSessionStatusRequest {
             session_id: SESSION_ID.to_string(),
@@ -310,6 +324,7 @@ async fn running_status_does_not_alert() {
         .await
         .expect("report_session_status must succeed");
 
+    // Then
     assert!(
         sender.recorded().is_empty(),
         "Running status must not produce a Telegram alert; got {:?}",

@@ -21,24 +21,24 @@ pub const TASK_FINALIZE: &str = "finalize";
 
 #[test]
 fn merge_pr_recipe_registers_with_resolver() {
+    // When
     let names = approval_policy::supported_workflow_recipe_cli_names();
+    let err = unknown_workflow_recipe_error("totally-unknown-merge-pr");
+    let (merge_pr, _) =
+        workflow_recipe_and_manifest_from_cli_name("merge-pr").expect("merge-pr must resolve");
+    let (tdd, _) = workflow_recipe_and_manifest_from_cli_name("tdd").expect("tdd must resolve");
+
+    // Then
     assert!(
         names.contains(&"merge-pr"),
         "F5: supported_workflow_recipe_cli_names must include merge-pr; got {:?}",
         names
     );
-
-    let err = unknown_workflow_recipe_error("totally-unknown-merge-pr");
     assert!(
         err.contains("\"merge-pr\""),
         "unknown_workflow_recipe_error must list merge-pr among expected names: {}",
         err
     );
-
-    let (merge_pr, _) =
-        workflow_recipe_and_manifest_from_cli_name("merge-pr").expect("merge-pr must resolve");
-    let (tdd, _) = workflow_recipe_and_manifest_from_cli_name("tdd").expect("tdd must resolve");
-
     assert_eq!(merge_pr.name(), "merge-pr");
     assert_eq!(tdd.name(), "tdd");
     assert_ne!(
@@ -46,7 +46,6 @@ fn merge_pr_recipe_registers_with_resolver() {
         tdd.name(),
         "merge-pr and tdd must be distinct recipes (distinct WorkflowRecipe identities)"
     );
-
     assert!(
         workflow_recipe_and_manifest_from_cli_name("garbage-merge-pr-name").is_err(),
         "unknown CLI names must not resolve"
@@ -55,26 +54,24 @@ fn merge_pr_recipe_registers_with_resolver() {
 
 #[test]
 fn merge_pr_graph_has_ordered_goals() {
+    // Given
     let (recipe, _) =
         workflow_recipe_and_manifest_from_cli_name("merge-pr").expect("merge-pr must resolve");
     let backend = Arc::new(StubBackend::new());
     let graph = recipe.build_graph(backend);
     let ctx = Context::new();
 
+    // Then
     assert_eq!(
         graph.id, "merge_pr_workflow",
         "merge-pr graph id must be stable for telemetry / debugging"
     );
 
     let ids: BTreeSet<String> = graph.task_ids().cloned().collect();
-    assert!(
-        ids.contains(TASK_ANALYZE)
-            && ids.contains(TASK_SYNC_MAIN)
-            && ids.contains(TASK_FINALIZE)
-            && ids.contains("end"),
-        "merge-pr graph must include analyze, sync-main, finalize, and end; got {:?}",
-        ids
-    );
+    assert!(ids.contains(TASK_ANALYZE), "graph must include analyze; got {:?}", ids);
+    assert!(ids.contains(TASK_SYNC_MAIN), "graph must include sync-main; got {:?}", ids);
+    assert!(ids.contains(TASK_FINALIZE), "graph must include finalize; got {:?}", ids);
+    assert!(ids.contains("end"), "graph must include end; got {:?}", ids);
 
     assert_eq!(
         graph.next_task_id(TASK_ANALYZE, &ctx),
@@ -116,10 +113,11 @@ fn merge_pr_graph_has_ordered_goals() {
 /// PRD: without credentials the recipe completes git work + push only; GitHub merge is not invoked (no merge API goal before finalize).
 #[test]
 fn merge_pr_skips_github_when_no_token() {
+    // Given
     let (recipe, _) =
         workflow_recipe_and_manifest_from_cli_name("merge-pr").expect("merge-pr must resolve");
 
-    // No dedicated GitHub merge graph task; API merge is conditional inside finalize.
+    // Then — no dedicated GitHub merge graph task; API merge is conditional inside finalize
     assert!(
         !recipe
             .goal_ids()
@@ -127,14 +125,10 @@ fn merge_pr_skips_github_when_no_token() {
             .any(|g| g.as_str().contains("github") || g.as_str() == "merge-api"),
         "merge-pr must not expose a dedicated GitHub merge graph task; API merge is conditional inside finalize"
     );
-
-    // Finalize requires structured submit for operator-visible outcome (PR / push / skip reason).
     assert!(
         recipe.goal_requires_tddy_tools_submit(&GoalId::new(TASK_FINALIZE)),
         "finalize must require tddy-tools submit for merge-pr-report-style outcome"
     );
-
-    // Analyze and sync steps: no structured submit.
     assert!(
         !recipe.goal_requires_tddy_tools_submit(&GoalId::new(TASK_ANALYZE)),
         "analyze must allow completion without structured submit (read-only analysis)"
@@ -148,9 +142,14 @@ fn merge_pr_skips_github_when_no_token() {
 /// PRD: with token, GitHub merge runs after sync; graph still orders sync before finalize (REST merge happens in finalize implementation).
 #[test]
 fn merge_pr_merges_pr_when_token_present() {
+    // Given
     let (recipe, _) =
         workflow_recipe_and_manifest_from_cli_name("merge-pr").expect("merge-pr must resolve");
+    let backend = Arc::new(StubBackend::new());
+    let graph = recipe.build_graph(backend);
+    let ctx = Context::new();
 
+    // Then
     let goal_ids = recipe.goal_ids();
     let ids: Vec<&str> = goal_ids.iter().map(|g| g.as_str()).collect();
     assert_eq!(
@@ -159,13 +158,15 @@ fn merge_pr_merges_pr_when_token_present() {
         "first recipe goal must be analyze"
     );
     assert!(
-        ids.contains(&TASK_SYNC_MAIN) && ids.contains(&TASK_FINALIZE),
-        "recipe.goal_ids must include sync-main and finalize for merge + push + API"
+        ids.contains(&TASK_SYNC_MAIN),
+        "recipe.goal_ids must include sync-main for worktree merge; got {:?}",
+        ids
     );
-
-    let backend = Arc::new(StubBackend::new());
-    let graph = recipe.build_graph(backend);
-    let ctx = Context::new();
+    assert!(
+        ids.contains(&TASK_FINALIZE),
+        "recipe.goal_ids must include finalize for push + API outcome; got {:?}",
+        ids
+    );
     assert_eq!(
         graph.next_task_id(TASK_ANALYZE, &ctx),
         Some(TASK_SYNC_MAIN.to_string()),
@@ -180,16 +181,23 @@ fn merge_pr_merges_pr_when_token_present() {
 
 #[test]
 fn merge_pr_sync_requires_session_worktree_for_conflict_hooks() {
+    // Given
     let (recipe, _) =
         workflow_recipe_and_manifest_from_cli_name("merge-pr").expect("merge-pr must resolve");
 
+    // Then
     assert!(
-        recipe.goal_requires_session_dir(&GoalId::new(TASK_ANALYZE))
-            && recipe.goal_requires_session_dir(&GoalId::new(TASK_SYNC_MAIN))
-            && recipe.goal_requires_session_dir(&GoalId::new(TASK_FINALIZE)),
-        "analyze, sync-main, and finalize must all require a session dir"
+        recipe.goal_requires_session_dir(&GoalId::new(TASK_ANALYZE)),
+        "analyze must require a session dir"
     );
-
+    assert!(
+        recipe.goal_requires_session_dir(&GoalId::new(TASK_SYNC_MAIN)),
+        "sync-main must require a session dir"
+    );
+    assert!(
+        recipe.goal_requires_session_dir(&GoalId::new(TASK_FINALIZE)),
+        "finalize must require a session dir"
+    );
     assert!(
         recipe.goal_ids().iter().any(|g| g.as_str() == TASK_ANALYZE),
         "analyze goal must exist for read-only merge feasibility check"
@@ -208,8 +216,11 @@ fn merge_pr_sync_requires_session_worktree_for_conflict_hooks() {
 /// can target that shape before sync-main creates `.worktrees/<name>/`.
 #[test]
 fn merge_pr_analyze_submit_key_targets_dedicated_goal_for_worktree_suggestion() {
+    // Given
     let (recipe, _) =
         workflow_recipe_and_manifest_from_cli_name("merge-pr").expect("merge-pr must resolve");
+
+    // Then
     assert_eq!(
         recipe.submit_key(&GoalId::new(TASK_ANALYZE)).as_str(),
         "merge-pr-analyze",
