@@ -2,6 +2,15 @@
 
 Release note history for the Coder product area.
 
+## 2026-06-20 — Demo goal: QEMU deploy architecture (Phase 1)
+
+- New `tddy-demo-runner` crate: `DemoVm` trait, `QemuVmArgs` arg builder, `MockDemoVm`, `DemoOrchestrator` (deploy→verify→port-forward→Telegram link)
+- VM lifecycle is UI/daemon-owned: `DemoOrchestrator::run()` receives an already-running `RunningVm`, never boots the VM
+- Extended `DemoPlan` recipe with `mode` (`PortForward`/`ScreenShare`), `hostfwd` port maps, `deploy_steps`, `verify_command`, `build_target`; `DemoOutput` gains `share_url`
+- `demo-plan.md` round-trips losslessly via JSON front-matter; `read_demo_plan_file` falls back for legacy files
+- `BuildrootPlugin` + `QemuPlugin` registered in `tddy-tools` plugin registry
+- Phase 2 (concrete SSH impl, daemon RPC `StartDemoVm`/`StopDemoVm`, web UI VM actions, nix guest image) tracked in [demo-goal.md](demo-goal.md)
+
 ## 2026-05-03 — Bugfix recipe: interview-first graph
 
 - **`tddy-workflow-recipes`**: **`BugfixRecipe`** graph **`interview` → `analyze` → `reproduce` → `end`**; **`bugfix::interview`** (**`system_prompt`**, relay **`.workflow/bugfix_interview_handoff.txt`**, **`Interviewing`** / **`Interviewed`** on **`changeset.yaml`**, **`host_clarification_gate_after_no_submit_turn`** with question-shaped numbered-line probe); **`BugfixWorkflowHooks`** **`before_bugfix_interview`** / **`before_bugfix_analyze`** handoff merge. Tests: **`bugfix_interview_acceptance`**, **`bugfix_interview_granular`**.
