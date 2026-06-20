@@ -1,7 +1,7 @@
 # tddy-build: content-addressed build system
 
 **Product area:** Build
-**Updated:** 2026-06-16
+**Updated:** 2026-06-20
 **Status:** Implemented
 
 ## Summary
@@ -32,6 +32,8 @@ language/ecosystem recipes live in their **own crates**:
 | `tddy-build-rust` | `rust_library` | `cargo build -p <pkg> [--features …] [--release]` |
 | `tddy-build-typescript` | `typescript` | `bun run <build_script>` in `package_dir` |
 | `tddy-build-docker` | `docker_image` | `docker build -f <dockerfile> -t <tag> [--build-arg …] <context>` |
+| `tddy-build-buildroot` | `buildroot_image` | `make O=<out> <defconfig>` then `make O=<out>` in `buildroot_dir` |
+| `tddy-build-qemu` | `qemu_disk_image` | `qemu-img convert -f <fmt> -O qcow2 <input> <output>` |
 
 ### Built-in structural types
 
@@ -70,6 +72,61 @@ action fields (`ActionType`, `OutputKind`, authored as snake_case strings) are
 unchanged. `BuildAction` and the cache types remain proto messages — the stable
 engine↔plugin contract.
 
+### `buildroot_image` config
+
+```yaml
+config:
+  type: buildroot_image
+  defconfig: qemu_x86_64_defconfig     # required — make target to configure
+  buildroot_dir: "external/buildroot"  # required — repo-root-relative path to Buildroot tree
+  output_dir: "build/br-out"           # required — repo-root-relative Buildroot output dir (O=)
+  srcs: ["board/my-os/"]               # optional — cache invalidation globs
+  outputs:                             # optional — default: <output_dir>/images/rootfs.ext4
+    - path: "build/br-out/images/rootfs.ext4"
+      kind: file
+```
+
+Emits two `BuildAction`s. The first runs `make O=<rel> <defconfig>` and declares `<output_dir>/.config` as its output. The second runs `make O=<rel>` and declares `.config` as its input — this wires sequencing via the engine's action-overlap edge inference. `O=<rel>` is computed as the relative path from `buildroot_dir` to `output_dir` so `make` writes to the correct location when running inside `buildroot_dir`. `jobs`/parallelism is not a config field; set `MAKEFLAGS=-j$(nproc)` in the environment.
+
+### `qemu_disk_image` config
+
+```yaml
+config:
+  type: qemu_disk_image
+  input: "build/br-out/images/rootfs.ext4"  # required — repo-root-relative
+  input_format: raw                          # optional, default "raw"
+  srcs: ["build/br-out/images/rootfs.ext4"] # optional — cache invalidation globs
+  outputs:                                   # optional — default: swap input ext to .qcow2
+    - path: "build/br-out/images/rootfs.qcow2"
+      kind: file
+```
+
+Emits one `BuildAction`: `qemu-img convert -f <input_format> -O qcow2 <input> <output>`. Runs from the repo root (all paths repo-root-relative).
+
+### End-to-end: OS image → QEMU qcow2
+
+```yaml
+schema_version: 1
+targets:
+  - id: "my-os:rootfs"
+    name: "Buildroot rootfs"
+    config:
+      type: buildroot_image
+      defconfig: qemu_x86_64_defconfig
+      buildroot_dir: "external/buildroot"
+      output_dir: "build/br-out"
+      srcs: ["board/my-os/"]
+
+  - id: "my-os:qcow2"
+    name: "QEMU disk image"
+    deps: ["my-os:rootfs"]
+    config:
+      type: qemu_disk_image
+      input: "build/br-out/images/rootfs.ext4"
+```
+
+`my-os:rootfs` runs Buildroot and caches the ext4 image independently. If only the `qemu_disk_image` config changes, Buildroot does not re-run. `make` and `qemu-img` are both provided by the Nix dev shell (`pkgs.gnumake`, `pkgs.qemu`).
+
 ## Action cache
 
 - Location: `{repo_root}/.tddy-build/cache/{target_id}/{action_id}.json`.
@@ -90,6 +147,7 @@ engine↔plugin contract.
 tddy-build  (standalone engine + plugin wiring point — no tddy-* deps)
    ▲ implemented-against by the plugin crates:
    │     tddy-build-rust, tddy-build-typescript, tddy-build-docker
+   │     tddy-build-buildroot, tddy-build-qemu
    ▲ assembled into a PluginRegistry by:
    │     tddy-tools  (local exec / relay client)
    │     tddy-coder  (executor impl; relay host)
