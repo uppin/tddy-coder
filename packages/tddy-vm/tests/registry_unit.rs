@@ -2,8 +2,8 @@
 //! VmSpec serde and structural tests pass immediately.
 //! VmManager method tests fail until methods are implemented.
 
-use tddy_vm::{MockVm, VmManager, VmSpec};
 use tddy_vm::registry::VmState;
+use tddy_vm::{MockVm, VmManager, VmSpec};
 use tempfile::tempdir;
 
 // ── VmSpec serde ─────────────────────────────────────────────────────────────
@@ -37,7 +37,10 @@ fn vm_spec_serde_round_trip_with_build_target() {
         name: "app".to_string(),
         build_target: Some("qemu-minimal".to_string()),
         image_path: None,
-        port_forwards: vec![tddy_vm::PortForward { host_port: 8080, guest_port: 80 }],
+        port_forwards: vec![tddy_vm::PortForward {
+            host_port: 8080,
+            guest_port: 80,
+        }],
         ssh_host_port: 2223,
     };
 
@@ -130,13 +133,16 @@ async fn define_increments_list_count() {
 async fn list_returns_defined_state_after_define() {
     // Given — a freshly defined VM
     let (_dir, manager) = make_manager();
-    manager.define(VmSpec {
-        name: "web".to_string(),
-        build_target: None,
-        image_path: Some("/web.qcow2".to_string()),
-        port_forwards: vec![],
-        ssh_host_port: 2222,
-    }).await.unwrap();
+    manager
+        .define(VmSpec {
+            name: "web".to_string(),
+            build_target: None,
+            image_path: Some("/web.qcow2".to_string()),
+            port_forwards: vec![],
+            ssh_host_port: 2222,
+        })
+        .await
+        .unwrap();
 
     // When — list is called
     let vms = manager.list().await;
@@ -150,13 +156,16 @@ async fn list_returns_defined_state_after_define() {
 async fn remove_after_define_empties_list() {
     // Given — one defined VM
     let (_dir, manager) = make_manager();
-    manager.define(VmSpec {
-        name: "temp".to_string(),
-        build_target: None,
-        image_path: Some("/t.qcow2".to_string()),
-        port_forwards: vec![],
-        ssh_host_port: 2222,
-    }).await.unwrap();
+    manager
+        .define(VmSpec {
+            name: "temp".to_string(),
+            build_target: None,
+            image_path: Some("/t.qcow2".to_string()),
+            port_forwards: vec![],
+            ssh_host_port: 2222,
+        })
+        .await
+        .unwrap();
 
     // When — remove is called
     manager.remove("temp").await.unwrap();

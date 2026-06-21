@@ -68,6 +68,8 @@ pub enum VmError {
     AlreadyExists(String),
     #[error("Invalid state for operation: {0}")]
     InvalidState(String),
+    #[error("VM image build failed: {0}")]
+    BuildFailed(String),
 }
 
 /// Mockable boundary for a VM.

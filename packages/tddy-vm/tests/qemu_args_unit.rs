@@ -168,5 +168,8 @@ fn qemu_args_monitor_socket_path_is_per_port() {
     let path_2222 = QemuVmArgs::monitor_socket_path(2222);
     let path_2223 = QemuVmArgs::monitor_socket_path(2223);
     assert_eq!(path_2222, "/tmp/tddy-vm-monitor-2222.sock");
-    assert_ne!(path_2222, path_2223, "each SSH port must get its own monitor socket path");
+    assert_ne!(
+        path_2222, path_2223,
+        "each SSH port must get its own monitor socket path"
+    );
 }
