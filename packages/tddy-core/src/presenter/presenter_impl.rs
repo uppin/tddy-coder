@@ -1586,6 +1586,27 @@ mod tests {
     use crate::presenter::state::AppMode;
     use crate::{ClarificationQuestion, QuestionOption};
 
+    /// RAII guard that redirects [`crate::output::tddy_data_dir_path`] to an isolated temp
+    /// directory, preventing sessions from being written to `~/.tddy` during tests.
+    /// Tests using this must be annotated with `#[serial_test::serial]`.
+    struct TempSessionsBase {
+        _tmp: tempfile::TempDir,
+    }
+
+    impl TempSessionsBase {
+        fn new() -> Self {
+            let tmp = tempfile::tempdir().expect("TempSessionsBase: create temp dir");
+            crate::output::set_tddy_data_dir_override(Some(tmp.path().to_path_buf()));
+            Self { _tmp: tmp }
+        }
+    }
+
+    impl Drop for TempSessionsBase {
+        fn drop(&mut self) {
+            crate::output::set_tddy_data_dir_override(None);
+        }
+    }
+
     fn make_presenter() -> Presenter {
         Presenter::new(
             "agent",
@@ -1747,13 +1768,12 @@ mod tests {
     fn continue_with_agent_sets_exit_action_and_quits_when_session_available() {
         // Given
         let mut p = make_presenter();
-        let tmp = std::env::temp_dir().join("tddy-test-continue-agent-exit");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
         let mut cs = crate::changeset::Changeset::default();
         cs.state.session_id = Some("agent-session-42".to_string());
-        crate::changeset::write_changeset(&tmp, &cs).unwrap();
-        p.workflow_output_dir = Some(tmp.clone());
+        crate::changeset::write_changeset(tmp, &cs).unwrap();
+        p.workflow_output_dir = Some(tmp.to_path_buf());
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "test error".to_string(),
         };
@@ -1776,19 +1796,17 @@ mod tests {
             p.state().exit_action
         );
 
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn continue_with_agent_stays_in_error_recovery_when_no_session() {
         // Given
         let mut p = make_presenter();
-        let tmp = std::env::temp_dir().join("tddy-test-continue-agent-no-session");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
         let cs = crate::changeset::Changeset::default(); // session_id is None
-        crate::changeset::write_changeset(&tmp, &cs).unwrap();
-        p.workflow_output_dir = Some(tmp.clone());
+        crate::changeset::write_changeset(tmp, &cs).unwrap();
+        p.workflow_output_dir = Some(tmp.to_path_buf());
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "test error".to_string(),
         };
@@ -1805,8 +1823,6 @@ mod tests {
             p.state().exit_action.is_none(),
             "exit_action should remain None when no session_id"
         );
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// Cursor stores the agent thread id on the session list (tagged `evaluate`, `green`, etc.);
@@ -1825,9 +1841,8 @@ mod tests {
     fn continue_with_agent_resolves_tagged_session_when_state_session_id_missing() {
         // Given
         let mut p = make_presenter();
-        let tmp = std::env::temp_dir().join("tddy-test-continue-agent-tag-fallback");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
         let cursor_thread = "019d105b-ac0f-78d3-9a89-409731145a36";
         let mut cs = crate::changeset::Changeset::default();
         cs.state.session_id = None;
@@ -1838,8 +1853,8 @@ mod tests {
             created_at: "2026-03-21T12:00:00Z".to_string(),
             system_prompt_file: None,
         });
-        crate::changeset::write_changeset(&tmp, &cs).unwrap();
-        p.workflow_output_dir = Some(tmp.clone());
+        crate::changeset::write_changeset(tmp, &cs).unwrap();
+        p.workflow_output_dir = Some(tmp.to_path_buf());
         p.state.current_goal = Some("evaluate".to_string());
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "validate is not supported on the Cursor backend".to_string(),
@@ -1862,8 +1877,6 @@ mod tests {
             "exit_action should use session id from get_session_for_tag(evaluate), got {:?}",
             p.state().exit_action
         );
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// When the failing goal has no matching tagged session (e.g. validate failed before a
@@ -1873,9 +1886,8 @@ mod tests {
     fn continue_with_agent_resolves_session_when_current_goal_tag_has_no_entry() {
         // Given
         let mut p = make_presenter();
-        let tmp = std::env::temp_dir().join("tddy-test-continue-agent-wrong-tag");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
         let sid = "session-from-prior-step";
         let mut cs = crate::changeset::Changeset::default();
         cs.state.session_id = None;
@@ -1886,8 +1898,8 @@ mod tests {
             created_at: "2026-03-21T12:00:00Z".to_string(),
             system_prompt_file: None,
         });
-        crate::changeset::write_changeset(&tmp, &cs).unwrap();
-        p.workflow_output_dir = Some(tmp.clone());
+        crate::changeset::write_changeset(tmp, &cs).unwrap();
+        p.workflow_output_dir = Some(tmp.to_path_buf());
         p.state.current_goal = Some("validate".to_string());
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "validate is not supported on the Cursor backend".to_string(),
@@ -1910,8 +1922,6 @@ mod tests {
             "expected resume id from an existing session entry when goal tag misses, got {:?}",
             p.state().exit_action
         );
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// `start_workflow` passes `output_dir` as `.` while `session_dir` points at the session folder
@@ -1920,18 +1930,16 @@ mod tests {
     fn continue_with_agent_reads_changeset_from_workflow_session_dir() {
         // Given
         let mut p = make_presenter();
-        let tmp_plan = std::env::temp_dir().join("tddy-test-continue-plan-dir");
-        let tmp_wrong = std::env::temp_dir().join("tddy-test-continue-wrong-dir");
-        let _ = std::fs::remove_dir_all(&tmp_plan);
-        let _ = std::fs::remove_dir_all(&tmp_wrong);
-        std::fs::create_dir_all(&tmp_plan).unwrap();
-        std::fs::create_dir_all(&tmp_wrong).unwrap();
+        let tmp_plan_guard = tempfile::tempdir().unwrap();
+        let tmp_plan = tmp_plan_guard.path();
+        let tmp_wrong_guard = tempfile::tempdir().unwrap();
+        let tmp_wrong = tmp_wrong_guard.path();
         let resume_id = "resume-from-plan-dir";
         let mut cs = crate::changeset::Changeset::default();
         cs.state.session_id = Some(resume_id.to_string());
-        crate::changeset::write_changeset(&tmp_plan, &cs).unwrap();
-        p.workflow_output_dir = Some(tmp_wrong.clone());
-        p.workflow_session_dir = Some(tmp_plan.clone());
+        crate::changeset::write_changeset(tmp_plan, &cs).unwrap();
+        p.workflow_output_dir = Some(tmp_wrong.to_path_buf());
+        p.workflow_session_dir = Some(tmp_plan.to_path_buf());
         p.state.mode = AppMode::ErrorRecovery {
             error_message: "read refactoring-plan.md: No such file or directory (os error 2)"
                 .to_string(),
@@ -1951,9 +1959,6 @@ mod tests {
             "expected session id from changeset at workflow_session_dir, got {:?}",
             p.state().exit_action
         );
-
-        let _ = std::fs::remove_dir_all(&tmp_plan);
-        let _ = std::fs::remove_dir_all(&tmp_wrong);
     }
 
     #[test]
@@ -2174,14 +2179,14 @@ mod tests {
     #[test]
     fn view_session_document_markdown_viewer_shows_disk_not_stale_snapshot() {
         // Given
-        let tmp = std::env::temp_dir().join("tddy-test-view-doc-disk");
-        let _ = std::fs::remove_dir_all(&tmp);
+        let tmp_guard = tempfile::tempdir().unwrap();
+        let tmp = tmp_guard.path();
         std::fs::create_dir_all(tmp.join("artifacts")).unwrap();
         let on_disk = "# Plan\n\nDOC_FROM_DISK_UNIQUE_42\n";
         std::fs::write(tmp.join("artifacts").join("SessionDoc.md"), on_disk).unwrap();
 
         let mut p = make_presenter();
-        p.workflow_session_dir = Some(tmp.clone());
+        p.workflow_session_dir = Some(tmp.to_path_buf());
         p.state.mode = AppMode::DocumentReview {
             content: "STALE_SNAPSHOT_NOT_ON_DISK".to_string(),
         };
@@ -2205,16 +2210,13 @@ mod tests {
             }
             other => panic!("expected MarkdownViewer, got {:?}", other),
         }
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn view_session_document_markdown_viewer_shows_uuid_root_when_workflow_dir_nested() {
         // Given
-        let root =
-            std::env::temp_dir().join(format!("tddy-test-view-doc-nested-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+        let root_guard = tempfile::tempdir().unwrap();
+        let root = root_guard.path();
         let uuid = root
             .join("sessions")
             .join("a97addd3-c31b-442b-a6b0-a63abe99e11d");
@@ -2256,8 +2258,6 @@ mod tests {
             }
             other => panic!("expected MarkdownViewer, got {:?}", other),
         }
-
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn make_presenter_with_broadcast(
@@ -2377,15 +2377,16 @@ mod tests {
     /// `/start-*` calls `restart_workflow` while the first run may still be blocked on the first
     /// `answer_rx.recv()` (no `session_dir`, no `initial_prompt`). The old workflow thread must
     /// exit when the answer channel closes so `join()` cannot deadlock.
+    #[serial_test::serial]
     #[test]
     fn start_slash_restart_unblocks_workflow_waiting_for_first_feature_input() {
         use crate::presenter::presenter_test_recipe::EmptyPresenterTestRecipe;
         use crate::{AnyBackend, StubBackend};
 
         // Given
-        let tmp = std::env::temp_dir().join(format!("tddy-restart-unblock-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
+        let _sessions = TempSessionsBase::new();
+        let tmp_guard = tempfile::tempdir().unwrap();
+        let tmp = tmp_guard.path().to_path_buf();
 
         let resolver =
             Arc::new(|_: &str| Ok(Arc::new(EmptyPresenterTestRecipe) as Arc<dyn WorkflowRecipe>));
@@ -2417,7 +2418,5 @@ mod tests {
         done_rx
             .recv_timeout(std::time::Duration::from_secs(3))
             .expect("handle_intent must not deadlock waiting on workflow join");
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

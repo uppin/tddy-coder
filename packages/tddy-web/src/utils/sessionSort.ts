@@ -37,3 +37,27 @@ function compareSessionsForDisplay(a: SessionEntry, b: SessionEntry): number {
 export function sortSessionsForDisplay(sessions: SessionEntry[]): SessionEntry[] {
   return [...sessions].sort(compareSessionsForDisplay);
 }
+
+/**
+ * Compare two sessions purely by creation time (no active-first grouping):
+ * 1. Newer `createdAt` first (descending by time).
+ * 2. If timestamps are equal or either side fails to parse, order by `sessionId` ascending.
+ */
+function compareSessionsByCreation(a: SessionEntry, b: SessionEntry): number {
+  const ta = createdAtMs(a.createdAt);
+  const tb = createdAtMs(b.createdAt);
+  if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) {
+    return tb - ta;
+  }
+  return a.sessionId.localeCompare(b.sessionId);
+}
+
+/**
+ * Orders sessions purely by creation time, newest first — no active-first grouping.
+ *
+ * Tie-break: `sessionId` ascending (stable, deterministic).
+ * Unparsable `createdAt` values are treated as tied on time.
+ */
+export function sortSessionsByCreation(sessions: SessionEntry[]): SessionEntry[] {
+  return [...sessions].sort(compareSessionsByCreation);
+}

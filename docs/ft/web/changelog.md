@@ -4,6 +4,28 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-06-21 — Auth redirect: all daemon pages require login
+
+- All daemon-mode pages now gate on auth at the `App` level; unauthenticated visitors see a login screen with "Sign in with GitHub"
+- `login(returnTo?)` saves the current hash path to `sessionStorage`; `AuthCallback` redirects to `/#<returnTo>` after OAuth completes, returning users to the page they were trying to access
+
+## 2026-06-21 — Session Inspector Drawer
+
+- `SessionInspectorDrawer` overlay panel: `data-state="closed" | "open" | "expanded"`; header with expand/restore + close buttons; scrollable metadata section (all `SessionEntry` fields, empty omitted); controls (Resume / Delete with two-click confirm / Terminate SIGTERM)
+- `inspectorState.ts`: pure `defaultInspectorOpen(isActive)` + `nextInspectorState(state, action)` reducer (actions: open/close/toggle/expand/restore/select)
+- `SessionMainPane` (repurposed from `SessionDetailPane`): inspector toggle button, connected-terminal branch, disconnected placeholder; inspector open by default for disconnected sessions
+- `useSessionAttachment`: added `deleteSession` (DeleteSession RPC) and `signalSession` (SignalSession RPC) actions
+- Proto `SessionEntry` extended with five new fields (tool, sessionType, updatedAt, livekitRoom, previousSessionId) surfaced from `.session.yaml`; `hook_token` never exposed
+- Feature: [session-drawer.md](session-drawer.md)
+
+## 2026-06-21 — Session Drawer Screen
+
+- New `#/sessions` route and `SessionsDrawerScreen`: left-side drawer listing all sessions newest-first, detail pane showing terminal (connected) or Resume + metadata (disconnected)
+- `SessionDrawerItem`: derived label (`repoPath` basename → `workflowGoal` → `sessionId.slice(0,8)`), status dot (connected / disconnected / needs-input), focus tooltip with full session id
+- `useSessionAttachment` hook: single-session `ConnectSession` / `ResumeSession` attach lifecycle, `connected-livekit` and `connected-grpc` states
+- New shadcn primitives: `tooltip.tsx`, `scroll-area.tsx`; new utils: `sessionDrawerLabel`, `connectionStatusForSession`, `sortSessionsByCreation`
+- Feature: [session-drawer.md](session-drawer.md)
+
 ## 2026-06-21 — Demo goal Phase 2: DemoVmControls
 
 - `DemoVmControls` component: polls `GetDemoVmStatus` every 3 s; "Launch Demo VM" → `StartDemoVm`, "Stop VM" → `StopDemoVm`, booting badge, running state with "Open demo" share-URL link, error with "Retry"

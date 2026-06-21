@@ -86,6 +86,21 @@ export const TEST_IDS = {
   // Session more-actions menu
   sessionMoreActionsShowFiles: "session-more-actions-show-files",
 
+  // Sessions drawer screen
+  sessionsDrawerScreen: "sessions-drawer-screen",
+  sessionsDrawer: "sessions-drawer",
+  sessionsDetailPane: "sessions-detail-pane",
+  sessionsDetailTerminalContainer: "sessions-detail-terminal-container",
+  sessionsDetailMetadata: "sessions-detail-metadata",
+
+  // Session inspector drawer
+  sessionsInspectorDrawer: "sessions-inspector-drawer",
+  sessionsInspectorToggle: "sessions-inspector-toggle",
+  sessionsInspectorClose: "sessions-inspector-close",
+  sessionsInspectorExpand: "sessions-inspector-expand",
+  sessionsInspectorRestore: "sessions-inspector-restore",
+  sessionsInspectorMetadata: "sessions-inspector-metadata",
+
   // Shell navigation
   shellMenuButton: "shell-menu-button",
   shellMenuRpcPlayground: "shell-menu-rpc-playground",
@@ -177,3 +192,46 @@ export const participantOwnedProjectCount = (identity: string) =>
 
 /** `[data-testid="session-more-actions-<sessionId>"]` */
 export const sessionMoreActions = (sessionId: string) => `session-more-actions-${sessionId}`;
+
+// ---------------------------------------------------------------------------
+// Sessions drawer screen dynamic helpers
+// ---------------------------------------------------------------------------
+
+/** `[data-testid="sessions-drawer-item-<sessionId>"]` — clickable drawer row */
+export const sessionsDrawerItem = (sessionId: string) => `sessions-drawer-item-${sessionId}`;
+
+/** `[data-testid="sessions-drawer-item-label-<sessionId>"]` — derived label text */
+export const sessionsDrawerItemLabel = (sessionId: string) =>
+  `sessions-drawer-item-label-${sessionId}`;
+
+/** `[data-testid="sessions-drawer-item-status-<sessionId>"]` — connected/disconnected dot */
+export const sessionsDrawerItemStatus = (sessionId: string) =>
+  `sessions-drawer-item-status-${sessionId}`;
+
+/** `[data-testid="sessions-drawer-item-tooltip-<sessionId>"]` — tooltip content showing full id */
+export const sessionsDrawerItemTooltip = (sessionId: string) =>
+  `sessions-drawer-item-tooltip-${sessionId}`;
+
+/** `[data-testid="sessions-detail-resume-<sessionId>"]` — Resume button in detail pane */
+export const sessionsDetailResumeBtn = (sessionId: string) =>
+  `sessions-detail-resume-${sessionId}`;
+
+/** `[data-testid="sessions-detail-delete-<sessionId>"]` — Delete button in detail pane */
+export const sessionsDetailDeleteBtn = (sessionId: string) =>
+  `sessions-detail-delete-${sessionId}`;
+
+/** `[data-testid="sessions-inspector-resume-<sessionId>"]` — Resume button in inspector */
+export const sessionsInspectorResumeBtn = (sessionId: string) =>
+  `sessions-inspector-resume-${sessionId}`;
+
+/** `[data-testid="sessions-inspector-delete-<sessionId>"]` — Delete button in inspector */
+export const sessionsInspectorDeleteBtn = (sessionId: string) =>
+  `sessions-inspector-delete-${sessionId}`;
+
+/** `[data-testid="sessions-inspector-delete-confirm-<sessionId>"]` — Delete confirm button */
+export const sessionsInspectorDeleteConfirm = (sessionId: string) =>
+  `sessions-inspector-delete-confirm-${sessionId}`;
+
+/** `[data-testid="sessions-inspector-terminate-<sessionId>"]` — Terminate button in inspector */
+export const sessionsInspectorTerminateBtn = (sessionId: string) =>
+  `sessions-inspector-terminate-${sessionId}`;

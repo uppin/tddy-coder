@@ -48,9 +48,11 @@ import { ConnectionScreen } from "./components/ConnectionScreen";
 import { WorktreesAppPage } from "./components/worktrees/WorktreesAppPage";
 import { VmsAppPage } from "./components/vms/VmsAppPage";
 import { RpcPlaygroundAppPage } from "./rpc-playground/RpcPlaygroundAppPage";
+import { SessionsDrawerScreen } from "./components/sessions/SessionsDrawerScreen";
 import {
   isRpcPlaygroundPath,
   isVmsPath,
+  isSessionsDrawerPath,
   parseTerminalSessionIdFromPathname,
 } from "./routing/appRoutes";
 
@@ -354,8 +356,26 @@ function ConnectionForm() {
   );
 }
 
+function DaemonLoginScreen({ path, login, authError }: { path: string; login: (returnTo?: string) => void; authError: string | null }) {
+  return (
+    <div style={{ ...formStyle, display: "flex", flexDirection: "column", gap: 16, paddingTop: 48 }}>
+      <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0 }}>Sign in</h1>
+      <p style={{ fontSize: 14, color: "#555", margin: 0 }}>
+        Sign in with GitHub to continue to tddy-web.
+      </p>
+      {authError ? (
+        <p data-testid="auth-flow-error" style={{ fontSize: 14, color: "#c00", margin: 0 }}>
+          {authError}
+        </p>
+      ) : null}
+      <GitHubLoginButton onClick={() => login(path)} />
+    </div>
+  );
+}
+
 export function App() {
   const [path, navigate] = usePathname();
+  const { isAuthenticated, isLoading: authLoading, login, error: authError } = useAuth();
   const [appConfig, setAppConfig] = useState<{
     daemonMode: boolean | null;
     livekitUrl?: string;
@@ -398,10 +418,12 @@ export function App() {
     <>
       {(typeof window !== "undefined" ? window.location.pathname : "/") === "/auth/callback" ? (
         <AuthCallback />
-      ) : daemonMode === null ? (
+      ) : daemonMode === null || (daemonMode === true && authLoading) ? (
         <div style={{ padding: 24 }}>Loading…</div>
       ) : daemonMode === true ? (
-        isRpcPlaygroundPath(path) ? (
+        !isAuthenticated ? (
+          <DaemonLoginScreen path={path} login={login} authError={authError} />
+        ) : isRpcPlaygroundPath(path) ? (
           <RpcPlaygroundAppPage
             livekitUrl={appConfig.livekitUrl}
             commonRoom={appConfig.commonRoom}
@@ -411,6 +433,8 @@ export function App() {
           <VmsAppPage onNavigate={navigate} />
         ) : path === "/worktrees" ? (
           <WorktreesAppPage onNavigate={navigate} />
+        ) : isSessionsDrawerPath(path) ? (
+          <SessionsDrawerScreen />
         ) : (
           <ConnectionScreen
             livekitUrl={appConfig.livekitUrl}

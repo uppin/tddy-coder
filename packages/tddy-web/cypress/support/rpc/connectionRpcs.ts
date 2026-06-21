@@ -328,6 +328,20 @@ export function interceptSignalSessionError(): void {
   }).as("signalSessionError");
 }
 
+/** Intercept DeleteSession and reply with ok:true. Decodes and captures the session id. */
+export function interceptDeleteSession(captureIds: string[]): void {
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/DeleteSession", (req) => {
+    const u8 = decodeProtoRequestBody(req.body);
+    const decoded = fromBinary(DeleteSessionRequestSchema, u8);
+    captureIds.push(decoded.sessionId);
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: toArrayBuffer(OK_RESPONSE_BYTES),
+    });
+  }).as("deleteSession");
+}
+
 /** Intercept GenerateToken + RefreshToken for presence. */
 export function interceptTokenForPresence(): void {
   const generateBody = toArrayBuffer(aGenerateTokenResponse());

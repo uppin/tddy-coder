@@ -15,6 +15,11 @@ pub struct SessionEntry {
     pub project_id: String,
     pub pid: Option<u32>,
     pub is_active: bool,
+    pub tool: String,
+    pub session_type: String,
+    pub updated_at: String,
+    pub livekit_room: String,
+    pub previous_session_id: String,
 }
 
 /// Check if a process with the given PID is alive (same semantics as listing sessions).
@@ -68,8 +73,56 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
             project_id: metadata.project_id,
             pid: metadata.pid,
             is_active,
+            tool: metadata.tool.unwrap_or_default(),
+            session_type: metadata.session_type.unwrap_or_default(),
+            updated_at: metadata.updated_at,
+            livekit_room: metadata.livekit_room.unwrap_or_default(),
+            previous_session_id: metadata.previous_session_id.unwrap_or_default(),
         });
     }
 
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tddy_core::output::SESSIONS_SUBDIR;
+    use tddy_core::{write_session_metadata, SessionMetadata};
+
+    #[test]
+    fn list_sessions_returns_new_metadata_fields() {
+        let temp = tempfile::tempdir().unwrap();
+        let session_id = "test-reader-session-001";
+        let session_dir = temp.path().join(SESSIONS_SUBDIR).join(session_id);
+        fs::create_dir_all(&session_dir).unwrap();
+
+        let metadata = SessionMetadata {
+            session_id: session_id.to_string(),
+            project_id: "".to_string(),
+            created_at: "2026-06-21T10:00:00Z".to_string(),
+            updated_at: "2026-06-21T11:00:00Z".to_string(),
+            status: "active".to_string(),
+            repo_path: Some("/tmp/my-repo".to_string()),
+            pid: None,
+            tool: Some("tddy-coder".to_string()),
+            livekit_room: Some("room-abc".to_string()),
+            pending_elicitation: false,
+            previous_session_id: Some("prev-session-000".to_string()),
+            session_type: Some("tool".to_string()),
+            model: None,
+            activity_status: None,
+            hook_token: None,
+        };
+        write_session_metadata(&session_dir, &metadata).unwrap();
+
+        let entries = list_sessions_in_dir(temp.path()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].tool, "tddy-coder");
+        assert_eq!(entries[0].livekit_room, "room-abc");
+        assert_eq!(entries[0].updated_at, "2026-06-21T11:00:00Z");
+        assert_eq!(entries[0].session_type, "tool");
+        assert_eq!(entries[0].previous_session_id, "prev-session-000");
+    }
 }
