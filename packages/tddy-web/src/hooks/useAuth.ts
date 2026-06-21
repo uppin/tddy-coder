@@ -6,6 +6,7 @@ import type { GitHubUser } from "../gen/auth_pb";
 
 const SESSION_TOKEN_KEY = "tddy_session_token";
 const OAUTH_STATE_KEY = "tddy_oauth_state";
+export const OAUTH_RETURN_TO_KEY = "tddy_oauth_return_to";
 
 function createAuthClient() {
   const transport = createConnectTransport({
@@ -66,10 +67,15 @@ export function useAuth() {
       });
   }, [client]);
 
-  const login = useCallback(async () => {
+  const login = useCallback(async (returnTo?: string) => {
     try {
       const res = await client.getAuthUrl({});
       sessionStorage.setItem(OAUTH_STATE_KEY, res.state);
+      if (returnTo && returnTo !== "/") {
+        sessionStorage.setItem(OAUTH_RETURN_TO_KEY, returnTo);
+      } else {
+        sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
+      }
       window.location.href = res.authorizeUrl;
     } catch (e) {
       setState((s) => ({
