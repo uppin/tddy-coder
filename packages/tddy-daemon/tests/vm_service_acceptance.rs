@@ -5,9 +5,9 @@ use prost::Message;
 use std::sync::Arc;
 use tddy_rpc::{RequestMetadata, ResponseBody, RpcBridge, RpcMessage};
 use tddy_service::proto::vm::{
-    DefineVmRequest, DefineVmResponse, GetVmStatusRequest, GetVmStatusResponse, ListVmsRequest,
-    ListVmsResponse, StartVmRequest, StartVmResponse, StopVmRequest, StopVmResponse,
-    VmServiceServer, VmSpecProto,
+    BuildVmImageProgress, BuildVmImageRequest, DefineVmRequest, DefineVmResponse,
+    GetVmStatusRequest, GetVmStatusResponse, ListVmsRequest, ListVmsResponse, StartVmRequest,
+    StartVmResponse, StopVmRequest, StopVmResponse, VmServiceServer, VmSpecProto,
 };
 use tddy_vm::service::VmServiceImpl;
 use tddy_vm::{MockVm, VmManager};
@@ -189,4 +189,70 @@ async fn stop_vm_returns_stopped_status() {
     .await;
     // VmState::VM_STATE_STOPPED = 4 in the proto enum
     assert_eq!(status.state, 4, "VM must be STOPPED after StopVm");
+}
+
+async fn call_stream<Req: Message, Resp: Message + Default>(
+    bridge: &RpcBridge<VmServiceServer<VmServiceImpl>>,
+    method: &str,
+    req: Req,
+) -> Vec<Resp> {
+    let payload = req.encode_to_vec();
+    let msg = RpcMessage {
+        payload,
+        metadata: RequestMetadata::default(),
+    };
+    let result = bridge
+        .handle_messages("vm.VmService", method, &[msg])
+        .await
+        .expect("bridge dispatch must not fail at transport level");
+    let mut rx = match result {
+        ResponseBody::Streaming(rx) => rx,
+        _ => panic!("expected Streaming for server-streaming method {method}"),
+    };
+    let mut messages = Vec::new();
+    while let Some(chunk) = rx.recv().await {
+        let bytes = chunk.expect("stream chunk must not be an error");
+        messages.push(Resp::decode(&bytes[..]).expect("decode stream message"));
+    }
+    messages
+}
+
+#[tokio::test]
+async fn build_vm_image_streams_progress_messages() {
+    // BuildVmImage must return a server stream ending with a Done or Error message.
+    let _dir = tempdir().unwrap();
+    let manager = Arc::new(VmManager::new(
+        &_dir.path().join("vms.json"),
+        Box::new(MockVm::new()),
+    ));
+    let svc = VmServiceImpl::new(manager);
+    let bridge = RpcBridge::new(VmServiceServer::new(svc));
+
+    let messages: Vec<BuildVmImageProgress> = call_stream(
+        &bridge,
+        "BuildVmImage",
+        BuildVmImageRequest {
+            session_token: TOKEN.to_string(),
+            buildroot_spec: "BR2_x86_64=y\nBR2_TOOLCHAIN_BUILDROOT_GLIBC=y\n".to_string(),
+        },
+    )
+    .await;
+
+    assert!(
+        !messages.is_empty(),
+        "must emit at least one progress message"
+    );
+    let last = messages.last().unwrap();
+    // stage 4 = STAGE_DONE, stage 5 = STAGE_ERROR
+    assert!(
+        last.stage == 4 || last.stage == 5,
+        "last message must be Done or Error, got stage {}",
+        last.stage
+    );
+    if last.stage == 4 {
+        assert!(
+            !last.image_path.is_empty(),
+            "Done message must carry a non-empty image_path"
+        );
+    }
 }

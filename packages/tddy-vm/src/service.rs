@@ -5,11 +5,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::vm::{
-    BuildVmImageRequest, BuildVmImageResponse, DefineVmRequest, DefineVmResponse,
+    BuildVmImageProgress, BuildVmImageRequest, DefineVmRequest, DefineVmResponse,
     GetVmStatusRequest, GetVmStatusResponse, ListVmsRequest, ListVmsResponse, RemoveVmRequest,
     RemoveVmResponse, StartVmRequest, StartVmResponse, StopVmRequest, StopVmResponse, VmInfo,
     VmService,
 };
+use tokio_stream::wrappers::ReceiverStream;
 
 use crate::registry::{VmManager, VmSpec, VmState};
 use crate::vm::{PortForward, VmError};
@@ -49,6 +50,8 @@ fn vm_state_to_proto(state: &VmState) -> i32 {
 
 #[async_trait]
 impl VmService for VmServiceImpl {
+    type BuildVmImageStream = ReceiverStream<Result<BuildVmImageProgress, Status>>;
+
     async fn define_vm(
         &self,
         request: Request<DefineVmRequest>,
@@ -186,9 +189,16 @@ impl VmService for VmServiceImpl {
     async fn build_vm_image(
         &self,
         request: Request<BuildVmImageRequest>,
-    ) -> Result<Response<BuildVmImageResponse>, Status> {
-        let _req = request.into_inner();
-        // TODO: build_vm_image not yet implemented
-        Err(Status::unimplemented("build_vm_image not yet implemented"))
+    ) -> Result<Response<Self::BuildVmImageStream>, Status> {
+        let req = request.into_inner();
+        let spec = req.buildroot_spec;
+
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+
+        tokio::spawn(async move {
+            crate::build::build_vm_image_from_spec(&spec, tx).await;
+        });
+
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 }

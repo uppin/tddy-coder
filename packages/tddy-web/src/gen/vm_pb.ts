@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vm.proto.
  */
 export const file_vm: GenFile = /*@__PURE__*/
-  fileDesc("Cgh2bS5wcm90bxICdm0iQgoTQnVpbGRWbUltYWdlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhQKDGJ1aWxkX3RhcmdldBgCIAEoCSJHChRCdWlsZFZtSW1hZ2VSZXNwb25zZRIKCgJvaxgBIAEoCBISCgppbWFnZV9wYXRoGAIgASgJEg8KB21lc3NhZ2UYAyABKAkiNgoNVm1Qb3J0Rm9yd2FyZBIRCglob3N0X3BvcnQYASABKA0SEgoKZ3Vlc3RfcG9ydBgCIAEoDSKGAQoLVm1TcGVjUHJvdG8SDAoEbmFtZRgBIAEoCRIUCgxidWlsZF90YXJnZXQYAiABKAkSEgoKaW1hZ2VfcGF0aBgDIAEoCRIoCg1wb3J0X2ZvcndhcmRzGAQgAygLMhEudm0uVm1Qb3J0Rm9yd2FyZBIVCg1zc2hfaG9zdF9wb3J0GAUgASgNIkcKD0RlZmluZVZtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEh0KBHNwZWMYAiABKAsyDy52bS5WbVNwZWNQcm90byIvChBEZWZpbmVWbVJlc3BvbnNlEgoKAm9rGAEgASgIEg8KB21lc3NhZ2UYAiABKAkicwoGVm1JbmZvEgwKBG5hbWUYASABKAkSGgoFc3RhdGUYAiABKA4yCy52bS5WbVN0YXRlEhUKDXNzaF9ob3N0X3BvcnQYAyABKA0SEQoJc2hhcmVfdXJsGAQgASgJEhUKDWVycm9yX21lc3NhZ2UYBSABKAkiJwoOTGlzdFZtc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSIqCg9MaXN0Vm1zUmVzcG9uc2USFwoDdm1zGAEgAygLMgoudm0uVm1JbmZvIjUKDlN0YXJ0Vm1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDAoEbmFtZRgCIAEoCSI+Cg9TdGFydFZtUmVzcG9uc2USGgoFc3RhdGUYASABKA4yCy52bS5WbVN0YXRlEg8KB21lc3NhZ2UYAiABKAkiNAoNU3RvcFZtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkiLQoOU3RvcFZtUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSI5ChJHZXRWbVN0YXR1c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIMCgRuYW1lGAIgASgJImwKE0dldFZtU3RhdHVzUmVzcG9uc2USGgoFc3RhdGUYASABKA4yCy52bS5WbVN0YXRlEhUKDXNzaF9ob3N0X3BvcnQYAiABKA0SEQoJc2hhcmVfdXJsGAMgASgJEg8KB21lc3NhZ2UYBCABKAkiNgoPUmVtb3ZlVm1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDAoEbmFtZRgCIAEoCSIvChBSZW1vdmVWbVJlc3BvbnNlEgoKAm9rGAEgASgIEg8KB21lc3NhZ2UYAiABKAkqiwEKB1ZtU3RhdGUSFAoQVk1fU1RBVEVfVU5LTk9XThAAEhQKEFZNX1NUQVRFX0RFRklORUQQARIUChBWTV9TVEFURV9CT09USU5HEAISFAoQVk1fU1RBVEVfUlVOTklORxADEhQKEFZNX1NUQVRFX1NUT1BQRUQQBBISCg5WTV9TVEFURV9FUlJPUhAFMpUDCglWbVNlcnZpY2USQQoMQnVpbGRWbUltYWdlEhcudm0uQnVpbGRWbUltYWdlUmVxdWVzdBoYLnZtLkJ1aWxkVm1JbWFnZVJlc3BvbnNlEjUKCERlZmluZVZtEhMudm0uRGVmaW5lVm1SZXF1ZXN0GhQudm0uRGVmaW5lVm1SZXNwb25zZRIyCgdMaXN0Vm1zEhIudm0uTGlzdFZtc1JlcXVlc3QaEy52bS5MaXN0Vm1zUmVzcG9uc2USMgoHU3RhcnRWbRISLnZtLlN0YXJ0Vm1SZXF1ZXN0GhMudm0uU3RhcnRWbVJlc3BvbnNlEi8KBlN0b3BWbRIRLnZtLlN0b3BWbVJlcXVlc3QaEi52bS5TdG9wVm1SZXNwb25zZRI+CgtHZXRWbVN0YXR1cxIWLnZtLkdldFZtU3RhdHVzUmVxdWVzdBoXLnZtLkdldFZtU3RhdHVzUmVzcG9uc2USNQoIUmVtb3ZlVm0SEy52bS5SZW1vdmVWbVJlcXVlc3QaFC52bS5SZW1vdmVWbVJlc3BvbnNlYgZwcm90bzM");
+  fileDesc("Cgh2bS5wcm90bxICdm0iRAoTQnVpbGRWbUltYWdlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhYKDmJ1aWxkcm9vdF9zcGVjGAIgASgJIugBChRCdWlsZFZtSW1hZ2VQcm9ncmVzcxItCgVzdGFnZRgBIAEoDjIeLnZtLkJ1aWxkVm1JbWFnZVByb2dyZXNzLlN0YWdlEg8KB21lc3NhZ2UYAiABKAkSEgoKaW1hZ2VfcGF0aBgDIAEoCSJ8CgVTdGFnZRIRCg1TVEFHRV9VTktOT1dOEAASFQoRU1RBR0VfQ09ORklHVVJJTkcQARISCg5TVEFHRV9CVUlMRElORxACEhQKEFNUQUdFX0NPTlZFUlRJTkcQAxIOCgpTVEFHRV9ET05FEAQSDwoLU1RBR0VfRVJST1IQBSI2Cg1WbVBvcnRGb3J3YXJkEhEKCWhvc3RfcG9ydBgBIAEoDRISCgpndWVzdF9wb3J0GAIgASgNIoYBCgtWbVNwZWNQcm90bxIMCgRuYW1lGAEgASgJEhQKDGJ1aWxkX3RhcmdldBgCIAEoCRISCgppbWFnZV9wYXRoGAMgASgJEigKDXBvcnRfZm9yd2FyZHMYBCADKAsyES52bS5WbVBvcnRGb3J3YXJkEhUKDXNzaF9ob3N0X3BvcnQYBSABKA0iRwoPRGVmaW5lVm1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSHQoEc3BlYxgCIAEoCzIPLnZtLlZtU3BlY1Byb3RvIi8KEERlZmluZVZtUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJzCgZWbUluZm8SDAoEbmFtZRgBIAEoCRIaCgVzdGF0ZRgCIAEoDjILLnZtLlZtU3RhdGUSFQoNc3NoX2hvc3RfcG9ydBgDIAEoDRIRCglzaGFyZV91cmwYBCABKAkSFQoNZXJyb3JfbWVzc2FnZRgFIAEoCSInCg5MaXN0Vm1zUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIioKD0xpc3RWbXNSZXNwb25zZRIXCgN2bXMYASADKAsyCi52bS5WbUluZm8iNQoOU3RhcnRWbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIMCgRuYW1lGAIgASgJIj4KD1N0YXJ0Vm1SZXNwb25zZRIaCgVzdGF0ZRgBIAEoDjILLnZtLlZtU3RhdGUSDwoHbWVzc2FnZRgCIAEoCSI0Cg1TdG9wVm1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDAoEbmFtZRgCIAEoCSItCg5TdG9wVm1SZXNwb25zZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIjkKEkdldFZtU3RhdHVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkibAoTR2V0Vm1TdGF0dXNSZXNwb25zZRIaCgVzdGF0ZRgBIAEoDjILLnZtLlZtU3RhdGUSFQoNc3NoX2hvc3RfcG9ydBgCIAEoDRIRCglzaGFyZV91cmwYAyABKAkSDwoHbWVzc2FnZRgEIAEoCSI2Cg9SZW1vdmVWbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIMCgRuYW1lGAIgASgJIi8KEFJlbW92ZVZtUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSqLAQoHVm1TdGF0ZRIUChBWTV9TVEFURV9VTktOT1dOEAASFAoQVk1fU1RBVEVfREVGSU5FRBABEhQKEFZNX1NUQVRFX0JPT1RJTkcQAhIUChBWTV9TVEFURV9SVU5OSU5HEAMSFAoQVk1fU1RBVEVfU1RPUFBFRBAEEhIKDlZNX1NUQVRFX0VSUk9SEAUylwMKCVZtU2VydmljZRJDCgxCdWlsZFZtSW1hZ2USFy52bS5CdWlsZFZtSW1hZ2VSZXF1ZXN0Ghgudm0uQnVpbGRWbUltYWdlUHJvZ3Jlc3MwARI1CghEZWZpbmVWbRITLnZtLkRlZmluZVZtUmVxdWVzdBoULnZtLkRlZmluZVZtUmVzcG9uc2USMgoHTGlzdFZtcxISLnZtLkxpc3RWbXNSZXF1ZXN0GhMudm0uTGlzdFZtc1Jlc3BvbnNlEjIKB1N0YXJ0Vm0SEi52bS5TdGFydFZtUmVxdWVzdBoTLnZtLlN0YXJ0Vm1SZXNwb25zZRIvCgZTdG9wVm0SES52bS5TdG9wVm1SZXF1ZXN0GhIudm0uU3RvcFZtUmVzcG9uc2USPgoLR2V0Vm1TdGF0dXMSFi52bS5HZXRWbVN0YXR1c1JlcXVlc3QaFy52bS5HZXRWbVN0YXR1c1Jlc3BvbnNlEjUKCFJlbW92ZVZtEhMudm0uUmVtb3ZlVm1SZXF1ZXN0GhQudm0uUmVtb3ZlVm1SZXNwb25zZWIGcHJvdG8z");
 
 /**
  * @generated from message vm.BuildVmImageRequest
@@ -22,9 +22,11 @@ export type BuildVmImageRequest = Message<"vm.BuildVmImageRequest"> & {
   sessionToken: string;
 
   /**
-   * @generated from field: string build_target = 2;
+   * Full Buildroot .config content (BR2_* variables)
+   *
+   * @generated from field: string buildroot_spec = 2;
    */
-  buildTarget: string;
+  buildrootSpec: string;
 };
 
 /**
@@ -35,31 +37,76 @@ export const BuildVmImageRequestSchema: GenMessage<BuildVmImageRequest> = /*@__P
   messageDesc(file_vm, 0);
 
 /**
- * @generated from message vm.BuildVmImageResponse
+ * @generated from message vm.BuildVmImageProgress
  */
-export type BuildVmImageResponse = Message<"vm.BuildVmImageResponse"> & {
+export type BuildVmImageProgress = Message<"vm.BuildVmImageProgress"> & {
   /**
-   * @generated from field: bool ok = 1;
+   * @generated from field: vm.BuildVmImageProgress.Stage stage = 1;
    */
-  ok: boolean;
+  stage: BuildVmImageProgress_Stage;
 
   /**
-   * @generated from field: string image_path = 2;
-   */
-  imagePath: string;
-
-  /**
-   * @generated from field: string message = 3;
+   * Buildroot stdout line or error description
+   *
+   * @generated from field: string message = 2;
    */
   message: string;
+
+  /**
+   * Populated only when stage == STAGE_DONE
+   *
+   * @generated from field: string image_path = 3;
+   */
+  imagePath: string;
 };
 
 /**
- * Describes the message vm.BuildVmImageResponse.
- * Use `create(BuildVmImageResponseSchema)` to create a new message.
+ * Describes the message vm.BuildVmImageProgress.
+ * Use `create(BuildVmImageProgressSchema)` to create a new message.
  */
-export const BuildVmImageResponseSchema: GenMessage<BuildVmImageResponse> = /*@__PURE__*/
+export const BuildVmImageProgressSchema: GenMessage<BuildVmImageProgress> = /*@__PURE__*/
   messageDesc(file_vm, 1);
+
+/**
+ * @generated from enum vm.BuildVmImageProgress.Stage
+ */
+export enum BuildVmImageProgress_Stage {
+  /**
+   * @generated from enum value: STAGE_UNKNOWN = 0;
+   */
+  UNKNOWN = 0,
+
+  /**
+   * @generated from enum value: STAGE_CONFIGURING = 1;
+   */
+  CONFIGURING = 1,
+
+  /**
+   * @generated from enum value: STAGE_BUILDING = 2;
+   */
+  BUILDING = 2,
+
+  /**
+   * @generated from enum value: STAGE_CONVERTING = 3;
+   */
+  CONVERTING = 3,
+
+  /**
+   * @generated from enum value: STAGE_DONE = 4;
+   */
+  DONE = 4,
+
+  /**
+   * @generated from enum value: STAGE_ERROR = 5;
+   */
+  ERROR = 5,
+}
+
+/**
+ * Describes the enum vm.BuildVmImageProgress.Stage.
+ */
+export const BuildVmImageProgress_StageSchema: GenEnum<BuildVmImageProgress_Stage> = /*@__PURE__*/
+  enumDesc(file_vm, 1, 0);
 
 /**
  * @generated from message vm.VmPortForward
@@ -474,9 +521,9 @@ export const VmService: GenService<{
    * @generated from rpc vm.VmService.BuildVmImage
    */
   buildVmImage: {
-    methodKind: "unary";
+    methodKind: "server_streaming";
     input: typeof BuildVmImageRequestSchema;
-    output: typeof BuildVmImageResponseSchema;
+    output: typeof BuildVmImageProgressSchema;
   },
   /**
    * @generated from rpc vm.VmService.DefineVm

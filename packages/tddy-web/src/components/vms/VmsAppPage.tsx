@@ -48,6 +48,7 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
   const [building, setBuilding] = useState(false);
   const [availableImages, setAvailableImages] = useState<string[]>([]);
   const [buildError, setBuildError] = useState("");
+  const [buildLog, setBuildLog] = useState<string[]>([]);
 
   const loadVms = useCallback(() => {
     if (!sessionToken) return;
@@ -63,24 +64,40 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
 
   const handleBuild = useCallback(
     (spec: string) => {
+      console.log("[VmsAppPage] handleBuild called, sessionToken=", sessionToken ? "present" : "missing", "spec length=", spec.length);
       if (!sessionToken) return;
       setBuilding(true);
       setBuildError("");
-      client
-        .buildVmImage({ sessionToken, buildTarget: spec })
-        .then((res) => {
-          if (res.ok) {
-            setAvailableImages((prev) =>
-              prev.includes(res.imagePath) ? prev : [...prev, res.imagePath]
-            );
-          } else {
-            setBuildError(res.message || "Build failed");
+      setBuildLog([]);
+
+      (async () => {
+        console.log("[VmsAppPage] buildVmImage dispatched, spec length=", spec.length);
+        try {
+          const stream = client.buildVmImage({ sessionToken, buildrootSpec: spec });
+          for await (const progress of stream) {
+            console.log("[VmsAppPage] progress stage=", progress.stage, "msg=", progress.message, "imagePath=", progress.imagePath);
+            if (progress.message) {
+              setBuildLog((prev) => [...prev, progress.message]);
+            }
+            // stage 4 = STAGE_DONE
+            if (progress.stage === 4 && progress.imagePath) {
+              setAvailableImages((prev) =>
+                prev.includes(progress.imagePath) ? prev : [...prev, progress.imagePath]
+              );
+            }
+            // stage 5 = STAGE_ERROR
+            if (progress.stage === 5) {
+              setBuildError(progress.message || "Build failed");
+            }
           }
-        })
-        .catch((e: unknown) => {
+          console.log("[VmsAppPage] buildVmImage stream ended");
+        } catch (e: unknown) {
+          console.error("[VmsAppPage] buildVmImage error:", e);
           setBuildError(e instanceof Error ? e.message : "Build failed");
-        })
-        .finally(() => setBuilding(false));
+        } finally {
+          setBuilding(false);
+        }
+      })();
     },
     [client, sessionToken]
   );
@@ -151,6 +168,7 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
           building={building}
           availableImages={availableImages}
           errorMessage={buildError}
+          buildLog={buildLog}
           onBuild={handleBuild}
           onDefineVm={handleDefineVm}
         />

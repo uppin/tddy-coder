@@ -17,6 +17,13 @@
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rustfmt" "clippy" ];
         };
+        # Buildroot 2024.02.6 (LTS) — not in nixpkgs; fetched from buildroot.org.
+        # BUILDROOT_DIR is exported in shellHook so the VM image build daemon can find it.
+        buildrootSrc = pkgs.fetchzip {
+          name = "buildroot-2024.02.6-src";
+          url = "https://buildroot.org/downloads/buildroot-2024.02.6.tar.gz";
+          sha256 = "1hkr8vh670wiiw97ikh7damb1qymbzhha4cdgy1idzf86v1vqf3y";
+        };
       in
       {
         devShells.default = pkgs.mkShell ({
@@ -59,6 +66,7 @@
           ];
           shellHook = ''
             echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer, bun, node"
+            export BUILDROOT_DIR="${buildrootSrc}"
           '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
             export LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib"
           '' + ''

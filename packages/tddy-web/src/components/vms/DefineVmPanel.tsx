@@ -5,6 +5,7 @@ export interface DefineVmPanelProps {
   building: boolean;
   availableImages: string[];
   errorMessage: string;
+  buildLog: string[];
   onBuild: (spec: string) => void;
   onDefineVm: (name: string, imagePath: string) => void;
 }
@@ -20,10 +21,13 @@ export function DefineVmPanel({
   building,
   availableImages,
   errorMessage,
+  buildLog,
   onBuild,
   onDefineVm,
 }: DefineVmPanelProps) {
-  const [spec, setSpec] = useState("");
+  const [spec, setSpec] = useState(
+    "BR2_x86_64=y\nBR2_TOOLCHAIN_BUILDROOT_GLIBC=y\nBR2_PACKAGE_BUSYBOX=y\nBR2_TARGET_ROOTFS_EXT2=y\n"
+  );
   const [selectedImage, setSelectedImage] = useState("");
   const [vmName, setVmName] = useState("");
 
@@ -43,7 +47,7 @@ export function DefineVmPanel({
             data-testid="define-vm-spec"
             className={`${inputClass} font-mono resize-y`}
             rows={6}
-            placeholder={"BR2_x86_64=y\nBR2_TOOLCHAIN_BUILDROOT_GLIBC=y\nBR2_TARGET_ROOTFS_EXT2=y"}
+
             value={spec}
             onChange={(e) => setSpec(e.target.value)}
             disabled={building}
@@ -59,13 +63,22 @@ export function DefineVmPanel({
             Build image
           </Button>
         </div>
-        {building && (
-          <p
-            data-testid="define-vm-building-status"
-            className="text-sm text-muted-foreground animate-pulse"
-          >
-            Building image…
+        {building && buildLog.length === 0 && (
+          <p data-testid="define-vm-connecting" className="text-sm text-muted-foreground animate-pulse">
+            Connecting to build service…
           </p>
+        )}
+        {buildLog.length > 0 && (
+          <div
+            data-testid="define-vm-build-log"
+            className="rounded-md border border-input bg-muted p-2 max-h-48 overflow-y-auto font-mono text-xs"
+          >
+            {buildLog.map((entry, i) => (
+              <div key={i} data-testid="define-vm-build-log-entry">
+                {entry}
+              </div>
+            ))}
+          </div>
         )}
         {errorMessage && (
           <p data-testid="define-vm-error" className="text-sm text-destructive">

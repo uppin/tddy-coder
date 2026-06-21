@@ -6,6 +6,294 @@ use tddy_build::executor::{execute_target, ExecuteOptions};
 use tddy_build::graph::BuildGraph;
 use tddy_build::plugin::PluginRegistry;
 use tddy_build_qemu::QemuPlugin;
+use tddy_rpc::Status;
+use tddy_service::proto::vm::BuildVmImageProgress;
+
+// Stage constants matching BuildVmImageProgress::Stage proto enum values
+const STAGE_CONFIGURING: i32 = 1;
+const STAGE_BUILDING: i32 = 2;
+const STAGE_CONVERTING: i32 = 3;
+const STAGE_DONE: i32 = 4;
+const STAGE_ERROR: i32 = 5;
+
+/// Helper to send a progress message, ignoring send errors (receiver may have dropped).
+async fn send_progress(
+    tx: &tokio::sync::mpsc::Sender<Result<BuildVmImageProgress, Status>>,
+    stage: i32,
+    message: impl Into<String>,
+    image_path: impl Into<String>,
+) {
+    let _ = tx
+        .send(Ok(BuildVmImageProgress {
+            stage,
+            message: message.into(),
+            image_path: image_path.into(),
+        }))
+        .await;
+}
+
+/// Build a VM image from a Buildroot `.config` spec string, streaming progress messages.
+///
+/// Stages:
+/// 1. STAGE_CONFIGURING — writes spec, runs `make olddefconfig`
+/// 2. STAGE_BUILDING    — runs `make -j<nproc>`, forwarding each stdout line
+/// 3. STAGE_CONVERTING  — runs `qemu-img convert` to produce a qcow2
+/// 4. STAGE_DONE        — sends the final image path
+/// 5. STAGE_ERROR       — sent if any step fails (Buildroot not found, make failed, etc.)
+pub async fn build_vm_image_from_spec(
+    spec: &str,
+    tx: tokio::sync::mpsc::Sender<Result<BuildVmImageProgress, Status>>,
+) {
+    use std::env;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::process::Command;
+
+    // Emit immediately so the UI shows feedback before any blocking work begins.
+    send_progress(&tx, STAGE_CONFIGURING, "Starting Buildroot build…", "").await;
+    log::info!(
+        "build_vm_image_from_spec: build requested, spec length={}",
+        spec.len()
+    );
+
+    // ── 1. Locate the Buildroot source directory ──────────────────────────────
+    let buildroot_dir = match env::var("BUILDROOT_DIR") {
+        Ok(dir) if !dir.is_empty() => {
+            log::info!("build_vm_image_from_spec: BUILDROOT_DIR={}", dir);
+            std::path::PathBuf::from(dir)
+        }
+        _ => {
+            log::error!("build_vm_image_from_spec: BUILDROOT_DIR not set");
+            send_progress(
+                &tx,
+                STAGE_ERROR,
+                "Buildroot not found: set BUILDROOT_DIR env var to the Buildroot source directory",
+                "",
+            )
+            .await;
+            return;
+        }
+    };
+
+    // ── 2. Resolve output dirs relative to the daemon's cwd (repo root when started via web-dev).
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let dl_dir = cwd.join("tmp/buildroot/dl");
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let build_path = cwd.join("tmp/buildroot/disks").join(format!("build-{ts}"));
+    if let Err(e) = tokio::fs::create_dir_all(&build_path).await {
+        send_progress(
+            &tx,
+            STAGE_ERROR,
+            format!("failed to create build dir {}: {e}", build_path.display()),
+            "",
+        )
+        .await;
+        return;
+    }
+    log::info!(
+        "build_vm_image_from_spec: build_path={} dl_dir={}",
+        build_path.display(),
+        dl_dir.display()
+    );
+
+    // ── 3. Write the spec as .config ─────────────────────────────────────────
+    let config_path = build_path.join(".config");
+    if let Err(e) = tokio::fs::write(&config_path, spec).await {
+        send_progress(
+            &tx,
+            STAGE_ERROR,
+            format!("failed to write .config: {e}"),
+            "",
+        )
+        .await;
+        return;
+    }
+
+    // ── 4. make olddefconfig ─────────────────────────────────────────────────
+    log::info!(
+        "build_vm_image_from_spec: running make olddefconfig in {}",
+        build_path.display()
+    );
+    send_progress(&tx, STAGE_CONFIGURING, "Running make olddefconfig…", "").await;
+    let olddefconfig = Command::new("make")
+        .arg("-C")
+        .arg(&buildroot_dir)
+        .arg(format!("O={}", build_path.display()))
+        .arg(format!("BR2_DL_DIR={}", dl_dir.display()))
+        .arg("HOSTCC=/usr/bin/gcc")
+        .arg("HOSTCXX=/usr/bin/g++")
+        .arg("olddefconfig")
+        .output()
+        .await;
+    match olddefconfig {
+        Err(e) => {
+            send_progress(
+                &tx,
+                STAGE_ERROR,
+                format!("make olddefconfig launch failed: {e}"),
+                "",
+            )
+            .await;
+            return;
+        }
+        Ok(out) if !out.status.success() => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            send_progress(
+                &tx,
+                STAGE_ERROR,
+                format!("make olddefconfig failed: {stderr}"),
+                "",
+            )
+            .await;
+            return;
+        }
+        Ok(_) => {}
+    }
+
+    // ── 5. make -j<nproc> ────────────────────────────────────────────────────
+    let nproc = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    log::info!("build_vm_image_from_spec: running make -j{nproc}");
+
+    let mut make_build = match Command::new("make")
+        .arg("-C")
+        .arg(&buildroot_dir)
+        .arg(format!("O={}", build_path.display()))
+        .arg(format!("BR2_DL_DIR={}", dl_dir.display()))
+        .arg("HOSTCC=/usr/bin/gcc")
+        .arg("HOSTCXX=/usr/bin/g++")
+        .arg(format!("-j{nproc}"))
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(e) => {
+            send_progress(
+                &tx,
+                STAGE_ERROR,
+                format!("make build launch failed: {e}"),
+                "",
+            )
+            .await;
+            return;
+        }
+    };
+
+    send_progress(
+        &tx,
+        STAGE_BUILDING,
+        "Building rootfs (this takes several minutes)…",
+        "",
+    )
+    .await;
+    // Drain stdout and stderr concurrently — reading only one at a time risks a pipe-buffer deadlock
+    // when the other fills up, and also hides error messages that make writes to stderr.
+    let stdout = make_build.stdout.take();
+    let stderr = make_build.stderr.take();
+
+    let tx_out = tx.clone();
+    let stdout_task = tokio::spawn(async move {
+        if let Some(out) = stdout {
+            let mut lines = BufReader::new(out).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                log::info!("buildroot: {}", line);
+                send_progress(&tx_out, STAGE_BUILDING, &line, "").await;
+            }
+        }
+    });
+    let tx_err = tx.clone();
+    let stderr_task = tokio::spawn(async move {
+        if let Some(err) = stderr {
+            let mut lines = BufReader::new(err).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                log::warn!("buildroot stderr: {}", line);
+                send_progress(&tx_err, STAGE_BUILDING, &line, "").await;
+            }
+        }
+    });
+    let _ = tokio::join!(stdout_task, stderr_task);
+
+    let status = match make_build.wait().await {
+        Ok(s) => s,
+        Err(e) => {
+            send_progress(&tx, STAGE_ERROR, format!("make build wait failed: {e}"), "").await;
+            return;
+        }
+    };
+    if !status.success() {
+        send_progress(
+            &tx,
+            STAGE_ERROR,
+            format!("make build failed (exit {})", status),
+            "",
+        )
+        .await;
+        return;
+    }
+
+    // ── 6. Convert rootfs.ext2 → qcow2 ──────────────────────────────────────
+    let rootfs_ext2 = build_path.join("images").join("rootfs.ext2");
+    let qcow2_path = build_path.join("images").join("rootfs.qcow2");
+
+    log::info!(
+        "build_vm_image_from_spec: converting {} to qcow2",
+        rootfs_ext2.display()
+    );
+    send_progress(
+        &tx,
+        STAGE_CONVERTING,
+        "Converting rootfs.ext2 to qcow2…",
+        "",
+    )
+    .await;
+
+    let convert = Command::new("qemu-img")
+        .arg("convert")
+        .arg("-f")
+        .arg("raw")
+        .arg("-O")
+        .arg("qcow2")
+        .arg(&rootfs_ext2)
+        .arg(&qcow2_path)
+        .output()
+        .await;
+
+    match convert {
+        Err(e) => {
+            send_progress(
+                &tx,
+                STAGE_ERROR,
+                format!("qemu-img convert launch failed: {e}"),
+                "",
+            )
+            .await;
+            return;
+        }
+        Ok(out) if !out.status.success() => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            send_progress(
+                &tx,
+                STAGE_ERROR,
+                format!("qemu-img convert failed: {stderr}"),
+                "",
+            )
+            .await;
+            return;
+        }
+        Ok(_) => {}
+    }
+
+    // ── 7. STAGE_DONE ────────────────────────────────────────────────────────
+    // Keep the temp dir alive by leaking it (image must persist for caller to use).
+    // In production the daemon owns the image path; the build dir is intentionally leaked here.
+    let image_path = qcow2_path.to_string_lossy().into_owned();
+    log::info!("build_vm_image_from_spec: done, image_path={}", image_path);
+    send_progress(&tx, STAGE_DONE, "Build complete", &image_path).await;
+}
 
 /// Build a VM image from the given build target using the tddy-build system.
 /// Returns the path to the produced qcow2 image.

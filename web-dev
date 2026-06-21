@@ -49,17 +49,6 @@ VITE_PORT="${VITE_PORT:-5173}"
 # DAEMON_CONFIG overrides; default is dev.daemon.yaml at repo root.
 CONFIG="${DAEMON_CONFIG:-dev.daemon.yaml}"
 
-find_binary() {
-  local debug="target/debug/tddy-daemon"
-  local release="target/release/tddy-daemon"
-  if [ -f "$debug" ]; then echo "$debug"; return; fi
-  if [ -f "$release" ]; then echo "$release"; return; fi
-  echo "tddy-daemon binary not found. Run: cargo build -p tddy-daemon" >&2
-  exit 1
-}
-
-binary=$(find_binary)
-
 daemon_args=()
 if [ -f "$CONFIG" ]; then
   # Replace CURRENT_USER with $USER in a temp copy (daemon config uses os_user).
@@ -107,8 +96,11 @@ fi
 fuser -k -9 -s "${DAEMON_PORT}/tcp" "${VITE_PORT}/tcp" 2>/dev/null || true
 sleep 2
 
-# Start daemon via ./dev (nix may take 5–10s to load the binary) so CLI args are passed correctly to the tddy binary
-./dev "$binary" "${daemon_args[@]}" &
+# Ensure writable build output dirs exist before the daemon starts.
+mkdir -p tmp/buildroot/disks tmp/buildroot/dl
+
+# Build and start daemon via cargo run so source changes are picked up automatically.
+./dev cargo run -p tddy-daemon -- "${daemon_args[@]}" &
 daemon_pid=$!
 
 # Wait for daemon to be ready (HTTP 200 on /api/config, verified twice to avoid race)

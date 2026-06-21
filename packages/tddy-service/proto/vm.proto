@@ -2,7 +2,7 @@ syntax = "proto3";
 package vm;
 
 service VmService {
-  rpc BuildVmImage(BuildVmImageRequest)  returns (BuildVmImageResponse);
+  rpc BuildVmImage(BuildVmImageRequest)  returns (stream BuildVmImageProgress);
   rpc DefineVm    (DefineVmRequest)      returns (DefineVmResponse);
   rpc ListVms     (ListVmsRequest)       returns (ListVmsResponse);
   rpc StartVm     (StartVmRequest)       returns (StartVmResponse);
@@ -14,14 +14,22 @@ service VmService {
 // --- Build ---
 
 message BuildVmImageRequest {
-  string session_token = 1;
-  string build_target  = 2;
+  string session_token  = 1;
+  string buildroot_spec = 2;  // Full Buildroot .config content (BR2_* variables)
 }
 
-message BuildVmImageResponse {
-  bool   ok         = 1;
-  string image_path = 2;
-  string message    = 3;
+message BuildVmImageProgress {
+  enum Stage {
+    STAGE_UNKNOWN     = 0;
+    STAGE_CONFIGURING = 1;
+    STAGE_BUILDING    = 2;
+    STAGE_CONVERTING  = 3;
+    STAGE_DONE        = 4;
+    STAGE_ERROR       = 5;
+  }
+  Stage  stage      = 1;
+  string message    = 2;  // Buildroot stdout line or error description
+  string image_path = 3;  // Populated only when stage == STAGE_DONE
 }
 
 // --- Define ---

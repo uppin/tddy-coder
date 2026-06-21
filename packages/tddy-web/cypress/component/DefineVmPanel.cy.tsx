@@ -5,6 +5,7 @@ const idle = {
   building: false,
   availableImages: [] as string[],
   errorMessage: "",
+  buildLog: [] as string[],
   onBuild: noop,
   onDefineVm: noop,
 };
@@ -26,14 +27,22 @@ describe("DefineVmPanel — build spec", () => {
     cy.get('[data-testid="define-vm-spec"]').should("be.visible");
   });
 
+  it("textarea is pre-filled with a minimal busybox x86_64 spec", () => {
+    cy.mount(<DefineVmPanel {...idle} />);
+    cy.get('[data-testid="define-vm-spec"]')
+      .should("contain.value", "BR2_x86_64=y")
+      .and("contain.value", "BR2_PACKAGE_BUSYBOX=y")
+      .and("contain.value", "BR2_TARGET_ROOTFS_EXT2=y");
+  });
+
   it("Build button is disabled when the spec textarea is empty", () => {
     cy.mount(<DefineVmPanel {...idle} />);
+    cy.get('[data-testid="define-vm-spec"]').clear();
     cy.get('[data-testid="define-vm-build-btn"]').should("be.disabled");
   });
 
-  it("Build button is enabled after typing in the spec textarea", () => {
+  it("Build button is enabled when the spec textarea has content", () => {
     cy.mount(<DefineVmPanel {...idle} />);
-    cy.get('[data-testid="define-vm-spec"]').type(SAMPLE_SPEC);
     cy.get('[data-testid="define-vm-build-btn"]').should("not.be.disabled");
   });
 
@@ -46,10 +55,43 @@ describe("DefineVmPanel — build spec", () => {
     cy.get("@onBuild").its("firstCall.args.0").should("include", "BR2_x86_64=y");
   });
 
-  it("shows a building indicator and disables Build while building=true", () => {
+  it("Build button is disabled while building=true", () => {
     cy.mount(<DefineVmPanel {...idle} building={true} />);
-    cy.get('[data-testid="define-vm-building-status"]').should("be.visible");
     cy.get('[data-testid="define-vm-build-btn"]').should("be.disabled");
+  });
+
+  it("shows connecting indicator when building and buildLog is empty", () => {
+    cy.mount(<DefineVmPanel {...idle} building={true} buildLog={[]} />);
+    cy.get('[data-testid="define-vm-connecting"]').should("be.visible");
+  });
+
+  it("connecting indicator is absent when not building", () => {
+    cy.mount(<DefineVmPanel {...idle} building={false} buildLog={[]} />);
+    cy.get('[data-testid="define-vm-connecting"]').should("not.exist");
+  });
+
+  it("connecting indicator is absent once buildLog has entries", () => {
+    cy.mount(<DefineVmPanel {...idle} building={true} buildLog={["Starting..."]} />);
+    cy.get('[data-testid="define-vm-connecting"]').should("not.exist");
+  });
+
+  it("build log container is absent when buildLog is empty", () => {
+    cy.mount(<DefineVmPanel {...idle} buildLog={[]} />);
+    cy.get('[data-testid="define-vm-build-log"]').should("not.exist");
+  });
+
+  it("shows build log container when buildLog has entries", () => {
+    const log = ["Configuring...", "Building rootfs...", "Converting to qcow2..."];
+    cy.mount(<DefineVmPanel {...idle} buildLog={log} />);
+    cy.get('[data-testid="define-vm-build-log"]').should("be.visible");
+  });
+
+  it("renders one entry per buildLog item in order", () => {
+    const log = ["Step 1", "Step 2", "Step 3"];
+    cy.mount(<DefineVmPanel {...idle} buildLog={log} />);
+    cy.get('[data-testid="define-vm-build-log-entry"]').should("have.length", 3);
+    cy.get('[data-testid="define-vm-build-log-entry"]').first().should("contain.text", "Step 1");
+    cy.get('[data-testid="define-vm-build-log-entry"]').last().should("contain.text", "Step 3");
   });
 
   it("shows an error message when errorMessage is provided", () => {

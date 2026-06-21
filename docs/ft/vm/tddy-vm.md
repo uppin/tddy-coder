@@ -41,7 +41,7 @@ New `vm.VmService` with 7 methods:
 
 | Method | Description |
 |--------|-------------|
-| `BuildVmImage` | Invoke tddy-build system to produce a qcow2 from a build target |
+| `BuildVmImage` | **Server-streaming.** Accept a Buildroot `.config` spec, invoke Buildroot directly (via Nix), stream progress lines, emit final message with qcow2 path or error. Independent of tddy-build. (Updated: 2026-06-21) |
 | `DefineVm` | Register a VM spec in the registry |
 | `ListVms` | List all VMs with their current state |
 | `StartVm` | Boot a named VM (builds image first if `build_target` set) |
@@ -57,9 +57,15 @@ A `/vms` page in the dashboard (accessed via the hamburger nav menu). (Updated: 
 
 ### Build image panel
 
-A two-step panel for building a disk image and creating a VM:
+A two-step panel for building a disk image and creating a VM: (Updated: 2026-06-21)
 
-1. **Buildroot spec textarea** — the user pastes or types a Buildroot configuration fragment (e.g. `BR2_x86_64=y`, `BR2_TARGET_ROOTFS_EXT2=y`). Clicking **Build image** sends the spec to the `BuildVmImage` RPC. A "Building…" indicator shows while the build is in progress. Errors surface inline below the textarea.
+1. **Buildroot spec textarea** — the user pastes a Buildroot configuration spec (e.g. a defconfig name or config fragment). Clicking **Build image** sends the spec to a backend that invokes Buildroot **directly** — this is completely independent of the tddy-build graph system and repo-internal build targets. A "Building…" indicator shows while the build is in progress (Buildroot builds can take 20–60 min on first run). Errors surface inline below the textarea.
+
+   > ⚠️ **Not yet implemented on the backend.** The current `BuildVmImage` RPC incorrectly passes the textarea content as a tddy-build target ID. A new backend path is required (Updated: 2026-06-21):
+   > - **Spec format:** full Buildroot `.config` content (same `BR2_*` variable syntax as Linux kernel config). Example minimal QEMU x86_64 image: `BR2_x86_64=y`, `BR2_TOOLCHAIN_BUILDROOT_GLIBC=y`, `BR2_TARGET_ROOTFS_EXT2=y`, `BR2_LINUX_KERNEL=y`, etc.
+   > - **Buildroot source:** provided by Nix (`buildroot` added to the Nix flake). No hardcoded path — the daemon finds it via the Nix environment.
+   > - **Build flow:** write spec to temp workspace as `.config` → `make olddefconfig` → `make -j$(nproc)` → `qemu-img convert rootfs.ext4 → output.qcow2` → stream qcow2 path in the final message.
+   > - **Streaming:** `BuildVmImage` is a **server-streaming RPC** — it emits a sequence of progress messages as the build runs (Buildroot stdout lines forwarded in real time), with a final message carrying the result or error. The UI renders these as a live build log below the textarea. Both transports support server streaming natively: the LiveKit transport (`tddy-livekit-web`) uses an `AsyncQueue` fed by data-channel messages, and the HTTP transport uses HTTP/2 streaming. No transport-level workarounds needed. (Added: 2026-06-21)
 
 2. **Create VM form** — once an image is available, a **dropdown** lists all successfully built image paths. The user selects an image, enters a VM name, and clicks **Create VM** to call `DefineVm`. The dropdown accumulates images across multiple builds in the same session.
 
@@ -74,7 +80,7 @@ tddy-vm (new)
 ├── vm.rs         — Vm trait (mockable boundary), VmConfig, RunningVm, VmError, PortForward
 ├── qemu.rs       — QemuVm (full impl), QemuVmArgs (pure arg builder), wait_for_ssh_port, send_monitor_command
 ├── mock.rs       — MockVm (recording test double)
-├── build.rs      — build_vm_image() — wraps tddy-build-qemu/buildroot plugins
+├── build.rs      — build_vm_image() — currently wraps tddy-build (WRONG for spec-based builds; needs new direct-Buildroot path)
 ├── registry.rs   — VmSpec, VmState, VmManager (HashMap + JSON persistence)
 └── service.rs    — VmServiceImpl (implements generated vm::VmService trait)
 
@@ -99,12 +105,14 @@ tddy-web
 4. `tddy-demo-runner` has no duplicated VM lifecycle code.
 5. `/vms` page renders in the web app and appears in the nav menu.
 6. `VmManager` persists specs to JSON; serde round-trip is correct.
-7. `build_vm_image` invokes the tddy-build system (QemuPlugin + BuildrootPlugin registry).
+7. `build_vm_image` invokes the tddy-build system (QemuPlugin + BuildrootPlugin registry). [SUPERSEDED — see below]
 
 ## Out of scope for this changeset
 
-- `VmManager` methods fully implemented (deferred to /green phase).
-- `build_vm_image` fully implemented (deferred to /green phase).
-- `VmsAppPage` wired to live RPC (deferred to /green phase).
 - ScreenShare VM mode.
 - Multi-host VM management.
+
+## Known gaps / pending design (Updated: 2026-06-21)
+
+- **`BuildVmImage` backend is wrong for spec-based builds.** The current implementation passes the UI textarea content as a tddy-build target ID. The correct implementation must accept a Buildroot config spec as text and invoke Buildroot directly — completely independent of the tddy-build graph. Requires: (a) agree on spec format (defconfig name / full `.config` / fragment); (b) establish Buildroot install path on the daemon host; (c) new RPC field or new RPC method; (d) new `build_vm_image_from_spec` Rust function.
+- **`ListVmImages` RPC does not exist.** Dropdown images currently only accumulate within a single browser session. A persistent image registry (list of previously built qcow2 paths) needs its own storage and RPC.
