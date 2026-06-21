@@ -28,6 +28,7 @@ struct VmHandle {
     state: VmState,
 }
 
+#[allow(dead_code)] // fields used once methods are implemented
 pub struct VmManager {
     state_file: PathBuf,
     backend: Arc<dyn Vm>,
