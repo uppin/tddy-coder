@@ -28,6 +28,47 @@ pub fn merge_base(
     unimplemented!("merge_base: not yet implemented")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "rebase_onto")]
+    fn rebase_onto_panics_unimplemented() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        rebase_onto(tmp.path(), "main", "old-base", "feature").unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "force_push_with_lease")]
+    fn force_push_with_lease_panics_unimplemented() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        force_push_with_lease(tmp.path(), "feature", "deadbeef").unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "merge_base")]
+    fn merge_base_panics_unimplemented() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        merge_base(tmp.path(), "HEAD", "main").unwrap();
+    }
+}
+
 /// Build or refresh a local integration ref (`stack-int/<node_id>`) from multiple parent tips.
 /// Returns the SHA of the resulting ref.
 pub fn build_integration_ref(

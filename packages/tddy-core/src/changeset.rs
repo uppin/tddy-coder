@@ -754,6 +754,350 @@ mod resolve_agent_tests {
 }
 
 #[cfg(test)]
+mod stack_tests {
+    use super::*;
+
+    #[test]
+    fn effective_base_refs_single_parent_skip() {
+        let stack = Stack {
+            version: 1,
+            nodes: vec![
+                StackNode {
+                    node_id: "n1".to_string(),
+                    title: "Node 1".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: Some("feature/n1".to_string()),
+                    session_id: Some("sess-1".to_string()),
+                    parents: vec![],
+                    pr_status: Some(GithubPrStatus {
+                        phase: "merged".to_string(),
+                        url: None,
+                        error: None,
+                    }),
+                    child_state: None,
+                },
+                StackNode {
+                    node_id: "n2".to_string(),
+                    title: "Node 2".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: Some("feature/n2".to_string()),
+                    session_id: None,
+                    parents: vec!["n1".to_string()],
+                    pr_status: None,
+                    child_state: None,
+                },
+            ],
+        };
+        let refs = stack.effective_base_refs("n2", "origin/master");
+        assert_eq!(refs, vec!["origin/master".to_string()]);
+    }
+
+    #[test]
+    fn effective_base_refs_multi_parent_unmerged_set() {
+        let stack = Stack {
+            version: 1,
+            nodes: vec![
+                StackNode {
+                    node_id: "n1".to_string(),
+                    title: "Node 1".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: Some("feature/n1".to_string()),
+                    session_id: Some("sess-1".to_string()),
+                    parents: vec![],
+                    pr_status: Some(GithubPrStatus {
+                        phase: "open".to_string(),
+                        url: None,
+                        error: None,
+                    }),
+                    child_state: None,
+                },
+                StackNode {
+                    node_id: "n2".to_string(),
+                    title: "Node 2".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: Some("feature/n2".to_string()),
+                    session_id: Some("sess-2".to_string()),
+                    parents: vec![],
+                    pr_status: Some(GithubPrStatus {
+                        phase: "open".to_string(),
+                        url: None,
+                        error: None,
+                    }),
+                    child_state: None,
+                },
+                StackNode {
+                    node_id: "n3".to_string(),
+                    title: "Node 3".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: Some("feature/n3".to_string()),
+                    session_id: None,
+                    parents: vec!["n1".to_string(), "n2".to_string()],
+                    pr_status: None,
+                    child_state: None,
+                },
+            ],
+        };
+        let refs = stack.effective_base_refs("n3", "origin/master");
+        assert_eq!(
+            refs,
+            vec!["origin/feature/n1".to_string(), "origin/feature/n2".to_string()]
+        );
+    }
+
+    #[test]
+    fn effective_base_refs_all_merged_returns_bottom_base() {
+        let merged_status = || Some(GithubPrStatus {
+            phase: "merged".to_string(),
+            url: None,
+            error: None,
+        });
+        let stack = Stack {
+            version: 1,
+            nodes: vec![
+                StackNode {
+                    node_id: "n1".to_string(),
+                    title: "Node 1".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: Some("feature/n1".to_string()),
+                    session_id: Some("sess-1".to_string()),
+                    parents: vec![],
+                    pr_status: merged_status(),
+                    child_state: None,
+                },
+                StackNode {
+                    node_id: "n2".to_string(),
+                    title: "Node 2".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: Some("feature/n2".to_string()),
+                    session_id: Some("sess-2".to_string()),
+                    parents: vec!["n1".to_string()],
+                    pr_status: merged_status(),
+                    child_state: None,
+                },
+                StackNode {
+                    node_id: "n3".to_string(),
+                    title: "Node 3".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: Some("feature/n3".to_string()),
+                    session_id: None,
+                    parents: vec!["n2".to_string()],
+                    pr_status: None,
+                    child_state: None,
+                },
+            ],
+        };
+        let refs = stack.effective_base_refs("n3", "origin/master");
+        assert_eq!(refs, vec!["origin/master".to_string()]);
+    }
+
+    #[test]
+    fn topo_order_linear_dag() {
+        let stack = Stack {
+            version: 1,
+            nodes: vec![
+                StackNode {
+                    node_id: "n1".to_string(),
+                    title: "Node 1".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: None,
+                    session_id: None,
+                    parents: vec![],
+                    pr_status: None,
+                    child_state: None,
+                },
+                StackNode {
+                    node_id: "n2".to_string(),
+                    title: "Node 2".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: None,
+                    session_id: None,
+                    parents: vec!["n1".to_string()],
+                    pr_status: None,
+                    child_state: None,
+                },
+                StackNode {
+                    node_id: "n3".to_string(),
+                    title: "Node 3".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: None,
+                    session_id: None,
+                    parents: vec!["n2".to_string()],
+                    pr_status: None,
+                    child_state: None,
+                },
+            ],
+        };
+        let order = stack.topo_order().unwrap();
+        assert_eq!(order, vec!["n1".to_string(), "n2".to_string(), "n3".to_string()]);
+    }
+
+    #[test]
+    fn topo_order_cycle_returns_error() {
+        let stack = Stack {
+            version: 1,
+            nodes: vec![
+                StackNode {
+                    node_id: "n1".to_string(),
+                    title: "Node 1".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: None,
+                    session_id: None,
+                    parents: vec!["n2".to_string()],
+                    pr_status: None,
+                    child_state: None,
+                },
+                StackNode {
+                    node_id: "n2".to_string(),
+                    title: "Node 2".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: None,
+                    session_id: None,
+                    parents: vec!["n1".to_string()],
+                    pr_status: None,
+                    child_state: None,
+                },
+            ],
+        };
+        let result = stack.topo_order();
+        assert!(result.is_err(), "expected Err for cycle, got Ok");
+        let err = result.unwrap_err().to_string().to_lowercase();
+        assert!(err.contains("cycle"), "error message should mention 'cycle', got: {err}");
+    }
+
+    #[test]
+    fn update_stack_atomic_reads_and_writes_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let mut cs = Changeset::default();
+        cs.stack = Some(Stack { version: 1, nodes: vec![] });
+        write_changeset(dir, &cs).unwrap();
+
+        update_stack_atomic(dir, |stack| {
+            stack.version = 42;
+        })
+        .unwrap();
+
+        let loaded = read_changeset(dir).unwrap();
+        assert_eq!(loaded.stack.unwrap().version, 42);
+    }
+
+    #[test]
+    fn link_stack_node_to_child_session_sets_fields() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let mut cs = Changeset::default();
+        cs.stack = Some(Stack {
+            version: 1,
+            nodes: vec![StackNode {
+                node_id: "n1".to_string(),
+                title: "Node 1".to_string(),
+                description: String::new(),
+                branch_suggestion: None,
+                branch: None,
+                session_id: None,
+                parents: vec![],
+                pr_status: None,
+                child_state: None,
+            }],
+        });
+        write_changeset(dir, &cs).unwrap();
+
+        link_stack_node_to_child_session(dir, "n1", "sess-abc", Some("feature/n1".to_string()))
+            .unwrap();
+
+        let loaded = read_changeset(dir).unwrap();
+        let node = loaded.stack.unwrap();
+        let n1 = node.node("n1").unwrap();
+        assert_eq!(n1.session_id.as_deref(), Some("sess-abc"));
+        assert_eq!(n1.branch.as_deref(), Some("feature/n1"));
+    }
+
+    #[test]
+    fn sync_stack_node_from_child_propagates_state_and_pr_status() {
+        use crate::workflow::ids::WorkflowState;
+        let orch_tmp = tempfile::tempdir().unwrap();
+        let sessions_tmp = tempfile::tempdir().unwrap();
+        let orch_dir = orch_tmp.path();
+        let sessions_root = sessions_tmp.path();
+        let child_id = "child-session-1";
+
+        // unified_session_dir_path = sessions_root/sessions/<id>
+        let child_dir = sessions_root.join("sessions").join(child_id);
+        std::fs::create_dir_all(&child_dir).unwrap();
+        let mut child_cs = Changeset::default();
+        child_cs.state.current = WorkflowState::new("GreenImplementing");
+        child_cs.workflow = Some(ChangesetWorkflow {
+            github_pr_status: Some(GithubPrStatus {
+                phase: "open".to_string(),
+                url: Some("https://github.com/example/pr/1".to_string()),
+                error: None,
+            }),
+            ..Default::default()
+        });
+        write_changeset(&child_dir, &child_cs).unwrap();
+
+        let mut orch_cs = Changeset::default();
+        orch_cs.stack = Some(Stack {
+            version: 1,
+            nodes: vec![StackNode {
+                node_id: "n1".to_string(),
+                title: "Node 1".to_string(),
+                description: String::new(),
+                branch_suggestion: None,
+                branch: Some("feature/n1".to_string()),
+                session_id: Some(child_id.to_string()),
+                parents: vec![],
+                pr_status: None,
+                child_state: None,
+            }],
+        });
+        write_changeset(orch_dir, &orch_cs).unwrap();
+
+        sync_stack_node_from_child(orch_dir, sessions_root, "n1").unwrap();
+
+        let loaded = read_changeset(orch_dir).unwrap();
+        let stack = loaded.stack.unwrap();
+        let n1 = stack.node("n1").unwrap();
+        assert_eq!(n1.child_state, Some(WorkflowState::new("GreenImplementing")));
+        assert_eq!(n1.pr_status.as_ref().unwrap().phase, "open");
+    }
+
+    #[test]
+    fn serde_back_compat_changeset_without_stack_field() {
+        let yaml = r#"
+version: 1
+models: {}
+sessions: []
+state:
+  current: Init
+  updated_at: "2024-01-01T00:00:00Z"
+  history: []
+artifacts: {}
+discovery: ~
+"#;
+        let cs: Changeset = serde_yaml::from_str(yaml).expect("legacy changeset should deserialize");
+        assert!(cs.stack.is_none(), "stack should be None for legacy changeset");
+        assert!(
+            cs.orchestrator_session_id.is_none(),
+            "orchestrator_session_id should be None for legacy changeset"
+        );
+    }
+}
+
+#[cfg(test)]
 mod worktree_directory_basename_tests {
     use super::*;
 

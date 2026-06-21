@@ -153,6 +153,167 @@ impl WorkflowRecipe for PlanPrStackRecipe {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parser_happy_path_three_node_dag() {
+        use tddy_core::StackNode;
+        let plan = StackPlanOutput {
+            version: 1,
+            prs: vec![
+                PlannedPr {
+                    node_id: "n1".to_string(),
+                    title: "Auth token store".to_string(),
+                    description: "Store tokens securely".to_string(),
+                    branch_suggestion: Some("feature/auth-store".to_string()),
+                    parents: vec![],
+                    child_recipe: None,
+                },
+                PlannedPr {
+                    node_id: "n2".to_string(),
+                    title: "Auth middleware".to_string(),
+                    description: "Validate tokens".to_string(),
+                    branch_suggestion: Some("feature/auth-middleware".to_string()),
+                    parents: vec!["n1".to_string()],
+                    child_recipe: None,
+                },
+                PlannedPr {
+                    node_id: "n3".to_string(),
+                    title: "Auth UI".to_string(),
+                    description: "Login page".to_string(),
+                    branch_suggestion: Some("feature/auth-ui".to_string()),
+                    parents: vec!["n1".to_string(), "n2".to_string()],
+                    child_recipe: Some("tdd".to_string()),
+                },
+            ],
+        };
+
+        let nodes = planned_prs_into_stack_nodes(&plan.prs);
+        assert_eq!(nodes.len(), 3);
+
+        let n1 = nodes.iter().find(|n| n.node_id == "n1").unwrap();
+        assert!(n1.parents.is_empty());
+        assert_eq!(n1.branch_suggestion.as_deref(), Some("feature/auth-store"));
+        assert!(n1.session_id.is_none());
+        assert!(n1.branch.is_none());
+
+        let n2 = nodes.iter().find(|n| n.node_id == "n2").unwrap();
+        assert_eq!(n2.parents, vec!["n1".to_string()]);
+
+        let n3 = nodes.iter().find(|n| n.node_id == "n3").unwrap();
+        assert_eq!(n3.parents, vec!["n1".to_string(), "n2".to_string()]);
+    }
+
+    #[test]
+    fn validate_stack_plan_rejects_duplicate_node_id() {
+        let plan = StackPlanOutput {
+            version: 1,
+            prs: vec![
+                PlannedPr {
+                    node_id: "n1".to_string(),
+                    title: "First".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    parents: vec![],
+                    child_recipe: None,
+                },
+                PlannedPr {
+                    node_id: "n1".to_string(),
+                    title: "Duplicate".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    parents: vec![],
+                    child_recipe: None,
+                },
+            ],
+        };
+        let result = validate_stack_plan(&plan);
+        assert!(result.is_err(), "expected Err for duplicate node_id");
+        let msg = result.unwrap_err().to_lowercase();
+        assert!(
+            msg.contains("duplicate") || msg.contains("n1"),
+            "error should mention duplicate or node id, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_stack_plan_rejects_dangling_parent_ref() {
+        let plan = StackPlanOutput {
+            version: 1,
+            prs: vec![PlannedPr {
+                node_id: "n2".to_string(),
+                title: "Orphan".to_string(),
+                description: String::new(),
+                branch_suggestion: None,
+                parents: vec!["n1".to_string()], // n1 does not exist
+                child_recipe: None,
+            }],
+        };
+        let result = validate_stack_plan(&plan);
+        assert!(result.is_err(), "expected Err for dangling parent ref");
+        let msg = result.unwrap_err().to_lowercase();
+        assert!(
+            msg.contains("n1") || msg.contains("dangling") || msg.contains("parent"),
+            "error should mention the missing parent, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_stack_plan_rejects_cycle() {
+        let plan = StackPlanOutput {
+            version: 1,
+            prs: vec![
+                PlannedPr {
+                    node_id: "n1".to_string(),
+                    title: "A".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    parents: vec!["n2".to_string()],
+                    child_recipe: None,
+                },
+                PlannedPr {
+                    node_id: "n2".to_string(),
+                    title: "B".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    parents: vec!["n1".to_string()],
+                    child_recipe: None,
+                },
+            ],
+        };
+        let result = validate_stack_plan(&plan);
+        assert!(result.is_err(), "expected Err for cycle in plan");
+        let msg = result.unwrap_err().to_lowercase();
+        assert!(msg.contains("cycle"), "error should mention cycle, got: {msg}");
+    }
+
+    #[test]
+    fn planned_prs_into_stack_nodes_maps_all_fields() {
+        let pr = PlannedPr {
+            node_id: "n1".to_string(),
+            title: "My PR".to_string(),
+            description: "Does things".to_string(),
+            branch_suggestion: Some("feature/my-pr".to_string()),
+            parents: vec!["n0".to_string()],
+            child_recipe: Some("tdd".to_string()),
+        };
+        let nodes = planned_prs_into_stack_nodes(&[pr]);
+        assert_eq!(nodes.len(), 1);
+        let n = &nodes[0];
+        assert_eq!(n.node_id, "n1");
+        assert_eq!(n.title, "My PR");
+        assert_eq!(n.description, "Does things");
+        assert_eq!(n.branch_suggestion.as_deref(), Some("feature/my-pr"));
+        assert_eq!(n.parents, vec!["n0".to_string()]);
+        assert!(n.session_id.is_none());
+        assert!(n.branch.is_none());
+        assert!(n.pr_status.is_none());
+        assert!(n.child_state.is_none());
+    }
+}
+
 impl SessionArtifactManifest for PlanPrStackRecipe {
     fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
         &[

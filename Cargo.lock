@@ -7154,6 +7154,7 @@ dependencies = [
  "serial_test",
  "tddy-testing-commons",
  "tddy-workflow",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
