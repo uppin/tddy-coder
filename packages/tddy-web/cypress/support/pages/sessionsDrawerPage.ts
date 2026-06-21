@@ -13,6 +13,10 @@ import {
   sessionsDrawerItemTooltip,
   sessionsDetailResumeBtn,
   sessionsDetailDeleteBtn,
+  sessionsInspectorResumeBtn,
+  sessionsInspectorDeleteBtn,
+  sessionsInspectorDeleteConfirm,
+  sessionsInspectorTerminateBtn,
   TEST_IDS,
 } from "../testIds";
 
@@ -76,4 +80,48 @@ export const sessionsDrawerPage = {
   /** The Delete button rendered for a disconnected session in the detail pane. */
   detailDeleteBtn: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsDetailDeleteBtn(sessionId), { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
+  // Inspector drawer (right overlay)
+  // ---------------------------------------------------------------------------
+
+  /** The inspector drawer element — check data-state attribute ("closed"|"open"|"expanded"). */
+  inspectorDrawer: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorDrawer, { timeout: 5000, ...options }),
+
+  /** The toggle button that opens/closes the inspector. */
+  inspectorToggle: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorToggle, { timeout: 5000, ...options }),
+
+  /** The close button inside the inspector header. */
+  inspectorClose: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorClose, { timeout: 5000, ...options }),
+
+  /** The expand button inside the inspector header. */
+  inspectorExpand: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorExpand, { timeout: 5000, ...options }),
+
+  /** The restore button inside the inspector header (visible only in expanded state). */
+  inspectorRestore: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorRestore, { timeout: 5000, ...options }),
+
+  /** The metadata section inside the inspector. */
+  inspectorMetadata: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorMetadata, { timeout: 5000, ...options }),
+
+  /** The Resume button inside the inspector for the given session. */
+  inspectorResumeBtn: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsInspectorResumeBtn(sessionId), { timeout: 5000, ...options }),
+
+  /** The Delete button inside the inspector for the given session. */
+  inspectorDeleteBtn: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsInspectorDeleteBtn(sessionId), { timeout: 5000, ...options }),
+
+  /** The confirm-delete button (second click) inside the inspector. */
+  inspectorDeleteConfirm: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsInspectorDeleteConfirm(sessionId), { timeout: 5000, ...options }),
+
+  /** The Terminate button inside the inspector for the given session. */
+  inspectorTerminateBtn: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsInspectorTerminateBtn(sessionId), { timeout: 5000, ...options }),
 };

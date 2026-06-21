@@ -93,6 +93,14 @@ export const TEST_IDS = {
   sessionsDetailTerminalContainer: "sessions-detail-terminal-container",
   sessionsDetailMetadata: "sessions-detail-metadata",
 
+  // Session inspector drawer
+  sessionsInspectorDrawer: "sessions-inspector-drawer",
+  sessionsInspectorToggle: "sessions-inspector-toggle",
+  sessionsInspectorClose: "sessions-inspector-close",
+  sessionsInspectorExpand: "sessions-inspector-expand",
+  sessionsInspectorRestore: "sessions-inspector-restore",
+  sessionsInspectorMetadata: "sessions-inspector-metadata",
+
   // Shell navigation
   shellMenuButton: "shell-menu-button",
   shellMenuRpcPlayground: "shell-menu-rpc-playground",
@@ -211,3 +219,19 @@ export const sessionsDetailResumeBtn = (sessionId: string) =>
 /** `[data-testid="sessions-detail-delete-<sessionId>"]` — Delete button in detail pane */
 export const sessionsDetailDeleteBtn = (sessionId: string) =>
   `sessions-detail-delete-${sessionId}`;
+
+/** `[data-testid="sessions-inspector-resume-<sessionId>"]` — Resume button in inspector */
+export const sessionsInspectorResumeBtn = (sessionId: string) =>
+  `sessions-inspector-resume-${sessionId}`;
+
+/** `[data-testid="sessions-inspector-delete-<sessionId>"]` — Delete button in inspector */
+export const sessionsInspectorDeleteBtn = (sessionId: string) =>
+  `sessions-inspector-delete-${sessionId}`;
+
+/** `[data-testid="sessions-inspector-delete-confirm-<sessionId>"]` — Delete confirm button */
+export const sessionsInspectorDeleteConfirm = (sessionId: string) =>
+  `sessions-inspector-delete-confirm-${sessionId}`;
+
+/** `[data-testid="sessions-inspector-terminate-<sessionId>"]` — Terminate button in inspector */
+export const sessionsInspectorTerminateBtn = (sessionId: string) =>
+  `sessions-inspector-terminate-${sessionId}`;
