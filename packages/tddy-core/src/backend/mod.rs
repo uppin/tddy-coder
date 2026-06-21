@@ -509,6 +509,10 @@ pub fn workflow_recipe_selection_question() -> ClarificationQuestion {
                 label: "Grill me".to_string(),
                 description: "Grill (questions) then Create plan (grill-me-brief.md)".to_string(),
             },
+            QuestionOption {
+                label: "Plan PR stack".to_string(),
+                description: "Analyze feature intent and emit a structured PR-stack plan".to_string(),
+            },
         ],
         multi_select: false,
         allow_other: false,
@@ -523,6 +527,7 @@ pub fn recipe_cli_name_from_selection_label(label: &str) -> Option<&'static str>
         "Bugfix" => Some("bugfix"),
         "Free prompting" => Some("free-prompting"),
         "Grill me" => Some("grill-me"),
+        "Plan PR stack" => Some("plan-pr-stack"),
         _ => None,
     }
 }

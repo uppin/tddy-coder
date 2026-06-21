@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tddy_core::WorkflowRecipe;
 
 use crate::{
-    approval_policy, BugfixRecipe, FreePromptingRecipe, GrillMeRecipe, MergePrRecipe, ReviewRecipe,
+    approval_policy, BugfixRecipe, FreePromptingRecipe, GrillMeRecipe, MergePrRecipe, PlanPrStackRecipe, ReviewRecipe,
     SessionArtifactManifest, TddRecipe, TddSmallRecipe,
 };
 
@@ -106,6 +106,10 @@ pub fn workflow_recipe_and_manifest_from_cli_name(
                 r.clone() as Arc<dyn WorkflowRecipe>,
                 r as Arc<dyn SessionArtifactManifest>,
             ))
+        }
+        "plan-pr-stack" => {
+            let r = PlanPrStackRecipe;
+            Ok((Arc::new(r), Arc::new(r)))
         }
         other => Err(unknown_workflow_recipe_error(other)),
     }
