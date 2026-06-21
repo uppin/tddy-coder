@@ -45,12 +45,55 @@ pub struct PlannedPr {
 
 /// Convert a parsed plan into StackNode list (no child session yet — session_id/branch = None).
 pub fn planned_prs_into_stack_nodes(prs: &[PlannedPr]) -> Vec<StackNode> {
-    unimplemented!("planned_prs_into_stack_nodes: not yet implemented")
+    prs.iter()
+        .map(|pr| StackNode {
+            node_id: pr.node_id.clone(),
+            title: pr.title.clone(),
+            description: pr.description.clone(),
+            branch_suggestion: pr.branch_suggestion.clone(),
+            branch: None,
+            session_id: None,
+            parents: pr.parents.clone(),
+            pr_status: None,
+            child_state: None,
+        })
+        .collect()
 }
 
 /// Validate a StackPlanOutput: unique node_ids, all parents resolve, no cycle.
 pub fn validate_stack_plan(plan: &StackPlanOutput) -> Result<(), String> {
-    unimplemented!("validate_stack_plan: not yet implemented")
+    use std::collections::HashSet;
+
+    // 1. Duplicate node_ids.
+    let mut seen: HashSet<&str> = HashSet::new();
+    for pr in &plan.prs {
+        if !seen.insert(pr.node_id.as_str()) {
+            return Err(format!("duplicate node_id: {}", pr.node_id));
+        }
+    }
+
+    // 2. Dangling parent refs.
+    for pr in &plan.prs {
+        for parent in &pr.parents {
+            if !seen.contains(parent.as_str()) {
+                return Err(format!(
+                    "dangling parent ref: {parent} in node {}",
+                    pr.node_id
+                ));
+            }
+        }
+    }
+
+    // 3. Cycle detection via topological sort.
+    let stack = tddy_core::changeset::Stack {
+        version: plan.version,
+        nodes: planned_prs_into_stack_nodes(&plan.prs),
+    };
+    stack
+        .topo_order()
+        .map_err(|err| format!("cycle detected: {err}"))?;
+
+    Ok(())
 }
 
 /// **plan-pr-stack** recipe: `analyze-stack` → `write-stack-plan` → `end`.

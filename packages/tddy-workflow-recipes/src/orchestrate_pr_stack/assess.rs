@@ -63,7 +63,84 @@ pub fn decide_next_action(
     autonomous_merge: bool,
     approved_nodes: &std::collections::HashSet<String>,
 ) -> OrchestratorAction {
-    unimplemented!("decide_next_action: not yet implemented")
+    // A node is considered "complete" (merged) when its PR is merged.
+    let is_merged = |v: &NodeView| matches!(v.pr, PrLiveStatus::Merged);
+    // A node's dependencies are satisfied for merge when every parent dep is merged.
+    let deps_merged = |v: &NodeView| {
+        v.parent_dep_ids.iter().all(|dep| {
+            views
+                .iter()
+                .find(|other| &other.node_id == dep)
+                .map(is_merged)
+                .unwrap_or(false)
+        })
+    };
+    // A node's dependencies are satisfied for spawning when every parent dep has
+    // already been spawned (i.e. is not still NotSpawned).
+    let deps_spawned = |v: &NodeView| {
+        v.parent_dep_ids.iter().all(|dep| {
+            views
+                .iter()
+                .find(|other| &other.node_id == dep)
+                .map(|other| other.child_phase != ChildPhase::NotSpawned)
+                .unwrap_or(false)
+        })
+    };
+
+    // 1. Any failed node or closed PR → MarkFailed.
+    for v in views {
+        if let ChildPhase::Failed(reason) = &v.child_phase {
+            return OrchestratorAction::MarkFailed {
+                node_id: v.node_id.clone(),
+                reason: reason.clone(),
+            };
+        }
+        if matches!(v.pr, PrLiveStatus::Closed) {
+            return OrchestratorAction::MarkFailed {
+                node_id: v.node_id.clone(),
+                reason: format!("PR for node {} was closed without merging", v.node_id),
+            };
+        }
+    }
+
+    // 2. Done when every node is merged.
+    if !views.is_empty() && views.iter().all(is_merged) {
+        return OrchestratorAction::Done;
+    }
+
+    // 3. Spawn the first node (bottom→top) that hasn't been spawned and whose deps are spawned.
+    for v in views {
+        if v.child_phase == ChildPhase::NotSpawned && deps_spawned(v) {
+            return OrchestratorAction::Spawn {
+                node_ids: vec![v.node_id.clone()],
+            };
+        }
+    }
+
+    // 4. Merge an open PR whose deps are merged, subject to the merge gate.
+    for v in views {
+        if let PrLiveStatus::Open { number, .. } = &v.pr {
+            if deps_merged(v) {
+                if autonomous_merge || approved_nodes.contains(&v.node_id) {
+                    return OrchestratorAction::Merge {
+                        node_id: v.node_id.clone(),
+                        pr_number: *number,
+                    };
+                }
+                return OrchestratorAction::Wait {
+                    reason: format!(
+                        "node {} is ready to merge but awaiting operator approval",
+                        v.node_id
+                    ),
+                };
+            }
+        }
+    }
+
+    // 5/6. Otherwise wait for in-flight work.
+    OrchestratorAction::Wait {
+        reason: "waiting for child sessions / PRs to progress".to_string(),
+    }
 }
 
 /// Effective base ref for a node (skips merged ancestors; returns default_branch when all merged).

@@ -95,14 +95,80 @@ impl Stack {
     /// Kahn topological sort over node_id/parents relationships.
     /// Returns ordered list of node_ids (leaves last). Cycle → WorkflowError::ChangesetInvalid.
     pub fn topo_order(&self) -> Result<Vec<String>, WorkflowError> {
-        unimplemented!("topo_order: Kahn sort not yet implemented")
+        use std::collections::VecDeque;
+
+        // In-degree = number of parents that exist as nodes in this stack.
+        let known: std::collections::HashSet<&str> =
+            self.nodes.iter().map(|n| n.node_id.as_str()).collect();
+        let mut in_degree: BTreeMap<&str, usize> = BTreeMap::new();
+        // children[parent] = nodes that depend on `parent`.
+        let mut children: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for node in &self.nodes {
+            in_degree.entry(node.node_id.as_str()).or_insert(0);
+            for parent in &node.parents {
+                if known.contains(parent.as_str()) {
+                    *in_degree.entry(node.node_id.as_str()).or_insert(0) += 1;
+                    children
+                        .entry(parent.as_str())
+                        .or_default()
+                        .push(node.node_id.as_str());
+                }
+            }
+        }
+
+        let mut queue: VecDeque<&str> = in_degree
+            .iter()
+            .filter(|(_, &d)| d == 0)
+            .map(|(&id, _)| id)
+            .collect();
+        let mut order: Vec<String> = Vec::with_capacity(self.nodes.len());
+        while let Some(id) = queue.pop_front() {
+            order.push(id.to_string());
+            if let Some(deps) = children.get(id) {
+                for &child in deps {
+                    let d = in_degree.get_mut(child).expect("child has in-degree entry");
+                    *d -= 1;
+                    if *d == 0 {
+                        queue.push_back(child);
+                    }
+                }
+            }
+        }
+
+        if order.len() != self.nodes.len() {
+            return Err(WorkflowError::ChangesetInvalid(format!(
+                "cycle detected in PR-stack DAG: only {} of {} nodes orderable",
+                order.len(),
+                self.nodes.len()
+            )));
+        }
+        Ok(order)
     }
 
     /// Effective base origin refs for a node, skipping merged ancestors.
     /// Returns `origin/<branch>` for each nearest non-skipped ancestor across all `parents`,
     /// or `[stack_bottom_base.to_string()]` when all parents are merged/absent.
     pub fn effective_base_refs(&self, node_id: &str, stack_bottom_base: &str) -> Vec<String> {
-        unimplemented!("effective_base_refs: not yet implemented")
+        let Some(node) = self.node(node_id) else {
+            return vec![stack_bottom_base.to_string()];
+        };
+        let refs: Vec<String> = node
+            .parents
+            .iter()
+            .filter_map(|parent_id| self.node(parent_id))
+            .filter(|parent| !parent.is_skipped())
+            .map(|parent| {
+                format!(
+                    "origin/{}",
+                    parent.branch.as_deref().unwrap_or(parent.node_id.as_str())
+                )
+            })
+            .collect();
+        if refs.is_empty() {
+            vec![stack_bottom_base.to_string()]
+        } else {
+            refs
+        }
     }
 }
 
@@ -657,7 +723,10 @@ pub fn update_stack_atomic(
     orchestrator_session_dir: &Path,
     f: impl FnOnce(&mut Stack),
 ) -> Result<(), WorkflowError> {
-    unimplemented!("update_stack_atomic: not yet implemented")
+    let mut changeset = read_changeset(orchestrator_session_dir)?;
+    let stack = changeset.stack.get_or_insert_with(Stack::default);
+    f(stack);
+    write_changeset_atomic(orchestrator_session_dir, &changeset)
 }
 
 /// Link a stack node to its materialized child session (set session_id + branch).
@@ -667,7 +736,14 @@ pub fn link_stack_node_to_child_session(
     child_session_id: &str,
     branch: Option<String>,
 ) -> Result<(), WorkflowError> {
-    unimplemented!("link_stack_node_to_child_session: not yet implemented")
+    update_stack_atomic(orchestrator_session_dir, |stack| {
+        if let Some(node) = stack.nodes.iter_mut().find(|n| n.node_id == node_id) {
+            node.session_id = Some(child_session_id.to_string());
+            if let Some(b) = branch {
+                node.branch = Some(b);
+            }
+        }
+    })
 }
 
 /// Sync a stack node's child_state + pr_status from the child session's changeset.
@@ -677,7 +753,32 @@ pub fn sync_stack_node_from_child(
     sessions_root: &Path,
     node_id: &str,
 ) -> Result<(), WorkflowError> {
-    unimplemented!("sync_stack_node_from_child: not yet implemented")
+    // Resolve the child session id from the current orchestrator stack before any write.
+    let orch = read_changeset(orchestrator_session_dir)?;
+    let session_id = orch
+        .stack
+        .as_ref()
+        .and_then(|s| s.node(node_id))
+        .and_then(|n| n.session_id.clone());
+    let Some(session_id) = session_id else {
+        return Ok(());
+    };
+
+    let child_dir =
+        crate::session_lifecycle::unified_session_dir_path(sessions_root, &session_id);
+    let child = read_changeset(&child_dir)?;
+    let child_state = child.state.current.clone();
+    let pr_status = child
+        .workflow
+        .as_ref()
+        .and_then(|w| w.github_pr_status.clone());
+
+    update_stack_atomic(orchestrator_session_dir, |stack| {
+        if let Some(node) = stack.nodes.iter_mut().find(|n| n.node_id == node_id) {
+            node.child_state = Some(child_state);
+            node.pr_status = pr_status;
+        }
+    })
 }
 
 /// Append a session and update state.
