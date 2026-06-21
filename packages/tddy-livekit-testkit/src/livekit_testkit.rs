@@ -16,15 +16,31 @@ use testcontainers::ImageExt;
 
 const LIVEKIT_IMAGE: &str = "livekit/livekit-server";
 const LIVEKIT_TAG: &str = "master";
-const LIVEKIT_PORT: u16 = 7880;
-/// ICE/TCP fallback port (required for WebRTC).
-const LIVEKIT_ICE_TCP_PORT: u16 = 7881;
-/// ICE/UDP mux port (required for WebRTC).
-const LIVEKIT_ICE_UDP_PORT: u16 = 7882;
 const DEV_API_KEY: &str = "devkey";
 const DEV_API_SECRET: &str = "secret";
 const API_READY_TIMEOUT: Duration = Duration::from_secs(15);
 const API_READY_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Bind to :0 to let the OS assign a free TCP port; returns that port.
+///
+/// There is an inherent TOCTOU window between release and Docker binding, but the
+/// window is tiny and much preferable to hardcoding well-known ports.
+fn free_tcp_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("bind :0 to find free TCP port")
+        .local_addr()
+        .expect("local_addr")
+        .port()
+}
+
+/// Same as [`free_tcp_port`] but for UDP.
+fn free_udp_port() -> u16 {
+    std::net::UdpSocket::bind("127.0.0.1:0")
+        .expect("bind :0 to find free UDP port")
+        .local_addr()
+        .expect("local_addr")
+        .port()
+}
 
 /// Env var to reuse an existing LiveKit server instead of starting a container.
 /// Value: `ws://HOST:PORT` (e.g. `ws://127.0.0.1:54321`).
@@ -82,24 +98,36 @@ impl LiveKitTestkit {
             LIVEKIT_TAG
         );
 
+        // Find three free ports on the host. LiveKit embeds its internal (container) port
+        // numbers in ICE candidates, so the host port MUST equal the container port for
+        // WebRTC to be reachable. We solve this by telling LiveKit to listen on the same
+        // free port numbers we select, then mapping host:N → container:N for each.
+        let port_ws = free_tcp_port();
+        let port_ice_tcp = free_tcp_port();
+        let port_ice_udp = free_udp_port();
+
         let http_wait = HttpWaitStrategy::new("/")
-            .with_port(LIVEKIT_PORT.tcp())
+            .with_port(port_ws.tcp())
             .with_expected_status_code(200u16);
 
-        // Pin host ports to fixed values matching the container ports.
-        // LiveKit advertises --node-ip 127.0.0.1 in ICE candidates, so the mapped host
-        // port must equal the container port for WebRTC to reach the container.
-        // If these ports are already in use, set LIVEKIT_TESTKIT_WS_URL to reuse a
-        // running server instead of starting a new container.
+        let cmd: Vec<String> = vec![
+            "--dev".into(),
+            "--bind".into(), "0.0.0.0".into(),
+            "--node-ip".into(), "127.0.0.1".into(),
+            "--port".into(), port_ws.to_string(),
+            "--rtc.tcp_port".into(), port_ice_tcp.to_string(),
+            "--rtc.udp_mux_listen_addr".into(), format!("0.0.0.0:{}", port_ice_udp),
+        ];
+
         let image = GenericImage::new(LIVEKIT_IMAGE, LIVEKIT_TAG)
             .with_wait_for(WaitFor::from(http_wait))
-            .with_cmd(["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1"])
-            .with_mapped_port(LIVEKIT_PORT, LIVEKIT_PORT.tcp())
-            .with_mapped_port(LIVEKIT_ICE_TCP_PORT, LIVEKIT_ICE_TCP_PORT.tcp())
-            .with_mapped_port(LIVEKIT_ICE_UDP_PORT, LIVEKIT_ICE_UDP_PORT.udp());
+            .with_cmd(cmd)
+            .with_mapped_port(port_ws, port_ws.tcp())
+            .with_mapped_port(port_ice_tcp, port_ice_tcp.tcp())
+            .with_mapped_port(port_ice_udp, port_ice_udp.udp());
 
         let container: testcontainers::ContainerAsync<GenericImage> = image.start().await?;
-        let host_port = container.get_host_port_ipv4(LIVEKIT_PORT.tcp()).await?;
+        let host_port = container.get_host_port_ipv4(port_ws.tcp()).await?;
 
         log::debug!(
             "LiveKitTestkit: HTTP ready on port {}, probing API...",
