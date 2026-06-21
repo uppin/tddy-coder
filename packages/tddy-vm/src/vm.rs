@@ -62,6 +62,12 @@ pub enum VmError {
     ShutdownFailed(String),
     #[error("Not implemented: {0}")]
     NotImplemented(String),
+    #[error("VM not found: {0}")]
+    NotFound(String),
+    #[error("VM already exists: {0}")]
+    AlreadyExists(String),
+    #[error("Invalid state for operation: {0}")]
+    InvalidState(String),
 }
 
 /// Mockable boundary for a VM.
