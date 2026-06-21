@@ -38,6 +38,74 @@ pub struct QuestionOptionForQa {
     pub description: String,
 }
 
+/// PR-stack DAG carried by the ORCHESTRATOR session's changeset.
+/// Each node is a child PR session reference.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Stack {
+    #[serde(default)]
+    pub version: u32,
+    #[serde(default)]
+    pub nodes: Vec<StackNode>,
+}
+
+/// A single node in the PR-stack DAG.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct StackNode {
+    /// Stable planner-assigned id (e.g. "n1"). Exists before a child session is materialized.
+    pub node_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    /// Suggested git branch name (e.g. "feature/auth-token-store").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_suggestion: Option<String>,
+    /// Actual branch once the child worktree is created.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// Child session id once materialized; None while only planned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// Parent NODE ids (not session ids). Empty = root off stack base; >1 = DAG.
+    #[serde(default)]
+    pub parents: Vec<String>,
+    /// Reuses existing GithubPrStatus; phase values: "planned"|"open"|"merged"|"closed"|"error".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_status: Option<GithubPrStatus>,
+    /// Coarse mirror of child session WorkflowState for orchestrator dashboards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_state: Option<WorkflowState>,
+}
+
+impl StackNode {
+    /// A node is "skipped" when its PR has been merged.
+    pub fn is_skipped(&self) -> bool {
+        self.pr_status
+            .as_ref()
+            .map(|s| s.phase == "merged")
+            .unwrap_or(false)
+    }
+}
+
+impl Stack {
+    /// Find a node by node_id.
+    pub fn node(&self, node_id: &str) -> Option<&StackNode> {
+        self.nodes.iter().find(|n| n.node_id == node_id)
+    }
+
+    /// Kahn topological sort over node_id/parents relationships.
+    /// Returns ordered list of node_ids (leaves last). Cycle → WorkflowError::ChangesetInvalid.
+    pub fn topo_order(&self) -> Result<Vec<String>, WorkflowError> {
+        unimplemented!("topo_order: Kahn sort not yet implemented")
+    }
+
+    /// Effective base origin refs for a node, skipping merged ancestors.
+    /// Returns `origin/<branch>` for each nearest non-skipped ancestor across all `parents`,
+    /// or `[stack_bottom_base.to_string()]` when all parents are merged/absent.
+    pub fn effective_base_refs(&self, node_id: &str, stack_bottom_base: &str) -> Vec<String> {
+        unimplemented!("effective_base_refs: not yet implemented")
+    }
+}
+
 /// Changeset manifest stored in plan directory.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Changeset {
@@ -90,6 +158,14 @@ pub struct Changeset {
     /// User-selected chain-PR base ref (`origin/...`) when opted in; omitted when using default resolution only.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub worktree_integration_base_ref: Option<String>,
+    /// PR-stack DAG; present only on an orchestrator session. Omitted for normal sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stack: Option<Stack>,
+    /// Back-reference from a CHILD session to its orchestrating session.
+    /// Distinct from `previous_session_id` in `.session.yaml` (the base-branch source, which
+    /// in a DAG may be a sibling node, not the orchestrator).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestrator_session_id: Option<String>,
 }
 
 /// A single session entry (plan, acceptance-tests, or impl).
@@ -289,6 +365,8 @@ impl Default for Changeset {
             workflow: None,
             effective_worktree_integration_base_ref: None,
             worktree_integration_base_ref: None,
+            stack: None,
+            orchestrator_session_id: None,
         }
     }
 }
@@ -572,6 +650,34 @@ pub fn clarification_qa_from_backend(
             }
         })
         .collect()
+}
+
+/// Atomically update the stack on an orchestrator session.
+pub fn update_stack_atomic(
+    orchestrator_session_dir: &Path,
+    f: impl FnOnce(&mut Stack),
+) -> Result<(), WorkflowError> {
+    unimplemented!("update_stack_atomic: not yet implemented")
+}
+
+/// Link a stack node to its materialized child session (set session_id + branch).
+pub fn link_stack_node_to_child_session(
+    orchestrator_session_dir: &Path,
+    node_id: &str,
+    child_session_id: &str,
+    branch: Option<String>,
+) -> Result<(), WorkflowError> {
+    unimplemented!("link_stack_node_to_child_session: not yet implemented")
+}
+
+/// Sync a stack node's child_state + pr_status from the child session's changeset.
+/// Reads child via `unified_session_dir_path(sessions_root, node.session_id)` + `read_changeset`.
+pub fn sync_stack_node_from_child(
+    orchestrator_session_dir: &Path,
+    sessions_root: &Path,
+    node_id: &str,
+) -> Result<(), WorkflowError> {
+    unimplemented!("sync_stack_node_from_child: not yet implemented")
 }
 
 /// Append a session and update state.
