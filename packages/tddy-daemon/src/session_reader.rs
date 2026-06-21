@@ -87,9 +87,9 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use tddy_core::output::SESSIONS_SUBDIR;
     use tddy_core::{write_session_metadata, SessionMetadata};
-    use std::fs;
 
     #[test]
     fn list_sessions_returns_new_metadata_fields() {

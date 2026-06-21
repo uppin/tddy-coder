@@ -2149,9 +2149,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             if let Some(h) = state.get(&req.session_id) {
                 let (state_enum, msg) = match h {
                     DemoVmHandle::Booting => (DemoVmState::Booting, "already booting"),
-                    DemoVmHandle::Running { .. } => {
-                        (DemoVmState::Running, "VM already running")
-                    }
+                    DemoVmHandle::Running { .. } => (DemoVmState::Running, "VM already running"),
                     DemoVmHandle::Error(_) => {
                         // Allow retry after error.
                         return Ok(Response::new(StartDemoVmResponse {
@@ -2491,10 +2489,10 @@ mod delete_session_unit_tests {
 #[cfg(test)]
 mod list_sessions_unit_tests {
     use super::*;
+    use std::fs;
     use tddy_core::output::SESSIONS_SUBDIR;
     use tddy_core::{write_session_metadata, SessionMetadata};
     use tddy_service::proto::connection::ListSessionsRequest;
-    use std::fs;
 
     fn make_unit_config() -> crate::config::DaemonConfig {
         let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
