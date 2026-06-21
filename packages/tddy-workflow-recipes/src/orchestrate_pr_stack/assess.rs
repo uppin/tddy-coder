@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use tddy_core::changeset::Stack;
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::context::Context;
-use tddy_core::workflow::task::{Task, TaskResult, NextAction};
+use tddy_core::workflow::task::{Task, TaskResult};
 
 use super::github::GithubPrApi;
 
@@ -145,18 +145,18 @@ pub fn decide_next_action(
 
 // TODO: implement — consolidate with Stack::effective_base_refs, deriving single-ref from NodeView slice
 /// Effective base ref for a node (skips merged ancestors; returns default_branch when all merged).
-pub fn effective_base_ref(node_id: &str, views: &[NodeView], default_branch: &str) -> String {
+pub fn effective_base_ref(_node_id: &str, _views: &[NodeView], _default_branch: &str) -> String {
     unimplemented!("effective_base_ref: not yet implemented")
 }
 
 // TODO: implement — reads child changesets via unified_session_dir_path + read_changeset; calls GithubPrApi::get_open_pr
 /// Assemble NodeView list from orchestrator changeset + child changesets + live GitHub.
 pub fn assemble_views(
-    parent_dir: &Path,
-    sessions_root: &Path,
-    stack: &Stack,
-    gh: &dyn GithubPrApi,
-    default_branch: &str,
+    _parent_dir: &Path,
+    _sessions_root: &Path,
+    _stack: &Stack,
+    _gh: &dyn GithubPrApi,
+    _default_branch: &str,
 ) -> Result<Vec<NodeView>, tddy_core::WorkflowError> {
     unimplemented!("assemble_views: not yet implemented")
 }

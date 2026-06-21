@@ -2,31 +2,34 @@
 
 // TODO: implement — git rebase --onto <new_base> <old_base> <branch>; enable rerere; detect conflicts → WorkflowError
 /// Rebase `branch` onto `new_base`, replacing `old_base` as the fork point.
+#[allow(dead_code)]
 pub fn rebase_onto(
-    repo_root: &std::path::Path,
-    new_base: &str,
-    old_base: &str,
-    branch: &str,
+    _repo_root: &std::path::Path,
+    _new_base: &str,
+    _old_base: &str,
+    _branch: &str,
 ) -> Result<(), tddy_core::WorkflowError> {
     unimplemented!("rebase_onto: not yet implemented")
 }
 
 // TODO: implement — git push --force-with-lease=<branch>:<expected_sha> origin <branch>
 /// Force-push `branch` to origin, aborting if origin no longer matches `expected_sha`.
+#[allow(dead_code)]
 pub fn force_push_with_lease(
-    repo_root: &std::path::Path,
-    branch: &str,
-    expected_sha: &str,
+    _repo_root: &std::path::Path,
+    _branch: &str,
+    _expected_sha: &str,
 ) -> Result<(), tddy_core::WorkflowError> {
     unimplemented!("force_push_with_lease: not yet implemented")
 }
 
 // TODO: implement — git merge-base a b; used as old_base fallback guard in rebase_onto
 /// Compute `git merge-base a b`, returning the common ancestor SHA.
+#[allow(dead_code)]
 pub fn merge_base(
-    repo_root: &std::path::Path,
-    a: &str,
-    b: &str,
+    _repo_root: &std::path::Path,
+    _a: &str,
+    _b: &str,
 ) -> Result<String, tddy_core::WorkflowError> {
     unimplemented!("merge_base: not yet implemented")
 }
@@ -75,10 +78,11 @@ mod tests {
 // TODO: implement — octopus merge of parent_branches into stack-int/<node_id>; used for multi-parent DAG nodes
 /// Build or refresh a local integration ref (`stack-int/<node_id>`) from multiple parent tips.
 /// Returns the SHA of the resulting ref.
+#[allow(dead_code)]
 pub fn build_integration_ref(
-    repo_root: &std::path::Path,
-    node_id: &str,
-    parent_branches: &[String],
+    _repo_root: &std::path::Path,
+    _node_id: &str,
+    _parent_branches: &[String],
 ) -> Result<String, tddy_core::WorkflowError> {
     unimplemented!("build_integration_ref: not yet implemented")
 }
