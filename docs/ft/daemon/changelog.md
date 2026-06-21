@@ -2,6 +2,13 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-06-21 — Demo goal Phase 2: daemon VM lifecycle RPCs
+
+- `StartDemoVm` RPC: reads session's `demo-plan.md`, builds `DemoVmConfig`, spawns `QemuDemoVm::boot()` background task, tracks handle per session
+- `StopDemoVm` RPC: removes handle and calls `shutdown()` via monitor socket
+- `GetDemoVmStatus` RPC: returns `DemoVmState` (`BOOTING`/`RUNNING`/`STOPPED`/`ERROR`), `ssh_host_port`, and `share_url`
+- Feature: [coder/demo-goal.md](../coder/demo-goal.md). Cross-package: [docs/dev/changesets.md](../../dev/changesets.md).
+
 ## 2026-06-15 — RPC Playground
 
 - **Backend**: `grpc.reflection.v1.ServerReflection` service (`reflection_service.rs`, vendored `reflection.proto`, embedded `FileDescriptorSet` from build.rs); `MultiRpcService::service_names()` in `tddy-rpc`; `reflection_entry_from()` helper registered in daemon `main.rs` and all `tddy-coder` `MultiRpcService` sites; daemon spawns a dedicated `LiveKitParticipant` in the common room (identity `daemon-{id}`) so the playground reaches it via data channel.

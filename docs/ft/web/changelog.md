@@ -4,6 +4,12 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-06-21 — Demo goal Phase 2: DemoVmControls
+
+- `DemoVmControls` component: polls `GetDemoVmStatus` every 3 s; "Launch Demo VM" → `StartDemoVm`, "Stop VM" → `StopDemoVm`, booting badge, running state with "Open demo" share-URL link, error with "Retry"
+- Wired into `ConnectionScreen.tsx` for sessions with `workflowGoal === "demo"` alongside the session token guard
+- Feature: [coder/demo-goal.md](../coder/demo-goal.md). Cross-package: [docs/dev/changesets.md](../../dev/changesets.md).
+
 ## 2026-04-11 — Codex OAuth: operator tunnel in tddy-daemon
 
 - **Docs**: **[codex-oauth-web-relay.md](codex-oauth-web-relay.md)** — operator callback TCP and **`StreamBytes`** run in **`tddy-daemon`** when using desktop + **`livekit.common_room`**; session-side **`LoopbackTunnelService`** semantics unchanged. **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
