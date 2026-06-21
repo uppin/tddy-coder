@@ -2537,7 +2537,7 @@ mod list_sessions_unit_tests {
             repo_path: Some("/home/dev/repo".to_string()),
             pid: None,
             tool: Some("tddy-coder".to_string()),
-            livekit_room: None,
+            livekit_room: Some("room-xyz-ct".to_string()),
             pending_elicitation: false,
             previous_session_id: Some("ancestor-session".to_string()),
             session_type: Some("tool".to_string()),
@@ -2560,6 +2560,7 @@ mod list_sessions_unit_tests {
         assert_eq!(sessions[0].session_type, "tool");
         assert_eq!(sessions[0].updated_at, "2026-06-21T12:00:00Z");
         assert_eq!(sessions[0].previous_session_id, "ancestor-session");
+        assert_eq!(sessions[0].livekit_room, "room-xyz-ct");
     }
 }
 

@@ -194,6 +194,8 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
       .should("contain.text", "tddy-coder")
       .and("contain.text", "tool")
       .and("contain.text", "prev-session-aabbccdd");
+    // livekitRoom is "" so no LiveKit room row should render
+    sessionsDrawerPage.inspectorMetadata().should("not.contain.text", "LiveKit room");
   });
 
   // -------------------------------------------------------------------------

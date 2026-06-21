@@ -7,7 +7,7 @@ fields from `.session.yaml` through to the UI.
 
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Red phase tests written
+- [x] Red phase tests written
 - [ ] Green phase (implementation)
 - [ ] PR merged
 
