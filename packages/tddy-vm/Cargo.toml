@@ -13,7 +13,6 @@ log = "0.4"
 tokio = { version = "1", features = ["rt", "process", "io-util", "net", "sync", "time"] }
 tddy-build = { path = "../tddy-build" }
 tddy-build-qemu = { path = "../tddy-build-qemu" }
-tddy-build-buildroot = { path = "../tddy-build-buildroot" }
 tddy-service = { path = "../tddy-service" }
 tddy-rpc = { path = "../tddy-rpc" }
 

@@ -382,7 +382,6 @@ fn main() -> anyhow::Result<()> {
         }
 
         // VM lifecycle service — build and manage VMs via RPC
-        // TODO: VmManager::new is a stub — will panic at runtime until Task 1 stubs are filled in.
         let vm_state_file = {
             let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
             let base = tddy_daemon::user_sessions_path::tddy_data_root_matching_child(&user)

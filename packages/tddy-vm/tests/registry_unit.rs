@@ -71,7 +71,7 @@ async fn start_unknown_vm_returns_error() {
     // When — start is called for a name that doesn't exist
     let result = manager.start("ghost").await;
 
-    // Then — an error is returned (not a panic after /green implements it)
+    // Then — an error is returned
     assert!(result.is_err(), "start of unknown VM must return an error");
 }
 

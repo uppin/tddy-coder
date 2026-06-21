@@ -121,7 +121,7 @@ impl VmService for VmServiceImpl {
             .await
             .map_err(vm_err_to_status)?;
         Ok(Response::new(StartVmResponse {
-            state: 3, // VM_STATE_RUNNING
+            state: vm_state_to_proto(&VmState::Running),
             message: String::new(),
         }))
     }

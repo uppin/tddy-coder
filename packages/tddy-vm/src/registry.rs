@@ -98,11 +98,18 @@ impl VmManager {
 
     pub async fn start(&self, name: &str) -> Result<(), VmError> {
         // Extract what we need and update state to Booting, then release lock
-        let (image_path, config) = {
+        let config = {
             let mut vms = self.vms.lock().await;
             let (spec, handle) = vms
                 .get_mut(name)
                 .ok_or_else(|| VmError::NotFound(name.to_string()))?;
+
+            if matches!(handle.state, VmState::Booting | VmState::Running) {
+                return Err(VmError::InvalidState(format!(
+                    "VM '{}' is already {:?}",
+                    name, handle.state
+                )));
+            }
 
             let image_path = if let Some(path) = spec.image_path.clone() {
                 path
@@ -118,24 +125,15 @@ impl VmManager {
 
             handle.state = VmState::Booting;
 
-            let extra_hostfwd: Vec<PortForward> = spec
-                .port_forwards
-                .iter()
-                .map(|p| PortForward {
-                    host_port: p.host_port,
-                    guest_port: p.guest_port,
-                })
-                .collect();
+            let extra_hostfwd = spec.port_forwards.clone();
             let ssh_host_port = spec.ssh_host_port;
 
-            let config = VmConfig {
-                qcow2_path: image_path.clone(),
+            VmConfig {
+                qcow2_path: image_path,
                 extra_hostfwd,
                 ssh_host_port,
-            };
-            (image_path, config)
+            }
         };
-        let _ = image_path; // used via config
 
         // Call async backend without holding the lock
         let running_vm = self.backend.boot(&config).await?;
@@ -172,16 +170,22 @@ impl VmManager {
         };
 
         // Call async backend without holding the lock
-        self.backend.shutdown(running_vm).await?;
-
-        // Re-lock and update state
-        let mut vms = self.vms.lock().await;
-        let (_, handle) = vms
-            .get_mut(name)
-            .ok_or_else(|| VmError::NotFound(name.to_string()))?;
-        handle.state = VmState::Stopped;
-
-        Ok(())
+        match self.backend.shutdown(running_vm).await {
+            Ok(()) => {
+                let mut vms = self.vms.lock().await;
+                if let Some((_, handle)) = vms.get_mut(name) {
+                    handle.state = VmState::Stopped;
+                }
+                Ok(())
+            }
+            Err(e) => {
+                let mut vms = self.vms.lock().await;
+                if let Some((_, handle)) = vms.get_mut(name) {
+                    handle.state = VmState::Error(e.to_string());
+                }
+                Err(e)
+            }
+        }
     }
 
     pub async fn status(&self, name: &str) -> Result<VmState, VmError> {
@@ -212,7 +216,12 @@ impl VmManager {
     fn persist(&self, vms: &HashMap<String, (VmSpec, VmHandle)>) {
         let specs: Vec<&VmSpec> = vms.values().map(|(spec, _)| spec).collect();
         if let Ok(json) = serde_json::to_string_pretty(&specs) {
-            let _ = std::fs::write(&self.state_file, json);
+            if let Err(e) = std::fs::write(&self.state_file, json) {
+                log::error!(
+                    "VmManager: failed to persist state to {}: {e}",
+                    self.state_file.display()
+                );
+            }
         }
     }
 }
