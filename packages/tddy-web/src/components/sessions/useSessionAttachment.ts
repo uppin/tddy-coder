@@ -33,6 +33,17 @@ export interface UseSessionAttachmentResult {
     sessionToken: string,
     client: ConnectionClient,
   ): Promise<void>;
+  deleteSession(
+    sessionId: string,
+    sessionToken: string,
+    client: ConnectionClient,
+  ): Promise<void>;
+  signalSession(
+    sessionId: string,
+    signal: number,
+    sessionToken: string,
+    client: ConnectionClient,
+  ): Promise<void>;
   reset(): void;
 }
 
@@ -90,9 +101,34 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
     [],
   );
 
+  const deleteSession = useCallback(
+    async (sessionId: string, sessionToken: string, client: ConnectionClient) => {
+      try {
+        await client.deleteSession({ sessionToken, sessionId });
+        setState({ status: "idle" });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setState({ status: "error", error: message });
+      }
+    },
+    [],
+  );
+
+  const signalSession = useCallback(
+    async (sessionId: string, signal: number, sessionToken: string, client: ConnectionClient) => {
+      try {
+        await client.signalSession({ sessionToken, sessionId, signal });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setState({ status: "error", error: message });
+      }
+    },
+    [],
+  );
+
   const reset = useCallback(() => {
     setState({ status: "idle" });
   }, []);
 
-  return { state, connectSession, resumeSession, reset };
+  return { state, connectSession, resumeSession, deleteSession, signalSession, reset };
 }

@@ -5,8 +5,10 @@ import { ConnectionService, type SessionEntry } from "../../gen/connection_pb";
 import { sortSessionsByCreation } from "../../utils/sessionSort";
 import { TooltipProvider } from "../ui/tooltip";
 import { SessionDrawer } from "./SessionDrawer";
-import { SessionDetailPane } from "./SessionDetailPane";
+import { SessionMainPane } from "./SessionMainPane";
 import { useSessionAttachment } from "./useSessionAttachment";
+import { nextInspectorState } from "./inspectorState";
+import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 
 // ---------------------------------------------------------------------------
 // RPC client
@@ -34,8 +36,9 @@ export function SessionsDrawerScreen() {
 
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [inspectorState, setInspectorState] = useState<InspectorDrawerState>("closed");
 
-  const { state: attachment, connectSession, resumeSession } = useSessionAttachment();
+  const { state: attachment, connectSession, resumeSession, deleteSession, signalSession } = useSessionAttachment();
 
   // Fetch sessions on mount
   useEffect(() => {
@@ -66,6 +69,15 @@ export function SessionsDrawerScreen() {
   const handleSelectSession = (sessionId: string) => {
     setSelectedSessionId(sessionId);
     const session = sortedSessions.find((s) => s.sessionId === sessionId);
+    // Update inspector state based on session active status
+    setInspectorState((prev) =>
+      nextInspectorState(
+        { open: prev !== "closed", expanded: prev === "expanded" },
+        { type: "select", isActive: session?.isActive ?? false },
+      ).open
+        ? "open"
+        : "closed",
+    );
     if (session?.isActive) {
       connectSession(sessionId, sessionToken, client).catch((err) => {
         console.debug("[SessionsDrawerScreen] connectSession error", err);
@@ -79,9 +91,30 @@ export function SessionsDrawerScreen() {
     });
   };
 
-  const handleDelete = (_sessionId: string) => {
-    // TODO: implement delete
+  const handleDelete = (sessionId: string) => {
+    deleteSession(sessionId, sessionToken, client).catch((err) => {
+      console.debug("[SessionsDrawerScreen] deleteSession error", err);
+    });
   };
+
+  const handleTerminate = (sessionId: string) => {
+    // SIGTERM = 15
+    signalSession(sessionId, 15, sessionToken, client).catch((err) => {
+      console.debug("[SessionsDrawerScreen] signalSession error", err);
+    });
+  };
+
+  const handleInspectorToggle = () => {
+    setInspectorState((prev) => {
+      const prevState = { open: prev !== "closed", expanded: prev === "expanded" };
+      const next = nextInspectorState(prevState, { type: "toggle" });
+      return next.open ? (next.expanded ? "expanded" : "open") : "closed";
+    });
+  };
+
+  const handleInspectorClose = () => setInspectorState("closed");
+  const handleInspectorExpand = () => setInspectorState("expanded");
+  const handleInspectorRestore = () => setInspectorState("open");
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -94,12 +127,17 @@ export function SessionsDrawerScreen() {
           selectedSessionId={selectedSessionId}
           onSelectSession={handleSelectSession}
         />
-        <SessionDetailPane
+        <SessionMainPane
           selectedSession={selectedSession}
           attachment={attachment}
-          onConnect={handleSelectSession}
+          inspectorState={inspectorState}
+          onToggleInspector={handleInspectorToggle}
+          onInspectorClose={handleInspectorClose}
+          onInspectorExpand={handleInspectorExpand}
+          onInspectorRestore={handleInspectorRestore}
           onResume={handleResume}
           onDelete={handleDelete}
+          onTerminate={handleTerminate}
         />
       </div>
     </TooltipProvider>

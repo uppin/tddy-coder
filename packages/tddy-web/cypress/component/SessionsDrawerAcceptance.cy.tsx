@@ -287,7 +287,7 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
     cy.mount(<SessionsDrawerScreen />);
     cy.wait("@listSessions");
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
-    sessionsDrawerPage.detailResumeBtn(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorResumeBtn(DISCONNECTED_SESSION.sessionId).click();
 
     // Then — verify the request was made with the correct session id
     cy.wait("@resumeSession").then((interception) => {
