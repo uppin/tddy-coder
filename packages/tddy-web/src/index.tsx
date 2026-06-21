@@ -47,8 +47,10 @@ import { Button } from "./components/ui/button";
 import { ConnectionScreen } from "./components/ConnectionScreen";
 import { WorktreesAppPage } from "./components/worktrees/WorktreesAppPage";
 import { RpcPlaygroundAppPage } from "./rpc-playground/RpcPlaygroundAppPage";
+import { SessionsDrawerScreen } from "./components/sessions/SessionsDrawerScreen";
 import {
   isRpcPlaygroundPath,
+  isSessionsDrawerPath,
   parseTerminalSessionIdFromPathname,
 } from "./routing/appRoutes";
 
@@ -407,6 +409,8 @@ export function App() {
           />
         ) : path === "/worktrees" ? (
           <WorktreesAppPage onNavigate={navigate} />
+        ) : isSessionsDrawerPath(path) ? (
+          <SessionsDrawerScreen />
         ) : (
           <ConnectionScreen
             livekitUrl={appConfig.livekitUrl}

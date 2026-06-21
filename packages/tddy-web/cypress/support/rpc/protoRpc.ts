@@ -49,9 +49,9 @@ export function decodeProtoRequestBody(body: unknown): Uint8Array {
  * Register a cy.intercept for a Connect-RPC POST endpoint that replies with a
  * proto-encoded response.
  *
- * URL pattern is standardised to `**/rpc/<serviceMethod>`.
+ * URL pattern matches any path ending in /rpc/<serviceMethod>.
  *
- * @param serviceMethod  e.g. `"auth.AuthService/GetAuthStatus"`
+ * @param serviceMethod  e.g. "auth.AuthService/GetAuthStatus"
  * @param schema         The protobuf descriptor schema for the response.
  * @param message        The message to encode as the response body.
  * @param alias          Optional cy alias (defaults to a camelCase derivation of serviceMethod).
