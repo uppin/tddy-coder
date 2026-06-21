@@ -2134,10 +2134,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let ssh_host_port: u16 = 2222;
         let config = tddy_vm::VmConfig {
             qcow2_path,
-            extra_hostfwd: demo_plan.hostfwd.iter().map(|p| tddy_vm::PortForward {
-                host_port: p.host_port,
-                guest_port: p.guest_port,
-            }).collect(),
+            extra_hostfwd: demo_plan
+                .hostfwd
+                .iter()
+                .map(|p| tddy_vm::PortForward {
+                    host_port: p.host_port,
+                    guest_port: p.guest_port,
+                })
+                .collect(),
             ssh_host_port,
         };
 
@@ -2147,9 +2151,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             if let Some(h) = state.get(&req.session_id) {
                 let (state_enum, msg) = match h {
                     DemoVmHandle::Booting => (DemoVmState::Booting, "already booting"),
-                    DemoVmHandle::Running { .. } => {
-                        (DemoVmState::Running, "VM already running")
-                    }
+                    DemoVmHandle::Running { .. } => (DemoVmState::Running, "VM already running"),
                     DemoVmHandle::Error(_) => {
                         // Allow retry after error.
                         return Ok(Response::new(StartDemoVmResponse {

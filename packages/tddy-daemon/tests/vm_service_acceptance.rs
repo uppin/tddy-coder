@@ -1,17 +1,17 @@
 //! VM service acceptance tests — drives VmService through RpcBridge with mock backend.
 //! Fails until VmServiceImpl methods are implemented.
 
-use std::sync::Arc;
 use prost::Message;
-use tempfile::tempdir;
+use std::sync::Arc;
 use tddy_rpc::{RequestMetadata, ResponseBody, RpcBridge, RpcMessage};
 use tddy_service::proto::vm::{
-    DefineVmRequest, DefineVmResponse, GetVmStatusRequest, GetVmStatusResponse,
-    ListVmsRequest, ListVmsResponse, StartVmRequest, StartVmResponse, StopVmRequest,
-    StopVmResponse, VmServiceServer, VmSpecProto,
+    DefineVmRequest, DefineVmResponse, GetVmStatusRequest, GetVmStatusResponse, ListVmsRequest,
+    ListVmsResponse, StartVmRequest, StartVmResponse, StopVmRequest, StopVmResponse,
+    VmServiceServer, VmSpecProto,
 };
-use tddy_vm::{MockVm, VmManager};
 use tddy_vm::service::VmServiceImpl;
+use tddy_vm::{MockVm, VmManager};
+use tempfile::tempdir;
 
 const TOKEN: &str = "valid-token";
 

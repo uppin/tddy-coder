@@ -7178,7 +7178,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tddy-build",
- "tddy-build-buildroot",
  "tddy-build-qemu",
  "tddy-rpc",
  "tddy-service",
