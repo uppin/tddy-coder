@@ -398,6 +398,11 @@ state:
             model: String::new(),
             pending_elicitation: false,
             activity_status: String::new(),
+            tool: String::new(),
+            session_type: String::new(),
+            updated_at: String::new(),
+            livekit_room: String::new(),
+            previous_session_id: String::new(),
         };
         apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
         assert_eq!(proto.workflow_goal, "acceptance-tests");
@@ -641,6 +646,11 @@ sessions:
             model: String::new(),
             pending_elicitation: false,
             activity_status: String::new(),
+            tool: String::new(),
+            session_type: String::new(),
+            updated_at: String::new(),
+            livekit_room: String::new(),
+            previous_session_id: String::new(),
         };
         apply_session_list_status_to_proto(&session_dir, &mut proto).unwrap();
         assert_eq!(

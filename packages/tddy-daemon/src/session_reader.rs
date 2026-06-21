@@ -15,6 +15,11 @@ pub struct SessionEntry {
     pub project_id: String,
     pub pid: Option<u32>,
     pub is_active: bool,
+    pub tool: String,
+    pub session_type: String,
+    pub updated_at: String,
+    pub livekit_room: String,
+    pub previous_session_id: String,
 }
 
 /// Check if a process with the given PID is alive (same semantics as listing sessions).
@@ -68,6 +73,11 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
             project_id: metadata.project_id,
             pid: metadata.pid,
             is_active,
+            tool: metadata.tool.unwrap_or_default(),
+            session_type: metadata.session_type.unwrap_or_default(),
+            updated_at: metadata.updated_at,
+            livekit_room: metadata.livekit_room.unwrap_or_default(),
+            previous_session_id: metadata.previous_session_id.unwrap_or_default(),
         });
     }
 

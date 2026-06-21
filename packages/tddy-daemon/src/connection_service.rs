@@ -745,6 +745,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         model: String::new(),
                         pending_elicitation: false,
                         activity_status: String::new(),
+                        tool: s.tool,
+                        session_type: s.session_type,
+                        updated_at: s.updated_at,
+                        livekit_room: s.livekit_room,
+                        previous_session_id: s.previous_session_id,
                     };
                     if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
                         &session_dir,

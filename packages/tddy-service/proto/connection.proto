@@ -82,6 +82,12 @@ message SessionEntry {
   // Granular activity status for claude-cli sessions (Started, Running, ExecutingTool,
   // WaitingForInput, Done, Ended). Empty string for tool/changeset sessions.
   string activity_status = 15;
+  // Extra .session.yaml fields surfaced for the session inspector.
+  string tool = 16;
+  string session_type = 17;
+  string updated_at = 18;
+  string livekit_room = 19;
+  string previous_session_id = 20;
 }
 
 message ProjectEntry {
