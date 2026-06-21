@@ -70,7 +70,7 @@ fn operator_gated_loop_waits_before_merge_when_autonomous_disabled() {
     // When — called without merge gate approval (default gated mode)
     // Implementation must expose a way to pass gate=false. Suggested: second parameter
     // `autonomous_merge: bool`. The test will be updated when the signature is finalized.
-    // For the RED phase, decide_next_action panics with unimplemented! before reaching gate logic.
+    // decide_next_action is not yet implemented and panics before reaching gate logic.
     let action = decide_next_action(&views);
 
     // Then — with gate=false (default), action must be Wait

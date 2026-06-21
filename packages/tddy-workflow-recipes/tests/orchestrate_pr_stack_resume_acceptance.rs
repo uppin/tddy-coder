@@ -6,9 +6,7 @@ use std::path::PathBuf;
 
 use tddy_workflow_recipes::orchestrate_pr_stack::{
     MergePhase, StackOpJournal, recover_in_flight_stack_op, write_stack_op_journal,
-    NodeView, ChildPhase, PrLiveStatus,
 };
-use tddy_core::workflow::ids::WorkflowState;
 
 fn scratch(label: &str) -> PathBuf {
     let p = std::env::temp_dir().join(format!(

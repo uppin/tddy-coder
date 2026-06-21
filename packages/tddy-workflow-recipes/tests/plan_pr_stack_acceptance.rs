@@ -2,8 +2,7 @@
 //! rejects cyclic plans.
 
 use tddy_workflow_recipes::plan_pr_stack::{
-    planned_prs_into_stack_nodes, validate_stack_plan, PlanPrStackRecipe, StackPlanOutput,
-    STACK_PLAN_BASENAME, PR_STACK_PLAN_MD_BASENAME,
+    planned_prs_into_stack_nodes, validate_stack_plan, StackPlanOutput,
 };
 use tddy_workflow_recipes::workflow_recipe_and_manifest_from_cli_name;
 
