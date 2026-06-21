@@ -6,9 +6,10 @@ import {
   parseTerminalSessionIdFromPathname,
   terminalDeepLinkSessionPath,
   terminalPathForSessionId,
-  // These imports fail until RPC_PLAYGROUND_ROUTE and isRpcPlaygroundPath are added to appRoutes.ts.
   RPC_PLAYGROUND_ROUTE,
   isRpcPlaygroundPath,
+  VMS_ROUTE,
+  isVmsPath,
 } from "./appRoutes";
 
 describe("appRoutes helpers (canonical path rules)", () => {
@@ -89,5 +90,31 @@ describe("appRoutes — RPC Playground route helpers", () => {
     const result = isRpcPlaygroundPath("/rpc-playground/extra");
     // Then
     expect(result).toBe(false);
+  });
+});
+
+describe("appRoutes — VMs route helpers", () => {
+  it("VMS_ROUTE is /vms", () => {
+    expect(VMS_ROUTE).toBe("/vms");
+  });
+
+  it("recognises /vms as the VMs path", () => {
+    expect(isVmsPath("/vms")).toBe(true);
+  });
+
+  it("does not match root as a VMs path", () => {
+    expect(isVmsPath("/")).toBe(false);
+  });
+
+  it("does not match /worktrees as a VMs path", () => {
+    expect(isVmsPath("/worktrees")).toBe(false);
+  });
+
+  it("does not match /rpc-playground as a VMs path", () => {
+    expect(isVmsPath("/rpc-playground")).toBe(false);
+  });
+
+  it("does not match sub-paths under /vms", () => {
+    expect(isVmsPath("/vms/extra")).toBe(false);
   });
 });
