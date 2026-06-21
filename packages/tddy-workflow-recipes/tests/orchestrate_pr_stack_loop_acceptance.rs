@@ -34,7 +34,8 @@ fn autonomous_merge_on_linear_two_pr_stack_reaches_done() {
     ];
 
     // When — n1 is ready to merge (deps all merged/none, PR open, base=master)
-    let action = decide_next_action(&views);
+    // autonomous_merge=true: no operator gate, merge is allowed automatically.
+    let action = decide_next_action(&views, true, &std::collections::HashSet::new());
 
     // Then — decide_next_action must pick Merge for n1
     assert_eq!(
@@ -46,15 +47,8 @@ fn autonomous_merge_on_linear_two_pr_stack_reaches_done() {
 
 #[test]
 fn operator_gated_loop_waits_before_merge_when_autonomous_disabled() {
-    // Given — same topology as above but with an operator-gate representation:
-    // decide_next_action receives views AND a "gate open?" check.
-    // The CURRENT API of decide_next_action takes only &[NodeView].
-    // Per the plan, the gate is a Context flag. Until implemented, decide_next_action
-    // always returns unimplemented! so this test also correctly panics.
-    //
-    // NOTE TO IMPLEMENTER: decide_next_action signature may need to accept a gate flag.
-    // This test asserts that without gate approval, the action is Wait (not Merge).
-    // For now: same call as above; test fails because decide_next_action is unimplemented.
+    // Given — one node: deps all merged (none), PR open, base=master — normally ready to merge.
+    // With autonomous_merge=false (operator-gated mode), decide_next_action must return Wait.
     let views = vec![
         NodeView {
             node_id: "n1".into(),
@@ -67,11 +61,8 @@ fn operator_gated_loop_waits_before_merge_when_autonomous_disabled() {
         },
     ];
 
-    // When — called without merge gate approval (default gated mode)
-    // Implementation must expose a way to pass gate=false. Suggested: second parameter
-    // `autonomous_merge: bool`. The test will be updated when the signature is finalized.
-    // decide_next_action is not yet implemented and panics before reaching gate logic.
-    let action = decide_next_action(&views);
+    // When — called with autonomous_merge=false and no approved nodes (operator-gated mode)
+    let action = decide_next_action(&views, false, &std::collections::HashSet::new());
 
     // Then — with gate=false (default), action must be Wait
     assert!(

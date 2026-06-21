@@ -40,14 +40,14 @@ recipes (`plan-pr-stack`, `orchestrate-pr-stack`) and enriched `changeset.yaml` 
 ## tddy-coder
 
 - `run.rs` — two new CLI flags: `--stack-parent <orchestrator-session-id>` (sets child
-  `orchestrator_session_id`) and `--stack-base <base-session-id>` (sets `previous_session_id` +
-  integration base ref, calls `spawn_chain_child_worktree`).
+  `orchestrator_session_id`) and `--stack-base <base-session-id>` (sets `previous_session_id`;
+  worktree integration base wiring deferred to green phase).
 
 ## tddy-daemon
 
-- `telegram_session_control.rs` — existing
-  `merge_chain_integration_base_with_explicit_operator_overrides` made a thin wrapper over
-  `tddy-core::session_chain::spawn_chain_child_worktree`.
+- Deferred to green phase: `telegram_session_control.rs::merge_chain_integration_base_with_explicit_operator_overrides`
+  will be made a thin wrapper over `tddy-core::session_chain::spawn_chain_child_worktree` when
+  that function is implemented.
 
 ## Note for docs/ft/coder/workflow-recipes.md
 

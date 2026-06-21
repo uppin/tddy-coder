@@ -430,7 +430,7 @@ pub struct Args {
 
     /// Base-branch source session id for this stack child.
     /// Defaults to stack_parent when omitted.
-    /// Sets previous_session_id and worktree_integration_base_ref.
+    /// Sets `previous_session_id`; worktree integration base wiring implemented in green phase.
     pub stack_base: Option<String>,
 }
 
@@ -617,7 +617,7 @@ pub struct CoderArgs {
 
     /// Base-branch source session id for this stack child.
     /// Defaults to stack_parent when omitted.
-    /// Sets previous_session_id and worktree_integration_base_ref.
+    /// Sets `previous_session_id`; worktree integration base wiring implemented in green phase.
     #[arg(long)]
     pub stack_base: Option<String>,
 }
