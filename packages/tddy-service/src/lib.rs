@@ -33,6 +33,7 @@ pub use proto::reflection::ServerReflectionServer;
 pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
+pub use proto::vm::VmServiceServer;
 pub use reflection_service::{reflection_entry_from, ServerReflectionImpl};
 pub use service::TddyRemoteService;
 pub use tddy_rpc::Status;
@@ -66,6 +67,10 @@ pub mod proto {
     }
     pub mod loopback_tunnel {
         include!(concat!(env!("OUT_DIR"), "/loopback_tunnel.rs"));
+    }
+    #[allow(unused_imports, unused_variables)]
+    pub mod vm {
+        include!(concat!(env!("OUT_DIR"), "/vm.rs"));
     }
     pub mod reflection {
         include!(concat!(env!("OUT_DIR"), "/grpc.reflection.v1.rs"));

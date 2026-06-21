@@ -1,0 +1,127 @@
+syntax = "proto3";
+package vm;
+
+service VmService {
+  rpc BuildVmImage(BuildVmImageRequest)  returns (BuildVmImageResponse);
+  rpc DefineVm    (DefineVmRequest)      returns (DefineVmResponse);
+  rpc ListVms     (ListVmsRequest)       returns (ListVmsResponse);
+  rpc StartVm     (StartVmRequest)       returns (StartVmResponse);
+  rpc StopVm      (StopVmRequest)        returns (StopVmResponse);
+  rpc GetVmStatus (GetVmStatusRequest)   returns (GetVmStatusResponse);
+  rpc RemoveVm    (RemoveVmRequest)      returns (RemoveVmResponse);
+}
+
+// --- Build ---
+
+message BuildVmImageRequest {
+  string session_token = 1;
+  string build_target  = 2;
+}
+
+message BuildVmImageResponse {
+  bool   ok         = 1;
+  string image_path = 2;
+  string message    = 3;
+}
+
+// --- Define ---
+
+message VmPortForward {
+  uint32 host_port  = 1;
+  uint32 guest_port = 2;
+}
+
+message VmSpecProto {
+  string            name          = 1;
+  string            build_target  = 2;  // empty if image_path set
+  string            image_path    = 3;  // empty if build_target set
+  repeated VmPortForward port_forwards = 4;
+  uint32            ssh_host_port = 5;
+}
+
+message DefineVmRequest {
+  string      session_token = 1;
+  VmSpecProto spec          = 2;
+}
+
+message DefineVmResponse {
+  bool   ok      = 1;
+  string message = 2;
+}
+
+// --- List ---
+
+enum VmState {
+  VM_STATE_UNKNOWN = 0;
+  VM_STATE_DEFINED = 1;
+  VM_STATE_BOOTING = 2;
+  VM_STATE_RUNNING = 3;
+  VM_STATE_STOPPED = 4;
+  VM_STATE_ERROR   = 5;
+}
+
+message VmInfo {
+  string   name          = 1;
+  VmState  state         = 2;
+  uint32   ssh_host_port = 3;
+  string   share_url     = 4;
+  string   error_message = 5;
+}
+
+message ListVmsRequest {
+  string session_token = 1;
+}
+
+message ListVmsResponse {
+  repeated VmInfo vms = 1;
+}
+
+// --- Start ---
+
+message StartVmRequest {
+  string session_token = 1;
+  string name          = 2;
+}
+
+message StartVmResponse {
+  VmState state   = 1;
+  string  message = 2;
+}
+
+// --- Stop ---
+
+message StopVmRequest {
+  string session_token = 1;
+  string name          = 2;
+}
+
+message StopVmResponse {
+  bool   ok      = 1;
+  string message = 2;
+}
+
+// --- Status ---
+
+message GetVmStatusRequest {
+  string session_token = 1;
+  string name          = 2;
+}
+
+message GetVmStatusResponse {
+  VmState state         = 1;
+  uint32  ssh_host_port = 2;
+  string  share_url     = 3;
+  string  message       = 4;
+}
+
+// --- Remove ---
+
+message RemoveVmRequest {
+  string session_token = 1;
+  string name          = 2;
+}
+
+message RemoveVmResponse {
+  bool   ok      = 1;
+  string message = 2;
+}

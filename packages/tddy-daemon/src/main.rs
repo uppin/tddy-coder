@@ -381,6 +381,25 @@ fn main() -> anyhow::Result<()> {
             });
         }
 
+        // VM lifecycle service — build and manage VMs via RPC
+        // TODO: VmManager::new is a stub — will panic at runtime until Task 1 stubs are filled in.
+        let vm_state_file = {
+            let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+            let base = tddy_daemon::user_sessions_path::tddy_data_root_matching_child(&user)
+                .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+            base.join("vm-registry.json")
+        };
+        let vm_manager = Arc::new(tddy_vm::VmManager::new(
+            &vm_state_file,
+            Box::new(tddy_vm::QemuVm),
+        ));
+        let vm_service_impl = tddy_vm::VmServiceImpl::new(Arc::clone(&vm_manager));
+        let vm_server = tddy_service::VmServiceServer::new(vm_service_impl);
+        rpc_entries.push(tddy_rpc::ServiceEntry {
+            name: "vm.VmService",
+            service: Arc::new(vm_server) as Arc<dyn tddy_rpc::RpcService>,
+        });
+
         // Relay mode: spawn idle-monitor task that fires the shutdown channel on timeout.
         let idle_monitor_task = idle_tx_opt.map(|tx| {
             let tracker = idle_tracker_opt.expect("tx implies tracker");
