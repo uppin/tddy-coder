@@ -10,8 +10,8 @@
 //! 4. Post the link to all configured Telegram chats
 //! 5. Return `DemoResult` (share_url, steps_completed, verification text)
 
-use crate::vm::{DemoVm, DemoVmError, RunningVm};
 use std::sync::Arc;
+use tddy_vm::{PortForward, RunningVm, Vm, VmError};
 use tddy_workflow_recipes::parser::{DemoMode, DemoPlan};
 
 /// Result of a completed demo.
@@ -26,7 +26,7 @@ pub struct DemoResult {
 #[derive(Debug, thiserror::Error)]
 pub enum OrchestratorError {
     #[error("VM error: {0}")]
-    Vm(#[from] DemoVmError),
+    Vm(#[from] VmError),
     #[error("Telegram error: {0}")]
     Telegram(String),
     #[error("Configuration error: {0}")]
@@ -43,7 +43,7 @@ pub trait TelegramNotifier: Send + Sync {
 
 /// Orchestrates the demo step: boot VM → deploy → verify → forward → notify.
 pub struct DemoOrchestrator {
-    vm: Arc<dyn DemoVm>,
+    vm: Arc<dyn Vm>,
     telegram: Option<Arc<dyn TelegramNotifier>>,
     /// Chat IDs to notify when the link is ready.
     chat_ids: Vec<i64>,
@@ -51,7 +51,7 @@ pub struct DemoOrchestrator {
 
 impl DemoOrchestrator {
     pub fn new(
-        vm: Arc<dyn DemoVm>,
+        vm: Arc<dyn Vm>,
         telegram: Option<Arc<dyn TelegramNotifier>>,
         chat_ids: Vec<i64>,
     ) -> Self {
@@ -91,6 +91,11 @@ impl DemoOrchestrator {
             .hostfwd
             .first()
             .ok_or_else(|| OrchestratorError::Config("no hostfwd ports configured".into()))?;
+        // Convert from workflow-recipes PortMap to tddy_vm::PortForward
+        let port_forward = PortForward {
+            host_port: port_map.host_port,
+            guest_port: port_map.guest_port,
+        };
 
         self.vm.deploy(&vm, &recipe.deploy_steps).await?;
 
@@ -99,12 +104,12 @@ impl DemoOrchestrator {
             .verify(&vm, recipe.verify_command.as_deref().unwrap_or_default())
             .await?;
         if !verify_result.success {
-            return Err(OrchestratorError::Vm(DemoVmError::VerifyFailed(
+            return Err(OrchestratorError::Vm(VmError::VerifyFailed(
                 verify_result.output,
             )));
         }
 
-        let handle = self.vm.forward(&vm, port_map).await?;
+        let handle = self.vm.forward(&vm, &port_forward).await?;
 
         self.notify_telegram(&handle.share_url).await?;
 

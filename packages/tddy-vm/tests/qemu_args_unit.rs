@@ -159,3 +159,17 @@ fn port_forward_to_share_url_uses_host_port() {
         "share URL must be http://localhost:<host_port>"
     );
 }
+
+// ── monitor socket path ──────────────────────────────────────────────────────
+
+/// monitor_socket_path must be unique per ssh_host_port and use the /tmp/tddy-vm-monitor- prefix.
+#[test]
+fn qemu_args_monitor_socket_path_is_per_port() {
+    let path_2222 = QemuVmArgs::monitor_socket_path(2222);
+    let path_2223 = QemuVmArgs::monitor_socket_path(2223);
+    assert_eq!(path_2222, "/tmp/tddy-vm-monitor-2222.sock");
+    assert_ne!(
+        path_2222, path_2223,
+        "each SSH port must get its own monitor socket path"
+    );
+}

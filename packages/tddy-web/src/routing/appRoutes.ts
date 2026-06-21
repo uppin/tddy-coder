@@ -50,6 +50,13 @@ export function isRpcPlaygroundPath(pathname: string): boolean {
   return pathname === RPC_PLAYGROUND_ROUTE;
 }
 
+/** Canonical path for the VM management screen. */
+export const VMS_ROUTE = "/vms";
+
+export function isVmsPath(pathname: string): boolean {
+  return pathname === VMS_ROUTE;
+}
+
 /** Path for the sessions drawer screen and its deep links. */
 export const SESSIONS_DRAWER_ROUTE = "/sessions";
 

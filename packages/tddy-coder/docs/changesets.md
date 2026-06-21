@@ -4,6 +4,8 @@ Wrapped changeset history for tddy-coder.
 
 **Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
 
+- **2026-06-21** [Feature] **PR stacking CLI flags** — `--stack-parent <orchestrator-session-id>` (sets `orchestrator_session_id` on changeset) and `--stack-base <base-session-id>` (sets `previous_session_id`) added to `run.rs`.
+
 - **2026-06-16** [Feature] **Build executor registration** — `build_executor.rs`: `TddyBuildExecutor` implements `tddy_core::toolcall::BuildExecutor` over `tddy-build`; `run.rs` calls `build_executor::register()` before starting the toolcall listener so relayed `build`/`build-list` run co-located. New dep on `tddy-build`. Cross-package: [docs/dev/changesets.md](../../../docs/dev/changesets.md). (tddy-coder, tddy-build)
 - **2026-06-15** [Feature] **RPC Playground — reflection registration** — `reflection_entry_from()` pushed at all `MultiRpcService` assembly sites in `run.rs` (web server path, LiveKit path, full workflow TUI path). Feature [rpc-playground.md](../../../docs/ft/daemon/rpc-playground.md). (tddy-coder)
 - **2026-06-14** [Feature] **Remote-codebase mode** — `remote.rs`: `RemoteContextDir` RAII, `build_remote_allowlist`, `REMOTE_APPENDIX`; `config.rs`: `RemoteConfig` (daemon_url/session_id/session_token/daemon_instance_id), `to_remote_tool_env()`; `run.rs`: `--remote-daemon-url`/`--remote-session-token`/`--remote-daemon-id` flags, `run_remote` dispatch + implementation (shells out to `tddy-tools remote list-tools`, builds allowlist, runs free-prompting workflow). Feature [remote-codebase-mode.md](../../../docs/ft/daemon/remote-codebase-mode.md). (tddy-coder)

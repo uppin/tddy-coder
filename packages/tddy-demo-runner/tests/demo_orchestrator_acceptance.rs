@@ -1,6 +1,6 @@
 //! Acceptance test: demo orchestrator port-forward path.
 //!
-//! Uses `MockDemoVm` and an in-test `TelegramNotifier` to assert:
+//! Uses `MockVm` and an in-test `TelegramNotifier` to assert:
 //! - deploy steps are called in order with the recipe's deploy_steps
 //! - verify is called with the recipe's verify_command
 //! - the forward is requested for the recipe's app port
@@ -8,7 +8,8 @@
 //! - the link is posted to every configured chat_id
 
 use std::sync::Arc;
-use tddy_demo_runner::{BootCall, DemoOrchestrator, MockDemoVm, RunningVm, TelegramNotifier};
+use tddy_demo_runner::{BootCall, DemoOrchestrator, RunningVm, TelegramNotifier};
+use tddy_vm::MockVm;
 use tddy_workflow_recipes::parser::{DemoMode, DemoPlan, DemoStep, PortMap};
 
 // ── in-test Telegram notifier ────────────────────────────────────────────────
@@ -84,7 +85,7 @@ fn running_vm() -> RunningVm {
 /// The orchestrator receives an already-running VM — it must not call boot().
 #[tokio::test]
 async fn demo_orchestrator_port_forward_deploys_verifies_and_posts_link() {
-    let mock_vm = Arc::new(MockDemoVm::new());
+    let mock_vm = Arc::new(MockVm::new());
     let notifier = Arc::new(RecordingNotifier::new());
     let chat_ids = vec![100_i64, 200_i64];
     let recipe = port_forward_recipe();
@@ -176,7 +177,7 @@ async fn demo_orchestrator_port_forward_deploys_verifies_and_posts_link() {
 /// Orchestrator must return an error when the recipe has no `mode` set.
 #[tokio::test]
 async fn demo_orchestrator_errors_when_mode_is_missing() {
-    let mock_vm = Arc::new(MockDemoVm::new());
+    let mock_vm = Arc::new(MockVm::new());
     let orchestrator = DemoOrchestrator::new(mock_vm, None, vec![]);
 
     let recipe = DemoPlan {
@@ -202,7 +203,7 @@ async fn demo_orchestrator_errors_when_mode_is_missing() {
 /// Orchestrator must return an error when verify returns a failing exit code.
 #[tokio::test]
 async fn demo_orchestrator_errors_when_verify_fails() {
-    let mut mock_vm = MockDemoVm::new();
+    let mut mock_vm = MockVm::new();
     mock_vm.verify_fails = true;
     let mock_vm = Arc::new(mock_vm);
 
@@ -221,7 +222,7 @@ async fn demo_orchestrator_errors_when_verify_fails() {
 /// `run()` receives an already-running `RunningVm`; boot is the daemon's responsibility.
 #[tokio::test]
 async fn demo_orchestrator_does_not_call_boot_it_receives_running_vm() {
-    let mock_vm = Arc::new(MockDemoVm::new());
+    let mock_vm = Arc::new(MockVm::new());
     let orchestrator = DemoOrchestrator::new(mock_vm.clone(), None, vec![]);
     let recipe = port_forward_recipe();
 

@@ -83,6 +83,16 @@ export function DaemonNavMenu({
             variant="ghost"
             className="h-auto w-full justify-start rounded-sm px-3 py-2 font-normal"
             role="menuitem"
+            data-testid="shell-menu-vms"
+            onClick={() => go("/vms")}
+          >
+            VMs
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-auto w-full justify-start rounded-sm px-3 py-2 font-normal"
+            role="menuitem"
             data-testid="shell-menu-rpc-playground"
             onClick={() => go("/rpc-playground")}
           >

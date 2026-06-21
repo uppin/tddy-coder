@@ -1,17 +1,18 @@
-//! Demo goal runtime — QEMU VM lifecycle, SSH deploy, port-forward, orchestration.
+//! Demo goal runtime — orchestration of the QEMU PortForward demo cycle.
 //!
 //! Key types:
-//! - [`DemoVm`] trait: mockable VM boundary (boot / deploy / verify / forward / shutdown)
-//! - [`QemuDemoVm`]: concrete impl using nix-provided `qemu-system-x86_64` + slirp hostfwd
-//! - [`MockDemoVm`]: test double that records all calls
+//! - [`tddy_vm::Vm`] trait: mockable VM boundary (boot / deploy / verify / forward / shutdown)
+//! - [`tddy_vm::QemuVm`]: concrete QEMU impl
+//! - [`tddy_vm::MockVm`]: test double
 //! - [`DemoOrchestrator`]: drives the full PortForward demo cycle; posts Telegram link
 
-pub mod mock;
 pub mod orchestrator;
-pub mod qemu;
-pub mod vm;
 
-pub use mock::{BootCall, MockDemoVm};
-pub use orchestrator::{DemoOrchestrator, DemoResult, TelegramNotifier};
-pub use qemu::{send_monitor_command, wait_for_ssh_port, QemuDemoVm, QemuVmArgs};
-pub use vm::{DemoVm, DemoVmConfig, DemoVmError, ForwardHandle, RunningVm, VerifyResult};
+pub use orchestrator::{DemoOrchestrator, DemoResult, OrchestratorError, TelegramNotifier};
+// Re-export tddy_vm types so downstream callers (tddy-daemon, tests) can use one import path.
+pub use tddy_vm::{
+    send_monitor_command, wait_for_ssh_port, MockVm, PortForward, QemuVm, QemuVmArgs, RunningVm,
+    Vm, VmConfig, VmError,
+};
+// BootCall re-export for tests that check mock call recording.
+pub use tddy_vm::mock::BootCall;

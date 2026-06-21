@@ -178,7 +178,7 @@ enum DemoVmHandle {
     /// VM is up and accepting SSH connections.
     /// `share_url` is the first app port forward URL (e.g. "http://localhost:8080"), if any.
     Running {
-        vm: tddy_demo_runner::RunningVm,
+        vm: tddy_vm::RunningVm,
         share_url: String,
     },
     /// Boot or shutdown failed.
@@ -2137,9 +2137,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::failed_precondition("demo-plan.md has no build_target"))?;
         // ssh_host_port defaults to 2222; the first hostfwd entry is the app port, not SSH.
         let ssh_host_port: u16 = 2222;
-        let config = tddy_demo_runner::DemoVmConfig {
+        let config = tddy_vm::VmConfig {
             qcow2_path,
-            extra_hostfwd: demo_plan.hostfwd,
+            extra_hostfwd: demo_plan
+                .hostfwd
+                .iter()
+                .map(|p| tddy_vm::PortForward {
+                    host_port: p.host_port,
+                    guest_port: p.guest_port,
+                })
+                .collect(),
             ssh_host_port,
         };
 
@@ -2181,8 +2188,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let state_ref = Arc::clone(&self.demo_vm_state);
         let session_id = req.session_id.clone();
         tokio::spawn(async move {
-            use tddy_demo_runner::DemoVm as _;
-            let vm_impl = tddy_demo_runner::QemuDemoVm;
+            use tddy_vm::Vm as _;
+            let vm_impl = tddy_vm::QemuVm;
             match vm_impl.boot(&config).await {
                 Ok(vm) => {
                     let mut state = state_ref.lock().await;
@@ -2227,8 +2234,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         match handle {
             Some(DemoVmHandle::Running { vm, .. }) => {
-                use tddy_demo_runner::DemoVm as _;
-                let vm_impl = tddy_demo_runner::QemuDemoVm;
+                use tddy_vm::Vm as _;
+                let vm_impl = tddy_vm::QemuVm;
                 match vm_impl.shutdown(vm).await {
                     Ok(()) => {
                         log::info!("stop_demo_vm: shutdown ok session_id={}", req.session_id);

@@ -1,15 +1,20 @@
-//! `DemoVm` trait — the mockable boundary between the orchestrator and the concrete
-//! VM runtime (QEMU or, in tests, `MockDemoVm`).
+//! `Vm` trait — the mockable boundary between the VM manager and the concrete
+//! VM runtime (QEMU or, in tests, `MockVm`).
 
-use tddy_workflow_recipes::parser::PortMap;
+/// A single host ↔ guest port mapping for QEMU slirp `hostfwd`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PortForward {
+    pub host_port: u16,
+    pub guest_port: u16,
+}
 
-/// Configuration needed to boot a demo VM instance.
+/// Configuration needed to boot a VM instance.
 #[derive(Debug, Clone)]
-pub struct DemoVmConfig {
+pub struct VmConfig {
     /// Path to the qcow2 image to boot.
     pub qcow2_path: String,
     /// Host ↔ guest port maps (beyond the SSH forward which is always added at `tcp::2222-:22`).
-    pub extra_hostfwd: Vec<PortMap>,
+    pub extra_hostfwd: Vec<PortForward>,
     /// Base SSH port on the host (default `2222`).
     pub ssh_host_port: u16,
 }
@@ -30,7 +35,7 @@ pub struct RunningVm {
 pub struct ForwardHandle {
     pub host_port: u16,
     pub guest_port: u16,
-    /// Shareable URL for a PortForward demo: `http://localhost:<host_port>`.
+    /// Shareable URL for a port-forward: `http://localhost:<host_port>`.
     pub share_url: String,
 }
 
@@ -44,7 +49,7 @@ pub struct VerifyResult {
 
 /// Errors from VM operations.
 #[derive(Debug, thiserror::Error)]
-pub enum DemoVmError {
+pub enum VmError {
     #[error("VM boot failed: {0}")]
     BootFailed(String),
     #[error("SSH deploy failed: {0}")]
@@ -57,22 +62,30 @@ pub enum DemoVmError {
     ShutdownFailed(String),
     #[error("Not implemented: {0}")]
     NotImplemented(String),
+    #[error("VM not found: {0}")]
+    NotFound(String),
+    #[error("VM already exists: {0}")]
+    AlreadyExists(String),
+    #[error("Invalid state for operation: {0}")]
+    InvalidState(String),
+    #[error("VM image build failed: {0}")]
+    BuildFailed(String),
 }
 
-/// Mockable boundary for a demo VM.
+/// Mockable boundary for a VM.
 ///
-/// The orchestrator calls these methods in order:
+/// The caller drives the VM through:
 /// `boot` → `deploy` → `verify` → `forward` → (use the link) → `shutdown`.
 #[async_trait::async_trait]
-pub trait DemoVm: Send + Sync {
+pub trait Vm: Send + Sync {
     /// Boot the VM from the given config. Returns a `RunningVm` handle when SSH is ready.
-    async fn boot(&self, config: &DemoVmConfig) -> Result<RunningVm, DemoVmError>;
+    async fn boot(&self, config: &VmConfig) -> Result<RunningVm, VmError>;
 
     /// Run the given deploy commands inside the guest via SSH.
-    async fn deploy(&self, vm: &RunningVm, steps: &[String]) -> Result<(), DemoVmError>;
+    async fn deploy(&self, vm: &RunningVm, steps: &[String]) -> Result<(), VmError>;
 
     /// Run a verification command inside the guest and return the result.
-    async fn verify(&self, vm: &RunningVm, command: &str) -> Result<VerifyResult, DemoVmError>;
+    async fn verify(&self, vm: &RunningVm, command: &str) -> Result<VerifyResult, VmError>;
 
     /// Activate the port-forward mapping and return a `ForwardHandle` with the share URL.
     ///
@@ -81,9 +94,9 @@ pub trait DemoVm: Send + Sync {
     async fn forward(
         &self,
         vm: &RunningVm,
-        port_map: &PortMap,
-    ) -> Result<ForwardHandle, DemoVmError>;
+        port_forward: &PortForward,
+    ) -> Result<ForwardHandle, VmError>;
 
     /// Shut down the VM gracefully (QEMU monitor `system_powerdown`).
-    async fn shutdown(&self, vm: RunningVm) -> Result<(), DemoVmError>;
+    async fn shutdown(&self, vm: RunningVm) -> Result<(), VmError>;
 }

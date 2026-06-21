@@ -1,11 +1,10 @@
-//! `MockDemoVm` — test double for `DemoVm`.
+//! `MockVm` — test double for `Vm`.
 //!
 //! Records all calls (deploy steps, verify commands, forward requests) and
-//! returns configurable results. Used in orchestrator acceptance tests.
+//! returns configurable results. Used in acceptance tests.
 
-use crate::vm::{DemoVm, DemoVmConfig, DemoVmError, ForwardHandle, RunningVm, VerifyResult};
+use crate::vm::{ForwardHandle, PortForward, RunningVm, VerifyResult, Vm, VmConfig, VmError};
 use std::sync::Mutex;
-use tddy_workflow_recipes::parser::PortMap;
 
 /// Recorded call to `deploy`.
 #[derive(Debug, Clone)]
@@ -35,16 +34,16 @@ pub struct BootCall {
     pub ssh_host_port: u16,
 }
 
-/// Test double for `DemoVm`.
+/// Test double for `Vm`.
 ///
 /// Configure it before use:
 /// ```
-/// use tddy_demo_runner::MockDemoVm;
-/// let vm = MockDemoVm::new();
+/// use tddy_vm::MockVm;
+/// let vm = MockVm::new();
 /// // All methods succeed by default; the mock records calls.
 /// ```
 #[derive(Default)]
-pub struct MockDemoVm {
+pub struct MockVm {
     pub boot_calls: Mutex<Vec<BootCall>>,
     pub deploy_calls: Mutex<Vec<DeployCall>>,
     pub verify_calls: Mutex<Vec<VerifyCall>>,
@@ -55,7 +54,7 @@ pub struct MockDemoVm {
     pub verify_fails: bool,
 }
 
-impl MockDemoVm {
+impl MockVm {
     pub fn new() -> Self {
         Self::default()
     }
@@ -78,8 +77,8 @@ impl MockDemoVm {
 }
 
 #[async_trait::async_trait]
-impl DemoVm for MockDemoVm {
-    async fn boot(&self, config: &DemoVmConfig) -> Result<RunningVm, DemoVmError> {
+impl Vm for MockVm {
+    async fn boot(&self, config: &VmConfig) -> Result<RunningVm, VmError> {
         self.boot_calls.lock().unwrap().push(BootCall {
             qcow2_path: config.qcow2_path.clone(),
             ssh_host_port: config.ssh_host_port,
@@ -91,7 +90,7 @@ impl DemoVm for MockDemoVm {
         })
     }
 
-    async fn deploy(&self, vm: &RunningVm, steps: &[String]) -> Result<(), DemoVmError> {
+    async fn deploy(&self, vm: &RunningVm, steps: &[String]) -> Result<(), VmError> {
         self.deploy_calls.lock().unwrap().push(DeployCall {
             ssh_host_port: vm.ssh_host_port,
             steps: steps.to_vec(),
@@ -99,7 +98,7 @@ impl DemoVm for MockDemoVm {
         Ok(())
     }
 
-    async fn verify(&self, vm: &RunningVm, command: &str) -> Result<VerifyResult, DemoVmError> {
+    async fn verify(&self, vm: &RunningVm, command: &str) -> Result<VerifyResult, VmError> {
         self.verify_calls.lock().unwrap().push(VerifyCall {
             ssh_host_port: vm.ssh_host_port,
             command: command.to_string(),
@@ -121,24 +120,24 @@ impl DemoVm for MockDemoVm {
     async fn forward(
         &self,
         _vm: &RunningVm,
-        port_map: &PortMap,
-    ) -> Result<ForwardHandle, DemoVmError> {
+        port_forward: &PortForward,
+    ) -> Result<ForwardHandle, VmError> {
         self.forward_calls.lock().unwrap().push(ForwardCall {
-            host_port: port_map.host_port,
-            guest_port: port_map.guest_port,
+            host_port: port_forward.host_port,
+            guest_port: port_forward.guest_port,
         });
         let share_url = self
             .forward_url_override
             .clone()
-            .unwrap_or_else(|| format!("http://localhost:{}", port_map.host_port));
+            .unwrap_or_else(|| format!("http://localhost:{}", port_forward.host_port));
         Ok(ForwardHandle {
-            host_port: port_map.host_port,
-            guest_port: port_map.guest_port,
+            host_port: port_forward.host_port,
+            guest_port: port_forward.guest_port,
             share_url,
         })
     }
 
-    async fn shutdown(&self, _vm: RunningVm) -> Result<(), DemoVmError> {
+    async fn shutdown(&self, _vm: RunningVm) -> Result<(), VmError> {
         Ok(())
     }
 }
