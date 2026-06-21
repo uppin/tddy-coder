@@ -107,6 +107,7 @@ mod tests {
     }
 }
 
+// TODO: implement RealGithubPrApi using curl_github_get_with_query / curl_github_patch_json / curl_github_post_json
 impl GithubPrApi for RealGithubPrApi {
     fn get_open_pr(&self, _head_branch: &str) -> Result<Option<PrRef>, tddy_core::WorkflowError> {
         unimplemented!("RealGithubPrApi::get_open_pr")

@@ -113,6 +113,7 @@ pub fn resolve_chain_integration_base_ref_from_parent_session(
 ///
 /// `explicit_base`: when Some, use this ref directly (skipping parent-branch resolution).
 /// When None, call `resolve_chain_integration_base_ref_from_parent_session` first.
+// TODO: implement by lifting body of telegram_session_control::merge_chain_integration_base_with_explicit_operator_overrides
 pub fn spawn_chain_child_worktree(
     _sessions_root: &Path,
     _parent_session_id: &str,

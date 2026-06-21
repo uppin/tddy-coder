@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::task::{Task, TaskResult};
 
+// TODO: implement spawn — shells out to tddy-coder --stack-parent <orch> --stack-base <base-node>
 /// Task: spawn child sessions for nodes that are NotSpawned.
 pub struct SpawnTask {}
 
@@ -27,6 +28,7 @@ impl Task for SpawnTask {
     }
 }
 
+// TODO: implement merge — calls RealGithubPrApi::merge_pr + writes StackOpJournal PrMerged phase
 /// Task: merge the next ready PR via GitHub REST API.
 pub struct MergeTask {}
 
@@ -50,6 +52,7 @@ impl Task for MergeTask {
     }
 }
 
+// TODO: implement repoint — git rebase --onto + force-with-lease + patch_pr_base for each dependent
 /// Task: repoint dependent PRs after a parent has been merged.
 pub struct RepointTask {}
 

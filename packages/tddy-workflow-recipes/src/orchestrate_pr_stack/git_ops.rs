@@ -1,5 +1,6 @@
 //! Git operations for orchestrate-pr-stack: rebase, force-push, merge-base, integration refs.
 
+// TODO: implement — git rebase --onto <new_base> <old_base> <branch>; enable rerere; detect conflicts → WorkflowError
 /// Rebase `branch` onto `new_base`, replacing `old_base` as the fork point.
 pub fn rebase_onto(
     repo_root: &std::path::Path,
@@ -10,6 +11,7 @@ pub fn rebase_onto(
     unimplemented!("rebase_onto: not yet implemented")
 }
 
+// TODO: implement — git push --force-with-lease=<branch>:<expected_sha> origin <branch>
 /// Force-push `branch` to origin, aborting if origin no longer matches `expected_sha`.
 pub fn force_push_with_lease(
     repo_root: &std::path::Path,
@@ -19,6 +21,7 @@ pub fn force_push_with_lease(
     unimplemented!("force_push_with_lease: not yet implemented")
 }
 
+// TODO: implement — git merge-base a b; used as old_base fallback guard in rebase_onto
 /// Compute `git merge-base a b`, returning the common ancestor SHA.
 pub fn merge_base(
     repo_root: &std::path::Path,
@@ -69,6 +72,7 @@ mod tests {
     }
 }
 
+// TODO: implement — octopus merge of parent_branches into stack-int/<node_id>; used for multi-parent DAG nodes
 /// Build or refresh a local integration ref (`stack-int/<node_id>`) from multiple parent tips.
 /// Returns the SHA of the resulting ref.
 pub fn build_integration_ref(

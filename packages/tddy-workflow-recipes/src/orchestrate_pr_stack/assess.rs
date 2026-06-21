@@ -143,11 +143,13 @@ pub fn decide_next_action(
     }
 }
 
+// TODO: implement — consolidate with Stack::effective_base_refs, deriving single-ref from NodeView slice
 /// Effective base ref for a node (skips merged ancestors; returns default_branch when all merged).
 pub fn effective_base_ref(node_id: &str, views: &[NodeView], default_branch: &str) -> String {
     unimplemented!("effective_base_ref: not yet implemented")
 }
 
+// TODO: implement — reads child changesets via unified_session_dir_path + read_changeset; calls GithubPrApi::get_open_pr
 /// Assemble NodeView list from orchestrator changeset + child changesets + live GitHub.
 pub fn assemble_views(
     parent_dir: &Path,
@@ -255,6 +257,7 @@ mod tests {
     }
 }
 
+// TODO: implement AssessTask::run — recover_in_flight_stack_op → assemble_views → decide_next_action → GoTo
 /// The assess Task: reads stack, calls assemble_views + decide_next_action, returns GoTo.
 pub struct AssessTask {}
 

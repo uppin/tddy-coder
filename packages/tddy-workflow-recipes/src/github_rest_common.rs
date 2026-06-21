@@ -33,6 +33,7 @@ pub fn github_env_token_present() -> bool {
     github_token_from_env().is_some()
 }
 
+// TODO: implement — mirrors curl_github_get_with_query using -X PATCH + --data <body>
 /// HTTP PATCH with a JSON body string, returns the response body.
 /// Uses curl; token from `github_token_from_env()`.
 pub fn curl_github_patch_json(
@@ -43,6 +44,7 @@ pub fn curl_github_patch_json(
     unimplemented!("curl_github_patch_json: not yet implemented")
 }
 
+// TODO: implement — mirrors curl_github_get_with_query using -X POST + --data <body>
 /// HTTP POST with a JSON body string, returns the response body.
 /// Uses curl; token from `github_token_from_env()`.
 pub fn curl_github_post_json(
