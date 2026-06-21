@@ -12,24 +12,39 @@ import {
 } from "./appRoutes";
 
 describe("appRoutes helpers (canonical path rules)", () => {
-  it("terminalPathForSessionId maps a session id to /terminal/:id", () => {
-    expect(terminalPathForSessionId("sess-a")).toBe(`${TERMINAL_SESSION_ROUTE_PREFIX}/sess-a`);
+  it("builds a /terminal/:id path from a session id", () => {
+    // When
+    const result = terminalPathForSessionId("sess-a");
+    // Then
+    expect(result).toBe(`${TERMINAL_SESSION_ROUTE_PREFIX}/sess-a`);
   });
 
-  it("parseTerminalSessionIdFromPathname extracts id from /terminal/:sessionId", () => {
-    expect(parseTerminalSessionIdFromPathname(`${TERMINAL_SESSION_ROUTE_PREFIX}/abc-123`)).toBe("abc-123");
+  it("extracts the session id from a /terminal/:sessionId pathname", () => {
+    // When
+    const result = parseTerminalSessionIdFromPathname(`${TERMINAL_SESSION_ROUTE_PREFIX}/abc-123`);
+    // Then
+    expect(result).toBe("abc-123");
   });
 
-  it("isSessionListPath is true for home / session list", () => {
-    expect(isSessionListPath("/")).toBe(true);
+  it("recognises the home path as the session list", () => {
+    // When
+    const result = isSessionListPath("/");
+    // Then
+    expect(result).toBe(true);
   });
 
-  it("auth_callback_route_unchanged_and_still_handles_oauth", () => {
-    expect(isAuthCallbackPath("/auth/callback")).toBe(true);
+  it("recognises /auth/callback as the OAuth callback path", () => {
+    // When
+    const result = isAuthCallbackPath("/auth/callback");
+    // Then
+    expect(result).toBe(true);
   });
 
-  it("acceptance: terminalDeepLinkSessionPath stays aligned with terminalPathForSessionId (encoded ids)", () => {
+  it("deep-link session path stays aligned with terminalPathForSessionId for encoded ids", () => {
+    // Given
     const id = "sess/with space";
+
+    // When + Then
     expect(terminalDeepLinkSessionPath(id)).toBe(terminalPathForSessionId(id));
   });
 });
@@ -37,26 +52,42 @@ describe("appRoutes helpers (canonical path rules)", () => {
 // These tests fail until RPC_PLAYGROUND_ROUTE and isRpcPlaygroundPath are added to appRoutes.ts.
 describe("appRoutes — RPC Playground route helpers", () => {
   it("RPC_PLAYGROUND_ROUTE is /rpc-playground", () => {
+    // When + Then
     expect(RPC_PLAYGROUND_ROUTE).toBe("/rpc-playground");
   });
 
-  it("isRpcPlaygroundPath is true for /rpc-playground", () => {
-    expect(isRpcPlaygroundPath("/rpc-playground")).toBe(true);
+  it("recognises /rpc-playground as the RPC Playground path", () => {
+    // When
+    const result = isRpcPlaygroundPath("/rpc-playground");
+    // Then
+    expect(result).toBe(true);
   });
 
-  it("isRpcPlaygroundPath is false for /", () => {
-    expect(isRpcPlaygroundPath("/")).toBe(false);
+  it("does not match the root path as an RPC Playground path", () => {
+    // When
+    const result = isRpcPlaygroundPath("/");
+    // Then
+    expect(result).toBe(false);
   });
 
-  it("isRpcPlaygroundPath is false for /worktrees", () => {
-    expect(isRpcPlaygroundPath("/worktrees")).toBe(false);
+  it("does not match /worktrees as an RPC Playground path", () => {
+    // When
+    const result = isRpcPlaygroundPath("/worktrees");
+    // Then
+    expect(result).toBe(false);
   });
 
-  it("isRpcPlaygroundPath is false for a terminal path", () => {
-    expect(isRpcPlaygroundPath(`${TERMINAL_SESSION_ROUTE_PREFIX}/some-session`)).toBe(false);
+  it("does not match a terminal session path as an RPC Playground path", () => {
+    // When
+    const result = isRpcPlaygroundPath(`${TERMINAL_SESSION_ROUTE_PREFIX}/some-session`);
+    // Then
+    expect(result).toBe(false);
   });
 
-  it("isRpcPlaygroundPath is false for /rpc-playground/extra (no sub-paths)", () => {
-    expect(isRpcPlaygroundPath("/rpc-playground/extra")).toBe(false);
+  it("does not match sub-paths under /rpc-playground", () => {
+    // When
+    const result = isRpcPlaygroundPath("/rpc-playground/extra");
+    // Then
+    expect(result).toBe(false);
   });
 });

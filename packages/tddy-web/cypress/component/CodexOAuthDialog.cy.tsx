@@ -1,8 +1,10 @@
 import React, { useState } from "react";
 import { CodexOAuthDialog } from "../../src/components/CodexOAuthDialog";
+import { byTestId, TEST_IDS } from "../support/testIds";
 
-describe("Codex OAuth web relay dialog", () => {
-  it("opens and closes on stub RPC events (authorize URL then dismiss)", () => {
+describe("CodexOAuthDialog", () => {
+  it("opens when an authorize URL is pushed and closes on dismiss", () => {
+    // Given — a harness that simulates an RPC push of the authorize URL
     const onDismiss = cy.stub().as("onDismiss");
 
     function Harness() {
@@ -34,10 +36,18 @@ describe("Codex OAuth web relay dialog", () => {
     }
 
     cy.mount(<Harness />);
-    cy.get("[data-testid='stub-rpc-push-authorize-url']").click();
-    cy.get("[data-testid='codex-oauth-dialog']", { timeout: 8000 }).should("be.visible");
-    cy.get("[data-testid='codex-oauth-dismiss']").click();
-    cy.get("[data-testid='codex-oauth-dialog']").should("not.exist");
+
+    // When
+    byTestId("stub-rpc-push-authorize-url").click();
+
+    // Then — dialog is visible
+    byTestId(TEST_IDS.codexOauthDialog, { timeout: 8000 }).should("be.visible");
+
+    // When — user dismisses
+    byTestId(TEST_IDS.codexOauthDismiss).click();
+
+    // Then — dialog closes and callback fires
+    byTestId(TEST_IDS.codexOauthDialog).should("not.exist");
     cy.get("@onDismiss").should("have.been.calledOnce");
   });
 });

@@ -1,124 +1,64 @@
 /**
- * Strip ANSI escape sequences (CSI, OSC) to get readable text for assertions.
- */
-function stripAnsi(text: string): string {
-  return text
-    .replace(/\x1b\[[?0-9;]*[a-zA-Z]/g, "")
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
-}
-
-/**
- * E2E acceptance test: Ghostty terminal content from tddy-demo over LiveKit.
+ * E2E acceptance: Ghostty terminal content from tddy-demo over LiveKit.
  *
- * Requires:
- * - LIVEKIT_TESTKIT_WS_URL (from ./run-livekit-testkit-server)
- * - tddy-demo built with LiveKit support (cargo build -p tddy-demo)
- *
- * Flow: Cypress starts tddy-demo via startTerminalServer task, visits
- * GhosttyTerminal LiveKit story, connects, asserts RPC stream and buffer.
+ * Requires: LIVEKIT_TESTKIT_WS_URL, tddy-demo built (cargo build -p tddy-demo).
  *
  * Skipped when LIVEKIT_TESTKIT_WS_URL is not set.
  */
-describe("Ghostty Terminal E2E", () => {
-  let serverUrl: string;
-  let clientToken: string;
-  let roomName: string;
+import type { TerminalSessionResult } from "../support/commands";
 
-  let serverLogPath: string | undefined;
+const STORY_ID = "components-ghosttyterminal--live-kit-connected";
+
+describe("Ghostty Terminal E2E", () => {
+  let session: TerminalSessionResult = {} as TerminalSessionResult;
 
   before(function () {
-    if (!Cypress.env("LIVEKIT_TESTKIT_WS_URL")) {
-      this.skip();
-      return;
-    }
-    return cy.task("startTerminalServer").then((result) => {
-      const r = result as {
-        url: string;
-        clientToken: string;
-        roomName: string;
-        serverLogPath?: string;
-      };
-      serverUrl = r.url;
-      clientToken = r.clientToken;
-      roomName = r.roomName;
-      serverLogPath = r.serverLogPath;
+    cy.startTerminalSession({ kind: "terminal" }).then((result) => {
+      session = result;
     });
   });
 
   after(function () {
-    if (this.currentTest?.state === "failed" && serverLogPath) {
-      cy.log(`Server debug log: ${serverLogPath}`);
+    if (this.currentTest?.state === "failed" && session.serverLogPath) {
+      cy.dumpServerLog(session.serverLogPath);
     }
     cy.task("stopTerminalServer");
   });
 
-  it("displays tddy-demo terminal output in ghostty through LiveKit", () => {
-    const storyUrl = `/iframe.html?id=components-ghosttyterminal--live-kit-connected&url=${encodeURIComponent(serverUrl)}&token=${encodeURIComponent(clientToken)}&roomName=${encodeURIComponent(roomName)}`;
-    cy.visit(storyUrl);
+  it("displays tddy-demo terminal output in Ghostty through LiveKit", () => {
+    // Given
+    cy.visitGhosttyStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName });
 
-    cy.get("body", { timeout: 10000 }).should("be.visible");
+    // When — wait for full LiveKit connection
+    cy.connectAndWaitForTerminal();
 
-    cy.get(
-      "[data-testid='connection-status-dot'], [data-testid='livekit-placeholder'], [data-testid='livekit-error'], [data-testid='ghostty-terminal']",
-      { timeout: 25000 }
-    ).should("exist");
+    // Then — RPC has streamed bytes from tddy-demo
+    cy.get("[data-testid='streamed-byte-count']", { timeout: 30000 }).should(($el) => {
+      expect(parseInt($el.text(), 10)).to.be.greaterThan(0, "RPC should have streamed bytes from tddy-demo");
+    });
 
-    cy.get("[data-testid='connection-status-dot']", { timeout: 10000 })
-      .should("be.visible")
-      .and("have.attr", "data-connection-status", "connected");
-    cy.get("[data-testid='livekit-status']").should("not.be.visible");
-
-    cy.get("[data-testid='ghostty-terminal']", { timeout: 5000 }).should(
-      "exist"
-    );
-
-    cy.get("[data-testid='streamed-byte-count']", { timeout: 30000 }).should(
-      ($el) => {
-        const n = parseInt($el.text(), 10);
-        expect(n).to.be.greaterThan(0, "RPC should have streamed bytes from tddy-demo");
-      }
-    );
-
-    // Buffer receives streamed content (RPC + Ghostty pipeline working)
-    cy.get("[data-testid='terminal-buffer-text']", { timeout: 20000 }).should(
-      ($el) => {
-        const raw = $el.text();
-        expect(raw.length).to.be.greaterThan(0, "terminal buffer should have content from tddy-demo");
-      }
-    );
+    // Then — terminal buffer has content
+    cy.get("[data-testid='terminal-buffer-text']", { timeout: 20000 }).should(($el) => {
+      expect($el.text().length).to.be.greaterThan(0, "terminal buffer should have content from tddy-demo");
+    });
   });
 
-  /**
-   * When the coder / daemon process exits, the LiveKit server participant leaves the room.
-   * The terminal must stop accepting input and show a clear indication (same UX expectation
-   * as losing the backend session).
-   */
-  it("disables terminal and shows coder-unavailable when server participant leaves", () => {
-    const storyUrl = `/iframe.html?id=components-ghosttyterminal--live-kit-connected&url=${encodeURIComponent(serverUrl)}&token=${encodeURIComponent(clientToken)}&roomName=${encodeURIComponent(roomName)}`;
-    cy.visit(storyUrl);
+  it("shows the coder-unavailable banner and disables input when the server participant leaves", () => {
+    // Given
+    cy.visitGhosttyStory({ storyId: STORY_ID, url: session.url, token: session.clientToken, roomName: session.roomName });
+    cy.connectAndWaitForTerminal();
 
-    cy.get("[data-testid='connection-status-dot']", { timeout: 10000 })
-      .should("be.visible")
-      .and("have.attr", "data-connection-status", "connected");
-    cy.get("[data-testid='livekit-status']").should("not.be.visible");
-
-    cy.get("[data-testid='ghostty-terminal']", { timeout: 5000 }).should("exist");
-
+    // When — kill the server
     cy.task("stopTerminalServer");
 
+    // Then — coder-unavailable banner appears
     cy.get("[data-testid='terminal-coder-unavailable']", { timeout: 45000 })
       .should("be.visible")
       .and(($el) => {
-        expect($el.text().trim().length).to.be.greaterThan(
-          0,
-          "banner should explain that the session ended"
-        );
+        expect($el.text().trim().length).to.be.greaterThan(0, "banner should explain the session ended");
       });
 
-    cy.get("[data-testid='ghostty-terminal']").should(
-      "have.attr",
-      "data-session-active",
-      "false"
-    );
+    // Then — terminal marks session inactive
+    cy.get("[data-testid='ghostty-terminal']").should("have.attr", "data-session-active", "false");
   });
 });

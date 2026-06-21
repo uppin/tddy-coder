@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { aConnectCounter } from "../../test-utils";
 import {
   applyDedicatedTerminalBackToMini,
   applyOverlayPreviewClickToFull,
@@ -15,100 +16,260 @@ import {
   TERMINAL_OVERLAY_ROWS,
 } from "./terminalPresentation";
 
-describe("overlay pane: default size & fixed 80×24 font scaling (header excluded)", () => {
-  it("uses explicit default height and capped width (taller pane without matching width growth)", () => {
+// ---------------------------------------------------------------------------
+// Default overlay size constants
+// ---------------------------------------------------------------------------
+
+describe("overlay pane: default size & 80×24 grid", () => {
+  it("terminal overlay is 80 columns wide", () => {
+    // Then
     expect(TERMINAL_OVERLAY_COLS).toBe(80);
+  });
+
+  it("terminal overlay is 24 rows tall", () => {
+    // Then
     expect(TERMINAL_OVERLAY_ROWS).toBe(24);
+  });
+
+  it("default pane width is 320px", () => {
+    // Then
     expect(TERMINAL_OVERLAY_PANE_WIDTH_PX).toBe(320);
+  });
+
+  it("default pane height is 180px", () => {
+    // Then
     expect(TERMINAL_OVERLAY_PANE_HEIGHT_PX).toBe(180);
-    expect(TERMINAL_OVERLAY_PANE_WIDTH_PX / TERMINAL_OVERLAY_PANE_HEIGHT_PX).not.toBeCloseTo(80 / 24, 5);
+  });
+
+  it("pane aspect ratio does not match the 80/24 grid ratio (taller pane, width does not scale with rows)", () => {
+    // The overlay pane is intentionally taller relative to width than the pure 80/24 cell ratio.
+    // not.toBeCloseTo is appropriate here: we're asserting the ratio is far from 80/24 (≈3.33),
+    // not that it equals a specific value.
+    expect(TERMINAL_OVERLAY_PANE_WIDTH_PX / TERMINAL_OVERLAY_PANE_HEIGHT_PX).not.toBeCloseTo(
+      80 / 24,
+      5,
+    );
   });
 });
+
+// ---------------------------------------------------------------------------
+// clampTerminalOverlayPaneSize
+// ---------------------------------------------------------------------------
 
 describe("clampTerminalOverlayPaneSize", () => {
-  it("clamps to min and max", () => {
-    const a = clampTerminalOverlayPaneSize(50, 20, 800, 600);
-    expect(a.width).toBe(TERMINAL_OVERLAY_PANE_MIN_WIDTH_PX);
-    expect(a.height).toBe(TERMINAL_OVERLAY_PANE_MIN_HEIGHT_PX);
-    const b = clampTerminalOverlayPaneSize(2000, 2000, 400, 300);
-    expect(b.width).toBe(400);
-    expect(b.height).toBe(300);
+  it("clamps width and height to the configured minimum when input is below the floor", () => {
+    // When
+    const result = clampTerminalOverlayPaneSize(50, 20, 800, 600);
+
+    // Then
+    expect(result.width).toBe(TERMINAL_OVERLAY_PANE_MIN_WIDTH_PX);
+    expect(result.height).toBe(TERMINAL_OVERLAY_PANE_MIN_HEIGHT_PX);
   });
 
-  it("when max is below min width, effective max is at least min", () => {
-    const c = clampTerminalOverlayPaneSize(100, 40, 100, 40);
-    expect(c.width).toBe(TERMINAL_OVERLAY_PANE_MIN_WIDTH_PX);
-    expect(c.height).toBe(TERMINAL_OVERLAY_PANE_MIN_HEIGHT_PX);
-  });
-});
+  it("clamps width and height to the viewport maximum when input exceeds the ceiling", () => {
+    // When
+    const result = clampTerminalOverlayPaneSize(2000, 2000, 400, 300);
 
-describe("acceptance: presentation state — new session opens overlay, reconnect selects overlay", () => {
-  it("new attach → overlay and no push to /terminal/:id (Connect opens pane, not dedicated screen)", () => {
-    const r = nextPresentationFromAttach("hidden", "new");
-    expect(r.presentation).toBe("overlay");
-    expect(r.shouldPushTerminalRoute).toBe(false);
+    // Then
+    expect(result.width).toBe(400);
+    expect(result.height).toBe(300);
   });
 
-  it("new attach from any prior presentation still uses overlay without route push", () => {
-    const r = nextPresentationFromAttach("full", "new");
-    expect(r.presentation).toBe("overlay");
-    expect(r.shouldPushTerminalRoute).toBe(false);
-  });
+  it("enforces the minimum when the viewport max is itself below the minimum size", () => {
+    // When
+    const result = clampTerminalOverlayPaneSize(100, 40, 100, 40);
 
-  it("reconnect attach → overlay and no automatic push to /terminal/:id", () => {
-    const r = nextPresentationFromAttach("hidden", "reconnect");
-    expect(r.presentation).toBe("overlay");
-    expect(r.shouldPushTerminalRoute).toBe(false);
+    // Then
+    expect(result.width).toBe(TERMINAL_OVERLAY_PANE_MIN_WIDTH_PX);
+    expect(result.height).toBe(TERMINAL_OVERLAY_PANE_MIN_HEIGHT_PX);
   });
 });
 
-describe("acceptance: overlay click navigates to terminal route without second connect", () => {
-  it("does not increment connect counters when expanding preview to full", () => {
-    const before = { connectSessionCalls: 2, resumeSessionCalls: 1, disconnectCalls: 0 };
+// ---------------------------------------------------------------------------
+// nextPresentationFromAttach — new session
+// ---------------------------------------------------------------------------
+
+describe("new-session attach opens overlay without pushing a /terminal route", () => {
+  it("opening a new session from hidden state uses the overlay presentation", () => {
+    // When
+    const result = nextPresentationFromAttach("hidden", "new");
+
+    // Then
+    expect(result.presentation).toBe("overlay");
+  });
+
+  it("opening a new session does not push to /terminal/:id", () => {
+    // When
+    const result = nextPresentationFromAttach("hidden", "new");
+
+    // Then
+    expect(result.shouldPushTerminalRoute).toBe(false);
+  });
+
+  it("opening a new session from any prior presentation still uses overlay", () => {
+    // When
+    const result = nextPresentationFromAttach("full", "new");
+
+    // Then
+    expect(result.presentation).toBe("overlay");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// nextPresentationFromAttach — reconnect
+// ---------------------------------------------------------------------------
+
+describe("reconnect attach opens overlay without pushing a /terminal route", () => {
+  it("reconnecting from hidden state uses the overlay presentation", () => {
+    // When
+    const result = nextPresentationFromAttach("hidden", "reconnect");
+
+    // Then
+    expect(result.presentation).toBe("overlay");
+  });
+
+  it("reconnecting does not push to /terminal/:id", () => {
+    // When
+    const result = nextPresentationFromAttach("hidden", "reconnect");
+
+    // Then
+    expect(result.shouldPushTerminalRoute).toBe(false);
+  });
+
+  it("reconnecting while already in overlay presentation stays in overlay", () => {
+    // When
+    const result = nextPresentationFromAttach("overlay", "reconnect");
+
+    // Then
+    expect(result.presentation).toBe("overlay");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyOverlayPreviewClickToFull
+// ---------------------------------------------------------------------------
+
+describe("expanding overlay preview to full does not trigger a new session connect", () => {
+  it("preserves the connect-session call count when expanding to full", () => {
+    // Given
+    const before = aConnectCounter({ connectSessionCalls: 2, resumeSessionCalls: 1 });
+
+    // When
     const { presentation, counters } = applyOverlayPreviewClickToFull(before);
+
+    // Then
     expect(presentation).toBe("full");
     expect(counters.connectSessionCalls).toBe(before.connectSessionCalls);
+  });
+
+  it("preserves the resume-session call count when expanding to full", () => {
+    // Given
+    const before = aConnectCounter({ connectSessionCalls: 2, resumeSessionCalls: 1 });
+
+    // When
+    const { counters } = applyOverlayPreviewClickToFull(before);
+
+    // Then
     expect(counters.resumeSessionCalls).toBe(before.resumeSessionCalls);
+  });
+
+  it("preserves the disconnect call count when expanding to full", () => {
+    // Given
+    const before = aConnectCounter({ connectSessionCalls: 2, disconnectCalls: 0 });
+
+    // When
+    const { counters } = applyOverlayPreviewClickToFull(before);
+
+    // Then
     expect(counters.disconnectCalls).toBe(before.disconnectCalls);
   });
 });
 
-describe("acceptance: Back minimizes to mini without disconnect", () => {
-  it("sets mini presentation and leaves disconnect count unchanged", () => {
-    const before = { connectSessionCalls: 1, resumeSessionCalls: 0, disconnectCalls: 0 };
-    const { presentation, counters } = applyDedicatedTerminalBackToMini(before);
+// ---------------------------------------------------------------------------
+// applyDedicatedTerminalBackToMini
+// ---------------------------------------------------------------------------
+
+describe("Back from full terminal minimizes to mini without disconnecting", () => {
+  it("sets the presentation to mini", () => {
+    // Given
+    const before = aConnectCounter({ connectSessionCalls: 1 });
+
+    // When
+    const { presentation } = applyDedicatedTerminalBackToMini(before);
+
+    // Then
     expect(presentation).toBe("mini");
+  });
+
+  it("leaves the disconnect count unchanged", () => {
+    // Given
+    const before = aConnectCounter({ connectSessionCalls: 1 });
+
+    // When
+    const { counters } = applyDedicatedTerminalBackToMini(before);
+
+    // Then
     expect(counters.disconnectCalls).toBe(0);
+  });
+
+  it("preserves the connect-session call count", () => {
+    // Given
+    const before = aConnectCounter({ connectSessionCalls: 1 });
+
+    // When
+    const { counters } = applyDedicatedTerminalBackToMini(before);
+
+    // Then
     expect(counters.connectSessionCalls).toBe(before.connectSessionCalls);
   });
 });
 
-describe("acceptance: reconnect overlay idempotent", () => {
-  it("multiple reconnect signals yield a single logical overlay instance", () => {
+// ---------------------------------------------------------------------------
+// reconcileReconnectOverlayInstances — idempotency
+// ---------------------------------------------------------------------------
+
+describe("reconcileReconnectOverlayInstances collapses multiple signals to one overlay", () => {
+  it("a single signal yields one overlay instance", () => {
     expect(reconcileReconnectOverlayInstances(1)).toBe(1);
+  });
+
+  it("three signals still yield only one overlay instance", () => {
     expect(reconcileReconnectOverlayInstances(3)).toBe(1);
+  });
+
+  it("one hundred signals still yield only one overlay instance", () => {
     expect(reconcileReconnectOverlayInstances(100)).toBe(1);
   });
 });
 
-describe("acceptance: session control → attach kind (for ConnectionScreen branching)", () => {
-  it("startSession and connectSession are new attach; resumeSession is reconnect", () => {
+// ---------------------------------------------------------------------------
+// attachKindForSessionControl
+// ---------------------------------------------------------------------------
+
+describe("attachKindForSessionControl maps session control actions to attach kind", () => {
+  it("startSession is a new attach", () => {
     expect(attachKindForSessionControl("startSession")).toBe("new");
+  });
+
+  it("connectSession is a new attach", () => {
     expect(attachKindForSessionControl("connectSession")).toBe("new");
+  });
+
+  it("resumeSession is a reconnect attach", () => {
     expect(attachKindForSessionControl("resumeSession")).toBe("reconnect");
   });
 });
 
-describe("acceptance: default mini/overlay placement", () => {
-  it("defaults to floating bottom-right", () => {
-    expect(defaultTerminalMiniOverlayPlacement()).toBe("bottom-right");
-  });
-});
+// ---------------------------------------------------------------------------
+// defaultTerminalMiniOverlayPlacement
+// ---------------------------------------------------------------------------
 
-describe("unit: presentation transitions (granular)", () => {
-  it("reconnect attach while already in overlay stays overlay without route push", () => {
-    const r = nextPresentationFromAttach("overlay", "reconnect");
-    expect(r.presentation).toBe("overlay");
-    expect(r.shouldPushTerminalRoute).toBe(false);
+describe("default mini overlay placement", () => {
+  it("defaults to floating bottom-right", () => {
+    // When
+    const placement = defaultTerminalMiniOverlayPlacement();
+
+    // Then
+    expect(placement).toBe("bottom-right");
   });
 });

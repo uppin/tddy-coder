@@ -16,9 +16,9 @@
  */
 
 import React from "react";
-import { create, toBinary } from "@bufbuild/protobuf";
-import { GenerateTokenResponseSchema } from "../../src/gen/token_pb";
-import { GetAuthStatusResponseSchema, GitHubUserSchema } from "../../src/gen/auth_pb";
+import { byTestId, TEST_IDS } from "../support/testIds";
+import { anAuthStatusAuthenticated, aGenerateTokenResponse } from "../support/rpc/responses";
+import { toArrayBuffer } from "../support/rpc/protoRpc";
 
 // These imports fail until the screen and route helpers are created.
 import { RpcPlaygroundScreen } from "../../src/rpc-playground/RpcPlaygroundScreen";
@@ -27,39 +27,9 @@ import {
   isRpcPlaygroundPath,
 } from "../../src/routing/appRoutes";
 
-const toArrayBuffer = (u8: Uint8Array): ArrayBuffer => {
-  const buf = new ArrayBuffer(u8.length);
-  new Uint8Array(buf).set(u8);
-  return buf;
-};
-
 // ---------------------------------------------------------------------------
-// Mock helpers
+// Test fixtures
 // ---------------------------------------------------------------------------
-
-function mockTokenResponse() {
-  return toArrayBuffer(
-    toBinary(
-      GenerateTokenResponseSchema,
-      create(GenerateTokenResponseSchema, { token: "mock-token", ttlSeconds: 300 }),
-    ),
-  );
-}
-
-function mockAuthAuthenticated() {
-  const user = create(GitHubUserSchema, {
-    login: "testuser",
-    avatarUrl: "https://example.com/avatar.png",
-    name: "Test User",
-    id: BigInt(42),
-  });
-  return toArrayBuffer(
-    toBinary(
-      GetAuthStatusResponseSchema,
-      create(GetAuthStatusResponseSchema, { authenticated: true, user }),
-    ),
-  );
-}
 
 // Mock reflection response: a fake service tree with EchoService.
 const MOCK_SERVICES = [
@@ -74,14 +44,6 @@ const MOCK_SERVICES = [
   },
 ];
 
-// Mock transport for dynamic invocation (passed as prop).
-const mockTransport = {
-  services: MOCK_SERVICES,
-  lastInvokedService: null as string | null,
-  lastInvokedMethod: null as string | null,
-  mockResponseJson: '{"message":"playground-echo","timestamp":"0"}',
-};
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -90,17 +52,18 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
   beforeEach(() => {
     cy.intercept("POST", "**/auth.AuthService/GetAuthStatus", {
       statusCode: 200,
-      body: mockAuthAuthenticated(),
+      body: toArrayBuffer(anAuthStatusAuthenticated()),
       headers: { "content-type": "application/proto" },
     });
     cy.intercept("POST", "**/token.TokenService/GenerateToken", {
       statusCode: 200,
-      body: mockTokenResponse(),
+      body: toArrayBuffer(aGenerateTokenResponse()),
       headers: { "content-type": "application/proto" },
     });
   });
 
   it("renders participant picker and service/method tree from mocked reflection", () => {
+    // Given / When
     cy.mount(
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
@@ -109,12 +72,14 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
       />
     );
 
-    cy.get('[data-testid="rpc-playground-participant-select"]').should("exist");
-    cy.get('[data-testid="rpc-service-tree"]').should("exist");
+    // Then
+    byTestId(TEST_IDS.rpcPlaygroundParticipantSelect).should("exist");
+    byTestId(TEST_IDS.rpcServiceTree).should("exist");
     cy.contains("test.EchoService").should("be.visible");
   });
 
   it("expanding a service shows its methods with kind badges", () => {
+    // Given
     cy.mount(
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
@@ -123,7 +88,10 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
       />
     );
 
+    // When
     cy.contains("test.EchoService").click();
+
+    // Then
     cy.contains("Echo").should("be.visible");
     cy.contains("unary").should("be.visible");
     cy.contains("EchoServerStream").should("be.visible");
@@ -131,6 +99,7 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
   });
 
   it("selecting a method seeds the request editor with default JSON", () => {
+    // Given
     cy.mount(
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
@@ -139,14 +108,17 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
       />
     );
 
+    // When
     cy.contains("test.EchoService").click();
     cy.contains("Echo").click();
-    cy.get('[data-testid="rpc-request-editor"]').should("exist");
-    // Default JSON for a method with no schema is the empty object.
-    cy.get('[data-testid="rpc-request-raw-json"]').should("contain", "{");
+
+    // Then — default JSON for a method with no schema is the empty object
+    byTestId(TEST_IDS.rpcRequestEditor).should("exist");
+    byTestId(TEST_IDS.rpcRequestRawJson).should("contain", "{");
   });
 
   it("toggling builder view and raw view retains the request value", () => {
+    // Given
     cy.mount(
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
@@ -154,25 +126,21 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
         onNavigate={() => {}}
       />
     );
-
     cy.contains("test.EchoService").click();
     cy.contains("Echo").click();
 
-    // Switch to raw JSON view and type a value.
-    cy.get('[data-testid="rpc-editor-toggle-raw"]').click();
-    cy.get('[data-testid="rpc-request-raw-json"]')
-      .clear()
-      .type('{"message":"retain-me"}');
+    // When — switch to raw JSON, type a value, toggle back and forth
+    byTestId(TEST_IDS.rpcEditorToggleRaw).click();
+    byTestId(TEST_IDS.rpcRequestRawJson).clear().type('{"message":"retain-me"}');
+    byTestId(TEST_IDS.rpcEditorToggleBuilder).click();
+    byTestId(TEST_IDS.rpcEditorToggleRaw).click();
 
-    // Switch to builder view and back.
-    cy.get('[data-testid="rpc-editor-toggle-builder"]').click();
-    cy.get('[data-testid="rpc-editor-toggle-raw"]').click();
-
-    // Value must still be present (single source of truth).
-    cy.get('[data-testid="rpc-request-raw-json"]').should("contain", "retain-me");
+    // Then — value is preserved (single source of truth)
+    byTestId(TEST_IDS.rpcRequestRawJson).should("contain", "retain-me");
   });
 
   it("clicking Invoke shows decoded response JSON", () => {
+    // Given
     const responseJson = '{"message":"playground-echo","timestamp":"0"}';
     cy.mount(
       <RpcPlaygroundScreen
@@ -181,14 +149,18 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
         onNavigate={() => {}}
       />
     );
-
     cy.contains("test.EchoService").click();
     cy.contains("Echo").click();
-    cy.get('[data-testid="rpc-invoke-button"]').click();
-    cy.get('[data-testid="rpc-response"]').should("contain", "playground-echo");
+
+    // When
+    byTestId(TEST_IDS.rpcInvokeButton).click();
+
+    // Then
+    byTestId(TEST_IDS.rpcResponse).should("contain", "playground-echo");
   });
 
   it("shows error code and message when invocation fails", () => {
+    // Given
     cy.mount(
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
@@ -198,37 +170,41 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
         onNavigate={() => {}}
       />
     );
-
     cy.contains("test.EchoService").click();
     cy.contains("Echo").click();
-    cy.get('[data-testid="rpc-invoke-button"]').click();
-    cy.get('[data-testid="rpc-error"]').should("contain", "not_found");
-    cy.get('[data-testid="rpc-error"]').should("contain", "Unknown method");
+
+    // When
+    byTestId(TEST_IDS.rpcInvokeButton).click();
+
+    // Then
+    byTestId(TEST_IDS.rpcError).should("contain", "not_found");
+    byTestId(TEST_IDS.rpcError).should("contain", "Unknown method");
   });
 });
 
 describe("DaemonNavMenu — RPC Playground entry", () => {
   it("renders shell-menu-rpc-playground menu item", () => {
-    // Import DaemonNavMenu which must have the new menu item.
+    // Given
     const { DaemonNavMenu } = require("../../src/components/shell/DaemonNavMenu");
+    cy.mount(<DaemonNavMenu onNavigate={cy.stub().as("onNavigate")} />);
 
-    cy.mount(
-      <DaemonNavMenu onNavigate={cy.stub().as("onNavigate")} />
-    );
+    // When
+    byTestId(TEST_IDS.shellMenuButton).click();
 
-    cy.get('[data-testid="shell-menu-button"]').click();
-    cy.get('[data-testid="shell-menu-rpc-playground"]').should("be.visible");
+    // Then
+    byTestId(TEST_IDS.shellMenuRpcPlayground).should("be.visible");
   });
 
   it("clicking shell-menu-rpc-playground navigates to /rpc-playground", () => {
+    // Given
     const { DaemonNavMenu } = require("../../src/components/shell/DaemonNavMenu");
+    cy.mount(<DaemonNavMenu onNavigate={cy.stub().as("onNavigate")} />);
+    byTestId(TEST_IDS.shellMenuButton).click();
 
-    cy.mount(
-      <DaemonNavMenu onNavigate={cy.stub().as("onNavigate")} />
-    );
+    // When
+    byTestId(TEST_IDS.shellMenuRpcPlayground).click();
 
-    cy.get('[data-testid="shell-menu-button"]').click();
-    cy.get('[data-testid="shell-menu-rpc-playground"]').click();
+    // Then
     cy.get("@onNavigate").should("have.been.calledWith", "/rpc-playground");
   });
 });

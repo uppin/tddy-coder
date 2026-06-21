@@ -1,12 +1,18 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { workflowPreviewKind } from "./sessionWorkflowPreview";
 
 describe("workflowPreviewKind", () => {
-  test("classifies changeset.yaml as yaml preview", () => {
-    expect(workflowPreviewKind("changeset.yaml")).toBe("yaml");
+  it("classifies a YAML changeset file as a yaml preview", () => {
+    // When
+    const result = workflowPreviewKind("changeset.yaml");
+    // Then
+    expect(result).toBe("yaml");
   });
 
-  test("classifies PRD.md as markdown preview", () => {
-    expect(workflowPreviewKind("PRD.md")).toBe("markdown");
+  it("classifies a Markdown PRD file as a markdown preview", () => {
+    // When
+    const result = workflowPreviewKind("PRD.md");
+    // Then
+    expect(result).toBe("markdown");
   });
 });

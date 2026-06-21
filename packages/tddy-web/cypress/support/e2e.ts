@@ -1,1 +1,6 @@
-// E2E support file - add custom commands or global config here
+import "./commands";
+
+// Clear app storage before each test (localStorage + sessionStorage).
+beforeEach(() => {
+  cy.clearAppStorage();
+});

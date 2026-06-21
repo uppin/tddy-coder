@@ -9,7 +9,7 @@
  * All imports will fail to resolve until registry.ts is created (red phase).
  */
 
-import { describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 // These imports fail until registry.ts is created.
 import { buildRegistry, findMethod } from "./registry";
 
@@ -18,43 +18,83 @@ import { buildRegistry, findMethod } from "./registry";
 // For now the import itself will fail.
 import { ECHO_SERVICE_DESCRIPTOR_FIXTURE } from "./test-fixtures/echoServiceDescriptor";
 
-describe("buildRegistry", () => {
-  it("resolves EchoService and Echo method from a FileDescriptorSet", () => {
-    const registry = buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
+describe("buildRegistry + findMethod", () => {
+  let registry: ReturnType<typeof buildRegistry>;
+
+  beforeEach(() => {
+    // Given: a registry built from the EchoService FileDescriptorSet fixture
+    registry = buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
+  });
+
+  // -------------------------------------------------------------------------
+  // Echo — unary method
+  // -------------------------------------------------------------------------
+
+  it("Echo method belongs to the test.EchoService service type", () => {
+    // When
     const method = findMethod(registry, "test.EchoService", "Echo");
 
+    // Then
     expect(method.parent.typeName).toBe("test.EchoService");
+  });
+
+  it("Echo method name and kind resolve to unary", () => {
+    // When
+    const method = findMethod(registry, "test.EchoService", "Echo");
+
+    // Then
     expect(method.name).toBe("Echo");
     expect(method.methodKind).toBe("unary");
+  });
+
+  it("Echo method takes EchoRequest input and produces EchoResponse output", () => {
+    // When
+    const method = findMethod(registry, "test.EchoService", "Echo");
+
+    // Then
     expect(method.input.typeName).toBe("test.EchoRequest");
     expect(method.output.typeName).toBe("test.EchoResponse");
   });
 
-  it("returns server_streaming kind for EchoServerStream", () => {
-    const registry = buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
+  // -------------------------------------------------------------------------
+  // Streaming method kinds
+  // -------------------------------------------------------------------------
+
+  it("EchoServerStream has server_streaming kind", () => {
+    // When
     const method = findMethod(registry, "test.EchoService", "EchoServerStream");
+
+    // Then
     expect(method.methodKind).toBe("server_streaming");
   });
 
-  it("returns client_streaming kind for EchoClientStream", () => {
-    const registry = buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
+  it("EchoClientStream has client_streaming kind", () => {
+    // When
     const method = findMethod(registry, "test.EchoService", "EchoClientStream");
+
+    // Then
     expect(method.methodKind).toBe("client_streaming");
   });
 
-  it("returns bidi_streaming kind for EchoBidiStream", () => {
-    const registry = buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
+  it("EchoBidiStream has bidi_streaming kind", () => {
+    // When
     const method = findMethod(registry, "test.EchoService", "EchoBidiStream");
+
+    // Then
     expect(method.methodKind).toBe("bidi_streaming");
   });
 
-  it("throws for an unknown service name", () => {
-    const registry = buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
+  // -------------------------------------------------------------------------
+  // Error handling
+  // -------------------------------------------------------------------------
+
+  it("throws when looking up a service that does not exist in the descriptor", () => {
+    // When / Then
     expect(() => findMethod(registry, "nonexistent.FakeService", "Foo")).toThrow();
   });
 
-  it("throws for an unknown method on a known service", () => {
-    const registry = buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
+  it("throws when looking up a method that does not exist on a known service", () => {
+    // When / Then
     expect(() => findMethod(registry, "test.EchoService", "NonExistentMethod")).toThrow();
   });
 });

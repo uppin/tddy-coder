@@ -13,6 +13,7 @@
 import React from "react";
 // FAILS: module does not exist yet — implement at packages/tddy-web/src/components/GhosttyTerminalGrpc.tsx
 import { GhosttyTerminalGrpc } from "../../src/components/GhosttyTerminalGrpc";
+import { byTestId, TEST_IDS } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -49,7 +50,10 @@ function makeFakeGrpcStream() {
 describe("GhosttyTerminalGrpc", () => {
   it("renders the ghostty terminal container", () => {
     // FAILS: GhosttyTerminalGrpc does not exist.
+    // Given
     const fake = makeFakeGrpcStream();
+
+    // When
     cy.mount(
       <div style={{ height: 400, width: 800, position: "relative" }}>
         <GhosttyTerminalGrpc
@@ -59,12 +63,17 @@ describe("GhosttyTerminalGrpc", () => {
         />
       </div>
     );
-    cy.get("[data-testid='ghostty-terminal']", { timeout: 10000 }).should("exist");
+
+    // Then
+    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
   });
 
   it("displays output bytes received from the gRPC stream", () => {
     // FAILS: GhosttyTerminalGrpc does not exist.
+    // Given
     const fake = makeFakeGrpcStream();
+
+    // When
     cy.mount(
       <div style={{ height: 400, width: 800, position: "relative" }}>
         <GhosttyTerminalGrpc
@@ -74,20 +83,21 @@ describe("GhosttyTerminalGrpc", () => {
         />
       </div>
     );
-    cy.get("[data-testid='ghostty-terminal']", { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
 
-    // Simulate the server sending "Hello world\r\n" to the terminal.
+    // When — server pushes "Hello world\r\n" to the terminal
     const payload = new TextEncoder().encode("Hello world\r\n");
     cy.then(() => {
       fake.pushOutput(payload);
     });
 
-    // The terminal canvas should render the text.
-    cy.get("[data-testid='ghostty-terminal']").should("contain.text", "Hello world");
+    // Then
+    byTestId(TEST_IDS.ghosttyTerminal).should("contain.text", "Hello world");
   });
 
   it("forwards keyboard input as bytes to the gRPC stream", () => {
     // FAILS: GhosttyTerminalGrpc does not exist.
+    // Given
     const fake = makeFakeGrpcStream();
     cy.mount(
       <div style={{ height: 400, width: 800, position: "relative" }}>
@@ -98,13 +108,13 @@ describe("GhosttyTerminalGrpc", () => {
         />
       </div>
     );
-    cy.get("[data-testid='ghostty-terminal']", { timeout: 10000 })
-      .should("exist")
-      .focus()
-      .type("ls");
+    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
 
+    // When
+    byTestId(TEST_IDS.ghosttyTerminal).focus().type("ls");
+
+    // Then
     cy.then(() => {
-      // Input bytes for "ls" must have been forwarded to the stream.
       const allSent = fake.sentChunks
         .map((c) => new TextDecoder().decode(c))
         .join("");
@@ -115,6 +125,7 @@ describe("GhosttyTerminalGrpc", () => {
 
   it("sends OSC resize sequence when the container is resized", () => {
     // FAILS: GhosttyTerminalGrpc does not exist.
+    // Given
     const fake = makeFakeGrpcStream();
     cy.mount(
       <div
@@ -128,13 +139,13 @@ describe("GhosttyTerminalGrpc", () => {
         />
       </div>
     );
-    cy.get("[data-testid='ghostty-terminal']", { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
 
-    // Trigger a resize by changing the container dimensions.
+    // When
     cy.get("#resize-wrapper").invoke("css", "width", "600px").invoke("css", "height", "300px");
 
+    // Then — at least one OSC resize sequence was sent: \x1b]resize;{cols};{rows}\x07
     cy.then(() => {
-      // At least one resize OSC sequence must have been sent:  \x1b]resize;{cols};{rows}\x07
       const allSent = fake.sentChunks
         .map((c) => new TextDecoder().decode(c))
         .join("");
@@ -144,6 +155,7 @@ describe("GhosttyTerminalGrpc", () => {
 
   it("shows a connection status dot", () => {
     // FAILS: GhosttyTerminalGrpc does not exist.
+    // Given / When
     const fake = makeFakeGrpcStream();
     cy.mount(
       <div style={{ height: 400, width: 800, position: "relative" }}>
@@ -155,11 +167,14 @@ describe("GhosttyTerminalGrpc", () => {
         />
       </div>
     );
-    cy.get("[data-testid='connection-status-dot']", { timeout: 10000 }).should("exist");
+
+    // Then
+    byTestId(TEST_IDS.connectionStatusDot, { timeout: 10000 }).should("exist");
   });
 
   it("calls onDisconnect when the Disconnect menu item is clicked", () => {
     // FAILS: GhosttyTerminalGrpc does not exist.
+    // Given
     const fake = makeFakeGrpcStream();
     const onDisconnect = cy.stub().as("onDisconnect");
     cy.mount(
@@ -173,8 +188,12 @@ describe("GhosttyTerminalGrpc", () => {
         />
       </div>
     );
-    cy.get("[data-testid='connection-status-dot']", { timeout: 10000 }).click();
-    cy.get("[data-testid='connection-menu-disconnect']").click({ force: true });
+
+    // When
+    byTestId(TEST_IDS.connectionStatusDot, { timeout: 10000 }).click();
+    byTestId(TEST_IDS.connectionMenuDisconnect).click({ force: true });
+
+    // Then
     cy.get("@onDisconnect").should("have.been.calledOnce");
   });
 });

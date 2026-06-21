@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { WorktreesScreen } from "../../src/components/worktrees/WorktreesScreen";
+import { worktreesPage } from "../support/pages/worktreesPage";
 
 const MOCK_ROWS = [
   {
@@ -20,7 +21,6 @@ const MOCK_ROWS = [
   },
 ];
 
-/** Acceptance: hamburger/menu entry, table columns, and delete confirmation with injected clients (no live RPC). */
 function WorktreesHarness() {
   const [deleted, setDeleted] = useState<string | null>(null);
   return (
@@ -30,27 +30,36 @@ function WorktreesHarness() {
           Worktrees
         </button>
       </nav>
-      <WorktreesScreen
-        worktrees={MOCK_ROWS}
-        onConfirmDelete={(p) => setDeleted(p)}
-      />
+      <WorktreesScreen worktrees={MOCK_ROWS} onConfirmDelete={(p) => setDeleted(p)} />
       {deleted ? <span data-testid="worktrees-deleted-path">{deleted}</span> : null}
     </div>
   );
 }
 
 describe("WorktreesScreen", () => {
-  it("cypress_worktrees_screen_renders_menu_and_table_with_mocked_clients", () => {
+  it("renders the menu entry, table headers, and all worktree rows", () => {
+    // Given
     cy.mount(<WorktreesHarness />);
-    cy.get('[data-testid="shell-menu-worktrees"]').should("be.visible");
-    cy.get('[data-testid="worktrees-screen"]').should("exist");
-    cy.get('[data-testid="worktrees-table"]').should("exist");
+
+    // Then
+    worktreesPage.menuButton().should("be.visible");
+    worktreesPage.screen().should("exist");
+    worktreesPage.table().should("exist");
     cy.contains("th", "Branch").should("be.visible");
     cy.contains("th", "Size").should("be.visible");
     cy.contains("th", "Changed files").should("be.visible");
-    cy.get('[data-testid="worktrees-row"]').should("have.length", MOCK_ROWS.length);
-    cy.get('[data-testid="worktrees-delete"]').first().click();
-    cy.get('[data-testid="worktrees-delete-confirm"]').click();
-    cy.get('[data-testid="worktrees-deleted-path"]').should("contain.text", MOCK_ROWS[0].path);
+    worktreesPage.rows().should("have.length", MOCK_ROWS.length);
+  });
+
+  it("fires onConfirmDelete with the worktree path after the user clicks Delete then Confirm", () => {
+    // Given
+    cy.mount(<WorktreesHarness />);
+
+    // When
+    worktreesPage.deleteBtn(0).click();
+    worktreesPage.confirmDeleteBtn().click();
+
+    // Then
+    worktreesPage.deletedPath().should("contain.text", MOCK_ROWS[0].path);
   });
 });

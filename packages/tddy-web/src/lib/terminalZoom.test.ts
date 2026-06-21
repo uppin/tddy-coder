@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   canPitchIn,
   canPitchOut,
@@ -11,48 +11,97 @@ import {
   TRACKPAD_PINCH_STEP_ACCUM_PX,
 } from "./terminalZoom";
 
-describe("terminalZoom (granular — Green phase implements correct math)", () => {
-  test("clampTerminalFontSize enforces min and max", () => {
-    expect(clampTerminalFontSize(5)).toBe(DEFAULT_TERMINAL_FONT_MIN);
-    expect(clampTerminalFontSize(100)).toBe(DEFAULT_TERMINAL_FONT_MAX);
-    expect(clampTerminalFontSize(20)).toBe(20);
+describe("terminalZoom", () => {
+  it("clamps the font size to the minimum when the input is below the floor", () => {
+    // When
+    const result = clampTerminalFontSize(5);
+    // Then
+    expect(result).toBe(DEFAULT_TERMINAL_FONT_MIN);
   });
 
-  test("pitchInFontSize increases by step until max", () => {
+  it("clamps the font size to the maximum when the input is above the ceiling", () => {
+    // When
+    const result = clampTerminalFontSize(100);
+    // Then
+    expect(result).toBe(DEFAULT_TERMINAL_FONT_MAX);
+  });
+
+  it("returns the value unchanged when it is within the allowed bounds", () => {
+    // When
+    const result = clampTerminalFontSize(20);
+    // Then
+    expect(result).toBe(20);
+  });
+
+  it("increases the font size by one step when pitching in below the maximum", () => {
+    // When + Then
     expect(pitchInFontSize(14)).toBe(15);
     expect(pitchInFontSize(31)).toBe(32);
   });
 
-  test("pitchOutFontSize decreases by step until min", () => {
+  it("decreases the font size by one step when pitching out above the minimum", () => {
+    // When + Then
     expect(pitchOutFontSize(14)).toBe(13);
     expect(pitchOutFontSize(9)).toBe(8);
-    expect(pitchOutFontSize(8)).toBe(8);
   });
 
-  test("canPitchIn is false at max", () => {
+  it("does not decrease the font size below the minimum when pitching out at the floor", () => {
+    // When
+    const result = pitchOutFontSize(8);
+    // Then
+    expect(result).toBe(8);
+  });
+
+  it("allows pitch-in when the font size is below the maximum", () => {
+    // When + Then
     expect(canPitchIn(31)).toBe(true);
-    expect(canPitchIn(32)).toBe(false);
   });
 
-  test("canPitchOut is false at min", () => {
+  it("blocks pitch-in when the font size is already at the maximum", () => {
+    // When
+    const result = canPitchIn(32);
+    // Then
+    expect(result).toBe(false);
+  });
+
+  it("allows pitch-out when the font size is above the minimum", () => {
+    // When + Then
     expect(canPitchOut(9)).toBe(true);
-    expect(canPitchOut(8)).toBe(false);
   });
 
-  test("reduceTrackpadPinchAccum resets when ctrlKey is false", () => {
-    const r = reduceTrackpadPinchAccum(10, -5, false, TRACKPAD_PINCH_STEP_ACCUM_PX, 14, {});
-    expect(r.accum).toBe(0);
-    expect(r.fontSize).toBe(14);
+  it("blocks pitch-out when the font size is already at the minimum", () => {
+    // When
+    const result = canPitchOut(8);
+    // Then
+    expect(result).toBe(false);
   });
 
-  test("reduceTrackpadPinchAccum pitch-in when deltaY negative and span exceeds step", () => {
-    const r = reduceTrackpadPinchAccum(0, -120, true, TRACKPAD_PINCH_STEP_ACCUM_PX, 14, {});
-    expect(r.fontSize).toBeGreaterThan(14);
-    expect(r.accum).toBeGreaterThan(-TRACKPAD_PINCH_STEP_ACCUM_PX);
+  it("resets the accumulator and leaves the font size unchanged when ctrlKey is false", () => {
+    // When
+    const result = reduceTrackpadPinchAccum(10, -5, false, TRACKPAD_PINCH_STEP_ACCUM_PX, 14, {});
+
+    // Then
+    expect(result.accum).toBe(0);
+    expect(result.fontSize).toBe(14);
   });
 
-  test("reduceTrackpadPinchAccum pitch-out when deltaY positive", () => {
-    const r = reduceTrackpadPinchAccum(0, 120, true, TRACKPAD_PINCH_STEP_ACCUM_PX, 20, {});
-    expect(r.fontSize).toBeLessThan(20);
+  it("increases the font size and wraps the accumulator when a negative deltaY exceeds the pitch step", () => {
+    // When
+    const result = reduceTrackpadPinchAccum(0, -120, true, TRACKPAD_PINCH_STEP_ACCUM_PX, 14, {});
+
+    // Then
+    // Font size must be strictly larger — exact increment depends on step math
+    expect(result.fontSize).toBeGreaterThan(14);
+    // Accumulator wraps back within one step after the pitch fires
+    expect(result.accum).toBeGreaterThan(-TRACKPAD_PINCH_STEP_ACCUM_PX);
+  });
+
+  it("decreases the font size when a positive deltaY exceeds the pitch step", () => {
+    // When
+    const result = reduceTrackpadPinchAccum(0, 120, true, TRACKPAD_PINCH_STEP_ACCUM_PX, 20, {});
+
+    // Then
+    // Font size must be strictly smaller — exact decrement depends on step math
+    expect(result.fontSize).toBeLessThan(20);
   });
 });

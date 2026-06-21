@@ -1,44 +1,81 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   computeHeaderCheckboxState,
   toggleRowInTableSelection,
   toggleSelectAllForTable,
 } from "./sessionSelection";
 
-describe("sessionSelection helpers (granular)", () => {
-  test("computeHeaderCheckboxState: partial selection → indeterminate, not checked", () => {
-    expect(computeHeaderCheckboxState(1, 3)).toEqual({ checked: false, indeterminate: true });
+describe("sessionSelection helpers", () => {
+  it("reports indeterminate state when only some rows are selected", () => {
+    // When
+    const result = computeHeaderCheckboxState(1, 3);
+    // Then
+    expect(result).toEqual({ checked: false, indeterminate: true });
   });
 
-  test("computeHeaderCheckboxState: all rows selected → checked, not indeterminate", () => {
-    expect(computeHeaderCheckboxState(3, 3)).toEqual({ checked: true, indeterminate: false });
+  it("reports checked state when all rows are selected", () => {
+    // When
+    const result = computeHeaderCheckboxState(3, 3);
+    // Then
+    expect(result).toEqual({ checked: true, indeterminate: false });
   });
 
-  test("toggleSelectAllForTable: when empty, selects all ids", () => {
+  it("reports unchecked non-indeterminate state when the table is empty", () => {
+    // When
+    const result = computeHeaderCheckboxState(0, 0);
+    // Then
+    expect(result).toEqual({ checked: false, indeterminate: false });
+  });
+
+  it("selects all ids when the current selection is empty", () => {
+    // Given
     const all = ["a", "b"];
-    expect(toggleSelectAllForTable(all, new Set())).toEqual(new Set(all));
+
+    // When
+    const result = toggleSelectAllForTable(all, new Set());
+
+    // Then
+    expect(result).toEqual(new Set(all));
   });
 
-  test("toggleSelectAllForTable: when all selected, clears", () => {
+  it("clears the selection when all rows are already selected", () => {
+    // Given
     const all = ["a", "b"];
-    expect(toggleSelectAllForTable(all, new Set(all))).toEqual(new Set());
+
+    // When
+    const result = toggleSelectAllForTable(all, new Set(all));
+
+    // Then
+    expect(result).toEqual(new Set());
   });
 
-  test("computeHeaderCheckboxState: zero rows → unchecked, not indeterminate", () => {
-    expect(computeHeaderCheckboxState(0, 0)).toEqual({ checked: false, indeterminate: false });
-  });
-
-  test("toggleSelectAllForTable: stale id in selection is replaced by current table ids", () => {
+  it("replaces a stale selection with the current table ids when toggling select-all", () => {
+    // Given
     const all = ["a", "b"];
     const stale = new Set(["a", "b", "removed-from-server"]);
-    expect(toggleSelectAllForTable(all, stale)).toEqual(new Set(all));
+
+    // When
+    const result = toggleSelectAllForTable(all, stale);
+
+    // Then
+    expect(result).toEqual(new Set(all));
   });
 
-  test("toggleRowInTableSelection: adds id when absent", () => {
-    expect(toggleRowInTableSelection(new Set(), "x")).toEqual(new Set(["x"]));
+  it("adds a row id to the selection when it is not present", () => {
+    // When
+    const result = toggleRowInTableSelection(new Set(), "x");
+    // Then
+    expect(result).toEqual(new Set(["x"]));
   });
 
-  test("toggleRowInTableSelection: removes id when present", () => {
-    expect(toggleRowInTableSelection(new Set(["x", "y"]), "x")).toEqual(new Set(["y"]));
+  it("removes a row id from the selection when it is already present", () => {
+    // Given
+    const selection = new Set(["x", "y"]);
+
+    // When
+    const result = toggleRowInTableSelection(selection, "x");
+
+    // Then
+    expect(result).toEqual(new Set(["y"]));
   });
 });

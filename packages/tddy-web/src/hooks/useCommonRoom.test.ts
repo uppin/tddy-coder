@@ -1,9 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
 
-function mockSessionStorage(): Storage {
+/** Provides an isolated in-memory sessionStorage for the duration of fn. */
+function withMockedSessionStorage(fn: () => void): void {
   const store = new Map<string, string>();
-  return {
+  const mock: Storage = {
     get length() {
       return store.size;
     },
@@ -22,43 +23,53 @@ function mockSessionStorage(): Storage {
     setItem(k: string, v: string) {
       store.set(k, v);
     },
-  } as Storage;
+  };
+  const prev = globalThis.sessionStorage;
+  globalThis.sessionStorage = mock;
+  try {
+    fn();
+  } finally {
+    globalThis.sessionStorage = prev;
+  }
 }
 
 describe("presence identity for LiveKit common room", () => {
-  test("repeated calls in the same tab reuse the same identity (sessionStorage)", () => {
-    const prev = globalThis.sessionStorage;
-    globalThis.sessionStorage = mockSessionStorage();
-    try {
+  it("repeated calls in the same tab reuse the same identity via sessionStorage", () => {
+    withMockedSessionStorage(() => {
+      // Given — fresh tab (empty sessionStorage)
+
+      // When
       const a = presenceIdentityForUser("testuser");
       const b = presenceIdentityForUser("testuser");
+
+      // Then — both calls return the same stable identity for this tab
       expect(a).toBe(b);
       expect(a.startsWith("web-testuser-")).toBe(true);
-    } finally {
-      globalThis.sessionStorage = prev;
-    }
+    });
   });
 
-  test("different GitHub logins get different identities in the same tab", () => {
-    const prev = globalThis.sessionStorage;
-    globalThis.sessionStorage = mockSessionStorage();
-    try {
+  it("different GitHub logins get different identities in the same tab", () => {
+    withMockedSessionStorage(() => {
+      // Given — fresh tab
+
+      // When
       const alice = presenceIdentityForUser("alice");
       const bob = presenceIdentityForUser("bob");
+
+      // Then
       expect(alice).not.toBe(bob);
-    } finally {
-      globalThis.sessionStorage = prev;
-    }
+    });
   });
 
-  test("identity includes a time-derived segment for debugging", () => {
-    const prev = globalThis.sessionStorage;
-    globalThis.sessionStorage = mockSessionStorage();
-    try {
+  it("identity includes a time-derived segment for debugging", () => {
+    withMockedSessionStorage(() => {
+      // Given — fresh tab
+
+      // When
       const identity = presenceIdentityForUser("myuser");
+
+      // Then — time-derived segment is generated at runtime; can only validate it contains a number sequence
       expect(identity).toMatch(/\d{10,}/);
-    } finally {
-      globalThis.sessionStorage = prev;
-    }
+    });
   });
 });

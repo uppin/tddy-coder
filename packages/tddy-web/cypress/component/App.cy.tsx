@@ -1,82 +1,14 @@
 import React from "react";
-import { create } from "@bufbuild/protobuf";
-import { toBinary } from "@bufbuild/protobuf";
 import { App } from "../../src/index";
 import {
-  GenerateTokenResponseSchema,
-  RefreshTokenResponseSchema,
-} from "../../src/gen/token_pb";
-import {
-  GetAuthStatusResponseSchema,
-  GitHubUserSchema,
-  GetAuthUrlResponseSchema,
-  ExchangeCodeResponseSchema,
-} from "../../src/gen/auth_pb";
-
-function mockTokenResponse(token: string, ttlSeconds: number) {
-  const msg = create(GenerateTokenResponseSchema, {
-    token,
-    ttlSeconds: BigInt(ttlSeconds),
-  });
-  return toBinary(GenerateTokenResponseSchema, msg);
-}
-
-function mockRefreshResponse(token: string, ttlSeconds: number) {
-  const msg = create(RefreshTokenResponseSchema, {
-    token,
-    ttlSeconds: BigInt(ttlSeconds),
-  });
-  return toBinary(RefreshTokenResponseSchema, msg);
-}
-
-function mockAuthStatusAuthenticated() {
-  const user = create(GitHubUserSchema, {
-    login: "testuser",
-    avatarUrl: "https://example.com/avatar.png",
-    name: "Test User",
-    id: BigInt(42),
-  });
-  const msg = create(GetAuthStatusResponseSchema, {
-    authenticated: true,
-    user,
-  });
-  return toBinary(GetAuthStatusResponseSchema, msg);
-}
-
-function mockAuthStatusUnauthenticated() {
-  const msg = create(GetAuthStatusResponseSchema, {
-    authenticated: false,
-  });
-  return toBinary(GetAuthStatusResponseSchema, msg);
-}
-
-const toArrayBuffer = (u8: Uint8Array) => {
-  const buf = new ArrayBuffer(u8.length);
-  new Uint8Array(buf).set(u8);
-  return buf;
-};
-
-function interceptAuthAsAuthenticated() {
-  const body = mockAuthStatusAuthenticated();
-  cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(body),
-    });
-  }).as("getAuthStatus");
-}
-
-function interceptAuthAsUnauthenticated() {
-  const body = mockAuthStatusUnauthenticated();
-  cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(body),
-    });
-  }).as("getAuthStatus");
-}
+  anAuthStatusAuthenticated,
+  anAuthStatusUnauthenticated,
+  aGenerateTokenResponse,
+  aRefreshTokenResponse,
+} from "../support/rpc/responses";
+import { toArrayBuffer } from "../support/rpc/protoRpc";
+import { byTestId, TEST_IDS } from "../support/testIds";
+import { connectionPage } from "../support/pages/connectionPage";
 
 // Mobile tap-to-type / focus assertions need a real LiveKit room (server participant). Those flows are covered in GhosttyTerminalLiveKit.cy.tsx without full App wiring.
 describe("App", () => {
@@ -93,64 +25,77 @@ describe("App", () => {
   });
 
   it("shows login button when not authenticated", () => {
-    interceptAuthAsUnauthenticated();
+    // Given — unauthenticated auth status
+    const body = toArrayBuffer(anAuthStatusUnauthenticated());
+    cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
+      req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
+    }).as("getAuthStatus");
+
+    // When
     cy.mount(<App />);
-    cy.get("[data-testid='github-login-button']", { timeout: 5000 }).should("exist");
+
+    // Then
+    byTestId(TEST_IDS.githubLoginButton, { timeout: 5000 }).should("exist");
     cy.get("#livekit-url").should("not.exist");
   });
 
   it("shows identity, url, and roomName form fields when authenticated", () => {
+    // Given — authenticated session
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAuthAsAuthenticated();
+    const body = toArrayBuffer(anAuthStatusAuthenticated());
+    cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
+      req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
+    }).as("getAuthStatus");
+
+    // When
     cy.mount(<App />);
     cy.wait("@getAuthStatus");
+
+    // Then
     cy.get("#livekit-url", { timeout: 5000 }).should("exist");
-    cy.get("[data-testid='livekit-identity']").should("exist");
+    byTestId(TEST_IDS.livekitIdentity).should("exist");
     cy.get("#livekit-room").should("exist");
-    cy.get("[data-testid='user-login']").should("have.text", "testuser");
+    byTestId(TEST_IDS.userLogin).should("have.text", "testuser");
   });
 
   it("connects via Connect-RPC token fetch when authenticated and form submitted", () => {
+    // Given — authenticated session with token intercepts
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAuthAsAuthenticated();
+    const authBody = toArrayBuffer(anAuthStatusAuthenticated());
+    cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
+      req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: authBody });
+    }).as("getAuthStatus");
 
-    const mockToken = "mock-jwt-from-rpc";
-    const mockTtl = 600;
-    const generateBody = mockTokenResponse(mockToken, mockTtl);
-    const refreshBody = mockRefreshResponse(mockToken, mockTtl);
+    const generateBody = toArrayBuffer(aGenerateTokenResponse({ token: "mock-jwt-from-rpc", ttlSeconds: 600n }));
     cy.intercept("POST", "**/rpc/token.TokenService/GenerateToken", (req) => {
-      req.reply({
-        statusCode: 200,
-        headers: { "Content-Type": "application/proto" },
-        body: toArrayBuffer(generateBody),
-      });
+      req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: generateBody });
     }).as("generateToken");
+
+    const refreshBody = toArrayBuffer(aRefreshTokenResponse({ token: "mock-jwt-from-rpc", ttlSeconds: 600n }));
     cy.intercept("POST", "**/rpc/token.TokenService/RefreshToken", (req) => {
-      req.reply({
-        statusCode: 200,
-        headers: { "Content-Type": "application/proto" },
-        body: toArrayBuffer(refreshBody),
-      });
+      req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: refreshBody });
     }).as("refreshToken");
 
+    // When — mount and submit the connection form
     cy.mount(<App />);
     cy.wait("@getAuthStatus");
     cy.get("#livekit-url", { timeout: 5000 }).type("ws://localhost:7880");
-    cy.get("[data-testid='livekit-identity']").type("client");
+    byTestId(TEST_IDS.livekitIdentity).type("client");
     cy.get("#livekit-room").clear().type("terminal-e2e");
     cy.get("button[type='submit']").click();
-
     cy.wait("@generateToken");
+
+    // Then — connection chrome is visible; form is gone; terminal container is fullscreen
     // Token fetch phase: primary status is the connection chrome (dot), not text-only livekit-status alone.
-    cy.get("[data-testid='connection-status-dot']", { timeout: 5000 }).should("exist");
+    connectionPage.statusDot({ timeout: 5000 }).should("exist");
     cy.get("#livekit-url").should("not.exist");
 
     // Acceptance: connection chrome — top-right status dot (with state); interrupt is TUI Stop pane (not web Stop).
-    cy.get("[data-testid='connection-status-dot']").should("have.attr", "data-connection-status");
-    cy.get("[data-testid='ctrl-c-button']").should("not.exist");
+    connectionPage.statusDot().should("have.attr", "data-connection-status");
+    byTestId(TEST_IDS.ctrlCButton).should("not.exist");
 
     // Acceptance: connected terminal container is fullscreen (100vw x 100vh)
-    cy.get("[data-testid='connected-terminal-container']")
+    connectionPage.terminalContainer({ timeout: 5000 })
       .should("exist")
       .then(($el) => {
         const rect = $el[0].getBoundingClientRect();
@@ -163,41 +108,36 @@ describe("App", () => {
   });
 
   it("shows mobile keyboard button when connected on touch-capable device", () => {
+    // Given — mobile viewport and authenticated session with token intercepts
     cy.viewport(375, 667);
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAuthAsAuthenticated();
+    const authBody = toArrayBuffer(anAuthStatusAuthenticated());
+    cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
+      req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: authBody });
+    }).as("getAuthStatus");
 
-    const mockToken = "mock-jwt-from-rpc";
-    const mockTtl = 600;
-    const generateBody = mockTokenResponse(mockToken, mockTtl);
-    const refreshBody = mockRefreshResponse(mockToken, mockTtl);
+    const generateBody = toArrayBuffer(aGenerateTokenResponse({ token: "mock-jwt-from-rpc", ttlSeconds: 600n }));
     cy.intercept("POST", "**/rpc/token.TokenService/GenerateToken", (req) => {
-      req.reply({
-        statusCode: 200,
-        headers: { "Content-Type": "application/proto" },
-        body: toArrayBuffer(generateBody),
-      });
+      req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: generateBody });
     }).as("generateToken");
+
+    const refreshBody = toArrayBuffer(aRefreshTokenResponse({ token: "mock-jwt-from-rpc", ttlSeconds: 600n }));
     cy.intercept("POST", "**/rpc/token.TokenService/RefreshToken", (req) => {
-      req.reply({
-        statusCode: 200,
-        headers: { "Content-Type": "application/proto" },
-        body: toArrayBuffer(refreshBody),
-      });
+      req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: refreshBody });
     }).as("refreshToken");
 
+    // When — mount and submit the connection form
     cy.mount(<App />);
     cy.wait("@getAuthStatus");
     cy.get("#livekit-url", { timeout: 5000 }).type("ws://localhost:7880");
-    cy.get("[data-testid='livekit-identity']").type("client");
+    byTestId(TEST_IDS.livekitIdentity).type("client");
     cy.get("#livekit-room").clear().type("terminal-e2e");
     cy.get("button[type='submit']").click();
-
     cy.wait("@generateToken");
-    cy.get("[data-testid='connected-terminal-container']", { timeout: 5000 }).should("exist");
-    cy.get("[data-testid='build-id']", { timeout: 2000 }).should("exist");
 
-    // Acceptance: on mobile (touch-capable), keyboard button appears at bottom when keyboard closed
-    cy.get("[data-testid='mobile-keyboard-button']", { timeout: 5000 }).should("exist");
+    // Then — on mobile (touch-capable), keyboard button appears at bottom when keyboard closed
+    connectionPage.terminalContainer({ timeout: 5000 }).should("exist");
+    byTestId(TEST_IDS.buildId, { timeout: 2000 }).should("exist");
+    byTestId(TEST_IDS.mobileKeyboardButton, { timeout: 5000 }).should("exist");
   });
 });

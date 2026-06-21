@@ -1,50 +1,22 @@
 import { describe, expect, it } from "bun:test";
-import { create } from "@bufbuild/protobuf";
-import { SessionEntrySchema } from "../gen/connection_pb";
+import { anActiveSession, anInactiveSession } from "../test-utils";
 import { sortSessionsForDisplay } from "./sessionSort";
 
 describe("sortSessionsForDisplay", () => {
-  it("orders active before inactive, then by createdAt descending, tie-break by sessionId", () => {
-    const wrongOrder = [
-      create(SessionEntrySchema, {
-        sessionId: "proj-order-inactive-old",
-        createdAt: "2026-03-21T07:00:00Z",
-        status: "exited",
-        repoPath: "/p",
-        pid: 0,
-        isActive: false,
-        projectId: "proj-1",
-      }),
-      create(SessionEntrySchema, {
-        sessionId: "proj-order-active-old",
-        createdAt: "2026-03-21T08:00:00Z",
-        status: "active",
-        repoPath: "/p",
-        pid: 2,
-        isActive: true,
-        projectId: "proj-1",
-      }),
-      create(SessionEntrySchema, {
-        sessionId: "proj-order-inactive-new",
-        createdAt: "2026-03-21T11:00:00Z",
-        status: "exited",
-        repoPath: "/p",
-        pid: 0,
-        isActive: false,
-        projectId: "proj-1",
-      }),
-      create(SessionEntrySchema, {
-        sessionId: "proj-order-active-new",
-        createdAt: "2026-03-21T12:00:00Z",
-        status: "active",
-        repoPath: "/p",
-        pid: 1,
-        isActive: true,
-        projectId: "proj-1",
-      }),
+  it("places active sessions before inactive, then orders by createdAt descending", () => {
+    // Given — sessions in deliberately wrong order (inactive first, oldest active last)
+    const sessions = [
+      anInactiveSession({ sessionId: "proj-order-inactive-old", createdAt: "2026-03-21T07:00:00Z", repoPath: "/p", projectId: "proj-1" }),
+      anActiveSession({ sessionId: "proj-order-active-old", createdAt: "2026-03-21T08:00:00Z", pid: 2, repoPath: "/p", projectId: "proj-1" }),
+      anInactiveSession({ sessionId: "proj-order-inactive-new", createdAt: "2026-03-21T11:00:00Z", repoPath: "/p", projectId: "proj-1" }),
+      anActiveSession({ sessionId: "proj-order-active-new", createdAt: "2026-03-21T12:00:00Z", pid: 1, repoPath: "/p", projectId: "proj-1" }),
     ];
-    const sorted = sortSessionsForDisplay(wrongOrder);
-    expect(sorted.map((s) => s.sessionId)).toEqual([
+
+    // When
+    const sorted = sortSessionsForDisplay(sessions);
+
+    // Then
+    expect(sorted).toContainSessionIdsInOrder([
       "proj-order-active-new",
       "proj-order-active-old",
       "proj-order-inactive-new",
@@ -52,92 +24,62 @@ describe("sortSessionsForDisplay", () => {
     ]);
   });
 
-  it("uses sessionId as stable tie-breaker when createdAt compares equal", () => {
+  it("uses sessionId as a stable tie-breaker when createdAt timestamps are equal", () => {
+    // Given — two inactive sessions with the same timestamp
     const sameTime = "2026-03-21T10:00:00Z";
-    const a = create(SessionEntrySchema, {
-      sessionId: "session-b",
-      createdAt: sameTime,
-      status: "exited",
-      repoPath: "/p",
-      pid: 0,
-      isActive: false,
-      projectId: "p",
-    });
-    const b = create(SessionEntrySchema, {
-      sessionId: "session-a",
-      createdAt: sameTime,
-      status: "exited",
-      repoPath: "/p",
-      pid: 0,
-      isActive: false,
-      projectId: "p",
-    });
-    const sorted = sortSessionsForDisplay([a, b]);
-    expect(sorted.map((s) => s.sessionId)).toEqual(["session-a", "session-b"]);
+    const sessions = [
+      anInactiveSession({ sessionId: "session-b", createdAt: sameTime, repoPath: "/p", projectId: "p" }),
+      anInactiveSession({ sessionId: "session-a", createdAt: sameTime, repoPath: "/p", projectId: "p" }),
+    ];
+
+    // When
+    const sorted = sortSessionsForDisplay(sessions);
+
+    // Then
+    expect(sorted).toContainSessionIdsInOrder(["session-a", "session-b"]);
   });
 
-  it("orders by sessionId when both createdAt values are unparsable", () => {
-    const hi = create(SessionEntrySchema, {
-      sessionId: "z-last",
-      createdAt: "not-a-date",
-      status: "exited",
-      repoPath: "/p",
-      pid: 0,
-      isActive: false,
-      projectId: "p",
-    });
-    const lo = create(SessionEntrySchema, {
-      sessionId: "a-first",
-      createdAt: "also-invalid",
-      status: "exited",
-      repoPath: "/p",
-      pid: 0,
-      isActive: false,
-      projectId: "p",
-    });
-    const sorted = sortSessionsForDisplay([hi, lo]);
-    expect(sorted.map((s) => s.sessionId)).toEqual(["a-first", "z-last"]);
+  it("falls back to sessionId order when both createdAt values are unparsable", () => {
+    // Given
+    const sessions = [
+      anInactiveSession({ sessionId: "z-last", createdAt: "not-a-date", repoPath: "/p", projectId: "p" }),
+      anInactiveSession({ sessionId: "a-first", createdAt: "also-invalid", repoPath: "/p", projectId: "p" }),
+    ];
+
+    // When
+    const sorted = sortSessionsForDisplay(sessions);
+
+    // Then
+    expect(sorted).toContainSessionIdsInOrder(["a-first", "z-last"]);
   });
 
-  it("uses sessionId when one createdAt is valid and the other is not (no time comparison)", () => {
-    const valid = create(SessionEntrySchema, {
-      sessionId: "session-zzz",
-      createdAt: "2026-03-21T12:00:00Z",
-      status: "exited",
-      repoPath: "/p",
-      pid: 0,
-      isActive: false,
-      projectId: "p",
-    });
-    const invalid = create(SessionEntrySchema, {
-      sessionId: "session-aaa",
-      createdAt: "bogus",
-      status: "exited",
-      repoPath: "/p",
-      pid: 0,
-      isActive: false,
-      projectId: "p",
-    });
-    const sorted = sortSessionsForDisplay([valid, invalid]);
-    expect(sorted.map((s) => s.sessionId)).toEqual(["session-aaa", "session-zzz"]);
+  it("falls back to sessionId order when one createdAt is valid and the other is not", () => {
+    // Given
+    const sessions = [
+      anInactiveSession({ sessionId: "session-zzz", createdAt: "2026-03-21T12:00:00Z", repoPath: "/p", projectId: "p" }),
+      anInactiveSession({ sessionId: "session-aaa", createdAt: "bogus", repoPath: "/p", projectId: "p" }),
+    ];
+
+    // When
+    const sorted = sortSessionsForDisplay(sessions);
+
+    // Then
+    expect(sorted).toContainSessionIdsInOrder(["session-aaa", "session-zzz"]);
   });
 
-  it("returns empty array for empty input", () => {
+  it("returns an empty array for empty input", () => {
+    // When / Then
     expect(sortSessionsForDisplay([])).toEqual([]);
   });
 
   it("returns a single session unchanged", () => {
-    const one = create(SessionEntrySchema, {
-      sessionId: "only",
-      createdAt: "2026-03-21T10:00:00Z",
-      status: "active",
-      repoPath: "/p",
-      pid: 1,
-      isActive: true,
-      projectId: "p",
-    });
-    const sorted = sortSessionsForDisplay([one]);
-    expect(sorted).toHaveLength(1);
-    expect(sorted[0]?.sessionId).toBe("only");
+    // Given
+    const only = anActiveSession({ sessionId: "only", repoPath: "/p", projectId: "p" });
+
+    // When
+    const sorted = sortSessionsForDisplay([only]);
+
+    // Then
+    expect(sorted).toContainSessionIdsInOrder(["only"]);
   });
 });

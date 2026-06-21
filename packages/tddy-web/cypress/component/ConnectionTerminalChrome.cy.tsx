@@ -1,29 +1,34 @@
 import React from "react";
 import { ConnectionTerminalChrome } from "../../src/components/connection/ConnectionTerminalChrome";
+import { byTestId, TEST_IDS } from "../support/testIds";
 
 describe("ConnectionTerminalChrome", () => {
-  it("places fullscreen control to the right of the connection status dot", () => {
+  it("places the fullscreen control to the right of the connection status dot", () => {
+    // Given
     const onDisconnect = cy.stub();
     cy.mount(
       <div style={{ position: "relative", width: 480, height: 320 }}>
-        <ConnectionTerminalChrome
-          overlayStatus="connected"
-          onDisconnect={onDisconnect}
-        />
-      </div>
+        <ConnectionTerminalChrome overlayStatus="connected" onDisconnect={onDisconnect} />
+      </div>,
     );
-    cy.get("[data-testid='connection-status-dot']").should("exist");
-    cy.get("[data-testid='terminal-fullscreen-button']").should("exist");
     cy.window().then((win) => {
       cy.stub(win.Element.prototype, "requestFullscreen").as("requestFullscreenStub").resolves();
     });
-    cy.get("[data-testid='terminal-fullscreen-button']").click();
+
+    // When
+    byTestId(TEST_IDS.terminalFullscreenButton).click();
+
+    // Then — fullscreen API was invoked
     cy.get("@requestFullscreenStub").should("have.been.calledOnce");
-    cy.get("[data-testid='connection-status-dot']").then(($dot) => {
-      cy.get("[data-testid='terminal-fullscreen-button']").then(($btn) => {
+
+    // Then — fullscreen control sits to the right of the status dot
+    byTestId(TEST_IDS.connectionStatusDot).then(($dot) => {
+      byTestId(TEST_IDS.terminalFullscreenButton).then(($btn) => {
         const dot = $dot[0].getBoundingClientRect();
         const btn = $btn[0].getBoundingClientRect();
-        expect(btn.left, "fullscreen control should sit to the right of the dot").to.be.greaterThan(dot.right);
+        expect(btn.left, "fullscreen control should sit to the right of the dot").to.be.greaterThan(
+          dot.right,
+        );
       });
     });
   });

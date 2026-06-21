@@ -5,13 +5,29 @@ import {
 } from "./connection/terminalPresentation";
 
 /**
- * Smoke: ConnectionScreen production module must keep importing presentation helpers used for
- * start/connect vs resume branching. Detailed behavior is covered in `terminalPresentation.test.ts`.
+ * Smoke: ConnectionScreen production module must keep importing the presentation helpers used
+ * for start/connect vs resume branching. Detailed behaviour is covered in
+ * `terminalPresentation.test.ts`.
  */
 describe("ConnectionScreen — terminal presentation import contract", () => {
-  it("exposes expected attach → presentation mapping used by ConnectionScreen handlers", () => {
+  it("resumeSession maps to the reconnect attach kind", () => {
+    // Then
     expect(attachKindForSessionControl("resumeSession")).toBe("reconnect");
-    expect(nextPresentationFromAttach("hidden", "reconnect").presentation).toBe("overlay");
-    expect(nextPresentationFromAttach("hidden", "new").shouldPushTerminalRoute).toBe(false);
+  });
+
+  it("reconnecting from hidden state opens the overlay presentation", () => {
+    // When
+    const result = nextPresentationFromAttach("hidden", "reconnect");
+
+    // Then
+    expect(result.presentation).toBe("overlay");
+  });
+
+  it("opening a new session from hidden state does not push a terminal route", () => {
+    // When
+    const result = nextPresentationFromAttach("hidden", "new");
+
+    // Then
+    expect(result.shouldPushTerminalRoute).toBe(false);
   });
 });
