@@ -106,22 +106,27 @@ impl LiveKitTestkit {
         let port_ice_tcp = free_tcp_port();
         let port_ice_udp = free_udp_port();
 
+        // Configure LiveKit ports via --config-body (inline YAML) for HTTP+ICE/TCP,
+        // and via UDP_PORT env var for ICE/UDP (which does not accept a YAML key here).
+        let config_body =
+            format!("port: {port_ws}\nrtc:\n  tcp_port: {port_ice_tcp}\n");
+
         let http_wait = HttpWaitStrategy::new("/")
             .with_port(port_ws.tcp())
             .with_expected_status_code(200u16);
 
-        let cmd: Vec<String> = vec![
-            "--dev".into(),
-            "--bind".into(), "0.0.0.0".into(),
-            "--node-ip".into(), "127.0.0.1".into(),
-            "--port".into(), port_ws.to_string(),
-            "--rtc.tcp_port".into(), port_ice_tcp.to_string(),
-            "--rtc.udp_mux_listen_addr".into(), format!("0.0.0.0:{}", port_ice_udp),
-        ];
-
         let image = GenericImage::new(LIVEKIT_IMAGE, LIVEKIT_TAG)
             .with_wait_for(WaitFor::from(http_wait))
-            .with_cmd(cmd)
+            .with_cmd([
+                "--dev",
+                "--bind",
+                "0.0.0.0",
+                "--node-ip",
+                "127.0.0.1",
+                "--config-body",
+                &config_body,
+            ])
+            .with_env_var("UDP_PORT", port_ice_udp.to_string())
             .with_mapped_port(port_ws, port_ws.tcp())
             .with_mapped_port(port_ice_tcp, port_ice_tcp.tcp())
             .with_mapped_port(port_ice_udp, port_ice_udp.udp());
