@@ -7322,7 +7322,7 @@ dependencies = [
  "env_logger",
  "futures-util",
  "livekit",
- "livekit-api 0.4.24",
+ "livekit-api 0.5.2",
  "log",
  "pretty_assertions",
  "prost 0.13.5",
@@ -7370,7 +7370,7 @@ name = "tddy-livekit-testkit"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "livekit-api 0.4.24",
+ "livekit-api 0.5.2",
  "log",
  "pretty_assertions",
  "rstest 0.24.0",
