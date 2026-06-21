@@ -78,6 +78,7 @@ export function SessionMainPane({
           )}
           {/* Inspector overlay */}
           <SessionInspectorDrawer
+            key={selectedSession.sessionId}
             state={inspectorState}
             session={selectedSession}
             onClose={onInspectorClose}
@@ -96,6 +97,7 @@ export function SessionMainPane({
           </div>
           {/* Inspector overlay */}
           <SessionInspectorDrawer
+            key={selectedSession.sessionId}
             state={inspectorState}
             session={selectedSession}
             onClose={onInspectorClose}
