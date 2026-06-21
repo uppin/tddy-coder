@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "../hooks/useAuth";
+import { useAuth, OAUTH_RETURN_TO_KEY } from "../hooks/useAuth";
 
 export function AuthCallback() {
   const { handleCallback, isAuthenticated, error } = useAuth();
@@ -20,7 +20,9 @@ export function AuthCallback() {
 
   useEffect(() => {
     if (isAuthenticated && !processing) {
-      window.location.href = "/";
+      const returnTo = sessionStorage.getItem(OAUTH_RETURN_TO_KEY);
+      sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
+      window.location.href = returnTo ? `/#${returnTo}` : "/";
     }
   }, [isAuthenticated, processing]);
 

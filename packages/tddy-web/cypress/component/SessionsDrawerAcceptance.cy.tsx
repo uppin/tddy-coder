@@ -258,7 +258,7 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
   // AC6: Clicking a disconnected session shows Resume + status + controls
   // -------------------------------------------------------------------------
 
-  it("shows Resume button and metadata in the detail pane when a disconnected session is clicked", () => {
+  it("opens the inspector with metadata and controls when a disconnected session is clicked", () => {
     // Given
     interceptConnectionRpcs([DISCONNECTED_SESSION]);
 
@@ -267,9 +267,10 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
     cy.wait("@listSessions");
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
 
-    // Then — Resume button and metadata visible; terminal container absent
-    sessionsDrawerPage.detailResumeBtn(DISCONNECTED_SESSION.sessionId).should("be.visible");
-    sessionsDrawerPage.detailMetadata().should("be.visible");
+    // Then — inspector opens with metadata and resume button; terminal container absent
+    sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
+    sessionsDrawerPage.inspectorMetadata().should("be.visible");
+    sessionsDrawerPage.inspectorResumeBtn(DISCONNECTED_SESSION.sessionId).should("be.visible");
     sessionsDrawerPage.detailTerminalContainer().should("not.exist");
   });
 
@@ -286,7 +287,7 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
     cy.mount(<SessionsDrawerScreen />);
     cy.wait("@listSessions");
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
-    sessionsDrawerPage.detailResumeBtn(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorResumeBtn(DISCONNECTED_SESSION.sessionId).click();
 
     // Then — verify the request was made with the correct session id
     cy.wait("@resumeSession").then((interception) => {
