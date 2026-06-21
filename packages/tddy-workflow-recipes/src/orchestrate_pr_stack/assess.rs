@@ -5,8 +5,8 @@ use std::path::Path;
 
 use async_trait::async_trait;
 use tddy_core::changeset::Stack;
-use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::context::Context;
+use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::task::{Task, TaskResult};
 
 use super::github::GithubPrApi;
@@ -194,7 +194,12 @@ mod tests {
 
     #[test]
     fn decide_next_action_spawn_root_node_not_yet_spawned() {
-        let views = vec![node_view("n1", &[], ChildPhase::NotSpawned, PrLiveStatus::None)];
+        let views = vec![node_view(
+            "n1",
+            &[],
+            ChildPhase::NotSpawned,
+            PrLiveStatus::None,
+        )];
         let action = decide_next_action(&views, false, &std::collections::HashSet::new());
         assert!(
             matches!(&action, OrchestratorAction::Spawn { node_ids } if node_ids == &["n1".to_string()]),
@@ -221,7 +226,10 @@ mod tests {
             "n2",
             &["n1"],
             ChildPhase::PrOpen,
-            PrLiveStatus::Open { number: 7, base: "master".to_string() },
+            PrLiveStatus::Open {
+                number: 7,
+                base: "master".to_string(),
+            },
         );
         let action = decide_next_action(&[n1, n2], true, &std::collections::HashSet::new());
         assert!(
@@ -235,7 +243,11 @@ mod tests {
         let n1 = node_view("n1", &[], ChildPhase::PrOpen, PrLiveStatus::Merged);
         let n2 = node_view("n2", &["n1"], ChildPhase::PrOpen, PrLiveStatus::Merged);
         let action = decide_next_action(&[n1, n2], false, &std::collections::HashSet::new());
-        assert_eq!(action, OrchestratorAction::Done, "expected Done when all merged");
+        assert_eq!(
+            action,
+            OrchestratorAction::Done,
+            "expected Done when all merged"
+        );
     }
 
     #[test]
@@ -246,7 +258,10 @@ mod tests {
             "n1",
             &[],
             ChildPhase::PrOpen,
-            PrLiveStatus::Open { number: 3, base: "master".to_string() },
+            PrLiveStatus::Open {
+                number: 3,
+                base: "master".to_string(),
+            },
         )];
         let action = decide_next_action(&views, false, &std::collections::HashSet::new());
         // Gate-off default: expect Wait, not Merge
@@ -262,16 +277,22 @@ mod tests {
 pub struct AssessTask {}
 
 impl AssessTask {
-    pub fn new() -> Self { Self {} }
+    pub fn new() -> Self {
+        Self {}
+    }
 }
 
 impl Default for AssessTask {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[async_trait]
 impl Task for AssessTask {
-    fn id(&self) -> &str { "assess" }
+    fn id(&self) -> &str {
+        "assess"
+    }
 
     async fn run(
         &self,

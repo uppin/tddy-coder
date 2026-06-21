@@ -5,7 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use tddy_workflow_recipes::orchestrate_pr_stack::{
-    MergePhase, StackOpJournal, recover_in_flight_stack_op, write_stack_op_journal,
+    recover_in_flight_stack_op, write_stack_op_journal, MergePhase, StackOpJournal,
 };
 
 fn scratch(label: &str) -> PathBuf {
@@ -27,14 +27,19 @@ fn recover_in_flight_stack_op_resumes_repointing_not_remerges() {
     let journal = StackOpJournal {
         op_id: "op-001".into(),
         merged_node_id: "n1".into(),
-        merge_phase: MergePhase::PrMerged { sha: "abc123".into() },
+        merge_phase: MergePhase::PrMerged {
+            sha: "abc123".into(),
+        },
         dependents: vec!["n2".into()],
     };
     write_stack_op_journal(&dir, &journal).expect("write_stack_op_journal must succeed");
 
     // Verify the file landed
     let journal_path = dir.join(".workflow").join("stack-op.json");
-    assert!(journal_path.exists(), "stack-op.json must be written by write_stack_op_journal");
+    assert!(
+        journal_path.exists(),
+        "stack-op.json must be written by write_stack_op_journal"
+    );
 
     // When — recover reads the journal and determines the action to take
     // Stub GithubPrApi: for now, recovery just reads the journal (no real GitHub call needed for

@@ -1,18 +1,22 @@
 //! **orchestrate-pr-stack** recipe: resumable idempotent loop that merges a PR stack to master.
 
-mod assess;
 mod actions;
+mod assess;
 mod git_ops;
 pub mod github;
 mod hooks;
 pub mod transient;
 
-pub use assess::{AssessTask, NodeView, ChildPhase, PrLiveStatus, OrchestratorAction,
-    decide_next_action, assemble_views, effective_base_ref};
-pub use actions::{SpawnTask, MergeTask, RepointTask};
+pub use actions::{MergeTask, RepointTask, SpawnTask};
+pub use assess::{
+    assemble_views, decide_next_action, effective_base_ref, AssessTask, ChildPhase, NodeView,
+    OrchestratorAction, PrLiveStatus,
+};
 pub use github::{GithubPrApi, RealGithubPrApi};
 pub use hooks::OrchestratePrStackHooks;
-pub use transient::{StackOpJournal, MergePhase, recover_in_flight_stack_op, write_stack_op_journal};
+pub use transient::{
+    recover_in_flight_stack_op, write_stack_op_journal, MergePhase, StackOpJournal,
+};
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -35,7 +39,9 @@ pub const STACK_STATUS_JSON_BASENAME: &str = "stack-status.json";
 pub struct OrchestratePrStackRecipe;
 
 impl WorkflowRecipe for OrchestratePrStackRecipe {
-    fn name(&self) -> &str { "orchestrate-pr-stack" }
+    fn name(&self) -> &str {
+        "orchestrate-pr-stack"
+    }
 
     fn build_graph(&self, _backend: Arc<dyn CodingBackend>) -> Graph {
         let assess = Arc::new(AssessTask::new());
@@ -83,7 +89,9 @@ impl WorkflowRecipe for OrchestratePrStackRecipe {
         vec![GoalId::new("assess")]
     }
 
-    fn submit_key(&self, goal_id: &GoalId) -> GoalId { goal_id.clone() }
+    fn submit_key(&self, goal_id: &GoalId) -> GoalId {
+        goal_id.clone()
+    }
 
     fn next_goal_for_state(&self, state: &WorkflowState) -> Option<GoalId> {
         match state.as_str() {
@@ -100,17 +108,29 @@ impl WorkflowRecipe for OrchestratePrStackRecipe {
         }
     }
 
-    fn initial_state(&self) -> WorkflowState { WorkflowState::new("Init") }
+    fn initial_state(&self) -> WorkflowState {
+        WorkflowState::new("Init")
+    }
 
-    fn start_goal(&self) -> GoalId { GoalId::new("assess") }
+    fn start_goal(&self) -> GoalId {
+        GoalId::new("assess")
+    }
 
-    fn plan_refinement_goal(&self) -> GoalId { GoalId::new("assess") }
+    fn plan_refinement_goal(&self) -> GoalId {
+        GoalId::new("assess")
+    }
 
-    fn default_models(&self) -> BTreeMap<GoalId, String> { BTreeMap::new() }
+    fn default_models(&self) -> BTreeMap<GoalId, String> {
+        BTreeMap::new()
+    }
 
-    fn goal_requires_session_dir(&self, _goal_id: &GoalId) -> bool { true }
+    fn goal_requires_session_dir(&self, _goal_id: &GoalId) -> bool {
+        true
+    }
 
-    fn uses_primary_session_document(&self) -> bool { false }
+    fn uses_primary_session_document(&self) -> bool {
+        false
+    }
 
     fn plain_goal_cli_output(
         &self,
@@ -124,7 +144,9 @@ impl WorkflowRecipe for OrchestratePrStackRecipe {
         Ok(())
     }
 
-    fn goal_requires_tddy_tools_submit(&self, _goal_id: &GoalId) -> bool { false }
+    fn goal_requires_tddy_tools_submit(&self, _goal_id: &GoalId) -> bool {
+        false
+    }
 }
 
 impl SessionArtifactManifest for OrchestratePrStackRecipe {
@@ -137,10 +159,18 @@ impl SessionArtifactManifest for OrchestratePrStackRecipe {
 
     fn default_artifacts(&self) -> BTreeMap<String, String> {
         let mut a = BTreeMap::new();
-        a.insert("stack_status_md".to_string(), STACK_STATUS_MD_BASENAME.to_string());
-        a.insert("stack_status_json".to_string(), STACK_STATUS_JSON_BASENAME.to_string());
+        a.insert(
+            "stack_status_md".to_string(),
+            STACK_STATUS_MD_BASENAME.to_string(),
+        );
+        a.insert(
+            "stack_status_json".to_string(),
+            STACK_STATUS_JSON_BASENAME.to_string(),
+        );
         a
     }
 
-    fn primary_document_basename(&self) -> Option<String> { None }
+    fn primary_document_basename(&self) -> Option<String> {
+        None
+    }
 }

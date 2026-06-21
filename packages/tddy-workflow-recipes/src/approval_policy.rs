@@ -34,7 +34,12 @@ pub fn supported_workflow_recipe_cli_names() -> &'static [&'static str] {
 pub fn recipe_should_skip_session_document_approval(recipe_cli_name: &str) -> bool {
     let skip = matches!(
         recipe_cli_name.trim(),
-        "free-prompting" | "grill-me" | "review" | "merge-pr" | "plan-pr-stack" | "orchestrate-pr-stack"
+        "free-prompting"
+            | "grill-me"
+            | "review"
+            | "merge-pr"
+            | "plan-pr-stack"
+            | "orchestrate-pr-stack"
     );
     log::debug!(
         "approval_policy::recipe_should_skip_session_document_approval({:?}) -> {}",

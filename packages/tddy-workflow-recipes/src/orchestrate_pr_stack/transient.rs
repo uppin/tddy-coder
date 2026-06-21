@@ -78,7 +78,9 @@ mod tests {
 
     #[test]
     fn merge_phase_serde_round_trip() {
-        let phase = MergePhase::PrMerged { sha: "abc123".to_string() };
+        let phase = MergePhase::PrMerged {
+            sha: "abc123".to_string(),
+        };
         let json = serde_json::to_string(&phase).expect("MergePhase should serialize");
         let back: MergePhase = serde_json::from_str(&json).expect("MergePhase should deserialize");
         assert_eq!(back, phase);
@@ -110,13 +112,18 @@ mod tests {
         let journal = StackOpJournal {
             op_id: "op-1".to_string(),
             merged_node_id: "n1".to_string(),
-            merge_phase: MergePhase::PrMerged { sha: "abc".to_string() },
+            merge_phase: MergePhase::PrMerged {
+                sha: "abc".to_string(),
+            },
             dependents: vec!["n2".to_string()],
         };
         write_stack_op_journal(tmp.path(), &journal).unwrap();
         let recovered = recover_in_flight_stack_op(tmp.path()).unwrap().unwrap();
         assert_eq!(recovered.merged_node_id, "n1");
-        assert!(matches!(recovered.merge_phase, MergePhase::RepointingDependent { idx: 0 }));
+        assert!(matches!(
+            recovered.merge_phase,
+            MergePhase::RepointingDependent { idx: 0 }
+        ));
     }
 
     #[test]

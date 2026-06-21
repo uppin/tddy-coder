@@ -9,8 +9,8 @@ use tddy_core::WorkflowRecipe;
 
 use crate::{
     approval_policy, BugfixRecipe, FreePromptingRecipe, GrillMeRecipe, MergePrRecipe,
-    OrchestratePrStackRecipe, PlanPrStackRecipe, ReviewRecipe,
-    SessionArtifactManifest, TddRecipe, TddSmallRecipe,
+    OrchestratePrStackRecipe, PlanPrStackRecipe, ReviewRecipe, SessionArtifactManifest, TddRecipe,
+    TddSmallRecipe,
 };
 
 /// Resolved workflow recipe plus its session-artifact manifest (same concrete type implements both).

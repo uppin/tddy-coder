@@ -1,11 +1,10 @@
 //! PRD acceptance: orchestrate-pr-stack assess loop — decide_next_action picks Merge for bottom
 //! node when ready; returns Wait in operator-gated mode.
 
-use tddy_workflow_recipes::orchestrate_pr_stack::{
-    ChildPhase, NodeView, OrchestratorAction, PrLiveStatus,
-    decide_next_action,
-};
 use tddy_core::workflow::ids::WorkflowState;
+use tddy_workflow_recipes::orchestrate_pr_stack::{
+    decide_next_action, ChildPhase, NodeView, OrchestratorAction, PrLiveStatus,
+};
 
 #[test]
 fn autonomous_merge_on_linear_two_pr_stack_reaches_done() {
@@ -20,7 +19,10 @@ fn autonomous_merge_on_linear_two_pr_stack_reaches_done() {
             child_session_id: Some("sid-n1".into()),
             child_state: Some(WorkflowState::new("Done")),
             child_phase: ChildPhase::PrOpen,
-            pr: PrLiveStatus::Open { number: 1, base: "master".into() },
+            pr: PrLiveStatus::Open {
+                number: 1,
+                base: "master".into(),
+            },
         },
         NodeView {
             node_id: "n2".into(),
@@ -29,7 +31,10 @@ fn autonomous_merge_on_linear_two_pr_stack_reaches_done() {
             child_session_id: Some("sid-n2".into()),
             child_state: Some(WorkflowState::new("Done")),
             child_phase: ChildPhase::PrOpen,
-            pr: PrLiveStatus::Open { number: 2, base: "feature/bottom".into() },
+            pr: PrLiveStatus::Open {
+                number: 2,
+                base: "feature/bottom".into(),
+            },
         },
     ];
 
@@ -40,7 +45,10 @@ fn autonomous_merge_on_linear_two_pr_stack_reaches_done() {
     // Then — decide_next_action must pick Merge for n1
     assert_eq!(
         action,
-        OrchestratorAction::Merge { node_id: "n1".into(), pr_number: 1 },
+        OrchestratorAction::Merge {
+            node_id: "n1".into(),
+            pr_number: 1
+        },
         "with n1 open and base=master and no unmerged parents, action must be Merge n1"
     );
 }
@@ -49,17 +57,18 @@ fn autonomous_merge_on_linear_two_pr_stack_reaches_done() {
 fn operator_gated_loop_waits_before_merge_when_autonomous_disabled() {
     // Given — one node: deps all merged (none), PR open, base=master — normally ready to merge.
     // With autonomous_merge=false (operator-gated mode), decide_next_action must return Wait.
-    let views = vec![
-        NodeView {
-            node_id: "n1".into(),
-            branch: "feature/bottom".into(),
-            parent_dep_ids: vec![],
-            child_session_id: Some("sid-n1".into()),
-            child_state: Some(WorkflowState::new("Done")),
-            child_phase: ChildPhase::PrOpen,
-            pr: PrLiveStatus::Open { number: 1, base: "master".into() },
+    let views = vec![NodeView {
+        node_id: "n1".into(),
+        branch: "feature/bottom".into(),
+        parent_dep_ids: vec![],
+        child_session_id: Some("sid-n1".into()),
+        child_state: Some(WorkflowState::new("Done")),
+        child_phase: ChildPhase::PrOpen,
+        pr: PrLiveStatus::Open {
+            number: 1,
+            base: "master".into(),
         },
-    ];
+    }];
 
     // When — called with autonomous_merge=false and no approved nodes (operator-gated mode)
     let action = decide_next_action(&views, false, &std::collections::HashSet::new());

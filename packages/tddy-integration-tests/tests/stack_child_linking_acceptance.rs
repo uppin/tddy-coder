@@ -9,8 +9,8 @@ use tddy_core::changeset::{
     link_stack_node_to_child_session, read_changeset, write_changeset, Changeset, ChangesetState,
     Stack, StackNode,
 };
-use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_chain::spawn_chain_child_worktree;
+use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::workflow::ids::WorkflowState;
 
 fn temp_dir(label: &str) -> PathBuf {
@@ -121,7 +121,7 @@ fn spawn_chain_child_sets_orchestrator_session_id() {
 
     // Then — must succeed; the child worktree creation confirms the base ref wired correctly
     result.expect(
-        "spawn_chain_child_worktree must succeed when orchestrator has a valid branch + repo_path"
+        "spawn_chain_child_worktree must succeed when orchestrator has a valid branch + repo_path",
     );
 }
 

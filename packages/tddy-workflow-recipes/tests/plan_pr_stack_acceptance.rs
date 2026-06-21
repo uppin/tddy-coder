@@ -48,7 +48,11 @@ prs:
     let nodes = planned_prs_into_stack_nodes(&plan.prs);
 
     // Then
-    assert_eq!(nodes.len(), 3, "mapper must produce one StackNode per PlannedPr");
+    assert_eq!(
+        nodes.len(),
+        3,
+        "mapper must produce one StackNode per PlannedPr"
+    );
     let n1 = nodes.iter().find(|n| n.node_id == "n1").expect("n1");
     let n2 = nodes.iter().find(|n| n.node_id == "n2").expect("n2");
     let n3 = nodes.iter().find(|n| n.node_id == "n3").expect("n3");
@@ -56,7 +60,10 @@ prs:
     assert_eq!(n2.parents, vec!["n1"]);
     assert_eq!(n3.parents, vec!["n1", "n2"]);
     assert_eq!(n1.branch_suggestion.as_deref(), Some("feature/auth-store"));
-    assert!(n1.session_id.is_none(), "no session_id before materialization");
+    assert!(
+        n1.session_id.is_none(),
+        "no session_id before materialization"
+    );
     assert!(n1.branch.is_none(), "no branch before materialization");
 }
 
@@ -89,7 +96,10 @@ fn validate_stack_plan_rejects_cycle() {
     let result = validate_stack_plan(&plan);
 
     // Then
-    assert!(result.is_err(), "validate_stack_plan must reject cyclic plans");
+    assert!(
+        result.is_err(),
+        "validate_stack_plan must reject cyclic plans"
+    );
     let msg = result.unwrap_err();
     assert!(
         msg.to_lowercase().contains("cycle"),

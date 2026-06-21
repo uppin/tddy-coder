@@ -9,16 +9,22 @@ use tddy_core::workflow::task::{Task, TaskResult};
 pub struct SpawnTask {}
 
 impl SpawnTask {
-    pub fn new() -> Self { Self {} }
+    pub fn new() -> Self {
+        Self {}
+    }
 }
 
 impl Default for SpawnTask {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[async_trait]
 impl Task for SpawnTask {
-    fn id(&self) -> &str { "spawn" }
+    fn id(&self) -> &str {
+        "spawn"
+    }
 
     async fn run(
         &self,
@@ -33,16 +39,22 @@ impl Task for SpawnTask {
 pub struct MergeTask {}
 
 impl MergeTask {
-    pub fn new() -> Self { Self {} }
+    pub fn new() -> Self {
+        Self {}
+    }
 }
 
 impl Default for MergeTask {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[async_trait]
 impl Task for MergeTask {
-    fn id(&self) -> &str { "merge" }
+    fn id(&self) -> &str {
+        "merge"
+    }
 
     async fn run(
         &self,
@@ -57,16 +69,22 @@ impl Task for MergeTask {
 pub struct RepointTask {}
 
 impl RepointTask {
-    pub fn new() -> Self { Self {} }
+    pub fn new() -> Self {
+        Self {}
+    }
 }
 
 impl Default for RepointTask {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[async_trait]
 impl Task for RepointTask {
-    fn id(&self) -> &str { "repoint" }
+    fn id(&self) -> &str {
+        "repoint"
+    }
 
     async fn run(
         &self,

@@ -511,7 +511,8 @@ pub fn workflow_recipe_selection_question() -> ClarificationQuestion {
             },
             QuestionOption {
                 label: "Plan PR stack".to_string(),
-                description: "Analyze feature intent and emit a structured PR-stack plan".to_string(),
+                description: "Analyze feature intent and emit a structured PR-stack plan"
+                    .to_string(),
             },
             QuestionOption {
                 label: "Orchestrate PR stack".to_string(),

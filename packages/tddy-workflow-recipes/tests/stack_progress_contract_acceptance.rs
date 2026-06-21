@@ -5,9 +5,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use tddy_core::changeset::{
-    read_changeset, sync_stack_node_from_child, update_stack_atomic,
-    write_changeset, Changeset, ChangesetState, GithubPrStatus, Stack, StackNode,
-    ChangesetWorkflow,
+    read_changeset, sync_stack_node_from_child, update_stack_atomic, write_changeset, Changeset,
+    ChangesetState, ChangesetWorkflow, GithubPrStatus, Stack, StackNode,
 };
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::workflow::ids::WorkflowState;
@@ -69,8 +68,8 @@ fn sync_stack_node_reflects_child_state_and_pr_status() {
                 branch: Some("feature/pr-1".into()),
                 session_id: Some(child_id.into()),
                 parents: vec![],
-                pr_status: None,       // not yet synced
-                child_state: None,     // not yet synced
+                pr_status: None,   // not yet synced
+                child_state: None, // not yet synced
             }],
         }),
         ..Changeset::default()
@@ -88,14 +87,20 @@ fn sync_stack_node_reflects_child_state_and_pr_status() {
     let stack = loaded.stack.expect("orchestrator stack must be present");
     let n1 = stack.node("n1").expect("n1 must exist");
 
-    let child_state = n1.child_state.as_ref().expect("child_state must be mirrored from child changeset state.current");
+    let child_state = n1
+        .child_state
+        .as_ref()
+        .expect("child_state must be mirrored from child changeset state.current");
     assert_eq!(
         child_state.as_str(),
         "Done",
         "child_state must reflect child session state.current (Done)"
     );
 
-    let pr_status = n1.pr_status.as_ref().expect("pr_status must be mirrored from child changeset workflow.github_pr_status");
+    let pr_status = n1
+        .pr_status
+        .as_ref()
+        .expect("pr_status must be mirrored from child changeset workflow.github_pr_status");
     assert_eq!(
         pr_status.phase, "open",
         "pr_status.phase must reflect child github_pr_status.phase"
@@ -147,7 +152,9 @@ fn update_stack_atomic_applies_mutation_and_writes_back() {
     let loaded = read_changeset(&orch_dir).unwrap();
     let _ = fs::remove_dir_all(&base);
 
-    let stack = loaded.stack.expect("stack must be present after atomic update");
+    let stack = loaded
+        .stack
+        .expect("stack must be present after atomic update");
     assert_eq!(stack.version, 2, "stack.version must be updated atomically");
     let n1 = stack.node("n1").expect("n1");
     assert_eq!(

@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 pub use hooks::PlanPrStackHooks;
-pub use prompt::{STACK_PLAN_BASENAME, PR_STACK_PLAN_MD_BASENAME};
+pub use prompt::{PR_STACK_PLAN_MD_BASENAME, STACK_PLAN_BASENAME};
 
 use tddy_core::backend::{CodingBackend, GoalHints, GoalId, PermissionHint};
 use tddy_core::workflow::graph::{Graph, GraphBuilder};
@@ -101,15 +101,23 @@ pub fn validate_stack_plan(plan: &StackPlanOutput) -> Result<(), String> {
 pub struct PlanPrStackRecipe;
 
 impl WorkflowRecipe for PlanPrStackRecipe {
-    fn name(&self) -> &str { "plan-pr-stack" }
+    fn name(&self) -> &str {
+        "plan-pr-stack"
+    }
 
     fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
         let analyze = Arc::new(BackendInvokeTask::from_recipe(
-            "analyze-stack", GoalId::new("analyze-stack"), recipe.clone(), backend.clone(),
+            "analyze-stack",
+            GoalId::new("analyze-stack"),
+            recipe.clone(),
+            backend.clone(),
         ));
         let write_plan = Arc::new(BackendInvokeTask::from_recipe(
-            "write-stack-plan", GoalId::new("write-stack-plan"), recipe, backend,
+            "write-stack-plan",
+            GoalId::new("write-stack-plan"),
+            recipe,
+            backend,
         ));
         let end = Arc::new(EndTask::new("end"));
         GraphBuilder::new("plan_pr_stack")
@@ -150,10 +158,15 @@ impl WorkflowRecipe for PlanPrStackRecipe {
     }
 
     fn goal_ids(&self) -> Vec<GoalId> {
-        vec![GoalId::new("analyze-stack"), GoalId::new("write-stack-plan")]
+        vec![
+            GoalId::new("analyze-stack"),
+            GoalId::new("write-stack-plan"),
+        ]
     }
 
-    fn submit_key(&self, goal_id: &GoalId) -> GoalId { goal_id.clone() }
+    fn submit_key(&self, goal_id: &GoalId) -> GoalId {
+        goal_id.clone()
+    }
 
     fn next_goal_for_state(&self, state: &WorkflowState) -> Option<GoalId> {
         match state.as_str() {
@@ -172,19 +185,36 @@ impl WorkflowRecipe for PlanPrStackRecipe {
         }
     }
 
-    fn initial_state(&self) -> WorkflowState { WorkflowState::new("AnalyzeStack") }
+    fn initial_state(&self) -> WorkflowState {
+        WorkflowState::new("AnalyzeStack")
+    }
 
-    fn start_goal(&self) -> GoalId { GoalId::new("analyze-stack") }
+    fn start_goal(&self) -> GoalId {
+        GoalId::new("analyze-stack")
+    }
 
-    fn plan_refinement_goal(&self) -> GoalId { GoalId::new("write-stack-plan") }
+    fn plan_refinement_goal(&self) -> GoalId {
+        GoalId::new("write-stack-plan")
+    }
 
-    fn default_models(&self) -> BTreeMap<GoalId, String> { BTreeMap::new() }
+    fn default_models(&self) -> BTreeMap<GoalId, String> {
+        BTreeMap::new()
+    }
 
-    fn goal_requires_session_dir(&self, _goal_id: &GoalId) -> bool { true }
+    fn goal_requires_session_dir(&self, _goal_id: &GoalId) -> bool {
+        true
+    }
 
-    fn uses_primary_session_document(&self) -> bool { false }
+    fn uses_primary_session_document(&self) -> bool {
+        false
+    }
 
-    fn plain_goal_cli_output(&self, goal_id: &GoalId, output: Option<&str>, _session_dir: &Path) -> Result<(), String> {
+    fn plain_goal_cli_output(
+        &self,
+        goal_id: &GoalId,
+        output: Option<&str>,
+        _session_dir: &Path,
+    ) -> Result<(), String> {
         if let Some(o) = output {
             log::info!("[plan-pr-stack:{}] output:\n{}", goal_id.as_str(), o);
         }
@@ -329,7 +359,10 @@ mod tests {
         let result = validate_stack_plan(&plan);
         assert!(result.is_err(), "expected Err for cycle in plan");
         let msg = result.unwrap_err().to_lowercase();
-        assert!(msg.contains("cycle"), "error should mention cycle, got: {msg}");
+        assert!(
+            msg.contains("cycle"),
+            "error should mention cycle, got: {msg}"
+        );
     }
 
     #[test]
@@ -368,9 +401,14 @@ impl SessionArtifactManifest for PlanPrStackRecipe {
     fn default_artifacts(&self) -> BTreeMap<String, String> {
         let mut a = BTreeMap::new();
         a.insert("stack_plan".to_string(), STACK_PLAN_BASENAME.to_string());
-        a.insert("stack_plan_md".to_string(), PR_STACK_PLAN_MD_BASENAME.to_string());
+        a.insert(
+            "stack_plan_md".to_string(),
+            PR_STACK_PLAN_MD_BASENAME.to_string(),
+        );
         a
     }
 
-    fn primary_document_basename(&self) -> Option<String> { None }
+    fn primary_document_basename(&self) -> Option<String> {
+        None
+    }
 }

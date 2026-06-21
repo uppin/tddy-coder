@@ -764,8 +764,7 @@ pub fn sync_stack_node_from_child(
         return Ok(());
     };
 
-    let child_dir =
-        crate::session_lifecycle::unified_session_dir_path(sessions_root, &session_id);
+    let child_dir = crate::session_lifecycle::unified_session_dir_path(sessions_root, &session_id);
     let child = read_changeset(&child_dir)?;
     let child_state = child.state.current.clone();
     let pr_status = child
@@ -946,17 +945,22 @@ mod stack_tests {
         let refs = stack.effective_base_refs("n3", "origin/master");
         assert_eq!(
             refs,
-            vec!["origin/feature/n1".to_string(), "origin/feature/n2".to_string()]
+            vec![
+                "origin/feature/n1".to_string(),
+                "origin/feature/n2".to_string()
+            ]
         );
     }
 
     #[test]
     fn effective_base_refs_all_merged_returns_bottom_base() {
-        let merged_status = || Some(GithubPrStatus {
-            phase: "merged".to_string(),
-            url: None,
-            error: None,
-        });
+        let merged_status = || {
+            Some(GithubPrStatus {
+                phase: "merged".to_string(),
+                url: None,
+                error: None,
+            })
+        };
         let stack = Stack {
             version: 1,
             nodes: vec![
@@ -1040,7 +1044,10 @@ mod stack_tests {
             ],
         };
         let order = stack.topo_order().unwrap();
-        assert_eq!(order, vec!["n1".to_string(), "n2".to_string(), "n3".to_string()]);
+        assert_eq!(
+            order,
+            vec!["n1".to_string(), "n2".to_string(), "n3".to_string()]
+        );
     }
 
     #[test]
@@ -1075,7 +1082,10 @@ mod stack_tests {
         let result = stack.topo_order();
         assert!(result.is_err(), "expected Err for cycle, got Ok");
         let err = result.unwrap_err().to_string().to_lowercase();
-        assert!(err.contains("cycle"), "error message should mention 'cycle', got: {err}");
+        assert!(
+            err.contains("cycle"),
+            "error message should mention 'cycle', got: {err}"
+        );
     }
 
     #[test]
@@ -1083,7 +1093,10 @@ mod stack_tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
         let mut cs = Changeset::default();
-        cs.stack = Some(Stack { version: 1, nodes: vec![] });
+        cs.stack = Some(Stack {
+            version: 1,
+            nodes: vec![],
+        });
         write_changeset(dir, &cs).unwrap();
 
         update_stack_atomic(dir, |stack| {
@@ -1172,7 +1185,10 @@ mod stack_tests {
         let loaded = read_changeset(orch_dir).unwrap();
         let stack = loaded.stack.unwrap();
         let n1 = stack.node("n1").unwrap();
-        assert_eq!(n1.child_state, Some(WorkflowState::new("GreenImplementing")));
+        assert_eq!(
+            n1.child_state,
+            Some(WorkflowState::new("GreenImplementing"))
+        );
         assert_eq!(n1.pr_status.as_ref().unwrap().phase, "open");
     }
 
@@ -1189,8 +1205,12 @@ state:
 artifacts: {}
 discovery: ~
 "#;
-        let cs: Changeset = serde_yaml::from_str(yaml).expect("legacy changeset should deserialize");
-        assert!(cs.stack.is_none(), "stack should be None for legacy changeset");
+        let cs: Changeset =
+            serde_yaml::from_str(yaml).expect("legacy changeset should deserialize");
+        assert!(
+            cs.stack.is_none(),
+            "stack should be None for legacy changeset"
+        );
         assert!(
             cs.orchestrator_session_id.is_none(),
             "orchestrator_session_id should be None for legacy changeset"
