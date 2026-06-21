@@ -8,17 +8,23 @@ import {
 /**
  * Unit acceptance tests for camera/track visibility helpers (PRD Testing Plan).
  * Implementation lives in `./participantCameraVideo` — tests must fail until it exists.
+ *
+ * Note: these tests build a minimal livekit Participant duck-type inline.
+ * The `aFakeParticipant` builder in test-utils represents a RoomParticipant (domain
+ * type), not the livekit Participant SDK type, so it does not apply here.
  */
-describe("participantCameraVideo (hasRenderableCameraVideo)", () => {
-  it("returns false when the participant has no renderable camera video track", () => {
-    const participant = {
-      getTrackPublications: () => [],
-      isLocal: false,
-    };
+
+describe("hasRenderableCameraVideo", () => {
+  it("returns false when the participant has no track publications", () => {
+    // Given
+    const participant = { getTrackPublications: () => [], isLocal: false };
+
+    // When / Then
     expect(hasRenderableCameraVideo(participant as never)).toBe(false);
   });
 
   it("returns true when a subscribed remote camera publication can be rendered", () => {
+    // Given
     const participant = {
       getTrackPublications: () => [
         {
@@ -30,12 +36,18 @@ describe("participantCameraVideo (hasRenderableCameraVideo)", () => {
       ],
       isLocal: false,
     };
+
+    // When / Then
     expect(hasRenderableCameraVideo(participant as never)).toBe(true);
   });
 });
 
-describe("participantCameraVideo (shouldShowParticipantVideoAffordance)", () => {
+describe("shouldShowParticipantVideoAffordance", () => {
   it("returns true when the injected map marks the identity as having camera video", () => {
-    expect(shouldShowParticipantVideoAffordance({ "peer-a": true }, "peer-a")).toBe(true);
+    // Given
+    const cameraMap = { "peer-a": true };
+
+    // When / Then
+    expect(shouldShowParticipantVideoAffordance(cameraMap, "peer-a")).toBe(true);
   });
 });

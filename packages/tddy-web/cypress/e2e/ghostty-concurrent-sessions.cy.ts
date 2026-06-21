@@ -1,35 +1,22 @@
 /**
  * E2E: A second browser window connecting to the same LiveKit room with mobile
- * screen dimensions must not blank the first (desktop) window's terminal.
+ * dimensions must not blank the first (desktop) window's terminal.
  *
- * Bug: reconnecting to a session in tddy-web results in a blank terminal
- * (only cursor blinking). The second RPC TUI session somehow affects the first.
+ * Bug: reconnecting to a session in tddy-web resulted in a blank terminal.
  *
- * This test uses window.open() to spawn a second browser window that connects
- * to the same tddy-demo server via the same LiveKit room with the same client
- * identity — simulating the real reconnection scenario.
- *
- * Requires: LIVEKIT_TESTKIT_WS_URL, tddy-demo built
+ * Requires: LIVEKIT_TESTKIT_WS_URL, tddy-demo built.
+ * Skipped when LIVEKIT_TESTKIT_WS_URL is not set.
  */
+import type { TerminalSessionResult } from "../support/commands";
+
+const STORY_ID = "components-ghosttyterminal--live-kit-connected";
+
 describe("Ghostty Concurrent Sessions — Two Browser Windows", () => {
-  let serverUrl: string;
-  let clientToken: string;
-  let roomName: string;
+  let session: TerminalSessionResult = {} as TerminalSessionResult;
 
   before(function () {
-    if (!Cypress.env("LIVEKIT_TESTKIT_WS_URL")) {
-      this.skip();
-      return;
-    }
-    return cy.task("startTerminalServer", { prompt: "Build auth" }).then((result) => {
-      const r = result as {
-        url: string;
-        clientToken: string;
-        roomName: string;
-      };
-      serverUrl = r.url;
-      clientToken = r.clientToken;
-      roomName = r.roomName;
+    cy.startTerminalSession({ kind: "terminal", prompt: "Build auth" }).then((result) => {
+      session = result;
     });
   });
 
@@ -37,59 +24,44 @@ describe("Ghostty Concurrent Sessions — Two Browser Windows", () => {
     cy.task("stopTerminalServer");
   });
 
-  it("mobile window connecting with same identity does not blank desktop terminal", () => {
-    const storyUrl = `/iframe.html?id=components-ghosttyterminal--live-kit-connected&url=${encodeURIComponent(serverUrl)}&token=${encodeURIComponent(clientToken)}&roomName=${encodeURIComponent(roomName)}`;
-
-    // Desktop window — full viewport
+  it("mobile window connecting with the same identity does not blank the desktop terminal", () => {
+    // Given — desktop window connected and showing content
+    const storyUrl = `/iframe.html?id=${STORY_ID}&url=${encodeURIComponent(session.url)}&token=${encodeURIComponent(session.clientToken)}&roomName=${encodeURIComponent(session.roomName)}`;
     cy.visit(storyUrl);
+    cy.connectAndWaitForTerminal();
+    cy.waitForBufferText("Email/password");
 
-    cy.get("[data-testid='connection-status-dot']", { timeout: 25000 })
-      .should("be.visible")
-      .and("have.attr", "data-connection-status", "connected");
-
-    cy.get("[data-testid='first-output-received']", { timeout: 15000 }).should("exist");
-
-    cy.get("[data-testid='terminal-buffer-text']", { timeout: 20000 }).should(($el) => {
-      const text = $el.text();
-      expect(text).to.include("Email/password");
-    });
-
-    // Open a second browser window with the SAME token (same identity)
-    // and mobile viewport dimensions, simulating a phone reconnection.
+    // When — open a second window with mobile viewport + same token (same identity)
     cy.window().then((win) => {
-      const mobileWidth = 375;
-      const mobileHeight = 667;
       win.open(
         storyUrl,
         "mobile-terminal",
-        `width=${mobileWidth},height=${mobileHeight},menubar=no,toolbar=no`
+        "width=375,height=667,menubar=no,toolbar=no",
       );
     });
 
-    // Wait for the second window's LiveKit connection to establish
-    // and any cross-session effects to propagate.
-    cy.wait(5000);
+    // Wait for the second window's connection to establish and any cross-session
+    // effects to propagate before asserting the desktop state
+    // eslint-disable-next-line cypress/no-unnecessary-waiting
+    cy.wait(5000); // justified: second window needs to complete its LiveKit handshake
 
-    // The desktop terminal must still show the user question — not go blank.
+    // Then — desktop terminal still shows user question (not blank)
     cy.get("[data-testid='terminal-buffer-text']").should(($el) => {
-      const text = $el.text();
-      expect(text).to.include(
-        "Email/password",
-        "Desktop terminal must not go blank after mobile window connects with same identity"
-      );
-    });
-
-    // Status bar must still appear (not blanked)
-    cy.get("[data-testid='terminal-buffer-text']").should(($el) => {
-      const text = $el.text();
-      const goalMatches = text.match(/Goal:/g);
       expect(
-        goalMatches?.length ?? 0,
-        "Desktop terminal should still have a status bar"
+        $el.text(),
+        "Desktop terminal must not go blank after mobile window connects with same identity",
+      ).to.include("Email/password");
+    });
+
+    // Then — status bar still present (not blanked)
+    cy.get("[data-testid='terminal-buffer-text']").should(($el) => {
+      expect(
+        ($el.text().match(/Goal:/g)?.length ?? 0),
+        "Desktop terminal should still have a status bar",
       ).to.be.greaterThan(0);
     });
 
-    // Connection must still be active (not evicted)
+    // Then — connection still active (not evicted)
     cy.get("[data-testid='connection-status-dot']")
       .should("be.visible")
       .and("have.attr", "data-connection-status", "connected");

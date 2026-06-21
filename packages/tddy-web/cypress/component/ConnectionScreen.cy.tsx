@@ -2,58 +2,29 @@ import React from "react";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { ConnectionScreen } from "../../src/components/ConnectionScreen";
 import {
-  ListToolsResponseSchema,
-  ToolInfoSchema,
-  ListAgentsResponseSchema,
-  AgentInfoSchema,
-  ListSessionsResponseSchema,
-  SessionEntrySchema,
-  ListProjectsResponseSchema,
-  ProjectEntrySchema,
-  ListEligibleDaemonsResponseSchema,
-  EligibleDaemonEntrySchema,
   StartSessionRequestSchema,
   StartSessionResponseSchema,
-  ConnectSessionRequestSchema,
-  ConnectSessionResponseSchema,
-  ResumeSessionResponseSchema,
-  DeleteSessionRequestSchema,
 } from "../../src/gen/connection_pb";
 import {
-  GetAuthStatusResponseSchema,
-  GitHubUserSchema,
-} from "../../src/gen/auth_pb";
-import {
-  GenerateTokenResponseSchema,
-  RefreshTokenResponseSchema,
-} from "../../src/gen/token_pb";
+  interceptConnectionRpcs,
+  interceptConnectionRpcsProjectIdCollision,
+  interceptConnectSession,
+  interceptConnectSessionPerSessionId,
+  interceptResumeSession,
+  interceptSignalSession,
+  interceptSignalSessionError,
+  interceptTokenForPresence,
+  DAEMON_LOCAL,
+  DAEMON_PEER,
+  COLLISION_PROJECT_ID,
+} from "../support/rpc/connectionRpcs";
+import { toArrayBuffer } from "../support/rpc/protoRpc";
+import { byTestId, TEST_IDS } from "../support/testIds";
+import { connectionPage } from "../support/pages/connectionPage";
 
-const toArrayBuffer = (u8: Uint8Array) => {
-  const buf = new ArrayBuffer(u8.length);
-  new Uint8Array(buf).set(u8);
-  return buf;
-};
-
-/** Binary request body from `cy.intercept` (ArrayBuffer, Buffer, Uint8Array, or binary string). */
-function connectRequestBodyToUint8(body: unknown): Uint8Array {
-  if (body instanceof Uint8Array) {
-    return body;
-  }
-  if (body instanceof ArrayBuffer) {
-    return new Uint8Array(body);
-  }
-  if (typeof Buffer !== "undefined" && Buffer.isBuffer(body)) {
-    return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
-  }
-  if (typeof body === "string") {
-    const out = new Uint8Array(body.length);
-    for (let i = 0; i < body.length; i++) {
-      out[i] = body.charCodeAt(i) & 0xff;
-    }
-    return out;
-  }
-  throw new Error(`Unsupported request body: ${Object.prototype.toString.call(body)}`);
-}
+// ---------------------------------------------------------------------------
+// Session / project constant builders (Partial<SessionEntry> objects)
+// ---------------------------------------------------------------------------
 
 const ACTIVE_SESSION = {
   sessionId: "session-active-1",
@@ -194,300 +165,96 @@ const ORPH_ORDER_INACTIVE_OLD = {
   projectId: ORPHAN_ORDER_PROJECT_ID,
 };
 
-const PROJECT = {
+const PROJECT_ID = "proj-1";
+
+/** Row key when ListProjects tags the project with the local eligible daemon (multi-host mocks). */
+const PROJECT_ROW_MULTI_HOST = `${PROJECT_ID}__${DAEMON_LOCAL.instanceId}`;
+
+const SESSION_WITH_HOST = {
+  sessionId: "session-host-1",
+  createdAt: "2026-03-28T10:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/project",
+  pid: 12345,
+  isActive: true,
   projectId: "proj-1",
-  name: "Test Project",
-  gitUrl: "https://github.com/test/project.git",
-  mainRepoPath: "/home/dev/project",
+  daemonInstanceId: "workstation-1",
+};
+
+/** `ACTIVE_SESSION` with daemon matching multi-host ListProjects + ListEligibleDaemons local row. */
+const ACTIVE_SESSION_ON_LOCAL_ELIGIBLE_DAEMON = {
+  ...ACTIVE_SESSION,
+  daemonInstanceId: DAEMON_LOCAL.instanceId,
+};
+
+const COLLISION_SESSION_WS = {
+  sessionId: "collision-sess-ws",
+  createdAt: "2026-04-10T10:00:00Z",
+  status: "active",
+  repoPath: "/home/ws/dup",
+  pid: 60001,
+  isActive: true,
+  projectId: COLLISION_PROJECT_ID,
+  daemonInstanceId: DAEMON_LOCAL.instanceId,
+};
+
+const COLLISION_SESSION_SRV = {
+  sessionId: "collision-sess-srv",
+  createdAt: "2026-04-10T11:00:00Z",
+  status: "active",
+  repoPath: "/srv/dup",
+  pid: 60002,
+  isActive: true,
+  projectId: COLLISION_PROJECT_ID,
+  daemonInstanceId: DAEMON_PEER.instanceId,
+};
+
+/** Extended ListSessions payload — acceptance / TUI parity (workflow columns). */
+const STATUS_PARITY_SESSION_V1 = {
+  sessionId: "session-status-parity-1",
+  createdAt: "2026-03-21T10:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/project",
+  pid: 12345,
+  isActive: true,
+  projectId: "proj-1",
+  daemonInstanceId: "",
+  workflowGoal: "acceptance-tests",
+  workflowState: "Red",
+  elapsedDisplay: "1m 2s",
+  agent: "claude",
+  model: "sonnet-4",
+};
+
+const STATUS_PARITY_SESSION_V2 = {
+  ...STATUS_PARITY_SESSION_V1,
+  workflowState: "Green",
+  elapsedDisplay: "3m 0s",
+};
+
+const SESSION_MULTI_A = {
+  sessionId: "multi-session-aaaaaaaa-bbbb-cccc-dddd-eeee11111111",
+  createdAt: "2026-03-21T10:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/project",
+  pid: 70001,
+  isActive: true,
+  projectId: "proj-1",
   daemonInstanceId: "",
 };
 
-function mockAuthAuthenticated() {
-  const user = create(GitHubUserSchema, {
-    login: "testuser",
-    avatarUrl: "https://example.com/avatar.png",
-    name: "Test User",
-    id: BigInt(42),
-  });
-  return toBinary(
-    GetAuthStatusResponseSchema,
-    create(GetAuthStatusResponseSchema, { authenticated: true, user }),
-  );
-}
-
-function mockListToolsResponse() {
-  return toBinary(
-    ListToolsResponseSchema,
-    create(ListToolsResponseSchema, {
-      tools: [
-        create(ToolInfoSchema, { path: "/usr/bin/tddy-coder", label: "tddy-coder" }),
-      ],
-    }),
-  );
-}
-
-/** Matches default dev.daemon.yaml `allowed_agents`. */
-const MOCK_DEFAULT_LIST_AGENTS = [
-  { id: "claude", label: "Claude (opus)" },
-  { id: "claude-acp", label: "Claude ACP (opus)" },
-  { id: "cursor", label: "Cursor (composer-2)" },
-  { id: "stub", label: "Stub" },
-  { id: "codex", label: "Codex" },
-  { id: "codex-acp", label: "Codex ACP" },
-];
-
-function mockListAgentsResponse(agents: Array<{ id: string; label: string }>) {
-  return toBinary(
-    ListAgentsResponseSchema,
-    create(ListAgentsResponseSchema, {
-      agents: agents.map((a) => create(AgentInfoSchema, { id: a.id, label: a.label })),
-    }),
-  );
-}
-
-type MockSessionRow = {
-  sessionId: string;
-  createdAt: string;
-  status: string;
-  repoPath: string;
-  pid: number;
-  isActive: boolean;
-  projectId: string;
-  daemonInstanceId?: string;
-  workflowGoal?: string;
-  workflowState?: string;
-  elapsedDisplay?: string;
-  agent?: string;
-  model?: string;
-  pendingElicitation?: boolean;
+const SESSION_MULTI_B = {
+  sessionId: "multi-session-bbbbbbbb-aaaa-cccc-dddd-ffff22222222",
+  createdAt: "2026-03-21T11:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/project",
+  pid: 70002,
+  isActive: true,
+  projectId: "proj-1",
+  daemonInstanceId: "",
 };
 
-function mockListSessionsResponse(sessions: MockSessionRow[]) {
-  return toBinary(
-    ListSessionsResponseSchema,
-    create(ListSessionsResponseSchema, {
-      sessions: sessions.map((s) =>
-        create(SessionEntrySchema, {
-          ...s,
-          pendingElicitation: s.pendingElicitation ?? false,
-        }),
-      ),
-    }),
-  );
-}
-
-function mockListProjectsResponse(daemonInstanceIdForProject = "") {
-  return toBinary(
-    ListProjectsResponseSchema,
-    create(ListProjectsResponseSchema, {
-      projects: [
-        create(ProjectEntrySchema, {
-          ...PROJECT,
-          daemonInstanceId: daemonInstanceIdForProject,
-        }),
-      ],
-    }),
-  );
-}
-
-function mockListEligibleDaemonsDefaultResponse() {
-  return toBinary(
-    ListEligibleDaemonsResponseSchema,
-    create(ListEligibleDaemonsResponseSchema, {
-      daemons: [
-        create(EligibleDaemonEntrySchema, { instanceId: "local", label: "local (this daemon)", isLocal: true }),
-      ],
-    }),
-  );
-}
-
-function mockListEligibleDaemonsResponse(
-  daemons: Array<{ instanceId: string; label: string; isLocal: boolean }> = [
-    { instanceId: "workstation-1", label: "workstation-1 (this daemon)", isLocal: true },
-    { instanceId: "server-2", label: "server-2", isLocal: false },
-  ],
-) {
-  return toBinary(
-    ListEligibleDaemonsResponseSchema,
-    create(ListEligibleDaemonsResponseSchema, {
-      daemons: daemons.map((d) => create(EligibleDaemonEntrySchema, d)),
-    }),
-  );
-}
-
-function interceptAllRpcs(
-  sessions: MockSessionRow[],
-  daemonsOverride?: Array<{
-    instanceId: string;
-    label: string;
-    isLocal: boolean;
-  }>,
-) {
-  const authBody = mockAuthAuthenticated();
-  cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(authBody),
-    });
-  }).as("getAuthStatus");
-
-  const toolsBody = mockListToolsResponse();
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListTools", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(toolsBody),
-    });
-  }).as("listTools");
-
-  const agentsBody = mockListAgentsResponse(MOCK_DEFAULT_LIST_AGENTS);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListAgents", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(agentsBody),
-    });
-  }).as("listAgents");
-
-  const daemonsBody =
-    daemonsOverride === undefined
-      ? mockListEligibleDaemonsDefaultResponse()
-      : mockListEligibleDaemonsResponse(daemonsOverride);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListEligibleDaemons", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(daemonsBody),
-    });
-  }).as("listEligibleDaemons");
-
-  const sessionsBody = mockListSessionsResponse(sessions);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(sessionsBody),
-    });
-  }).as("listSessions");
-
-  const projectDaemonId =
-    daemonsOverride === undefined
-      ? ""
-      : (daemonsOverride.find((d) => d.isLocal) ?? daemonsOverride[0]).instanceId;
-  const projectsBody = mockListProjectsResponse(projectDaemonId);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(projectsBody),
-    });
-  }).as("listProjects");
-}
-
-function interceptSignalSessionSuccess() {
-  // ok=true encoded as protobuf: field 1 (varint), value 1
-  const okResponse = new Uint8Array([0x08, 0x01]);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/SignalSession", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(okResponse),
-    });
-  }).as("signalSession");
-}
-
-function interceptSignalSessionError() {
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/SignalSession", (req) => {
-    req.reply({
-      statusCode: 412,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: "failed_precondition", message: "Process not alive" }),
-    });
-  }).as("signalSessionError");
-}
-
-/** DeleteSessionResponse { ok: true } — field 1 varint 1 */
-function interceptDeleteSessionSuccess() {
-  const okResponse = new Uint8Array([0x08, 0x01]);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/DeleteSession", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(okResponse),
-    });
-  }).as("deleteSession");
-}
-
-function interceptConnectSessionSuccess() {
-  const body = toBinary(
-    ConnectSessionResponseSchema,
-    create(ConnectSessionResponseSchema, {
-      livekitRoom: "session-room-ct",
-      livekitUrl: "ws://127.0.0.1:7880",
-      livekitServerIdentity: "server",
-    }),
-  );
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ConnectSession", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(body),
-    });
-  }).as("connectSession");
-}
-
-function interceptResumeSessionSuccess(sessionId: string) {
-  const body = toBinary(
-    ResumeSessionResponseSchema,
-    create(ResumeSessionResponseSchema, {
-      sessionId,
-      livekitRoom: "resume-room-ct",
-      livekitUrl: "ws://127.0.0.1:7880",
-      livekitServerIdentity: "server",
-    }),
-  );
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ResumeSession", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(body),
-    });
-  }).as("resumeSession");
-}
-
-function interceptTokenForPresence() {
-  const mockToken = "mock-jwt-presence";
-  const mockTtl = 600;
-  const generateBody = toBinary(
-    GenerateTokenResponseSchema,
-    create(GenerateTokenResponseSchema, {
-      token: mockToken,
-      ttlSeconds: BigInt(mockTtl),
-    }),
-  );
-  const refreshBody = toBinary(
-    RefreshTokenResponseSchema,
-    create(RefreshTokenResponseSchema, {
-      token: mockToken,
-      ttlSeconds: BigInt(mockTtl),
-    }),
-  );
-  cy.intercept("POST", "**/rpc/token.TokenService/GenerateToken", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(generateBody),
-    });
-  }).as("generateTokenPresence");
-  cy.intercept("POST", "**/rpc/token.TokenService/RefreshToken", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(refreshBody),
-    });
-  }).as("refreshTokenPresence");
-}
+// ---------------------------------------------------------------------------
 
 describe("ConnectionScreen terminal chrome — status dot menu", () => {
   beforeEach(() => {
@@ -496,65 +263,68 @@ describe("ConnectionScreen terminal chrome — status dot menu", () => {
   });
 
   it("ConnectionScreen connected daemon session exposes Terminate from the dot menu", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION]);
-    interceptConnectSessionSuccess();
+    interceptConnectionRpcs([ACTIVE_SESSION]);
+    interceptConnectSession();
     interceptTokenForPresence();
-    interceptSignalSessionSuccess();
+    interceptSignalSession();
     cy.window().then((win) => {
       cy.stub(win, "confirm").returns(true).as("confirmTerminate");
     });
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="connect-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 }).click();
+    connectionPage.connectBtn(ACTIVE_SESSION.sessionId).click();
     cy.wait("@connectSession");
-    cy.get("[data-testid='connected-terminal-container']", { timeout: 5000 }).should("exist");
+
+    // Then
+    connectionPage.terminalContainer().should("exist");
     // Token fetch uses standalone chrome; after the JWT arrives Ghostty mounts and replaces the tree — wait for LiveKit UI before clicking the dot (avoids detached DOM).
-    cy.get("[data-testid='connection-status-dot']", { timeout: 20000 })
-      .first()
-      .should("be.visible")
-      .and("have.attr", "data-connection-status");
-    cy.get("[data-testid='livekit-status']").should("not.be.visible");
-    cy.get("[data-testid='connection-status-dot']", { timeout: 5000 }).first().should("be.visible").click();
-    cy.get("[data-testid='connection-menu-disconnect']", { timeout: 10000 }).should("be.visible");
-    cy.get("[data-testid='connection-menu-terminate']", { timeout: 10000 }).should("be.visible");
-    cy.get("[data-testid='connection-menu-terminate']").click({ force: true });
+    connectionPage.statusDot().first().should("be.visible").and("have.attr", "data-connection-status");
+    connectionPage.livekitStatus().should("not.be.visible");
+    connectionPage.statusDot().first().should("be.visible").click();
+    connectionPage.disconnectMenuItem().should("be.visible");
+    connectionPage.terminateMenuItem().should("be.visible");
+    connectionPage.terminateMenuItem().click({ force: true });
     cy.get("@confirmTerminate").should("have.been.calledOnce");
     cy.wait("@signalSession").its("request.url").should("include", "SignalSession");
   });
 
   it("cancelling Terminate confirmation does not call SignalSession", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION]);
-    interceptConnectSessionSuccess();
+    interceptConnectionRpcs([ACTIVE_SESSION]);
+    interceptConnectSession();
     interceptTokenForPresence();
     let signalSessionRequests = 0;
-    const okResponse = new Uint8Array([0x08, 0x01]);
     cy.intercept("POST", "**/rpc/connection.ConnectionService/SignalSession", (req) => {
       signalSessionRequests += 1;
       req.reply({
         statusCode: 200,
         headers: { "Content-Type": "application/proto" },
-        body: toArrayBuffer(okResponse),
+        body: toArrayBuffer(new Uint8Array([0x08, 0x01])),
       });
     }).as("signalSessionTerminateCancel");
     cy.window().then((win) => {
       cy.stub(win, "confirm").returns(false);
     });
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="connect-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 }).click();
+    connectionPage.connectBtn(ACTIVE_SESSION.sessionId).click();
     cy.wait("@connectSession");
-    cy.get("[data-testid='connected-terminal-container']", { timeout: 5000 }).should("exist");
-    cy.get("[data-testid='connection-status-dot']", { timeout: 20000 })
-      .first()
-      .should("be.visible")
-      .and("have.attr", "data-connection-status");
-    cy.get("[data-testid='livekit-status']").should("not.be.visible");
-    cy.get("[data-testid='connection-status-dot']").first().should("be.visible").click();
-    cy.get("[data-testid='connection-menu-disconnect']", { timeout: 10000 }).should("be.visible");
-    cy.get("[data-testid='connection-menu-terminate']", { timeout: 10000 }).should("be.visible");
-    cy.get("[data-testid='connection-menu-terminate']").click({ force: true });
+    connectionPage.terminalContainer().should("exist");
+    connectionPage.statusDot().first().should("be.visible").and("have.attr", "data-connection-status");
+    connectionPage.livekitStatus().should("not.be.visible");
+    connectionPage.statusDot().first().should("be.visible").click();
+    connectionPage.disconnectMenuItem().should("be.visible");
+    connectionPage.terminateMenuItem().should("be.visible");
+    connectionPage.terminateMenuItem().click({ force: true });
+
+    // Then
     cy.then(() => {
       expect(signalSessionRequests, "Terminate cancel must not hit SignalSession").to.equal(0);
     });
@@ -568,26 +338,36 @@ describe("ConnectionScreen connected participants", () => {
   });
 
   it("does not render presence panel without common room config", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION]);
+    interceptConnectionRpcs([ACTIVE_SESSION]);
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get("[data-testid='sessions-table-proj-1']", { timeout: 5000 }).should("exist");
-    cy.get("[data-testid='connected-participants-panel']").should("not.exist");
+
+    // Then
+    connectionPage.sessionsTable(PROJECT_ID).should("exist");
+    byTestId(TEST_IDS.connectedParticipantsPanel).should("not.exist");
   });
 
   it("renders presence panel when livekit URL and common room are provided", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION]);
+    interceptConnectionRpcs([ACTIVE_SESSION]);
     interceptTokenForPresence();
+
+    // When
     cy.mount(
       <ConnectionScreen livekitUrl="ws://127.0.0.1:7880" commonRoom="tddy-lobby" />,
     );
     cy.wait("@getAuthStatus");
-    cy.get("[data-testid='connected-participants-panel']", { timeout: 5000 }).should("exist");
-    cy.get("[data-testid='participant-list']", { timeout: 5000 }).should("exist");
+
+    // Then
+    byTestId(TEST_IDS.connectedParticipantsPanel, { timeout: 5000 }).should("exist");
+    byTestId(TEST_IDS.participantList, { timeout: 5000 }).should("exist");
     cy.wait("@generateTokenPresence");
-    cy.get("[data-testid='participant-list']", { timeout: 20000 }).should(($el) => {
+    byTestId(TEST_IDS.participantList, { timeout: 20000 }).should(($el) => {
       const status = $el.attr("data-room-status");
       expect(status === "error" || status === "connected" || status === "connecting").to.be.true;
     });
@@ -601,107 +381,134 @@ describe("ConnectionScreen Signal Dropdown", () => {
   });
 
   it("renders signal dropdown for active sessions", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION]);
+    interceptConnectionRpcs([ACTIVE_SESSION]);
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="signal-dropdown-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 })
-      .should("exist");
+
+    // Then
+    connectionPage.signalDropdown(ACTIVE_SESSION.sessionId).should("exist");
   });
 
   it("hides signal dropdown for inactive sessions", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION, INACTIVE_SESSION]);
+    interceptConnectionRpcs([ACTIVE_SESSION, INACTIVE_SESSION]);
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="sessions-table-${PROJECT.projectId}"]`, { timeout: 5000 })
-      .should("exist");
-    cy.get(`[data-testid="signal-dropdown-${ACTIVE_SESSION.sessionId}"]`)
-      .should("exist");
-    cy.get(`[data-testid="signal-dropdown-${INACTIVE_SESSION.sessionId}"]`)
-      .should("not.exist");
+
+    // Then
+    connectionPage.sessionsTable(PROJECT_ID).should("exist");
+    connectionPage.signalDropdown(ACTIVE_SESSION.sessionId).should("exist");
+    connectionPage.signalDropdown(INACTIVE_SESSION.sessionId).should("not.exist");
   });
 
   it("signal dropdown shows three options", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION]);
+    interceptConnectionRpcs([ACTIVE_SESSION]);
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="signal-dropdown-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 })
-      .click();
-    cy.get(`[data-testid="signal-sigint-${ACTIVE_SESSION.sessionId}"]`)
+    connectionPage.signalDropdown(ACTIVE_SESSION.sessionId).click();
+
+    // Then
+    connectionPage.signalSigint(ACTIVE_SESSION.sessionId)
       .should("exist")
       .and("contain.text", "Interrupt");
-    cy.get(`[data-testid="signal-sigterm-${ACTIVE_SESSION.sessionId}"]`)
+    connectionPage.signalSigterm(ACTIVE_SESSION.sessionId)
       .should("exist")
       .and("contain.text", "Terminate");
-    cy.get(`[data-testid="signal-sigkill-${ACTIVE_SESSION.sessionId}"]`)
+    connectionPage.signalSigkill(ACTIVE_SESSION.sessionId)
       .should("exist")
       .and("contain.text", "Kill");
   });
 
   it("clicking interrupt calls signal session rpc with sigint", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION]);
-    interceptSignalSessionSuccess();
+    interceptConnectionRpcs([ACTIVE_SESSION]);
+    interceptSignalSession();
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="signal-dropdown-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 })
-      .click();
-    cy.get(`[data-testid="signal-sigint-${ACTIVE_SESSION.sessionId}"]`).click();
+    connectionPage.signalDropdown(ACTIVE_SESSION.sessionId).click();
+    connectionPage.signalSigint(ACTIVE_SESSION.sessionId).click();
+
+    // Then
     cy.wait("@signalSession").its("request.url").should("include", "SignalSession");
   });
 
   it("clicking terminate calls signal session rpc with sigterm", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION]);
-    interceptSignalSessionSuccess();
+    interceptConnectionRpcs([ACTIVE_SESSION]);
+    interceptSignalSession();
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="signal-dropdown-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 })
-      .click();
-    cy.get(`[data-testid="signal-sigterm-${ACTIVE_SESSION.sessionId}"]`).click();
+    connectionPage.signalDropdown(ACTIVE_SESSION.sessionId).click();
+    connectionPage.signalSigterm(ACTIVE_SESSION.sessionId).click();
+
+    // Then
     cy.wait("@signalSession").its("request.url").should("include", "SignalSession");
   });
 
   it("clicking kill calls signal session rpc with sigkill", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION]);
-    interceptSignalSessionSuccess();
+    interceptConnectionRpcs([ACTIVE_SESSION]);
+    interceptSignalSession();
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="signal-dropdown-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 })
-      .click();
-    cy.get(`[data-testid="signal-sigkill-${ACTIVE_SESSION.sessionId}"]`).click();
+    connectionPage.signalDropdown(ACTIVE_SESSION.sessionId).click();
+    connectionPage.signalSigkill(ACTIVE_SESSION.sessionId).click();
+
+    // Then
     cy.wait("@signalSession").its("request.url").should("include", "SignalSession");
   });
 
   it("dropdown closes after action", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION]);
-    interceptSignalSessionSuccess();
+    interceptConnectionRpcs([ACTIVE_SESSION]);
+    interceptSignalSession();
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="signal-dropdown-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 })
-      .click();
-    cy.get(`[data-testid="signal-menu-${ACTIVE_SESSION.sessionId}"]`)
-      .should("exist");
-    cy.get(`[data-testid="signal-sigint-${ACTIVE_SESSION.sessionId}"]`).click();
-    cy.get(`[data-testid="signal-menu-${ACTIVE_SESSION.sessionId}"]`)
-      .should("not.exist");
+    connectionPage.signalDropdown(ACTIVE_SESSION.sessionId).click();
+    connectionPage.signalMenu(ACTIVE_SESSION.sessionId).should("exist");
+    connectionPage.signalSigint(ACTIVE_SESSION.sessionId).click();
+
+    // Then
+    connectionPage.signalMenu(ACTIVE_SESSION.sessionId).should("not.exist");
   });
 
   it("shows error when signal rpc fails", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION]);
+    interceptConnectionRpcs([ACTIVE_SESSION]);
     interceptSignalSessionError();
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="signal-dropdown-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 })
-      .click();
-    cy.get(`[data-testid="signal-sigint-${ACTIVE_SESSION.sessionId}"]`).click();
-    cy.get("[data-testid='connection-error']", { timeout: 5000 })
-      .should("exist");
+    connectionPage.signalDropdown(ACTIVE_SESSION.sessionId).click();
+    connectionPage.signalSigint(ACTIVE_SESSION.sessionId).click();
+
+    // Then
+    connectionPage.connectionError().should("exist");
   });
 });
 
@@ -719,108 +526,44 @@ describe("ConnectionScreen Delete session", () => {
   ];
 
   it("delete_button_visible_for_active_and_inactive_session_rows", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs(sessionsForDeleteSuite);
+    interceptConnectionRpcs(sessionsForDeleteSuite);
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="sessions-table-${PROJECT.projectId}"]`, { timeout: 5000 }).should("exist");
-    cy.get(`[data-testid="connect-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 }).should("exist");
-    cy.get(`[data-testid="connect-${ORPHAN_ACTIVE_SESSION.sessionId}"]`).should("exist");
-    cy.get(`[data-testid="delete-session-${ACTIVE_SESSION.sessionId}"]`).should("exist");
-    cy.get(`[data-testid="delete-session-${ORPHAN_ACTIVE_SESSION.sessionId}"]`).should("exist");
-    cy.get(`[data-testid="delete-session-${INACTIVE_SESSION.sessionId}"]`).should("exist");
-    cy.get(`[data-testid="delete-session-${ORPHAN_INACTIVE_SESSION.sessionId}"]`).should("exist");
-    cy.get("[data-testid='sessions-table-orphan']", { timeout: 5000 }).should("exist");
+
+    // Then
+    connectionPage.sessionsTable(PROJECT_ID).should("exist");
+    connectionPage.connectBtn(ACTIVE_SESSION.sessionId).should("exist");
+    connectionPage.connectBtn(ORPHAN_ACTIVE_SESSION.sessionId).should("exist");
+    connectionPage.deleteSessionBtn(ACTIVE_SESSION.sessionId).should("exist");
+    connectionPage.deleteSessionBtn(ORPHAN_ACTIVE_SESSION.sessionId).should("exist");
+    connectionPage.deleteSessionBtn(INACTIVE_SESSION.sessionId).should("exist");
+    connectionPage.deleteSessionBtn(ORPHAN_INACTIVE_SESSION.sessionId).should("exist");
+    connectionPage.orphanTable().should("exist");
   });
 
   it("clicking_delete_confirmed_calls_delete_session_rpc", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs(sessionsForDeleteSuite);
-    interceptDeleteSessionSuccess();
+    interceptConnectionRpcs(sessionsForDeleteSuite);
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
     cy.window().then((win) => {
       cy.stub(win, "confirm").returns(true);
     });
-    cy.get(`[data-testid="delete-session-${INACTIVE_SESSION.sessionId}"]`, { timeout: 5000 })
-      .click();
+
+    // When
+    connectionPage.deleteSessionBtn(INACTIVE_SESSION.sessionId).click();
+
+    // Then
     cy.wait("@deleteSession").then((interception) => {
       expect(interception.request.url).to.include("DeleteSession");
     });
   });
 });
-
-/** Bulk selection / delete acceptance: same RPC wiring as `interceptAllRpcs` but tracks DeleteSession bodies. */
-function interceptAllRpcsWithTrackedDelete(
-  sessions: MockSessionRow[],
-  options?: { captureDeleteSessionIds?: string[] },
-) {
-  const authBody = mockAuthAuthenticated();
-  cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(authBody),
-    });
-  }).as("getAuthStatus");
-
-  const toolsBody = mockListToolsResponse();
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListTools", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(toolsBody),
-    });
-  }).as("listTools");
-
-  const agentsBody = mockListAgentsResponse(MOCK_DEFAULT_LIST_AGENTS);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListAgents", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(agentsBody),
-    });
-  }).as("listAgents");
-
-  const daemonsBody = mockListEligibleDaemonsDefaultResponse();
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListEligibleDaemons", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(daemonsBody),
-    });
-  }).as("listEligibleDaemons");
-
-  const sessionsBody = mockListSessionsResponse(sessions);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(sessionsBody),
-    });
-  }).as("listSessions");
-
-  const projectsBody = mockListProjectsResponse("");
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(projectsBody),
-    });
-  }).as("listProjects");
-
-  const okDelete = new Uint8Array([0x08, 0x01]);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/DeleteSession", (req) => {
-    const u8 = connectRequestBodyToUint8(req.body);
-    const decoded = fromBinary(DeleteSessionRequestSchema, u8);
-    options?.captureDeleteSessionIds?.push(decoded.sessionId);
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(okDelete),
-    });
-  }).as("deleteSession");
-}
 
 describe("ConnectionScreen bulk session selection and delete (acceptance)", () => {
   beforeEach(() => {
@@ -829,57 +572,61 @@ describe("ConnectionScreen bulk session selection and delete (acceptance)", () =
   });
 
   it("header select all checks every row checkbox in a project session table", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION, INACTIVE_SESSION]);
+    interceptConnectionRpcs([ACTIVE_SESSION, INACTIVE_SESSION]);
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    const tableSel = `[data-testid="sessions-table-${PROJECT.projectId}"]`;
-    cy.get(`${tableSel} [data-testid="session-table-select-all-${PROJECT.projectId}"]`, {
-      timeout: 5000,
-    }).click();
-    cy.get(`${tableSel} [data-testid="session-row-select-${ACTIVE_SESSION.sessionId}"]`).should(
-      "be.checked",
-    );
-    cy.get(`${tableSel} [data-testid="session-row-select-${INACTIVE_SESSION.sessionId}"]`).should(
-      "be.checked",
-    );
-    cy.get(`${tableSel} [data-testid="session-table-select-all-${PROJECT.projectId}"]`).should(
-      "be.checked",
-    );
+    connectionPage.sessionsTable(PROJECT_ID).within(() => {
+      connectionPage.selectAll(PROJECT_ID).click();
+    });
+
+    // Then
+    connectionPage.sessionsTable(PROJECT_ID).within(() => {
+      connectionPage.sessionRowCheckbox(ACTIVE_SESSION.sessionId).should("be.checked");
+      connectionPage.sessionRowCheckbox(INACTIVE_SESSION.sessionId).should("be.checked");
+      connectionPage.selectAll(PROJECT_ID).should("be.checked");
+    });
   });
 
   it("header checkbox shows indeterminate when selection is partial", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION, INACTIVE_SESSION]);
+    interceptConnectionRpcs([ACTIVE_SESSION, INACTIVE_SESSION]);
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    const tableSel = `[data-testid="sessions-table-${PROJECT.projectId}"]`;
-    cy.get(`${tableSel} [data-testid="session-row-select-${ACTIVE_SESSION.sessionId}"]`, {
-      timeout: 5000,
-    }).click();
-    cy.get(`${tableSel} [data-testid="session-row-select-${INACTIVE_SESSION.sessionId}"]`).should(
-      "not.be.checked",
-    );
-    cy.get(`${tableSel} [data-testid="session-table-select-all-${PROJECT.projectId}"]`).should(
-      ($el) => {
+    connectionPage.sessionsTable(PROJECT_ID).within(() => {
+      connectionPage.sessionRowCheckbox(ACTIVE_SESSION.sessionId).click();
+    });
+
+    // Then
+    connectionPage.sessionsTable(PROJECT_ID).within(() => {
+      connectionPage.sessionRowCheckbox(INACTIVE_SESSION.sessionId).should("not.be.checked");
+      connectionPage.selectAll(PROJECT_ID).should(($el) => {
         const el = $el.get(0) as HTMLInputElement;
         expect(el.indeterminate, "header checkbox indeterminate when partial").to.be.true;
-      },
-    );
+      });
+    });
   });
 
   it("bulk delete confirms once and calls deleteSession once per selected id", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
     const capturedDeleteSessionIds: string[] = [];
-    interceptAllRpcsWithTrackedDelete([ACTIVE_SESSION, INACTIVE_SESSION], {
+    interceptConnectionRpcs([ACTIVE_SESSION, INACTIVE_SESSION], {
       captureDeleteSessionIds: capturedDeleteSessionIds,
     });
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    const tableSel = `[data-testid="sessions-table-${PROJECT.projectId}"]`;
-    cy.get(`${tableSel} [data-testid="session-table-select-all-${PROJECT.projectId}"]`, {
-      timeout: 5000,
-    }).click();
+
+    // When
+    connectionPage.sessionsTable(PROJECT_ID).within(() => {
+      connectionPage.selectAll(PROJECT_ID).click();
+    });
     cy.window().then((win) => {
       cy.stub(win, "confirm")
         .callsFake((msg: string) => {
@@ -889,7 +636,11 @@ describe("ConnectionScreen bulk session selection and delete (acceptance)", () =
         })
         .as("bulkDeleteConfirm");
     });
-    cy.get(`${tableSel} [data-testid="bulk-delete-selected-${PROJECT.projectId}"]`).click();
+    // NOTE: bulk-delete-selected-<tableKey> does NOT match connectionPage.bulkDeleteButton()
+    // (which uses bulk-delete-button-<id>). Keep raw selector until component is fixed.
+    cy.get(`[data-testid="bulk-delete-selected-${PROJECT_ID}"]`).click();
+
+    // Then
     cy.get("@bulkDeleteConfirm").should("have.been.calledOnce");
     cy.wait("@deleteSession");
     cy.wait("@deleteSession");
@@ -902,64 +653,78 @@ describe("ConnectionScreen bulk session selection and delete (acceptance)", () =
   });
 
   it("bulk delete does not call DeleteSession when user cancels confirm", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION, INACTIVE_SESSION]);
+    interceptConnectionRpcs([ACTIVE_SESSION, INACTIVE_SESSION]);
     let deleteSessionRequests = 0;
-    const okDelete = new Uint8Array([0x08, 0x01]);
     cy.intercept("POST", "**/rpc/connection.ConnectionService/DeleteSession", (req) => {
       deleteSessionRequests += 1;
       req.reply({
         statusCode: 200,
         headers: { "Content-Type": "application/proto" },
-        body: toArrayBuffer(okDelete),
+        body: toArrayBuffer(new Uint8Array([0x08, 0x01])),
       });
     });
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    const tableSel = `[data-testid="sessions-table-${PROJECT.projectId}"]`;
-    cy.get(`${tableSel} [data-testid="session-table-select-all-${PROJECT.projectId}"]`, {
-      timeout: 5000,
-    }).click();
+    connectionPage.sessionsTable(PROJECT_ID).within(() => {
+      connectionPage.selectAll(PROJECT_ID).click();
+    });
     cy.window().then((win) => {
       cy.stub(win, "confirm").returns(false);
     });
-    cy.get(`${tableSel} [data-testid="bulk-delete-selected-${PROJECT.projectId}"]`).click();
+    // NOTE: bulk-delete-selected-<tableKey> does NOT match connectionPage.bulkDeleteButton()
+    // (which uses bulk-delete-button-<id>). Keep raw selector until component is fixed.
+    cy.get(`[data-testid="bulk-delete-selected-${PROJECT_ID}"]`).click();
+
+    // Then
     cy.then(() => {
       expect(deleteSessionRequests, "cancelled bulk delete must not call DeleteSession").to.equal(0);
     });
   });
 
   it("Delete selected is disabled when no rows are selected", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION, INACTIVE_SESSION]);
+    interceptConnectionRpcs([ACTIVE_SESSION, INACTIVE_SESSION]);
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="bulk-delete-selected-${PROJECT.projectId}"]`, { timeout: 5000 }).should(
+
+    // Then
+    // NOTE: bulk-delete-selected-<tableKey> does NOT match connectionPage.bulkDeleteButton()
+    // (which uses bulk-delete-button-<id>). Keep raw selector until component is fixed.
+    cy.get(`[data-testid="bulk-delete-selected-${PROJECT_ID}"]`, { timeout: 5000 }).should(
       "be.disabled",
     );
   });
 
   it("orphan table bulk selection does not clear project table selection", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION, INACTIVE_SESSION, ORPHAN_ACTIVE_SESSION]);
+    interceptConnectionRpcs([ACTIVE_SESSION, INACTIVE_SESSION, ORPHAN_ACTIVE_SESSION]);
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    const projTable = `[data-testid="sessions-table-${PROJECT.projectId}"]`;
-    const orphanTable = `[data-testid="sessions-table-orphan"]`;
-    cy.get(`${projTable} [data-testid="session-table-select-all-${PROJECT.projectId}"]`, {
-      timeout: 5000,
-    }).click();
-    cy.get(`${orphanTable} [data-testid="session-row-select-${ORPHAN_ACTIVE_SESSION.sessionId}"]`)
-      .click();
-    cy.get(`${projTable} [data-testid="session-row-select-${ACTIVE_SESSION.sessionId}"]`).should(
-      "be.checked",
-    );
-    cy.get(`${projTable} [data-testid="session-row-select-${INACTIVE_SESSION.sessionId}"]`).should(
-      "be.checked",
-    );
-    cy.get(`${orphanTable} [data-testid="session-row-select-${ORPHAN_ACTIVE_SESSION.sessionId}"]`).should(
-      "be.checked",
-    );
+    connectionPage.sessionsTable(PROJECT_ID).within(() => {
+      connectionPage.selectAll(PROJECT_ID).click();
+    });
+    connectionPage.orphanTable().within(() => {
+      connectionPage.sessionRowCheckbox(ORPHAN_ACTIVE_SESSION.sessionId).click();
+    });
+
+    // Then
+    connectionPage.sessionsTable(PROJECT_ID).within(() => {
+      connectionPage.sessionRowCheckbox(ACTIVE_SESSION.sessionId).should("be.checked");
+      connectionPage.sessionRowCheckbox(INACTIVE_SESSION.sessionId).should("be.checked");
+    });
+    connectionPage.orphanTable().within(() => {
+      connectionPage.sessionRowCheckbox(ORPHAN_ACTIVE_SESSION.sessionId).should("be.checked");
+    });
   });
 });
 
@@ -970,19 +735,22 @@ describe("ConnectionScreen session table ordering", () => {
   });
 
   it("ConnectionScreen — sorts project sessions with active on top then by createdAt descending", () => {
-    window.localStorage.setItem("tddy_session_token", "fake-token");
+    // Given
     /** Deliberately wrong: inactive rows first; active newest last — sorted UI must fix order. */
-    const wrongApiOrder = [
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    interceptConnectionRpcs([
       PROJ_ORDER_INACTIVE_OLD,
       PROJ_ORDER_ACTIVE_OLD,
       PROJ_ORDER_INACTIVE_NEW,
       PROJ_ORDER_ACTIVE_NEW,
-    ];
-    interceptAllRpcs(wrongApiOrder);
+    ]);
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    const tableSel = `[data-testid="sessions-table-${PROJECT.projectId}"]`;
-    cy.get(tableSel, { timeout: 5000 }).should("exist");
+
+    // Then
+    connectionPage.sessionsTable(PROJECT_ID).should("exist");
     const expectedOrder = [
       PROJ_ORDER_ACTIVE_NEW.sessionId,
       PROJ_ORDER_ACTIVE_OLD.sessionId,
@@ -990,7 +758,7 @@ describe("ConnectionScreen session table ordering", () => {
       PROJ_ORDER_INACTIVE_OLD.sessionId,
     ];
     expectedOrder.forEach((sessionId, index) => {
-      cy.get(`${tableSel} tbody tr`)
+      connectionPage.sessionsTable(PROJECT_ID).find("tbody tr")
         .eq(index)
         .find(`[data-testid="connect-${sessionId}"], [data-testid="resume-${sessionId}"]`)
         .should("exist");
@@ -998,251 +766,35 @@ describe("ConnectionScreen session table ordering", () => {
   });
 
   it("ConnectionScreen — sorts orphan sessions with active on top then by createdAt descending", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    const wrongApiOrder = [
+    interceptConnectionRpcs([
       ORPH_ORDER_INACTIVE_OLD,
       ORPH_ORDER_ACTIVE_OLD,
       ORPH_ORDER_INACTIVE_NEW,
       ORPH_ORDER_ACTIVE_NEW,
-    ];
-    interceptAllRpcs(wrongApiOrder);
+    ]);
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get("[data-testid='sessions-table-orphan']", { timeout: 5000 }).should("exist");
+
+    // Then
+    connectionPage.orphanTable().should("exist");
     const expectedOrder = [
       ORPH_ORDER_ACTIVE_NEW.sessionId,
       ORPH_ORDER_ACTIVE_OLD.sessionId,
       ORPH_ORDER_INACTIVE_NEW.sessionId,
       ORPH_ORDER_INACTIVE_OLD.sessionId,
     ];
-    const tableSel = "[data-testid='sessions-table-orphan']";
     expectedOrder.forEach((sessionId, index) => {
-      cy.get(`${tableSel} tbody tr`)
+      connectionPage.orphanTable().find("tbody tr")
         .eq(index)
         .find(`[data-testid="connect-${sessionId}"], [data-testid="resume-${sessionId}"]`)
         .should("exist");
     });
   });
 });
-
-/** Extended ListSessions payload — acceptance / TUI parity (workflow columns). */
-const STATUS_PARITY_SESSION_V1: MockSessionRow = {
-  sessionId: "session-status-parity-1",
-  createdAt: "2026-03-21T10:00:00Z",
-  status: "active",
-  repoPath: "/home/dev/project",
-  pid: 12345,
-  isActive: true,
-  projectId: "proj-1",
-  daemonInstanceId: "",
-  workflowGoal: "acceptance-tests",
-  workflowState: "Red",
-  elapsedDisplay: "1m 2s",
-  agent: "claude",
-  model: "sonnet-4",
-};
-
-const STATUS_PARITY_SESSION_V2: MockSessionRow = {
-  ...STATUS_PARITY_SESSION_V1,
-  workflowState: "Green",
-  elapsedDisplay: "3m 0s",
-};
-
-function interceptAllRpcsWithListSessionsFactory(getSessions: () => MockSessionRow[]) {
-  const authBody = mockAuthAuthenticated();
-  cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(authBody),
-    });
-  }).as("getAuthStatus");
-
-  const toolsBody = mockListToolsResponse();
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListTools", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(toolsBody),
-    });
-  }).as("listTools");
-
-  const agentsBody = mockListAgentsResponse(MOCK_DEFAULT_LIST_AGENTS);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListAgents", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(agentsBody),
-    });
-  }).as("listAgents");
-
-  const daemonsBody = mockListEligibleDaemonsDefaultResponse();
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListEligibleDaemons", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(daemonsBody),
-    });
-  }).as("listEligibleDaemons");
-
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
-    const sessionsBody = mockListSessionsResponse(getSessions());
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(sessionsBody),
-    });
-  }).as("listSessions");
-
-  const projectsBody = mockListProjectsResponse("");
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(projectsBody),
-    });
-  }).as("listProjects");
-}
-
-// ---------------------------------------------------------------------------
-// Multi-host daemon selection acceptance tests
-// ---------------------------------------------------------------------------
-
-const DAEMON_LOCAL = { instanceId: "workstation-1", label: "workstation-1 (this daemon)", isLocal: true };
-const DAEMON_PEER = { instanceId: "server-2", label: "server-2", isLocal: false };
-
-/** Row key when ListProjects tags the project with the local eligible daemon (multi-host mocks). */
-const PROJECT_ROW_MULTI_HOST = `${PROJECT.projectId}__${DAEMON_LOCAL.instanceId}`;
-
-const SESSION_WITH_HOST: MockSessionRow = {
-  sessionId: "session-host-1",
-  createdAt: "2026-03-28T10:00:00Z",
-  status: "active",
-  repoPath: "/home/dev/project",
-  pid: 12345,
-  isActive: true,
-  projectId: "proj-1",
-  daemonInstanceId: "workstation-1",
-};
-
-/** `ACTIVE_SESSION` with daemon matching multi-host ListProjects + ListEligibleDaemons local row. */
-const ACTIVE_SESSION_ON_LOCAL_ELIGIBLE_DAEMON: MockSessionRow = {
-  ...ACTIVE_SESSION,
-  daemonInstanceId: DAEMON_LOCAL.instanceId,
-};
-
-/** Same `project_id` on two daemons — multi-daemon listing + grouping (PRD acceptance). */
-const COLLISION_PROJECT_ID = "cccccccc-dddd-4eee-8fff-999999999999";
-
-const COLLISION_SESSION_WS: MockSessionRow = {
-  sessionId: "collision-sess-ws",
-  createdAt: "2026-04-10T10:00:00Z",
-  status: "active",
-  repoPath: "/home/ws/dup",
-  pid: 60001,
-  isActive: true,
-  projectId: COLLISION_PROJECT_ID,
-  daemonInstanceId: DAEMON_LOCAL.instanceId,
-};
-
-const COLLISION_SESSION_SRV: MockSessionRow = {
-  sessionId: "collision-sess-srv",
-  createdAt: "2026-04-10T11:00:00Z",
-  status: "active",
-  repoPath: "/srv/dup",
-  pid: 60002,
-  isActive: true,
-  projectId: COLLISION_PROJECT_ID,
-  daemonInstanceId: DAEMON_PEER.instanceId,
-};
-
-function mockListProjectsCollisionSameProjectId() {
-  return toBinary(
-    ListProjectsResponseSchema,
-    create(ListProjectsResponseSchema, {
-      projects: [
-        create(ProjectEntrySchema, {
-          projectId: COLLISION_PROJECT_ID,
-          name: "dup-workstation",
-          gitUrl: "https://github.com/test/dup.git",
-          mainRepoPath: "/home/ws/dup",
-          daemonInstanceId: DAEMON_LOCAL.instanceId,
-        }),
-        create(ProjectEntrySchema, {
-          projectId: COLLISION_PROJECT_ID,
-          name: "dup-server",
-          gitUrl: "https://github.com/test/dup.git",
-          mainRepoPath: "/srv/dup",
-          daemonInstanceId: DAEMON_PEER.instanceId,
-        }),
-      ],
-    }),
-  );
-}
-
-/** Like `interceptAllRpcsWithDaemons` but ListProjects returns duplicate `project_id` across hosts. */
-function interceptAllRpcsProjectIdCollision(sessions: MockSessionRow[]) {
-  const authBody = mockAuthAuthenticated();
-  cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(authBody),
-    });
-  }).as("getAuthStatus");
-
-  const toolsBody = mockListToolsResponse();
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListTools", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(toolsBody),
-    });
-  }).as("listTools");
-
-  const agentsBody = mockListAgentsResponse(MOCK_DEFAULT_LIST_AGENTS);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListAgents", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(agentsBody),
-    });
-  }).as("listAgents");
-
-  const daemonsBody = mockListEligibleDaemonsResponse([DAEMON_LOCAL, DAEMON_PEER]);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListEligibleDaemons", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(daemonsBody),
-    });
-  }).as("listEligibleDaemons");
-
-  const sessionsBody = mockListSessionsResponse(sessions);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(sessionsBody),
-    });
-  }).as("listSessions");
-
-  const projectsBody = mockListProjectsCollisionSameProjectId();
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(projectsBody),
-    });
-  }).as("listProjects");
-}
-
-function interceptAllRpcsWithDaemons(
-  sessions: MockSessionRow[],
-  daemons: Array<{ instanceId: string; label: string; isLocal: boolean }> = [DAEMON_LOCAL, DAEMON_PEER],
-) {
-  interceptAllRpcs(sessions, daemons);
-}
 
 describe("ConnectionScreen session status (TUI parity)", () => {
   beforeEach(() => {
@@ -1251,113 +803,52 @@ describe("ConnectionScreen session status (TUI parity)", () => {
   });
 
   it("connection_screen_renders_status_columns_from_extended_session_entry", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([STATUS_PARITY_SESSION_V1]);
+    interceptConnectionRpcs([STATUS_PARITY_SESSION_V1]);
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
+
+    // Then
     const sid = STATUS_PARITY_SESSION_V1.sessionId;
-    cy.get(`[data-testid="session-row-workflow-goal-${sid}"]`, { timeout: 8000 })
+    byTestId(`session-row-workflow-goal-${sid}`, { timeout: 8000 })
       .scrollIntoView()
       .should("be.visible")
       .and("contain.text", "acceptance-tests");
-    cy.get(`[data-testid="session-row-workflow-state-${sid}"]`)
-      .should("contain.text", "Red");
-    cy.get(`[data-testid="session-row-agent-${sid}"]`).should("contain.text", "claude");
-    cy.get(`[data-testid="session-row-model-${sid}"]`).should("contain.text", "sonnet-4");
+    byTestId(`session-row-workflow-state-${sid}`).should("contain.text", "Red");
+    byTestId(`session-row-agent-${sid}`).should("contain.text", "claude");
+    byTestId(`session-row-model-${sid}`).should("contain.text", "sonnet-4");
   });
 
   it("connection_screen_updates_row_when_live_status_payload_changes", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
     let call = 0;
-    interceptAllRpcsWithListSessionsFactory(() => {
-      call += 1;
-      return [call === 1 ? STATUS_PARITY_SESSION_V1 : STATUS_PARITY_SESSION_V2];
+    interceptConnectionRpcs([STATUS_PARITY_SESSION_V1], {
+      listSessionsFactory: () => {
+        call += 1;
+        return [call === 1 ? STATUS_PARITY_SESSION_V1 : STATUS_PARITY_SESSION_V2];
+      },
     });
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@listSessions");
+
+    // Then
     const sid = STATUS_PARITY_SESSION_V1.sessionId;
-    cy.get(`[data-testid="session-row-workflow-state-${sid}"]`, { timeout: 8000 }).should(
+    byTestId(`session-row-workflow-state-${sid}`, { timeout: 8000 }).should(
       "contain.text",
       "Red",
     );
     cy.wait(5500);
     cy.wait("@listSessions");
-    cy.get(`[data-testid="session-row-workflow-state-${sid}"]`).should("contain.text", "Green");
-    cy.get(`[data-testid="session-row-elapsed-${sid}"]`).should("contain.text", "3m 0s");
+    byTestId(`session-row-workflow-state-${sid}`).should("contain.text", "Green");
+    byTestId(`session-row-elapsed-${sid}`).should("contain.text", "3m 0s");
   });
 });
-
-/** Same as `interceptAllRpcs` but overrides the `ListAgents` mock payload (acceptance: dynamic backend options). */
-function interceptAllRpcsWithListAgents(
-  sessions: MockSessionRow[],
-  listAgents: Array<{ id: string; label: string }>,
-  daemonsOverride?: Array<{
-    instanceId: string;
-    label: string;
-    isLocal: boolean;
-  }>,
-) {
-  const authBody = mockAuthAuthenticated();
-  cy.intercept("POST", "**/rpc/auth.AuthService/GetAuthStatus", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(authBody),
-    });
-  }).as("getAuthStatus");
-
-  const toolsBody = mockListToolsResponse();
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListTools", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(toolsBody),
-    });
-  }).as("listTools");
-
-  const agentsBody = mockListAgentsResponse(listAgents);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListAgents", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(agentsBody),
-    });
-  }).as("listAgents");
-
-  const daemonsBody =
-    daemonsOverride === undefined
-      ? mockListEligibleDaemonsDefaultResponse()
-      : mockListEligibleDaemonsResponse(daemonsOverride);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListEligibleDaemons", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(daemonsBody),
-    });
-  }).as("listEligibleDaemons");
-
-  const sessionsBody = mockListSessionsResponse(sessions);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(sessionsBody),
-    });
-  }).as("listSessions");
-
-  const projectDaemonId =
-    daemonsOverride === undefined
-      ? ""
-      : (daemonsOverride.find((d) => d.isLocal) ?? daemonsOverride[0]).instanceId;
-  const projectsBody = mockListProjectsResponse(projectDaemonId);
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjects", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(projectsBody),
-    });
-  }).as("listProjects");
-}
 
 describe("ConnectionScreen ListAgents backend select (acceptance)", () => {
   beforeEach(() => {
@@ -1366,31 +857,36 @@ describe("ConnectionScreen ListAgents backend select (acceptance)", () => {
   });
 
   it("connection_screen_backend_select_uses_list_agents", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcsWithListAgents(
-      [],
-      [
+    interceptConnectionRpcs([], {
+      agents: [
         { id: "agent-one", label: "Agent One" },
         { id: "agent-two", label: "Agent Two" },
       ],
-    );
+    });
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
     cy.wait("@listAgents");
-    const backendSel = `[data-testid="backend-select-${PROJECT.projectId}"]`;
-    cy.get(backendSel, { timeout: 8000 }).should("exist");
-    cy.get(`${backendSel} option`).should("have.length", 2);
-    cy.get(`${backendSel} option`).eq(0).should("have.value", "agent-one");
-    cy.get(`${backendSel} option`).eq(1).should("have.value", "agent-two");
-    cy.get(`${backendSel} option[value="claude"]`).should("not.exist");
-    cy.get(`${backendSel} option[value="cursor"]`).should("not.exist");
 
-    interceptAllRpcsWithListAgents([], [{ id: "gamma-only", label: "Gamma" }]);
+    // Then
+    connectionPage.backendSelect(PROJECT_ID).should("exist");
+    connectionPage.backendSelect(PROJECT_ID).find("option").should("have.length", 2);
+    connectionPage.backendSelect(PROJECT_ID).find("option").eq(0).should("have.value", "agent-one");
+    connectionPage.backendSelect(PROJECT_ID).find("option").eq(1).should("have.value", "agent-two");
+    connectionPage.backendSelect(PROJECT_ID).find("option[value='claude']").should("not.exist");
+    connectionPage.backendSelect(PROJECT_ID).find("option[value='cursor']").should("not.exist");
+
+    // Given — re-mount with different agents
+    interceptConnectionRpcs([], { agents: [{ id: "gamma-only", label: "Gamma" }] });
     cy.mount(<ConnectionScreen />);
     cy.wait("@listAgents");
-    cy.get(`[data-testid="backend-select-${PROJECT.projectId}"] option`).should("have.length", 1);
-    cy.get(`[data-testid="backend-select-${PROJECT.projectId}"]`)
-      .should("have.value", "gamma-only");
+
+    // Then
+    connectionPage.backendSelect(PROJECT_ID).find("option").should("have.length", 1);
+    connectionPage.backendSelect(PROJECT_ID).should("have.value", "gamma-only");
   });
 });
 
@@ -1401,44 +897,64 @@ describe("ConnectionScreen multi-host daemon selection", () => {
   });
 
   it("renders a Host dropdown per project populated from ListEligibleDaemons", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcsWithDaemons([ACTIVE_SESSION_ON_LOCAL_ELIGIBLE_DAEMON]);
+    interceptConnectionRpcs([ACTIVE_SESSION_ON_LOCAL_ELIGIBLE_DAEMON], {
+      daemons: [DAEMON_LOCAL, DAEMON_PEER],
+    });
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"]`, { timeout: 5000 }).should("exist");
-    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`).should("have.length", 2);
-    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`).eq(0).should("contain.text", DAEMON_LOCAL.label);
-    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`).eq(1).should("contain.text", DAEMON_PEER.label);
+
+    // Then
+    connectionPage.hostSelect(PROJECT_ROW_MULTI_HOST).should("exist");
+    connectionPage.hostSelect(PROJECT_ROW_MULTI_HOST).find("option").should("have.length", 2);
+    connectionPage.hostSelect(PROJECT_ROW_MULTI_HOST).find("option").eq(0).should("contain.text", DAEMON_LOCAL.label);
+    connectionPage.hostSelect(PROJECT_ROW_MULTI_HOST).find("option").eq(1).should("contain.text", DAEMON_PEER.label);
   });
 
   /** PRD: local daemon row first in the Host dropdown even when the RPC returns peers before the local row. */
   it("web_connection_screen_host_dropdown_lists_multiple_daemons", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcsWithDaemons([ACTIVE_SESSION_ON_LOCAL_ELIGIBLE_DAEMON], [
-      { instanceId: DAEMON_PEER.instanceId, label: DAEMON_PEER.label, isLocal: false },
-      { instanceId: DAEMON_LOCAL.instanceId, label: DAEMON_LOCAL.label, isLocal: true },
-    ]);
+    interceptConnectionRpcs([ACTIVE_SESSION_ON_LOCAL_ELIGIBLE_DAEMON], {
+      daemons: [
+        { instanceId: DAEMON_PEER.instanceId, label: DAEMON_PEER.label, isLocal: false },
+        { instanceId: DAEMON_LOCAL.instanceId, label: DAEMON_LOCAL.label, isLocal: true },
+      ],
+    });
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"]`, { timeout: 5000 }).should("exist");
-    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`).should("have.length", 2);
-    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`).eq(0).should("contain.text", DAEMON_LOCAL.label);
-    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`).eq(1).should("contain.text", DAEMON_PEER.label);
+
+    // Then
+    connectionPage.hostSelect(PROJECT_ROW_MULTI_HOST).should("exist");
+    connectionPage.hostSelect(PROJECT_ROW_MULTI_HOST).find("option").should("have.length", 2);
+    connectionPage.hostSelect(PROJECT_ROW_MULTI_HOST).find("option").eq(0).should("contain.text", DAEMON_LOCAL.label);
+    connectionPage.hostSelect(PROJECT_ROW_MULTI_HOST).find("option").eq(1).should("contain.text", DAEMON_PEER.label);
   });
 
   it("defaults Host dropdown to the local daemon", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcsWithDaemons([ACTIVE_SESSION_ON_LOCAL_ELIGIBLE_DAEMON]);
+    interceptConnectionRpcs([ACTIVE_SESSION_ON_LOCAL_ELIGIBLE_DAEMON], {
+      daemons: [DAEMON_LOCAL, DAEMON_PEER],
+    });
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"]`, { timeout: 5000 })
-      .should("have.value", DAEMON_LOCAL.instanceId);
+
+    // Then
+    connectionPage.hostSelect(PROJECT_ROW_MULTI_HOST).should("have.value", DAEMON_LOCAL.instanceId);
   });
 
   it("web_start_session_includes_recipe_field", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcsWithDaemons([]);
-
+    interceptConnectionRpcs([], { daemons: [DAEMON_LOCAL, DAEMON_PEER] });
     cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
       req.reply({
         statusCode: 200,
@@ -1447,13 +963,13 @@ describe("ConnectionScreen multi-host daemon selection", () => {
       });
     }).as("startSession");
 
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
+    byTestId(`recipe-select-${PROJECT_ROW_MULTI_HOST}`, { timeout: 5000 }).select("bugfix");
+    connectionPage.startSession(PROJECT_ROW_MULTI_HOST).click();
 
-    cy.get(`[data-testid="recipe-select-${PROJECT_ROW_MULTI_HOST}"]`, { timeout: 5000 })
-      .select("bugfix");
-    cy.get(`[data-testid="start-session-${PROJECT_ROW_MULTI_HOST}"]`).click();
-
+    // Then
     cy.wait("@startSession").then((interception) => {
       const bodyBytes = new Uint8Array(interception.request.body as ArrayBuffer);
       const decoded = fromBinary(StartSessionRequestSchema, bodyBytes);
@@ -1462,9 +978,9 @@ describe("ConnectionScreen multi-host daemon selection", () => {
   });
 
   it("sends daemonInstanceId in StartSession request", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcsWithDaemons([]);
-
+    interceptConnectionRpcs([], { daemons: [DAEMON_LOCAL, DAEMON_PEER] });
     cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
       req.reply({
         statusCode: 200,
@@ -1473,13 +989,13 @@ describe("ConnectionScreen multi-host daemon selection", () => {
       });
     }).as("startSession");
 
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
+    connectionPage.hostSelect(PROJECT_ROW_MULTI_HOST).select(DAEMON_PEER.instanceId);
+    connectionPage.startSession(PROJECT_ROW_MULTI_HOST).click();
 
-    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"]`, { timeout: 5000 })
-      .select(DAEMON_PEER.instanceId);
-    cy.get(`[data-testid="start-session-${PROJECT_ROW_MULTI_HOST}"]`).click();
-
+    // Then
     cy.wait("@startSession").then((interception) => {
       const bodyBytes = new Uint8Array(interception.request.body as ArrayBuffer);
       const decoded = fromBinary(StartSessionRequestSchema, bodyBytes);
@@ -1488,25 +1004,37 @@ describe("ConnectionScreen multi-host daemon selection", () => {
   });
 
   it("shows Host column in session tables", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcsWithDaemons([SESSION_WITH_HOST]);
+    interceptConnectionRpcs([SESSION_WITH_HOST], { daemons: [DAEMON_LOCAL, DAEMON_PEER] });
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="sessions-table-${PROJECT_ROW_MULTI_HOST}"]`, { timeout: 5000 })
+
+    // Then
+    connectionPage.sessionsTable(PROJECT_ROW_MULTI_HOST)
       .find("th")
       .should("contain.text", "Host");
-    cy.get(`[data-testid="sessions-table-${PROJECT_ROW_MULTI_HOST}"] tbody tr`)
+    connectionPage.sessionsTable(PROJECT_ROW_MULTI_HOST).find("tbody tr")
       .first()
       .should("contain.text", "workstation-1");
   });
 
   it("renders single option when only one daemon is available", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcsWithDaemons([ACTIVE_SESSION_ON_LOCAL_ELIGIBLE_DAEMON], [DAEMON_LOCAL]);
+    interceptConnectionRpcs([ACTIVE_SESSION_ON_LOCAL_ELIGIBLE_DAEMON], {
+      daemons: [DAEMON_LOCAL],
+    });
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"]`, { timeout: 5000 }).should("exist");
-    cy.get(`[data-testid="host-select-${PROJECT_ROW_MULTI_HOST}"] option`).should("have.length", 1);
+
+    // Then
+    connectionPage.hostSelect(PROJECT_ROW_MULTI_HOST).should("exist");
+    connectionPage.hostSelect(PROJECT_ROW_MULTI_HOST).find("option").should("have.length", 1);
   });
 });
 
@@ -1517,25 +1045,25 @@ describe("ConnectionScreen multi-daemon project collision (acceptance)", () => {
   });
 
   it("renders_separate_accordions_per_project_and_host_when_project_id_collides", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcsProjectIdCollision([COLLISION_SESSION_WS, COLLISION_SESSION_SRV]);
+    interceptConnectionRpcsProjectIdCollision([COLLISION_SESSION_WS, COLLISION_SESSION_SRV]);
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
 
-    const accWs = `[data-testid="project-accordion-${COLLISION_PROJECT_ID}__${DAEMON_LOCAL.instanceId}"]`;
-    const accSrv = `[data-testid="project-accordion-${COLLISION_PROJECT_ID}__${DAEMON_PEER.instanceId}"]`;
-    cy.get(accWs, { timeout: 8000 }).should("exist");
-    cy.get(accSrv).should("exist");
+    // Then
+    byTestId(`project-accordion-${COLLISION_PROJECT_ID}__${DAEMON_LOCAL.instanceId}`, { timeout: 8000 }).should("exist");
+    byTestId(`project-accordion-${COLLISION_PROJECT_ID}__${DAEMON_PEER.instanceId}`).should("exist");
 
-    const tableWs = `[data-testid="sessions-table-${COLLISION_PROJECT_ID}__${DAEMON_LOCAL.instanceId}"]`;
-    const tableSrv = `[data-testid="sessions-table-${COLLISION_PROJECT_ID}__${DAEMON_PEER.instanceId}"]`;
-    cy.get(tableWs).within(() => {
-      cy.get(`[data-testid="connect-${COLLISION_SESSION_WS.sessionId}"]`).should("exist");
-      cy.get(`[data-testid="connect-${COLLISION_SESSION_SRV.sessionId}"]`).should("not.exist");
+    byTestId(`sessions-table-${COLLISION_PROJECT_ID}__${DAEMON_LOCAL.instanceId}`).within(() => {
+      connectionPage.connectBtn(COLLISION_SESSION_WS.sessionId).should("exist");
+      connectionPage.connectBtn(COLLISION_SESSION_SRV.sessionId).should("not.exist");
     });
-    cy.get(tableSrv).within(() => {
-      cy.get(`[data-testid="connect-${COLLISION_SESSION_SRV.sessionId}"]`).should("exist");
-      cy.get(`[data-testid="connect-${COLLISION_SESSION_WS.sessionId}"]`).should("not.exist");
+    byTestId(`sessions-table-${COLLISION_PROJECT_ID}__${DAEMON_PEER.instanceId}`).within(() => {
+      connectionPage.connectBtn(COLLISION_SESSION_SRV.sessionId).should("exist");
+      connectionPage.connectBtn(COLLISION_SESSION_WS.sessionId).should("not.exist");
     });
   });
 });
@@ -1547,35 +1075,45 @@ describe("ConnectionScreen — reconnect vs new-session presentation", () => {
   });
 
   it("Resume inactive session shows floating overlay without pushing /terminal onto history", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([INACTIVE_SESSION]);
-    interceptResumeSessionSuccess(INACTIVE_SESSION.sessionId);
+    interceptConnectionRpcs([INACTIVE_SESSION]);
+    interceptResumeSession(INACTIVE_SESSION.sessionId);
     interceptTokenForPresence();
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
     cy.window().then((win) => {
       cy.spy(win.history, "pushState").as("historyPush");
     });
-    cy.get(`[data-testid="resume-${INACTIVE_SESSION.sessionId}"]`, { timeout: 5000 }).click();
+    byTestId(`resume-${INACTIVE_SESSION.sessionId}`, { timeout: 5000 }).click();
     cy.wait("@resumeSession");
-    cy.get("[data-testid='terminal-reconnect-overlay-root']", { timeout: 15000 }).should("be.visible");
+
+    // Then
+    connectionPage.reconnectOverlay().should("be.visible");
     cy.get("@historyPush").should("not.have.been.called");
   });
 
   it("Connect active session opens floating overlay without pushing /terminal onto history", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([ACTIVE_SESSION]);
-    interceptConnectSessionSuccess();
+    interceptConnectionRpcs([ACTIVE_SESSION]);
+    interceptConnectSession();
     interceptTokenForPresence();
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
     cy.window().then((win) => {
       cy.spy(win.history, "pushState").as("historyPush");
     });
-    cy.get(`[data-testid="connect-${ACTIVE_SESSION.sessionId}"]`, { timeout: 5000 }).click();
+    connectionPage.connectBtn(ACTIVE_SESSION.sessionId).click();
     cy.wait("@connectSession");
-    cy.get("[data-testid='terminal-reconnect-overlay-root']", { timeout: 15000 }).should("be.visible");
-    cy.get("[data-testid='connected-terminal-container']", { timeout: 15000 }).should("exist");
+
+    // Then
+    connectionPage.reconnectOverlay().should("be.visible");
+    connectionPage.terminalContainer({ timeout: 15000 }).should("exist");
     cy.get("@historyPush").should("not.have.been.called");
   });
 });
@@ -1587,22 +1125,32 @@ describe("ConnectionScreen — pending elicitation indicator", () => {
   });
 
   it("ConnectionScreen_shows_elicitation_indicator_when_pending_elicitation_true", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([SESSION_PENDING_ELICITATION]);
+    interceptConnectionRpcs([SESSION_PENDING_ELICITATION]);
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="sessions-table-${PROJECT.projectId}"]`, { timeout: 5000 }).should("exist");
-    cy.get(`[data-testid="connect-${SESSION_PENDING_ELICITATION.sessionId}"]`)
+
+    // Then
+    connectionPage.sessionsTable(PROJECT_ID).should("exist");
+    connectionPage.connectBtn(SESSION_PENDING_ELICITATION.sessionId)
       .closest("tr")
       .should("have.attr", "data-pending-elicitation", "true");
   });
 
   it("ConnectionScreen_hides_elicitation_indicator_when_pending_elicitation_false", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([SESSION_WITHOUT_ELICITATION]);
+    interceptConnectionRpcs([SESSION_WITHOUT_ELICITATION]);
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="connect-${SESSION_WITHOUT_ELICITATION.sessionId}"]`)
+
+    // Then
+    connectionPage.connectBtn(SESSION_WITHOUT_ELICITATION.sessionId)
       .closest("tr")
       .should("have.attr", "data-pending-elicitation", "false");
   });
@@ -1612,50 +1160,6 @@ describe("ConnectionScreen — pending elicitation indicator", () => {
 // Multi-session concurrent attachments (acceptance — PRD: Connection screen N≥1)
 // ---------------------------------------------------------------------------
 
-const SESSION_MULTI_A: MockSessionRow = {
-  sessionId: "multi-session-aaaaaaaa-bbbb-cccc-dddd-eeee11111111",
-  createdAt: "2026-03-21T10:00:00Z",
-  status: "active",
-  repoPath: "/home/dev/project",
-  pid: 70001,
-  isActive: true,
-  projectId: "proj-1",
-  daemonInstanceId: "",
-};
-
-const SESSION_MULTI_B: MockSessionRow = {
-  sessionId: "multi-session-bbbbbbbb-aaaa-cccc-dddd-ffff22222222",
-  createdAt: "2026-03-21T11:00:00Z",
-  status: "active",
-  repoPath: "/home/dev/project",
-  pid: 70002,
-  isActive: true,
-  projectId: "proj-1",
-  daemonInstanceId: "",
-};
-
-/** Per-request ConnectSession: room name derived from requested session id (distinct LiveKit rooms). */
-function interceptConnectSessionPerSessionId() {
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/ConnectSession", (req) => {
-    const bodyBytes = new Uint8Array(req.body as ArrayBuffer);
-    const decoded = fromBinary(ConnectSessionRequestSchema, bodyBytes);
-    const sid = decoded.sessionId;
-    const body = toBinary(
-      ConnectSessionResponseSchema,
-      create(ConnectSessionResponseSchema, {
-        livekitRoom: `room-${sid}`,
-        livekitUrl: "ws://127.0.0.1:7880",
-        livekitServerIdentity: `server-${sid.slice(0, 8)}`,
-      }),
-    );
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: toArrayBuffer(body),
-    });
-  }).as("connectSessionMulti");
-}
-
 describe("ConnectionScreen — multi-session attachments (acceptance)", () => {
   beforeEach(() => {
     cy.clearLocalStorage();
@@ -1663,61 +1167,60 @@ describe("ConnectionScreen — multi-session attachments (acceptance)", () => {
   });
 
   it("ConnectionScreen — two concurrent connects: two distinct attachment roots (mocked RPC)", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([SESSION_MULTI_A, SESSION_MULTI_B]);
+    interceptConnectionRpcs([SESSION_MULTI_A, SESSION_MULTI_B]);
     interceptConnectSessionPerSessionId();
     interceptTokenForPresence();
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="connect-${SESSION_MULTI_A.sessionId}"]`, { timeout: 8000 }).click();
+    connectionPage.connectBtn(SESSION_MULTI_A.sessionId, { timeout: 8000 }).click();
     cy.wait("@connectSessionMulti");
-    cy.get("[data-testid='connected-terminal-container']", { timeout: 15000 }).should("exist");
-    cy.get(`[data-testid="connect-${SESSION_MULTI_B.sessionId}"]`).click();
+    connectionPage.terminalContainer().should("exist");
+    connectionPage.connectBtn(SESSION_MULTI_B.sessionId).click();
     cy.wait("@connectSessionMulti");
-    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_A.sessionId}"]`, {
-      timeout: 15000,
-    }).should("exist");
-    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_B.sessionId}"]`).should(
-      "exist",
-    );
+
+    // Then
+    connectionPage.attachedTerminal(SESSION_MULTI_A.sessionId).should("exist");
+    connectionPage.attachedTerminal(SESSION_MULTI_B.sessionId).should("exist");
   });
 
   it("ConnectionScreen — disconnect first leaves second terminal (mocked)", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([SESSION_MULTI_A, SESSION_MULTI_B]);
+    interceptConnectionRpcs([SESSION_MULTI_A, SESSION_MULTI_B]);
     interceptConnectSessionPerSessionId();
     interceptTokenForPresence();
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="connect-${SESSION_MULTI_A.sessionId}"]`, { timeout: 8000 }).click();
+    connectionPage.connectBtn(SESSION_MULTI_A.sessionId, { timeout: 8000 }).click();
     cy.wait("@connectSessionMulti");
-    cy.get(`[data-testid="connect-${SESSION_MULTI_B.sessionId}"]`).click();
+    connectionPage.connectBtn(SESSION_MULTI_B.sessionId).click();
     cy.wait("@connectSessionMulti");
-    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_A.sessionId}"]`, {
-      timeout: 15000,
-    })
-      .find("[data-testid='connection-status-dot']", { timeout: 20000 })
+    connectionPage.attachedTerminal(SESSION_MULTI_A.sessionId)
+      .find(`[data-testid='${TEST_IDS.connectionStatusDot}']`, { timeout: 20000 })
       .should("have.length.at.least", 1)
       .first()
       .scrollIntoView()
       .click({ force: true });
-    cy.get("[data-testid='connection-menu-disconnect']", { timeout: 10000 })
-      .first()
-      .click({ force: true });
-    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_B.sessionId}"]`, {
-      timeout: 15000,
-    }).should("exist");
-    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_B.sessionId}"]`, {
-      timeout: 15000,
-    })
-      .find("[data-testid='connection-status-dot']", { timeout: 20000 })
+    connectionPage.disconnectMenuItem().first().click({ force: true });
+
+    // Then
+    connectionPage.attachedTerminal(SESSION_MULTI_B.sessionId).should("exist");
+    connectionPage.attachedTerminal(SESSION_MULTI_B.sessionId)
+      .find(`[data-testid='${TEST_IDS.connectionStatusDot}']`, { timeout: 20000 })
       .first()
       .should("exist");
   });
 
   it("ConnectionScreen — Start New Session with another terminal open adds attachment (mocked)", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptAllRpcs([SESSION_MULTI_A, SESSION_MULTI_B]);
+    interceptConnectionRpcs([SESSION_MULTI_A, SESSION_MULTI_B]);
     interceptConnectSessionPerSessionId();
     const newSessionId = "multi-session-new-start-cccc-dddd-eeee-ffffffffffff";
     cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
@@ -1737,52 +1240,53 @@ describe("ConnectionScreen — multi-session attachments (acceptance)", () => {
       });
     }).as("startSessionMulti");
     interceptTokenForPresence();
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="connect-${SESSION_MULTI_A.sessionId}"]`, { timeout: 8000 }).click();
+    connectionPage.connectBtn(SESSION_MULTI_A.sessionId, { timeout: 8000 }).click();
     cy.wait("@connectSessionMulti");
-    cy.get(`[data-testid="start-session-${PROJECT.projectId}"]`, { timeout: 8000 }).click();
+    connectionPage.startSession(PROJECT_ID).click();
     cy.wait("@startSessionMulti");
-    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_A.sessionId}"]`, {
-      timeout: 20000,
-    }).should("exist");
-    cy.get(`[data-testid="connection-attached-terminal-${newSessionId}"]`).should("exist");
+
+    // Then
+    connectionPage.attachedTerminal(SESSION_MULTI_A.sessionId, { timeout: 20000 }).should("exist");
+    connectionPage.attachedTerminal(newSessionId).should("exist");
   });
 
   it("ConnectionScreen — inactive ListSessions clears only matching attachment (mocked)", () => {
+    // Given
     window.localStorage.setItem("tddy_session_token", "fake-token");
     let poll = 0;
-    interceptAllRpcsWithListSessionsFactory(() => {
-      poll += 1;
-      if (poll === 1) {
-        return [SESSION_MULTI_A, SESSION_MULTI_B];
-      }
-      return [
-        { ...SESSION_MULTI_A, isActive: false, status: "exited", pid: 0 },
-        SESSION_MULTI_B,
-      ];
+    interceptConnectionRpcs([SESSION_MULTI_A, SESSION_MULTI_B], {
+      listSessionsFactory: () => {
+        poll += 1;
+        if (poll === 1) {
+          return [SESSION_MULTI_A, SESSION_MULTI_B];
+        }
+        return [
+          { ...SESSION_MULTI_A, isActive: false, status: "exited", pid: 0 },
+          SESSION_MULTI_B,
+        ];
+      },
     });
     interceptConnectSessionPerSessionId();
     interceptTokenForPresence();
+
+    // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    cy.get(`[data-testid="connect-${SESSION_MULTI_A.sessionId}"]`, { timeout: 8000 }).click();
+    connectionPage.connectBtn(SESSION_MULTI_A.sessionId, { timeout: 8000 }).click();
     cy.wait("@connectSessionMulti");
-    cy.get(`[data-testid="connect-${SESSION_MULTI_B.sessionId}"]`).click();
+    connectionPage.connectBtn(SESSION_MULTI_B.sessionId).click();
     cy.wait("@connectSessionMulti");
-    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_A.sessionId}"]`, {
-      timeout: 15000,
-    }).should("exist");
-    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_B.sessionId}"]`).should(
-      "exist",
-    );
+    connectionPage.attachedTerminal(SESSION_MULTI_A.sessionId).should("exist");
+    connectionPage.attachedTerminal(SESSION_MULTI_B.sessionId).should("exist");
     cy.wait(5500);
     cy.wait("@listSessions");
-    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_B.sessionId}"]`, {
-      timeout: 15000,
-    }).should("exist");
-    cy.get(`[data-testid="connection-attached-terminal-${SESSION_MULTI_A.sessionId}"]`).should(
-      "not.exist",
-    );
+
+    // Then
+    connectionPage.attachedTerminal(SESSION_MULTI_B.sessionId).should("exist");
+    connectionPage.attachedTerminal(SESSION_MULTI_A.sessionId).should("not.exist");
   });
 });

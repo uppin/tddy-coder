@@ -1,6 +1,7 @@
 import React from "react";
 import { SessionFilesPanel } from "../../src/components/session/SessionFilesPanel";
 import { SessionMoreActionsMenu } from "../../src/components/session/SessionMoreActionsMenu";
+import { byTestId, TEST_IDS } from "../support/testIds";
 
 const MD_FIXTURE = `# Unique Acceptance Heading
 
@@ -27,32 +28,42 @@ function SessionFilesPanelHarness() {
   );
 }
 
-/** Acceptance: Markdown preview is rendered (sanitized) with visible heading text, not raw source only. */
 describe("SessionFilesPanel", () => {
-  it("SessionFilesPanel_renders_markdown_preview_when_md_selected", () => {
+  it("renders sanitized Markdown preview with heading when a .md file is selected", () => {
+    // Given
     cy.mount(<SessionFilesPanelHarness />);
+
+    // When
     cy.contains("button", "PRD.md").click();
-    cy.get('[data-testid="session-file-preview"]')
-      .find("h1")
-      .should("contain.text", "Unique Acceptance Heading");
-    cy.get('[data-testid="session-file-preview"]').find("script").should("not.exist");
+
+    // Then — heading text is visible and script tag is stripped
+    byTestId(TEST_IDS.sessionFilePreview).find("h1").should("contain.text", "Unique Acceptance Heading");
+    byTestId(TEST_IDS.sessionFilePreview).find("script").should("not.exist");
   });
 
-  /** Acceptance: YAML preview uses structured / syntax-highlighted presentation with distinctive keys visible. */
-  it("SessionFilesPanel_renders_yaml_preview_when_yaml_selected", () => {
+  it("renders YAML with syntax highlighting when a .yaml file is selected", () => {
+    // Given
     cy.mount(<SessionFilesPanelHarness />);
+
+    // When
     cy.contains("button", "changeset.yaml").click();
-    cy.get('[data-testid="yaml-syntax-highlight"]').should("exist");
+
+    // Then
+    byTestId(TEST_IDS.yamlSyntaxHighlight).should("exist");
     cy.contains("acceptance-yaml-7f3a").should("be.visible");
   });
 });
 
 describe("SessionMoreActionsMenu", () => {
-  /** Acceptance: overflow exposes Show files with stable test id for automation. */
-  it("MoreActionsMenu_includes_show_files", () => {
+  it("overflow menu includes a Show files action with a stable test-id", () => {
+    // Given
     cy.mount(<SessionMoreActionsMenu sessionId="acceptance-sess-1" onShowFiles={() => {}} />);
-    cy.get('[data-testid="session-more-actions-acceptance-sess-1"]').click();
-    cy.get('[data-testid="session-more-actions-show-files"]').should("be.visible");
+
+    // When
+    byTestId("session-more-actions-acceptance-sess-1").click();
+
+    // Then
+    byTestId(TEST_IDS.sessionMoreActionsShowFiles).should("be.visible");
     cy.contains("Show files").should("be.visible");
   });
 });

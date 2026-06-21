@@ -1,58 +1,42 @@
 /**
- * E2E test: App Connect flow — token fetch via Connect-RPC, LiveKit connection.
+ * E2E: App Connect flow — token fetch via Connect-RPC + LiveKit connection.
  *
- * Reproduces: "failed to decode Protobuf message: buffer underflow" when
- * clicking Connect (client sends JSON, server expects protobuf).
+ * Reproduces: "failed to decode Protobuf message: buffer underflow" when clicking
+ * Connect (client was sending JSON, server expected protobuf).
  *
- * Requires:
- * - LIVEKIT_TESTKIT_WS_URL (from ./run-livekit-testkit-server)
- * - tddy-coder built (cargo build -p tddy-coder)
- * - Web bundle built (bun run build)
- *
- * Flow: Cypress starts tddy-coder with API key/secret and web bundle,
- * visits the app, fills form, clicks Connect. Asserts token fetch succeeds
- * and connection reaches "connected" (no buffer underflow error).
- *
+ * Requires: LIVEKIT_TESTKIT_WS_URL, tddy-coder built, web bundle built.
  * Skipped when LIVEKIT_TESTKIT_WS_URL is not set.
  */
+import { appAuthPage } from "../support/pages/appAuthPage";
+
 describe("App Connect Flow E2E", () => {
   let baseUrl: string;
 
   before(function () {
-    if (!Cypress.env("LIVEKIT_TESTKIT_WS_URL")) {
-      this.skip();
-      return;
-    }
-    return cy.task("startTddyCoderForConnectFlow").then((result) => {
-      const r = result as { baseUrl: string };
-      baseUrl = r.baseUrl;
+    cy.startTddyCoderApp({ flow: "connect" }).then((result) => {
+      baseUrl = result.baseUrl;
     });
-  });
-
-  beforeEach(() => {
-    cy.clearLocalStorage();
-    cy.clearAllSessionStorage();
   });
 
   after(() => {
     cy.task("stopTddyCoderForConnectFlow");
   });
 
-  it("connects via Connect-RPC token fetch without buffer underflow error", () => {
+  it("connects via Connect-RPC token fetch without a buffer underflow error", () => {
+    // Given
     const wsUrl = Cypress.env("LIVEKIT_TESTKIT_WS_URL") as string;
     cy.visit(baseUrl);
 
-    cy.get("[data-testid='github-login-button']", { timeout: 10000 }).should("exist").click();
-    // Stub OAuth round-trips through /auth/callback; wait for the post-auth connection form.
-    cy.get("#livekit-url", { timeout: 20000 }).should("exist").clear().type(wsUrl);
-    cy.get("[data-testid='livekit-identity']").clear().type("client");
-    cy.get("#livekit-room").clear().type("terminal-e2e");
-    cy.get("button[type='submit']").click();
+    // When — fill and submit the connection form
+    appAuthPage.loginButton().should("exist").click();
+    appAuthPage.livekitUrlInput({ timeout: 20000 }).should("exist").clear().type(wsUrl);
+    appAuthPage.livekitIdentityInput().clear().type("client");
+    appAuthPage.livekitRoomInput().clear().type("terminal-e2e");
+    appAuthPage.submitButton().click();
 
-    cy.get("[data-testid='connection-status-dot']", { timeout: 15000 })
-      .should("be.visible")
-      .and("have.attr", "data-connection-status", "connected");
-    cy.get("[data-testid='livekit-status']").should("not.be.visible");
+    // Then — connection reaches "connected" without protobuf decode errors
+    appAuthPage.statusDot({ timeout: 15000 }).should("be.visible").and("have.attr", "data-connection-status", "connected");
+    appAuthPage.livekitUrlInput().should("not.be.visible");
 
     cy.get("[data-testid='livekit-error']").should("not.exist");
     cy.contains("buffer underflow").should("not.exist");

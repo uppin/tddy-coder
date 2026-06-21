@@ -1,22 +1,24 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { shouldShowVisibleLiveKitStatusStrip } from "./liveKitStatusPresentation";
 
 describe("shouldShowVisibleLiveKitStatusStrip", () => {
-  test("hides plain status strip when connection overlay is on and status is connected", () => {
-    expect(
-      shouldShowVisibleLiveKitStatusStrip({
-        connectionOverlayEnabled: true,
-        status: "connected",
-      }),
-    ).toBe(false);
+  it("hides the plain status strip when the connection overlay is enabled and the state is connected", () => {
+    // When
+    const result = shouldShowVisibleLiveKitStatusStrip({
+      connectionOverlayEnabled: true,
+      status: "connected",
+    });
+    // Then
+    expect(result).toBe(false);
   });
 
-  test("hides plain status strip when connection overlay is on and status is connecting", () => {
-    expect(
-      shouldShowVisibleLiveKitStatusStrip({
-        connectionOverlayEnabled: true,
-        status: "connecting",
-      }),
-    ).toBe(false);
+  it("hides the plain status strip when the connection overlay is enabled and the state is connecting", () => {
+    // When
+    const result = shouldShowVisibleLiveKitStatusStrip({
+      connectionOverlayEnabled: true,
+      status: "connecting",
+    });
+    // Then
+    expect(result).toBe(false);
   });
 });

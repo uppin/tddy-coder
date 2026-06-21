@@ -11,10 +11,11 @@
  * All imports fail until invoke.ts is created (red phase).
  */
 
-import { describe, expect, it, mock } from "bun:test";
-import type { Transport, UnaryRequest, UnaryResponse, StreamResponse } from "@connectrpc/connect";
+import { beforeEach, describe, expect, it } from "bun:test";
+import type { Transport, UnaryResponse } from "@connectrpc/connect";
 import type { DescMethod } from "@bufbuild/protobuf";
-import { ConnectError, Code } from "@connectrpc/connect";
+import { Code } from "@connectrpc/connect";
+import { aFakeErrorTransport, aFakeStreamingTransport, aFakeUnaryTransport } from "../test-utils";
 
 // These imports fail until invoke.ts is created.
 import { invokeRpc, type InvokeResult } from "./invoke";
@@ -25,63 +26,58 @@ import { buildRegistry, findMethod } from "./registry";
 import { ECHO_SERVICE_DESCRIPTOR_FIXTURE } from "./test-fixtures/echoServiceDescriptor";
 
 // ---------------------------------------------------------------------------
-// Fake transport helpers
+// Type-narrowing guards — eliminates conditional test bodies
 // ---------------------------------------------------------------------------
 
-function makeFakeUnaryTransport(responseJson: string): Transport {
-  return {
-    async unary(method: DescMethod, _signal, _timeout, _header, message): Promise<UnaryResponse> {
-      // Echo back what was sent, decoded through the method output schema.
-      // In the real transport, message is deserialized; here we return a preset JSON.
-      const { create, fromJsonString } = await import("@bufbuild/protobuf");
-      const output = fromJsonString(method.output, responseJson);
-      return {
-        stream: false,
-        service: method.parent,
-        method,
-        header: new Headers(),
-        trailer: new Headers(),
-        message: output,
-      } as unknown as UnaryResponse;
-    },
-    stream() {
-      throw new Error("stream not expected in this test");
-    },
-  } as unknown as Transport;
+function assertSuccess(
+  result: InvokeResult,
+): asserts result is Extract<InvokeResult, { kind: "success" }> {
+  expect(result.kind).toBe("success");
+  if (result.kind !== "success") throw new Error(`expected success, got: ${result.kind}`);
 }
 
-function makeFakeErrorTransport(code: Code): Transport {
-  return {
-    async unary() {
-      throw new ConnectError("test error", code);
-    },
-    stream() {
-      throw new ConnectError("test error", code);
-    },
-  } as unknown as Transport;
+function assertError(
+  result: InvokeResult,
+): asserts result is Extract<InvokeResult, { kind: "error" }> {
+  expect(result.kind).toBe("error");
+  if (result.kind !== "error") throw new Error(`expected error, got: ${result.kind}`);
+}
+
+function assertStreamComplete(
+  result: InvokeResult,
+): asserts result is Extract<InvokeResult, { kind: "stream_complete" }> {
+  expect(result.kind).toBe("stream_complete");
+  if (result.kind !== "stream_complete") throw new Error(`expected stream_complete, got: ${result.kind}`);
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Tests — unary
 // ---------------------------------------------------------------------------
 
 describe("invokeRpc — unary", () => {
-  it("serializes request JSON and returns decoded JSON response", async () => {
-    const registry = buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
-    const method = findMethod(registry, "test.EchoService", "Echo");
-    const transport = makeFakeUnaryTransport('{"message":"hi","timestamp":"0"}');
+  let registry: ReturnType<typeof buildRegistry>;
 
-    const result = await invokeRpc(transport, method, '{"message":"hi"}');
-
-    expect(result.kind).toBe("success");
-    if (result.kind === "success") {
-      const parsed = JSON.parse(result.json);
-      expect(parsed.message).toBe("hi");
-    }
+  beforeEach(() => {
+    // Given: a registry built from the EchoService FileDescriptorSet fixture
+    registry = buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
   });
 
-  it("passes correct service typeName and method name to the transport", async () => {
-    const registry = buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
+  it("serializes request JSON and returns the decoded JSON response", async () => {
+    // Given
+    const method = findMethod(registry, "test.EchoService", "Echo");
+    const transport = aFakeUnaryTransport('{"message":"hi","timestamp":"0"}');
+
+    // When
+    const result = await invokeRpc(transport, method, '{"message":"hi"}');
+
+    // Then
+    assertSuccess(result);
+    const parsed = JSON.parse(result.json);
+    expect(parsed.message).toBe("hi");
+  });
+
+  it("passes the correct service typeName and method name to the transport", async () => {
+    // Given
     const method = findMethod(registry, "test.EchoService", "Echo");
 
     let capturedMethod: DescMethod | undefined;
@@ -99,85 +95,77 @@ describe("invokeRpc — unary", () => {
           message: output,
         } as unknown as UnaryResponse;
       },
-      stream() { throw new Error("not expected"); },
+      stream() {
+        throw new Error("not expected");
+      },
     } as unknown as Transport;
 
+    // When
     await invokeRpc(capturingTransport, method, "{}");
 
+    // Then
     expect(capturedMethod).toBeDefined();
     expect(capturedMethod!.parent.typeName).toBe("test.EchoService");
     expect(capturedMethod!.name).toBe("Echo");
   });
 
-  it("maps ConnectError NOT_FOUND to { kind: 'error', code, message }", async () => {
-    const registry = buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
+  it("maps ConnectError NOT_FOUND to { kind: 'error', code: 'not_found', message }", async () => {
+    // Given
     const method = findMethod(registry, "test.EchoService", "Echo");
-    const transport = makeFakeErrorTransport(Code.NotFound);
+    const transport = aFakeErrorTransport(Code.NotFound);
 
+    // When
     const result = await invokeRpc(transport, method, "{}");
 
-    expect(result.kind).toBe("error");
-    if (result.kind === "error") {
-      expect(result.code).toBe("not_found");
-      expect(typeof result.message).toBe("string");
-    }
+    // Then
+    assertError(result);
+    expect(result.code).toBe("not_found");
+    expect(typeof result.message).toBe("string");
   });
 
-  it("maps ConnectError INVALID_ARGUMENT to { kind: 'error', code, message }", async () => {
-    const registry = buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
+  it("maps ConnectError INVALID_ARGUMENT to { kind: 'error', code: 'invalid_argument' }", async () => {
+    // Given
     const method = findMethod(registry, "test.EchoService", "Echo");
-    const transport = makeFakeErrorTransport(Code.InvalidArgument);
+    const transport = aFakeErrorTransport(Code.InvalidArgument);
 
+    // When
     const result = await invokeRpc(transport, method, "{}");
 
-    expect(result.kind).toBe("error");
-    if (result.kind === "error") {
-      expect(result.code).toBe("invalid_argument");
-    }
+    // Then
+    assertError(result);
+    expect(result.code).toBe("invalid_argument");
   });
 });
 
-describe("invokeRpc — server streaming", () => {
-  it("collects multiple decoded JSON chunks from a server-streaming method", async () => {
-    const registry = buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
-    const method = findMethod(registry, "test.EchoService", "EchoServerStream");
+// ---------------------------------------------------------------------------
+// Tests — server streaming
+// ---------------------------------------------------------------------------
 
-    // Fake transport yields 3 response frames.
+describe("invokeRpc — server streaming", () => {
+  let registry: ReturnType<typeof buildRegistry>;
+
+  beforeEach(() => {
+    // Given: a registry built from the EchoService FileDescriptorSet fixture
+    registry = buildRegistry(ECHO_SERVICE_DESCRIPTOR_FIXTURE);
+  });
+
+  it("collects all decoded JSON chunks from a server-streaming method", async () => {
+    // Given
+    const method = findMethod(registry, "test.EchoService", "EchoServerStream");
     const fakeChunks = [
       '{"message":"streaming #1","timestamp":"0"}',
       '{"message":"streaming #2","timestamp":"0"}',
       '{"message":"streaming #3","timestamp":"0"}',
     ];
+    const transport = aFakeStreamingTransport(fakeChunks);
 
-    // NOTE: transport.stream() must return Promise<StreamResponse> (not an AsyncGenerator).
-    // Each item yielded by StreamResponse.message is the proto message directly.
-    const streamingTransport: Transport = {
-      unary() { throw new Error("not expected"); },
-      async stream(m) {
-        const { fromJsonString } = await import("@bufbuild/protobuf");
-        return {
-          stream: true,
-          method: m,
-          header: new Headers(),
-          trailer: new Headers(),
-          message: (async function* () {
-            for (const chunk of fakeChunks) {
-              yield fromJsonString(m.output, chunk);
-            }
-          })(),
-        };
-      },
-    } as unknown as Transport;
+    // When
+    const result = await invokeRpc(transport, method, '{"message":"streaming"}');
 
-    const result = await invokeRpc(streamingTransport, method, '{"message":"streaming"}');
-
-    expect(result.kind).toBe("stream_complete");
-    if (result.kind === "stream_complete") {
-      expect(result.chunks).toHaveLength(3);
-      const first = JSON.parse(result.chunks[0]);
-      expect(first.message).toBe("streaming #1");
-      const last = JSON.parse(result.chunks[2]);
-      expect(last.message).toBe("streaming #3");
-    }
+    // Then
+    assertStreamComplete(result);
+    expect(result.chunks).toHaveLength(3);
+    expect(JSON.parse(result.chunks[0]).message).toBe("streaming #1");
+    expect(JSON.parse(result.chunks[2]).message).toBe("streaming #3");
   });
 });

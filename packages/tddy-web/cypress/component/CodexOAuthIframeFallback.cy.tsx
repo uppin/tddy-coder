@@ -1,8 +1,10 @@
 import React from "react";
 import { CodexOAuthDialog } from "../../src/components/CodexOAuthDialog";
+import { byTestId, TEST_IDS } from "../support/testIds";
 
-describe("Codex OAuth iframe-blocked provider path", () => {
-  it("shows documented top-level or popup fallback when embedding is blocked", () => {
+describe("CodexOAuthDialog — iframe-blocked fallback", () => {
+  it("shows the top-level/popup fallback when embedding is blocked by the provider", () => {
+    // Given
     cy.mount(
       <CodexOAuthDialog
         authorizeUrl="https://auth.openai.com/oauth/authorize?state=blocked"
@@ -12,8 +14,7 @@ describe("Codex OAuth iframe-blocked provider path", () => {
       />,
     );
 
-    cy.get("[data-testid='codex-oauth-embedding-fallback']", { timeout: 8000 }).should(
-      "be.visible",
-    );
+    // Then
+    byTestId(TEST_IDS.codexOauthEmbeddingFallback, { timeout: 8000 }).should("be.visible");
   });
 });

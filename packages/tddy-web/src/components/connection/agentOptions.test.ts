@@ -1,15 +1,21 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   buildAgentSelectOptionsFromRpc,
   coalesceBackendAgentSelection,
 } from "./agentOptions";
 
 describe("buildAgentSelectOptionsFromRpc", () => {
-  test("maps id and label from RPC agents", () => {
-    const opts = buildAgentSelectOptionsFromRpc([
+  it("builds a select option for each RPC agent, using its id as the value and its label as the display text", () => {
+    // Given
+    const rpcAgents = [
       { id: "a1", label: "Alpha" },
       { id: "b2", label: "Beta" },
-    ]);
+    ];
+
+    // When
+    const opts = buildAgentSelectOptionsFromRpc(rpcAgents);
+
+    // Then
     expect(opts).toEqual([
       { value: "a1", label: "Alpha" },
       { value: "b2", label: "Beta" },
@@ -18,16 +24,28 @@ describe("buildAgentSelectOptionsFromRpc", () => {
 });
 
 describe("coalesceBackendAgentSelection", () => {
-  test("prefers previous id when still allowed", () => {
+  it("keeps the previously selected agent when it is still in the allowed list", () => {
+    // Given
     const agents = [
       { value: "first", label: "First" },
       { value: "second", label: "Second" },
     ];
-    expect(coalesceBackendAgentSelection(agents, "second")).toBe("second");
+
+    // When
+    const result = coalesceBackendAgentSelection(agents, "second");
+
+    // Then
+    expect(result).toBe("second");
   });
 
-  test("falls back to first agent when previous missing", () => {
+  it("falls back to the first available agent when the previous selection is no longer allowed", () => {
+    // Given
     const agents = [{ value: "only", label: "Only" }];
-    expect(coalesceBackendAgentSelection(agents, "stale")).toBe("only");
+
+    // When
+    const result = coalesceBackendAgentSelection(agents, "stale");
+
+    // Then
+    expect(result).toBe("only");
   });
 });
