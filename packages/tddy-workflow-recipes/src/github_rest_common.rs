@@ -32,3 +32,23 @@ pub fn github_token_from_env() -> Option<String> {
 pub fn github_env_token_present() -> bool {
     github_token_from_env().is_some()
 }
+
+/// HTTP PATCH with a JSON body string, returns the response body.
+/// Uses curl; token from `github_token_from_env()`.
+pub fn curl_github_patch_json(
+    repo: &str,
+    path: &str,
+    body: &str,
+) -> Result<String, tddy_core::WorkflowError> {
+    unimplemented!("curl_github_patch_json: not yet implemented")
+}
+
+/// HTTP POST with a JSON body string, returns the response body.
+/// Uses curl; token from `github_token_from_env()`.
+pub fn curl_github_post_json(
+    repo: &str,
+    path: &str,
+    body: &str,
+) -> Result<String, tddy_core::WorkflowError> {
+    unimplemented!("curl_github_post_json: not yet implemented")
+}

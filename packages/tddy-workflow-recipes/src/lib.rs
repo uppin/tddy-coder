@@ -8,6 +8,7 @@ pub mod github_rest_common;
 pub mod grill_me;
 pub mod merge_pr;
 pub mod parser;
+pub mod orchestrate_pr_stack;
 pub mod plan_pr_stack;
 pub mod permissions;
 pub mod recipe_resolve;
@@ -30,6 +31,7 @@ pub use github_rest_common::{
     USER_AGENT_MERGE_PR, USER_AGENT_TDDY_TOOLS,
 };
 pub use grill_me::GrillMeRecipe;
+pub use orchestrate_pr_stack::{OrchestratePrStackRecipe, STACK_STATUS_MD_BASENAME, STACK_STATUS_JSON_BASENAME};
 pub use plan_pr_stack::{PlanPrStackRecipe, StackPlanOutput, PlannedPr, planned_prs_into_stack_nodes, validate_stack_plan};
 pub use merge_pr::merge_pr_github_tools_awareness_line;
 pub use merge_pr::MergePrRecipe;
