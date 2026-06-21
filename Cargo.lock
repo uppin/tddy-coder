@@ -7225,8 +7225,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "log",
- "serde",
- "serde_json",
+ "tddy-vm",
  "tddy-workflow-recipes",
  "tempfile",
  "thiserror 1.0.69",
