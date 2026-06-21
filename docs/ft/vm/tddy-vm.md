@@ -53,7 +53,19 @@ All methods require `session_token` for authentication (same pattern as `Connect
 
 ## Web UI
 
-A `/vms` page in the dashboard (accessed via the hamburger nav menu). Shows a table of all defined VMs with their state, SSH port, share URL, and Start/Stop/Remove action buttons.
+A `/vms` page in the dashboard (accessed via the hamburger nav menu). (Updated: 2026-06-21)
+
+### Build image panel
+
+A two-step panel for building a disk image and creating a VM:
+
+1. **Buildroot spec textarea** — the user pastes or types a Buildroot configuration fragment (e.g. `BR2_x86_64=y`, `BR2_TARGET_ROOTFS_EXT2=y`). Clicking **Build image** sends the spec to the `BuildVmImage` RPC. A "Building…" indicator shows while the build is in progress. Errors surface inline below the textarea.
+
+2. **Create VM form** — once an image is available, a **dropdown** lists all successfully built image paths. The user selects an image, enters a VM name, and clicks **Create VM** to call `DefineVm`. The dropdown accumulates images across multiple builds in the same session.
+
+### VM table
+
+A table of all defined VMs with their state, SSH host port, share URL, and **Start / Stop / Remove** action buttons. The table refreshes after every mutating action (define, start, stop, remove).
 
 ## Architecture
 
@@ -73,7 +85,10 @@ tddy-demo-runner (refactored)
 └── orchestrator.rs — DemoOrchestrator uses tddy_vm::Vm; vm.rs/qemu.rs/mock.rs deleted
 
 tddy-web
-└── src/components/vms/ — VmsAppPage + VmsScreen (/vms route)
+└── src/components/vms/
+    ├── VmsAppPage.tsx   — container: RPC wiring, state (building, availableImages)
+    ├── DefineVmPanel.tsx — presentational: spec textarea + image dropdown + Create form
+    └── VmsScreen.tsx    — presentational: VM table with Start/Stop/Remove
 ```
 
 ## Requirements

@@ -1,59 +1,55 @@
 import { DefineVmPanel } from "@/components/vms/DefineVmPanel";
 
-// Shared idle props — use plain no-ops where no assertion is needed.
-// Tests that assert a callback override the relevant prop with cy.stub().
 const noop = () => {};
 const idle = {
   building: false,
-  builtImagePath: "",
+  availableImages: [] as string[],
   errorMessage: "",
-  onBuildImage: noop,
+  onBuild: noop,
   onDefineVm: noop,
 };
 
-describe("DefineVmPanel", () => {
-  it("renders build-target input and Build button", () => {
+const TWO_IMAGES = [
+  "/var/tddy/images/minimal.qcow2",
+  "/var/tddy/images/full.qcow2",
+];
+
+const SAMPLE_SPEC = `BR2_x86_64=y
+BR2_TOOLCHAIN_BUILDROOT_GLIBC=y
+BR2_TARGET_ROOTFS_EXT2=y`;
+
+// ── Build spec section ────────────────────────────────────────────────────────
+
+describe("DefineVmPanel — build spec", () => {
+  it("renders a textarea for the buildroot spec", () => {
     cy.mount(<DefineVmPanel {...idle} />);
-    cy.get('[data-testid="define-vm-build-target"]').should("be.visible");
-    cy.get('[data-testid="define-vm-build-btn"]').should("be.visible");
+    cy.get('[data-testid="define-vm-spec"]').should("be.visible");
   });
 
-  it("Build button is disabled when build-target input is empty", () => {
+  it("Build button is disabled when the spec textarea is empty", () => {
     cy.mount(<DefineVmPanel {...idle} />);
     cy.get('[data-testid="define-vm-build-btn"]').should("be.disabled");
   });
 
-  it("Build button is enabled after typing a build target", () => {
+  it("Build button is enabled after typing in the spec textarea", () => {
     cy.mount(<DefineVmPanel {...idle} />);
-    cy.get('[data-testid="define-vm-build-target"]').type("qemu-minimal:qcow2");
+    cy.get('[data-testid="define-vm-spec"]').type(SAMPLE_SPEC);
     cy.get('[data-testid="define-vm-build-btn"]').should("not.be.disabled");
   });
 
-  it("calls onBuildImage with the typed build target when Build is clicked", () => {
-    const onBuildImage = cy.stub().as("onBuildImage");
-    cy.mount(<DefineVmPanel {...idle} onBuildImage={onBuildImage} />);
-    cy.get('[data-testid="define-vm-build-target"]').type("qemu-minimal:qcow2");
+  it("calls onBuild with the textarea content when Build is clicked", () => {
+    const onBuild = cy.stub().as("onBuild");
+    cy.mount(<DefineVmPanel {...idle} onBuild={onBuild} />);
+    cy.get('[data-testid="define-vm-spec"]').type(SAMPLE_SPEC);
     cy.get('[data-testid="define-vm-build-btn"]').click();
-    cy.get("@onBuildImage").should("have.been.calledWith", "qemu-minimal:qcow2");
+    cy.get("@onBuild").should("have.been.calledOnce");
+    cy.get("@onBuild").its("firstCall.args.0").should("include", "BR2_x86_64=y");
   });
 
-  it("shows a building indicator and disables Build while building prop is true", () => {
+  it("shows a building indicator and disables Build while building=true", () => {
     cy.mount(<DefineVmPanel {...idle} building={true} />);
     cy.get('[data-testid="define-vm-building-status"]').should("be.visible");
     cy.get('[data-testid="define-vm-build-btn"]').should("be.disabled");
-  });
-
-  it("shows the built image path when builtImagePath is provided", () => {
-    cy.mount(
-      <DefineVmPanel
-        {...idle}
-        builtImagePath="/var/tddy/build/images/rootfs.qcow2"
-      />
-    );
-    cy.get('[data-testid="define-vm-image-path"]').should(
-      "contain.text",
-      "/var/tddy/build/images/rootfs.qcow2"
-    );
   });
 
   it("shows an error message when errorMessage is provided", () => {
@@ -65,35 +61,64 @@ describe("DefineVmPanel", () => {
       "build failed: missing config"
     );
   });
+});
 
-  it("Create button is disabled when VM name is empty", () => {
-    cy.mount(
-      <DefineVmPanel {...idle} builtImagePath="/images/rootfs.qcow2" />
-    );
-    cy.get('[data-testid="define-vm-create-btn"]').should("be.disabled");
+// ── Create VM section ─────────────────────────────────────────────────────────
+
+describe("DefineVmPanel — create VM", () => {
+  it("renders a dropdown for image selection", () => {
+    cy.mount(<DefineVmPanel {...idle} availableImages={TWO_IMAGES} />);
+    cy.get('[data-testid="define-vm-image-select"]').should("be.visible");
   });
 
-  it("Create button is disabled when no image path is set", () => {
-    cy.mount(<DefineVmPanel {...idle} builtImagePath="" />);
+  it("dropdown shows a placeholder option when no images are available", () => {
+    cy.mount(<DefineVmPanel {...idle} availableImages={[]} />);
+    cy.get('[data-testid="define-vm-image-select"]')
+      .find("option")
+      .first()
+      .should("have.attr", "disabled");
+  });
+
+  it("dropdown lists every available image as a selectable option", () => {
+    cy.mount(<DefineVmPanel {...idle} availableImages={TWO_IMAGES} />);
+    cy.get('[data-testid="define-vm-image-select"] option').should(
+      "have.length.at.least",
+      TWO_IMAGES.length
+    );
+    cy.get('[data-testid="define-vm-image-select"]').contains(
+      "minimal.qcow2"
+    );
+    cy.get('[data-testid="define-vm-image-select"]').contains("full.qcow2");
+  });
+
+  it("Create button is disabled when availableImages is empty", () => {
+    cy.mount(<DefineVmPanel {...idle} availableImages={[]} />);
     cy.get('[data-testid="define-vm-name"]').type("web-vm");
     cy.get('[data-testid="define-vm-create-btn"]').should("be.disabled");
   });
 
-  it("calls onDefineVm with vm name and built image path when Create is clicked", () => {
+  it("Create button is disabled when VM name is empty", () => {
+    cy.mount(<DefineVmPanel {...idle} availableImages={TWO_IMAGES} />);
+    cy.get('[data-testid="define-vm-image-select"]').select(TWO_IMAGES[0]);
+    cy.get('[data-testid="define-vm-create-btn"]').should("be.disabled");
+  });
+
+  it("calls onDefineVm with vm name and the selected image path when Create is clicked", () => {
     const onDefineVm = cy.stub().as("onDefineVm");
     cy.mount(
       <DefineVmPanel
         {...idle}
-        builtImagePath="/images/rootfs.qcow2"
+        availableImages={TWO_IMAGES}
         onDefineVm={onDefineVm}
       />
     );
-    cy.get('[data-testid="define-vm-name"]').type("web-vm");
+    cy.get('[data-testid="define-vm-image-select"]').select(TWO_IMAGES[1]);
+    cy.get('[data-testid="define-vm-name"]').type("my-vm");
     cy.get('[data-testid="define-vm-create-btn"]').click();
     cy.get("@onDefineVm").should(
       "have.been.calledWith",
-      "web-vm",
-      "/images/rootfs.qcow2"
+      "my-vm",
+      TWO_IMAGES[1]
     );
   });
 });

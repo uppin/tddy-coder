@@ -46,7 +46,7 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
 
   const [rows, setRows] = useState<VmRow[]>([]);
   const [building, setBuilding] = useState(false);
-  const [builtImagePath, setBuiltImagePath] = useState("");
+  const [availableImages, setAvailableImages] = useState<string[]>([]);
   const [buildError, setBuildError] = useState("");
 
   const loadVms = useCallback(() => {
@@ -61,17 +61,18 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
     loadVms();
   }, [loadVms]);
 
-  const handleBuildImage = useCallback(
-    (buildTarget: string) => {
+  const handleBuild = useCallback(
+    (spec: string) => {
       if (!sessionToken) return;
       setBuilding(true);
       setBuildError("");
-      setBuiltImagePath("");
       client
-        .buildVmImage({ sessionToken, buildTarget })
+        .buildVmImage({ sessionToken, buildTarget: spec })
         .then((res) => {
           if (res.ok) {
-            setBuiltImagePath(res.imagePath);
+            setAvailableImages((prev) =>
+              prev.includes(res.imagePath) ? prev : [...prev, res.imagePath]
+            );
           } else {
             setBuildError(res.message || "Build failed");
           }
@@ -148,9 +149,9 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
       <div className="mb-8">
         <DefineVmPanel
           building={building}
-          builtImagePath={builtImagePath}
+          availableImages={availableImages}
           errorMessage={buildError}
-          onBuildImage={handleBuildImage}
+          onBuild={handleBuild}
           onDefineVm={handleDefineVm}
         />
       </div>
