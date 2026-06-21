@@ -1,5 +1,8 @@
 use crate::vm::{PortForward, Vm, VmError};
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VmSpec {
@@ -19,12 +22,25 @@ pub enum VmState {
     Error(String),
 }
 
-pub struct VmManager {/* internals TBD — must have Mutex<HashMap>, Box<dyn Vm>, state-file path */}
+/// Handle to a running VM kept in the registry.
+#[allow(dead_code)]
+struct VmHandle {
+    state: VmState,
+}
+
+pub struct VmManager {
+    state_file: PathBuf,
+    backend: Arc<dyn Vm>,
+    vms: Mutex<HashMap<String, (VmSpec, VmHandle)>>,
+}
 
 impl VmManager {
     pub fn new(state_file: &Path, backend: Box<dyn Vm>) -> Self {
-        let _ = (state_file, backend);
-        unimplemented!()
+        Self {
+            state_file: state_file.to_path_buf(),
+            backend: Arc::from(backend),
+            vms: Mutex::new(HashMap::new()),
+        }
     }
     pub async fn define(&self, spec: VmSpec) -> Result<(), VmError> {
         let _ = spec;
