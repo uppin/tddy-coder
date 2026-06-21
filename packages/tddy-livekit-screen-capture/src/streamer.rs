@@ -132,6 +132,7 @@ impl ScreenShareStreamer {
             rotation: VideoRotation::VideoRotation0,
             buffer: i420_buffer,
             timestamp_us: ts,
+            frame_metadata: None,
         };
 
         state.video_source.capture_frame(&video_frame);

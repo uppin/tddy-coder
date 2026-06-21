@@ -51,6 +51,10 @@ pub use changeset::{
     ChangesetState, ChangesetWorkflow, ClarificationQa, ClarificationQuestionForQa, DiscoveryData,
     GithubPrStatus, QuestionOptionForQa, SessionEntry, StateTransition,
 };
+pub use changeset::{
+    link_stack_node_to_child_session, sync_stack_node_from_child, update_stack_atomic, Stack,
+    StackNode,
+};
 pub use claude_hooks::{build_claude_hooks_settings, HookCommandParams};
 pub use elapsed_format::format_elapsed_compact;
 pub use error::{BackendError, ParseError, WorkflowError};
@@ -84,7 +88,7 @@ pub use session_activity::{
 };
 pub use session_chain::{
     integrate_chain_base_into_session_worktree_bootstrap,
-    resolve_chain_integration_base_ref_from_parent_session,
+    resolve_chain_integration_base_ref_from_parent_session, spawn_chain_child_worktree,
 };
 pub use session_lifecycle::{
     materialize_unified_session_directory, resolve_effective_session_id, unified_session_dir_path,

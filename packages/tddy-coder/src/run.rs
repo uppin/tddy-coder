@@ -423,6 +423,15 @@ pub struct Args {
 
     /// Target daemon instance ID on the relay.
     pub remote_daemon_id: Option<String>,
+
+    /// Orchestrating session id when this session is a child in a PR stack.
+    /// Sets orchestrator_session_id on the child's changeset.
+    pub stack_parent: Option<String>,
+
+    /// Base-branch source session id for this stack child.
+    /// Defaults to stack_parent when omitted.
+    /// Sets `previous_session_id`. TODO: wire worktree integration base via spawn_chain_child_worktree.
+    pub stack_base: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -600,6 +609,17 @@ pub struct CoderArgs {
     /// Target daemon instance ID on the relay (routes tool calls to a specific peer).
     #[arg(long, requires = "remote")]
     pub remote_daemon_id: Option<String>,
+
+    /// Orchestrating session id when this session is a child in a PR stack.
+    /// Sets orchestrator_session_id on the child's changeset.
+    #[arg(long)]
+    pub stack_parent: Option<String>,
+
+    /// Base-branch source session id for this stack child.
+    /// Defaults to stack_parent when omitted.
+    /// Sets `previous_session_id`. TODO: wire worktree integration base via spawn_chain_child_worktree.
+    #[arg(long)]
+    pub stack_base: Option<String>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -821,6 +841,8 @@ impl From<CoderArgs> for Args {
             remote_daemon_url: a.remote_daemon_url,
             remote_session_token: a.remote_session_token,
             remote_daemon_id: a.remote_daemon_id,
+            stack_parent: a.stack_parent,
+            stack_base: a.stack_base,
         }
     }
 }
@@ -869,6 +891,8 @@ impl From<DemoArgs> for Args {
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
+            stack_parent: None,
+            stack_base: None,
         }
     }
 }
@@ -1168,6 +1192,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
                 .unwrap_or_else(|| crate::default_unspecified_workflow_recipe_cli_name())
                 .to_string(),
         ),
+        orchestrator_session_id: args.stack_parent.clone(),
         ..tddy_core::changeset::Changeset::default()
     };
     tddy_core::changeset::write_changeset(&session_dir, &init_cs)
@@ -1180,7 +1205,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             pid: Some(std::process::id()),
             tool: Some("tddy-coder".to_string()),
             livekit_room: None,
-            previous_session_id: None,
+            previous_session_id: args.stack_base.clone(),
             session_type: None,
             model: None,
 
@@ -1339,7 +1364,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 pid: Some(std::process::id()),
                 tool: Some("tddy-coder".to_string()),
                 livekit_room: args.livekit_room.clone(),
-                previous_session_id: None,
+                previous_session_id: args.stack_base.clone(),
                 session_type: None,
                 model: None,
 
@@ -2811,6 +2836,7 @@ fn run_plan_bootstrap_in_session_dir(
                 .unwrap_or_else(|| crate::default_unspecified_workflow_recipe_cli_name())
                 .to_string(),
         ),
+        orchestrator_session_id: args.stack_parent.clone(),
         ..tddy_core::changeset::Changeset::default()
     };
     tddy_core::changeset::write_changeset(session_dir, &init_cs)
@@ -2823,7 +2849,7 @@ fn run_plan_bootstrap_in_session_dir(
             pid: Some(std::process::id()),
             tool: Some("tddy-coder".to_string()),
             livekit_room: None,
-            previous_session_id: None,
+            previous_session_id: args.stack_base.clone(),
             session_type: None,
             model: None,
 
@@ -3128,6 +3154,8 @@ mod resume_session_config_tests {
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
+            stack_parent: None,
+            stack_base: None,
         };
 
         merge_session_coder_config_for_resume(&mut args).expect("merge");
@@ -3193,6 +3221,8 @@ mod resume_session_identity_tests {
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
+            stack_parent: None,
+            stack_base: None,
         };
 
         assign_default_session_id(&mut args);
@@ -3261,6 +3291,8 @@ mod session_dir_sync_tests {
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
+            stack_parent: None,
+            stack_base: None,
         };
 
         sync_session_dir_from_args(&mut args).expect("apply");
@@ -3343,6 +3375,8 @@ mod changeset_agent_resume_tests {
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
+            stack_parent: None,
+            stack_base: None,
         };
 
         apply_agent_from_changeset_if_needed(&mut args).expect("apply");
@@ -3442,6 +3476,8 @@ mod post_tui_workflow_exit_tests {
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
+            stack_parent: None,
+            stack_base: None,
         }
     }
 
