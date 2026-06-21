@@ -50,6 +50,7 @@ import {
 } from "../utils/sessionSelection";
 import { sortSessionsForDisplay } from "../utils/sessionSort";
 import { SessionWorkflowStatusCells } from "./SessionWorkflowStatusCells";
+import { DemoVmControls } from "./DemoVmControls";
 import { SessionMoreActionsMenu } from "./session/SessionMoreActionsMenu";
 import { SessionWorkflowFilesModal } from "./session/SessionWorkflowFilesModal";
 import { DaemonNavMenu } from "./shell/DaemonNavMenu";
@@ -2271,6 +2272,12 @@ export function ConnectionScreen({
                         <SessionWorkflowStatusCells session={s} />
                         <TableCell>
                           <span className="inline-flex flex-wrap items-center gap-2">
+                            {s.workflowGoal === "demo" && sessionToken ? (
+                              <DemoVmControls
+                                sessionId={s.sessionId}
+                                sessionToken={sessionToken}
+                              />
+                            ) : null}
                             {s.isActive ? (
                               <>
                                 <Button
@@ -2420,6 +2427,12 @@ export function ConnectionScreen({
                   <SessionWorkflowStatusCells session={s} />
                   <TableCell>
                     <span className="inline-flex flex-wrap items-center gap-2">
+                      {s.workflowGoal === "demo" && sessionToken ? (
+                        <DemoVmControls
+                          sessionId={s.sessionId}
+                          sessionToken={sessionToken}
+                        />
+                      ) : null}
                       {s.isActive ? (
                         <>
                           <Button

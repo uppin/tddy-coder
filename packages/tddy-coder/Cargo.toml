@@ -31,6 +31,8 @@ tddy-build = { path = "../tddy-build" }
 tddy-build-rust = { path = "../tddy-build-rust" }
 tddy-build-typescript = { path = "../tddy-build-typescript" }
 tddy-build-docker = { path = "../tddy-build-docker" }
+tddy-build-buildroot = { path = "../tddy-build-buildroot" }
+tddy-build-qemu = { path = "../tddy-build-qemu" }
 tddy-tui = { path = "../tddy-tui" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-rpc = { path = "../tddy-rpc" }

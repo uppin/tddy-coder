@@ -8,6 +8,7 @@ members = [
     "packages/tddy-build-docker",
     "packages/tddy-build-buildroot",
     "packages/tddy-build-qemu",
+    "packages/tddy-demo-runner",
     "packages/tddy-core",
     "packages/tddy-rpc",
     "packages/tddy-coder",

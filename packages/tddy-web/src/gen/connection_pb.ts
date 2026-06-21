@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file connection.proto.
  */
 export const file_connection: GenFile = /*@__PURE__*/
-  fileDesc("ChBjb25uZWN0aW9uLnByb3RvEgpjb25uZWN0aW9uIhIKEExpc3RUb29sc1JlcXVlc3QiOAoRTGlzdFRvb2xzUmVzcG9uc2USIwoFdG9vbHMYASADKAsyFC5jb25uZWN0aW9uLlRvb2xJbmZvIicKCFRvb2xJbmZvEgwKBHBhdGgYASABKAkSDQoFbGFiZWwYAiABKAkiEwoRTGlzdEFnZW50c1JlcXVlc3QiOwoSTGlzdEFnZW50c1Jlc3BvbnNlEiUKBmFnZW50cxgBIAMoCzIVLmNvbm5lY3Rpb24uQWdlbnRJbmZvIiYKCUFnZW50SW5mbxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCSIsChNMaXN0U2Vzc2lvbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiQgoUTGlzdFNlc3Npb25zUmVzcG9uc2USKgoIc2Vzc2lvbnMYASADKAsyGC5jb25uZWN0aW9uLlNlc3Npb25FbnRyeSKsAgoMU2Vzc2lvbkVudHJ5EhIKCnNlc3Npb25faWQYASABKAkSEgoKY3JlYXRlZF9hdBgCIAEoCRIOCgZzdGF0dXMYAyABKAkSEQoJcmVwb19wYXRoGAQgASgJEgsKA3BpZBgFIAEoDRIRCglpc19hY3RpdmUYBiABKAgSEgoKcHJvamVjdF9pZBgHIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYCCABKAkSFQoNd29ya2Zsb3dfZ29hbBgJIAEoCRIWCg53b3JrZmxvd19zdGF0ZRgKIAEoCRIXCg9lbGFwc2VkX2Rpc3BsYXkYCyABKAkSDQoFYWdlbnQYDCABKAkSDQoFbW9kZWwYDSABKAkSGwoTcGVuZGluZ19lbGljaXRhdGlvbhgOIAEoCCJ1CgxQcm9qZWN0RW50cnkSEgoKcHJvamVjdF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEg8KB2dpdF91cmwYAyABKAkSFgoObWFpbl9yZXBvX3BhdGgYBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJIiwKE0xpc3RQcm9qZWN0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJCChRMaXN0UHJvamVjdHNSZXNwb25zZRIqCghwcm9qZWN0cxgBIAMoCzIYLmNvbm5lY3Rpb24uUHJvamVjdEVudHJ5ImgKFENyZWF0ZVByb2plY3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDAoEbmFtZRgCIAEoCRIPCgdnaXRfdXJsGAMgASgJEhoKEnVzZXJfcmVsYXRpdmVfcGF0aBgEIAEoCSJCChVDcmVhdGVQcm9qZWN0UmVzcG9uc2USKQoHcHJvamVjdBgBIAEoCzIYLmNvbm5lY3Rpb24uUHJvamVjdEVudHJ5IrcCChNTdGFydFNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEQoJdG9vbF9wYXRoGAIgASgJEhIKCnByb2plY3RfaWQYAyABKAkSDQoFYWdlbnQYBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJEg4KBnJlY2lwZRgGIAEoCRIUCgxzZXNzaW9uX3R5cGUYByABKAkSDQoFbW9kZWwYCCABKAkSHgoWYnJhbmNoX3dvcmt0cmVlX2ludGVudBgJIAEoCRIXCg9uZXdfYnJhbmNoX25hbWUYCiABKAkSJQodc2VsZWN0ZWRfaW50ZWdyYXRpb25fYmFzZV9yZWYYCyABKAkSIgoac2VsZWN0ZWRfYnJhbmNoX3RvX3dvcmtfb24YDCABKAkidgoUU3RhcnRTZXNzaW9uUmVzcG9uc2USEgoKc2Vzc2lvbl9pZBgBIAEoCRIUCgxsaXZla2l0X3Jvb20YAiABKAkSEwoLbGl2ZWtpdF91cmwYAyABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYBCABKAkiQgoVQ29ubmVjdFNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJkChZDb25uZWN0U2Vzc2lvblJlc3BvbnNlEhQKDGxpdmVraXRfcm9vbRgBIAEoCRITCgtsaXZla2l0X3VybBgCIAEoCRIfChdsaXZla2l0X3NlcnZlcl9pZGVudGl0eRgDIAEoCSJBChRSZXN1bWVTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkidwoVUmVzdW1lU2Vzc2lvblJlc3BvbnNlEhIKCnNlc3Npb25faWQYASABKAkSFAoMbGl2ZWtpdF9yb29tGAIgASgJEhMKC2xpdmVraXRfdXJsGAMgASgJEh8KF2xpdmVraXRfc2VydmVyX2lkZW50aXR5GAQgASgJIlEKFFNpZ25hbFNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIOCgZzaWduYWwYAyABKAUiNAoVU2lnbmFsU2Vzc2lvblJlc3BvbnNlEgoKAm9rGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiQQoURGVsZXRlU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIiMKFURlbGV0ZVNlc3Npb25SZXNwb25zZRIKCgJvaxgBIAEoCCIzChpMaXN0RWxpZ2libGVEYWVtb25zUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIksKE0VsaWdpYmxlRGFlbW9uRW50cnkSEwoLaW5zdGFuY2VfaWQYASABKAkSDQoFbGFiZWwYAiABKAkSEAoIaXNfbG9jYWwYAyABKAgiTwobTGlzdEVsaWdpYmxlRGFlbW9uc1Jlc3BvbnNlEjAKB2RhZW1vbnMYASADKAsyHy5jb25uZWN0aW9uLkVsaWdpYmxlRGFlbW9uRW50cnkiTAofTGlzdFNlc3Npb25Xb3JrZmxvd0ZpbGVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiJQoRV29ya2Zsb3dGaWxlRW50cnkSEAoIYmFzZW5hbWUYASABKAkiUAogTGlzdFNlc3Npb25Xb3JrZmxvd0ZpbGVzUmVzcG9uc2USLAoFZmlsZXMYASADKAsyHS5jb25uZWN0aW9uLldvcmtmbG93RmlsZUVudHJ5Il0KHlJlYWRTZXNzaW9uV29ya2Zsb3dGaWxlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEAoIYmFzZW5hbWUYAyABKAkiNwofUmVhZFNlc3Npb25Xb3JrZmxvd0ZpbGVSZXNwb25zZRIUCgxjb250ZW50X3V0ZjgYASABKAkiswEKC1dvcmt0cmVlUm93EgwKBHBhdGgYASABKAkSFAoMYnJhbmNoX2xhYmVsGAIgASgJEhIKCmRpc2tfYnl0ZXMYAyABKAQSFQoNY2hhbmdlZF9maWxlcxgEIAEoDRITCgtsaW5lc19hZGRlZBgFIAEoAxIVCg1saW5lc19yZW1vdmVkGAYgASgDEhoKEnVwZGF0ZWRfYXRfdW5peF9tcxgHIAEoAxINCgVzdGFsZRgIIAEoCCJcCh5MaXN0V29ya3RyZWVzRm9yUHJvamVjdFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEg8KB3JlZnJlc2gYAyABKAgiTQofTGlzdFdvcmt0cmVlc0ZvclByb2plY3RSZXNwb25zZRIqCgl3b3JrdHJlZXMYASADKAsyFy5jb25uZWN0aW9uLldvcmt0cmVlUm93IlkKFVJlbW92ZVdvcmt0cmVlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCSI1ChZSZW1vdmVXb3JrdHJlZVJlc3BvbnNlEgoKAm9rGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiYwoaTGlzdFByb2plY3RCcmFuY2hlc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSIvChtMaXN0UHJvamVjdEJyYW5jaGVzUmVzcG9uc2USEAoIYnJhbmNoZXMYASADKAkiTwoUU2Vzc2lvblRlcm1pbmFsSW5wdXQSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEgwKBGRhdGEYAyABKAwiJQoVU2Vzc2lvblRlcm1pbmFsT3V0cHV0EgwKBGRhdGEYASABKAwiSAobU3RyZWFtVGVybWluYWxPdXRwdXRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSIbChlTZW5kVGVybWluYWxJbnB1dFJlc3BvbnNlKkMKBlNpZ25hbBIRCg1TSUdOQUxfU0lHSU5UEAASEgoOU0lHTkFMX1NJR1RFUk0QARISCg5TSUdOQUxfU0lHS0lMTBACMoQOChFDb25uZWN0aW9uU2VydmljZRJICglMaXN0VG9vbHMSHC5jb25uZWN0aW9uLkxpc3RUb29sc1JlcXVlc3QaHS5jb25uZWN0aW9uLkxpc3RUb29sc1Jlc3BvbnNlEksKCkxpc3RBZ2VudHMSHS5jb25uZWN0aW9uLkxpc3RBZ2VudHNSZXF1ZXN0Gh4uY29ubmVjdGlvbi5MaXN0QWdlbnRzUmVzcG9uc2USUQoMTGlzdFNlc3Npb25zEh8uY29ubmVjdGlvbi5MaXN0U2Vzc2lvbnNSZXF1ZXN0GiAuY29ubmVjdGlvbi5MaXN0U2Vzc2lvbnNSZXNwb25zZRJRCgxMaXN0UHJvamVjdHMSHy5jb25uZWN0aW9uLkxpc3RQcm9qZWN0c1JlcXVlc3QaIC5jb25uZWN0aW9uLkxpc3RQcm9qZWN0c1Jlc3BvbnNlElQKDUNyZWF0ZVByb2plY3QSIC5jb25uZWN0aW9uLkNyZWF0ZVByb2plY3RSZXF1ZXN0GiEuY29ubmVjdGlvbi5DcmVhdGVQcm9qZWN0UmVzcG9uc2USUQoMU3RhcnRTZXNzaW9uEh8uY29ubmVjdGlvbi5TdGFydFNlc3Npb25SZXF1ZXN0GiAuY29ubmVjdGlvbi5TdGFydFNlc3Npb25SZXNwb25zZRJXCg5Db25uZWN0U2Vzc2lvbhIhLmNvbm5lY3Rpb24uQ29ubmVjdFNlc3Npb25SZXF1ZXN0GiIuY29ubmVjdGlvbi5Db25uZWN0U2Vzc2lvblJlc3BvbnNlElQKDVJlc3VtZVNlc3Npb24SIC5jb25uZWN0aW9uLlJlc3VtZVNlc3Npb25SZXF1ZXN0GiEuY29ubmVjdGlvbi5SZXN1bWVTZXNzaW9uUmVzcG9uc2USVAoNU2lnbmFsU2Vzc2lvbhIgLmNvbm5lY3Rpb24uU2lnbmFsU2Vzc2lvblJlcXVlc3QaIS5jb25uZWN0aW9uLlNpZ25hbFNlc3Npb25SZXNwb25zZRJUCg1EZWxldGVTZXNzaW9uEiAuY29ubmVjdGlvbi5EZWxldGVTZXNzaW9uUmVxdWVzdBohLmNvbm5lY3Rpb24uRGVsZXRlU2Vzc2lvblJlc3BvbnNlEmYKE0xpc3RFbGlnaWJsZURhZW1vbnMSJi5jb25uZWN0aW9uLkxpc3RFbGlnaWJsZURhZW1vbnNSZXF1ZXN0GicuY29ubmVjdGlvbi5MaXN0RWxpZ2libGVEYWVtb25zUmVzcG9uc2USdQoYTGlzdFNlc3Npb25Xb3JrZmxvd0ZpbGVzEisuY29ubmVjdGlvbi5MaXN0U2Vzc2lvbldvcmtmbG93RmlsZXNSZXF1ZXN0GiwuY29ubmVjdGlvbi5MaXN0U2Vzc2lvbldvcmtmbG93RmlsZXNSZXNwb25zZRJyChdSZWFkU2Vzc2lvbldvcmtmbG93RmlsZRIqLmNvbm5lY3Rpb24uUmVhZFNlc3Npb25Xb3JrZmxvd0ZpbGVSZXF1ZXN0GisuY29ubmVjdGlvbi5SZWFkU2Vzc2lvbldvcmtmbG93RmlsZVJlc3BvbnNlEnIKF0xpc3RXb3JrdHJlZXNGb3JQcm9qZWN0EiouY29ubmVjdGlvbi5MaXN0V29ya3RyZWVzRm9yUHJvamVjdFJlcXVlc3QaKy5jb25uZWN0aW9uLkxpc3RXb3JrdHJlZXNGb3JQcm9qZWN0UmVzcG9uc2USVwoOUmVtb3ZlV29ya3RyZWUSIS5jb25uZWN0aW9uLlJlbW92ZVdvcmt0cmVlUmVxdWVzdBoiLmNvbm5lY3Rpb24uUmVtb3ZlV29ya3RyZWVSZXNwb25zZRJiChdTdHJlYW1TZXNzaW9uVGVybWluYWxJTxIgLmNvbm5lY3Rpb24uU2Vzc2lvblRlcm1pbmFsSW5wdXQaIS5jb25uZWN0aW9uLlNlc3Npb25UZXJtaW5hbE91dHB1dCgBMAESZAoUU3RyZWFtVGVybWluYWxPdXRwdXQSJy5jb25uZWN0aW9uLlN0cmVhbVRlcm1pbmFsT3V0cHV0UmVxdWVzdBohLmNvbm5lY3Rpb24uU2Vzc2lvblRlcm1pbmFsT3V0cHV0MAESXAoRU2VuZFRlcm1pbmFsSW5wdXQSIC5jb25uZWN0aW9uLlNlc3Npb25UZXJtaW5hbElucHV0GiUuY29ubmVjdGlvbi5TZW5kVGVybWluYWxJbnB1dFJlc3BvbnNlEmYKE0xpc3RQcm9qZWN0QnJhbmNoZXMSJi5jb25uZWN0aW9uLkxpc3RQcm9qZWN0QnJhbmNoZXNSZXF1ZXN0GicuY29ubmVjdGlvbi5MaXN0UHJvamVjdEJyYW5jaGVzUmVzcG9uc2ViBnByb3RvMw");
+  fileDesc("ChBjb25uZWN0aW9uLnByb3RvEgpjb25uZWN0aW9uIhIKEExpc3RUb29sc1JlcXVlc3QiOAoRTGlzdFRvb2xzUmVzcG9uc2USIwoFdG9vbHMYASADKAsyFC5jb25uZWN0aW9uLlRvb2xJbmZvIicKCFRvb2xJbmZvEgwKBHBhdGgYASABKAkSDQoFbGFiZWwYAiABKAkiEwoRTGlzdEFnZW50c1JlcXVlc3QiOwoSTGlzdEFnZW50c1Jlc3BvbnNlEiUKBmFnZW50cxgBIAMoCzIVLmNvbm5lY3Rpb24uQWdlbnRJbmZvIiYKCUFnZW50SW5mbxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCSIsChNMaXN0U2Vzc2lvbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiQgoUTGlzdFNlc3Npb25zUmVzcG9uc2USKgoIc2Vzc2lvbnMYASADKAsyGC5jb25uZWN0aW9uLlNlc3Npb25FbnRyeSLFAgoMU2Vzc2lvbkVudHJ5EhIKCnNlc3Npb25faWQYASABKAkSEgoKY3JlYXRlZF9hdBgCIAEoCRIOCgZzdGF0dXMYAyABKAkSEQoJcmVwb19wYXRoGAQgASgJEgsKA3BpZBgFIAEoDRIRCglpc19hY3RpdmUYBiABKAgSEgoKcHJvamVjdF9pZBgHIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYCCABKAkSFQoNd29ya2Zsb3dfZ29hbBgJIAEoCRIWCg53b3JrZmxvd19zdGF0ZRgKIAEoCRIXCg9lbGFwc2VkX2Rpc3BsYXkYCyABKAkSDQoFYWdlbnQYDCABKAkSDQoFbW9kZWwYDSABKAkSGwoTcGVuZGluZ19lbGljaXRhdGlvbhgOIAEoCBIXCg9hY3Rpdml0eV9zdGF0dXMYDyABKAkidQoMUHJvamVjdEVudHJ5EhIKCnByb2plY3RfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIPCgdnaXRfdXJsGAMgASgJEhYKDm1haW5fcmVwb19wYXRoGAQgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgFIAEoCSIsChNMaXN0UHJvamVjdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiQgoUTGlzdFByb2plY3RzUmVzcG9uc2USKgoIcHJvamVjdHMYASADKAsyGC5jb25uZWN0aW9uLlByb2plY3RFbnRyeSJoChRDcmVhdGVQcm9qZWN0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkSDwoHZ2l0X3VybBgDIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYBCABKAkiQgoVQ3JlYXRlUHJvamVjdFJlc3BvbnNlEikKB3Byb2plY3QYASABKAsyGC5jb25uZWN0aW9uLlByb2plY3RFbnRyeSLoAgoTU3RhcnRTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhEKCXRvb2xfcGF0aBgCIAEoCRISCgpwcm9qZWN0X2lkGAMgASgJEg0KBWFnZW50GAQgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgFIAEoCRIOCgZyZWNpcGUYBiABKAkSFAoMc2Vzc2lvbl90eXBlGAcgASgJEg0KBW1vZGVsGAggASgJEh4KFmJyYW5jaF93b3JrdHJlZV9pbnRlbnQYCSABKAkSFwoPbmV3X2JyYW5jaF9uYW1lGAogASgJEiUKHXNlbGVjdGVkX2ludGVncmF0aW9uX2Jhc2VfcmVmGAsgASgJEiIKGnNlbGVjdGVkX2JyYW5jaF90b193b3JrX29uGAwgASgJEhYKDmluaXRpYWxfcHJvbXB0GA0gASgJEhcKD3Blcm1pc3Npb25fbW9kZRgOIAEoCSJ2ChRTdGFydFNlc3Npb25SZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGxpdmVraXRfcm9vbRgCIAEoCRITCgtsaXZla2l0X3VybBgDIAEoCRIfChdsaXZla2l0X3NlcnZlcl9pZGVudGl0eRgEIAEoCSJCChVDb25uZWN0U2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJImQKFkNvbm5lY3RTZXNzaW9uUmVzcG9uc2USFAoMbGl2ZWtpdF9yb29tGAEgASgJEhMKC2xpdmVraXRfdXJsGAIgASgJEh8KF2xpdmVraXRfc2VydmVyX2lkZW50aXR5GAMgASgJIkEKFFJlc3VtZVNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJ3ChVSZXN1bWVTZXNzaW9uUmVzcG9uc2USEgoKc2Vzc2lvbl9pZBgBIAEoCRIUCgxsaXZla2l0X3Jvb20YAiABKAkSEwoLbGl2ZWtpdF91cmwYAyABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYBCABKAkiUQoUU2lnbmFsU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg4KBnNpZ25hbBgDIAEoBSI0ChVTaWduYWxTZXNzaW9uUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJBChREZWxldGVTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiIwoVRGVsZXRlU2Vzc2lvblJlc3BvbnNlEgoKAm9rGAEgASgIIjMKGkxpc3RFbGlnaWJsZURhZW1vbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiSwoTRWxpZ2libGVEYWVtb25FbnRyeRITCgtpbnN0YW5jZV9pZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIQCghpc19sb2NhbBgDIAEoCCJPChtMaXN0RWxpZ2libGVEYWVtb25zUmVzcG9uc2USMAoHZGFlbW9ucxgBIAMoCzIfLmNvbm5lY3Rpb24uRWxpZ2libGVEYWVtb25FbnRyeSJMCh9MaXN0U2Vzc2lvbldvcmtmbG93RmlsZXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSIlChFXb3JrZmxvd0ZpbGVFbnRyeRIQCghiYXNlbmFtZRgBIAEoCSJQCiBMaXN0U2Vzc2lvbldvcmtmbG93RmlsZXNSZXNwb25zZRIsCgVmaWxlcxgBIAMoCzIdLmNvbm5lY3Rpb24uV29ya2Zsb3dGaWxlRW50cnkiXQoeUmVhZFNlc3Npb25Xb3JrZmxvd0ZpbGVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIQCghiYXNlbmFtZRgDIAEoCSI3Ch9SZWFkU2Vzc2lvbldvcmtmbG93RmlsZVJlc3BvbnNlEhQKDGNvbnRlbnRfdXRmOBgBIAEoCSKzAQoLV29ya3RyZWVSb3cSDAoEcGF0aBgBIAEoCRIUCgxicmFuY2hfbGFiZWwYAiABKAkSEgoKZGlza19ieXRlcxgDIAEoBBIVCg1jaGFuZ2VkX2ZpbGVzGAQgASgNEhMKC2xpbmVzX2FkZGVkGAUgASgDEhUKDWxpbmVzX3JlbW92ZWQYBiABKAMSGgoSdXBkYXRlZF9hdF91bml4X21zGAcgASgDEg0KBXN0YWxlGAggASgIIlwKHkxpc3RXb3JrdHJlZXNGb3JQcm9qZWN0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSDwoHcmVmcmVzaBgDIAEoCCJNCh9MaXN0V29ya3RyZWVzRm9yUHJvamVjdFJlc3BvbnNlEioKCXdvcmt0cmVlcxgBIAMoCzIXLmNvbm5lY3Rpb24uV29ya3RyZWVSb3ciWQoVUmVtb3ZlV29ya3RyZWVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJIjUKFlJlbW92ZVdvcmt0cmVlUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJjChpMaXN0UHJvamVjdEJyYW5jaGVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIi8KG0xpc3RQcm9qZWN0QnJhbmNoZXNSZXNwb25zZRIQCghicmFuY2hlcxgBIAMoCSJPChRTZXNzaW9uVGVybWluYWxJbnB1dBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDAoEZGF0YRgDIAEoDCIlChVTZXNzaW9uVGVybWluYWxPdXRwdXQSDAoEZGF0YRgBIAEoDCJIChtTdHJlYW1UZXJtaW5hbE91dHB1dFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIhsKGVNlbmRUZXJtaW5hbElucHV0UmVzcG9uc2UigQEKEkV4ZWN1dGVUb29sUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEQoJdG9vbF9uYW1lGAMgASgJEhEKCWFyZ3NfanNvbhgEIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYBSABKAkieAoTRXhlY3V0ZVRvb2xSZXNwb25zZRITCgtyZXN1bHRfanNvbhgBIAEoCRIQCghpc19lcnJvchgCIAEoCBIVCg1lcnJvcl9tZXNzYWdlGAMgASgJEg4KBmpvYl9pZBgEIAEoCRITCgtqb2JfcnVubmluZxgFIAEoCCJJChRMaXN0RXhlY1Rvb2xzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCSJHCgdUb29sRGVmEgwKBG5hbWUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSGQoRaW5wdXRfc2NoZW1hX2pzb24YAyABKAkiOwoVTGlzdEV4ZWNUb29sc1Jlc3BvbnNlEiIKBXRvb2xzGAEgAygLMhMuY29ubmVjdGlvbi5Ub29sRGVmImUKGlJlcG9ydFNlc3Npb25TdGF0dXNSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSEgoKaG9va190b2tlbhgCIAEoCRIPCgdvc191c2VyGAMgASgJEg4KBnN0YXR1cxgEIAEoCSIpChtSZXBvcnRTZXNzaW9uU3RhdHVzUmVzcG9uc2USCgoCb2sYASABKAgiPwoSU3RhcnREZW1vVm1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJOChNTdGFydERlbW9WbVJlc3BvbnNlEiYKBXN0YXRlGAEgASgOMhcuY29ubmVjdGlvbi5EZW1vVm1TdGF0ZRIPCgdtZXNzYWdlGAIgASgJIj4KEVN0b3BEZW1vVm1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSIxChJTdG9wRGVtb1ZtUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJDChZHZXREZW1vVm1TdGF0dXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJ8ChdHZXREZW1vVm1TdGF0dXNSZXNwb25zZRImCgVzdGF0ZRgBIAEoDjIXLmNvbm5lY3Rpb24uRGVtb1ZtU3RhdGUSFQoNc3NoX2hvc3RfcG9ydBgCIAEoDRIPCgdtZXNzYWdlGAMgASgJEhEKCXNoYXJlX3VybBgEIAEoCSpDCgZTaWduYWwSEQoNU0lHTkFMX1NJR0lOVBAAEhIKDlNJR05BTF9TSUdURVJNEAESEgoOU0lHTkFMX1NJR0tJTEwQAiqSAQoLRGVtb1ZtU3RhdGUSGQoVREVNT19WTV9TVEFURV9VTktOT1dOEAASGQoVREVNT19WTV9TVEFURV9CT09USU5HEAESGQoVREVNT19WTV9TVEFURV9SVU5OSU5HEAISGQoVREVNT19WTV9TVEFURV9TVE9QUEVEEAMSFwoTREVNT19WTV9TVEFURV9FUlJPUhAEMosSChFDb25uZWN0aW9uU2VydmljZRJICglMaXN0VG9vbHMSHC5jb25uZWN0aW9uLkxpc3RUb29sc1JlcXVlc3QaHS5jb25uZWN0aW9uLkxpc3RUb29sc1Jlc3BvbnNlEksKCkxpc3RBZ2VudHMSHS5jb25uZWN0aW9uLkxpc3RBZ2VudHNSZXF1ZXN0Gh4uY29ubmVjdGlvbi5MaXN0QWdlbnRzUmVzcG9uc2USUQoMTGlzdFNlc3Npb25zEh8uY29ubmVjdGlvbi5MaXN0U2Vzc2lvbnNSZXF1ZXN0GiAuY29ubmVjdGlvbi5MaXN0U2Vzc2lvbnNSZXNwb25zZRJRCgxMaXN0UHJvamVjdHMSHy5jb25uZWN0aW9uLkxpc3RQcm9qZWN0c1JlcXVlc3QaIC5jb25uZWN0aW9uLkxpc3RQcm9qZWN0c1Jlc3BvbnNlElQKDUNyZWF0ZVByb2plY3QSIC5jb25uZWN0aW9uLkNyZWF0ZVByb2plY3RSZXF1ZXN0GiEuY29ubmVjdGlvbi5DcmVhdGVQcm9qZWN0UmVzcG9uc2USUQoMU3RhcnRTZXNzaW9uEh8uY29ubmVjdGlvbi5TdGFydFNlc3Npb25SZXF1ZXN0GiAuY29ubmVjdGlvbi5TdGFydFNlc3Npb25SZXNwb25zZRJXCg5Db25uZWN0U2Vzc2lvbhIhLmNvbm5lY3Rpb24uQ29ubmVjdFNlc3Npb25SZXF1ZXN0GiIuY29ubmVjdGlvbi5Db25uZWN0U2Vzc2lvblJlc3BvbnNlElQKDVJlc3VtZVNlc3Npb24SIC5jb25uZWN0aW9uLlJlc3VtZVNlc3Npb25SZXF1ZXN0GiEuY29ubmVjdGlvbi5SZXN1bWVTZXNzaW9uUmVzcG9uc2USVAoNU2lnbmFsU2Vzc2lvbhIgLmNvbm5lY3Rpb24uU2lnbmFsU2Vzc2lvblJlcXVlc3QaIS5jb25uZWN0aW9uLlNpZ25hbFNlc3Npb25SZXNwb25zZRJUCg1EZWxldGVTZXNzaW9uEiAuY29ubmVjdGlvbi5EZWxldGVTZXNzaW9uUmVxdWVzdBohLmNvbm5lY3Rpb24uRGVsZXRlU2Vzc2lvblJlc3BvbnNlEmYKE0xpc3RFbGlnaWJsZURhZW1vbnMSJi5jb25uZWN0aW9uLkxpc3RFbGlnaWJsZURhZW1vbnNSZXF1ZXN0GicuY29ubmVjdGlvbi5MaXN0RWxpZ2libGVEYWVtb25zUmVzcG9uc2USdQoYTGlzdFNlc3Npb25Xb3JrZmxvd0ZpbGVzEisuY29ubmVjdGlvbi5MaXN0U2Vzc2lvbldvcmtmbG93RmlsZXNSZXF1ZXN0GiwuY29ubmVjdGlvbi5MaXN0U2Vzc2lvbldvcmtmbG93RmlsZXNSZXNwb25zZRJyChdSZWFkU2Vzc2lvbldvcmtmbG93RmlsZRIqLmNvbm5lY3Rpb24uUmVhZFNlc3Npb25Xb3JrZmxvd0ZpbGVSZXF1ZXN0GisuY29ubmVjdGlvbi5SZWFkU2Vzc2lvbldvcmtmbG93RmlsZVJlc3BvbnNlEnIKF0xpc3RXb3JrdHJlZXNGb3JQcm9qZWN0EiouY29ubmVjdGlvbi5MaXN0V29ya3RyZWVzRm9yUHJvamVjdFJlcXVlc3QaKy5jb25uZWN0aW9uLkxpc3RXb3JrdHJlZXNGb3JQcm9qZWN0UmVzcG9uc2USVwoOUmVtb3ZlV29ya3RyZWUSIS5jb25uZWN0aW9uLlJlbW92ZVdvcmt0cmVlUmVxdWVzdBoiLmNvbm5lY3Rpb24uUmVtb3ZlV29ya3RyZWVSZXNwb25zZRJiChdTdHJlYW1TZXNzaW9uVGVybWluYWxJTxIgLmNvbm5lY3Rpb24uU2Vzc2lvblRlcm1pbmFsSW5wdXQaIS5jb25uZWN0aW9uLlNlc3Npb25UZXJtaW5hbE91dHB1dCgBMAESZAoUU3RyZWFtVGVybWluYWxPdXRwdXQSJy5jb25uZWN0aW9uLlN0cmVhbVRlcm1pbmFsT3V0cHV0UmVxdWVzdBohLmNvbm5lY3Rpb24uU2Vzc2lvblRlcm1pbmFsT3V0cHV0MAESXAoRU2VuZFRlcm1pbmFsSW5wdXQSIC5jb25uZWN0aW9uLlNlc3Npb25UZXJtaW5hbElucHV0GiUuY29ubmVjdGlvbi5TZW5kVGVybWluYWxJbnB1dFJlc3BvbnNlEmYKE0xpc3RQcm9qZWN0QnJhbmNoZXMSJi5jb25uZWN0aW9uLkxpc3RQcm9qZWN0QnJhbmNoZXNSZXF1ZXN0GicuY29ubmVjdGlvbi5MaXN0UHJvamVjdEJyYW5jaGVzUmVzcG9uc2USTgoLRXhlY3V0ZVRvb2wSHi5jb25uZWN0aW9uLkV4ZWN1dGVUb29sUmVxdWVzdBofLmNvbm5lY3Rpb24uRXhlY3V0ZVRvb2xSZXNwb25zZRJUCg1MaXN0RXhlY1Rvb2xzEiAuY29ubmVjdGlvbi5MaXN0RXhlY1Rvb2xzUmVxdWVzdBohLmNvbm5lY3Rpb24uTGlzdEV4ZWNUb29sc1Jlc3BvbnNlEmYKE1JlcG9ydFNlc3Npb25TdGF0dXMSJi5jb25uZWN0aW9uLlJlcG9ydFNlc3Npb25TdGF0dXNSZXF1ZXN0GicuY29ubmVjdGlvbi5SZXBvcnRTZXNzaW9uU3RhdHVzUmVzcG9uc2USTgoLU3RhcnREZW1vVm0SHi5jb25uZWN0aW9uLlN0YXJ0RGVtb1ZtUmVxdWVzdBofLmNvbm5lY3Rpb24uU3RhcnREZW1vVm1SZXNwb25zZRJLCgpTdG9wRGVtb1ZtEh0uY29ubmVjdGlvbi5TdG9wRGVtb1ZtUmVxdWVzdBoeLmNvbm5lY3Rpb24uU3RvcERlbW9WbVJlc3BvbnNlEloKD0dldERlbW9WbVN0YXR1cxIiLmNvbm5lY3Rpb24uR2V0RGVtb1ZtU3RhdHVzUmVxdWVzdBojLmNvbm5lY3Rpb24uR2V0RGVtb1ZtU3RhdHVzUmVzcG9uc2ViBnByb3RvMw");
 
 /**
  * @generated from message connection.ListToolsRequest
@@ -231,6 +231,14 @@ export type SessionEntry = Message<"connection.SessionEntry"> & {
    * @generated from field: bool pending_elicitation = 14;
    */
   pendingElicitation: boolean;
+
+  /**
+   * Granular activity status for claude-cli sessions (Started, Running, ExecutingTool,
+   * WaitingForInput, Done, Ended). Empty string for tool/changeset sessions.
+   *
+   * @generated from field: string activity_status = 15;
+   */
+  activityStatus: string;
 };
 
 /**
@@ -450,6 +458,24 @@ export type StartSessionRequest = Message<"connection.StartSessionRequest"> & {
    * @generated from field: string selected_branch_to_work_on = 12;
    */
   selectedBranchToWorkOn: string;
+
+  /**
+   * Optional first prompt to pass as a positional argument to the claude CLI process on launch
+   * (e.g. `claude "build feature X"`). Only used when session_type = "claude-cli". Empty = no prompt.
+   * The session is still started interactively; the prompt seeds the first user turn.
+   *
+   * @generated from field: string initial_prompt = 13;
+   */
+  initialPrompt: string;
+
+  /**
+   * Permission mode for claude-cli sessions. Empty string defaults to "auto".
+   * Valid values: "auto", "default", "acceptEdits", "plan", "bypassPermissions".
+   * Passed as `--permission-mode <mode>` to the claude binary.
+   *
+   * @generated from field: string permission_mode = 14;
+   */
+  permissionMode: string;
 };
 
 /**
@@ -1122,6 +1148,349 @@ export const SendTerminalInputResponseSchema: GenMessage<SendTerminalInputRespon
   messageDesc(file_connection, 42);
 
 /**
+ * @generated from message connection.ExecuteToolRequest
+ */
+export type ExecuteToolRequest = Message<"connection.ExecuteToolRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string tool_name = 3;
+   */
+  toolName: string;
+
+  /**
+   * @generated from field: string args_json = 4;
+   */
+  argsJson: string;
+
+  /**
+   * @generated from field: string daemon_instance_id = 5;
+   */
+  daemonInstanceId: string;
+};
+
+/**
+ * Describes the message connection.ExecuteToolRequest.
+ * Use `create(ExecuteToolRequestSchema)` to create a new message.
+ */
+export const ExecuteToolRequestSchema: GenMessage<ExecuteToolRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 43);
+
+/**
+ * @generated from message connection.ExecuteToolResponse
+ */
+export type ExecuteToolResponse = Message<"connection.ExecuteToolResponse"> & {
+  /**
+   * @generated from field: string result_json = 1;
+   */
+  resultJson: string;
+
+  /**
+   * @generated from field: bool is_error = 2;
+   */
+  isError: boolean;
+
+  /**
+   * @generated from field: string error_message = 3;
+   */
+  errorMessage: string;
+
+  /**
+   * @generated from field: string job_id = 4;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: bool job_running = 5;
+   */
+  jobRunning: boolean;
+};
+
+/**
+ * Describes the message connection.ExecuteToolResponse.
+ * Use `create(ExecuteToolResponseSchema)` to create a new message.
+ */
+export const ExecuteToolResponseSchema: GenMessage<ExecuteToolResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 44);
+
+/**
+ * @generated from message connection.ListExecToolsRequest
+ */
+export type ListExecToolsRequest = Message<"connection.ListExecToolsRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string daemon_instance_id = 2;
+   */
+  daemonInstanceId: string;
+};
+
+/**
+ * Describes the message connection.ListExecToolsRequest.
+ * Use `create(ListExecToolsRequestSchema)` to create a new message.
+ */
+export const ListExecToolsRequestSchema: GenMessage<ListExecToolsRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 45);
+
+/**
+ * @generated from message connection.ToolDef
+ */
+export type ToolDef = Message<"connection.ToolDef"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string description = 2;
+   */
+  description: string;
+
+  /**
+   * @generated from field: string input_schema_json = 3;
+   */
+  inputSchemaJson: string;
+};
+
+/**
+ * Describes the message connection.ToolDef.
+ * Use `create(ToolDefSchema)` to create a new message.
+ */
+export const ToolDefSchema: GenMessage<ToolDef> = /*@__PURE__*/
+  messageDesc(file_connection, 46);
+
+/**
+ * @generated from message connection.ListExecToolsResponse
+ */
+export type ListExecToolsResponse = Message<"connection.ListExecToolsResponse"> & {
+  /**
+   * @generated from field: repeated connection.ToolDef tools = 1;
+   */
+  tools: ToolDef[];
+};
+
+/**
+ * Describes the message connection.ListExecToolsResponse.
+ * Use `create(ListExecToolsResponseSchema)` to create a new message.
+ */
+export const ListExecToolsResponseSchema: GenMessage<ListExecToolsResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 47);
+
+/**
+ * / Sent by `tddy-tools session-hook`; bearer is the per-session hook_token.
+ *
+ * @generated from message connection.ReportSessionStatusRequest
+ */
+export type ReportSessionStatusRequest = Message<"connection.ReportSessionStatusRequest"> & {
+  /**
+   * Daemon session id (baked into the hook command at worktree-prep time).
+   *
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+
+  /**
+   * Per-session random token — validated against .session.yaml hook_token field.
+   *
+   * @generated from field: string hook_token = 2;
+   */
+  hookToken: string;
+
+  /**
+   * OS user (resolves the sessions_base path on the daemon).
+   *
+   * @generated from field: string os_user = 3;
+   */
+  osUser: string;
+
+  /**
+   * Wire status string: one of Started, Running, ExecutingTool, WaitingForInput, Done, Ended.
+   *
+   * @generated from field: string status = 4;
+   */
+  status: string;
+};
+
+/**
+ * Describes the message connection.ReportSessionStatusRequest.
+ * Use `create(ReportSessionStatusRequestSchema)` to create a new message.
+ */
+export const ReportSessionStatusRequestSchema: GenMessage<ReportSessionStatusRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 48);
+
+/**
+ * @generated from message connection.ReportSessionStatusResponse
+ */
+export type ReportSessionStatusResponse = Message<"connection.ReportSessionStatusResponse"> & {
+  /**
+   * @generated from field: bool ok = 1;
+   */
+  ok: boolean;
+};
+
+/**
+ * Describes the message connection.ReportSessionStatusResponse.
+ * Use `create(ReportSessionStatusResponseSchema)` to create a new message.
+ */
+export const ReportSessionStatusResponseSchema: GenMessage<ReportSessionStatusResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 49);
+
+/**
+ * @generated from message connection.StartDemoVmRequest
+ */
+export type StartDemoVmRequest = Message<"connection.StartDemoVmRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+};
+
+/**
+ * Describes the message connection.StartDemoVmRequest.
+ * Use `create(StartDemoVmRequestSchema)` to create a new message.
+ */
+export const StartDemoVmRequestSchema: GenMessage<StartDemoVmRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 50);
+
+/**
+ * @generated from message connection.StartDemoVmResponse
+ */
+export type StartDemoVmResponse = Message<"connection.StartDemoVmResponse"> & {
+  /**
+   * @generated from field: connection.DemoVmState state = 1;
+   */
+  state: DemoVmState;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+};
+
+/**
+ * Describes the message connection.StartDemoVmResponse.
+ * Use `create(StartDemoVmResponseSchema)` to create a new message.
+ */
+export const StartDemoVmResponseSchema: GenMessage<StartDemoVmResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 51);
+
+/**
+ * @generated from message connection.StopDemoVmRequest
+ */
+export type StopDemoVmRequest = Message<"connection.StopDemoVmRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+};
+
+/**
+ * Describes the message connection.StopDemoVmRequest.
+ * Use `create(StopDemoVmRequestSchema)` to create a new message.
+ */
+export const StopDemoVmRequestSchema: GenMessage<StopDemoVmRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 52);
+
+/**
+ * @generated from message connection.StopDemoVmResponse
+ */
+export type StopDemoVmResponse = Message<"connection.StopDemoVmResponse"> & {
+  /**
+   * @generated from field: bool ok = 1;
+   */
+  ok: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+};
+
+/**
+ * Describes the message connection.StopDemoVmResponse.
+ * Use `create(StopDemoVmResponseSchema)` to create a new message.
+ */
+export const StopDemoVmResponseSchema: GenMessage<StopDemoVmResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 53);
+
+/**
+ * @generated from message connection.GetDemoVmStatusRequest
+ */
+export type GetDemoVmStatusRequest = Message<"connection.GetDemoVmStatusRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+};
+
+/**
+ * Describes the message connection.GetDemoVmStatusRequest.
+ * Use `create(GetDemoVmStatusRequestSchema)` to create a new message.
+ */
+export const GetDemoVmStatusRequestSchema: GenMessage<GetDemoVmStatusRequest> = /*@__PURE__*/
+  messageDesc(file_connection, 54);
+
+/**
+ * @generated from message connection.GetDemoVmStatusResponse
+ */
+export type GetDemoVmStatusResponse = Message<"connection.GetDemoVmStatusResponse"> & {
+  /**
+   * @generated from field: connection.DemoVmState state = 1;
+   */
+  state: DemoVmState;
+
+  /**
+   * @generated from field: uint32 ssh_host_port = 2;
+   */
+  sshHostPort: number;
+
+  /**
+   * @generated from field: string message = 3;
+   */
+  message: string;
+
+  /**
+   * Present when state = RUNNING and an app port is configured (e.g. "http://localhost:8080").
+   *
+   * @generated from field: string share_url = 4;
+   */
+  shareUrl: string;
+};
+
+/**
+ * Describes the message connection.GetDemoVmStatusResponse.
+ * Use `create(GetDemoVmStatusResponseSchema)` to create a new message.
+ */
+export const GetDemoVmStatusResponseSchema: GenMessage<GetDemoVmStatusResponse> = /*@__PURE__*/
+  messageDesc(file_connection, 55);
+
+/**
  * @generated from enum connection.Signal
  */
 export enum Signal {
@@ -1146,6 +1515,44 @@ export enum Signal {
  */
 export const SignalSchema: GenEnum<Signal> = /*@__PURE__*/
   enumDesc(file_connection, 0);
+
+/**
+ * State of the demo VM for a session.
+ *
+ * @generated from enum connection.DemoVmState
+ */
+export enum DemoVmState {
+  /**
+   * @generated from enum value: DEMO_VM_STATE_UNKNOWN = 0;
+   */
+  UNKNOWN = 0,
+
+  /**
+   * @generated from enum value: DEMO_VM_STATE_BOOTING = 1;
+   */
+  BOOTING = 1,
+
+  /**
+   * @generated from enum value: DEMO_VM_STATE_RUNNING = 2;
+   */
+  RUNNING = 2,
+
+  /**
+   * @generated from enum value: DEMO_VM_STATE_STOPPED = 3;
+   */
+  STOPPED = 3,
+
+  /**
+   * @generated from enum value: DEMO_VM_STATE_ERROR = 4;
+   */
+  ERROR = 4,
+}
+
+/**
+ * Describes the enum connection.DemoVmState.
+ */
+export const DemoVmStateSchema: GenEnum<DemoVmState> = /*@__PURE__*/
+  enumDesc(file_connection, 1);
 
 /**
  * @generated from service connection.ConnectionService
@@ -1305,6 +1712,61 @@ export const ConnectionService: GenService<{
     methodKind: "unary";
     input: typeof ListProjectBranchesRequestSchema;
     output: typeof ListProjectBranchesResponseSchema;
+  },
+  /**
+   * Remote-codebase mode: execute a tool in a session worktree, or list available tools.
+   *
+   * @generated from rpc connection.ConnectionService.ExecuteTool
+   */
+  executeTool: {
+    methodKind: "unary";
+    input: typeof ExecuteToolRequestSchema;
+    output: typeof ExecuteToolResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.ListExecTools
+   */
+  listExecTools: {
+    methodKind: "unary";
+    input: typeof ListExecToolsRequestSchema;
+    output: typeof ListExecToolsResponseSchema;
+  },
+  /**
+   * Per-worktree hooks (claude-cli sessions only) report granular activity status.
+   * Auth: `hook_token` is a per-session random token written to .session.yaml at session start.
+   *
+   * @generated from rpc connection.ConnectionService.ReportSessionStatus
+   */
+  reportSessionStatus: {
+    methodKind: "unary";
+    input: typeof ReportSessionStatusRequestSchema;
+    output: typeof ReportSessionStatusResponseSchema;
+  },
+  /**
+   * Demo VM lifecycle — UI-driven QEMU boot/shutdown for the demo goal.
+   *
+   * @generated from rpc connection.ConnectionService.StartDemoVm
+   */
+  startDemoVm: {
+    methodKind: "unary";
+    input: typeof StartDemoVmRequestSchema;
+    output: typeof StartDemoVmResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.StopDemoVm
+   */
+  stopDemoVm: {
+    methodKind: "unary";
+    input: typeof StopDemoVmRequestSchema;
+    output: typeof StopDemoVmResponseSchema;
+  },
+  /**
+   * @generated from rpc connection.ConnectionService.GetDemoVmStatus
+   */
+  getDemoVmStatus: {
+    methodKind: "unary";
+    input: typeof GetDemoVmStatusRequestSchema;
+    output: typeof GetDemoVmStatusResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_connection, 0);

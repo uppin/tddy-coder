@@ -9,6 +9,10 @@
     "summary": { "type": "string" },
     "demo_type": { "type": "string" },
     "steps_completed": { "type": "integer" },
-    "verification": { "type": "string" }
+    "verification": { "type": "string" },
+    "share_url": {
+      "type": "string",
+      "description": "Shareable URL for the running demo (http://localhost:<port> for port-forward, LiveKit viewer URL for screen-share)."
+    }
   }
 }

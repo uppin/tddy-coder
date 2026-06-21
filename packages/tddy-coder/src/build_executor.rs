@@ -20,6 +20,8 @@ fn plugin_registry() -> PluginRegistry {
     registry.register(Arc::new(tddy_build_rust::RustPlugin));
     registry.register(Arc::new(tddy_build_typescript::TypeScriptPlugin));
     registry.register(Arc::new(tddy_build_docker::DockerPlugin));
+    registry.register(Arc::new(tddy_build_buildroot::BuildrootPlugin));
+    registry.register(Arc::new(tddy_build_qemu::QemuPlugin));
     registry
 }
 
@@ -61,4 +63,28 @@ impl BuildExecutor for TddyBuildExecutor {
 /// Register the build executor (idempotent — first registration wins).
 pub fn register() {
     register_build_executor(Arc::new(TddyBuildExecutor));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plugin_registry;
+
+    /// `BuildrootPlugin` and `QemuPlugin` must be registered in `tddy-coder`'s plugin
+    /// registry so that build relay requests for `buildroot_image` and `qemu_disk_image`
+    /// targets are handled without "unknown target type" errors.
+    ///
+    /// RED: fails until both plugins are added to `plugin_registry()`.
+    #[test]
+    fn buildroot_and_qemu_plugins_registered_in_coder_registry() {
+        let registry = plugin_registry();
+        let types: Vec<&str> = registry.registered_types().collect();
+        assert!(
+            types.contains(&"buildroot_image"),
+            "buildroot_image plugin must be registered in tddy-coder; registered: {types:?}"
+        );
+        assert!(
+            types.contains(&"qemu_disk_image"),
+            "qemu_disk_image plugin must be registered in tddy-coder; registered: {types:?}"
+        );
+    }
 }

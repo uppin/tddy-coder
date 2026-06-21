@@ -127,10 +127,17 @@ pub fn write_artifacts(
 }
 
 /// Write demo-plan.md to the plan directory.
+///
+/// Embeds a JSON front-matter block (`<!-- tddy-demo-recipe: {...} -->`) so that
+/// [`read_demo_plan_file`] can round-trip the full [`DemoPlan`] including the new structured
+/// recipe fields (`mode`, `hostfwd`, `deploy_steps`, `verify_command`, `build_target`).
 pub fn write_demo_plan_file(session_dir: &Path, demo: &DemoPlan) -> Result<(), WorkflowError> {
+    // Embed structured recipe as JSON front-matter for lossless round-trip.
+    let frontmatter_json = serde_json::to_string(demo)
+        .map_err(|e| WorkflowError::WriteFailed(format!("serialize demo plan: {}", e)))?;
     let mut out = format!(
-        "# Demo Plan\n\n## Type\n{}\n\n## Setup\n\n{}\n\n## Steps\n\n",
-        demo.demo_type, demo.setup_instructions
+        "<!-- tddy-demo-recipe: {} -->\n\n# Demo Plan\n\n## Type\n{}\n\n## Setup\n\n{}\n\n## Steps\n\n",
+        frontmatter_json, demo.demo_type, demo.setup_instructions
     );
     for (i, step) in demo.steps.iter().enumerate() {
         out.push_str(&format!(
@@ -328,4 +335,68 @@ pub fn create_session_dir_with_id(base: &Path, session_id: &str) -> Result<PathB
 /// Same layout as [`create_session_dir_with_id`]: `{base}/sessions/{id}/`.
 pub fn create_session_dir_under(base: &Path, session_id: &str) -> Result<PathBuf, WorkflowError> {
     create_session_dir_with_id(base, session_id)
+}
+
+/// Read and parse `demo-plan.md` from `session_dir`, reconstructing a [`DemoPlan`].
+///
+/// The markdown written by [`write_demo_plan_file`] is re-parsed. Structured recipe fields
+/// (`mode`, `hostfwd`, `deploy_steps`, `verify_command`, `build_target`) are embedded as a
+/// JSON front-matter block (HTML comment) by `write_demo_plan_file` so they round-trip losslessly.
+/// If the front-matter is absent (legacy files), the function returns a `DemoPlan` with default
+/// values for the new fields.
+///
+/// # Errors
+/// Returns [`WorkflowError::WriteFailed`] if the file cannot be read.
+pub fn read_demo_plan_file(session_dir: &Path) -> Result<DemoPlan, WorkflowError> {
+    let path = session_dir.join("demo-plan.md");
+    let content = fs::read_to_string(&path)
+        .map_err(|e| WorkflowError::WriteFailed(format!("read demo-plan.md: {}", e)))?;
+
+    // Extract JSON front-matter block: <!-- tddy-demo-recipe: { ... } -->
+    if let Some(json) = extract_demo_recipe_frontmatter(&content) {
+        let plan: DemoPlan = serde_json::from_str(json).map_err(|e| {
+            WorkflowError::WriteFailed(format!("parse demo recipe frontmatter: {}", e))
+        })?;
+        return Ok(plan);
+    }
+
+    // Legacy: no front-matter — reconstruct minimal DemoPlan from markdown headings.
+    let demo_type =
+        extract_markdown_section(&content, "Type").unwrap_or_else(|| "unknown".to_string());
+    let setup_instructions = extract_markdown_section(&content, "Setup").unwrap_or_default();
+    let verification = extract_markdown_section(&content, "Verification").unwrap_or_default();
+    Ok(DemoPlan {
+        demo_type,
+        setup_instructions,
+        steps: vec![],
+        verification,
+        mode: None,
+        hostfwd: vec![],
+        deploy_steps: vec![],
+        verify_command: None,
+        build_target: None,
+    })
+}
+
+fn extract_demo_recipe_frontmatter(content: &str) -> Option<&str> {
+    const PREFIX: &str = "<!-- tddy-demo-recipe: ";
+    const SUFFIX: &str = " -->";
+    let start = content.find(PREFIX)?;
+    let json_start = start + PREFIX.len();
+    let end = content[json_start..].find(SUFFIX)?;
+    Some(&content[json_start..json_start + end])
+}
+
+fn extract_markdown_section(content: &str, heading: &str) -> Option<String> {
+    let marker = format!("## {}", heading);
+    let start = content.find(&marker)?;
+    let after = &content[start + marker.len()..];
+    // Content runs until the next `##` heading or end of string.
+    let end = after.find("\n## ").unwrap_or(after.len());
+    let section = after[..end].trim().to_string();
+    if section.is_empty() {
+        None
+    } else {
+        Some(section)
+    }
 }
