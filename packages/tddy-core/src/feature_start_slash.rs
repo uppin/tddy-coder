@@ -16,6 +16,8 @@ pub const SHIPPED_WORKFLOW_RECIPE_CLI_NAMES: &[&str] = &[
     "tdd-small",
     "review",
     "merge-pr",
+    "plan-pr-stack",
+    "orchestrate-pr-stack",
 ];
 
 fn unknown_workflow_recipe_error(name: &str) -> String {
