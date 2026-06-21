@@ -6858,6 +6858,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-testing-commons",
+ "tddy-workflow-recipes",
  "teloxide",
  "tempfile",
  "tokio",
