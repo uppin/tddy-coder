@@ -105,6 +105,24 @@ pub fn resolve_chain_integration_base_ref_from_parent_session(
     Ok(origin_ref)
 }
 
+/// Transport-agnostic helper: bootstrap a child worktree using a parent session's branch
+/// as the integration base, OR an explicitly supplied base ref.
+///
+/// Sets `worktree_integration_base_ref` + `effective_worktree_integration_base_ref` on
+/// the child's `changeset.yaml` via `integrate_chain_base_into_session_worktree_bootstrap`.
+///
+/// `explicit_base`: when Some, use this ref directly (skipping parent-branch resolution).
+/// When None, call `resolve_chain_integration_base_ref_from_parent_session` first.
+pub fn spawn_chain_child_worktree(
+    _sessions_root: &Path,
+    _parent_session_id: &str,
+    _child_session_dir: &Path,
+    _child_project_repo: &Path,
+    _explicit_base: Option<&str>,
+) -> Result<String, WorkflowError> {
+    unimplemented!("spawn_chain_child_worktree: not yet implemented")
+}
+
 /// Integrates a resolved chain base ref into session worktree bootstrap by delegating to
 /// [`crate::setup_worktree_for_session_with_optional_chain_base`].
 ///
