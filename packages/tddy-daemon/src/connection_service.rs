@@ -2143,14 +2143,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             let state = self.demo_vm_state.lock().await;
             if let Some(h) = state.get(&req.session_id) {
                 let (state_enum, msg) = match h {
-                    DemoVmHandle::Booting => (DemoVmState::DemoVmStateBooting, "already booting"),
+                    DemoVmHandle::Booting => (DemoVmState::Booting, "already booting"),
                     DemoVmHandle::Running { .. } => {
-                        (DemoVmState::DemoVmStateRunning, "VM already running")
+                        (DemoVmState::Running, "VM already running")
                     }
                     DemoVmHandle::Error(_) => {
                         // Allow retry after error.
                         return Ok(Response::new(StartDemoVmResponse {
-                            state: DemoVmState::DemoVmStateBooting as i32,
+                            state: DemoVmState::Booting as i32,
                             message: "retrying after previous error".to_string(),
                         }));
                     }
@@ -2197,7 +2197,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             req.session_id
         );
         Ok(Response::new(StartDemoVmResponse {
-            state: DemoVmState::DemoVmStateBooting as i32,
+            state: DemoVmState::Booting as i32,
             message: "booting".to_string(),
         }))
     }
@@ -2269,25 +2269,25 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let state = self.demo_vm_state.lock().await;
         let resp = match state.get(&req.session_id) {
             None => GetDemoVmStatusResponse {
-                state: DemoVmState::DemoVmStateStopped as i32,
+                state: DemoVmState::Stopped as i32,
                 ssh_host_port: 0,
                 message: "no VM for this session".to_string(),
                 share_url: String::new(),
             },
             Some(DemoVmHandle::Booting) => GetDemoVmStatusResponse {
-                state: DemoVmState::DemoVmStateBooting as i32,
+                state: DemoVmState::Booting as i32,
                 ssh_host_port: 0,
                 message: "booting".to_string(),
                 share_url: String::new(),
             },
             Some(DemoVmHandle::Running { vm, share_url }) => GetDemoVmStatusResponse {
-                state: DemoVmState::DemoVmStateRunning as i32,
+                state: DemoVmState::Running as i32,
                 ssh_host_port: vm.ssh_host_port as u32,
                 message: "running".to_string(),
                 share_url: share_url.clone(),
             },
             Some(DemoVmHandle::Error(msg)) => GetDemoVmStatusResponse {
-                state: DemoVmState::DemoVmStateError as i32,
+                state: DemoVmState::Error as i32,
                 ssh_host_port: 0,
                 message: msg.clone(),
                 share_url: String::new(),
