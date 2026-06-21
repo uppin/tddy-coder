@@ -49,3 +49,10 @@ export const RPC_PLAYGROUND_ROUTE = "/rpc-playground";
 export function isRpcPlaygroundPath(pathname: string): boolean {
   return pathname === RPC_PLAYGROUND_ROUTE;
 }
+
+/** Canonical path for the VM management screen. */
+export const VMS_ROUTE = "/vms";
+
+export function isVmsPath(pathname: string): boolean {
+  return pathname === VMS_ROUTE;
+}
