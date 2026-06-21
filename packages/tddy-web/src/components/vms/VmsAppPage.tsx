@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
-import { VmService, type VmInfo } from "../../gen/vm_pb";
+import { VmService, type VmInfo, type VmImageInfo } from "../../gen/vm_pb";
 import { useAuth } from "../../hooks/useAuth";
 import { DaemonNavMenu } from "../shell/DaemonNavMenu";
 import { UserAvatar } from "../UserAvatar";
@@ -58,14 +58,27 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
       .catch(() => {});
   }, [client, sessionToken]);
 
+  const loadImages = useCallback(() => {
+    if (!sessionToken) return;
+    client
+      .listVmImages({ sessionToken })
+      .then((res) => {
+        const paths = (res.images as VmImageInfo[]).map((img) => img.path);
+        setAvailableImages(paths);
+      })
+      .catch(() => {});
+  }, [client, sessionToken]);
+
   useEffect(() => {
     loadVms();
-  }, [loadVms]);
+    loadImages();
+  }, [loadVms, loadImages]);
 
   const handleBuild = useCallback(
     (spec: string) => {
       console.log("[VmsAppPage] handleBuild called, sessionToken=", sessionToken ? "present" : "missing", "spec length=", spec.length);
       if (!sessionToken) return;
+      loadImages(); // refresh on start so any pre-existing images are visible
       setBuilding(true);
       setBuildError("");
       setBuildLog([]);
@@ -81,9 +94,12 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
             }
             // stage 4 = STAGE_DONE
             if (progress.stage === 4 && progress.imagePath) {
+              // Immediate in-place merge for instant feedback during streaming
               setAvailableImages((prev) =>
                 prev.includes(progress.imagePath) ? prev : [...prev, progress.imagePath]
               );
+              // Full refresh from server to pick up correct metadata (size, mtime order)
+              loadImages();
             }
             // stage 5 = STAGE_ERROR
             if (progress.stage === 5) {
@@ -99,7 +115,7 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
         }
       })();
     },
-    [client, sessionToken]
+    [client, sessionToken, loadImages]
   );
 
   const handleDefineVm = useCallback(

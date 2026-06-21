@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vm.proto.
  */
 export const file_vm: GenFile = /*@__PURE__*/
-  fileDesc("Cgh2bS5wcm90bxICdm0iRAoTQnVpbGRWbUltYWdlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhYKDmJ1aWxkcm9vdF9zcGVjGAIgASgJIugBChRCdWlsZFZtSW1hZ2VQcm9ncmVzcxItCgVzdGFnZRgBIAEoDjIeLnZtLkJ1aWxkVm1JbWFnZVByb2dyZXNzLlN0YWdlEg8KB21lc3NhZ2UYAiABKAkSEgoKaW1hZ2VfcGF0aBgDIAEoCSJ8CgVTdGFnZRIRCg1TVEFHRV9VTktOT1dOEAASFQoRU1RBR0VfQ09ORklHVVJJTkcQARISCg5TVEFHRV9CVUlMRElORxACEhQKEFNUQUdFX0NPTlZFUlRJTkcQAxIOCgpTVEFHRV9ET05FEAQSDwoLU1RBR0VfRVJST1IQBSI2Cg1WbVBvcnRGb3J3YXJkEhEKCWhvc3RfcG9ydBgBIAEoDRISCgpndWVzdF9wb3J0GAIgASgNIoYBCgtWbVNwZWNQcm90bxIMCgRuYW1lGAEgASgJEhQKDGJ1aWxkX3RhcmdldBgCIAEoCRISCgppbWFnZV9wYXRoGAMgASgJEigKDXBvcnRfZm9yd2FyZHMYBCADKAsyES52bS5WbVBvcnRGb3J3YXJkEhUKDXNzaF9ob3N0X3BvcnQYBSABKA0iRwoPRGVmaW5lVm1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSHQoEc3BlYxgCIAEoCzIPLnZtLlZtU3BlY1Byb3RvIi8KEERlZmluZVZtUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJzCgZWbUluZm8SDAoEbmFtZRgBIAEoCRIaCgVzdGF0ZRgCIAEoDjILLnZtLlZtU3RhdGUSFQoNc3NoX2hvc3RfcG9ydBgDIAEoDRIRCglzaGFyZV91cmwYBCABKAkSFQoNZXJyb3JfbWVzc2FnZRgFIAEoCSInCg5MaXN0Vm1zUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIioKD0xpc3RWbXNSZXNwb25zZRIXCgN2bXMYASADKAsyCi52bS5WbUluZm8iNQoOU3RhcnRWbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIMCgRuYW1lGAIgASgJIj4KD1N0YXJ0Vm1SZXNwb25zZRIaCgVzdGF0ZRgBIAEoDjILLnZtLlZtU3RhdGUSDwoHbWVzc2FnZRgCIAEoCSI0Cg1TdG9wVm1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDAoEbmFtZRgCIAEoCSItCg5TdG9wVm1SZXNwb25zZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIjkKEkdldFZtU3RhdHVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkibAoTR2V0Vm1TdGF0dXNSZXNwb25zZRIaCgVzdGF0ZRgBIAEoDjILLnZtLlZtU3RhdGUSFQoNc3NoX2hvc3RfcG9ydBgCIAEoDRIRCglzaGFyZV91cmwYAyABKAkSDwoHbWVzc2FnZRgEIAEoCSI2Cg9SZW1vdmVWbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIMCgRuYW1lGAIgASgJIi8KEFJlbW92ZVZtUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSqLAQoHVm1TdGF0ZRIUChBWTV9TVEFURV9VTktOT1dOEAASFAoQVk1fU1RBVEVfREVGSU5FRBABEhQKEFZNX1NUQVRFX0JPT1RJTkcQAhIUChBWTV9TVEFURV9SVU5OSU5HEAMSFAoQVk1fU1RBVEVfU1RPUFBFRBAEEhIKDlZNX1NUQVRFX0VSUk9SEAUylwMKCVZtU2VydmljZRJDCgxCdWlsZFZtSW1hZ2USFy52bS5CdWlsZFZtSW1hZ2VSZXF1ZXN0Ghgudm0uQnVpbGRWbUltYWdlUHJvZ3Jlc3MwARI1CghEZWZpbmVWbRITLnZtLkRlZmluZVZtUmVxdWVzdBoULnZtLkRlZmluZVZtUmVzcG9uc2USMgoHTGlzdFZtcxISLnZtLkxpc3RWbXNSZXF1ZXN0GhMudm0uTGlzdFZtc1Jlc3BvbnNlEjIKB1N0YXJ0Vm0SEi52bS5TdGFydFZtUmVxdWVzdBoTLnZtLlN0YXJ0Vm1SZXNwb25zZRIvCgZTdG9wVm0SES52bS5TdG9wVm1SZXF1ZXN0GhIudm0uU3RvcFZtUmVzcG9uc2USPgoLR2V0Vm1TdGF0dXMSFi52bS5HZXRWbVN0YXR1c1JlcXVlc3QaFy52bS5HZXRWbVN0YXR1c1Jlc3BvbnNlEjUKCFJlbW92ZVZtEhMudm0uUmVtb3ZlVm1SZXF1ZXN0GhQudm0uUmVtb3ZlVm1SZXNwb25zZWIGcHJvdG8z");
+  fileDesc("Cgh2bS5wcm90bxICdm0iRAoTQnVpbGRWbUltYWdlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhYKDmJ1aWxkcm9vdF9zcGVjGAIgASgJIugBChRCdWlsZFZtSW1hZ2VQcm9ncmVzcxItCgVzdGFnZRgBIAEoDjIeLnZtLkJ1aWxkVm1JbWFnZVByb2dyZXNzLlN0YWdlEg8KB21lc3NhZ2UYAiABKAkSEgoKaW1hZ2VfcGF0aBgDIAEoCSJ8CgVTdGFnZRIRCg1TVEFHRV9VTktOT1dOEAASFQoRU1RBR0VfQ09ORklHVVJJTkcQARISCg5TVEFHRV9CVUlMRElORxACEhQKEFNUQUdFX0NPTlZFUlRJTkcQAxIOCgpTVEFHRV9ET05FEAQSDwoLU1RBR0VfRVJST1IQBSI2Cg1WbVBvcnRGb3J3YXJkEhEKCWhvc3RfcG9ydBgBIAEoDRISCgpndWVzdF9wb3J0GAIgASgNIoYBCgtWbVNwZWNQcm90bxIMCgRuYW1lGAEgASgJEhQKDGJ1aWxkX3RhcmdldBgCIAEoCRISCgppbWFnZV9wYXRoGAMgASgJEigKDXBvcnRfZm9yd2FyZHMYBCADKAsyES52bS5WbVBvcnRGb3J3YXJkEhUKDXNzaF9ob3N0X3BvcnQYBSABKA0iRwoPRGVmaW5lVm1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSHQoEc3BlYxgCIAEoCzIPLnZtLlZtU3BlY1Byb3RvIi8KEERlZmluZVZtUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJzCgZWbUluZm8SDAoEbmFtZRgBIAEoCRIaCgVzdGF0ZRgCIAEoDjILLnZtLlZtU3RhdGUSFQoNc3NoX2hvc3RfcG9ydBgDIAEoDRIRCglzaGFyZV91cmwYBCABKAkSFQoNZXJyb3JfbWVzc2FnZRgFIAEoCSInCg5MaXN0Vm1zUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIioKD0xpc3RWbXNSZXNwb25zZRIXCgN2bXMYASADKAsyCi52bS5WbUluZm8iLAoTTGlzdFZtSW1hZ2VzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIlcKC1ZtSW1hZ2VJbmZvEgwKBHBhdGgYASABKAkSDAoEbmFtZRgCIAEoCRISCgpzaXplX2J5dGVzGAMgASgEEhgKEG1vZGlmaWVkX3VuaXhfbXMYBCABKAQiNwoUTGlzdFZtSW1hZ2VzUmVzcG9uc2USHwoGaW1hZ2VzGAEgAygLMg8udm0uVm1JbWFnZUluZm8iNQoOU3RhcnRWbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIMCgRuYW1lGAIgASgJIj4KD1N0YXJ0Vm1SZXNwb25zZRIaCgVzdGF0ZRgBIAEoDjILLnZtLlZtU3RhdGUSDwoHbWVzc2FnZRgCIAEoCSI0Cg1TdG9wVm1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDAoEbmFtZRgCIAEoCSItCg5TdG9wVm1SZXNwb25zZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIjkKEkdldFZtU3RhdHVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkibAoTR2V0Vm1TdGF0dXNSZXNwb25zZRIaCgVzdGF0ZRgBIAEoDjILLnZtLlZtU3RhdGUSFQoNc3NoX2hvc3RfcG9ydBgCIAEoDRIRCglzaGFyZV91cmwYAyABKAkSDwoHbWVzc2FnZRgEIAEoCSI2Cg9SZW1vdmVWbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIMCgRuYW1lGAIgASgJIi8KEFJlbW92ZVZtUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSqLAQoHVm1TdGF0ZRIUChBWTV9TVEFURV9VTktOT1dOEAASFAoQVk1fU1RBVEVfREVGSU5FRBABEhQKEFZNX1NUQVRFX0JPT1RJTkcQAhIUChBWTV9TVEFURV9SVU5OSU5HEAMSFAoQVk1fU1RBVEVfU1RPUFBFRBAEEhIKDlZNX1NUQVRFX0VSUk9SEAUy2gMKCVZtU2VydmljZRJDCgxCdWlsZFZtSW1hZ2USFy52bS5CdWlsZFZtSW1hZ2VSZXF1ZXN0Ghgudm0uQnVpbGRWbUltYWdlUHJvZ3Jlc3MwARI1CghEZWZpbmVWbRITLnZtLkRlZmluZVZtUmVxdWVzdBoULnZtLkRlZmluZVZtUmVzcG9uc2USMgoHTGlzdFZtcxISLnZtLkxpc3RWbXNSZXF1ZXN0GhMudm0uTGlzdFZtc1Jlc3BvbnNlEkEKDExpc3RWbUltYWdlcxIXLnZtLkxpc3RWbUltYWdlc1JlcXVlc3QaGC52bS5MaXN0Vm1JbWFnZXNSZXNwb25zZRIyCgdTdGFydFZtEhIudm0uU3RhcnRWbVJlcXVlc3QaEy52bS5TdGFydFZtUmVzcG9uc2USLwoGU3RvcFZtEhEudm0uU3RvcFZtUmVxdWVzdBoSLnZtLlN0b3BWbVJlc3BvbnNlEj4KC0dldFZtU3RhdHVzEhYudm0uR2V0Vm1TdGF0dXNSZXF1ZXN0Ghcudm0uR2V0Vm1TdGF0dXNSZXNwb25zZRI1CghSZW1vdmVWbRITLnZtLlJlbW92ZVZtUmVxdWVzdBoULnZtLlJlbW92ZVZtUmVzcG9uc2ViBnByb3RvMw");
 
 /**
  * @generated from message vm.BuildVmImageRequest
@@ -287,6 +287,78 @@ export const ListVmsResponseSchema: GenMessage<ListVmsResponse> = /*@__PURE__*/
   messageDesc(file_vm, 8);
 
 /**
+ * @generated from message vm.ListVmImagesRequest
+ */
+export type ListVmImagesRequest = Message<"vm.ListVmImagesRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+};
+
+/**
+ * Describes the message vm.ListVmImagesRequest.
+ * Use `create(ListVmImagesRequestSchema)` to create a new message.
+ */
+export const ListVmImagesRequestSchema: GenMessage<ListVmImagesRequest> = /*@__PURE__*/
+  messageDesc(file_vm, 9);
+
+/**
+ * @generated from message vm.VmImageInfo
+ */
+export type VmImageInfo = Message<"vm.VmImageInfo"> & {
+  /**
+   * absolute qcow2 path
+   *
+   * @generated from field: string path = 1;
+   */
+  path: string;
+
+  /**
+   * display name (build dir name)
+   *
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: uint64 size_bytes = 3;
+   */
+  sizeBytes: bigint;
+
+  /**
+   * milliseconds since epoch; used for newest-first ordering
+   *
+   * @generated from field: uint64 modified_unix_ms = 4;
+   */
+  modifiedUnixMs: bigint;
+};
+
+/**
+ * Describes the message vm.VmImageInfo.
+ * Use `create(VmImageInfoSchema)` to create a new message.
+ */
+export const VmImageInfoSchema: GenMessage<VmImageInfo> = /*@__PURE__*/
+  messageDesc(file_vm, 10);
+
+/**
+ * @generated from message vm.ListVmImagesResponse
+ */
+export type ListVmImagesResponse = Message<"vm.ListVmImagesResponse"> & {
+  /**
+   * @generated from field: repeated vm.VmImageInfo images = 1;
+   */
+  images: VmImageInfo[];
+};
+
+/**
+ * Describes the message vm.ListVmImagesResponse.
+ * Use `create(ListVmImagesResponseSchema)` to create a new message.
+ */
+export const ListVmImagesResponseSchema: GenMessage<ListVmImagesResponse> = /*@__PURE__*/
+  messageDesc(file_vm, 11);
+
+/**
  * @generated from message vm.StartVmRequest
  */
 export type StartVmRequest = Message<"vm.StartVmRequest"> & {
@@ -306,7 +378,7 @@ export type StartVmRequest = Message<"vm.StartVmRequest"> & {
  * Use `create(StartVmRequestSchema)` to create a new message.
  */
 export const StartVmRequestSchema: GenMessage<StartVmRequest> = /*@__PURE__*/
-  messageDesc(file_vm, 9);
+  messageDesc(file_vm, 12);
 
 /**
  * @generated from message vm.StartVmResponse
@@ -328,7 +400,7 @@ export type StartVmResponse = Message<"vm.StartVmResponse"> & {
  * Use `create(StartVmResponseSchema)` to create a new message.
  */
 export const StartVmResponseSchema: GenMessage<StartVmResponse> = /*@__PURE__*/
-  messageDesc(file_vm, 10);
+  messageDesc(file_vm, 13);
 
 /**
  * @generated from message vm.StopVmRequest
@@ -350,7 +422,7 @@ export type StopVmRequest = Message<"vm.StopVmRequest"> & {
  * Use `create(StopVmRequestSchema)` to create a new message.
  */
 export const StopVmRequestSchema: GenMessage<StopVmRequest> = /*@__PURE__*/
-  messageDesc(file_vm, 11);
+  messageDesc(file_vm, 14);
 
 /**
  * @generated from message vm.StopVmResponse
@@ -372,7 +444,7 @@ export type StopVmResponse = Message<"vm.StopVmResponse"> & {
  * Use `create(StopVmResponseSchema)` to create a new message.
  */
 export const StopVmResponseSchema: GenMessage<StopVmResponse> = /*@__PURE__*/
-  messageDesc(file_vm, 12);
+  messageDesc(file_vm, 15);
 
 /**
  * @generated from message vm.GetVmStatusRequest
@@ -394,7 +466,7 @@ export type GetVmStatusRequest = Message<"vm.GetVmStatusRequest"> & {
  * Use `create(GetVmStatusRequestSchema)` to create a new message.
  */
 export const GetVmStatusRequestSchema: GenMessage<GetVmStatusRequest> = /*@__PURE__*/
-  messageDesc(file_vm, 13);
+  messageDesc(file_vm, 16);
 
 /**
  * @generated from message vm.GetVmStatusResponse
@@ -426,7 +498,7 @@ export type GetVmStatusResponse = Message<"vm.GetVmStatusResponse"> & {
  * Use `create(GetVmStatusResponseSchema)` to create a new message.
  */
 export const GetVmStatusResponseSchema: GenMessage<GetVmStatusResponse> = /*@__PURE__*/
-  messageDesc(file_vm, 14);
+  messageDesc(file_vm, 17);
 
 /**
  * @generated from message vm.RemoveVmRequest
@@ -448,7 +520,7 @@ export type RemoveVmRequest = Message<"vm.RemoveVmRequest"> & {
  * Use `create(RemoveVmRequestSchema)` to create a new message.
  */
 export const RemoveVmRequestSchema: GenMessage<RemoveVmRequest> = /*@__PURE__*/
-  messageDesc(file_vm, 15);
+  messageDesc(file_vm, 18);
 
 /**
  * @generated from message vm.RemoveVmResponse
@@ -470,7 +542,7 @@ export type RemoveVmResponse = Message<"vm.RemoveVmResponse"> & {
  * Use `create(RemoveVmResponseSchema)` to create a new message.
  */
 export const RemoveVmResponseSchema: GenMessage<RemoveVmResponse> = /*@__PURE__*/
-  messageDesc(file_vm, 16);
+  messageDesc(file_vm, 19);
 
 /**
  * @generated from enum vm.VmState
@@ -540,6 +612,14 @@ export const VmService: GenService<{
     methodKind: "unary";
     input: typeof ListVmsRequestSchema;
     output: typeof ListVmsResponseSchema;
+  },
+  /**
+   * @generated from rpc vm.VmService.ListVmImages
+   */
+  listVmImages: {
+    methodKind: "unary";
+    input: typeof ListVmImagesRequestSchema;
+    output: typeof ListVmImagesResponseSchema;
   },
   /**
    * @generated from rpc vm.VmService.StartVm

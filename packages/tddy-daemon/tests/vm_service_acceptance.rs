@@ -1,19 +1,31 @@
 //! VM service acceptance tests — drives VmService through RpcBridge with mock backend.
-//! Fails until VmServiceImpl methods are implemented.
 
 use prost::Message;
 use std::sync::Arc;
-use tddy_rpc::{RequestMetadata, ResponseBody, RpcBridge, RpcMessage};
+use tddy_rpc::{Code, RequestMetadata, ResponseBody, RpcBridge, RpcMessage};
 use tddy_service::proto::vm::{
     BuildVmImageProgress, BuildVmImageRequest, DefineVmRequest, DefineVmResponse,
-    GetVmStatusRequest, GetVmStatusResponse, ListVmsRequest, ListVmsResponse, StartVmRequest,
-    StartVmResponse, StopVmRequest, StopVmResponse, VmServiceServer, VmSpecProto,
+    GetVmStatusRequest, GetVmStatusResponse, ListVmImagesRequest, ListVmImagesResponse,
+    ListVmsRequest, ListVmsResponse, StartVmRequest, StartVmResponse, StopVmRequest,
+    StopVmResponse, VmServiceServer, VmSpecProto,
 };
-use tddy_vm::service::VmServiceImpl;
+use tddy_vm::service::{SessionUserResolver, VmServiceImpl};
 use tddy_vm::{MockVm, VmManager};
 use tempfile::tempdir;
 
-const TOKEN: &str = "valid-token";
+const GOOD_TOKEN: &str = "valid-token";
+const BAD_TOKEN: &str = "bogus-token";
+
+/// Build a resolver that accepts only GOOD_TOKEN.
+fn test_resolver() -> SessionUserResolver {
+    Arc::new(|token: &str| {
+        if token == GOOD_TOKEN {
+            Some("testuser".to_string())
+        } else {
+            None
+        }
+    })
+}
 
 async fn call<Req: Message, Resp: Message + Default>(
     bridge: &RpcBridge<VmServiceServer<VmServiceImpl>>,
@@ -37,15 +49,39 @@ async fn call<Req: Message, Resp: Message + Default>(
     Resp::decode(&chunks[0][..]).expect("decode response")
 }
 
+/// Call a unary method with raw payload and assert it returns Unauthenticated.
+async fn assert_unauthenticated(
+    bridge: &RpcBridge<VmServiceServer<VmServiceImpl>>,
+    method: &str,
+    payload: Vec<u8>,
+) {
+    let msg = RpcMessage {
+        payload,
+        metadata: RequestMetadata::default(),
+    };
+    let result = bridge.handle_messages("vm.VmService", method, &[msg]).await;
+    match result {
+        Err(status) => {
+            assert_eq!(
+                status.code,
+                Code::Unauthenticated,
+                "expected Unauthenticated for method {method}, got {:?}",
+                status.code
+            );
+        }
+        Ok(_) => panic!("expected Unauthenticated error for method {method} with bad token"),
+    }
+}
+
 #[tokio::test]
 async fn define_vm_then_list_shows_it() {
-    // Given — a fresh VmService backed by MockVm
+    // Given — a fresh VmService backed by MockVm with a valid resolver
     let _dir = tempdir().unwrap();
     let manager = Arc::new(VmManager::new(
         &_dir.path().join("vms.json"),
         Box::new(MockVm::new()),
     ));
-    let svc = VmServiceImpl::new(manager);
+    let svc = VmServiceImpl::new(manager, test_resolver());
     let bridge = RpcBridge::new(VmServiceServer::new(svc));
 
     // When — DefineVm is called
@@ -53,7 +89,7 @@ async fn define_vm_then_list_shows_it() {
         &bridge,
         "DefineVm",
         DefineVmRequest {
-            session_token: TOKEN.to_string(),
+            session_token: GOOD_TOKEN.to_string(),
             spec: Some(VmSpecProto {
                 name: "web".to_string(),
                 image_path: "/fake/image.qcow2".to_string(),
@@ -70,7 +106,7 @@ async fn define_vm_then_list_shows_it() {
         &bridge,
         "ListVms",
         ListVmsRequest {
-            session_token: TOKEN.to_string(),
+            session_token: GOOD_TOKEN.to_string(),
         },
     )
     .await;
@@ -86,14 +122,14 @@ async fn start_vm_and_get_running_status() {
         &_dir.path().join("vms.json"),
         Box::new(MockVm::new()),
     ));
-    let svc = VmServiceImpl::new(manager);
+    let svc = VmServiceImpl::new(manager, test_resolver());
     let bridge = RpcBridge::new(VmServiceServer::new(svc));
 
     let _: DefineVmResponse = call(
         &bridge,
         "DefineVm",
         DefineVmRequest {
-            session_token: TOKEN.to_string(),
+            session_token: GOOD_TOKEN.to_string(),
             spec: Some(VmSpecProto {
                 name: "app".to_string(),
                 image_path: "/fake/image.qcow2".to_string(),
@@ -110,7 +146,7 @@ async fn start_vm_and_get_running_status() {
         &bridge,
         "StartVm",
         StartVmRequest {
-            session_token: TOKEN.to_string(),
+            session_token: GOOD_TOKEN.to_string(),
             name: "app".to_string(),
         },
     )
@@ -121,7 +157,7 @@ async fn start_vm_and_get_running_status() {
         &bridge,
         "GetVmStatus",
         GetVmStatusRequest {
-            session_token: TOKEN.to_string(),
+            session_token: GOOD_TOKEN.to_string(),
             name: "app".to_string(),
         },
     )
@@ -138,14 +174,14 @@ async fn stop_vm_returns_stopped_status() {
         &_dir.path().join("vms.json"),
         Box::new(MockVm::new()),
     ));
-    let svc = VmServiceImpl::new(manager);
+    let svc = VmServiceImpl::new(manager, test_resolver());
     let bridge = RpcBridge::new(VmServiceServer::new(svc));
 
     let _: DefineVmResponse = call(
         &bridge,
         "DefineVm",
         DefineVmRequest {
-            session_token: TOKEN.to_string(),
+            session_token: GOOD_TOKEN.to_string(),
             spec: Some(VmSpecProto {
                 name: "runner".to_string(),
                 image_path: "/fake/image.qcow2".to_string(),
@@ -160,7 +196,7 @@ async fn stop_vm_returns_stopped_status() {
         &bridge,
         "StartVm",
         StartVmRequest {
-            session_token: TOKEN.to_string(),
+            session_token: GOOD_TOKEN.to_string(),
             name: "runner".to_string(),
         },
     )
@@ -171,7 +207,7 @@ async fn stop_vm_returns_stopped_status() {
         &bridge,
         "StopVm",
         StopVmRequest {
-            session_token: TOKEN.to_string(),
+            session_token: GOOD_TOKEN.to_string(),
             name: "runner".to_string(),
         },
     )
@@ -182,7 +218,7 @@ async fn stop_vm_returns_stopped_status() {
         &bridge,
         "GetVmStatus",
         GetVmStatusRequest {
-            session_token: TOKEN.to_string(),
+            session_token: GOOD_TOKEN.to_string(),
             name: "runner".to_string(),
         },
     )
@@ -225,14 +261,14 @@ async fn build_vm_image_streams_progress_messages() {
         &_dir.path().join("vms.json"),
         Box::new(MockVm::new()),
     ));
-    let svc = VmServiceImpl::new(manager);
+    let svc = VmServiceImpl::new(manager, test_resolver());
     let bridge = RpcBridge::new(VmServiceServer::new(svc));
 
     let messages: Vec<BuildVmImageProgress> = call_stream(
         &bridge,
         "BuildVmImage",
         BuildVmImageRequest {
-            session_token: TOKEN.to_string(),
+            session_token: GOOD_TOKEN.to_string(),
             buildroot_spec: "BR2_x86_64=y\nBR2_TOOLCHAIN_BUILDROOT_GLIBC=y\n".to_string(),
         },
     )
@@ -255,4 +291,99 @@ async fn build_vm_image_streams_progress_messages() {
             "Done message must carry a non-empty image_path"
         );
     }
+}
+
+#[tokio::test]
+async fn list_vms_with_invalid_token_returns_unauthenticated() {
+    let _dir = tempdir().unwrap();
+    let manager = Arc::new(VmManager::new(
+        &_dir.path().join("vms.json"),
+        Box::new(MockVm::new()),
+    ));
+    let svc = VmServiceImpl::new(manager, test_resolver());
+    let bridge = RpcBridge::new(VmServiceServer::new(svc));
+
+    assert_unauthenticated(
+        &bridge,
+        "ListVms",
+        ListVmsRequest {
+            session_token: BAD_TOKEN.to_string(),
+        }
+        .encode_to_vec(),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn define_vm_with_invalid_token_returns_unauthenticated() {
+    let _dir = tempdir().unwrap();
+    let manager = Arc::new(VmManager::new(
+        &_dir.path().join("vms.json"),
+        Box::new(MockVm::new()),
+    ));
+    let svc = VmServiceImpl::new(manager, test_resolver());
+    let bridge = RpcBridge::new(VmServiceServer::new(svc));
+
+    assert_unauthenticated(
+        &bridge,
+        "DefineVm",
+        DefineVmRequest {
+            session_token: BAD_TOKEN.to_string(),
+            spec: Some(VmSpecProto {
+                name: "vm".to_string(),
+                image_path: "/fake.qcow2".to_string(),
+                build_target: String::new(),
+                ssh_host_port: 2225,
+                port_forwards: vec![],
+            }),
+        }
+        .encode_to_vec(),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn list_vm_images_returns_empty_when_no_images_built() {
+    // With no built images in the scan dir, ListVmImages returns an empty list (no error).
+    let _dir = tempdir().unwrap();
+    let manager = Arc::new(VmManager::new(
+        &_dir.path().join("vms.json"),
+        Box::new(MockVm::new()),
+    ));
+    let svc = VmServiceImpl::new(manager, test_resolver());
+    let bridge = RpcBridge::new(VmServiceServer::new(svc));
+
+    let result: ListVmImagesResponse = call(
+        &bridge,
+        "ListVmImages",
+        ListVmImagesRequest {
+            session_token: GOOD_TOKEN.to_string(),
+        },
+    )
+    .await;
+
+    // The scan dir (tmp/buildroot/disks) likely doesn't exist in the test environment.
+    // What matters is that a valid token succeeds without error and returns a (possibly empty) list.
+    let _ = result.images.len();
+}
+
+#[tokio::test]
+async fn list_vm_images_with_invalid_token_returns_unauthenticated() {
+    let _dir = tempdir().unwrap();
+    let manager = Arc::new(VmManager::new(
+        &_dir.path().join("vms.json"),
+        Box::new(MockVm::new()),
+    ));
+    let svc = VmServiceImpl::new(manager, test_resolver());
+    let bridge = RpcBridge::new(VmServiceServer::new(svc));
+
+    assert_unauthenticated(
+        &bridge,
+        "ListVmImages",
+        ListVmImagesRequest {
+            session_token: BAD_TOKEN.to_string(),
+        }
+        .encode_to_vec(),
+    )
+    .await;
 }

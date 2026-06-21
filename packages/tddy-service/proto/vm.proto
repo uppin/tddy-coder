@@ -2,13 +2,14 @@ syntax = "proto3";
 package vm;
 
 service VmService {
-  rpc BuildVmImage(BuildVmImageRequest)  returns (stream BuildVmImageProgress);
-  rpc DefineVm    (DefineVmRequest)      returns (DefineVmResponse);
-  rpc ListVms     (ListVmsRequest)       returns (ListVmsResponse);
-  rpc StartVm     (StartVmRequest)       returns (StartVmResponse);
-  rpc StopVm      (StopVmRequest)        returns (StopVmResponse);
-  rpc GetVmStatus (GetVmStatusRequest)   returns (GetVmStatusResponse);
-  rpc RemoveVm    (RemoveVmRequest)      returns (RemoveVmResponse);
+  rpc BuildVmImage  (BuildVmImageRequest)   returns (stream BuildVmImageProgress);
+  rpc DefineVm      (DefineVmRequest)       returns (DefineVmResponse);
+  rpc ListVms       (ListVmsRequest)        returns (ListVmsResponse);
+  rpc ListVmImages  (ListVmImagesRequest)   returns (ListVmImagesResponse);
+  rpc StartVm       (StartVmRequest)        returns (StartVmResponse);
+  rpc StopVm        (StopVmRequest)         returns (StopVmResponse);
+  rpc GetVmStatus   (GetVmStatusRequest)    returns (GetVmStatusResponse);
+  rpc RemoveVm      (RemoveVmRequest)       returns (RemoveVmResponse);
 }
 
 // --- Build ---
@@ -82,6 +83,23 @@ message ListVmsRequest {
 
 message ListVmsResponse {
   repeated VmInfo vms = 1;
+}
+
+// --- List VM Images ---
+
+message ListVmImagesRequest {
+  string session_token = 1;
+}
+
+message VmImageInfo {
+  string path             = 1;  // absolute qcow2 path
+  string name             = 2;  // display name (build dir name)
+  uint64 size_bytes       = 3;
+  uint64 modified_unix_ms = 4;  // milliseconds since epoch; used for newest-first ordering
+}
+
+message ListVmImagesResponse {
+  repeated VmImageInfo images = 1;
 }
 
 // --- Start ---

@@ -8,6 +8,94 @@ use tddy_build::plugin::PluginRegistry;
 use tddy_build_qemu::QemuPlugin;
 use tddy_rpc::Status;
 use tddy_service::proto::vm::BuildVmImageProgress;
+use tokio::fs;
+
+// ── Image listing ──────────────────────────────────────────────────────────────
+
+/// Metadata about a built qcow2 image found in the Buildroot output tree.
+#[derive(Debug, Clone)]
+pub struct VmImageRecord {
+    /// Absolute path to the `.qcow2` file.
+    pub path: String,
+    /// The build directory name (e.g. `build-1748123456789`).
+    pub name: String,
+    /// File size in bytes.
+    pub size_bytes: u64,
+    /// File modification time in milliseconds since UNIX epoch.
+    pub modified_unix_ms: u64,
+}
+
+/// Returns the canonical `tmp/buildroot/disks` directory (relative to the daemon's cwd).
+pub fn built_images_dir() -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("tmp/buildroot/disks")
+}
+
+/// Scan `disks_dir` for `build-*/images/*.qcow2` files and return them sorted newest-first.
+///
+/// Silently skips any build dirs that have no `images/` subdirectory or no `.qcow2` files.
+/// Returns an empty vec if `disks_dir` does not exist.
+pub async fn list_built_images_in(disks_dir: &Path) -> Vec<VmImageRecord> {
+    let mut records = Vec::new();
+
+    let mut top = match fs::read_dir(disks_dir).await {
+        Ok(d) => d,
+        Err(_) => return records, // dir doesn't exist or not readable — not an error
+    };
+
+    while let Ok(Some(entry)) = top.next_entry().await {
+        let build_dir = entry.path();
+        if !build_dir.is_dir() {
+            continue;
+        }
+        let build_name = match build_dir.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+
+        let images_dir = build_dir.join("images");
+        let mut img_dir = match fs::read_dir(&images_dir).await {
+            Ok(d) => d,
+            Err(_) => continue, // no images/ subdir — skip
+        };
+
+        while let Ok(Some(img_entry)) = img_dir.next_entry().await {
+            let img_path = img_entry.path();
+            if img_path.extension().and_then(|e| e.to_str()) != Some("qcow2") {
+                continue;
+            }
+            let meta = match fs::metadata(&img_path).await {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let size_bytes = meta.len();
+            let modified_unix_ms = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            records.push(VmImageRecord {
+                path: img_path.to_string_lossy().into_owned(),
+                name: build_name.clone(),
+                size_bytes,
+                modified_unix_ms,
+            });
+        }
+    }
+
+    // Newest first
+    records.sort_by(|a, b| b.modified_unix_ms.cmp(&a.modified_unix_ms));
+    records
+}
+
+/// Scan the canonical built-images directory for `.qcow2` files, sorted newest-first.
+pub async fn list_built_images() -> Vec<VmImageRecord> {
+    list_built_images_in(&built_images_dir()).await
+}
+
+// ── Stage constants ────────────────────────────────────────────────────────────
 
 // Stage constants matching BuildVmImageProgress::Stage proto enum values
 const STAGE_CONFIGURING: i32 = 1;
@@ -81,7 +169,7 @@ pub async fn build_vm_image_from_spec(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let build_path = cwd.join("tmp/buildroot/disks").join(format!("build-{ts}"));
+    let build_path = built_images_dir().join(format!("build-{ts}"));
     if let Err(e) = tokio::fs::create_dir_all(&build_path).await {
         send_progress(
             &tx,

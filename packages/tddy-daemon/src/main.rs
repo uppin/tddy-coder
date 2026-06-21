@@ -362,6 +362,8 @@ fn main() -> anyhow::Result<()> {
                     None
                 }
             };
+            // Clone before moving into ConnectionServiceImpl — VmService needs the same resolver.
+            let vm_user_resolver = user_resolver.clone();
             let mut connection_impl = tddy_daemon::connection_service::ConnectionServiceImpl::new(
                 config.clone(),
                 Arc::new(tddy_daemon::user_sessions_path::sessions_base_for_user),
@@ -379,25 +381,26 @@ fn main() -> anyhow::Result<()> {
                 name: "connection.ConnectionService",
                 service: Arc::new(connection_server) as Arc<dyn tddy_rpc::RpcService>,
             });
-        }
 
-        // VM lifecycle service — build and manage VMs via RPC
-        let vm_state_file = {
-            let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
-            let base = tddy_daemon::user_sessions_path::tddy_data_root_matching_child(&user)
-                .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
-            base.join("vm-registry.json")
-        };
-        let vm_manager = Arc::new(tddy_vm::VmManager::new(
-            &vm_state_file,
-            Box::new(tddy_vm::QemuVm),
-        ));
-        let vm_service_impl = tddy_vm::VmServiceImpl::new(Arc::clone(&vm_manager));
-        let vm_server = tddy_service::VmServiceServer::new(vm_service_impl);
-        rpc_entries.push(tddy_rpc::ServiceEntry {
-            name: "vm.VmService",
-            service: Arc::new(vm_server) as Arc<dyn tddy_rpc::RpcService>,
-        });
+            // VM lifecycle service — gated on auth being configured (same as ConnectionService).
+            let vm_state_file = {
+                let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+                let base = tddy_daemon::user_sessions_path::tddy_data_root_matching_child(&user)
+                    .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+                base.join("vm-registry.json")
+            };
+            let vm_manager = Arc::new(tddy_vm::VmManager::new(
+                &vm_state_file,
+                Box::new(tddy_vm::QemuVm),
+            ));
+            let vm_service_impl =
+                tddy_vm::VmServiceImpl::new(Arc::clone(&vm_manager), vm_user_resolver);
+            let vm_server = tddy_service::VmServiceServer::new(vm_service_impl);
+            rpc_entries.push(tddy_rpc::ServiceEntry {
+                name: "vm.VmService",
+                service: Arc::new(vm_server) as Arc<dyn tddy_rpc::RpcService>,
+            });
+        }
 
         // Relay mode: spawn idle-monitor task that fires the shutdown channel on timeout.
         let idle_monitor_task = idle_tx_opt.map(|tx| {

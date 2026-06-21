@@ -6,22 +6,40 @@ use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::vm::{
     BuildVmImageProgress, BuildVmImageRequest, DefineVmRequest, DefineVmResponse,
-    GetVmStatusRequest, GetVmStatusResponse, ListVmsRequest, ListVmsResponse, RemoveVmRequest,
-    RemoveVmResponse, StartVmRequest, StartVmResponse, StopVmRequest, StopVmResponse, VmInfo,
-    VmService,
+    GetVmStatusRequest, GetVmStatusResponse, ListVmImagesRequest, ListVmImagesResponse,
+    ListVmsRequest, ListVmsResponse, RemoveVmRequest, RemoveVmResponse, StartVmRequest,
+    StartVmResponse, StopVmRequest, StopVmResponse, VmImageInfo, VmInfo, VmService,
 };
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::registry::{VmManager, VmSpec, VmState};
 use crate::vm::{PortForward, VmError};
 
+/// Resolver that maps a session token to the authenticated GitHub login.
+/// Returns `None` if the token is unknown or expired.
+///
+/// Defined locally to avoid a circular dependency with `tddy-daemon`
+/// (tddy-daemon depends on tddy-vm, so tddy-vm must not depend on tddy-daemon).
+pub type SessionUserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
 pub struct VmServiceImpl {
     manager: Arc<VmManager>,
+    user_resolver: SessionUserResolver,
 }
 
 impl VmServiceImpl {
-    pub fn new(manager: Arc<VmManager>) -> Self {
-        Self { manager }
+    pub fn new(manager: Arc<VmManager>, user_resolver: SessionUserResolver) -> Self {
+        Self {
+            manager,
+            user_resolver,
+        }
+    }
+
+    /// Authenticate a session token. Returns the GitHub login on success,
+    /// or `Status::unauthenticated` if the token is invalid or expired.
+    fn authenticate(&self, token: &str) -> Result<String, Status> {
+        (self.user_resolver)(token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))
     }
 }
 
@@ -57,6 +75,7 @@ impl VmService for VmServiceImpl {
         request: Request<DefineVmRequest>,
     ) -> Result<Response<DefineVmResponse>, Status> {
         let req = request.into_inner();
+        self.authenticate(&req.session_token)?;
         let proto_spec = req
             .spec
             .ok_or_else(|| Status::invalid_argument("spec is required"))?;
@@ -91,8 +110,10 @@ impl VmService for VmServiceImpl {
 
     async fn list_vms(
         &self,
-        _request: Request<ListVmsRequest>,
+        request: Request<ListVmsRequest>,
     ) -> Result<Response<ListVmsResponse>, Status> {
+        let req = request.into_inner();
+        self.authenticate(&req.session_token)?;
         let vms = self.manager.list().await;
         let infos = vms
             .into_iter()
@@ -114,11 +135,31 @@ impl VmService for VmServiceImpl {
         Ok(Response::new(ListVmsResponse { vms: infos }))
     }
 
+    async fn list_vm_images(
+        &self,
+        request: Request<ListVmImagesRequest>,
+    ) -> Result<Response<ListVmImagesResponse>, Status> {
+        let req = request.into_inner();
+        self.authenticate(&req.session_token)?;
+        let records = crate::build::list_built_images().await;
+        let images = records
+            .into_iter()
+            .map(|r| VmImageInfo {
+                path: r.path,
+                name: r.name,
+                size_bytes: r.size_bytes,
+                modified_unix_ms: r.modified_unix_ms,
+            })
+            .collect();
+        Ok(Response::new(ListVmImagesResponse { images }))
+    }
+
     async fn start_vm(
         &self,
         request: Request<StartVmRequest>,
     ) -> Result<Response<StartVmResponse>, Status> {
         let req = request.into_inner();
+        self.authenticate(&req.session_token)?;
         self.manager
             .start(&req.name)
             .await
@@ -134,6 +175,7 @@ impl VmService for VmServiceImpl {
         request: Request<StopVmRequest>,
     ) -> Result<Response<StopVmResponse>, Status> {
         let req = request.into_inner();
+        self.authenticate(&req.session_token)?;
         self.manager
             .stop(&req.name)
             .await
@@ -149,6 +191,7 @@ impl VmService for VmServiceImpl {
         request: Request<GetVmStatusRequest>,
     ) -> Result<Response<GetVmStatusResponse>, Status> {
         let req = request.into_inner();
+        self.authenticate(&req.session_token)?;
         let state = self
             .manager
             .status(&req.name)
@@ -176,6 +219,7 @@ impl VmService for VmServiceImpl {
         request: Request<RemoveVmRequest>,
     ) -> Result<Response<RemoveVmResponse>, Status> {
         let req = request.into_inner();
+        self.authenticate(&req.session_token)?;
         self.manager
             .remove(&req.name)
             .await
@@ -191,6 +235,8 @@ impl VmService for VmServiceImpl {
         request: Request<BuildVmImageRequest>,
     ) -> Result<Response<Self::BuildVmImageStream>, Status> {
         let req = request.into_inner();
+        // Validate token before spawning the long-running build task.
+        self.authenticate(&req.session_token)?;
         let spec = req.buildroot_spec;
 
         let (tx, rx) = tokio::sync::mpsc::channel(64);
