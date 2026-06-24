@@ -260,29 +260,56 @@ mod tests {
     use crate::task::{ChannelKind, TaskChannel, TaskStatus};
     use async_trait::async_trait;
 
-    struct ImmediateBody {
-        result: TaskStatus,
-    }
+    // ── Test bodies ──────────────────────────────────────────────────────────
+
+    struct CompletingBody;
 
     #[async_trait]
-    impl TaskBody for ImmediateBody {
+    impl TaskBody for CompletingBody {
         async fn run(self: Box<Self>, _ctx: TaskContext) -> TaskStatus {
-            self.result
+            TaskStatus::Completed { exit_code: Some(0) }
         }
     }
 
-    struct NeverCancelBody;
+    struct WaitForCancelBody;
 
     #[async_trait]
-    impl TaskBody for NeverCancelBody {
+    impl TaskBody for WaitForCancelBody {
         async fn run(self: Box<Self>, ctx: TaskContext) -> TaskStatus {
             ctx.cancel_token().cancelled().await;
             TaskStatus::Cancelled
         }
     }
 
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /// Block until the handle reaches any terminal status.
+    async fn wait_terminal(handle: &TaskHandle) {
+        let mut rx = handle.status_watch();
+        loop {
+            if rx.borrow().is_terminal() {
+                return;
+            }
+            if rx.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+
+    /// Spawn `n` instant-completing tasks and drain each to terminal before returning.
+    /// Used to exercise the cap eviction path without a loop in the test body.
+    async fn spawn_and_drain(registry: &TaskRegistry, n: usize) {
+        for _ in 0..n {
+            let handle = registry.spawn(CompletingBody, "test", "s", vec![]).await;
+            wait_terminal(&handle).await;
+            registry.evict_over_cap().await;
+        }
+    }
+
+    // ── Tests ────────────────────────────────────────────────────────────────
+
     #[tokio::test]
-    async fn register_then_list_shows_task() {
+    async fn registered_task_appears_in_list() {
         // Given
         let registry = TaskRegistry::new();
         let id = TaskId::new();
@@ -303,26 +330,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn status_transitions_pending_running_completed() {
+    async fn spawned_body_reaches_completed_status() {
         // Given
         let registry = TaskRegistry::new();
-        let body = ImmediateBody {
-            result: TaskStatus::Completed { exit_code: Some(0) },
-        };
 
         // When
-        let handle = registry.spawn(body, "test", "session", vec![]).await;
+        let handle = registry.spawn(CompletingBody, "test", "session", vec![]).await;
 
-        // Then — wait for terminal
-        let mut rx = handle.status_watch();
-        loop {
-            if rx.borrow().is_terminal() {
-                break;
-            }
-            if rx.changed().await.is_err() {
-                break;
-            }
-        }
+        // Then
+        wait_terminal(&handle).await;
         assert!(
             matches!(
                 handle.status(),
@@ -333,22 +349,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn channel_replay_then_live() {
-        // Given — a channel that has already received some output
+    async fn late_subscriber_receives_buffered_bytes_then_new_bytes_live() {
+        // Given — a channel that already has buffered output before subscription
         let ch = TaskChannel::output_only("0", "combined", ChannelKind::Combined);
         ch.write(bytes::Bytes::from("hello"));
 
-        // When — subscribe *after* the write
+        // When — subscribe after the write, then write more
         let replay = ch.replay_capture();
         let mut rx = ch.subscribe();
         ch.write(bytes::Bytes::from(" world"));
 
-        // Then — replay contains the earlier bytes, rx gets the later bytes
+        // Then — replay buffer contains the pre-subscription bytes
         assert_eq!(
             &replay, b"hello",
             "replay must contain pre-subscription bytes"
         );
-        let live = rx.recv().await.expect("live recv");
+        // And the live stream delivers the post-subscription byte
+        let live = rx.recv().await.expect("live recv must succeed");
         assert_eq!(
             &live[..],
             b" world",
@@ -357,26 +374,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancel_signals_body_and_reaches_cancelled() {
+    async fn cancel_signal_reaches_body_and_task_reports_cancelled() {
         // Given
         let registry = TaskRegistry::new();
         let handle = registry
-            .spawn(NeverCancelBody, "test", "session", vec![])
+            .spawn(WaitForCancelBody, "test", "session", vec![])
             .await;
 
         // When
         registry.cancel_task(&handle.id).await;
 
         // Then
-        let mut rx = handle.status_watch();
-        loop {
-            if rx.borrow().is_terminal() {
-                break;
-            }
-            if rx.changed().await.is_err() {
-                break;
-            }
-        }
+        wait_terminal(&handle).await;
         assert_eq!(
             handle.status(),
             TaskStatus::Cancelled,
@@ -385,27 +394,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn retention_caps_terminal_count() {
+    async fn registry_evicts_oldest_tasks_when_cap_is_exceeded() {
         // Given — spawn more than TERMINAL_TASK_CAP instant tasks
         let registry = TaskRegistry::new();
-        let over = TERMINAL_TASK_CAP + 10;
-        for _ in 0..over {
-            let body = ImmediateBody {
-                result: TaskStatus::Completed { exit_code: Some(0) },
-            };
-            let handle = registry.spawn(body, "test", "s", vec![]).await;
-            // Wait for terminal before spawning next to allow cap eviction.
-            let mut rx = handle.status_watch();
-            loop {
-                if rx.borrow().is_terminal() {
-                    break;
-                }
-                if rx.changed().await.is_err() {
-                    break;
-                }
-            }
-            registry.evict_over_cap().await;
-        }
+
+        // When — fill beyond the cap, draining each task before the next spawn
+        spawn_and_drain(&registry, TERMINAL_TASK_CAP + 10).await;
 
         // Then
         let count = registry.list().await.len();

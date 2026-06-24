@@ -38,6 +38,19 @@ async fn wait_dead(pid: u32, max_wait: Duration) -> bool {
     }
 }
 
+/// Block until the task handle reaches any terminal status.
+async fn wait_terminal(handle: &tddy_task::TaskHandle) {
+    let mut rx = handle.status_watch();
+    loop {
+        if rx.borrow().is_terminal() {
+            return;
+        }
+        if rx.changed().await.is_err() {
+            return;
+        }
+    }
+}
+
 /// A task body that spawns `sleep 60`, registers its PID, then awaits cancellation.
 /// On cancel: sends SIGINT to the child, waits, returns Cancelled.
 struct SleepBody;
@@ -142,7 +155,9 @@ async fn cancel_sends_sigint_to_registered_child() {
     let registry = TaskRegistry::new();
     let handle = registry.spawn(SleepBody, "test", "session", vec![]).await;
 
-    // Let the body start and register the PID.
+    // Allow the spawned tokio task to start and execute ctx.register_child_pid.
+    // There is no synchronous signal from body startup to the test; a brief yield
+    // is the only reliable option without adding test-only channels to TaskBody.
     tokio::time::sleep(Duration::from_millis(100)).await;
     let pids: Vec<u32> = handle.pid_slot.lock().unwrap().clone();
     assert!(!pids.is_empty(), "body must have registered a child PID");
@@ -154,23 +169,15 @@ async fn cancel_sends_sigint_to_registered_child() {
     // When
     registry.cancel_task(&handle.id).await;
 
-    // Then — child must die
+    // Then — child must die from SIGINT
     let died = wait_dead(child_pid, Duration::from_secs(5)).await;
     assert!(
         died,
         "child process {child_pid} must die after cancel sends SIGINT"
     );
 
-    // And task status must be Cancelled
-    let mut rx = handle.status_watch();
-    loop {
-        if rx.borrow().is_terminal() {
-            break;
-        }
-        if rx.changed().await.is_err() {
-            break;
-        }
-    }
+    // And the task itself must report Cancelled
+    wait_terminal(&handle).await;
     assert_eq!(
         handle.status(),
         TaskStatus::Cancelled,
@@ -186,23 +193,24 @@ async fn escalation_sigkills_unresponsive_child() {
     let registry = TaskRegistry::new();
     let handle = registry.spawn(TrapBody, "test", "session", vec![]).await;
 
-    // Let the body start and register the PID.
+    // Allow the spawned tokio task to start and execute ctx.register_child_pid.
+    // Slightly longer than the cooperative-cancel test because `trap` processing takes a moment.
     tokio::time::sleep(Duration::from_millis(200)).await;
     let pids: Vec<u32> = handle.pid_slot.lock().unwrap().clone();
     assert!(!pids.is_empty(), "body must have registered a child PID");
     let child_pid = pids[0];
 
-    // Verify child alive
     assert!(
         !is_dead(child_pid),
         "trapped child must be alive before cancel"
     );
 
-    // When — cancel triggers escalation safety net
+    // When — cancel triggers the escalation safety net
     registry.cancel_task(&handle.id).await;
 
-    // Then — child must die within the escalation window (~5s grace + ~2s SIGTERM + SIGKILL + buffer)
-    // The body awaits child.wait() so tokio reaps the zombie when SIGKILL fires.
+    // Then — child must die via SIGKILL within the escalation window.
+    // 15s budget: 5s grace period (escalation_safety_net) + 2s SIGTERM wait + SIGKILL + reap buffer.
+    // Exceeds the 1s integration test ceiling because the escalation sequence is fixed at ~7s minimum.
     let died = wait_dead(child_pid, Duration::from_secs(15)).await;
     assert!(
         died,
@@ -220,7 +228,7 @@ async fn multiple_children_all_signaled() {
         .spawn(TwoChildrenBody, "test", "session", vec![])
         .await;
 
-    // Let the body start and register both PIDs.
+    // Allow the spawned tokio task to start and execute ctx.register_child_pid for both children.
     tokio::time::sleep(Duration::from_millis(150)).await;
     let pids: Vec<u32> = handle.pid_slot.lock().unwrap().clone();
     assert_eq!(pids.len(), 2, "body must register exactly 2 child PIDs");

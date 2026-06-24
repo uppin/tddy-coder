@@ -416,14 +416,12 @@ async fn cancel_nonexistent_task_returns_not_found() {
 
 #[tokio::test]
 async fn send_input_to_input_channel_returns_ok() {
-    // Given — a task with an input-capable channel
+    // Given — a task with an input-capable channel that stays Running until cancelled
     let registry = TaskRegistry::new();
     let (ch, _stdin_rx) = TaskChannel::new("0", "stdin", ChannelKind::Combined);
     let handle = registry
         .spawn(
-            ImmediateBody {
-                result: TaskStatus::Running,
-            },
+            WaitForCancelBody, // stays Running so the channel is open when SendInput fires
             "test",
             "session",
             vec![ch],
