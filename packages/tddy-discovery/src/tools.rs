@@ -311,13 +311,14 @@ mod tests {
             .await
             .expect("local GREP must succeed");
 
-        // Then — matches array is present and non-empty
+        // Then — exactly one match for 'fn authenticate'
         let matches = output.value["matches"]
             .as_array()
             .expect("GREP result must have a 'matches' array");
-        assert!(
-            !matches.is_empty(),
-            "GREP must find at least one match for 'fn authenticate'"
+        assert_eq!(
+            matches.len(),
+            1,
+            "GREP must find exactly one match for 'fn authenticate'; got {matches:?}"
         );
     }
 
@@ -443,7 +444,7 @@ mod tests {
         let paths = output.value["paths"]
             .as_array()
             .expect("remote GLOB result must have a 'paths' array");
-        assert_eq!(paths.len(), 2);
+        assert_eq!(paths.len(), 2, "remote GLOB must return exactly 2 paths; got {paths:?}");
     }
 
     /// When the ExecuteTool response has `is_error: true`, the executor surfaces it as an error
@@ -469,13 +470,16 @@ mod tests {
         // When
         let result = executor.read("../../etc/passwd", None, None).await;
 
-        // Then — error is surfaced (not silently swallowed)
+        // Then — error is surfaced with the server's message (not silently swallowed)
         assert!(
             result.is_err(),
             "remote executor must return Err when is_error is true; got Ok"
         );
         let msg = result.unwrap_err().to_string();
-        assert!(!msg.is_empty(), "error message must be non-empty");
+        assert!(
+            msg.contains("path escapes worktree root"),
+            "error message must contain the server-returned error text; got: {msg}"
+        );
     }
 
     /// When `InvokeRequest.remote` is `Some(RemoteToolEnv)`, the executor is `Remote`.

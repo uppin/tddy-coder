@@ -43,11 +43,7 @@ fn fastcontext_agent_string_is_accepted_by_the_cli_arg_parser() {
 
     // Then — no clap "invalid value" error for --agent
     assert!(
-        !stderr.contains("invalid value 'fastcontext'")
-            && !stderr
-                .contains("possible values")
-                .then(|| stderr.contains("fastcontext"))
-                .unwrap_or(false),
+        !stderr.contains("invalid value 'fastcontext'"),
         "`--agent fastcontext` must be a valid CLI value; clap must not reject it. \
          stderr: {stderr}"
     );

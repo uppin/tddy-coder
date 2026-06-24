@@ -17,8 +17,8 @@ use std::time::Duration;
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::hooks::RunnerHooks;
-// set_sinks / clear_sinks / get_agent_sink are re-exported from tddy_core::workflow
-use tddy_core::workflow::{clear_sinks, get_agent_sink};
+// get_agent_sink is re-exported from tddy_core::workflow
+use tddy_core::workflow::get_agent_sink;
 use tddy_workflow_recipes::free_prompting::FreePromptingWorkflowHooks;
 
 /// `FreePromptingWorkflowHooks::on_enter_task` must call `set_sinks(...)`, making the
@@ -108,6 +108,4 @@ fn hooks_impl_without_sink_does_not_panic_on_enter_or_exit() {
         "default on_exit_task must not leave any sink set"
     );
 
-    // Suppress compiler warning for unused fields
-    let _ = clear_sinks;
 }

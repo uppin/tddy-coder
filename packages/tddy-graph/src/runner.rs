@@ -287,7 +287,7 @@ mod tests {
         let (runner, session_id) = make_runner_with_hooks(graph, hooks.clone()).await;
 
         // When
-        runner.run(&session_id).await.ok();
+        runner.run(&session_id).await.expect("runner must succeed");
 
         // Then
         let log = hooks.entries();
@@ -298,7 +298,7 @@ mod tests {
         let after_pos = log
             .iter()
             .position(|e| e == "after:step")
-            .unwrap_or(usize::MAX);
+            .unwrap_or_else(|| panic!("after_task must be recorded for EndTask; log: {log:?}"));
         assert!(
             enter_pos < after_pos,
             "on_enter_task must fire before after_task; log: {log:?}"
@@ -474,7 +474,7 @@ mod tests {
         let (runner, session_id) = make_runner_with_hooks(graph, hooks.clone()).await;
 
         // When
-        runner.run(&session_id).await.ok();
+        runner.run(&session_id).await.expect("runner must succeed");
 
         // Then
         let log = hooks.entries();

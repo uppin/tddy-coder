@@ -161,5 +161,15 @@ mod tests {
             "two citations inside <final_answer> must produce two entries; got {:?}",
             data.relevant_code
         );
+        assert!(
+            data.relevant_code.iter().any(|rc| rc.path == "src/auth.rs"),
+            "src/auth.rs must be in relevant_code; got {:?}",
+            data.relevant_code
+        );
+        assert!(
+            data.relevant_code.iter().any(|rc| rc.path == "src/session.rs"),
+            "src/session.rs must be in relevant_code; got {:?}",
+            data.relevant_code
+        );
     }
 }
