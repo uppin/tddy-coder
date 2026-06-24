@@ -33,6 +33,7 @@ pub use proto::reflection::ServerReflectionServer;
 pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
+pub use proto::tasks::TaskServiceServer;
 pub use proto::vm::VmServiceServer;
 pub use reflection_service::{reflection_entry_from, ServerReflectionImpl};
 pub use service::TddyRemoteService;
@@ -71,6 +72,10 @@ pub mod proto {
     #[allow(unused_imports, unused_variables)]
     pub mod vm {
         include!(concat!(env!("OUT_DIR"), "/vm.rs"));
+    }
+    #[allow(unused_imports, unused_variables)]
+    pub mod tasks {
+        include!(concat!(env!("OUT_DIR"), "/tasks.rs"));
     }
     pub mod reflection {
         include!(concat!(env!("OUT_DIR"), "/grpc.reflection.v1.rs"));

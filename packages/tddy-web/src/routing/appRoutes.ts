@@ -50,6 +50,13 @@ export function isRpcPlaygroundPath(pathname: string): boolean {
   return pathname === RPC_PLAYGROUND_ROUTE;
 }
 
+/** Canonical path for the Tasks management screen. */
+export const TASKS_ROUTE = "/tasks";
+
+export function isTasksPath(pathname: string): boolean {
+  return pathname === TASKS_ROUTE;
+}
+
 /** Canonical path for the VM management screen. */
 export const VMS_ROUTE = "/vms";
 
