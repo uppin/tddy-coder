@@ -156,6 +156,9 @@ impl TaskService for TaskServiceImpl {
         tokio::spawn(async move {
             // Subscribe FIRST so we don't miss any live bytes.
             let mut live_rx = channel.subscribe();
+            // Subscribe to status changes before the live-stream loop so a terminal transition
+            // that fires while live_rx.recv() is blocking unblocks the select immediately.
+            let mut status_rx = handle.status_watch();
 
             // Replay the capture buffer.
             let replay = channel.replay_capture();
@@ -185,32 +188,39 @@ impl TaskService for TaskServiceImpl {
                         .await;
                     break;
                 }
-                match live_rx.recv().await {
-                    Ok(data) => {
-                        let _ = tx
-                            .send(Ok(TaskOutputEvent {
-                                channel_id: channel_id.clone(),
-                                data: data.to_vec(),
-                                is_replay: false,
-                                status: 0,
-                            }))
-                            .await;
+                tokio::select! {
+                    recv_result = live_rx.recv() => {
+                        match recv_result {
+                            Ok(data) => {
+                                let _ = tx
+                                    .send(Ok(TaskOutputEvent {
+                                        channel_id: channel_id.clone(),
+                                        data: data.to_vec(),
+                                        is_replay: false,
+                                        status: 0,
+                                    }))
+                                    .await;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                log::warn!("WatchTask: lagged by {n} messages on channel {channel_id}");
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                // Channel closed — emit terminal event and finish.
+                                let terminal_status = handle.status();
+                                let _ = tx
+                                    .send(Ok(TaskOutputEvent {
+                                        channel_id: channel_id.clone(),
+                                        data: vec![],
+                                        is_replay: false,
+                                        status: task_status_to_proto(&terminal_status),
+                                    }))
+                                    .await;
+                                break;
+                            }
+                        }
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        log::warn!("WatchTask: lagged by {n} messages on channel {channel_id}");
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        // Channel closed — emit terminal event and finish.
-                        let terminal_status = handle.status();
-                        let _ = tx
-                            .send(Ok(TaskOutputEvent {
-                                channel_id: channel_id.clone(),
-                                data: vec![],
-                                is_replay: false,
-                                status: task_status_to_proto(&terminal_status),
-                            }))
-                            .await;
-                        break;
+                    _ = status_rx.changed() => {
+                        // Status changed — loop back to check is_terminal() at the top.
                     }
                 }
             }

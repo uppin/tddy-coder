@@ -10,30 +10,30 @@
 
 ## TODO
 
-- [ ] Create/update PRD documentation (`docs/ft/daemon/background-tasks.md`) ✓
-- [ ] Create changeset (`docs/dev/1-WIP/2026-06-24-changeset-background-tasks.md`) ✓
-- [ ] New leaf crate `packages/tddy-task`: `TaskId`, `TaskStatus`, `TaskChannel`, `TaskHandle`,
+- [x] Create/update PRD documentation (`docs/ft/daemon/background-tasks.md`)
+- [x] Create changeset (`docs/dev/1-WIP/2026-06-24-changeset-background-tasks.md`)
+- [x] New leaf crate `packages/tddy-task`: `TaskId`, `TaskStatus`, `TaskChannel`, `TaskHandle`,
       `TaskContext`, `TaskBody` trait, `TaskRegistry` (with `register`, `get`, `remove`, `list`, `spawn`)
-- [ ] `packages/tddy-service/proto/tasks.proto`: `TaskService` (ListTasks, GetTask, WatchTask,
+- [x] `packages/tddy-service/proto/tasks.proto`: `TaskService` (ListTasks, GetTask, WatchTask,
       CancelTask, SendInput)
-- [ ] Wire `tasks.proto` into `packages/tddy-service/build.rs` (codegen block + descriptor-set entry)
+- [x] Wire `tasks.proto` into `packages/tddy-service/build.rs` (codegen block + descriptor-set entry)
       and re-export `TaskServiceServer` from `packages/tddy-service/src/lib.rs`
-- [ ] Add `tddy-task` to root `Cargo.toml` workspace members and to `packages/tddy-daemon/Cargo.toml`
+- [x] Add `tddy-task` to root `Cargo.toml` workspace members and to `packages/tddy-daemon/Cargo.toml`
       and `packages/tddy-vm/Cargo.toml`
-- [ ] `packages/tddy-daemon/src/task_service.rs`: `TaskServiceImpl` implementing `TaskService` trait
-- [ ] Register `tasks.TaskService` in `packages/tddy-daemon/src/main.rs`; inject shared `TaskRegistry`
+- [x] `packages/tddy-daemon/src/task_service.rs`: `TaskServiceImpl` implementing `TaskService` trait
+- [x] Register `tasks.TaskService` in `packages/tddy-daemon/src/main.rs`; inject shared `TaskRegistry`
       into both `ConnectionServiceImpl` and `VmServiceImpl`
-- [ ] Delete `packages/tddy-daemon/src/shell_job_registry.rs`; update `tool_engine.rs`,
+- [x] Delete `packages/tddy-daemon/src/shell_job_registry.rs`; update `tool_engine.rs`,
       `connection_service.rs` to use `TaskRegistry`
-- [ ] Refactor `packages/tddy-vm/src/build.rs::build_vm_image_from_spec` to `TaskBody` with
+- [x] Refactor `packages/tddy-vm/src/build.rs::build_vm_image_from_spec` to `TaskBody` with
       cancellation via `CancellationToken` + `libc::kill`; update `service.rs::build_vm_image`
-- [ ] Retention/cap policy in `TaskRegistry` exit-monitor
-- [ ] Minimal `/tasks` page in `packages/tddy-web`
-- [ ] Acceptance tests: `packages/tddy-daemon/tests/task_service_acceptance.rs`
-- [ ] Crate unit tests: `packages/tddy-task/src/` `#[cfg(test)]`
-- [ ] Cancellation integration tests: `packages/tddy-task/tests/cancellation.rs`
-- [ ] ExecuteTool fold-in tests: `packages/tddy-daemon/tests/` extensions
-- [ ] VM build fold-in tests: extend `packages/tddy-daemon/tests/vm_service_acceptance.rs`
+- [x] Retention/cap policy in `TaskRegistry` exit-monitor
+- [x] Minimal `/tasks` page in `packages/tddy-web`
+- [x] Acceptance tests: `packages/tddy-daemon/tests/task_service_acceptance.rs`
+- [x] Crate unit tests: `packages/tddy-task/src/` `#[cfg(test)]`
+- [x] Cancellation integration tests: `packages/tddy-task/tests/cancellation.rs`
+- [x] ExecuteTool fold-in tests: `packages/tddy-daemon/tests/tool_engine_acceptance.rs`
+- [x] VM build fold-in tests: `packages/tddy-daemon/tests/vm_service_acceptance.rs` + `build_vm_image_adapter_still_delivers_progress_messages` + `vm_build_task_appears_in_registry_after_build_call`
 
 ## Validation Results (2026-06-24)
 
@@ -51,13 +51,15 @@
 
 ### Issues Found
 
-#### [CRITICAL] `packages/tddy-daemon/src/task_service.rs` — WatchTask can hang
-`watch_task` polling loop (`lines 174–215`): after receiving the last live byte, the loop re-checks `handle.status()`. If the tokio scheduler runs `WatchTask` before `set_terminal()` fires in the body task, status is still `Running` and `live_rx.recv()` blocks indefinitely (broadcast sender stays alive in `TaskChannel`/registry).
-**Fix needed**: `tokio::select!` on `live_rx.recv()` AND `status_watch().changed()` in the live-stream loop.
+#### ~~[CRITICAL]~~ ✅ FIXED `packages/tddy-daemon/src/task_service.rs` — WatchTask hang
+`watch_task` live-stream loop now uses `tokio::select!` racing `live_rx.recv()` against `status_rx.changed()`.
+A `watch::Receiver<TaskStatus>` is subscribed before entering the loop; any terminal transition immediately
+unblocks the select and the loop re-checks `is_terminal()` at the top.
 
-#### [CRITICAL] `packages/tddy-vm/src/build.rs` — VmBuildTaskBody always returns `Completed` on error
-`build_vm_image_from_spec` returns `()` regardless of outcome; `VmBuildTaskBody::run` (`lines 139–148`) cannot distinguish success from failure and always emits `TaskStatus::Completed { exit_code: Some(0) }` even when STAGE_ERROR was sent.
-**Fix needed**: `build_vm_image_from_spec` should return `bool`/`Result`; `run()` maps failure → `TaskStatus::Failed`.
+#### ~~[CRITICAL]~~ ✅ FIXED `packages/tddy-vm/src/build.rs` — VmBuildTaskBody status
+`build_vm_image_from_spec` now returns `bool` (`true` = success, `false` = any error or cancellation).
+`VmBuildTaskBody::run` maps: cancelled → `Cancelled`, success → `Completed { exit_code: Some(0) }`,
+failure → `Failed { message: "VM image build failed" }`.
 
 #### [WARNING] `packages/tddy-daemon/src/tool_engine.rs` — `ShellTaskBody` ignores cancel token
 `ShellTaskBody::run` (`lines 113–138`) uses `.output()` (waits for process) with no `select!` on `ctx.cancel_token().cancelled()`. Cancel requests go entirely through the 5-second SIGKILL escalation safety net rather than cooperative SIGINT first.
@@ -71,8 +73,9 @@
 Sync tasks (Read/Write/etc.) are created with no channels. `WatchTask` returns `not_found("channel not found")` which implies the task doesn't exist. Should be `failed_precondition("task has no output channels")`.
 
 #### [INFO] Missing tests
-- `retention_evicts_terminal_task_after_ttl` (plan item) not yet implemented (TTL requires `tokio::time::pause()`)
-- VM build fold-in tests (`build_vm_image_progress_unchanged`, `vm_build_task_is_cancellable`) not yet written
+- `retention_evicts_terminal_task_after_ttl` (plan item) not implemented (TTL requires `tokio::time::pause()` — deferred)
+- VM build fold-in tests: ✅ `build_vm_image_adapter_still_delivers_progress_messages` + `vm_build_task_appears_in_registry_after_build_call` added to `vm_service_acceptance.rs`
+- ExecuteTool fold-in tests: ✅ `tool_engine_acceptance.rs` — 5 tests covering sync task registration, error tasks, background Shell, Await, and cap eviction
 
 #### [INFO] `packages/tddy-daemon/src/spawner.rs` — unrelated clippy fix included
 Cast `gid as libc::c_int` with `#[allow(clippy::cast_possible_wrap)]` is a pre-existing lint fix, unrelated to this changeset. Fine to bundle.

@@ -138,11 +138,16 @@ pub struct VmBuildTaskBody {
 impl TaskBody for VmBuildTaskBody {
     async fn run(self: Box<Self>, ctx: TaskContext) -> TaskStatus {
         let cancel = ctx.cancel_token().clone();
-        build_vm_image_from_spec(&self.buildroot_spec, self.progress_tx, cancel).await;
+        let success =
+            build_vm_image_from_spec(&self.buildroot_spec, self.progress_tx, cancel).await;
         if ctx.is_cancelled() {
             TaskStatus::Cancelled
-        } else {
+        } else if success {
             TaskStatus::Completed { exit_code: Some(0) }
+        } else {
+            TaskStatus::Failed {
+                message: "VM image build failed".to_string(),
+            }
         }
     }
 }
@@ -159,7 +164,7 @@ pub async fn build_vm_image_from_spec(
     spec: &str,
     tx: tokio::sync::mpsc::Sender<Result<BuildVmImageProgress, Status>>,
     cancel: CancellationToken,
-) {
+) -> bool {
     use std::env;
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tokio::process::Command;
@@ -186,7 +191,7 @@ pub async fn build_vm_image_from_spec(
                 "",
             )
             .await;
-            return;
+            return false;
         }
     };
 
@@ -206,7 +211,7 @@ pub async fn build_vm_image_from_spec(
             "",
         )
         .await;
-        return;
+        return false;
     }
     log::info!(
         "build_vm_image_from_spec: build_path={} dl_dir={}",
@@ -224,7 +229,7 @@ pub async fn build_vm_image_from_spec(
             "",
         )
         .await;
-        return;
+        return false;
     }
 
     // ── 4. make olddefconfig ─────────────────────────────────────────────────
@@ -252,7 +257,7 @@ pub async fn build_vm_image_from_spec(
                 "",
             )
             .await;
-            return;
+            return false;
         }
         Ok(out) if !out.status.success() => {
             let stderr = String::from_utf8_lossy(&out.stderr);
@@ -263,7 +268,7 @@ pub async fn build_vm_image_from_spec(
                 "",
             )
             .await;
-            return;
+            return false;
         }
         Ok(_) => {}
     }
@@ -295,7 +300,7 @@ pub async fn build_vm_image_from_spec(
                 "",
             )
             .await;
-            return;
+            return false;
         }
     };
 
@@ -342,7 +347,7 @@ pub async fn build_vm_image_from_spec(
                 Ok(s) => s,
                 Err(e) => {
                     send_progress(&tx, STAGE_ERROR, format!("make build wait failed: {e}"), "").await;
-                    return;
+                    return false;
                 }
             }
         }
@@ -356,7 +361,7 @@ pub async fn build_vm_image_from_spec(
             // Reap the child so we don't leave a zombie.
             let _ = make_build.wait().await;
             send_progress(&tx, STAGE_ERROR, "Build cancelled", "").await;
-            return;
+            return false;
         }
     };
 
@@ -368,7 +373,7 @@ pub async fn build_vm_image_from_spec(
             "",
         )
         .await;
-        return;
+        return false;
     }
 
     // ── 6. Convert rootfs.ext2 → qcow2 ──────────────────────────────────────
@@ -407,7 +412,7 @@ pub async fn build_vm_image_from_spec(
                 "",
             )
             .await;
-            return;
+            return false;
         }
         Ok(out) if !out.status.success() => {
             let stderr = String::from_utf8_lossy(&out.stderr);
@@ -418,7 +423,7 @@ pub async fn build_vm_image_from_spec(
                 "",
             )
             .await;
-            return;
+            return false;
         }
         Ok(_) => {}
     }
@@ -429,6 +434,7 @@ pub async fn build_vm_image_from_spec(
     let image_path = qcow2_path.to_string_lossy().into_owned();
     log::info!("build_vm_image_from_spec: done, image_path={}", image_path);
     send_progress(&tx, STAGE_DONE, "Build complete", &image_path).await;
+    true
 }
 
 /// Build a VM image from the given build target using the tddy-build system.
