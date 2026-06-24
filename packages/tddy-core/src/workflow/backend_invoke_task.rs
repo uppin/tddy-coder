@@ -1,0 +1,369 @@
+//! BackendInvokeTask — invokes the coding backend for a given workflow goal.
+//!
+//! Implements `tddy_graph::task::Task`. This type stays in `tddy-core` because it depends
+//! on backend types (`CodingBackend`, `InvokeRequest`, etc.) that are tddy-core concerns.
+
+use crate::backend::{
+    CodingBackend, GoalHints, GoalId, InvokeRequest, SessionMode, WorkflowRecipe,
+};
+use crate::toolcall::take_submit_result_for_goal;
+use crate::workflow::action_cache::{
+    action_cache_disabled, fingerprint_action_inputs, lookup_cached_completed_submit,
+    persist_successful_submit_to_action_cache, stable_action_cache_key, ActionFingerprintParts,
+};
+use async_trait::async_trait;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tddy_graph::context::Context;
+use tddy_graph::task::{NextAction, Task, TaskResult};
+
+/// Task that invokes the backend for a given goal. Used by tddy-demo and workflow tests.
+#[derive(Clone)]
+pub struct BackendInvokeTask {
+    id: String,
+    goal_id: GoalId,
+    submit_key: GoalId,
+    hints: GoalHints,
+    backend: Arc<dyn CodingBackend>,
+    recipe: Arc<dyn WorkflowRecipe>,
+    goal_requires_tddy_tools_submit: bool,
+}
+
+impl BackendInvokeTask {
+    pub fn new(
+        id: impl Into<String>,
+        goal_id: GoalId,
+        submit_key: GoalId,
+        hints: GoalHints,
+        backend: Arc<dyn CodingBackend>,
+        recipe: Arc<dyn WorkflowRecipe>,
+        goal_requires_tddy_tools_submit: bool,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            goal_id,
+            submit_key,
+            hints,
+            backend,
+            recipe,
+            goal_requires_tddy_tools_submit,
+        }
+    }
+
+    /// Resolve hints, submit key, and submit policy from a [`WorkflowRecipe`].
+    pub fn from_recipe(
+        id: impl Into<String>,
+        goal_id: GoalId,
+        recipe: Arc<dyn WorkflowRecipe>,
+        backend: Arc<dyn CodingBackend>,
+    ) -> Self {
+        let hints = recipe.goal_hints(&goal_id).unwrap_or_else(|| {
+            panic!(
+                "WorkflowRecipe {}: missing hints for goal {}",
+                recipe.name(),
+                goal_id
+            )
+        });
+        let submit_key = recipe.submit_key(&goal_id);
+        let goal_requires_tddy_tools_submit = recipe.goal_requires_tddy_tools_submit(&goal_id);
+        Self::new(
+            id,
+            goal_id,
+            submit_key,
+            hints,
+            backend,
+            recipe,
+            goal_requires_tddy_tools_submit,
+        )
+    }
+}
+
+/// How many backend invokes to allow for a goal when each turn finishes without a relayed
+/// `tddy-tools submit` before failing the workflow. Keeps remediation bounded.
+const BACKEND_INVOKE_MAX_ATTEMPTS_WITHOUT_SUBMIT: usize = 8;
+
+fn missing_submit_remediation_line(submit_key: &str) -> String {
+    format!(
+        "Agent finished without calling tddy-tools submit for goal '{}'. Ensure tddy-tools is on PATH and the agent follows the system prompt.",
+        submit_key
+    )
+}
+
+#[async_trait]
+impl Task for BackendInvokeTask {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    async fn run(
+        &self,
+        context: Context,
+    ) -> Result<TaskResult, Box<dyn std::error::Error + Send + Sync>> {
+        // Prefer prompt (set by before_* hooks, e.g. followup with answers) over feature_input.
+        // Hooks like before_acceptance_tests set prompt when resuming from clarification.
+        let prompt: String = context
+            .get_sync("prompt")
+            .or_else(|| context.get_sync("feature_input"))
+            .unwrap_or_else(|| "Add a feature".to_string());
+
+        let session_dir: Option<PathBuf> = context.get_sync("session_dir");
+        let working_dir = context
+            .get_sync::<PathBuf>("worktree_dir")
+            .or_else(|| context.get_sync::<PathBuf>("output_dir"))
+            .or_else(|| session_dir.clone());
+        // Use Resume when is_resume is true, or when session_id exists but is_resume was cleared
+        // (e.g. Evaluate after Green — after_task clears is_resume). Use Fresh only when
+        // explicitly creating a new session (before_red, before_acceptance_tests set is_resume=false).
+        let is_resume = context.get_sync::<bool>("is_resume").unwrap_or(true);
+        // Codex `exec resume` requires the CLI's thread id from JSONL (`thread.started` / `session`),
+        // not the TDDY artifact `session_id`. See `codex_thread_id` + `CODEX_THREAD_ID_FILENAME`.
+        let session = if matches!(self.backend.name(), "codex" | "codex-acp") {
+            if is_resume {
+                context
+                    .get_sync::<String>("codex_thread_id")
+                    .filter(|s| !s.trim().is_empty())
+                    .map(SessionMode::Resume)
+            } else {
+                context
+                    .get_sync::<String>("session_id")
+                    .map(SessionMode::Fresh)
+            }
+        } else {
+            context.get_sync::<String>("session_id").map(|id| {
+                if is_resume {
+                    SessionMode::Resume(id)
+                } else {
+                    SessionMode::Fresh(id)
+                }
+            })
+        };
+
+        let key = self.submit_key.as_str();
+
+        let graph_for_cache = context
+            .get_sync::<String>("workflow_engine_graph_id")
+            .unwrap_or_default();
+
+        let fingerprint_parts = ActionFingerprintParts {
+            goal_id: self.goal_id.to_string(),
+            effective_prompt: prompt.clone(),
+            system_prompt: context.get_sync("system_prompt"),
+            model: context.get_sync("model"),
+        };
+        let fingerprint_opt = fingerprint_action_inputs(&fingerprint_parts);
+
+        let mut prompt_for_invoke = prompt;
+
+        if let Some(ref sd) = session_dir {
+            if !action_cache_disabled(&context) && self.backend.action_invoke_cache_eligible() {
+                if let Some(ref digest) = fingerprint_opt {
+                    let action_key = stable_action_cache_key(
+                        graph_for_cache.as_str(),
+                        self.id.as_str(),
+                        self.goal_id.as_str(),
+                    );
+                    log::debug!(
+                        target: "tddy_core::workflow::backend_invoke_task",
+                        "action-cache PRELOOKUP task={} ak={:?} fingerprint_len={}",
+                        self.id,
+                        action_key,
+                        digest.len()
+                    );
+                    if let Some(cached_output) =
+                        lookup_cached_completed_submit(sd.as_path(), &action_key, digest)
+                    {
+                        log::info!(
+                            target: "tddy_core::workflow::backend_invoke_task",
+                            "action-cache HIT skip backend invoke task={} goal={}",
+                            self.id,
+                            self.goal_id
+                        );
+                        context.set_sync("output", cached_output.clone());
+                        return Ok(TaskResult {
+                            response: cached_output,
+                            next_action: NextAction::Continue,
+                            task_id: self.id.clone(),
+                            status_message: Some(format!("{} step complete", self.id)),
+                        });
+                    }
+                    log::debug!(
+                        target: "tddy_core::workflow::backend_invoke_task",
+                        "action-cache miss task={} — invoking {}",
+                        self.id,
+                        self.backend.name()
+                    );
+                }
+            } else {
+                log::debug!(
+                    target: "tddy_core::workflow::backend_invoke_task",
+                    "action-cache disabled for task={}",
+                    self.id
+                );
+            }
+        }
+
+        for attempt in 0..BACKEND_INVOKE_MAX_ATTEMPTS_WITHOUT_SUBMIT {
+            let request = InvokeRequest {
+                prompt: prompt_for_invoke.clone(),
+                system_prompt: context.get_sync("system_prompt"),
+                system_prompt_path: None,
+                goal_id: self.goal_id.clone(),
+                submit_key: self.submit_key.clone(),
+                hints: self.hints.clone(),
+                model: context.get_sync("model"),
+                session: session.clone(),
+                working_dir: working_dir.clone(),
+                debug: context.get_sync::<bool>("debug").unwrap_or(false),
+                agent_output: context.get_sync::<bool>("agent_output").unwrap_or(false),
+                agent_output_sink: crate::workflow::agent_output::get_agent_sink(),
+                progress_sink: crate::workflow::agent_output::get_progress_sink(),
+                conversation_output_path: context.get_sync("conversation_output_path"),
+                inherit_stdin: context.get_sync::<bool>("inherit_stdin").unwrap_or(false),
+                extra_allowed_tools: context.get_sync("allowed_tools"),
+                socket_path: context.get_sync("socket_path"),
+                session_dir: session_dir.clone(),
+                remote: {
+                    const REMOTE_CTX_KEYS: &[&str] = &[
+                        "remote_daemon_url",
+                        "remote_session_id",
+                        "remote_session_token",
+                        "remote_daemon_instance_id",
+                        "remote_livekit_url",
+                        "remote_livekit_room",
+                        "remote_server_identity",
+                    ];
+                    let mut remote_map: HashMap<String, String> = HashMap::new();
+                    for key in REMOTE_CTX_KEYS {
+                        if let Some(val) = context.get_sync::<String>(key) {
+                            remote_map.insert(key.to_string(), val);
+                        }
+                    }
+                    crate::workflow::extract_remote_env_from_ctx(&remote_map)
+                },
+            };
+
+            let response = self
+                .backend
+                .invoke(request)
+                .await
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+
+            if matches!(self.backend.name(), "codex" | "codex-acp") {
+                if let Some(ref tid) = response.session_id {
+                    if !tid.trim().is_empty() {
+                        context.set_sync("codex_thread_id", tid.clone());
+                        if let Some(ref sd) = session_dir {
+                            crate::backend::write_codex_thread_id_file(sd, tid);
+                        }
+                    }
+                }
+            }
+
+            let submit_output = self
+                .backend
+                .submit_channel()
+                .and_then(|ch| ch.take_for_goal(key))
+                .or_else(|| take_submit_result_for_goal(key));
+
+            if let Some(output) = submit_output {
+                context.set_sync("output", output.clone());
+                if let (Some(sd), Some(digest)) = (session_dir.as_ref(), fingerprint_opt.as_ref()) {
+                    if !action_cache_disabled(&context)
+                        && self.backend.action_invoke_cache_eligible()
+                    {
+                        let action_key = stable_action_cache_key(
+                            graph_for_cache.as_str(),
+                            self.id.as_str(),
+                            self.goal_id.as_str(),
+                        );
+                        match persist_successful_submit_to_action_cache(
+                            sd.as_path(),
+                            self.goal_id.as_str(),
+                            &action_key,
+                            digest,
+                            output.as_str(),
+                        ) {
+                            Ok(()) => log::trace!(
+                                target: "tddy_core::workflow::backend_invoke_task",
+                                "action-cache persisted for task {}",
+                                self.id,
+                            ),
+                            Err(e) => log::warn!(
+                                target: "tddy_core::workflow::backend_invoke_task",
+                                "action-cache persist failed for task {}: {}",
+                                self.id,
+                                e,
+                            ),
+                        }
+                    }
+                }
+                let prior = context.get_sync::<String>("session_id");
+                if let Some(eff) = crate::session_lifecycle::resolve_effective_session_id(
+                    prior.as_deref(),
+                    response.session_id.as_deref(),
+                ) {
+                    log::debug!(
+                        "BackendInvokeTask {}: session_id {:?} -> {} (backend reported {:?})",
+                        self.id,
+                        prior,
+                        eff,
+                        response.session_id
+                    );
+                    context.set_sync("session_id", eff);
+                }
+                return Ok(TaskResult {
+                    response: output,
+                    next_action: NextAction::Continue,
+                    task_id: self.id.clone(),
+                    status_message: Some(format!("{} step complete", self.id)),
+                });
+            }
+
+            if !response.questions.is_empty() {
+                context.set_sync("pending_questions", response.questions.clone());
+                return Ok(TaskResult {
+                    response: response.output,
+                    next_action: NextAction::WaitForInput,
+                    task_id: self.id.clone(),
+                    status_message: Some("Clarification needed".to_string()),
+                });
+            }
+
+            if !self.goal_requires_tddy_tools_submit {
+                if let Some(qs) = self
+                    .recipe
+                    .host_clarification_gate_after_no_submit_turn(&self.goal_id, &context)
+                {
+                    context.set_sync("pending_questions", qs);
+                    return Ok(TaskResult {
+                        response: response.output,
+                        next_action: NextAction::WaitForInput,
+                        task_id: self.id.clone(),
+                        status_message: Some("Host clarification needed".to_string()),
+                    });
+                }
+                return Ok(TaskResult {
+                    response: response.output,
+                    next_action: NextAction::Continue,
+                    task_id: self.id.clone(),
+                    status_message: Some(format!("{} step complete", self.id)),
+                });
+            }
+
+            if attempt + 1 >= BACKEND_INVOKE_MAX_ATTEMPTS_WITHOUT_SUBMIT {
+                return Err(Box::new(crate::WorkflowError::ParseError(
+                    crate::ParseError::Malformed(missing_submit_remediation_line(key)),
+                )));
+            }
+
+            prompt_for_invoke.push_str("\n\n---\n");
+            prompt_for_invoke.push_str(&missing_submit_remediation_line(key));
+            prompt_for_invoke.push('\n');
+        }
+
+        Err(Box::new(crate::WorkflowError::ParseError(
+            crate::ParseError::Malformed(missing_submit_remediation_line(key)),
+        )))
+    }
+}

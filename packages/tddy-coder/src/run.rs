@@ -19,6 +19,7 @@ use tddy_core::{
     CursorBackend, GoalId, PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend,
     WorkflowEngine, WorkflowRecipe,
 };
+use tddy_discovery;
 use tddy_workflow_recipes::{parse_evaluate_response, parse_refactor_response};
 
 use crate::plain;
@@ -432,6 +433,13 @@ pub struct Args {
     /// Defaults to stack_parent when omitted.
     /// Sets `previous_session_id`. TODO: wire worktree integration base via spawn_chain_child_worktree.
     pub stack_base: Option<String>,
+
+    /// Base URL for the FastContext OpenAI-compatible endpoint (e.g. http://localhost:30000).
+    /// Used when `--agent fastcontext` is selected.
+    pub fastcontext_url: Option<String>,
+
+    /// Maximum number of model turns in the FastContext multi-turn loop (default: 10).
+    pub fastcontext_max_turns: Option<u32>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -471,10 +479,10 @@ pub struct CoderArgs {
     #[arg(long, value_name = "LEVEL", value_parser = ["off", "error", "warn", "info", "debug", "trace"])]
     pub log_level: Option<String>,
 
-    /// Agent backend: claude, claude-acp, cursor, codex, codex-acp, or stub. Omit to choose interactively at startup.
+    /// Agent backend: claude, claude-acp, cursor, codex, codex-acp, fastcontext, or stub. Omit to choose interactively at startup.
     #[arg(
         long,
-        value_parser = ["claude", "claude-acp", "cursor", "codex", "codex-acp", "stub"]
+        value_parser = ["claude", "claude-acp", "cursor", "codex", "codex-acp", "fastcontext", "stub"]
     )]
     pub agent: Option<String>,
 
@@ -620,6 +628,14 @@ pub struct CoderArgs {
     /// Sets `previous_session_id`. TODO: wire worktree integration base via spawn_chain_child_worktree.
     #[arg(long)]
     pub stack_base: Option<String>,
+
+    /// Base URL for the FastContext OpenAI-compatible endpoint. Required when `--agent fastcontext`.
+    #[arg(long)]
+    pub fastcontext_url: Option<String>,
+
+    /// Maximum model turns for the FastContext multi-turn loop (default: 10).
+    #[arg(long)]
+    pub fastcontext_max_turns: Option<u32>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -843,6 +859,8 @@ impl From<CoderArgs> for Args {
             remote_daemon_id: a.remote_daemon_id,
             stack_parent: a.stack_parent,
             stack_base: a.stack_base,
+            fastcontext_url: a.fastcontext_url,
+            fastcontext_max_turns: a.fastcontext_max_turns,
         }
     }
 }
@@ -893,6 +911,8 @@ impl From<DemoArgs> for Args {
             remote_daemon_id: None,
             stack_parent: None,
             stack_base: None,
+            fastcontext_url: None,
+            fastcontext_max_turns: None,
         }
     }
 }
@@ -1087,6 +1107,8 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         args.codex_acp_cli_path.as_deref(),
         None,
         None,
+        args.fastcontext_url.as_deref(),
+        args.fastcontext_max_turns,
     );
 
     if args.goal.as_deref() == Some("acceptance-tests") {
@@ -1303,6 +1325,8 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         args.codex_acp_cli_path.as_deref(),
         None,
         None,
+        args.fastcontext_url.as_deref(),
+        args.fastcontext_max_turns,
     );
     let has_token = args.livekit_token.is_some();
     let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
@@ -1924,6 +1948,7 @@ fn resolve_executable_on_path(name: &std::ffi::OsStr) -> Option<PathBuf> {
 /// StubBackend always uses InMemoryToolExecutor (no tddy-tools): stub simulates the agent,
 /// so it stores results directly. ProcessToolExecutor is for real agents (Claude/Cursor/Codex)
 /// that run tddy-tools submit.
+#[allow(clippy::too_many_arguments)]
 fn create_backend(
     agent: &str,
     cursor_agent_path: Option<&Path>,
@@ -1931,8 +1956,23 @@ fn create_backend(
     codex_acp_cli_path: Option<&Path>,
     _socket_path: Option<&Path>,
     _working_dir: Option<&Path>,
+    fastcontext_url: Option<&str>,
+    fastcontext_max_turns: Option<u32>,
 ) -> SharedBackend {
     log::info!("[tddy-coder] using agent: {}", agent);
+    if agent == "fastcontext" {
+        let base_url = fastcontext_url
+            .unwrap_or("http://localhost:30000")
+            .to_string();
+        let max_turns = fastcontext_max_turns.unwrap_or(10);
+        log::info!("[tddy-coder] FastContext backend: url={base_url} max_turns={max_turns}");
+        let fc = tddy_discovery::backend::FastContextBackend::new(
+            base_url,
+            "microsoft/FastContext-1.0-4B-RL",
+            max_turns,
+        );
+        return SharedBackend::from_arc(Arc::new(fc));
+    }
     let backend: AnyBackend = match agent {
         "cursor" => {
             let path = resolve_cursor_agent_binary(cursor_agent_path);
@@ -2241,6 +2281,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         let cursor_path_for_factory = args.cursor_agent_path.clone();
         let codex_path_for_factory = args.codex_cli_path.clone();
         let codex_acp_path_for_factory = args.codex_acp_cli_path.clone();
+        let fastcontext_url_for_factory = args.fastcontext_url.clone();
+        let fastcontext_max_turns_for_factory = args.fastcontext_max_turns;
         let mut p = presenter.lock().unwrap();
         p.configure_deferred_workflow_start(
             Box::new(move |agent: &str| {
@@ -2252,6 +2294,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     codex_acp_path_for_factory.as_deref(),
                     socket_path_for_factory.as_deref(),
                     None,
+                    fastcontext_url_for_factory.as_deref(),
+                    fastcontext_max_turns_for_factory,
                 ))
             }),
             PendingWorkflowStart {
@@ -2277,6 +2321,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             args.codex_acp_cli_path.as_deref(),
             socket_path.as_deref(),
             None,
+            args.fastcontext_url.as_deref(),
+            args.fastcontext_max_turns,
         );
         presenter.lock().unwrap().start_workflow(
             backend,
@@ -2612,6 +2658,8 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
         args.codex_acp_cli_path.as_deref(),
         None,
         None,
+        args.fastcontext_url.as_deref(),
+        args.fastcontext_max_turns,
     );
 
     let recipe = recipe_arc_for_args(args)?;
@@ -3156,6 +3204,8 @@ mod resume_session_config_tests {
             remote_daemon_id: None,
             stack_parent: None,
             stack_base: None,
+            fastcontext_url: None,
+            fastcontext_max_turns: None,
         };
 
         merge_session_coder_config_for_resume(&mut args).expect("merge");
@@ -3223,6 +3273,8 @@ mod resume_session_identity_tests {
             remote_daemon_id: None,
             stack_parent: None,
             stack_base: None,
+            fastcontext_url: None,
+            fastcontext_max_turns: None,
         };
 
         assign_default_session_id(&mut args);
@@ -3293,6 +3345,8 @@ mod session_dir_sync_tests {
             remote_daemon_id: None,
             stack_parent: None,
             stack_base: None,
+            fastcontext_url: None,
+            fastcontext_max_turns: None,
         };
 
         sync_session_dir_from_args(&mut args).expect("apply");
@@ -3377,6 +3431,8 @@ mod changeset_agent_resume_tests {
             remote_daemon_id: None,
             stack_parent: None,
             stack_base: None,
+            fastcontext_url: None,
+            fastcontext_max_turns: None,
         };
 
         apply_agent_from_changeset_if_needed(&mut args).expect("apply");
@@ -3478,6 +3534,8 @@ mod post_tui_workflow_exit_tests {
             remote_daemon_id: None,
             stack_parent: None,
             stack_base: None,
+            fastcontext_url: None,
+            fastcontext_max_turns: None,
         }
     }
 

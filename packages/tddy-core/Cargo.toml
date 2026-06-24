@@ -23,6 +23,7 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "p
 tokio-util = { version = "0.7", features = ["compat"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 tddy-workflow = { path = "../tddy-workflow" }
+tddy-graph = { path = "../tddy-graph" }
 
 [dev-dependencies]
 async-trait = "0.1"
@@ -31,6 +32,7 @@ rstest = { workspace = true }
 serial_test = "3"
 tempfile = "3"
 tddy-testing-commons = { path = "../tddy-testing-commons" }
+tddy-graph = { path = "../tddy-graph" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 [target.'cfg(unix)'.dependencies]

@@ -35,6 +35,7 @@ tddy-build-buildroot = { path = "../tddy-build-buildroot" }
 tddy-build-qemu = { path = "../tddy-build-qemu" }
 tddy-tui = { path = "../tddy-tui" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
+tddy-discovery = { path = "../tddy-discovery" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
 tddy-livekit = { path = "../tddy-livekit" }
