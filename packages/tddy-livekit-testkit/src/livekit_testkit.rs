@@ -108,8 +108,7 @@ impl LiveKitTestkit {
 
         // Configure LiveKit ports via --config-body (inline YAML) for HTTP+ICE/TCP,
         // and via UDP_PORT env var for ICE/UDP (which does not accept a YAML key here).
-        let config_body =
-            format!("port: {port_ws}\nrtc:\n  tcp_port: {port_ice_tcp}\n");
+        let config_body = format!("port: {port_ws}\nrtc:\n  tcp_port: {port_ice_tcp}\n");
 
         let http_wait = HttpWaitStrategy::new("/")
             .with_port(port_ws.tcp())

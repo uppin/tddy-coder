@@ -4,6 +4,7 @@ Wrapped changeset history for tddy-coder.
 
 **Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
 
+- **2026-06-24** [Feature] **FastContext discovery agent — CLI wiring** — `create_backend("fastcontext")` arm via `SharedBackend::from_arc(Arc::new(FastContextBackend::new(...)))`; `fastcontext_url`/`fastcontext_max_turns` config fields; `--agent fastcontext`/`--fastcontext-url`/`--fastcontext-max-turns` CLI args; `dev.daemon.yaml` `allowed_agents` entry. Feature [discovery-agent.md](../../../docs/ft/coder/discovery-agent.md). (tddy-coder, tddy-discovery)
 - **2026-06-21** [Feature] **PR stacking CLI flags** — `--stack-parent <orchestrator-session-id>` (sets `orchestrator_session_id` on changeset) and `--stack-base <base-session-id>` (sets `previous_session_id`) added to `run.rs`.
 
 - **2026-06-16** [Feature] **Build executor registration** — `build_executor.rs`: `TddyBuildExecutor` implements `tddy_core::toolcall::BuildExecutor` over `tddy-build`; `run.rs` calls `build_executor::register()` before starting the toolcall listener so relayed `build`/`build-list` run co-located. New dep on `tddy-build`. Cross-package: [docs/dev/changesets.md](../../../docs/dev/changesets.md). (tddy-coder, tddy-build)

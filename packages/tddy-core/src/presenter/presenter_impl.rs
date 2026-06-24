@@ -1795,7 +1795,6 @@ mod tests {
             "exit_action should be ContinueWithAgent with the session_id from changeset, got {:?}",
             p.state().exit_action
         );
-
     }
 
     #[test]

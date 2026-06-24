@@ -59,6 +59,12 @@ pub struct Config {
     /// Workflow recipe: `free-prompting` (default when omitted in CLI/changeset), `tdd`, `bugfix`, etc.
     #[serde(default)]
     pub recipe: Option<String>,
+    /// Base URL for the FastContext OpenAI-compatible endpoint.
+    #[serde(default)]
+    pub fastcontext_url: Option<String>,
+    /// Maximum number of model turns in the FastContext multi-turn loop.
+    #[serde(default)]
+    pub fastcontext_max_turns: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -266,6 +272,12 @@ pub fn merge_config_into_args(args: &mut Args, config: Config) {
     if args.recipe.is_none() {
         args.recipe = config.recipe;
     }
+    if args.fastcontext_url.is_none() {
+        args.fastcontext_url = config.fastcontext_url;
+    }
+    if args.fastcontext_max_turns.is_none() {
+        args.fastcontext_max_turns = config.fastcontext_max_turns;
+    }
 }
 
 #[cfg(test)]
@@ -386,6 +398,8 @@ github:
             remote_daemon_id: None,
             stack_parent: None,
             stack_base: None,
+            fastcontext_url: None,
+            fastcontext_max_turns: None,
             tddy_data_dir: Some(cli_base.clone()),
         };
         // When
@@ -441,6 +455,8 @@ github:
             remote_daemon_id: None,
             stack_parent: None,
             stack_base: None,
+            fastcontext_url: None,
+            fastcontext_max_turns: None,
             tddy_data_dir: None,
         };
         // When
@@ -499,6 +515,8 @@ github:
             remote_daemon_id: None,
             stack_parent: None,
             stack_base: None,
+            fastcontext_url: None,
+            fastcontext_max_turns: None,
             tddy_data_dir: None,
         };
         // When
@@ -554,6 +572,8 @@ github:
             remote_daemon_id: None,
             stack_parent: None,
             stack_base: None,
+            fastcontext_url: None,
+            fastcontext_max_turns: None,
             tddy_data_dir: None,
         };
         // When
@@ -676,6 +696,8 @@ log:
             remote_daemon_id: None,
             stack_parent: None,
             stack_base: None,
+            fastcontext_url: None,
+            fastcontext_max_turns: None,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);

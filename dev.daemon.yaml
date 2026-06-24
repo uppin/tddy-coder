@@ -94,6 +94,8 @@ allowed_agents:
     label: "Codex"
   - id: codex-acp
     label: "Codex ACP"
+  - id: fastcontext
+    label: "FastContext (microsoft/FastContext-1.0-4B-RL)"
 
 allowed_tools:
   - path: "target/debug/tddy-coder"

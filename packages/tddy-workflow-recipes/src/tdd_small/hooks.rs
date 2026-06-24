@@ -20,6 +20,7 @@ use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::prepend_context_header;
 use tddy_core::workflow::recipe::WorkflowRecipe;
 use tddy_core::workflow::task::TaskResult;
+use tddy_core::workflow::{clear_sinks, set_sinks};
 
 use crate::parser::{
     parse_green_response, parse_planning_response_with_base, parse_red_response,
@@ -396,10 +397,8 @@ impl TddSmallWorkflowHooks {
             event_tx,
         }
     }
-}
 
-impl RunnerHooks for TddSmallWorkflowHooks {
-    fn agent_output_sink(&self) -> Option<AgentOutputSink> {
+    fn agent_output_sink_impl(&self) -> Option<AgentOutputSink> {
         self.event_tx.as_ref().map(|tx| {
             let tx = tx.clone();
             AgentOutputSink::new(move |s: &str| {
@@ -408,7 +407,7 @@ impl RunnerHooks for TddSmallWorkflowHooks {
         })
     }
 
-    fn progress_sink(&self, context: &Context) -> Option<ProgressSink> {
+    fn progress_sink_impl(&self, context: &Context) -> Option<ProgressSink> {
         let session_dir: Option<PathBuf> = context
             .get_sync("session_dir")
             .or_else(|| context.get_sync("output_dir"));
@@ -452,6 +451,19 @@ impl RunnerHooks for TddSmallWorkflowHooks {
                 let _ = tx.send(WorkflowEvent::Progress(ev.clone()));
             }
         }))
+    }
+}
+
+impl RunnerHooks for TddSmallWorkflowHooks {
+    fn on_enter_task(&self, _task_id: &str, context: &Context) {
+        set_sinks(
+            self.agent_output_sink_impl(),
+            self.progress_sink_impl(context),
+        );
+    }
+
+    fn on_exit_task(&self, _task_id: &str, _context: &Context) {
+        clear_sinks();
     }
 
     fn before_task(

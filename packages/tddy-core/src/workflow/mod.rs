@@ -36,14 +36,31 @@ mod agent_output;
 pub use agent_output::{
     clear_sinks, get_agent_sink, get_progress_sink, set_agent_sink, set_progress_sink, set_sinks,
 };
-pub mod context;
+
+// Re-export shims: types physically live in `tddy-graph`; these modules expose the same paths.
+pub mod context {
+    pub use tddy_graph::context::*;
+}
+pub mod graph {
+    pub use tddy_graph::graph::*;
+}
+pub mod hooks {
+    pub use tddy_graph::hooks::*;
+}
+pub mod runner {
+    pub use tddy_graph::runner::*;
+}
+pub mod session {
+    pub use tddy_graph::session::*;
+}
+pub mod task {
+    pub use crate::workflow::backend_invoke_task::BackendInvokeTask;
+    pub use tddy_graph::task::*;
+}
+pub mod backend_invoke_task;
+
 pub mod engine;
 pub mod goal_conditions;
-pub mod graph;
-pub mod hooks;
-pub mod runner;
-pub mod session;
-pub mod task;
 
 use crate::error::WorkflowError;
 use std::path::{Path, PathBuf};

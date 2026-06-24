@@ -10,6 +10,7 @@ use tddy_core::presenter::WorkflowEvent;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::task::TaskResult;
+use tddy_core::workflow::{clear_sinks, set_sinks};
 
 use crate::github_rest_common::github_env_token_present;
 use crate::review::{
@@ -29,16 +30,24 @@ impl MergePrWorkflowHooks {
     pub fn new(event_tx: Option<mpsc::Sender<WorkflowEvent>>) -> Self {
         Self { event_tx }
     }
-}
 
-impl RunnerHooks for MergePrWorkflowHooks {
-    fn agent_output_sink(&self) -> Option<AgentOutputSink> {
+    fn agent_output_sink_impl(&self) -> Option<AgentOutputSink> {
         self.event_tx.as_ref().map(|tx| {
             let tx = tx.clone();
             AgentOutputSink::new(move |s: &str| {
                 let _ = tx.send(WorkflowEvent::AgentOutput(s.to_string()));
             })
         })
+    }
+}
+
+impl RunnerHooks for MergePrWorkflowHooks {
+    fn on_enter_task(&self, _task_id: &str, _context: &Context) {
+        set_sinks(self.agent_output_sink_impl(), None);
+    }
+
+    fn on_exit_task(&self, _task_id: &str, _context: &Context) {
+        clear_sinks();
     }
 
     fn before_task(
