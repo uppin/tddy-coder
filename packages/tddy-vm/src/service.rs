@@ -10,8 +10,10 @@ use tddy_service::proto::vm::{
     ListVmsRequest, ListVmsResponse, RemoveVmRequest, RemoveVmResponse, StartVmRequest,
     StartVmResponse, StopVmRequest, StopVmResponse, VmImageInfo, VmInfo, VmService,
 };
+use tddy_task::{ChannelKind, TaskRegistry};
 use tokio_stream::wrappers::ReceiverStream;
 
+use crate::build::VmBuildTaskBody;
 use crate::registry::{VmManager, VmSpec, VmState};
 use crate::vm::{PortForward, VmError};
 
@@ -25,13 +27,19 @@ pub type SessionUserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>
 pub struct VmServiceImpl {
     manager: Arc<VmManager>,
     user_resolver: SessionUserResolver,
+    task_registry: TaskRegistry,
 }
 
 impl VmServiceImpl {
-    pub fn new(manager: Arc<VmManager>, user_resolver: SessionUserResolver) -> Self {
+    pub fn new(
+        manager: Arc<VmManager>,
+        user_resolver: SessionUserResolver,
+        task_registry: TaskRegistry,
+    ) -> Self {
         Self {
             manager,
             user_resolver,
+            task_registry,
         }
     }
 
@@ -239,12 +247,20 @@ impl VmService for VmServiceImpl {
         self.authenticate(&req.session_token)?;
         let spec = req.buildroot_spec;
 
-        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        // Channel for structured BuildVmImageProgress events → RPC stream.
+        let (progress_tx, progress_rx) = tokio::sync::mpsc::channel(64);
 
-        tokio::spawn(async move {
-            crate::build::build_vm_image_from_spec(&spec, tx).await;
-        });
+        // Observable build-log channel for TaskService.WatchTask.
+        let log_ch = tddy_task::TaskChannel::output_only("0", "build-log", ChannelKind::Combined);
 
-        Ok(Response::new(ReceiverStream::new(rx)))
+        let body = VmBuildTaskBody {
+            buildroot_spec: spec,
+            progress_tx,
+        };
+        self.task_registry
+            .spawn(body, "vm_build", "", vec![log_ch])
+            .await;
+
+        Ok(Response::new(ReceiverStream::new(progress_rx)))
     }
 }

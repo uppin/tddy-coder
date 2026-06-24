@@ -26,6 +26,7 @@ members = [
     "packages/tddy-github",
     "packages/tddy-daemon",
     "packages/tddy-workflow-recipes",
+    "packages/tddy-task",
     "packages/tddy-testing-commons",
     "packages/tddy-workflow",
     "packages/tddy-integration-tests",

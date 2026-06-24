@@ -6857,12 +6857,14 @@ dependencies = [
  "tddy-livekit-testkit",
  "tddy-rpc",
  "tddy-service",
+ "tddy-task",
  "tddy-testing-commons",
  "tddy-vm",
  "tddy-workflow-recipes",
  "teloxide",
  "tempfile",
  "tokio",
+ "tokio-stream",
  "tonic 0.12.3",
  "url",
  "uuid",
@@ -7083,6 +7085,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-task"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "libc",
+ "log",
+ "serial_test",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
 name = "tddy-testing-commons"
 version = "0.1.0"
 dependencies = [
@@ -7174,6 +7191,7 @@ name = "tddy-vm"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "libc",
  "log",
  "serde",
  "serde_json",
@@ -7181,10 +7199,12 @@ dependencies = [
  "tddy-build-qemu",
  "tddy-rpc",
  "tddy-service",
+ "tddy-task",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
+ "tokio-util",
 ]
 
 [[package]]
@@ -7649,6 +7669,7 @@ dependencies = [
  "futures-core",
  "futures-io",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

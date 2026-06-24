@@ -6,6 +6,8 @@ description = "General-purpose VM build and lifecycle management (QEMU)"
 
 [dependencies]
 async-trait = "0.1"
+libc = "0.2"
+tokio-util = { version = "0.7", features = ["rt"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
@@ -16,6 +18,7 @@ tddy-build = { path = "../tddy-build" }
 tddy-build-qemu = { path = "../tddy-build-qemu" }
 tddy-service = { path = "../tddy-service" }
 tddy-rpc = { path = "../tddy-rpc" }
+tddy-task = { path = "../tddy-task" }
 
 [dev-dependencies]
 tempfile = "3"

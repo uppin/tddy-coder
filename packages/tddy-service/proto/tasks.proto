@@ -1,0 +1,146 @@
+syntax = "proto3";
+package tasks;
+
+// Task management service — manage, observe, and cancel long-running background tasks.
+service TaskService {
+  // List all tasks (running and recently-terminal) visible to the caller's session.
+  rpc ListTasks (ListTasksRequest) returns (ListTasksResponse);
+
+  // Fetch a single task by ID.
+  rpc GetTask (GetTaskRequest) returns (GetTaskResponse);
+
+  // Stream output from a single task channel.
+  // Replays the capture buffer first (is_replay=true), then streams live bytes (is_replay=false).
+  // Ends with a final event carrying the terminal status.
+  // Returns FAILED_PRECONDITION if daemon_instance_id refers to a remote host (streaming
+  // multi-host forwarding is deferred).
+  rpc WatchTask (WatchTaskRequest) returns (stream TaskOutputEvent);
+
+  // Request cooperative cancellation of a task.
+  // The task body handles SIGINT to its children; the registry escalates to SIGKILL if the
+  // body does not terminate within ~5 seconds.
+  rpc CancelTask (CancelTaskRequest) returns (CancelTaskResponse);
+
+  // Send bytes to a channel that accepts stdin.
+  // Returns NOT_FOUND if the task or channel does not exist; FAILED_PRECONDITION if the
+  // channel does not accept input.
+  rpc SendInput (SendInputRequest) returns (SendInputResponse);
+}
+
+// ──────────────────────────────────────────────────────────── enums ──────────
+
+enum TaskStatusProto {
+  TASK_STATUS_UNKNOWN = 0;
+  TASK_STATUS_PENDING = 1;
+  TASK_STATUS_RUNNING = 2;
+  TASK_STATUS_COMPLETED = 3;
+  TASK_STATUS_FAILED = 4;
+  TASK_STATUS_CANCELLED = 5;
+}
+
+enum ChannelKindProto {
+  CHANNEL_KIND_UNKNOWN = 0;
+  CHANNEL_KIND_STDOUT = 1;
+  CHANNEL_KIND_STDERR = 2;
+  CHANNEL_KIND_COMBINED = 3;
+}
+
+// ──────────────────────────────────────────────────────────── messages ───────
+
+// Summary of a task channel.
+message TaskChannelInfo {
+  string channel_id = 1;
+  string name = 2;
+  ChannelKindProto kind = 3;
+  bool accepts_input = 4;
+}
+
+// Summary of a task.
+message TaskInfo {
+  string task_id = 1;
+  string kind = 2;
+  TaskStatusProto status = 3;
+  // Set for Completed tasks.
+  int32 exit_code = 4;
+  // Set for Failed tasks.
+  string error_message = 5;
+  uint64 created_unix_ms = 6;
+  repeated TaskChannelInfo channels = 7;
+  // Terminal result payload (e.g. JSON-encoded tool output). Empty for in-progress tasks.
+  string result_json = 8;
+}
+
+// ListTasks ──────────────────────────────────────────────────────────────────
+
+message ListTasksRequest {
+  string session_token = 1;
+  // If set, forward to the identified daemon instance (for multi-host deployments).
+  string daemon_instance_id = 2;
+}
+
+message ListTasksResponse {
+  repeated TaskInfo tasks = 1;
+}
+
+// GetTask ────────────────────────────────────────────────────────────────────
+
+message GetTaskRequest {
+  string session_token = 1;
+  string task_id = 2;
+  string daemon_instance_id = 3;
+}
+
+message GetTaskResponse {
+  TaskInfo task = 1;
+}
+
+// WatchTask ──────────────────────────────────────────────────────────────────
+
+message WatchTaskRequest {
+  string session_token = 1;
+  string task_id = 2;
+  // Which channel to watch. Leave empty to watch the first available channel.
+  string channel_id = 3;
+  // WatchTask only supports local daemons this changeset. Setting this field returns
+  // FAILED_PRECONDITION.
+  string daemon_instance_id = 4;
+}
+
+message TaskOutputEvent {
+  string channel_id = 1;
+  // Output bytes from the channel.
+  bytes data = 2;
+  // True for events replayed from the capture buffer; false for live events.
+  bool is_replay = 3;
+  // Set on the final event when the task reaches a terminal status. Zero value (UNKNOWN)
+  // means the task is still running.
+  TaskStatusProto status = 4;
+}
+
+// CancelTask ─────────────────────────────────────────────────────────────────
+
+message CancelTaskRequest {
+  string session_token = 1;
+  string task_id = 2;
+  string daemon_instance_id = 3;
+}
+
+message CancelTaskResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+// SendInput ──────────────────────────────────────────────────────────────────
+
+message SendInputRequest {
+  string session_token = 1;
+  string task_id = 2;
+  string channel_id = 3;
+  bytes data = 4;
+  string daemon_instance_id = 5;
+}
+
+message SendInputResponse {
+  bool ok = 1;
+  string message = 2;
+}
