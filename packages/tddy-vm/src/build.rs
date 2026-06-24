@@ -8,7 +8,11 @@ use tddy_build::plugin::PluginRegistry;
 use tddy_build_qemu::QemuPlugin;
 use tddy_rpc::Status;
 use tddy_service::proto::vm::BuildVmImageProgress;
+use tddy_task::{TaskBody, TaskContext, TaskStatus};
 use tokio::fs;
+use tokio_util::sync::CancellationToken;
+
+use async_trait::async_trait;
 
 // ── Image listing ──────────────────────────────────────────────────────────────
 
@@ -120,6 +124,29 @@ async fn send_progress(
         .await;
 }
 
+/// `TaskBody` implementation for a Buildroot VM image build.
+///
+/// Holds the buildroot spec and an mpsc sender for streaming `BuildVmImageProgress` messages
+/// back to the `BuildVmImage` RPC caller. The task also writes raw build log lines to its
+/// channel "0" for observability via `TaskService.WatchTask`.
+pub struct VmBuildTaskBody {
+    pub buildroot_spec: String,
+    pub progress_tx: tokio::sync::mpsc::Sender<Result<BuildVmImageProgress, Status>>,
+}
+
+#[async_trait]
+impl TaskBody for VmBuildTaskBody {
+    async fn run(self: Box<Self>, ctx: TaskContext) -> TaskStatus {
+        let cancel = ctx.cancel_token().clone();
+        build_vm_image_from_spec(&self.buildroot_spec, self.progress_tx, cancel).await;
+        if ctx.is_cancelled() {
+            TaskStatus::Cancelled
+        } else {
+            TaskStatus::Completed { exit_code: Some(0) }
+        }
+    }
+}
+
 /// Build a VM image from a Buildroot `.config` spec string, streaming progress messages.
 ///
 /// Stages:
@@ -131,6 +158,7 @@ async fn send_progress(
 pub async fn build_vm_image_from_spec(
     spec: &str,
     tx: tokio::sync::mpsc::Sender<Result<BuildVmImageProgress, Status>>,
+    cancel: CancellationToken,
 ) {
     use std::env;
     use tokio::io::{AsyncBufReadExt, BufReader};
@@ -271,6 +299,9 @@ pub async fn build_vm_image_from_spec(
         }
     };
 
+    // Capture PID before taking stdio (id() requires mutable Child)
+    let make_pid = make_build.id();
+
     send_progress(
         &tx,
         STAGE_BUILDING,
@@ -303,15 +334,32 @@ pub async fn build_vm_image_from_spec(
             }
         }
     });
-    let _ = tokio::join!(stdout_task, stderr_task);
 
-    let status = match make_build.wait().await {
-        Ok(s) => s,
-        Err(e) => {
-            send_progress(&tx, STAGE_ERROR, format!("make build wait failed: {e}"), "").await;
+    let status = tokio::select! {
+        result = make_build.wait() => {
+            let _ = tokio::join!(stdout_task, stderr_task);
+            match result {
+                Ok(s) => s,
+                Err(e) => {
+                    send_progress(&tx, STAGE_ERROR, format!("make build wait failed: {e}"), "").await;
+                    return;
+                }
+            }
+        }
+        _ = cancel.cancelled() => {
+            #[cfg(unix)]
+            if let Some(pid) = make_pid {
+                unsafe { libc::kill(pid as libc::pid_t, libc::SIGINT) };
+            }
+            stdout_task.abort();
+            stderr_task.abort();
+            // Reap the child so we don't leave a zombie.
+            let _ = make_build.wait().await;
+            send_progress(&tx, STAGE_ERROR, "Build cancelled", "").await;
             return;
         }
     };
+
     if !status.success() {
         send_progress(
             &tx,

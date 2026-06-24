@@ -42,6 +42,8 @@ tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
+tddy-task = { path = "../tddy-task" }
+tokio-stream = "0.1"
 tddy-vm = { path = "../tddy-vm" }
 tddy-connectrpc = { path = "../tddy-connectrpc" }
 url = { version = "2", features = ["serde"] }

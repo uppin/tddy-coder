@@ -9,6 +9,7 @@ use tddy_service::proto::vm::{
     ListVmsRequest, ListVmsResponse, StartVmRequest, StartVmResponse, StopVmRequest,
     StopVmResponse, VmServiceServer, VmSpecProto,
 };
+use tddy_task::TaskRegistry;
 use tddy_vm::service::{SessionUserResolver, VmServiceImpl};
 use tddy_vm::{MockVm, VmManager};
 use tempfile::tempdir;
@@ -81,7 +82,7 @@ async fn define_vm_then_list_shows_it() {
         &_dir.path().join("vms.json"),
         Box::new(MockVm::new()),
     ));
-    let svc = VmServiceImpl::new(manager, test_resolver());
+    let svc = VmServiceImpl::new(manager, test_resolver(), TaskRegistry::new());
     let bridge = RpcBridge::new(VmServiceServer::new(svc));
 
     // When — DefineVm is called
@@ -122,7 +123,7 @@ async fn start_vm_and_get_running_status() {
         &_dir.path().join("vms.json"),
         Box::new(MockVm::new()),
     ));
-    let svc = VmServiceImpl::new(manager, test_resolver());
+    let svc = VmServiceImpl::new(manager, test_resolver(), TaskRegistry::new());
     let bridge = RpcBridge::new(VmServiceServer::new(svc));
 
     let _: DefineVmResponse = call(
@@ -174,7 +175,7 @@ async fn stop_vm_returns_stopped_status() {
         &_dir.path().join("vms.json"),
         Box::new(MockVm::new()),
     ));
-    let svc = VmServiceImpl::new(manager, test_resolver());
+    let svc = VmServiceImpl::new(manager, test_resolver(), TaskRegistry::new());
     let bridge = RpcBridge::new(VmServiceServer::new(svc));
 
     let _: DefineVmResponse = call(
@@ -261,7 +262,7 @@ async fn build_vm_image_streams_progress_messages() {
         &_dir.path().join("vms.json"),
         Box::new(MockVm::new()),
     ));
-    let svc = VmServiceImpl::new(manager, test_resolver());
+    let svc = VmServiceImpl::new(manager, test_resolver(), TaskRegistry::new());
     let bridge = RpcBridge::new(VmServiceServer::new(svc));
 
     let messages: Vec<BuildVmImageProgress> = call_stream(
@@ -300,7 +301,7 @@ async fn list_vms_with_invalid_token_returns_unauthenticated() {
         &_dir.path().join("vms.json"),
         Box::new(MockVm::new()),
     ));
-    let svc = VmServiceImpl::new(manager, test_resolver());
+    let svc = VmServiceImpl::new(manager, test_resolver(), TaskRegistry::new());
     let bridge = RpcBridge::new(VmServiceServer::new(svc));
 
     assert_unauthenticated(
@@ -321,7 +322,7 @@ async fn define_vm_with_invalid_token_returns_unauthenticated() {
         &_dir.path().join("vms.json"),
         Box::new(MockVm::new()),
     ));
-    let svc = VmServiceImpl::new(manager, test_resolver());
+    let svc = VmServiceImpl::new(manager, test_resolver(), TaskRegistry::new());
     let bridge = RpcBridge::new(VmServiceServer::new(svc));
 
     assert_unauthenticated(
@@ -350,7 +351,7 @@ async fn list_vm_images_returns_empty_when_no_images_built() {
         &_dir.path().join("vms.json"),
         Box::new(MockVm::new()),
     ));
-    let svc = VmServiceImpl::new(manager, test_resolver());
+    let svc = VmServiceImpl::new(manager, test_resolver(), TaskRegistry::new());
     let bridge = RpcBridge::new(VmServiceServer::new(svc));
 
     let result: ListVmImagesResponse = call(
@@ -374,7 +375,7 @@ async fn list_vm_images_with_invalid_token_returns_unauthenticated() {
         &_dir.path().join("vms.json"),
         Box::new(MockVm::new()),
     ));
-    let svc = VmServiceImpl::new(manager, test_resolver());
+    let svc = VmServiceImpl::new(manager, test_resolver(), TaskRegistry::new());
     let bridge = RpcBridge::new(VmServiceServer::new(svc));
 
     assert_unauthenticated(

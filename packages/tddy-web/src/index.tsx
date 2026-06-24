@@ -47,10 +47,12 @@ import { Button } from "./components/ui/button";
 import { ConnectionScreen } from "./components/ConnectionScreen";
 import { WorktreesAppPage } from "./components/worktrees/WorktreesAppPage";
 import { VmsAppPage } from "./components/vms/VmsAppPage";
+import { TasksAppPage } from "./components/tasks/TasksAppPage";
 import { RpcPlaygroundAppPage } from "./rpc-playground/RpcPlaygroundAppPage";
 import { SessionsDrawerScreen } from "./components/sessions/SessionsDrawerScreen";
 import {
   isRpcPlaygroundPath,
+  isTasksPath,
   isVmsPath,
   isSessionsDrawerPath,
   parseTerminalSessionIdFromPathname,
@@ -429,6 +431,8 @@ export function App() {
             commonRoom={appConfig.commonRoom}
             onNavigate={navigate}
           />
+        ) : isTasksPath(path) ? (
+          <TasksAppPage onNavigate={navigate} />
         ) : isVmsPath(path) ? (
           <VmsAppPage onNavigate={navigate} />
         ) : path === "/worktrees" ? (

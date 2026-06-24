@@ -40,7 +40,6 @@ use crate::project_storage::{self, ProjectData};
 use crate::session_deletion;
 use crate::session_list_enrichment;
 use crate::session_reader;
-use crate::shell_job_registry::ShellJobRegistry;
 use crate::spawn_worker;
 use crate::spawner::{self, SpawnOptions};
 use crate::telegram_session_subscriber::TelegramDaemonHooks;
@@ -56,6 +55,7 @@ use tddy_service::proto::connection::{
     GetDemoVmStatusResponse, ListExecToolsRequest, ListExecToolsResponse, StartDemoVmRequest,
     StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
 };
+use tddy_task::TaskRegistry;
 
 /// Runs blocking clone/spawn work with a wall-clock cap so hung NSS/git/spawn cannot block RPCs forever.
 async fn spawn_blocking_with_timeout<T: Send + 'static>(
@@ -197,8 +197,8 @@ pub struct ConnectionServiceImpl {
     telegram: Option<Arc<TelegramDaemonHooks>>,
     worktree_stats_cache: Arc<WorktreeStatsCache>,
     claude_cli_manager: Arc<ClaudeCliSessionManager>,
-    /// Registry for background shell jobs spawned by the `Shell` tool (block_until_ms=0).
-    shell_jobs: Arc<ShellJobRegistry>,
+    /// Registry for Tasks created by tool invocations (every ExecuteTool call).
+    task_registry: TaskRegistry,
     /// Optional idle-timeout tracker for relay mode — bumped on every RPC call.
     idle_tracker: Option<Arc<crate::relay_idle::IdleTimeoutTracker>>,
     /// Per-session demo VM state — keyed by session_id.
@@ -226,7 +226,7 @@ impl ConnectionServiceImpl {
         let worktree_stats_cache = Arc::new(WorktreeStatsCache::new(
             worktrees::projects_stats_cache_root(),
         ));
-        let shell_jobs = Arc::new(ShellJobRegistry::new());
+        let task_registry = TaskRegistry::new();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         Self {
             config,
@@ -238,10 +238,15 @@ impl ConnectionServiceImpl {
             telegram,
             worktree_stats_cache,
             claude_cli_manager,
-            shell_jobs,
+            task_registry,
             idle_tracker: None,
             demo_vm_state,
         }
+    }
+
+    /// Return the shared `TaskRegistry` so `main.rs` can pass it to other services.
+    pub fn task_registry(&self) -> TaskRegistry {
+        self.task_registry.clone()
     }
 
     /// Attach an idle-timeout tracker to this service (builder pattern).
@@ -1969,7 +1974,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             &worktree_root,
             &req.tool_name,
             &req.args_json,
-            &self.shell_jobs,
+            &self.task_registry,
+            &req.session_id,
         )
         .await;
 

@@ -4,17 +4,18 @@
 //! All file paths are validated against the worktree root to prevent path traversal.
 
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
 
-use crate::shell_job_registry::{ShellJob, ShellJobRegistry};
+use async_trait::async_trait;
+use tddy_task::{ChannelKind, TaskBody, TaskChannel, TaskContext, TaskRegistry, TaskStatus};
 
 /// Outcome of a tool execution.
 pub struct ToolOutcome {
     pub result_json: String,
     pub is_error: bool,
     pub error_message: String,
-    /// Non-empty when a background shell job was started.
+    /// The task ID for this invocation (equals `job_id` when `job_running`, otherwise the
+    /// task_id of the completed task).
     pub job_id: String,
     /// True immediately after a background shell job is launched.
     pub job_running: bool,
@@ -39,17 +40,6 @@ impl ToolOutcome {
             error_message: m,
             job_id: String::new(),
             job_running: false,
-        }
-    }
-
-    fn job(job_id: impl Into<String>) -> Self {
-        let j = job_id.into();
-        Self {
-            result_json: serde_json::json!({ "job_id": j }).to_string(),
-            is_error: false,
-            error_message: String::new(),
-            job_id: j,
-            job_running: true,
         }
     }
 }
@@ -113,6 +103,68 @@ fn contain_path(worktree_root: &Path, arg_path: &str) -> Result<PathBuf, String>
     Ok(candidate)
 }
 
+/// Background shell job body — runs a shell command and writes combined output to channel "0".
+struct ShellTaskBody {
+    command: String,
+    root: PathBuf,
+}
+
+#[async_trait]
+impl TaskBody for ShellTaskBody {
+    async fn run(self: Box<Self>, ctx: TaskContext) -> TaskStatus {
+        let result = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(&self.command)
+            .current_dir(&self.root)
+            .output()
+            .await;
+
+        match result {
+            Ok(out) => {
+                if let Some(ch) = ctx.channel("0") {
+                    ch.write(bytes::Bytes::from(out.stdout));
+                    ch.write(bytes::Bytes::from(out.stderr));
+                }
+                let code = out.status.code().unwrap_or(-1);
+                ctx.set_result(serde_json::json!({ "exit_code": code }).to_string());
+                TaskStatus::Completed {
+                    exit_code: Some(code),
+                }
+            }
+            Err(e) => TaskStatus::Failed {
+                message: format!("Shell: spawn failed: {e}"),
+            },
+        }
+    }
+}
+
+/// Wrap an already-completed inline tool invocation as a terminal task for observability.
+///
+/// Returns the new `TaskId` string so callers can populate `ToolOutcome.job_id`.
+async fn register_sync_task(
+    registry: &TaskRegistry,
+    session_id: &str,
+    kind: &str,
+    outcome: &ToolOutcome,
+) -> String {
+    let terminal = if outcome.is_error {
+        TaskStatus::Failed {
+            message: outcome.error_message.clone(),
+        }
+    } else {
+        TaskStatus::Completed { exit_code: Some(0) }
+    };
+    let task_id = registry
+        .create_terminal_task(
+            kind,
+            session_id,
+            Some(outcome.result_json.clone()),
+            terminal,
+        )
+        .await;
+    task_id.0
+}
+
 /// Dispatch a tool call within the given `worktree_root`.
 ///
 /// Returns a `ToolOutcome` — never panics or returns a gRPC-level error.
@@ -120,25 +172,36 @@ pub async fn execute_tool(
     worktree_root: &Path,
     tool_name: &str,
     args_json: &str,
-    jobs: &Arc<ShellJobRegistry>,
+    registry: &TaskRegistry,
+    session_id: &str,
 ) -> ToolOutcome {
     let args: serde_json::Value = match serde_json::from_str(args_json) {
         Ok(v) => v,
         Err(e) => return ToolOutcome::err(format!("invalid args_json: {e}")),
     };
 
+    let kind = format!("execute_tool:{tool_name}");
+
     match tool_name {
-        "Read" => tool_read(worktree_root, &args),
-        "Write" => tool_write(worktree_root, &args),
-        "StrReplace" => tool_str_replace(worktree_root, &args),
-        "Delete" => tool_delete(worktree_root, &args),
-        "Grep" => tool_grep(worktree_root, &args).await,
-        "Glob" => tool_glob(worktree_root, &args),
-        "Shell" => tool_shell(worktree_root, &args, jobs).await,
-        "Await" => tool_await(&args, jobs).await,
-        "ReadLints" => tool_read_lints(),
-        "SemanticSearch" => tool_semantic_search(worktree_root, &args).await,
-        other => ToolOutcome::err(format!("unknown tool: {other}")),
+        "Shell" => tool_shell(worktree_root, &args, registry, session_id, &kind).await,
+        "Await" => tool_await(&args, registry).await,
+        _ => {
+            // Sync tool — run inline, then register as a terminal task for observability.
+            let mut outcome = match tool_name {
+                "Read" => tool_read(worktree_root, &args),
+                "Write" => tool_write(worktree_root, &args),
+                "StrReplace" => tool_str_replace(worktree_root, &args),
+                "Delete" => tool_delete(worktree_root, &args),
+                "Grep" => tool_grep(worktree_root, &args).await,
+                "Glob" => tool_glob(worktree_root, &args),
+                "ReadLints" => tool_read_lints(),
+                "SemanticSearch" => tool_semantic_search(worktree_root, &args).await,
+                other => ToolOutcome::err(format!("unknown tool: {other}")),
+            };
+            let task_id = register_sync_task(registry, session_id, &kind, &outcome).await;
+            outcome.job_id = task_id;
+            outcome
+        }
     }
 }
 
@@ -314,7 +377,9 @@ fn tool_glob(root: &Path, args: &serde_json::Value) -> ToolOutcome {
 async fn tool_shell(
     root: &Path,
     args: &serde_json::Value,
-    jobs: &Arc<ShellJobRegistry>,
+    registry: &TaskRegistry,
+    session_id: &str,
+    kind: &str,
 ) -> ToolOutcome {
     // Shell runs arbitrary commands with the daemon's OS user privileges.
     // Access is controlled by session authentication and worktree containment for file paths.
@@ -331,40 +396,27 @@ async fn tool_shell(
     let root_owned = root.to_path_buf();
 
     if block_until_ms == 0 {
-        // Detached background job.
-        let job_id = uuid::Uuid::now_v7().to_string();
-        let job = Arc::new(ShellJob::new(job_id.clone(), String::new()));
-        jobs.register(Arc::clone(&job)).await;
-
-        let stdout_buf = job.stdout_clone();
-        let exit_code_slot = job.exit_code_clone();
-        let done_tx = job.done_sender();
-        let cmd = command.clone();
-
-        tokio::spawn(async move {
-            let result = tokio::process::Command::new("sh")
-                .arg("-c")
-                .arg(&cmd)
-                .current_dir(&root_owned)
-                .output()
-                .await;
-
-            match result {
-                Ok(out) => {
-                    let mut buf = stdout_buf.lock().unwrap();
-                    buf.extend_from_slice(&out.stdout);
-                    buf.extend_from_slice(&out.stderr);
-                    let code = out.status.code().unwrap_or(-1);
-                    *exit_code_slot.lock().unwrap() = Some(code);
-                }
-                Err(_) => {
-                    *exit_code_slot.lock().unwrap() = Some(-1);
-                }
-            }
-            let _ = done_tx.send(true);
-        });
-
-        return ToolOutcome::job(job_id);
+        // Detached background job — spawn a task with a combined output channel.
+        let ch = TaskChannel::output_only("0", "combined", ChannelKind::Combined);
+        let handle = registry
+            .spawn(
+                ShellTaskBody {
+                    command,
+                    root: root_owned,
+                },
+                kind,
+                session_id,
+                vec![ch],
+            )
+            .await;
+        let task_id = handle.id.0.clone();
+        return ToolOutcome {
+            result_json: serde_json::json!({ "job_id": &task_id }).to_string(),
+            is_error: false,
+            error_message: String::new(),
+            job_id: task_id,
+            job_running: true,
+        };
     }
 
     // Blocking execution with timeout.
@@ -375,7 +427,7 @@ async fn tool_shell(
         .current_dir(root)
         .output();
 
-    match tokio::time::timeout(timeout, fut).await {
+    let outcome = match tokio::time::timeout(timeout, fut).await {
         Ok(Ok(out)) => {
             let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
             let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
@@ -391,10 +443,15 @@ async fn tool_shell(
         }
         Ok(Err(e)) => ToolOutcome::err(format!("Shell: spawn failed: {e}")),
         Err(_) => ToolOutcome::err(format!("Shell: timed out after {}ms", block_until_ms)),
-    }
+    };
+
+    let task_id = register_sync_task(registry, session_id, kind, &outcome).await;
+    let mut o = outcome;
+    o.job_id = task_id;
+    o
 }
 
-async fn tool_await(args: &serde_json::Value, jobs: &Arc<ShellJobRegistry>) -> ToolOutcome {
+async fn tool_await(args: &serde_json::Value, registry: &TaskRegistry) -> ToolOutcome {
     // Accept both "job_id" (canonical) and "task_id" (alias used by some callers).
     let job_id = args
         .get("job_id")
@@ -412,8 +469,8 @@ async fn tool_await(args: &serde_json::Value, jobs: &Arc<ShellJobRegistry>) -> T
         .and_then(|v| v.as_i64())
         .unwrap_or(30_000);
 
-    let job = match jobs.get(job_id).await {
-        Some(j) => j,
+    let handle = match registry.get_by_str(job_id).await {
+        Some(h) => h,
         None => {
             return ToolOutcome {
                 result_json: serde_json::json!({ "error": format!("job '{}' not found", job_id) })
@@ -426,18 +483,15 @@ async fn tool_await(args: &serde_json::Value, jobs: &Arc<ShellJobRegistry>) -> T
         }
     };
 
-    let mut done_rx = job.done_receiver();
+    let mut status_rx = handle.status_watch();
     let timeout = Duration::from_millis(timeout_ms as u64);
 
     let completed = tokio::time::timeout(timeout, async {
         loop {
-            if *done_rx.borrow() {
+            if status_rx.borrow().is_terminal() {
                 return true;
             }
-            if done_rx.changed().await.is_err() {
-                return true;
-            }
-            if *done_rx.borrow() {
+            if status_rx.changed().await.is_err() {
                 return true;
             }
         }
@@ -445,17 +499,16 @@ async fn tool_await(args: &serde_json::Value, jobs: &Arc<ShellJobRegistry>) -> T
     .await
     .unwrap_or(false);
 
-    let stdout = {
-        let buf = job.stdout_clone();
-        let lock = buf.lock().unwrap();
-        String::from_utf8_lossy(&lock).into_owned()
-    };
-    let exit_code = *job.exit_code_clone().lock().unwrap();
+    // Read combined output from channel "0" (set by background Shell body).
+    let stdout = handle
+        .channel("0")
+        .map(|ch| String::from_utf8_lossy(&ch.replay_capture()).into_owned())
+        .unwrap_or_default();
 
-    // Remove completed jobs from the registry to prevent unbounded memory growth.
-    if completed {
-        jobs.remove(job_id).await;
-    }
+    let exit_code = match handle.status() {
+        TaskStatus::Completed { exit_code } => exit_code,
+        _ => None,
+    };
 
     ToolOutcome {
         result_json: serde_json::json!({

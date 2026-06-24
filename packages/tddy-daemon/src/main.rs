@@ -376,10 +376,23 @@ fn main() -> anyhow::Result<()> {
             if let Some(ref tracker) = idle_tracker_opt {
                 connection_impl = connection_impl.with_idle_tracker(tracker.clone());
             }
+            // Get the shared TaskRegistry before moving connection_impl into the server.
+            let task_registry = connection_impl.task_registry();
             let connection_server = tddy_service::ConnectionServiceServer::new(connection_impl);
             rpc_entries.push(tddy_rpc::ServiceEntry {
                 name: "connection.ConnectionService",
                 service: Arc::new(connection_server) as Arc<dyn tddy_rpc::RpcService>,
+            });
+
+            // TaskService — backed by the same registry as ConnectionService.
+            let task_service_impl = tddy_daemon::task_service::TaskServiceImpl::new(
+                task_registry.clone(),
+                vm_user_resolver.clone(),
+            );
+            let task_server = tddy_service::TaskServiceServer::new(task_service_impl);
+            rpc_entries.push(tddy_rpc::ServiceEntry {
+                name: "tasks.TaskService",
+                service: Arc::new(task_server) as Arc<dyn tddy_rpc::RpcService>,
             });
 
             // VM lifecycle service — gated on auth being configured (same as ConnectionService).
@@ -393,8 +406,11 @@ fn main() -> anyhow::Result<()> {
                 &vm_state_file,
                 Box::new(tddy_vm::QemuVm),
             ));
-            let vm_service_impl =
-                tddy_vm::VmServiceImpl::new(Arc::clone(&vm_manager), vm_user_resolver);
+            let vm_service_impl = tddy_vm::VmServiceImpl::new(
+                Arc::clone(&vm_manager),
+                vm_user_resolver,
+                task_registry,
+            );
             let vm_server = tddy_service::VmServiceServer::new(vm_service_impl);
             rpc_entries.push(tddy_rpc::ServiceEntry {
                 name: "vm.VmService",
