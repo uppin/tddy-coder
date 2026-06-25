@@ -1,5 +1,6 @@
 import React from "react";
-import type { SessionEntry } from "../../gen/connection_pb";
+import type { PromiseClient } from "@connectrpc/connect";
+import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { SessionInspectorDrawer } from "./SessionInspectorDrawer";
@@ -16,6 +17,8 @@ interface SessionMainPaneProps {
   onResume: (sessionId: string) => void;
   onDelete: (sessionId: string) => void;
   onTerminate: (sessionId: string) => void;
+  client?: PromiseClient<typeof ConnectionService>;
+  sessionToken?: string;
 }
 
 export function SessionMainPane({
@@ -29,6 +32,8 @@ export function SessionMainPane({
   onResume,
   onDelete,
   onTerminate,
+  client,
+  sessionToken,
 }: SessionMainPaneProps) {
   const isConnected =
     attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
@@ -87,6 +92,8 @@ export function SessionMainPane({
             onResume={onResume}
             onDelete={onDelete}
             onTerminate={onTerminate}
+            client={client}
+            sessionToken={sessionToken}
           />
         </div>
       ) : (
@@ -106,6 +113,8 @@ export function SessionMainPane({
             onResume={onResume}
             onDelete={onDelete}
             onTerminate={onTerminate}
+            client={client}
+            sessionToken={sessionToken}
           />
         </div>
       )}

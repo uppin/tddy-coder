@@ -282,4 +282,55 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
       expect(decoded.signal).to.equal(15); // SIGTERM = 15
     });
   });
+
+  // -------------------------------------------------------------------------
+  // AC1+AC2: Inspector tab strip — Details default + Tools tab switching
+  //
+  // ⚠️ RED PHASE — these tests fail until InspectorTabs is added to
+  // SessionInspectorDrawer and the tabs are wired in.
+  // -------------------------------------------------------------------------
+
+  it("shows Details and Tools tabs; Details is selected by default and metadata is visible", () => {
+    // Given — a disconnected session so the inspector opens automatically
+    interceptConnectionRpcs([DISCONNECTED_SESSION]);
+
+    // When
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
+
+    // Then — both tabs exist
+    cy.get(`[data-testid="sessions-inspector-tab-details"]`).should("exist");
+    cy.get(`[data-testid="sessions-inspector-tab-tools"]`).should("exist");
+
+    // And — Details tab is active and metadata is visible (regression guard)
+    cy.get(`[data-testid="sessions-inspector-tab-details"]`).should("have.attr", "aria-selected", "true");
+    sessionsDrawerPage.inspectorMetadata().should("be.visible");
+  });
+
+  it("switches to the Tools tab and reveals the tools panel; switching back restores the metadata panel", () => {
+    // Given
+    interceptConnectionRpcs([DISCONNECTED_SESSION]);
+
+    // When
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
+
+    // Switch to Tools tab
+    cy.get(`[data-testid="sessions-inspector-tab-tools"]`).click();
+
+    // Then — metadata hidden, Tools panel visible
+    sessionsDrawerPage.inspectorMetadata().should("not.exist");
+    cy.get(`[data-testid="sessions-inspector-tools-panel"]`).should("exist");
+
+    // When — switch back to Details tab
+    cy.get(`[data-testid="sessions-inspector-tab-details"]`).click();
+
+    // Then — metadata restored, Tools panel gone
+    sessionsDrawerPage.inspectorMetadata().should("be.visible");
+    cy.get(`[data-testid="sessions-inspector-tools-panel"]`, { timeout: 100 }).should("not.exist");
+  });
 });

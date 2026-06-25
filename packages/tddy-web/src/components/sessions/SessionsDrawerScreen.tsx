@@ -138,6 +138,8 @@ export function SessionsDrawerScreen() {
           onResume={handleResume}
           onDelete={handleDelete}
           onTerminate={handleTerminate}
+          client={client}
+          sessionToken={sessionToken}
         />
       </div>
     </TooltipProvider>

@@ -1,8 +1,11 @@
 import React, { useState } from "react";
-import type { SessionEntry } from "../../gen/connection_pb";
+import type { PromiseClient } from "@connectrpc/connect";
+import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "../../lib/utils";
+import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
+import { SessionToolsTab } from "./SessionToolsTab";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -19,6 +22,8 @@ interface SessionInspectorDrawerProps {
   onResume: (sessionId: string) => void;
   onDelete: (sessionId: string) => void;
   onTerminate: (sessionId: string) => void;
+  client?: PromiseClient<typeof ConnectionService>;
+  sessionToken?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -48,8 +53,11 @@ export function SessionInspectorDrawer({
   onResume,
   onDelete,
   onTerminate,
+  client,
+  sessionToken,
 }: SessionInspectorDrawerProps) {
   const [pendingDelete, setPendingDelete] = useState(false);
+  const [tab, setTab] = useState<InspectorTab>("details");
 
   // Always render in DOM — data-state drives visibility and layout.
   return (
@@ -150,86 +158,127 @@ export function SessionInspectorDrawer({
         </div>
       </div>
 
+      {/* Tab strip — only when a session is selected */}
+      {session && <InspectorTabs value={tab} onChange={setTab} />}
+
       {/* Content */}
       {session ? (
-        <ScrollArea className="flex-1 min-h-0">
-          <div className="px-3 py-3 flex flex-col gap-4">
-            {/* Metadata */}
-            <div
-              data-testid="sessions-inspector-metadata"
-              className="flex flex-col gap-2"
-            >
-              <MetaRow label="Goal" value={session.workflowGoal} />
-              <MetaRow label="Status" value={session.status} />
-              <MetaRow label="Repo" value={session.repoPath} />
-              <MetaRow label="Session ID" value={session.sessionId} />
-              <MetaRow label="PID" value={session.pid} />
-              <MetaRow label="Workflow state" value={session.workflowState} />
-              <MetaRow label="Activity status" value={session.activityStatus} />
-              <MetaRow label="Agent" value={session.agent} />
-              <MetaRow label="Model" value={session.model} />
-              <MetaRow label="Created" value={session.createdAt} />
-              <MetaRow label="Updated" value={session.updatedAt} />
-              <MetaRow label="Elapsed" value={session.elapsedDisplay} />
-              <MetaRow label="Tool" value={session.tool} />
-              <MetaRow label="Session type" value={session.sessionType} />
-              <MetaRow label="LiveKit room" value={session.livekitRoom} />
-              <MetaRow label="Previous session" value={session.previousSessionId} />
+        tab === "details" ? (
+          <ScrollArea className="flex-1 min-h-0">
+            <div className="px-3 py-3 flex flex-col gap-4">
+              {/* Metadata */}
+              <div
+                data-testid="sessions-inspector-metadata"
+                className="flex flex-col gap-2"
+              >
+                <MetaRow label="Goal" value={session.workflowGoal} />
+                <MetaRow label="Status" value={session.status} />
+                <MetaRow label="Repo" value={session.repoPath} />
+                <MetaRow label="Session ID" value={session.sessionId} />
+                <MetaRow label="PID" value={session.pid} />
+                <MetaRow label="Workflow state" value={session.workflowState} />
+                <MetaRow label="Activity status" value={session.activityStatus} />
+                <MetaRow label="Agent" value={session.agent} />
+                <MetaRow label="Model" value={session.model} />
+                <MetaRow label="Created" value={session.createdAt} />
+                <MetaRow label="Updated" value={session.updatedAt} />
+                <MetaRow label="Elapsed" value={session.elapsedDisplay} />
+                <MetaRow label="Tool" value={session.tool} />
+                <MetaRow label="Session type" value={session.sessionType} />
+                <MetaRow label="LiveKit room" value={session.livekitRoom} />
+                <MetaRow label="Previous session" value={session.previousSessionId} />
+              </div>
+
+              {/* Controls */}
+              <div className="flex flex-col gap-2">
+                {!session.isActive && (
+                  <Button
+                    data-testid={`sessions-inspector-resume-${session.sessionId}`}
+                    size="sm"
+                    onClick={() => {
+                      setPendingDelete(false);
+                      onResume(session.sessionId);
+                    }}
+                  >
+                    Resume
+                  </Button>
+                )}
+
+                {!session.isActive && !pendingDelete && (
+                  <Button
+                    data-testid={`sessions-inspector-delete-${session.sessionId}`}
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setPendingDelete(true)}
+                  >
+                    Delete
+                  </Button>
+                )}
+
+                {!session.isActive && pendingDelete && (
+                  <Button
+                    data-testid={`sessions-inspector-delete-confirm-${session.sessionId}`}
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => {
+                      setPendingDelete(false);
+                      onDelete(session.sessionId);
+                    }}
+                  >
+                    Confirm delete
+                  </Button>
+                )}
+
+                {session.isActive && (
+                  <Button
+                    data-testid={`sessions-inspector-terminate-${session.sessionId}`}
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => onTerminate(session.sessionId)}
+                  >
+                    Terminate
+                  </Button>
+                )}
+              </div>
             </div>
-
-            {/* Controls */}
-            <div className="flex flex-col gap-2">
-              {!session.isActive && (
-                <Button
-                  data-testid={`sessions-inspector-resume-${session.sessionId}`}
-                  size="sm"
-                  onClick={() => {
-                    setPendingDelete(false);
-                    onResume(session.sessionId);
-                  }}
-                >
-                  Resume
-                </Button>
-              )}
-
-              {!session.isActive && !pendingDelete && (
-                <Button
-                  data-testid={`sessions-inspector-delete-${session.sessionId}`}
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => setPendingDelete(true)}
-                >
-                  Delete
-                </Button>
-              )}
-
-              {!session.isActive && pendingDelete && (
-                <Button
-                  data-testid={`sessions-inspector-delete-confirm-${session.sessionId}`}
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => {
-                    setPendingDelete(false);
-                    onDelete(session.sessionId);
-                  }}
-                >
-                  Confirm delete
-                </Button>
-              )}
-
-              {session.isActive && (
-                <Button
-                  data-testid={`sessions-inspector-terminate-${session.sessionId}`}
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => onTerminate(session.sessionId)}
-                >
-                  Terminate
-                </Button>
-              )}
-            </div>
-          </div>
-        </ScrollArea>
+          </ScrollArea>
+        ) : (
+          <ScrollArea className="flex-1 min-h-0">
+            <SessionToolsTab
+              sessionId={session.sessionId}
+              sessionToken={sessionToken ?? ""}
+              onListExecTools={() =>
+                client
+                  ? client
+                      .listExecTools({ sessionToken: sessionToken ?? "", daemonInstanceId: "" })
+                      .then((r) => r.tools)
+                  : Promise.resolve([])
+              }
+              onListSessionToolCalls={() =>
+                client
+                  ? client
+                      .listSessionToolCalls({
+                        sessionToken: sessionToken ?? "",
+                        sessionId: session.sessionId,
+                        daemonInstanceId: "",
+                      })
+                      .then((r) => r.toolCalls)
+                  : Promise.resolve([])
+              }
+              onExecuteTool={({ toolName, argsJson }) =>
+                client
+                  ? client.executeTool({
+                      sessionToken: sessionToken ?? "",
+                      sessionId: session.sessionId,
+                      toolName,
+                      argsJson,
+                      daemonInstanceId: "",
+                    })
+                  : Promise.resolve({ resultJson: "", isError: true, errorMessage: "no client" })
+              }
+            />
+          </ScrollArea>
+        )
       ) : (
         <div className="flex items-center justify-center flex-1 text-sm text-muted-foreground">
           No session selected
