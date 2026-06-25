@@ -55,6 +55,7 @@ import { SessionMoreActionsMenu } from "./session/SessionMoreActionsMenu";
 import { SessionWorkflowFilesModal } from "./session/SessionWorkflowFilesModal";
 import { DaemonNavMenu } from "./shell/DaemonNavMenu";
 import { Button } from "@/components/ui/button";
+import { resolveShortcutsForSession, type ToolShortcutDef } from "../lib/toolShortcuts";
 import {
   Table,
   TableBody,
@@ -651,6 +652,7 @@ function ConnectedTerminal({
   onBackToMini,
   onMinimizePane,
   paneSessionLabel,
+  mobileShortcuts,
 }: {
   livekitUrl: string;
   roomName: string;
@@ -670,6 +672,8 @@ function ConnectedTerminal({
   onMinimizePane?: () => void;
   /** Short session id (same as session table first segment / two UUID groups). */
   paneSessionLabel: string;
+  /** Mobile shortcut presets for this session. */
+  mobileShortcuts?: ToolShortcutDef[];
 }) {
   type OverlayResizeCorner = "nw" | "ne" | "sw" | "se";
   const tokenClient = useHttpClient(TokenService);
@@ -1137,6 +1141,8 @@ function ConnectedTerminal({
               : undefined
           }
           onRemoteSessionEnded={onRemoteSessionEnded}
+          mobileShortcuts={mobileShortcuts}
+          mobileShortcutsViewportHeight={viewportHeight}
         />
       </div>
       {overlayResizeHandles}
@@ -1558,6 +1564,7 @@ export function ConnectionScreen({
             serverIdentity: res.livekitServerIdentity,
             debugLogging: debugForSessionId(id),
             claudeCli: isClaudeCliLink ? { sessionId: id, sessionToken } : undefined,
+            shortcuts: resolveShortcutsForSession(isClaudeCliLink, sessForLink?.tool ?? ""),
           }),
         );
         const attachNew = nextPresentationFromAttach(terminalPresentation, "new");
@@ -1581,6 +1588,7 @@ export function ConnectionScreen({
               serverIdentity: res.livekitServerIdentity,
               debugLogging: debugForSessionId(id),
               claudeCli: isClaudeCliLink ? { sessionId: res.sessionId, sessionToken } : undefined,
+              shortcuts: resolveShortcutsForSession(isClaudeCliLink, sessForLink?.tool ?? ""),
             }),
           );
           const attachRe = nextPresentationFromAttach(terminalPresentation, "reconnect");
@@ -1692,6 +1700,10 @@ export function ConnectionScreen({
             form.sessionType === "claude-cli"
               ? { sessionId: res.sessionId, sessionToken: sessionToken }
               : undefined,
+          shortcuts: resolveShortcutsForSession(
+            form.sessionType === "claude-cli",
+            form.sessionType === "claude-cli" ? "" : form.toolPath,
+          ),
         }),
       );
       const attach = nextPresentationFromAttach(terminalPresentation, "new");
@@ -1748,6 +1760,7 @@ export function ConnectionScreen({
           serverIdentity: res.livekitServerIdentity,
           debugLogging: debugForSessionId(sessionId),
           claudeCli: isClaudeCli ? { sessionId, sessionToken } : undefined,
+          shortcuts: resolveShortcutsForSession(isClaudeCli, sess?.tool ?? ""),
         }),
       );
       const attach = nextPresentationFromAttach(terminalPresentation, "new");
@@ -1789,6 +1802,7 @@ export function ConnectionScreen({
           serverIdentity: res.livekitServerIdentity,
           debugLogging: debugForSessionId(sessionId),
           claudeCli: isClaudeCli ? { sessionId: res.sessionId, sessionToken } : undefined,
+          shortcuts: resolveShortcutsForSession(isClaudeCli, sess?.tool ?? ""),
         }),
       );
       const attach = nextPresentationFromAttach(terminalPresentation, "reconnect");
@@ -1958,6 +1972,7 @@ export function ConnectionScreen({
           onRemoteSessionEnded={() =>
             removeAttachmentForSession(focusedSessionId, "remoteSessionEndedFullscreen")
           }
+          mobileShortcuts={focusedAttachment.shortcuts}
         />
       );
     }
@@ -2508,6 +2523,7 @@ export function ConnectionScreen({
                   onRemoteSessionEnded={() =>
                     removeAttachmentForSession(sessionId, "remoteSessionEndedOverlay")
                   }
+                  mobileShortcuts={att.shortcuts}
                 />
               )}
             </div>

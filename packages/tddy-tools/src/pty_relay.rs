@@ -560,6 +560,7 @@ async fn run_grpc_terminal(
     let stream_req = StreamTerminalOutputRequest {
         session_token: session_token.to_string(),
         session_id: session_id.to_string(),
+        terminal_id: String::new(),
     };
     let mut resp = connectrpc_post_streaming(
         &http_client,
@@ -588,6 +589,7 @@ async fn run_grpc_terminal(
                 session_token: input_session_token.clone(),
                 session_id: input_session_id.clone(),
                 data,
+                terminal_id: String::new(),
             };
             let _ = connectrpc_post(
                 &input_client,

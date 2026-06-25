@@ -27,7 +27,11 @@ export function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
  */
 export function decodeProtoRequestBody(body: unknown): Uint8Array {
   if (body instanceof Uint8Array) return body;
-  if (body instanceof ArrayBuffer) return new Uint8Array(body);
+  // Use toString check for cross-realm ArrayBuffer (Cypress intercept handlers may run in a
+  // different JS realm where `instanceof ArrayBuffer` returns false).
+  if (body instanceof ArrayBuffer || Object.prototype.toString.call(body) === "[object ArrayBuffer]") {
+    return new Uint8Array(body as ArrayBuffer);
+  }
   if (typeof Buffer !== "undefined" && Buffer.isBuffer(body)) {
     return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
   }

@@ -14,6 +14,8 @@ import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "../lib/ter
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
 import { TerminalConnectionStatusBar } from "./connection/TerminalConnectionStatusBar";
+import { ShortcutDrawer } from "./connection/ShortcutDrawer";
+import type { ToolShortcutDef } from "../lib/toolShortcuts";
 
 /** Human-readable description of a terminal input byte sequence. */
 function describeKey(bytes: Uint8Array): string {
@@ -105,6 +107,10 @@ export interface GhosttyTerminalLiveKitProps {
    * / session teardown, not the user choosing Disconnect in the menu.
    */
   onRemoteSessionEnded?: () => void;
+  /** Mobile shortcut presets. When non-empty and showMobileKeyboard is true, renders ShortcutDrawer. */
+  mobileShortcuts?: ToolShortcutDef[];
+  /** Viewport height for ShortcutDrawer snap positioning. 0 = use window.innerHeight. */
+  mobileShortcutsViewportHeight?: number;
 }
 
 export function GhosttyTerminalLiveKit({
@@ -131,6 +137,8 @@ export function GhosttyTerminalLiveKit({
   terminalContainerMinHeightPx,
   fixedViewportGrid,
   onRemoteSessionEnded,
+  mobileShortcuts,
+  mobileShortcutsViewportHeight = 0,
 }: GhosttyTerminalLiveKitProps) {
   const liveKitFactory = useLiveKitTransportFactory();
   const log = debugLogging
@@ -665,6 +673,13 @@ export function GhosttyTerminalLiveKit({
           />
         )}
       </div>
+      {showMobileKeyboard && mobileShortcuts && mobileShortcuts.length > 0 && (
+        <ShortcutDrawer
+          shortcuts={mobileShortcuts}
+          onSend={pushInput}
+          viewportHeight={mobileShortcutsViewportHeight}
+        />
+      )}
       {firstOutputReceived && (
         <div data-testid="first-output-received" style={{ display: "none" }} aria-hidden />
       )}

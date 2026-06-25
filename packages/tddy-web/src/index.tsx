@@ -46,7 +46,7 @@ import { Button } from "./components/ui/button";
 import { ConnectionScreen } from "./components/ConnectionScreen";
 import { WorktreesAppPage } from "./components/worktrees/WorktreesAppPage";
 import { VmsAppPage } from "./components/vms/VmsAppPage";
-import { TasksAppPage } from "./components/tasks/TasksAppPage";
+import { TasksDrawerScreen } from "./components/tasks/TasksDrawerScreen";
 import { RpcPlaygroundAppPage } from "./rpc-playground/RpcPlaygroundAppPage";
 import { SessionsDrawerScreen } from "./components/sessions/SessionsDrawerScreen";
 import {
@@ -420,7 +420,7 @@ export function App() {
             onNavigate={navigate}
           />
         ) : isTasksPath(path) ? (
-          <TasksAppPage onNavigate={navigate} />
+          <TasksDrawerScreen />
         ) : isVmsPath(path) ? (
           <VmsAppPage onNavigate={navigate} />
         ) : path === "/worktrees" ? (

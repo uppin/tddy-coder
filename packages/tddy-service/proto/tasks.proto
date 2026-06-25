@@ -25,6 +25,11 @@ service TaskService {
   // Returns NOT_FOUND if the task or channel does not exist; FAILED_PRECONDITION if the
   // channel does not accept input.
   rpc SendInput (SendInputRequest) returns (SendInputResponse);
+
+  // Stream task lifecycle events (added / updated / removed) in real time.
+  // Emits a snapshot of existing tasks (is_snapshot=true) before live events.
+  // Returns FAILED_PRECONDITION if daemon_instance_id refers to a remote host.
+  rpc WatchTaskList (WatchTaskListRequest) returns (stream TaskListEvent);
 }
 
 // ──────────────────────────────────────────────────────────── enums ──────────
@@ -143,4 +148,23 @@ message SendInputRequest {
 message SendInputResponse {
   bool ok = 1;
   string message = 2;
+}
+
+// WatchTaskList ──────────────────────────────────────────────────────────────
+
+message WatchTaskListRequest {
+  string session_token = 1;
+  // WatchTaskList only supports local daemons this changeset. Setting this field returns
+  // FAILED_PRECONDITION.
+  string daemon_instance_id = 2;
+}
+
+message TaskListEvent {
+  // True for events emitted as part of the initial snapshot.
+  bool is_snapshot = 1;
+  oneof event {
+    TaskInfo task_added   = 2;   // task appeared (or initial snapshot entry)
+    TaskInfo task_updated = 3;   // status or fields changed
+    string   task_removed = 4;   // task_id, evicted from registry
+  }
 }

@@ -8,5 +8,5 @@
 pub mod registry;
 pub mod task;
 
-pub use registry::TaskRegistry;
+pub use registry::{TaskRegistry, TaskRegistryEvent};
 pub use task::{ChannelKind, TaskBody, TaskChannel, TaskContext, TaskHandle, TaskId, TaskStatus};

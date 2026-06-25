@@ -7262,6 +7262,7 @@ name = "tddy-vm"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "libc",
  "log",
  "serde",
