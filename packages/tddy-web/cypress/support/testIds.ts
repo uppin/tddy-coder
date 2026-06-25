@@ -107,6 +107,24 @@ export const TEST_IDS = {
   tasksOutputPane: "tasks-output-pane",
   tasksOutputPaneEmpty: "tasks-output-pane-empty",
 
+  // Sessions drawer — create session
+  sessionsDrawerNewBtn: "sessions-drawer-new-btn",
+  createSessionPane: "create-session-pane",
+  createSessionTypeToolBtn: "create-session-type-tool",
+  createSessionTypeClaudeCliBtn: "create-session-type-claude-cli",
+  createSessionProjectSelect: "create-session-project-select",
+  createSessionAgentSelect: "create-session-agent-select",
+  createSessionRecipeInput: "create-session-recipe-input",
+  createSessionModelSelect: "create-session-model-select",
+  createSessionPermissionModeSelect: "create-session-permission-mode-select",
+  createSessionInitialPromptInput: "create-session-initial-prompt-input",
+  createSessionBranchIntentSelect: "create-session-branch-intent-select",
+  createSessionNewBranchNameInput: "create-session-new-branch-name-input",
+  createSessionBranchToWorkOnSelect: "create-session-branch-to-work-on-select",
+  createSessionCancelBtn: "create-session-cancel-btn",
+  createSessionSubmitBtn: "create-session-submit-btn",
+  createSessionError: "create-session-error",
+
   // Shell navigation
   shellMenuButton: "shell-menu-button",
   shellMenuRpcPlayground: "shell-menu-rpc-playground",
@@ -125,6 +143,10 @@ export const TEST_IDS = {
   // Terminal routes
   terminalRouteUnknownSession: "terminal-route-unknown-session",
   terminalRouteUnknownSessionHome: "terminal-route-unknown-session-home",
+
+  // Shortcut drawer
+  shortcutDrawer: "shortcut-drawer",
+  shortcutDragHandle: "shortcut-drag-handle",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -271,3 +293,6 @@ export const tasksChannelTab = (taskId: string, channelId: string) =>
 /** `[data-testid="tasks-channel-output-<taskId>-<channelId>"]` — channel output area */
 export const tasksChannelOutput = (taskId: string, channelId: string) =>
   `tasks-channel-output-${taskId}-${channelId}`;
+
+/** `[data-testid="shortcut-button-<label>"]` — individual shortcut button */
+export const shortcutButton = (label: string) => `shortcut-button-${label}`;

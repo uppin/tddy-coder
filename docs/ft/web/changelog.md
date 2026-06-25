@@ -11,6 +11,21 @@ Release note history for the Web product area.
 - `TaskDrawerItem`: status dot (blue/gray/green/red/yellow by status), kind text (truncated), inline Cancel button for pending/running tasks; newest-first order
 - `TaskOutputPane`: per-channel tabs (one per `TaskChannelInfo`); `TaskChannelOutput` streams bytes via existing `WatchTask` RPC with auto-scroll
 - Feature: [tasks-ui-realtime.md](tasks-ui-realtime.md)
+## 2026-06-25 — Create new session from sessions drawer
+
+- `+ New session` button in the `SessionDrawer` header switches `SessionsDrawerScreen` to `"creating"` mode
+- `CreateSessionPane` replaces the main pane: tool vs Claude CLI toggle; project (required), agent/recipe or model/permission-mode/initial-prompt fields; branch intent (new branch from base or work on existing branch with `ListProjectBranches` dropdown)
+- On submit: `StartSession` RPC; on success: auto-navigate to `/sessions/:newId` and auto-attach via `ConnectSession`; on error: inline error message, form stays open
+- Cancel returns to the previous session list / placeholder state
+- 29 new Cypress component tests (12 acceptance, 17 unit)
+## 2026-06-25 — Terminal mobile shortcut drawer
+
+- `ShortcutDrawer` component: floating drag-to-snap panel (`position: fixed`; snaps to nearest screen edge on drag release; `data-snap-edge` attribute); renders one button per preset; each click sends the correct ANSI/VT byte sequence via `pushInput`
+- `toolShortcuts.ts`: `ToolShortcutDef` interface, `TOOL_SHORTCUTS` map (tddy-coder: Shift+Tab/Ctrl+C/Escape; claude-cli: Escape/Ctrl+R/Ctrl+C), `keySequenceToBytes` (named keys, Ctrl+letter, F1–F12, single chars), `toolIdentifierFromPath`, `resolveShortcutsForSession`
+- `GhosttyTerminalLiveKit`: new `mobileShortcuts?: ToolShortcutDef[]` and `mobileShortcutsViewportHeight?: number` props; drawer renders when `showMobileKeyboard && mobileShortcuts.length > 0`
+- `LiveKitConnectionParams`: `shortcuts?: ToolShortcutDef[]` field; `resolveShortcutsForSession` called at all 5 `addSessionAttachment` sites in `ConnectionScreen`
+- Cypress component tests: `ShortcutDrawer.cy.tsx` (render, empty, click-to-send, drag-snap, row layout); `GhosttyTerminalLiveKit.cy.tsx` 3 integration tests; fixed 2 pre-existing flaky Disconnect tests (stub alias shadowing + `{ force: true }` for canvas `mousedown` interception)
+- Feature: [web-terminal.md](web-terminal.md)
 
 ## 2026-06-21 — Auth redirect: all daemon pages require login
 

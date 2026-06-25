@@ -2,6 +2,13 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-06-25 — Multiple tools per session (Bash tool)
+
+- A session can run multiple identified tools, not just `claude`: the main terminal is the reserved id `"main"` (kind `"claude-cli"`); on-demand **Bash** tools (kind `"bash"`) run `$SHELL` (fallback `/bin/bash`) in the worktree, no inputs
+- New `ConnectionService` RPCs `StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions` (`TerminalSessionInfo{terminal_id, kind, pid}`); stopping `"main"` is rejected with `INVALID_ARGUMENT`
+- Terminal I/O RPCs (`StreamSessionTerminalIO`, `StreamTerminalOutput`, `SendTerminalInput`) gain an optional `terminal_id` (empty ⇒ `"main"`); unknown id → `NOT_FOUND`
+- RPC-only; no web UI integration in this release
+
 ## 2026-06-24 — Long-running background Tasks
 
 - New `tasks.TaskService` gRPC service: `ListTasks`, `GetTask`, `WatchTask` (replay-then-live stream with `is_replay` flag), `CancelTask`, `SendInput`

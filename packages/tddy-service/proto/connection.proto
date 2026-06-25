@@ -23,6 +23,11 @@ service ConnectionService {
   // (connect-web fetch transport cannot send streaming request bodies required for bidi streaming.)
   rpc StreamTerminalOutput(StreamTerminalOutputRequest) returns (stream SessionTerminalOutput);
   rpc SendTerminalInput(SessionTerminalInput) returns (SendTerminalInputResponse);
+  // Multiple terminals per session — start/stop/list login-shell terminals attached to a session.
+  // Every terminal is identified; the main `claude` terminal is the reserved id "main".
+  rpc StartTerminalSession(StartTerminalSessionRequest) returns (StartTerminalSessionResponse);
+  rpc StopTerminalSession(StopTerminalSessionRequest) returns (StopTerminalSessionResponse);
+  rpc ListTerminalSessions(ListTerminalSessionsRequest) returns (ListTerminalSessionsResponse);
   rpc ListProjectBranches(ListProjectBranchesRequest) returns (ListProjectBranchesResponse);
   // Remote-codebase mode: execute a tool in a session worktree, or list available tools.
   rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse);
@@ -296,6 +301,8 @@ message SessionTerminalInput {
   string session_token = 1;
   string session_id    = 2;
   bytes  data          = 3;
+  // Target terminal; empty resolves to the reserved main ("claude") terminal.
+  string terminal_id   = 4;
 }
 
 message SessionTerminalOutput {
@@ -306,10 +313,51 @@ message SessionTerminalOutput {
 message StreamTerminalOutputRequest {
   string session_token = 1;
   string session_id    = 2;
+  // Target terminal; empty resolves to the reserved main ("claude") terminal.
+  string terminal_id   = 3;
 }
 
 // Empty response for SendTerminalInput.
 message SendTerminalInputResponse {}
+
+// --- Multiple terminals per session ---
+
+message StartTerminalSessionRequest {
+  string session_token = 1;
+  string session_id    = 2;
+}
+
+message StartTerminalSessionResponse {
+  // Fresh identifier for the started login-shell terminal (never "main").
+  string terminal_id = 1;
+}
+
+message StopTerminalSessionRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  string terminal_id   = 3;
+}
+
+message StopTerminalSessionResponse {
+  bool   ok      = 1;
+  string message = 2;
+}
+
+message ListTerminalSessionsRequest {
+  string session_token = 1;
+  string session_id    = 2;
+}
+
+message TerminalSessionInfo {
+  string terminal_id = 1;
+  // "claude-cli" for the reserved main tool, "bash" for started Bash (shell) tools.
+  string kind        = 2;
+  uint32 pid         = 3;
+}
+
+message ListTerminalSessionsResponse {
+  repeated TerminalSessionInfo terminals = 1;
+}
 
 // --- Remote-codebase mode: tool execution in session worktrees ---
 
