@@ -113,6 +113,8 @@ export function SessionMainPane({
                 onResume={onResume}
                 onDelete={onDelete}
                 onTerminate={onTerminate}
+                client={client}
+                sessionToken={sessionToken}
               />
             </div>
           ) : (
@@ -132,6 +134,8 @@ export function SessionMainPane({
                 onResume={onResume}
                 onDelete={onDelete}
                 onTerminate={onTerminate}
+                client={client}
+                sessionToken={sessionToken}
               />
             </div>
           )}

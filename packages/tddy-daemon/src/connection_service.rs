@@ -54,8 +54,9 @@ use crate::workspace_session;
 use crate::worktrees::{self, RemoveWorktreeError, WorktreeStatsCache};
 use tddy_service::proto::connection::{
     DemoVmState, ExecuteToolRequest, ExecuteToolResponse, GetDemoVmStatusRequest,
-    GetDemoVmStatusResponse, ListExecToolsRequest, ListExecToolsResponse, StartDemoVmRequest,
-    StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
+    GetDemoVmStatusResponse, ListExecToolsRequest, ListExecToolsResponse,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ToolCallInfo as ProtoToolCallInfo,
+    StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
 };
 use tddy_task::TaskRegistry;
 
@@ -2097,6 +2098,27 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         )
         .await;
 
+        // Durably record the tool call (non-fatal on failure).
+        {
+            let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+            let record = crate::tool_call_log::ToolCallRecord {
+                task_id: outcome.job_id.clone(),
+                tool_name: req.tool_name.clone(),
+                args_json: req.args_json.clone(),
+                result_json: outcome.result_json.clone(),
+                is_error: outcome.is_error,
+                error_message: outcome.error_message.clone(),
+                job_running: outcome.job_running,
+                created_unix_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64,
+            };
+            if let Err(e) = crate::tool_call_log::append_tool_call(&session_dir, &record) {
+                log::warn!("tool_call_log: failed to persist tool call for session {}: {}", req.session_id, e);
+            }
+        }
+
         Ok(Response::new(ExecuteToolResponse {
             result_json: outcome.result_json,
             is_error: outcome.is_error,
@@ -2171,6 +2193,98 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(ListExecToolsResponse {
             tools: tool_catalog::tool_catalog(),
         }))
+    }
+
+    async fn list_session_tool_calls(
+        &self,
+        request: Request<ListSessionToolCallsRequest>,
+    ) -> Result<Response<ListSessionToolCallsResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        // Route BEFORE session lookup so a relay can forward.
+        let requested_daemon = req.daemon_instance_id.trim();
+        if !requested_daemon.is_empty() {
+            let local_id = local_instance_id_for_config(&self.config);
+            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
+            let eligible_ids: Vec<String> = eligible_rows
+                .iter()
+                .map(|e| e.instance_id.0.clone())
+                .collect();
+            match crate::livekit_peer_discovery::classify_peer_route(
+                &local_id,
+                requested_daemon,
+                &eligible_ids,
+            ) {
+                Err(msg) => {
+                    log::info!("ListSessionToolCalls: rejected daemon routing: {}", msg);
+                    return Err(Status::invalid_argument(msg));
+                }
+                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
+                    log::info!(
+                        "ListSessionToolCalls: forwarding RPC to remote daemon_instance_id={}",
+                        peer_instance_id
+                    );
+                    let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
+                        Status::failed_precondition(
+                            "cannot forward ListSessionToolCalls: this process has no LiveKit common-room connection",
+                        )
+                    })?;
+                    let body = req.encode_to_vec();
+                    let out = crate::livekit_peer_discovery::forward_to_peer(
+                        slot,
+                        &peer_instance_id,
+                        "connection.ConnectionService",
+                        "ListSessionToolCalls",
+                        body,
+                    )
+                    .await?;
+                    let inner = ListSessionToolCallsResponse::decode(out.as_slice()).map_err(|e| {
+                        Status::internal(format!("decode ListSessionToolCallsResponse: {e}"))
+                    })?;
+                    return Ok(Response::new(inner));
+                }
+                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
+                    // Fall through to local execution below.
+                }
+            }
+        }
+
+        // Authenticate caller.
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        // Validate session ID segment to prevent path traversal.
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+
+        // Resolve the sessions base path.
+        let sessions_base = (self.sessions_base_for_user)(os_user)
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+
+        let records = crate::tool_call_log::read_tool_calls(&session_dir).unwrap_or_default();
+
+        let tool_calls: Vec<ProtoToolCallInfo> = records
+            .into_iter()
+            .map(|r| ProtoToolCallInfo {
+                task_id: r.task_id,
+                tool_name: r.tool_name,
+                args_json: r.args_json,
+                result_json: r.result_json,
+                is_error: r.is_error,
+                error_message: r.error_message,
+                job_running: r.job_running,
+                created_unix_ms: r.created_unix_ms,
+            })
+            .collect();
+
+        Ok(Response::new(ListSessionToolCallsResponse { tool_calls }))
     }
 
     async fn report_session_status(

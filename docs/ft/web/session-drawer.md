@@ -126,6 +126,37 @@ Adds to `src/components/ui/`:
 - `DeleteSession` — delete session (two-click confirm)
 - `SignalSession` — SIGTERM for active sessions
 
+## Inspector Tabs
+
+The inspector panel has two tabs:
+
+- **Details** (default) — the existing metadata + controls section described above.
+- **Tools** — per-session tool-call log and an inline invoke panel.
+
+### Tools Tab
+
+**Call log**: every `ExecuteTool` RPC call made against the session is durably recorded in
+`~/.tddy/sessions/{sessionId}/tool-calls.jsonl` (one JSON record per line, append-only).
+The call log survives the in-memory `TaskRegistry` eviction (5 min / 200-entry cap) and
+daemon restarts. Each row shows:
+- Tool name, status pill (ok / error / running), relative timestamp.
+- Expandable detail: **Input** (`args_json`), **Output** (`result_json`), **stdio** (for
+  `Shell` tool calls, `stdout` / `stderr` / `exit_code` are embedded in `result_json`).
+
+**Invoke panel**: pick a tool from the `ListExecTools` catalog, edit JSON args seeded from
+the tool's `input_schema_json`, click Invoke → calls `ExecuteTool` against the session.
+Result or error rendered inline. After a successful invoke the call log auto-refreshes.
+
+**Known limitation**: stdio for background Shell jobs (`block_until_ms: 0`) is non-durable.
+Live output is accessible via `TaskService.WatchTask` while the task is in the registry
+(~5 min). Once evicted, the log row shows only the `job_id` from `result_json`.
+
+### New RPCs
+
+- `ConnectionService.ListSessionToolCalls(session_token, session_id)` — reads the durable
+  JSONL log and returns `ToolCallInfo[]` in chronological order.
+- `ConnectionService.ListExecTools` — already existed; used to populate the invoke picker.
+
 ## Create Session
 
 A **"+ New session"** button in the `SessionDrawer` header opens a creation form in the
@@ -186,3 +217,5 @@ interface CreateSessionPaneProps {
 - Multi-daemon host filtering (the `daemonInstanceId` grouping in `ConnectionScreen`) is
   deferred — sessions from all daemons appear together in the flat list.
 - The old `ConnectionScreen` monolith is not retired by this change.
+- Background Shell stdio is not durably captured; only available live via `WatchTask` while
+  the task is in the in-memory registry.

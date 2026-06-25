@@ -71,12 +71,14 @@ fn start_backend(
         .with_intent_sender(intent_tx);
     let output_dir = std::env::temp_dir().join(format!("tddy-rpc-demo-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&output_dir).unwrap();
+    let session_dir = std::env::temp_dir().join(format!("tddy-rpc-demo-session-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&session_dir).unwrap();
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
     let mut presenter = presenter.with_worktree_dir(output_dir.clone());
     presenter.start_workflow(
         backend,
         output_dir,
-        None,
+        Some(session_dir),
         Some("Build auth".to_string()),
         None,
         None,

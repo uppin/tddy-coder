@@ -101,6 +101,25 @@ export const TEST_IDS = {
   sessionsInspectorRestore: "sessions-inspector-restore",
   sessionsInspectorMetadata: "sessions-inspector-metadata",
 
+  // Session inspector — tabs
+  sessionsInspectorTabDetails: "sessions-inspector-tab-details",
+  sessionsInspectorTabTools: "sessions-inspector-tab-tools",
+  sessionsInspectorToolsPanel: "sessions-inspector-tools-panel",
+
+  // Session inspector — Tools tab: invoke panel
+  sessionsToolInvokeSelect: "sessions-tool-invoke-select",
+  sessionsToolInvokeArgs: "sessions-tool-invoke-args",
+  sessionsToolInvokeButton: "sessions-tool-invoke-button",
+  sessionsToolInvokeResult: "sessions-tool-invoke-result",
+  sessionsToolInvokeError: "sessions-tool-invoke-error",
+
+  // Session inspector — Tools tab: call log
+  sessionsToolCallLog: "sessions-tool-call-log",
+  sessionsToolCallRow: "sessions-tool-call-row",
+  sessionsToolCallInput: "sessions-tool-call-input",
+  sessionsToolCallOutput: "sessions-tool-call-output",
+  sessionsToolCallStdio: "sessions-tool-call-stdio",
+
   // Tasks drawer screen
   tasksDrawerScreen: "tasks-drawer-screen",
   tasksDrawer: "tasks-drawer",

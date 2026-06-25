@@ -631,7 +631,6 @@ async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow:
     // Given
     let (_handle, port, shutdown) =
         spawn_presenter_with_terminal_service(Some("SKIP_QUESTIONS Build auth".to_string()));
-    let _approve = spawn_pr_document_approve(port);
 
     let mut client = connect_terminal_grpc(port).await?;
 
@@ -644,14 +643,23 @@ async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow:
         .into_inner();
 
     // Send init, drain until acceptance-tests permission Select (Yes / No).
+    // Approve the plan review via terminal when "Choose an action" appears.
+    // The DocumentReview ModeChanged gRPC event can race with subscriber setup;
+    // using the terminal stream is reliable because it's already established.
     input_tx.send(TerminalInput { data: vec![] }).await?;
     let mut initial = Vec::new();
+    let mut plan_approved = false;
     for _ in 0..60 {
         let chunk = drain_output(&mut stream, Duration::from_millis(200), "init").await?;
         initial.extend_from_slice(&chunk);
         let initial_text = ansi_to_text(&initial);
         if initial_text.contains("Permission") && initial_text.contains("> Yes") {
             break;
+        }
+        if !plan_approved && initial_text.contains("Choose an action") {
+            let _ = input_tx.send(TerminalInput { data: keys::DOWN.to_vec() }).await;
+            let _ = input_tx.send(TerminalInput { data: keys::ENTER.to_vec() }).await;
+            plan_approved = true;
         }
     }
     let initial_text = ansi_to_text(&initial);

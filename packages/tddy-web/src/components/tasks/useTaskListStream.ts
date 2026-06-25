@@ -1,24 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
 import { TaskService, type TaskInfo } from "../../gen/tasks_pb";
-
-function createTaskClient() {
-  const transport = createConnectTransport({
-    baseUrl: typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
-    useBinaryFormat: true,
-  });
-  return createClient(TaskService, transport);
-}
+import { useHttpClient } from "../../rpc/transportProvider";
 
 export function useTaskListStream(sessionToken: string) {
+  const client = useHttpClient(TaskService);
   const [tasks, setTasks] = useState<Map<string, TaskInfo>>(new Map());
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
     abortRef.current = controller;
-    const client = createTaskClient();
 
     (async () => {
       let retryDelay = 0;
@@ -66,7 +57,7 @@ export function useTaskListStream(sessionToken: string) {
     return () => {
       controller.abort();
     };
-  }, [sessionToken]);
+  }, [client, sessionToken]);
 
   return { tasks };
 }
