@@ -73,8 +73,9 @@ describe("App routing (daemon mode, acceptance)", () => {
     connectionPage.connectBtn(ACTIVE_SESSION.sessionId, { timeout: 8000 }).click();
     cy.wait("@connectSession");
 
-    // Then — URL stays at root; reconnect overlay appears; Expand navigates to terminal route
-    cy.window().its("location.pathname").should("eq", "/");
+    // Then — URL stays at root (hash routing: pathname stays as Cypress frame path, hash stays #/);
+    // reconnect overlay appears; Expand navigates to terminal route
+    cy.window().its("location.hash").should("eq", "#/");
     connectionPage.reconnectOverlay().should("be.visible");
     connectionPage.reconnectExpand().should("be.visible").click();
     cy.window()
@@ -128,7 +129,8 @@ describe("App routing (daemon mode, acceptance)", () => {
     // Then — unknown-session error is shown; clicking home navigates back and clears the error
     connectionPage.unknownSessionError().should("be.visible");
     connectionPage.unknownSessionHomeLink().should("be.visible").click();
-    cy.window().its("location.pathname").should("eq", "/");
+    // In Cypress component tests, pathname stays as the iframe path; hash routing uses #/
+    cy.window().its("location.hash").should("eq", "#/");
     connectionPage.sessionsTable(PROJECT_ID, { timeout: 8000 }).should("exist");
     connectionPage.unknownSessionError().should("not.exist");
   });

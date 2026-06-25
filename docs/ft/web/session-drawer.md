@@ -157,6 +157,60 @@ Live output is accessible via `TaskService.WatchTask` while the task is in the r
   JSONL log and returns `ToolCallInfo[]` in chronological order.
 - `ConnectionService.ListExecTools` — already existed; used to populate the invoke picker.
 
+## Create Session
+
+A **"+ New session"** button in the `SessionDrawer` header opens a creation form in the
+main pane. Clicking it switches `SessionsDrawerScreen` into `"creating"` mode; the drawer
+remains visible so the user can see existing sessions while filling the form.
+
+### Session Types
+
+A toggle at the top of the form switches between:
+
+- **Tool** — spawns `tddy-coder` via `StartSession` RPC (requires project + agent)
+- **Claude CLI** — spawns the Claude Code CLI directly (requires project + model)
+
+### Fields
+
+| Field | Types | Required |
+|-------|-------|----------|
+| Project | both | yes — dropdown from `ListProjects` |
+| Agent/coder | tool | yes — dropdown from `ListAgents` |
+| Recipe | tool | no — free-text |
+| Model | claude-cli | yes — dropdown of `CLAUDE_CLI_MODELS` |
+| Permission mode | claude-cli | no — auto/default/acceptEdits/plan/bypassPermissions |
+| Initial prompt | claude-cli | no — textarea |
+| Branch mode | both | — New branch from base (optional name + base ref) or Work on existing branch (select from `ListProjectBranches`) |
+
+The tool binary (`toolPath`) is auto-selected from `ListTools`; shown as a select only
+when multiple tools are available.
+
+### Post-Create
+
+On success, `SessionsDrawerScreen` navigates to `/sessions/:newId` and auto-attaches
+(same behaviour as clicking an active session in the drawer).
+
+### Component
+
+`CreateSessionPane` (`packages/tddy-web/src/components/sessions/CreateSessionPane.tsx`) — props:
+
+```typescript
+interface CreateSessionPaneProps {
+  client: ConnectionClient;
+  sessionToken: string;
+  onCancel: () => void;
+  onCreated: (sessionId: string) => void;
+}
+```
+
+### RPCs Used (Create Session)
+
+- `ListProjects` — project dropdown
+- `ListTools` — auto-select tool binary
+- `ListAgents` — agent dropdown (tool sessions)
+- `ListProjectBranches` — branch dropdown when "work on existing branch"
+- `StartSession` — create + start the session
+
 ## Known Limitations
 
 - The terminal in the main pane is a placeholder; real terminal mounting is out of scope.

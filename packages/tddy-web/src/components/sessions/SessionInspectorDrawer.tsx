@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import type { PromiseClient } from "@connectrpc/connect";
+import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
@@ -22,7 +22,7 @@ interface SessionInspectorDrawerProps {
   onResume: (sessionId: string) => void;
   onDelete: (sessionId: string) => void;
   onTerminate: (sessionId: string) => void;
-  client?: PromiseClient<typeof ConnectionService>;
+  client?: Client<typeof ConnectionService>;
   sessionToken?: string;
 }
 

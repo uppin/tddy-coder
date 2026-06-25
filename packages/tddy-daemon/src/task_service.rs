@@ -5,9 +5,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::tasks::{
-    CancelTaskRequest, CancelTaskResponse, GetTaskRequest, GetTaskResponse, ListTasksRequest,
-    ListTasksResponse, SendInputRequest, SendInputResponse, TaskChannelInfo, TaskInfo,
-    TaskOutputEvent, TaskService, TaskStatusProto, WatchTaskRequest,
+    task_list_event, CancelTaskRequest, CancelTaskResponse, GetTaskRequest, GetTaskResponse,
+    ListTasksRequest, ListTasksResponse, SendInputRequest, SendInputResponse, TaskChannelInfo,
+    TaskInfo, TaskListEvent, TaskOutputEvent, TaskService, TaskStatusProto, WatchTaskListRequest,
+    WatchTaskRequest,
 };
 use tddy_task::TaskRegistry;
 use tokio_stream::wrappers::ReceiverStream;
@@ -88,9 +89,27 @@ fn handle_to_proto(handle: &tddy_task::TaskHandle) -> TaskInfo {
     }
 }
 
+fn registry_event_to_list_event(event: tddy_task::TaskRegistryEvent) -> TaskListEvent {
+    match event {
+        tddy_task::TaskRegistryEvent::Added(h) => TaskListEvent {
+            is_snapshot: false,
+            event: Some(task_list_event::Event::TaskAdded(handle_to_proto(&h))),
+        },
+        tddy_task::TaskRegistryEvent::Updated(h) => TaskListEvent {
+            is_snapshot: false,
+            event: Some(task_list_event::Event::TaskUpdated(handle_to_proto(&h))),
+        },
+        tddy_task::TaskRegistryEvent::Removed(id) => TaskListEvent {
+            is_snapshot: false,
+            event: Some(task_list_event::Event::TaskRemoved(id.0)),
+        },
+    }
+}
+
 #[async_trait]
 impl TaskService for TaskServiceImpl {
     type WatchTaskStream = ReceiverStream<Result<TaskOutputEvent, Status>>;
+    type WatchTaskListStream = ReceiverStream<Result<TaskListEvent, Status>>;
 
     async fn list_tasks(
         &self,
@@ -274,5 +293,58 @@ impl TaskService for TaskServiceImpl {
                 "stdin receiver closed".to_string()
             },
         }))
+    }
+
+    async fn watch_task_list(
+        &self,
+        request: Request<WatchTaskListRequest>,
+    ) -> Result<Response<Self::WatchTaskListStream>, Status> {
+        let req = request.into_inner();
+        let _user = self.authenticate(&req.session_token)?;
+
+        if !req.daemon_instance_id.is_empty() {
+            return Err(Status::failed_precondition(
+                "WatchTaskList does not support remote daemon_instance_id in this version",
+            ));
+        }
+
+        let (snapshot, mut rx) = self.registry.list_and_subscribe().await;
+        let (tx, receiver) = tokio::sync::mpsc::channel(256);
+
+        tokio::spawn(async move {
+            // Emit snapshot events first.
+            for handle in &snapshot {
+                let event = TaskListEvent {
+                    is_snapshot: true,
+                    event: Some(task_list_event::Event::TaskAdded(handle_to_proto(handle))),
+                };
+                if tx.send(Ok(event)).await.is_err() {
+                    return;
+                }
+            }
+
+            // Stream live events until the client disconnects or the registry shuts down.
+            loop {
+                match rx.recv().await {
+                    Ok(registry_event) => {
+                        if tx
+                            .send(Ok(registry_event_to_list_event(registry_event)))
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        log::warn!("WatchTaskList: lagged by {n} events");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        return;
+                    }
+                }
+            }
+        });
+
+        Ok(Response::new(ReceiverStream::new(receiver)))
     }
 }

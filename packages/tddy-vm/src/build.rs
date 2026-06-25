@@ -8,7 +8,8 @@ use tddy_build::plugin::PluginRegistry;
 use tddy_build_qemu::QemuPlugin;
 use tddy_rpc::Status;
 use tddy_service::proto::vm::BuildVmImageProgress;
-use tddy_task::{TaskBody, TaskContext, TaskStatus};
+use bytes::Bytes;
+use tddy_task::{TaskBody, TaskChannel, TaskContext, TaskStatus};
 use tokio::fs;
 use tokio_util::sync::CancellationToken;
 
@@ -124,6 +125,13 @@ async fn send_progress(
         .await;
 }
 
+/// Write a log line to the task channel so `WatchTask` subscribers (Tasks UI) see build output.
+fn write_to_channel(ch: &Option<Arc<TaskChannel>>, line: &str) {
+    if let Some(ch) = ch {
+        ch.write(Bytes::from(format!("{line}\n")));
+    }
+}
+
 /// `TaskBody` implementation for a Buildroot VM image build.
 ///
 /// Holds the buildroot spec and an mpsc sender for streaming `BuildVmImageProgress` messages
@@ -138,8 +146,10 @@ pub struct VmBuildTaskBody {
 impl TaskBody for VmBuildTaskBody {
     async fn run(self: Box<Self>, ctx: TaskContext) -> TaskStatus {
         let cancel = ctx.cancel_token().clone();
+        let log_ch = ctx.channel("0");
         let success =
-            build_vm_image_from_spec(&self.buildroot_spec, self.progress_tx, cancel).await;
+            build_vm_image_from_spec(&self.buildroot_spec, self.progress_tx, cancel, log_ch)
+                .await;
         if ctx.is_cancelled() {
             TaskStatus::Cancelled
         } else if success {
@@ -164,6 +174,7 @@ pub async fn build_vm_image_from_spec(
     spec: &str,
     tx: tokio::sync::mpsc::Sender<Result<BuildVmImageProgress, Status>>,
     cancel: CancellationToken,
+    log_ch: Option<Arc<TaskChannel>>,
 ) -> bool {
     use std::env;
     use tokio::io::{AsyncBufReadExt, BufReader};
@@ -171,6 +182,7 @@ pub async fn build_vm_image_from_spec(
 
     // Emit immediately so the UI shows feedback before any blocking work begins.
     send_progress(&tx, STAGE_CONFIGURING, "Starting Buildroot build…", "").await;
+    write_to_channel(&log_ch, "Starting Buildroot build…");
     log::info!(
         "build_vm_image_from_spec: build requested, spec length={}",
         spec.len()
@@ -184,13 +196,9 @@ pub async fn build_vm_image_from_spec(
         }
         _ => {
             log::error!("build_vm_image_from_spec: BUILDROOT_DIR not set");
-            send_progress(
-                &tx,
-                STAGE_ERROR,
-                "Buildroot not found: set BUILDROOT_DIR env var to the Buildroot source directory",
-                "",
-            )
-            .await;
+            let msg = "Buildroot not found: set BUILDROOT_DIR env var to the Buildroot source directory";
+            send_progress(&tx, STAGE_ERROR, msg, "").await;
+            write_to_channel(&log_ch, msg);
             return false;
         }
     };
@@ -238,6 +246,7 @@ pub async fn build_vm_image_from_spec(
         build_path.display()
     );
     send_progress(&tx, STAGE_CONFIGURING, "Running make olddefconfig…", "").await;
+    write_to_channel(&log_ch, "Running make olddefconfig…");
     let olddefconfig = Command::new("make")
         .arg("-C")
         .arg(&buildroot_dir)
@@ -250,24 +259,16 @@ pub async fn build_vm_image_from_spec(
         .await;
     match olddefconfig {
         Err(e) => {
-            send_progress(
-                &tx,
-                STAGE_ERROR,
-                format!("make olddefconfig launch failed: {e}"),
-                "",
-            )
-            .await;
+            let msg = format!("make olddefconfig launch failed: {e}");
+            send_progress(&tx, STAGE_ERROR, &msg, "").await;
+            write_to_channel(&log_ch, &msg);
             return false;
         }
         Ok(out) if !out.status.success() => {
             let stderr = String::from_utf8_lossy(&out.stderr);
-            send_progress(
-                &tx,
-                STAGE_ERROR,
-                format!("make olddefconfig failed: {stderr}"),
-                "",
-            )
-            .await;
+            let msg = format!("make olddefconfig failed: {stderr}");
+            send_progress(&tx, STAGE_ERROR, &msg, "").await;
+            write_to_channel(&log_ch, &msg);
             return false;
         }
         Ok(_) => {}
@@ -307,35 +308,34 @@ pub async fn build_vm_image_from_spec(
     // Capture PID before taking stdio (id() requires mutable Child)
     let make_pid = make_build.id();
 
-    send_progress(
-        &tx,
-        STAGE_BUILDING,
-        "Building rootfs (this takes several minutes)…",
-        "",
-    )
-    .await;
+    send_progress(&tx, STAGE_BUILDING, "Building rootfs (this takes several minutes)…", "").await;
+    write_to_channel(&log_ch, "Building rootfs (this takes several minutes)…");
     // Drain stdout and stderr concurrently — reading only one at a time risks a pipe-buffer deadlock
     // when the other fills up, and also hides error messages that make writes to stderr.
     let stdout = make_build.stdout.take();
     let stderr = make_build.stderr.take();
 
     let tx_out = tx.clone();
+    let log_ch_out = log_ch.clone();
     let stdout_task = tokio::spawn(async move {
         if let Some(out) = stdout {
             let mut lines = BufReader::new(out).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 log::info!("buildroot: {}", line);
                 send_progress(&tx_out, STAGE_BUILDING, &line, "").await;
+                write_to_channel(&log_ch_out, &line);
             }
         }
     });
     let tx_err = tx.clone();
+    let log_ch_err = log_ch.clone();
     let stderr_task = tokio::spawn(async move {
         if let Some(err) = stderr {
             let mut lines = BufReader::new(err).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 log::warn!("buildroot stderr: {}", line);
                 send_progress(&tx_err, STAGE_BUILDING, &line, "").await;
+                write_to_channel(&log_ch_err, &line);
             }
         }
     });
@@ -346,7 +346,9 @@ pub async fn build_vm_image_from_spec(
             match result {
                 Ok(s) => s,
                 Err(e) => {
-                    send_progress(&tx, STAGE_ERROR, format!("make build wait failed: {e}"), "").await;
+                    let msg = format!("make build wait failed: {e}");
+                    send_progress(&tx, STAGE_ERROR, &msg, "").await;
+                    write_to_channel(&log_ch, &msg);
                     return false;
                 }
             }
@@ -361,18 +363,15 @@ pub async fn build_vm_image_from_spec(
             // Reap the child so we don't leave a zombie.
             let _ = make_build.wait().await;
             send_progress(&tx, STAGE_ERROR, "Build cancelled", "").await;
+            write_to_channel(&log_ch, "Build cancelled");
             return false;
         }
     };
 
     if !status.success() {
-        send_progress(
-            &tx,
-            STAGE_ERROR,
-            format!("make build failed (exit {})", status),
-            "",
-        )
-        .await;
+        let msg = format!("make build failed (exit {})", status);
+        send_progress(&tx, STAGE_ERROR, &msg, "").await;
+        write_to_channel(&log_ch, &msg);
         return false;
     }
 
@@ -384,13 +383,8 @@ pub async fn build_vm_image_from_spec(
         "build_vm_image_from_spec: converting {} to qcow2",
         rootfs_ext2.display()
     );
-    send_progress(
-        &tx,
-        STAGE_CONVERTING,
-        "Converting rootfs.ext2 to qcow2…",
-        "",
-    )
-    .await;
+    send_progress(&tx, STAGE_CONVERTING, "Converting rootfs.ext2 to qcow2…", "").await;
+    write_to_channel(&log_ch, "Converting rootfs.ext2 to qcow2…");
 
     let convert = Command::new("qemu-img")
         .arg("convert")
@@ -405,24 +399,16 @@ pub async fn build_vm_image_from_spec(
 
     match convert {
         Err(e) => {
-            send_progress(
-                &tx,
-                STAGE_ERROR,
-                format!("qemu-img convert launch failed: {e}"),
-                "",
-            )
-            .await;
+            let msg = format!("qemu-img convert launch failed: {e}");
+            send_progress(&tx, STAGE_ERROR, &msg, "").await;
+            write_to_channel(&log_ch, &msg);
             return false;
         }
         Ok(out) if !out.status.success() => {
             let stderr = String::from_utf8_lossy(&out.stderr);
-            send_progress(
-                &tx,
-                STAGE_ERROR,
-                format!("qemu-img convert failed: {stderr}"),
-                "",
-            )
-            .await;
+            let msg = format!("qemu-img convert failed: {stderr}");
+            send_progress(&tx, STAGE_ERROR, &msg, "").await;
+            write_to_channel(&log_ch, &msg);
             return false;
         }
         Ok(_) => {}
@@ -434,6 +420,7 @@ pub async fn build_vm_image_from_spec(
     let image_path = qcow2_path.to_string_lossy().into_owned();
     log::info!("build_vm_image_from_spec: done, image_path={}", image_path);
     send_progress(&tx, STAGE_DONE, "Build complete", &image_path).await;
+    write_to_channel(&log_ch, &format!("Build complete — {image_path}"));
     true
 }
 

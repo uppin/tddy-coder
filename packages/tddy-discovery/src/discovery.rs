@@ -167,7 +167,9 @@ mod tests {
             data.relevant_code
         );
         assert!(
-            data.relevant_code.iter().any(|rc| rc.path == "src/session.rs"),
+            data.relevant_code
+                .iter()
+                .any(|rc| rc.path == "src/session.rs"),
             "src/session.rs must be in relevant_code; got {:?}",
             data.relevant_code
         );

@@ -16,18 +16,14 @@
 use std::time::Duration;
 
 use strip_ansi_escapes::strip;
-use tokio_stream::wrappers::ReceiverStream;
-use tonic::Request;
 
-use tddy_e2e::{connect_grpc, connect_terminal_grpc, spawn_presenter_with_terminal_service};
-use tddy_service::gen::app_mode_proto;
-use tddy_service::gen::server_message;
-use tddy_service::gen::{client_message, ApproveSessionDocument, ClientMessage};
+use tddy_e2e::{connect_terminal_grpc, spawn_presenter_with_terminal_service};
 use tddy_service::proto::terminal::TerminalInput;
 use tddy_tui_testkit::ScreenParser;
 
 mod keys {
     pub const DOWN: &[u8] = b"\x1b[B";
+    pub const ENTER: &[u8] = b"\r";
 }
 
 fn ansi_to_text(bytes: &[u8]) -> String {
@@ -69,45 +65,6 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
     let (_handle, port, shutdown) =
         spawn_presenter_with_terminal_service(Some("SKIP_QUESTIONS Build auth".to_string()));
 
-    // PRD approval is a gRPC `DocumentReview` mode; approve so the stub run reaches acceptance-tests.
-    let port_doc = port;
-    let _doc_approve = tokio::spawn(async move {
-        let Ok(mut grpc_client) = connect_grpc(port_doc).await else {
-            return;
-        };
-        let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(8);
-        let request_stream = ReceiverStream::new(rx);
-        let Ok(resp) = grpc_client.stream(Request::new(request_stream)).await else {
-            return;
-        };
-        let mut stream = resp.into_inner();
-        for _ in 0..600 {
-            match tokio::time::timeout(Duration::from_millis(50), stream.message()).await {
-                Ok(Ok(Some(msg))) => {
-                    if let Some(server_message::Event::ModeChanged(mc)) = msg.event {
-                        if let Some(mode) = &mc.mode {
-                            if let Some(app_mode_proto::Variant::DocumentReview(_)) = &mode.variant
-                            {
-                                let _ = tx
-                                    .send(ClientMessage {
-                                        intent: Some(
-                                            client_message::Intent::ApproveSessionDocument(
-                                                ApproveSessionDocument {},
-                                            ),
-                                        ),
-                                    })
-                                    .await;
-                                break;
-                            }
-                        }
-                    }
-                }
-                Ok(Ok(None)) => break,
-                _ => {}
-            }
-        }
-    });
-
     // When
     let mut client = connect_terminal_grpc(port).await?;
 
@@ -120,6 +77,10 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
         .into_inner();
 
     input_tx1.send(TerminalInput { data: vec![] }).await?;
+    // Approve the plan review via the terminal when "Choose an action" appears.
+    // The DocumentReview ModeChanged gRPC event can race with subscriber setup;
+    // using the terminal stream is reliable because it's already established.
+    let mut plan_approved = false;
     let mut stream1_output = Vec::new();
     for _ in 0..50 {
         let chunk = collect_output_window(&mut stream1, Duration::from_millis(200)).await?;
@@ -127,6 +88,20 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
         let t = ansi_to_text(&stream1_output);
         if t.contains("Permission") && t.contains("> Yes") {
             break;
+        }
+        if !plan_approved && t.contains("Choose an action") {
+            // Navigate from View (index 0) to Approve (index 1) then submit.
+            let _ = input_tx1
+                .send(TerminalInput {
+                    data: keys::DOWN.to_vec(),
+                })
+                .await;
+            let _ = input_tx1
+                .send(TerminalInput {
+                    data: keys::ENTER.to_vec(),
+                })
+                .await;
+            plan_approved = true;
         }
     }
     let initial_text = ansi_to_text(&stream1_output);

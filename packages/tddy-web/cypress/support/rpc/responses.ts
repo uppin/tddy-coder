@@ -15,6 +15,7 @@ import {
   EligibleDaemonEntrySchema,
   ListAgentsResponseSchema,
   ListEligibleDaemonsResponseSchema,
+  ListProjectBranchesResponseSchema,
   ListProjectsResponseSchema,
   ListSessionsResponseSchema,
   ListToolsResponseSchema,
@@ -250,6 +251,13 @@ export function aResumeSessionResponse(
 // ---------------------------------------------------------------------------
 
 /** Protobuf encoding of `{ ok: true }` — field 1 varint 1. */
+export function listProjectBranches(branches: string[] = []): Uint8Array {
+  return toBinary(
+    ListProjectBranchesResponseSchema,
+    create(ListProjectBranchesResponseSchema, { branches }),
+  );
+}
+
 export const OK_RESPONSE_BYTES = new Uint8Array([0x08, 0x01]);
 
 export function okResponseBuffer(): ArrayBuffer {

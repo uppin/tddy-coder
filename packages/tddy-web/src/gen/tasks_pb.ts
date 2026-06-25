@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file tasks.proto.
  */
 export const file_tasks: GenFile = /*@__PURE__*/
-  fileDesc("Cgt0YXNrcy5wcm90bxIFdGFza3MicQoPVGFza0NoYW5uZWxJbmZvEhIKCmNoYW5uZWxfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIlCgRraW5kGAMgASgOMhcudGFza3MuQ2hhbm5lbEtpbmRQcm90bxIVCg1hY2NlcHRzX2lucHV0GAQgASgIItMBCghUYXNrSW5mbxIPCgd0YXNrX2lkGAEgASgJEgwKBGtpbmQYAiABKAkSJgoGc3RhdHVzGAMgASgOMhYudGFza3MuVGFza1N0YXR1c1Byb3RvEhEKCWV4aXRfY29kZRgEIAEoBRIVCg1lcnJvcl9tZXNzYWdlGAUgASgJEhcKD2NyZWF0ZWRfdW5peF9tcxgGIAEoBBIoCghjaGFubmVscxgHIAMoCzIWLnRhc2tzLlRhc2tDaGFubmVsSW5mbxITCgtyZXN1bHRfanNvbhgIIAEoCSJFChBMaXN0VGFza3NSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJIjMKEUxpc3RUYXNrc1Jlc3BvbnNlEh4KBXRhc2tzGAEgAygLMg8udGFza3MuVGFza0luZm8iVAoOR2V0VGFza1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSIwCg9HZXRUYXNrUmVzcG9uc2USHQoEdGFzaxgBIAEoCzIPLnRhc2tzLlRhc2tJbmZvImoKEFdhdGNoVGFza1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAQgASgJIm4KD1Rhc2tPdXRwdXRFdmVudBISCgpjaGFubmVsX2lkGAEgASgJEgwKBGRhdGEYAiABKAwSEQoJaXNfcmVwbGF5GAMgASgIEiYKBnN0YXR1cxgEIAEoDjIWLnRhc2tzLlRhc2tTdGF0dXNQcm90byJXChFDYW5jZWxUYXNrUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIjEKEkNhbmNlbFRhc2tSZXNwb25zZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIngKEFNlbmRJbnB1dFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkSDAoEZGF0YRgEIAEoDBIaChJkYWVtb25faW5zdGFuY2VfaWQYBSABKAkiMAoRU2VuZElucHV0UmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSqqAQoPVGFza1N0YXR1c1Byb3RvEhcKE1RBU0tfU1RBVFVTX1VOS05PV04QABIXChNUQVNLX1NUQVRVU19QRU5ESU5HEAESFwoTVEFTS19TVEFUVVNfUlVOTklORxACEhkKFVRBU0tfU1RBVFVTX0NPTVBMRVRFRBADEhYKElRBU0tfU1RBVFVTX0ZBSUxFRBAEEhkKFVRBU0tfU1RBVFVTX0NBTkNFTExFRBAFKnkKEENoYW5uZWxLaW5kUHJvdG8SGAoUQ0hBTk5FTF9LSU5EX1VOS05PV04QABIXChNDSEFOTkVMX0tJTkRfU1RET1VUEAESFwoTQ0hBTk5FTF9LSU5EX1NUREVSUhACEhkKFUNIQU5ORUxfS0lORF9DT01CSU5FRBADMsoCCgtUYXNrU2VydmljZRI+CglMaXN0VGFza3MSFy50YXNrcy5MaXN0VGFza3NSZXF1ZXN0GhgudGFza3MuTGlzdFRhc2tzUmVzcG9uc2USOAoHR2V0VGFzaxIVLnRhc2tzLkdldFRhc2tSZXF1ZXN0GhYudGFza3MuR2V0VGFza1Jlc3BvbnNlEj4KCVdhdGNoVGFzaxIXLnRhc2tzLldhdGNoVGFza1JlcXVlc3QaFi50YXNrcy5UYXNrT3V0cHV0RXZlbnQwARJBCgpDYW5jZWxUYXNrEhgudGFza3MuQ2FuY2VsVGFza1JlcXVlc3QaGS50YXNrcy5DYW5jZWxUYXNrUmVzcG9uc2USPgoJU2VuZElucHV0EhcudGFza3MuU2VuZElucHV0UmVxdWVzdBoYLnRhc2tzLlNlbmRJbnB1dFJlc3BvbnNlYgZwcm90bzM");
+  fileDesc("Cgt0YXNrcy5wcm90bxIFdGFza3MicQoPVGFza0NoYW5uZWxJbmZvEhIKCmNoYW5uZWxfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIlCgRraW5kGAMgASgOMhcudGFza3MuQ2hhbm5lbEtpbmRQcm90bxIVCg1hY2NlcHRzX2lucHV0GAQgASgIItMBCghUYXNrSW5mbxIPCgd0YXNrX2lkGAEgASgJEgwKBGtpbmQYAiABKAkSJgoGc3RhdHVzGAMgASgOMhYudGFza3MuVGFza1N0YXR1c1Byb3RvEhEKCWV4aXRfY29kZRgEIAEoBRIVCg1lcnJvcl9tZXNzYWdlGAUgASgJEhcKD2NyZWF0ZWRfdW5peF9tcxgGIAEoBBIoCghjaGFubmVscxgHIAMoCzIWLnRhc2tzLlRhc2tDaGFubmVsSW5mbxITCgtyZXN1bHRfanNvbhgIIAEoCSJFChBMaXN0VGFza3NSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJIjMKEUxpc3RUYXNrc1Jlc3BvbnNlEh4KBXRhc2tzGAEgAygLMg8udGFza3MuVGFza0luZm8iVAoOR2V0VGFza1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSIwCg9HZXRUYXNrUmVzcG9uc2USHQoEdGFzaxgBIAEoCzIPLnRhc2tzLlRhc2tJbmZvImoKEFdhdGNoVGFza1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAQgASgJIm4KD1Rhc2tPdXRwdXRFdmVudBISCgpjaGFubmVsX2lkGAEgASgJEgwKBGRhdGEYAiABKAwSEQoJaXNfcmVwbGF5GAMgASgIEiYKBnN0YXR1cxgEIAEoDjIWLnRhc2tzLlRhc2tTdGF0dXNQcm90byJXChFDYW5jZWxUYXNrUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIjEKEkNhbmNlbFRhc2tSZXNwb25zZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIngKEFNlbmRJbnB1dFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEhIKCmNoYW5uZWxfaWQYAyABKAkSDAoEZGF0YRgEIAEoDBIaChJkYWVtb25faW5zdGFuY2VfaWQYBSABKAkiMAoRU2VuZElucHV0UmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJJChRXYXRjaFRhc2tMaXN0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCSKVAQoNVGFza0xpc3RFdmVudBITCgtpc19zbmFwc2hvdBgBIAEoCBIlCgp0YXNrX2FkZGVkGAIgASgLMg8udGFza3MuVGFza0luZm9IABInCgx0YXNrX3VwZGF0ZWQYAyABKAsyDy50YXNrcy5UYXNrSW5mb0gAEhYKDHRhc2tfcmVtb3ZlZBgEIAEoCUgAQgcKBWV2ZW50KqoBCg9UYXNrU3RhdHVzUHJvdG8SFwoTVEFTS19TVEFUVVNfVU5LTk9XThAAEhcKE1RBU0tfU1RBVFVTX1BFTkRJTkcQARIXChNUQVNLX1NUQVRVU19SVU5OSU5HEAISGQoVVEFTS19TVEFUVVNfQ09NUExFVEVEEAMSFgoSVEFTS19TVEFUVVNfRkFJTEVEEAQSGQoVVEFTS19TVEFUVVNfQ0FOQ0VMTEVEEAUqeQoQQ2hhbm5lbEtpbmRQcm90bxIYChRDSEFOTkVMX0tJTkRfVU5LTk9XThAAEhcKE0NIQU5ORUxfS0lORF9TVERPVVQQARIXChNDSEFOTkVMX0tJTkRfU1RERVJSEAISGQoVQ0hBTk5FTF9LSU5EX0NPTUJJTkVEEAMykAMKC1Rhc2tTZXJ2aWNlEj4KCUxpc3RUYXNrcxIXLnRhc2tzLkxpc3RUYXNrc1JlcXVlc3QaGC50YXNrcy5MaXN0VGFza3NSZXNwb25zZRI4CgdHZXRUYXNrEhUudGFza3MuR2V0VGFza1JlcXVlc3QaFi50YXNrcy5HZXRUYXNrUmVzcG9uc2USPgoJV2F0Y2hUYXNrEhcudGFza3MuV2F0Y2hUYXNrUmVxdWVzdBoWLnRhc2tzLlRhc2tPdXRwdXRFdmVudDABEkEKCkNhbmNlbFRhc2sSGC50YXNrcy5DYW5jZWxUYXNrUmVxdWVzdBoZLnRhc2tzLkNhbmNlbFRhc2tSZXNwb25zZRI+CglTZW5kSW5wdXQSFy50YXNrcy5TZW5kSW5wdXRSZXF1ZXN0GhgudGFza3MuU2VuZElucHV0UmVzcG9uc2USRAoNV2F0Y2hUYXNrTGlzdBIbLnRhc2tzLldhdGNoVGFza0xpc3RSZXF1ZXN0GhQudGFza3MuVGFza0xpc3RFdmVudDABYgZwcm90bzM");
 
 /**
  * Summary of a task channel.
@@ -376,6 +376,79 @@ export const SendInputResponseSchema: GenMessage<SendInputResponse> = /*@__PURE_
   messageDesc(file_tasks, 11);
 
 /**
+ * @generated from message tasks.WatchTaskListRequest
+ */
+export type WatchTaskListRequest = Message<"tasks.WatchTaskListRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * WatchTaskList only supports local daemons this changeset. Setting this field returns
+   * FAILED_PRECONDITION.
+   *
+   * @generated from field: string daemon_instance_id = 2;
+   */
+  daemonInstanceId: string;
+};
+
+/**
+ * Describes the message tasks.WatchTaskListRequest.
+ * Use `create(WatchTaskListRequestSchema)` to create a new message.
+ */
+export const WatchTaskListRequestSchema: GenMessage<WatchTaskListRequest> = /*@__PURE__*/
+  messageDesc(file_tasks, 12);
+
+/**
+ * @generated from message tasks.TaskListEvent
+ */
+export type TaskListEvent = Message<"tasks.TaskListEvent"> & {
+  /**
+   * True for events emitted as part of the initial snapshot.
+   *
+   * @generated from field: bool is_snapshot = 1;
+   */
+  isSnapshot: boolean;
+
+  /**
+   * @generated from oneof tasks.TaskListEvent.event
+   */
+  event: {
+    /**
+     * task appeared (or initial snapshot entry)
+     *
+     * @generated from field: tasks.TaskInfo task_added = 2;
+     */
+    value: TaskInfo;
+    case: "taskAdded";
+  } | {
+    /**
+     * status or fields changed
+     *
+     * @generated from field: tasks.TaskInfo task_updated = 3;
+     */
+    value: TaskInfo;
+    case: "taskUpdated";
+  } | {
+    /**
+     * task_id, evicted from registry
+     *
+     * @generated from field: string task_removed = 4;
+     */
+    value: string;
+    case: "taskRemoved";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message tasks.TaskListEvent.
+ * Use `create(TaskListEventSchema)` to create a new message.
+ */
+export const TaskListEventSchema: GenMessage<TaskListEvent> = /*@__PURE__*/
+  messageDesc(file_tasks, 13);
+
+/**
  * @generated from enum tasks.TaskStatusProto
  */
 export enum TaskStatusProto {
@@ -510,6 +583,18 @@ export const TaskService: GenService<{
     methodKind: "unary";
     input: typeof SendInputRequestSchema;
     output: typeof SendInputResponseSchema;
+  },
+  /**
+   * Stream task lifecycle events (added / updated / removed) in real time.
+   * Emits a snapshot of existing tasks (is_snapshot=true) before live events.
+   * Returns FAILED_PRECONDITION if daemon_instance_id refers to a remote host.
+   *
+   * @generated from rpc tasks.TaskService.WatchTaskList
+   */
+  watchTaskList: {
+    methodKind: "server_streaming";
+    input: typeof WatchTaskListRequestSchema;
+    output: typeof TaskListEventSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_tasks, 0);
