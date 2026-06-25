@@ -19,20 +19,22 @@ use tddy_service::proto::connection::{
     ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
     ListProjectsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
-    ListSessionsRequest, ListSessionsResponse, ListToolsRequest, ListToolsResponse,
+    ListSessionsRequest, ListSessionsResponse, ListTerminalSessionsRequest,
+    ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreesForProjectRequest, ListWorktreesForProjectResponse,
     ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
     ReadSessionWorkflowFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
     ReportSessionStatusRequest, ReportSessionStatusResponse, ResumeSessionRequest,
     ResumeSessionResponse, SendTerminalInputResponse, SessionEntry as ProtoSessionEntry,
     SessionTerminalInput, SessionTerminalOutput, Signal, SignalSessionRequest,
-    SignalSessionResponse, StartSessionRequest, StartSessionResponse, StreamTerminalOutputRequest,
-    ToolInfo, WorkflowFileEntry, WorktreeRow,
+    SignalSessionResponse, StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
+    StartTerminalSessionResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
+    StreamTerminalOutputRequest, TerminalSessionInfo, ToolInfo, WorkflowFileEntry, WorktreeRow,
 };
 use uuid::Uuid;
 
 use crate::agent_list_mapping::agent_allowlist_rows;
-use crate::claude_cli_session::ClaudeCliSessionManager;
+use crate::claude_cli_session::{ClaudeCliSessionManager, MAIN_TERMINAL_ID};
 use crate::config::DaemonConfig;
 use crate::livekit_peer_discovery::{local_instance_id_for_config, LiveKitDiscoveryHandles};
 use crate::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
@@ -90,6 +92,17 @@ pub type SessionUserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>
 
 /// Resolves OS user to sessions base path.
 pub type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
+
+/// Resolve a request's `terminal_id`, defaulting an empty value to the reserved main terminal so
+/// existing single-terminal clients keep working.
+fn resolved_terminal_id(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        MAIN_TERMINAL_ID
+    } else {
+        trimmed
+    }
+}
 
 /// Stream adapter that yields [`SessionTerminalOutput`] from a broadcast receiver.
 ///
@@ -1584,22 +1597,25 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
         let session_id = first.session_id.clone();
+        let terminal_id = resolved_terminal_id(&first.terminal_id).to_string();
         log::info!(
             target: "tddy_daemon::connection_service",
-            "stream_session_terminal_io: session_id={}",
-            session_id
+            "stream_session_terminal_io: session_id={} terminal_id={}",
+            session_id,
+            terminal_id
         );
         let handle = self
             .claude_cli_manager
-            .get(&session_id)
+            .get_terminal(&session_id, &terminal_id)
             .await
             .ok_or_else(|| {
                 log::warn!(
                     target: "tddy_daemon::connection_service",
-                    "stream_session_terminal_io: session {} not found in registry",
-                    session_id
+                    "stream_session_terminal_io: session {} terminal {} not found in registry",
+                    session_id,
+                    terminal_id
                 );
-                Status::not_found("claude-cli session not found or not running")
+                Status::not_found("terminal not found or not running")
             })?;
 
         let stdin_tx = handle.stdin_tx.clone();
@@ -1648,22 +1664,25 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
         let session_id = req.session_id.trim().to_string();
+        let terminal_id = resolved_terminal_id(&req.terminal_id).to_string();
         log::info!(
             target: "tddy_daemon::connection_service",
-            "stream_terminal_output: session_id={}",
-            session_id
+            "stream_terminal_output: session_id={} terminal_id={}",
+            session_id,
+            terminal_id
         );
         let handle = self
             .claude_cli_manager
-            .get(&session_id)
+            .get_terminal(&session_id, &terminal_id)
             .await
             .ok_or_else(|| {
                 log::warn!(
                     target: "tddy_daemon::connection_service",
-                    "stream_terminal_output: session {} not found in registry",
-                    session_id
+                    "stream_terminal_output: session {} terminal {} not found in registry",
+                    session_id,
+                    terminal_id
                 );
-                Status::not_found("claude-cli session not found or not running")
+                Status::not_found("terminal not found or not running")
             })?;
 
         // Subscribe to broadcast BEFORE reading the capture buffer so there is no gap:
@@ -1740,23 +1759,122 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
         let session_id = req.session_id.trim().to_string();
+        let terminal_id = resolved_terminal_id(&req.terminal_id).to_string();
         let handle = self
             .claude_cli_manager
-            .get(&session_id)
+            .get_terminal(&session_id, &terminal_id)
             .await
-            .ok_or_else(|| Status::not_found("claude-cli session not found or not running"))?;
+            .ok_or_else(|| Status::not_found("terminal not found or not running"))?;
 
         if !req.data.is_empty() {
             log::trace!(
                 target: "tddy_daemon::connection_service",
-                "send_terminal_input: session_id={} {} bytes: {:?}",
+                "send_terminal_input: session_id={} terminal_id={} {} bytes: {:?}",
                 session_id,
+                terminal_id,
                 req.data.len(),
                 String::from_utf8_lossy(&req.data)
             );
             let _ = handle.stdin_tx.send(bytes::Bytes::from(req.data));
         }
         Ok(Response::new(SendTerminalInputResponse {}))
+    }
+
+    async fn start_terminal_session(
+        &self,
+        request: Request<StartTerminalSessionRequest>,
+    ) -> Result<Response<StartTerminalSessionResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let session_id = req.session_id.trim().to_string();
+        // A Bash tool runs in the session's worktree, resolved from the main (claude) terminal.
+        let main = self
+            .claude_cli_manager
+            .get(&session_id)
+            .await
+            .ok_or_else(|| Status::failed_precondition("session has no running terminal"))?;
+        let worktree = main.worktree_path.clone();
+
+        // The Bash tool is built-in: the user's login shell, falling back to /bin/bash.
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+
+        let handle = self
+            .claude_cli_manager
+            .start_terminal(&session_id, worktree, &shell)
+            .await
+            .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?;
+
+        Ok(Response::new(StartTerminalSessionResponse {
+            terminal_id: handle.terminal_id.clone(),
+        }))
+    }
+
+    async fn stop_terminal_session(
+        &self,
+        request: Request<StopTerminalSessionRequest>,
+    ) -> Result<Response<StopTerminalSessionResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let session_id = req.session_id.trim().to_string();
+        let terminal_id = req.terminal_id.trim().to_string();
+        if terminal_id == MAIN_TERMINAL_ID {
+            return Err(Status::invalid_argument(
+                "the main terminal cannot be stopped via StopTerminalSession; \
+                 use SignalSession or DeleteSession",
+            ));
+        }
+
+        if self
+            .claude_cli_manager
+            .stop_terminal(&session_id, &terminal_id)
+            .await
+        {
+            Ok(Response::new(StopTerminalSessionResponse {
+                ok: true,
+                message: String::new(),
+            }))
+        } else {
+            Err(Status::not_found("terminal not found"))
+        }
+    }
+
+    async fn list_terminal_sessions(
+        &self,
+        request: Request<ListTerminalSessionsRequest>,
+    ) -> Result<Response<ListTerminalSessionsResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let session_id = req.session_id.trim().to_string();
+        let terminals = self
+            .claude_cli_manager
+            .list_terminals(&session_id)
+            .await
+            .iter()
+            .map(|h| TerminalSessionInfo {
+                terminal_id: h.terminal_id.clone(),
+                kind: h.kind.clone(),
+                pid: h.pid,
+            })
+            .collect();
+        Ok(Response::new(ListTerminalSessionsResponse { terminals }))
     }
 
     async fn remove_worktree(

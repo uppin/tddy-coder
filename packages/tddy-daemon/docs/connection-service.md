@@ -16,7 +16,8 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 | `ReadSessionWorkflowFile` | Returns UTF-8 text for one allowlisted **basename** under the same resolved session directory. Rejects empty, non-allowlisted, or path-segment-unsafe **`basename`** values (`..`, `/`, `\`). Uses canonical path checks so resolved file paths cannot sit outside the session root. |
 | `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id`; optional `daemon_instance_id` selects target instance (local spawn when empty or local; non-local targets are unsupported until cross-daemon routing exists). When **`allowed_agents`** in config is non-empty, a non-empty **`agent`** on the request must match an entry **`id`** (after trim); otherwise the RPC returns **`INVALID_ARGUMENT`**. When **`allowed_agents`** is empty, **`agent`** is not restricted by this allowlist. When `session_type == "claude-cli"`, the tool-spawn path is bypassed entirely — see [Claude Code CLI sessions](#claude-code-cli-sessions) below. |
 | `ConnectSession` / `ResumeSession` | LiveKit / respawn (resume passes `project_id` from metadata); `session_id` is validated as a single path segment before resolving `{sessions_base}/sessions/{session_id}/`. For `session_type == "claude-cli"` sessions, `ConnectSession` returns empty LiveKit fields immediately (no token RPC). |
-| `StreamSessionTerminalIO` | Bidi stream for raw terminal I/O with a running `claude` CLI process. First client message must carry `session_token` + `session_id` for auth. Subsequent messages carry raw stdin bytes; the server forwards them to the child process stdin and broadcasts stdout/stderr back as `SessionTerminalOutput` messages. Resize: if the input starts with `\x1b]resize;{cols};{rows}\x07`, the daemon updates the terminal size instead of forwarding to stdin. Session must have `session_type == "claude-cli"`; returns `FAILED_PRECONDITION` when no active process is found. |
+| `StreamSessionTerminalIO` | Bidi stream for raw terminal I/O with a running `claude` CLI process. First client message must carry `session_token` + `session_id` for auth. Subsequent messages carry raw stdin bytes; the server forwards them to the child process stdin and broadcasts stdout/stderr back as `SessionTerminalOutput` messages. Resize: if the input starts with `\x1b]resize;{cols};{rows}\x07`, the daemon updates the terminal size instead of forwarding to stdin. Session must have `session_type == "claude-cli"`; returns `FAILED_PRECONDITION` when no active process is found. Accepts an optional `terminal_id` on the first message (empty ⇒ the reserved `"main"` claude terminal); an unknown id returns `NOT_FOUND`. |
+| `StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions` | Manage the **tools** running in a session — see [Session tools](#session-tools-multiple-terminals-per-session) below. |
 | `DeleteSession` | Removes **`{sessions_base}/sessions/{session_id}/`**. If **`.session.yaml`** records a live PID, the daemon sends **SIGTERM**, waits, then **SIGKILL** as needed (Linux zombie sessions are treated as stopped), then removes the directory. Directories without readable metadata are still removed when the path resolves safely. Rejects unknown ids and path-unsafe ids (implementation in **`session_deletion`**) |
 | `SignalSession` | Send Unix signal to recorded PID for an active session; `session_id` validated before path resolution |
 
@@ -94,6 +95,26 @@ claude_cli:
   tddy_tools_path: /usr/local/bin/tddy-tools  # default: current_exe sibling → "tddy-tools"
   daemon_url: http://127.0.0.1:8899    # default: http://127.0.0.1:{web_port}
 ```
+
+## Session tools (multiple terminals per session)
+
+A session can run multiple identified **tools**, each a `PtyHandle` in `ClaudeCliSessionManager`'s
+two-level registry `session_id → (terminal_id → PtyHandle)`. The original `claude` process is the
+tool under the reserved id `MAIN_TERMINAL_ID` (`"main"`, kind `"claude-cli"`); additional **Bash**
+tools (kind `"bash"`) run the user's `$SHELL` (fallback `/bin/bash`) in the session worktree and
+take no inputs.
+
+- `StartTerminalSession(session_id)` — resolves the worktree from the running `"main"` terminal
+  (`FAILED_PRECONDITION` if none), spawns a Bash tool, returns a fresh `terminal_id` (uuid v7).
+- `StopTerminalSession(session_id, terminal_id)` — SIGTERM→SIGKILL the tool's pid and deregister
+  (idempotent with the PTY exit-monitor). Rejects `terminal_id == "main"` with `INVALID_ARGUMENT`
+  (use `SignalSession`/`DeleteSession` for the session itself); unknown id → `NOT_FOUND`.
+- `ListTerminalSessions(session_id)` — `TerminalSessionInfo{terminal_id, kind, pid}` per running tool.
+
+The terminal I/O RPCs (`StreamSessionTerminalIO`, `StreamTerminalOutput`, `SendTerminalInput`)
+carry an optional `terminal_id` (empty ⇒ `"main"`) and resolve the target via
+`get_terminal(session_id, terminal_id)`. All four new/extended RPCs authenticate `session_token`
+via the same GitHub → OS user path as the other endpoints.
 
 ## Spawn worker
 
