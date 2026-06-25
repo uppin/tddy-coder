@@ -33,6 +33,7 @@ import {
   listDefaultAgents,
   listAgents,
   listEligibleDaemons,
+  listProjectBranches,
   listProjects,
   listSessions,
   listTools,
@@ -290,7 +291,7 @@ export function interceptResumeSession(sessionId: string): void {
 
 /** Intercept StartSession with a given sessionId. */
 export function interceptStartSession(sessionId: string): void {
-  const body = toArrayBuffer(
+  const responseBody = toArrayBuffer(
     toBinary(
       StartSessionResponseSchema,
       create(StartSessionResponseSchema, {
@@ -301,9 +302,44 @@ export function interceptStartSession(sessionId: string): void {
       }),
     ),
   );
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+  // Use middleware: true so this handler runs BEFORE any non-middleware handler (e.g. an
+  // anonymous capturing handler registered after this call in the test).
+  //
+  // Calling req.on('before:response', ...) subscribes a response modifier WITHOUT setting
+  // stopPropagation — so Cypress falls through to the next (non-middleware, anonymous) handler
+  // rather than skipping it. The anonymous handler can then capture the request body and call
+  // req.continue() to send the request to the upstream server (Vite dev server). When the Vite
+  // 404 response comes back, our before:response modifier replaces it with the valid protobuf
+  // response, letting the component resolve the RPC successfully.
+  //
+  // This avoids the problem where req.continue() / req.reply() set stopPropagation=true and
+  // skip subsequent handlers (confirmed from Cypress runner source: finish(true) skips, finish(false)
+  // propagates).
+  cy.intercept(
+    "**/rpc/connection.ConnectionService/StartSession",
+    { method: "POST", middleware: true },
+    (req) => {
+      req.on("before:response", (res) => {
+        // Replace whatever upstream response arrives (e.g. 404 from Vite dev server) with the
+        // canned proto response so that the component's startSession() resolves successfully.
+        res.send({
+          statusCode: 200,
+          headers: { "Content-Type": "application/proto" },
+          body: responseBody,
+        });
+      });
+      // Do NOT call req.reply() or req.continue() here — returning without either sets
+      // stopPropagation=false, letting Cypress continue to the next registered handler.
+    },
+  ).as("startSession");
+}
+
+/** Intercept ListProjectBranches and reply with the given branch names. */
+export function interceptListProjectBranches(branches: string[] = []): void {
+  const body = toArrayBuffer(listProjectBranches(branches));
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjectBranches", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
-  }).as("startSession");
+  }).as("listProjectBranches");
 }
 
 /** Intercept SignalSession and reply with ok:true. */

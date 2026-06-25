@@ -8,6 +8,7 @@ import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
 import { useSessionAttachment } from "./useSessionAttachment";
 import { nextInspectorState } from "./inspectorState";
+import { sessionsDrawerPathForSession } from "../../routing/appRoutes";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 
 // ---------------------------------------------------------------------------
@@ -37,6 +38,7 @@ export function SessionsDrawerScreen() {
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [inspectorState, setInspectorState] = useState<InspectorDrawerState>("closed");
+  const [mode, setMode] = useState<"list" | "creating">("list");
 
   const { state: attachment, connectSession, resumeSession, deleteSession, signalSession } = useSessionAttachment();
 
@@ -116,6 +118,17 @@ export function SessionsDrawerScreen() {
   const handleInspectorExpand = () => setInspectorState("expanded");
   const handleInspectorRestore = () => setInspectorState("open");
 
+  const handleCreateSession = () => setMode("creating");
+  const handleCancelCreate = () => setMode("list");
+  const handleSessionCreated = (sessionId: string) => {
+    setMode("list");
+    setSelectedSessionId(sessionId);
+    window.location.hash = sessionsDrawerPathForSession(sessionId);
+    connectSession(sessionId, sessionToken, client).catch((err) => {
+      console.debug("[SessionsDrawerScreen] connectSession after create error", err);
+    });
+  };
+
   return (
     <TooltipProvider delayDuration={0}>
       <div
@@ -126,6 +139,7 @@ export function SessionsDrawerScreen() {
           sessions={sortedSessions}
           selectedSessionId={selectedSessionId}
           onSelectSession={handleSelectSession}
+          onCreateSession={handleCreateSession}
         />
         <SessionMainPane
           selectedSession={selectedSession}
@@ -138,6 +152,11 @@ export function SessionsDrawerScreen() {
           onResume={handleResume}
           onDelete={handleDelete}
           onTerminate={handleTerminate}
+          isCreating={mode === "creating"}
+          client={client}
+          sessionToken={sessionToken}
+          onCancelCreate={handleCancelCreate}
+          onSessionCreated={handleSessionCreated}
         />
       </div>
     </TooltipProvider>
