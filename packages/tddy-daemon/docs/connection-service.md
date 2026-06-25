@@ -18,6 +18,9 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 | `ConnectSession` / `ResumeSession` | LiveKit / respawn (resume passes `project_id` from metadata); `session_id` is validated as a single path segment before resolving `{sessions_base}/sessions/{session_id}/`. For `session_type == "claude-cli"` sessions, `ConnectSession` returns empty LiveKit fields immediately (no token RPC). |
 | `StreamSessionTerminalIO` | Bidi stream for raw terminal I/O with a running `claude` CLI process. First client message must carry `session_token` + `session_id` for auth. Subsequent messages carry raw stdin bytes; the server forwards them to the child process stdin and broadcasts stdout/stderr back as `SessionTerminalOutput` messages. Resize: if the input starts with `\x1b]resize;{cols};{rows}\x07`, the daemon updates the terminal size instead of forwarding to stdin. Session must have `session_type == "claude-cli"`; returns `FAILED_PRECONDITION` when no active process is found. Accepts an optional `terminal_id` on the first message (empty ⇒ the reserved `"main"` claude terminal); an unknown id returns `NOT_FOUND`. |
 | `StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions` | Manage the **tools** running in a session — see [Session tools](#session-tools-multiple-terminals-per-session) below. |
+| `ExecuteTool` | Runs one exec-tool (Read, Write, StrReplace, Delete, Grep, Glob, Shell, Await, ReadLints, SemanticSearch) against the session's worktree. After execution, appends a `ToolCallRecord` to the durable JSONL log `~/.tddy/sessions/{session_id}/tool-calls.jsonl` (non-fatal: a write failure is logged as a warning and never blocks the response). Authenticates via `session_token` → OS user, validates `session_id`; optional `daemon_instance_id` for peer routing. |
+| `ListExecTools` | Returns the exec-tool catalog (`ToolDef` per tool: `name`, `description`, `input_schema_json`). Auth same as `ExecuteTool`. |
+| `ListSessionToolCalls` | Returns the durable tool-call log for a session (up to 500 most-recent entries from `tool-calls.jsonl`; ordered chronologically). Each `ToolCallInfo` carries `task_id`, `tool_name`, `args_json`, `result_json`, `is_error`, `error_message`, `job_running`, `created_unix_ms`. Authenticates via `session_token`, validates `session_id` (path-segment guard), optionally routes to owning daemon via `daemon_instance_id`. |
 | `DeleteSession` | Removes **`{sessions_base}/sessions/{session_id}/`**. If **`.session.yaml`** records a live PID, the daemon sends **SIGTERM**, waits, then **SIGKILL** as needed (Linux zombie sessions are treated as stopped), then removes the directory. Directories without readable metadata are still removed when the path resolves safely. Rejects unknown ids and path-unsafe ids (implementation in **`session_deletion`**) |
 | `SignalSession` | Send Unix signal to recorded PID for an active session; `session_id` validated before path resolution |
 
@@ -119,6 +122,23 @@ via the same GitHub → OS user path as the other endpoints.
 ## Spawn worker
 
 Spawn and **git clone** requests run through a forked single-threaded worker (`spawn_worker`) so fork+setuid from a Tokio process avoids deadlocks. JSON protocol: `WorkerRequest` (`spawn` | `clone`) and `WorkerResponse` (`spawn_ok` | `clone_ok` | `error`).
+
+## Durable tool-call log
+
+Every `ExecuteTool` invocation appends a JSON line to **`~/.tddy/sessions/{session_id}/tool-calls.jsonl`** (module **`tool_call_log.rs`**):
+
+```json
+{"task_id":"...","tool_name":"Read","args_json":"{\"path\":\"/foo\"}","result_json":"...","is_error":false,"error_message":"","job_running":false,"created_unix_ms":1719312000000}
+```
+
+- **Append-only** — no read-modify-write; safe for concurrent invocations.
+- **Durability** — survives daemon restarts and in-memory registry eviction (5-min TTL).
+- **Scope** — one file per session directory; calls from other sessions are not included.
+- **Tail cap** — `read_tool_calls` returns at most the 500 most-recent records; malformed lines are skipped with a warning.
+- **Non-fatal** — a write error only produces a `warn!` log entry; the `ExecuteTool` response is unaffected.
+- **Background Shell** — jobs with `job_running: true` store `task_id`; live stdout/stderr is available via `TaskService.WatchTask` while the task is in the registry. Durable stdio for detached jobs is not captured in the log.
+
+`ListSessionToolCalls` reads this file and returns up to 500 `ToolCallInfo` records in chronological order (UI reverses to newest-first).
 
 ## See also
 
