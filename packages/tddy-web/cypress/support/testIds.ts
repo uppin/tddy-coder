@@ -119,6 +119,10 @@ export const TEST_IDS = {
   // Terminal routes
   terminalRouteUnknownSession: "terminal-route-unknown-session",
   terminalRouteUnknownSessionHome: "terminal-route-unknown-session-home",
+
+  // Shortcut drawer
+  shortcutDrawer: "shortcut-drawer",
+  shortcutDragHandle: "shortcut-drag-handle",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -235,3 +239,6 @@ export const sessionsInspectorDeleteConfirm = (sessionId: string) =>
 /** `[data-testid="sessions-inspector-terminate-<sessionId>"]` — Terminate button in inspector */
 export const sessionsInspectorTerminateBtn = (sessionId: string) =>
   `sessions-inspector-terminate-${sessionId}`;
+
+/** `[data-testid="shortcut-button-<label>"]` — individual shortcut button */
+export const shortcutButton = (label: string) => `shortcut-button-${label}`;
