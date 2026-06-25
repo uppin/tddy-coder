@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
+import { useCallback, useEffect, useState } from "react";
 import { VmService, type VmInfo, type VmImageInfo } from "../../gen/vm_pb";
 import { useAuth } from "../../hooks/useAuth";
+import { useHttpClient } from "../../rpc/transportProvider";
 import { DaemonNavMenu } from "../shell/DaemonNavMenu";
 import { UserAvatar } from "../UserAvatar";
 import { VmsScreen, type VmRow } from "./VmsScreen";
@@ -10,14 +9,6 @@ import { DefineVmPanel } from "./DefineVmPanel";
 
 const screenShellClassName =
   "min-h-svh w-full min-w-0 box-border px-4 py-6 sm:px-6 font-sans text-foreground";
-
-function createVmClient() {
-  const transport = createConnectTransport({
-    baseUrl: typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
-    useBinaryFormat: true,
-  });
-  return createClient(VmService, transport);
-}
 
 function vmStateLabel(state: number): string {
   switch (state) {
@@ -42,7 +33,7 @@ function rowFromRpc(vm: VmInfo): VmRow {
 
 export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { user, logout, sessionToken } = useAuth();
-  const client = useMemo(() => createVmClient(), []);
+  const client = useHttpClient(VmService);
 
   const [rows, setRows] = useState<VmRow[]>([]);
   const [building, setBuilding] = useState(false);

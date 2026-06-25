@@ -1,19 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
 import {
   ConnectionService,
   DemoVmState,
 } from "../gen/connection_pb";
+import { useHttpClient } from "../rpc/transportProvider";
 import { Button } from "@/components/ui/button";
-
-function createClient_() {
-  const transport = createConnectTransport({
-    baseUrl: typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
-    useBinaryFormat: true,
-  });
-  return createClient(ConnectionService, transport);
-}
 
 type VmStatus = {
   state: DemoVmState;
@@ -35,10 +26,10 @@ export function DemoVmControls({
   const [status, setStatus] = useState<VmStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const client = useHttpClient(ConnectionService);
 
   const fetchStatus = useCallback(async () => {
     try {
-      const client = createClient_();
       const res = await client.getDemoVmStatus({ sessionToken, sessionId });
       setStatus({
         state: res.state,
@@ -48,7 +39,7 @@ export function DemoVmControls({
     } catch {
       // silently ignore transient network errors during polling
     }
-  }, [sessionId, sessionToken]);
+  }, [client, sessionId, sessionToken]);
 
   useEffect(() => {
     void fetchStatus();
@@ -61,7 +52,6 @@ export function DemoVmControls({
   const handleLaunch = async () => {
     setBusy(true);
     try {
-      const client = createClient_();
       await client.startDemoVm({ sessionToken, sessionId });
       await fetchStatus();
     } catch (e) {
@@ -74,7 +64,6 @@ export function DemoVmControls({
   const handleStop = async () => {
     setBusy(true);
     try {
-      const client = createClient_();
       await client.stopDemoVm({ sessionToken, sessionId });
       await fetchStatus();
     } catch (e) {

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { create } from "@bufbuild/protobuf";
 import { GripVertical, Minus, Trash2 } from "lucide-react";
-import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
+import type { Client } from "@connectrpc/connect";
 import {
   AgentInfoSchema,
   ConnectionService,
@@ -25,6 +24,7 @@ import { GhosttyTerminalLiveKit } from "./GhosttyTerminalLiveKit";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
 import { ParticipantList } from "./ParticipantList";
 import { useAuth } from "../hooks/useAuth";
+import { useHttpClient } from "../rpc/transportProvider";
 import { useCommonRoom } from "../hooks/useCommonRoom";
 import { useRoomParticipants } from "../hooks/useRoomParticipants";
 import { GitHubLoginButton } from "./GitHubLoginButton";
@@ -151,21 +151,6 @@ const inputStyle = {
 
 const labelStyle = { display: "block", marginBottom: 4, fontWeight: 500 };
 
-function createConnectionClient() {
-  const transport = createConnectTransport({
-    baseUrl: typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
-    useBinaryFormat: true,
-  });
-  return createClient(ConnectionService, transport);
-}
-
-function createTokenClient() {
-  const transport = createConnectTransport({
-    baseUrl: typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
-    useBinaryFormat: true,
-  });
-  return createClient(TokenService, transport);
-}
 
 type ProjectSessionForm = {
   toolPath: string;
@@ -215,7 +200,7 @@ function defaultProjectSessionForm(
 const sessionControlSelectClassName =
   "box-border w-full min-w-[9rem] max-w-[16rem] rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-type ConnectionClient = ReturnType<typeof createConnectionClient>;
+type ConnectionClient = Client<typeof ConnectionService>;
 
 /** Tool, backend, host, and browser-terminal debug for one project—per session / connection, not stored on the project. */
 function ProjectSessionOptions({
@@ -691,7 +676,7 @@ function ConnectedTerminal({
   mobileShortcuts?: ToolShortcutDef[];
 }) {
   type OverlayResizeCorner = "nw" | "ne" | "sw" | "se";
-  const tokenClient = useMemo(() => createTokenClient(), []);
+  const tokenClient = useHttpClient(TokenService);
   const fullscreenTargetRef = useRef<HTMLDivElement>(null);
   const [initialToken, setInitialToken] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);
@@ -1174,7 +1159,7 @@ function ConnectedClaudeCliTerminal({
   sessionToken: string;
   onDisconnect: () => void;
 }) {
-  const client = useMemo(() => createConnectionClient(), []);
+  const client = useHttpClient(ConnectionService);
   const [stream, setStream] = useState<GrpcStream | null>(null);
 
   useEffect(() => {
@@ -1282,7 +1267,7 @@ export function ConnectionScreen({
   const [terminalOverlayMinimized, setTerminalOverlayMinimized] = useState(false);
   const terminalDeepLinkSeqRef = useRef(0);
   const sessionsEverLoadedRef = useRef(false);
-  const client = useMemo(() => createConnectionClient(), []);
+  const client = useHttpClient(ConnectionService);
 
   const navigatePath = useCallback(
     (path: string, mode: "push" | "replace") => {

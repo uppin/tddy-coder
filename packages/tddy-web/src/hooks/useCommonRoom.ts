@@ -1,18 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Room } from "livekit-client";
-import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
 import { TokenService } from "../gen/token_pb";
+import { useHttpClient } from "../rpc/transportProvider";
 
 export type CommonRoomStatus = "idle" | "connecting" | "connected" | "error";
-
-function createTokenClient() {
-  const transport = createConnectTransport({
-    baseUrl: typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
-    useBinaryFormat: true,
-  });
-  return createClient(TokenService, transport);
-}
 
 /**
  * Joins a shared LiveKit room (presence / participant list). Disconnects on unmount or when inputs change.
@@ -25,7 +16,7 @@ export function useCommonRoom(
   const [room, setRoom] = useState<Room | null>(null);
   const [status, setStatus] = useState<CommonRoomStatus>("idle");
   const [error, setError] = useState<string | null>(null);
-  const tokenClient = useMemo(() => createTokenClient(), []);
+  const tokenClient = useHttpClient(TokenService);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const roomRef = useRef<Room | null>(null);
 

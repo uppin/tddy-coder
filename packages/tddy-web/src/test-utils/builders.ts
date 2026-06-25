@@ -5,7 +5,13 @@
  * only the fields relevant to each test scenario.
  *
  * For bun:test only — never import from Cypress tests.
+ *
+ * For ConnectRPC stubbing prefer `anInMemoryRpcBackend` (re-exported from
+ * `tddy-connectrpc-testkit`) over the legacy `aFake*Transport` helpers below.
  */
+
+// Re-export the in-memory ConnectRPC backend as a primary test-utils export.
+export { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 
 import { create } from "@bufbuild/protobuf";
 import type { Transport, UnaryResponse } from "@connectrpc/connect";
@@ -188,10 +194,12 @@ export async function anEchoRegistry() {
 }
 
 // ---------------------------------------------------------------------------
-// RPC Playground: fake transports
+// RPC Playground: fake transports (legacy — prefer anInMemoryRpcBackend for new tests)
 // ---------------------------------------------------------------------------
 
 /**
+ * @deprecated Use `anInMemoryRpcBackend().onUnary(method, handler)` instead.
+ *
  * Fake unary Transport that returns a preset JSON response string decoded through the method's
  * output schema — matches the `makeFakeUnaryTransport` pattern in invoke.test.ts.
  */

@@ -21,8 +21,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      // Cypress / dev server resolve `tddy-livekit-web` without requiring a prior `dist` build.
+      // Cypress / dev server resolve workspace packages without requiring a prior build.
       "tddy-livekit-web": path.resolve(__dirname, "../tddy-livekit-web/src/index.ts"),
+      "tddy-connectrpc-testkit": path.resolve(__dirname, "../tddy-connectrpc-testkit/src/index.ts"),
     },
   },
   build: {
