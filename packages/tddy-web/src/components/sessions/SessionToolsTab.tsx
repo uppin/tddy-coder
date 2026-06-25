@@ -21,7 +21,6 @@ interface InvokeResult {
 
 interface SessionToolsTabProps {
   sessionId: string;
-  sessionToken: string;
   onListExecTools: () => Promise<Partial<ToolDef>[]>;
   onListSessionToolCalls: () => Promise<ToolCallInfo[]>;
   onExecuteTool: (args: {
@@ -209,7 +208,7 @@ export function SessionToolsTab({
               const stdio = extractStdio(call.resultJson);
               return (
                 <div
-                  key={String(call.taskId) || String(displayIndex)}
+                  key={String(call.taskId) || String(originalIndex)}
                   className="border border-border rounded"
                 >
                   <div

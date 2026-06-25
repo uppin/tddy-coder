@@ -46,6 +46,33 @@ the session's worktree.
 | AC12 | The call log is scoped to the session — calls from a different session are not shown |
 | AC13 | When no calls have been made, the log shows an empty-state message |
 
+## Validation Results
+
+### Build
+- `cargo build -p tddy-daemon` ✅ clean
+- `cargo clippy -p tddy-daemon -- -D warnings` ✅ clean
+- `bun run build` (TypeScript) ✅ clean
+
+### Issues Found
+
+#### [WARNING] `packages/tddy-web/src/components/sessions/SessionToolsTab.tsx:212`
+React key instability for sync tool call rows. The fallback key uses `String(displayIndex)` — the position in the **reversed** array — which shifts by 1 for all existing items whenever a new entry is prepended. For sync tools (Read, Write, StrReplace etc.), `task_id` is always `""` (confirmed in `tool_engine.rs`), so the fallback fires for every non-Shell call.
+
+**Effect**: React incorrectly recycles DOM nodes across renders when new items are added; any expanded row state resets for shifted items.
+
+**Fix**: Use `String(originalIndex)` instead — `originalIndex` is the position in the original (append-only) `callLog` array and is stable. Or use `String(call.createdUnixMs)` for full uniqueness.
+
+#### [INFO] `packages/tddy-web/src/components/sessions/SessionToolsTab.tsx:24`
+`sessionToken` is declared in `SessionToolsTabProps` but is never destructured or used in the component body. The token is already baked into the callback closures by the parent (`SessionInspectorDrawer`). Dead prop.
+
+#### [INFO] `packages/tddy-web/src/components/sessions/SessionInspectorDrawer.tsx:250-279`
+Inline arrow function callbacks (`onListExecTools`, `onListSessionToolCalls`) get new references on every parent render. Both are in `useEffect` dep arrays in `SessionToolsTab`, so the catalog + call log are re-fetched whenever the inspector re-renders (e.g., on expand/restore state changes). 2 extra RPC calls per inspector state change — acceptable but worth noting.
+
+### Risk Assessment
+- **Critical**: 0
+- **Warning**: 1 (React key instability — UX impact only, no data loss)
+- **Info**: 2
+
 ## Packages Affected
 
 - `packages/tddy-service` — proto changes (`connection.proto`)

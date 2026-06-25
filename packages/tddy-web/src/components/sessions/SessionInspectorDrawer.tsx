@@ -246,7 +246,6 @@ export function SessionInspectorDrawer({
           <ScrollArea className="flex-1 min-h-0">
             <SessionToolsTab
               sessionId={session.sessionId}
-              sessionToken={sessionToken ?? ""}
               onListExecTools={() =>
                 client
                   ? client
