@@ -2,10 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { DisconnectReason, Room, RoomEvent } from "livekit-client";
 import { createClient } from "@connectrpc/connect";
 import {
-  createLiveKitTransport,
   TerminalService,
   TerminalInputSchema,
 } from "tddy-livekit-web";
+import { useLiveKitTransportFactory } from "../rpc/transportProvider";
 import { create } from "@bufbuild/protobuf";
 import { isCancelledLiveKitConnectionError } from "../lib/liveKitConnectionErrors";
 import { tddyDevDebug } from "../lib/tddyDevLog";
@@ -132,6 +132,7 @@ export function GhosttyTerminalLiveKit({
   fixedViewportGrid,
   onRemoteSessionEnded,
 }: GhosttyTerminalLiveKitProps) {
+  const liveKitFactory = useLiveKitTransportFactory();
   const log = debugLogging
     ? (...args: unknown[]) => console.log("[GhosttyLiveKit]", ...args)
     : () => {};
@@ -302,11 +303,7 @@ export function GhosttyTerminalLiveKit({
         });
         log("lifecycle: server participant found");
 
-        const transport = createLiveKitTransport({
-          room: room!,
-          targetIdentity: serverIdentity,
-          debug: debugMode || debugLogging,
-        });
+        const transport = liveKitFactory(room!, serverIdentity, { debug: debugMode || debugLogging });
         log("lifecycle: transport created");
 
         const client = createClient(TerminalService, transport);

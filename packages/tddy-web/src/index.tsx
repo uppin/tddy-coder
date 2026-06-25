@@ -2,7 +2,7 @@ import "./index.css";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
+import { RpcTransportProvider, useHttpTransport } from "./rpc/transportProvider";
 import { GhosttyTerminalLiveKit } from "./components/GhosttyTerminalLiveKit";
 import { ConnectionTerminalChrome } from "./components/connection/ConnectionTerminalChrome";
 import { BUILD_ID } from "./buildId";
@@ -116,17 +116,6 @@ const inputStyle = {
 
 const labelStyle = { display: "block", marginBottom: 4, fontWeight: 500 };
 
-function createTokenClient() {
-  const transport = createConnectTransport({
-    baseUrl:
-      typeof window !== "undefined"
-        ? `${window.location.origin}/rpc`
-        : "",
-    useBinaryFormat: true,
-  });
-  return createClient(TokenService, transport);
-}
-
 function ConnectedTerminal({
   url,
   identity,
@@ -143,7 +132,8 @@ function ConnectedTerminal({
   /** Standalone GitHub flow has no daemon session — omit Terminate. */
   onTerminate?: () => void;
 }) {
-  const client = useMemo(() => createTokenClient(), []);
+  const transport = useHttpTransport();
+  const client = useMemo(() => createClient(TokenService, transport), [transport]);
   const fullscreenTargetRef = useRef<HTMLDivElement>(null);
   const [initialToken, setInitialToken] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);
@@ -457,5 +447,9 @@ export function App() {
 
 const root = document.getElementById("root");
 if (root) {
-  createRoot(root).render(<App />);
+  createRoot(root).render(
+    <RpcTransportProvider>
+      <App />
+    </RpcTransportProvider>,
+  );
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@connectrpc/connect";
 import { create, type Registry } from "@bufbuild/protobuf";
-import { createLiveKitTransport } from "tddy-livekit-web";
+import { useLiveKitTransportFactory } from "../rpc/transportProvider";
 import {
   ServerReflection,
   ServerReflectionRequestSchema,
@@ -74,6 +74,7 @@ export function RpcPlaygroundAppPage({
   onNavigate: (path: string) => void;
 }) {
   const { user, isAuthenticated, login, logout, sessionToken } = useAuth();
+  const liveKitFactory = useLiveKitTransportFactory();
 
   const identity = useMemo(
     () => (user ? presenceIdentityForUser(user.login) : undefined),
@@ -104,8 +105,8 @@ export function RpcPlaygroundAppPage({
   // LiveKit transport for the selected participant — rebuilt on participant change.
   const transport = useMemo(() => {
     if (!room || !selectedParticipantId) return null;
-    return createLiveKitTransport({ room, targetIdentity: selectedParticipantId });
-  }, [room, selectedParticipantId]);
+    return liveKitFactory(room, selectedParticipantId);
+  }, [room, selectedParticipantId, liveKitFactory]);
 
   const [registry, setRegistry] = useState<Registry | null>(null);
   const [services, setServices] = useState<ServiceInfo[]>([]);

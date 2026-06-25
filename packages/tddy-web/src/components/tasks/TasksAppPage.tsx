@@ -1,22 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
 import { TaskService, type TaskInfo } from "../../gen/tasks_pb";
 import { useAuth } from "../../hooks/useAuth";
+import { useHttpTransport } from "../../rpc/transportProvider";
 import { DaemonNavMenu } from "../shell/DaemonNavMenu";
 import { UserAvatar } from "../UserAvatar";
 import { Button } from "../ui/button";
 
 const screenShellClassName =
   "min-h-svh w-full min-w-0 box-border px-4 py-6 sm:px-6 font-sans text-foreground";
-
-function createTaskClient() {
-  const transport = createConnectTransport({
-    baseUrl: typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
-    useBinaryFormat: true,
-  });
-  return createClient(TaskService, transport);
-}
 
 function statusLabel(status: number): string {
   switch (status) {
@@ -49,7 +41,8 @@ function relativeTime(ms: bigint): string {
 
 export function TasksAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { user, logout, sessionToken } = useAuth();
-  const client = useMemo(() => createTaskClient(), []);
+  const transport = useHttpTransport();
+  const client = useMemo(() => createClient(TaskService, transport), [transport]);
 
   const [tasks, setTasks] = useState<TaskInfo[]>([]);
   const [error, setError] = useState("");

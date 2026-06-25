@@ -1,23 +1,12 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
 import { AuthService } from "../gen/auth_pb";
 import type { GitHubUser } from "../gen/auth_pb";
+import { useHttpTransport } from "../rpc/transportProvider";
 
 const SESSION_TOKEN_KEY = "tddy_session_token";
 const OAUTH_STATE_KEY = "tddy_oauth_state";
 export const OAUTH_RETURN_TO_KEY = "tddy_oauth_return_to";
-
-function createAuthClient() {
-  const transport = createConnectTransport({
-    baseUrl:
-      typeof window !== "undefined"
-        ? `${window.location.origin}/rpc`
-        : "",
-    useBinaryFormat: true,
-  });
-  return createClient(AuthService, transport);
-}
 
 export interface AuthState {
   user: GitHubUser | null;
@@ -29,7 +18,8 @@ export interface AuthState {
 }
 
 export function useAuth() {
-  const client = useMemo(() => createAuthClient(), []);
+  const transport = useHttpTransport();
+  const client = useMemo(() => createClient(AuthService, transport), [transport]);
   const [state, setState] = useState<AuthState>({
     user: null,
     isAuthenticated: false,

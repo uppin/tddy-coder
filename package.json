@@ -4,7 +4,8 @@
     "packages/tddy-web",
     "packages/tddy-livekit-web",
     "packages/tddy-desktop",
-    "packages/tddy-rust-typescript-tests"
+    "packages/tddy-rust-typescript-tests",
+    "packages/tddy-connectrpc-testkit"
   ],
   "dependencies": {
     "@zed-industries/codex-acp": "0.11.1"

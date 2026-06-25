@@ -1,26 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
 import { ConnectionService, type SessionEntry } from "../../gen/connection_pb";
 import { sortSessionsByCreation } from "../../utils/sessionSort";
+import { useHttpTransport } from "../../rpc/transportProvider";
 import { TooltipProvider } from "../ui/tooltip";
 import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
 import { useSessionAttachment } from "./useSessionAttachment";
 import { nextInspectorState } from "./inspectorState";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
-
-// ---------------------------------------------------------------------------
-// RPC client
-// ---------------------------------------------------------------------------
-
-function createConnectionClient() {
-  const transport = createConnectTransport({
-    baseUrl: typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
-    useBinaryFormat: true,
-  });
-  return createClient(ConnectionService, transport);
-}
 
 // ---------------------------------------------------------------------------
 // Screen
@@ -32,7 +20,8 @@ export function SessionsDrawerScreen() {
       ? (window.localStorage.getItem("tddy_session_token") ?? "")
       : "";
 
-  const client = useMemo(() => createConnectionClient(), []);
+  const transport = useHttpTransport();
+  const client = useMemo(() => createClient(ConnectionService, transport), [transport]);
 
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
