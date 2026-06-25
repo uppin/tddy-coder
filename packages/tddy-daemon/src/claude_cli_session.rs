@@ -34,8 +34,19 @@ const OUTPUT_BROADCAST_CAPACITY: usize = 256;
 /// later connects it can replay the full screen state from the beginning.
 const CAPTURE_LIMIT_BYTES: usize = 65536; // 64 KB
 
-/// Handle to a running claude CLI process in a PTY.
+/// Reserved terminal id for the original `claude` terminal of a session.
+///
+/// Every terminal in a session is identified; the `claude` terminal spawned at session start is
+/// always addressable under this id, while started shell terminals receive fresh unique ids.
+pub const MAIN_TERMINAL_ID: &str = "main";
+
+/// Handle to a running process in a PTY (the `claude` CLI for the main terminal, or a login shell
+/// for started terminals).
 pub struct PtyHandle {
+    /// Stable identifier within the session; [`MAIN_TERMINAL_ID`] for the main `claude` terminal.
+    pub terminal_id: String,
+    /// Tool kind label: `"claude-cli"` for the main terminal, `"bash"` for started Bash tools.
+    pub kind: String,
     pub worktree_path: PathBuf,
     pub model: String,
     /// Send bytes to the child process via PTY master (stdin).
@@ -88,9 +99,15 @@ impl PtyHandle {
     }
 }
 
-/// Manages a registry of active Claude CLI sessions (session_id → PtyHandle).
+/// Registry of active session tools: `session_id → (terminal_id → PtyHandle)`.
+///
+/// Each session may run multiple identified tools — the main `claude` terminal under
+/// [`MAIN_TERMINAL_ID`] plus additional Bash tools under fresh ids.
+type TerminalRegistry = Arc<RwLock<HashMap<String, HashMap<String, Arc<PtyHandle>>>>>;
+
+/// Manages the [`TerminalRegistry`] of active session tools.
 pub struct ClaudeCliSessionManager {
-    registry: Arc<RwLock<HashMap<String, Arc<PtyHandle>>>>,
+    registry: TerminalRegistry,
 }
 
 impl Default for ClaudeCliSessionManager {
@@ -167,15 +184,43 @@ impl ClaudeCliSessionManager {
         initial_prompt: Option<&str>,
         permission_mode: Option<&str>,
     ) -> anyhow::Result<Arc<PtyHandle>> {
+        let argv = Self::build_claude_argv(
+            binary_path,
+            model,
+            session_id,
+            initial_prompt,
+            permission_mode,
+        );
+        self.spawn_tool(
+            session_id,
+            MAIN_TERMINAL_ID,
+            "claude-cli",
+            worktree_path,
+            model,
+            argv,
+        )
+        .await
+    }
+
+    /// Spawn `argv` in a PTY as an identified tool and register it under `(session_id, terminal_id)`.
+    ///
+    /// Shared by [`start`](Self::start) (the `claude` tool) and
+    /// [`start_terminal`](Self::start_terminal) (Bash tools).
+    async fn spawn_tool(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+        kind: &str,
+        worktree_path: PathBuf,
+        model: &str,
+        argv: Vec<String>,
+    ) -> anyhow::Result<Arc<PtyHandle>> {
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<Bytes>();
         let (stdout_tx, _stdout_rx) = broadcast::channel::<Bytes>(OUTPUT_BROADCAST_CAPACITY);
         let capture = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
 
         let session_id_owned = session_id.to_string();
-        let model_owned = model.to_string();
-        let binary_owned = binary_path.to_string();
-        let initial_prompt_owned = initial_prompt.map(str::to_owned);
-        let permission_mode_owned = permission_mode.map(str::to_owned);
+        let terminal_id_owned = terminal_id.to_string();
         let worktree_clone = worktree_path.clone();
         let stdout_tx_clone = stdout_tx.clone();
         let capture_clone = Arc::clone(&capture);
@@ -186,11 +231,9 @@ impl ClaudeCliSessionManager {
         std::thread::spawn(move || {
             let res = Self::spawn_in_pty(
                 &session_id_owned,
+                &terminal_id_owned,
                 worktree_clone,
-                &model_owned,
-                &binary_owned,
-                initial_prompt_owned.as_deref(),
-                permission_mode_owned.as_deref(),
+                argv,
                 stdin_rx,
                 stdout_tx_clone,
                 capture_clone,
@@ -204,6 +247,8 @@ impl ClaudeCliSessionManager {
             .map_err(|_| anyhow::anyhow!("PTY spawn thread did not respond"))??;
 
         let handle = Arc::new(PtyHandle {
+            terminal_id: terminal_id.to_string(),
+            kind: kind.to_string(),
             worktree_path,
             model: model.to_string(),
             stdin_tx,
@@ -225,7 +270,9 @@ impl ClaudeCliSessionManager {
         self.registry
             .write()
             .await
-            .insert(session_id.to_string(), Arc::clone(&handle));
+            .entry(session_id.to_string())
+            .or_default()
+            .insert(terminal_id.to_string(), Arc::clone(&handle));
 
         Ok(handle)
     }
@@ -247,9 +294,82 @@ impl ClaudeCliSessionManager {
             .await
     }
 
-    /// Look up an active session by id.
+    /// Look up the **main** (`claude`) terminal of a session by id.
+    ///
+    /// Back-compat convenience: equivalent to `get_terminal(session_id, MAIN_TERMINAL_ID)`.
     pub async fn get(&self, session_id: &str) -> Option<Arc<PtyHandle>> {
-        self.registry.read().await.get(session_id).cloned()
+        self.get_terminal(session_id, MAIN_TERMINAL_ID).await
+    }
+
+    /// Start a **Bash tool** attached to `session_id`: a shell (`shell_path`, resolved from
+    /// `$SHELL` at the RPC layer) in `worktree_path`, taking no inputs. Returns the new handle with
+    /// a fresh `terminal_id` (never the reserved `MAIN_TERMINAL_ID`) and kind `"bash"`.
+    pub async fn start_terminal(
+        &self,
+        session_id: &str,
+        worktree_path: PathBuf,
+        shell_path: &str,
+    ) -> anyhow::Result<Arc<PtyHandle>> {
+        let terminal_id = uuid::Uuid::now_v7().to_string();
+        let argv = vec![shell_path.to_string()];
+        self.spawn_tool(session_id, &terminal_id, "bash", worktree_path, "", argv)
+            .await
+    }
+
+    /// Look up a specific tool of a session by `terminal_id` (use `MAIN_TERMINAL_ID` for the
+    /// `claude` terminal).
+    pub async fn get_terminal(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+    ) -> Option<Arc<PtyHandle>> {
+        self.registry
+            .read()
+            .await
+            .get(session_id)
+            .and_then(|tools| tools.get(terminal_id).cloned())
+    }
+
+    /// List all running tools of a session, including the `MAIN_TERMINAL_ID` terminal.
+    pub async fn list_terminals(&self, session_id: &str) -> Vec<Arc<PtyHandle>> {
+        self.registry
+            .read()
+            .await
+            .get(session_id)
+            .map(|tools| tools.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Stop a started tool: terminate its process and remove it from the registry.
+    /// Returns `true` if the tool existed. The reserved `MAIN_TERMINAL_ID` is not stoppable
+    /// here (callers must reject it before calling).
+    pub async fn stop_terminal(&self, session_id: &str, terminal_id: &str) -> bool {
+        let handle = {
+            let mut reg = self.registry.write().await;
+            let removed = reg
+                .get_mut(session_id)
+                .and_then(|tools| tools.remove(terminal_id));
+            // Drop the session entry once its last tool is gone.
+            if reg.get(session_id).is_some_and(|tools| tools.is_empty()) {
+                reg.remove(session_id);
+            }
+            removed
+        };
+
+        match handle {
+            Some(handle) => {
+                // POSIX interactive shells ignore SIGTERM, so escalate to SIGKILL to guarantee the
+                // process exits. `signal_pid` treats an already-dead pid (ESRCH) as success.
+                #[cfg(unix)]
+                {
+                    let pid = handle.pid as i32;
+                    let _ = crate::session_deletion::signal_pid(pid, libc::SIGTERM);
+                    let _ = crate::session_deletion::signal_pid(pid, libc::SIGKILL);
+                }
+                true
+            }
+            None => false,
+        }
     }
 
     // --- private helpers ---
@@ -261,15 +381,13 @@ impl ClaudeCliSessionManager {
     #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     fn spawn_in_pty(
         session_id: &str,
+        terminal_id: &str,
         worktree_path: PathBuf,
-        model: &str,
-        binary_path: &str,
-        initial_prompt: Option<&str>,
-        permission_mode: Option<&str>,
+        argv: Vec<String>,
         stdin_rx: mpsc::UnboundedReceiver<Bytes>,
         stdout_tx: broadcast::Sender<Bytes>,
         capture: Arc<std::sync::Mutex<Vec<u8>>>,
-        reg: Arc<RwLock<HashMap<String, Arc<PtyHandle>>>>,
+        reg: TerminalRegistry,
     ) -> anyhow::Result<(
         u32,
         Arc<std::sync::Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
@@ -285,14 +403,8 @@ impl ClaudeCliSessionManager {
             })
             .map_err(|e| anyhow::anyhow!("openpty failed: {}", e))?;
 
-        // Build argv via the shared helper so it is testable without a real PTY.
-        let argv = Self::build_claude_argv(
-            binary_path,
-            model,
-            session_id,
-            initial_prompt,
-            permission_mode,
-        );
+        // `argv` is prebuilt by the caller (claude argv via `build_claude_argv`, or `[shell]` for a
+        // Bash tool) so the command is testable without a real PTY.
         let mut cmd = CommandBuilder::new(&argv[0]);
         for arg in &argv[1..] {
             cmd.arg(arg);
@@ -304,9 +416,10 @@ impl ClaudeCliSessionManager {
 
         // Spawn the child on the slave side. The slave is consumed/closed after spawn so the
         // master sees EOF when the child exits.
-        let child = pair.slave.spawn_command(cmd).map_err(|e| {
-            anyhow::anyhow!("failed to spawn claude-cli binary {:?}: {}", binary_path, e)
-        })?;
+        let child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| anyhow::anyhow!("failed to spawn tool {:?}: {}", argv.first(), e))?;
         // Drop slave so master sees EOF on child exit.
         drop(pair.slave);
 
@@ -429,29 +542,40 @@ impl ClaudeCliSessionManager {
             }
         });
 
-        // Exit monitor thread: wait for child exit → remove from registry.
+        // Exit monitor thread: wait for child exit → remove this tool from the registry.
         let sid = session_id.to_string();
+        let tid = terminal_id.to_string();
         let mut child_monitor = child;
         std::thread::spawn(move || {
             if let Err(e) = child_monitor.wait() {
                 log::debug!(
                     target: "tddy_daemon::claude_cli_session",
-                    "child wait error for session {}: {}",
+                    "child wait error for session {} terminal {}: {}",
                     sid,
+                    tid,
                     e
                 );
             }
             log::info!(
                 target: "tddy_daemon::claude_cli_session",
-                "claude-cli process exited for session {}",
-                sid
+                "tool process exited for session {} terminal {}",
+                sid,
+                tid
             );
-            // Remove from registry using a lightweight tokio runtime block.
+            // Remove from registry using a lightweight tokio runtime block. Dropping the session
+            // entry once its last tool is gone is idempotent with `stop_terminal`.
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 let reg_clone = Arc::clone(&reg);
                 let sid_clone = sid.clone();
+                let tid_clone = tid.clone();
                 handle.spawn(async move {
-                    reg_clone.write().await.remove(&sid_clone);
+                    let mut reg = reg_clone.write().await;
+                    if let Some(tools) = reg.get_mut(&sid_clone) {
+                        tools.remove(&tid_clone);
+                        if tools.is_empty() {
+                            reg.remove(&sid_clone);
+                        }
+                    }
                 });
             }
         });
