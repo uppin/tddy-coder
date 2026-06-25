@@ -183,6 +183,48 @@ describe("GhosttyTerminalLiveKit", () => {
 });
 
 // ---------------------------------------------------------------------------
+// ShortcutDrawer integration
+// ---------------------------------------------------------------------------
+
+describe("GhosttyTerminalLiveKit — ShortcutDrawer integration", () => {
+  it("renders the shortcut drawer when mobileShortcuts are provided and showMobileKeyboard is true", () => {
+    // Given
+    const driver = aGhosttyTerminalLiveKit({
+      showMobileKeyboard: true,
+      mobileShortcuts: [
+        { label: "Shift+Tab", keys: ["Shift", "Tab"] },
+        { label: "Ctrl+C", keys: ["Ctrl", "C"] },
+      ],
+    }).mount();
+
+    // Then
+    driver.expectShortcutDrawerExists();
+  });
+
+  it("does not render the shortcut drawer when mobileShortcuts is empty", () => {
+    // Given
+    const driver = aGhosttyTerminalLiveKit({
+      showMobileKeyboard: true,
+      mobileShortcuts: [],
+    }).mount();
+
+    // Then
+    driver.expectShortcutDrawerNotExists();
+  });
+
+  it("does not render the shortcut drawer when showMobileKeyboard is false even with shortcuts provided", () => {
+    // Given
+    const driver = aGhosttyTerminalLiveKit({
+      showMobileKeyboard: false,
+      mobileShortcuts: [{ label: "Shift+Tab", keys: ["Shift", "Tab"] }],
+    }).mount();
+
+    // Then
+    driver.expectShortcutDrawerNotExists();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Terminal status bar acceptance (PRD)
 // ---------------------------------------------------------------------------
 

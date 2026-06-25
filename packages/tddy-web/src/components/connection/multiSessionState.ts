@@ -3,6 +3,7 @@
  */
 
 import { parseTerminalSessionIdFromPathname } from "../../routing/appRoutes";
+import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 
 function logMultiSessionDebug(message: string, data: Record<string, unknown>): void {
   console.debug(`[tddy][multiSessionState] ${message}`, data);
@@ -19,6 +20,8 @@ export type LiveKitConnectionParams = {
     sessionId: string;
     sessionToken: string;
   };
+  /** Mobile shortcut presets for this session's tool. Empty = no drawer shown. */
+  shortcuts?: ToolShortcutDef[];
 };
 
 /** Map: sessionId → LiveKit params for that attachment (insertion order = connect order). */

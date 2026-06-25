@@ -22,6 +22,7 @@ import React from "react";
 import { mount } from "cypress/react";
 import type { GhosttyTerminalLiveKitProps } from "../../../src/components/GhosttyTerminalLiveKit";
 import { GhosttyTerminalLiveKit } from "../../../src/components/GhosttyTerminalLiveKit";
+import type { ToolShortcutDef } from "../../../src/lib/toolShortcuts";
 import { byTestId, TEST_IDS } from "../testIds";
 
 // ---------------------------------------------------------------------------
@@ -54,6 +55,8 @@ export interface GhosttyTerminalLiveKitDriverOptions {
   containerHeight?: number;
   /** Container width (default unset). */
   containerWidth?: number;
+  /** Mobile shortcut presets to pass to the component. */
+  mobileShortcuts?: ToolShortcutDef[];
 }
 
 export function aGhosttyTerminalLiveKit(
@@ -132,6 +135,7 @@ export function aGhosttyTerminalLiveKit(
             showMobileKeyboard={opts.showMobileKeyboard}
             preventFocusOnTap={opts.preventFocusOnTap}
             connectionOverlay={connectionOverlay}
+            mobileShortcuts={opts.mobileShortcuts}
           />
         </div>,
       );
@@ -245,6 +249,20 @@ export function aGhosttyTerminalLiveKit(
 
     expectMobileKeyboardNotExists() {
       byTestId(TEST_IDS.mobileKeyboardButton).should("not.exist");
+      return driver;
+    },
+
+    /** The shortcut drawer (floating panel). */
+    shortcutDrawer: (options?: Parameters<typeof cy.get>[1]) =>
+      byTestId(TEST_IDS.shortcutDrawer, options),
+
+    expectShortcutDrawerExists() {
+      driver.shortcutDrawer().should("exist");
+      return driver;
+    },
+
+    expectShortcutDrawerNotExists() {
+      byTestId(TEST_IDS.shortcutDrawer).should("not.exist");
       return driver;
     },
   };
