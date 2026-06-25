@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { createClient } from "@connectrpc/connect";
+import { useCallback, useEffect, useState } from "react";
 import { TaskService, type TaskInfo } from "../../gen/tasks_pb";
 import { useAuth } from "../../hooks/useAuth";
-import { useHttpTransport } from "../../rpc/transportProvider";
+import { useHttpClient } from "../../rpc/transportProvider";
 import { DaemonNavMenu } from "../shell/DaemonNavMenu";
 import { UserAvatar } from "../UserAvatar";
 import { Button } from "../ui/button";
@@ -41,8 +40,7 @@ function relativeTime(ms: bigint): string {
 
 export function TasksAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { user, logout, sessionToken } = useAuth();
-  const transport = useHttpTransport();
-  const client = useMemo(() => createClient(TaskService, transport), [transport]);
+  const client = useHttpClient(TaskService);
 
   const [tasks, setTasks] = useState<TaskInfo[]>([]);
   const [error, setError] = useState("");

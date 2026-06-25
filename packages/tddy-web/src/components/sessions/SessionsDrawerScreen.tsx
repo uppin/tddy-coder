@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { createClient } from "@connectrpc/connect";
 import { ConnectionService, type SessionEntry } from "../../gen/connection_pb";
 import { sortSessionsByCreation } from "../../utils/sessionSort";
-import { useHttpTransport } from "../../rpc/transportProvider";
+import { useHttpClient } from "../../rpc/transportProvider";
 import { TooltipProvider } from "../ui/tooltip";
 import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
@@ -20,8 +19,7 @@ export function SessionsDrawerScreen() {
       ? (window.localStorage.getItem("tddy_session_token") ?? "")
       : "";
 
-  const transport = useHttpTransport();
-  const client = useMemo(() => createClient(ConnectionService, transport), [transport]);
+  const client = useHttpClient(ConnectionService);
 
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);

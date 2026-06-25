@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { createClient } from "@connectrpc/connect";
+import { useCallback, useEffect, useState } from "react";
 import { VmService, type VmInfo, type VmImageInfo } from "../../gen/vm_pb";
 import { useAuth } from "../../hooks/useAuth";
-import { useHttpTransport } from "../../rpc/transportProvider";
+import { useHttpClient } from "../../rpc/transportProvider";
 import { DaemonNavMenu } from "../shell/DaemonNavMenu";
 import { UserAvatar } from "../UserAvatar";
 import { VmsScreen, type VmRow } from "./VmsScreen";
@@ -34,8 +33,7 @@ function rowFromRpc(vm: VmInfo): VmRow {
 
 export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { user, logout, sessionToken } = useAuth();
-  const transport = useHttpTransport();
-  const client = useMemo(() => createClient(VmService, transport), [transport]);
+  const client = useHttpClient(VmService);
 
   const [rows, setRows] = useState<VmRow[]>([]);
   const [building, setBuilding] = useState(false);

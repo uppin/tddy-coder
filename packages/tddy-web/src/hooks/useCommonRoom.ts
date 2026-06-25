@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Room } from "livekit-client";
-import { createClient } from "@connectrpc/connect";
 import { TokenService } from "../gen/token_pb";
-import { useHttpTransport } from "../rpc/transportProvider";
+import { useHttpClient } from "../rpc/transportProvider";
 
 export type CommonRoomStatus = "idle" | "connecting" | "connected" | "error";
 
@@ -17,8 +16,7 @@ export function useCommonRoom(
   const [room, setRoom] = useState<Room | null>(null);
   const [status, setStatus] = useState<CommonRoomStatus>("idle");
   const [error, setError] = useState<string | null>(null);
-  const transport = useHttpTransport();
-  const tokenClient = useMemo(() => createClient(TokenService, transport), [transport]);
+  const tokenClient = useHttpClient(TokenService);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const roomRef = useRef<Room | null>(null);
 

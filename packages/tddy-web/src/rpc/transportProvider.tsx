@@ -25,9 +25,10 @@
  * ```
  */
 
-import { createContext, useContext, useRef, type ReactNode } from "react";
-import type { Transport } from "@connectrpc/connect";
+import { createContext, useContext, useMemo, useRef, type ReactNode } from "react";
+import { createClient, type Client, type Transport } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
+import type { DescService } from "@bufbuild/protobuf";
 import { createLiveKitTransport } from "tddy-livekit-web";
 import type { Room } from "livekit-client";
 
@@ -144,6 +145,18 @@ export function useHttpTransport(): Transport {
   const fallbackRef = useRef<Transport | null>(null);
   fallbackRef.current ??= createDefaultHttpTransport();
   return ctx?.httpTransport ?? fallbackRef.current;
+}
+
+/**
+ * Create and memoize a ConnectRPC client bound to the HTTP transport in this context.
+ *
+ * Equivalent to `useMemo(() => createClient(Service, useHttpTransport()), [transport])`.
+ */
+export function useHttpClient<S extends DescService>(service: S): Client<S> {
+  const transport = useHttpTransport();
+  // `service` is always a module-level constant so its reference is stable;
+  // including it in the dep array is correct without cost.
+  return useMemo(() => createClient(service, transport), [service, transport]);
 }
 
 /**

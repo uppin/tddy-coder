@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { create } from "@bufbuild/protobuf";
 import { GripVertical, Minus, Trash2 } from "lucide-react";
-import { createClient, type Client } from "@connectrpc/connect";
+import type { Client } from "@connectrpc/connect";
 import {
   AgentInfoSchema,
   ConnectionService,
@@ -24,7 +24,7 @@ import { GhosttyTerminalLiveKit } from "./GhosttyTerminalLiveKit";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
 import { ParticipantList } from "./ParticipantList";
 import { useAuth } from "../hooks/useAuth";
-import { useHttpTransport } from "../rpc/transportProvider";
+import { useHttpClient } from "../rpc/transportProvider";
 import { useCommonRoom } from "../hooks/useCommonRoom";
 import { useRoomParticipants } from "../hooks/useRoomParticipants";
 import { GitHubLoginButton } from "./GitHubLoginButton";
@@ -672,8 +672,7 @@ function ConnectedTerminal({
   paneSessionLabel: string;
 }) {
   type OverlayResizeCorner = "nw" | "ne" | "sw" | "se";
-  const transport = useHttpTransport();
-  const tokenClient = useMemo(() => createClient(TokenService, transport), [transport]);
+  const tokenClient = useHttpClient(TokenService);
   const fullscreenTargetRef = useRef<HTMLDivElement>(null);
   const [initialToken, setInitialToken] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);
@@ -1154,8 +1153,7 @@ function ConnectedClaudeCliTerminal({
   sessionToken: string;
   onDisconnect: () => void;
 }) {
-  const transport = useHttpTransport();
-  const client = useMemo(() => createClient(ConnectionService, transport), [transport]);
+  const client = useHttpClient(ConnectionService);
   const [stream, setStream] = useState<GrpcStream | null>(null);
 
   useEffect(() => {
@@ -1263,8 +1261,7 @@ export function ConnectionScreen({
   const [terminalOverlayMinimized, setTerminalOverlayMinimized] = useState(false);
   const terminalDeepLinkSeqRef = useRef(0);
   const sessionsEverLoadedRef = useRef(false);
-  const transport = useHttpTransport();
-  const client = useMemo(() => createClient(ConnectionService, transport), [transport]);
+  const client = useHttpClient(ConnectionService);
 
   const navigatePath = useCallback(
     (path: string, mode: "push" | "replace") => {

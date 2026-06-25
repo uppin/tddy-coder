@@ -1,8 +1,7 @@
 import "./index.css";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
-import { createClient } from "@connectrpc/connect";
-import { RpcTransportProvider, useHttpTransport } from "./rpc/transportProvider";
+import { RpcTransportProvider, useHttpClient } from "./rpc/transportProvider";
 import { GhosttyTerminalLiveKit } from "./components/GhosttyTerminalLiveKit";
 import { ConnectionTerminalChrome } from "./components/connection/ConnectionTerminalChrome";
 import { BUILD_ID } from "./buildId";
@@ -132,8 +131,7 @@ function ConnectedTerminal({
   /** Standalone GitHub flow has no daemon session — omit Terminate. */
   onTerminate?: () => void;
 }) {
-  const transport = useHttpTransport();
-  const client = useMemo(() => createClient(TokenService, transport), [transport]);
+  const client = useHttpClient(TokenService);
   const fullscreenTargetRef = useRef<HTMLDivElement>(null);
   const [initialToken, setInitialToken] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);

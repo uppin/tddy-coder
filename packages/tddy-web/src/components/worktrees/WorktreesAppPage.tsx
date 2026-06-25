@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { createClient } from "@connectrpc/connect";
+import { useCallback, useEffect, useState } from "react";
 import {
   ConnectionService,
   type EligibleDaemonEntry,
@@ -10,7 +9,7 @@ import { GitHubLoginButton } from "../GitHubLoginButton";
 import { UserAvatar } from "../UserAvatar";
 import { DaemonNavMenu } from "../shell/DaemonNavMenu";
 import { useAuth } from "../../hooks/useAuth";
-import { useHttpTransport } from "../../rpc/transportProvider";
+import { useHttpClient } from "../../rpc/transportProvider";
 import { WorktreesScreen, type WorktreesScreenMockRow } from "./WorktreesScreen";
 import { Button } from "@/components/ui/button";
 
@@ -56,8 +55,7 @@ export function WorktreesAppPage({
   onNavigate: (path: string) => void;
 }) {
   const { user, isAuthenticated, login, logout, sessionToken } = useAuth();
-  const transport = useHttpTransport();
-  const client = useMemo(() => createClient(ConnectionService, transport), [transport]);
+  const client = useHttpClient(ConnectionService);
 
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [daemons, setDaemons] = useState<EligibleDaemonEntry[]>([]);

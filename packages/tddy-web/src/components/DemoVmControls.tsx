@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createClient } from "@connectrpc/connect";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ConnectionService,
   DemoVmState,
 } from "../gen/connection_pb";
-import { useHttpTransport } from "../rpc/transportProvider";
+import { useHttpClient } from "../rpc/transportProvider";
 import { Button } from "@/components/ui/button";
 
 type VmStatus = {
@@ -27,8 +26,7 @@ export function DemoVmControls({
   const [status, setStatus] = useState<VmStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const transport = useHttpTransport();
-  const client = useMemo(() => createClient(ConnectionService, transport), [transport]);
+  const client = useHttpClient(ConnectionService);
 
   const fetchStatus = useCallback(async () => {
     try {
