@@ -62,7 +62,7 @@ pub fn resolve_session_directory_for_delete(
 }
 
 #[cfg(unix)]
-fn signal_pid(pid: i32, sig: libc::c_int) -> Result<(), Status> {
+pub(crate) fn signal_pid(pid: i32, sig: libc::c_int) -> Result<(), Status> {
     let ret = unsafe { libc::kill(pid, sig) };
     if ret == 0 {
         return Ok(());

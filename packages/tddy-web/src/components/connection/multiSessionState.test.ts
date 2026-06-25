@@ -8,6 +8,7 @@ import {
   type SessionAttachmentMap,
 } from "./multiSessionState";
 import { terminalPathForSessionId } from "../../routing/appRoutes";
+import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 
 function aConnectionParams(prefix: string): LiveKitConnectionParams {
   return {
@@ -83,6 +84,51 @@ describe("multiSessionState — connectionAttachedTerminalTestId", () => {
 
     // Then
     expect(testId).toBe(`connection-attached-terminal-${sid}`);
+  });
+});
+
+describe("multiSessionState — shortcuts in LiveKitConnectionParams", () => {
+  it("preserves shortcuts through addSessionAttachment", () => {
+    // Given
+    const id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeee1111";
+    const shortcuts: ToolShortcutDef[] = [
+      { label: "Shift+Tab", keys: ["Shift", "Tab"] },
+    ];
+    const params: LiveKitConnectionParams = {
+      livekitUrl: "ws://127.0.0.1:7880",
+      roomName: "room",
+      identity: "id",
+      serverIdentity: "server",
+      debugLogging: false,
+      shortcuts,
+    };
+    let map: SessionAttachmentMap = new Map();
+
+    // When
+    map = addSessionAttachment(map, id, params);
+
+    // Then
+    expect(map.get(id)?.shortcuts).toBe(shortcuts);
+  });
+
+  it("stores an empty shortcuts array when none are provided", () => {
+    // Given
+    const id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeee2222";
+    const params: LiveKitConnectionParams = {
+      livekitUrl: "ws://127.0.0.1:7880",
+      roomName: "room",
+      identity: "id",
+      serverIdentity: "server",
+      debugLogging: false,
+      shortcuts: [],
+    };
+    let map: SessionAttachmentMap = new Map();
+
+    // When
+    map = addSessionAttachment(map, id, params);
+
+    // Then
+    expect(map.get(id)?.shortcuts).toEqual([]);
   });
 });
 
