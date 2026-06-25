@@ -101,6 +101,24 @@ export const TEST_IDS = {
   sessionsInspectorRestore: "sessions-inspector-restore",
   sessionsInspectorMetadata: "sessions-inspector-metadata",
 
+  // Sessions drawer — create session
+  sessionsDrawerNewBtn: "sessions-drawer-new-btn",
+  createSessionPane: "create-session-pane",
+  createSessionTypeToolBtn: "create-session-type-tool",
+  createSessionTypeClaudeCliBtn: "create-session-type-claude-cli",
+  createSessionProjectSelect: "create-session-project-select",
+  createSessionAgentSelect: "create-session-agent-select",
+  createSessionRecipeInput: "create-session-recipe-input",
+  createSessionModelSelect: "create-session-model-select",
+  createSessionPermissionModeSelect: "create-session-permission-mode-select",
+  createSessionInitialPromptInput: "create-session-initial-prompt-input",
+  createSessionBranchIntentSelect: "create-session-branch-intent-select",
+  createSessionNewBranchNameInput: "create-session-new-branch-name-input",
+  createSessionBranchToWorkOnSelect: "create-session-branch-to-work-on-select",
+  createSessionCancelBtn: "create-session-cancel-btn",
+  createSessionSubmitBtn: "create-session-submit-btn",
+  createSessionError: "create-session-error",
+
   // Shell navigation
   shellMenuButton: "shell-menu-button",
   shellMenuRpcPlayground: "shell-menu-rpc-playground",

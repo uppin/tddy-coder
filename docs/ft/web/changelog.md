@@ -4,6 +4,14 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-06-25 — Create new session from sessions drawer
+
+- `+ New session` button in the `SessionDrawer` header switches `SessionsDrawerScreen` to `"creating"` mode
+- `CreateSessionPane` replaces the main pane: tool vs Claude CLI toggle; project (required), agent/recipe or model/permission-mode/initial-prompt fields; branch intent (new branch from base or work on existing branch with `ListProjectBranches` dropdown)
+- On submit: `StartSession` RPC; on success: auto-navigate to `/sessions/:newId` and auto-attach via `ConnectSession`; on error: inline error message, form stays open
+- Cancel returns to the previous session list / placeholder state
+- 29 new Cypress component tests (12 acceptance, 17 unit)
+
 ## 2026-06-21 — Auth redirect: all daemon pages require login
 
 - All daemon-mode pages now gate on auth at the `App` level; unauthenticated visitors see a login screen with "Sign in with GitHub"
