@@ -87,6 +87,43 @@ async fn call_streaming<Req: Message, Resp: Message + Default>(
     messages
 }
 
+/// Collect events from a persistent server-streaming RPC until no event arrives for `idle`.
+///
+/// Used for `WatchTaskList` which keeps the stream open indefinitely — a per-event idle timeout
+/// lets the test collect the expected events without waiting for the stream to close naturally.
+async fn collect_streaming_until_idle<Req: Message, Resp: Message + Default>(
+    bridge: &RpcBridge<TaskServiceServer<TaskServiceImpl>>,
+    method: &str,
+    req: Req,
+    idle: std::time::Duration,
+) -> Vec<Resp> {
+    let payload = req.encode_to_vec();
+    let msg = RpcMessage {
+        payload,
+        metadata: RequestMetadata::default(),
+    };
+    let result = bridge
+        .handle_messages("tasks.TaskService", method, &[msg])
+        .await
+        .expect("bridge dispatch must not fail at transport level");
+    let mut rx = match result {
+        ResponseBody::Streaming(rx) => rx,
+        _ => panic!("expected Streaming for server-streaming method {method}"),
+    };
+    let mut messages = Vec::new();
+    loop {
+        match tokio::time::timeout(idle, rx.recv()).await {
+            Ok(Some(chunk)) => {
+                let bytes = chunk.expect("stream chunk must not be an error");
+                messages.push(Resp::decode(&bytes[..]).expect("decode stream message"));
+            }
+            Ok(None) => break,  // stream closed
+            Err(_) => break,    // idle timeout — no more events expected
+        }
+    }
+    messages
+}
+
 async fn assert_unauthenticated(
     bridge: &RpcBridge<TaskServiceServer<TaskServiceImpl>>,
     method: &str,
@@ -535,14 +572,15 @@ async fn watch_task_list_initial_snapshot_includes_existing_tasks() {
 
     let bridge = test_bridge(registry);
 
-    // When — open WatchTaskList stream
-    let events: Vec<TaskListEvent> = call_streaming(
+    // When — open WatchTaskList stream; collect until idle (stream stays open persistently)
+    let events: Vec<TaskListEvent> = collect_streaming_until_idle(
         &bridge,
         "WatchTaskList",
         WatchTaskListRequest {
             session_token: GOOD_TOKEN.to_string(),
             daemon_instance_id: String::new(),
         },
+        std::time::Duration::from_millis(500),
     )
     .await;
 
@@ -590,14 +628,15 @@ async fn watch_task_list_streams_task_added_for_newly_spawned_task() {
             .await
     });
 
-    // When — stream events
-    let events: Vec<TaskListEvent> = call_streaming(
+    // When — stream events; collect until idle (stream stays open persistently)
+    let events: Vec<TaskListEvent> = collect_streaming_until_idle(
         &bridge,
         "WatchTaskList",
         WatchTaskListRequest {
             session_token: GOOD_TOKEN.to_string(),
             daemon_instance_id: String::new(),
         },
+        std::time::Duration::from_millis(500),
     )
     .await;
 
@@ -637,14 +676,15 @@ async fn watch_task_list_streams_task_updated_on_status_transition() {
         registry_for_cancel.cancel_task(&handle_id).await;
     });
 
-    // When — stream events until the task reaches terminal
-    let events: Vec<TaskListEvent> = call_streaming(
+    // When — stream events until the task reaches terminal; collect until idle
+    let events: Vec<TaskListEvent> = collect_streaming_until_idle(
         &bridge,
         "WatchTaskList",
         WatchTaskListRequest {
             session_token: GOOD_TOKEN.to_string(),
             daemon_instance_id: String::new(),
         },
+        std::time::Duration::from_millis(500),
     )
     .await;
 

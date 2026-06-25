@@ -323,13 +323,10 @@ impl TaskService for TaskServiceImpl {
                 }
             }
 
-            // Stream live events. Close if the broadcast channel closes or the client disconnects.
-            // An idle timeout closes the stream when no events arrive for a period; this lets
-            // callers detect end-of-stream without the registry holding a persistent send handle.
-            const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
+            // Stream live events until the client disconnects or the registry shuts down.
             loop {
-                match tokio::time::timeout(IDLE_TIMEOUT, rx.recv()).await {
-                    Ok(Ok(registry_event)) => {
+                match rx.recv().await {
+                    Ok(registry_event) => {
                         if tx
                             .send(Ok(registry_event_to_list_event(registry_event)))
                             .await
@@ -338,14 +335,10 @@ impl TaskService for TaskServiceImpl {
                             return;
                         }
                     }
-                    Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(n))) => {
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         log::warn!("WatchTaskList: lagged by {n} events");
                     }
-                    Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
-                        return;
-                    }
-                    Err(_idle) => {
-                        // No events for IDLE_TIMEOUT — close the stream gracefully.
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         return;
                     }
                 }
