@@ -1,21 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
 import { TaskService } from "../../gen/tasks_pb";
-
-function createTaskClient() {
-  const transport = createConnectTransport({
-    baseUrl: typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
-    useBinaryFormat: true,
-  });
-  return createClient(TaskService, transport);
-}
+import { useHttpClient } from "../../rpc/transportProvider";
 
 export function useTaskChannelStream(
   sessionToken: string,
   taskId: string | null,
   channelId: string | null
 ) {
+  const client = useHttpClient(TaskService);
   const [output, setOutput] = useState<string>("");
   const abortRef = useRef<AbortController | null>(null);
   const decoderRef = useRef(new TextDecoder());
@@ -29,7 +21,6 @@ export function useTaskChannelStream(
     setOutput("");
     const controller = new AbortController();
     abortRef.current = controller;
-    const client = createTaskClient();
 
     (async () => {
       try {
@@ -53,7 +44,7 @@ export function useTaskChannelStream(
     return () => {
       controller.abort();
     };
-  }, [sessionToken, taskId, channelId]);
+  }, [client, sessionToken, taskId, channelId]);
 
   return { output };
 }

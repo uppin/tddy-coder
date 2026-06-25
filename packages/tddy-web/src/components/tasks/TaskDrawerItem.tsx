@@ -1,7 +1,6 @@
-import React, { useCallback, useMemo, useState } from "react";
-import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
+import React, { useCallback, useState } from "react";
 import { TaskService, TaskStatusProto, type TaskInfo } from "../../gen/tasks_pb";
+import { useHttpClient } from "../../rpc/transportProvider";
 import { Button } from "../ui/button";
 
 function statusDotColor(status: TaskStatusProto): string {
@@ -26,14 +25,6 @@ function isCancellable(status: TaskStatusProto): boolean {
   );
 }
 
-function createTaskClient() {
-  const transport = createConnectTransport({
-    baseUrl: typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
-    useBinaryFormat: true,
-  });
-  return createClient(TaskService, transport);
-}
-
 interface TaskDrawerItemProps {
   task: TaskInfo;
   isSelected: boolean;
@@ -43,7 +34,7 @@ interface TaskDrawerItemProps {
 
 export function TaskDrawerItem({ task, isSelected, onClick, sessionToken }: TaskDrawerItemProps) {
   const [cancelling, setCancelling] = useState(false);
-  const client = useMemo(() => createTaskClient(), []);
+  const client = useHttpClient(TaskService);
 
   const handleCancel = useCallback(
     (e: React.MouseEvent) => {
