@@ -444,7 +444,11 @@ mod tests {
         let paths = output.value["paths"]
             .as_array()
             .expect("remote GLOB result must have a 'paths' array");
-        assert_eq!(paths.len(), 2, "remote GLOB must return exactly 2 paths; got {paths:?}");
+        assert_eq!(
+            paths.len(),
+            2,
+            "remote GLOB must return exactly 2 paths; got {paths:?}"
+        );
     }
 
     /// When the ExecuteTool response has `is_error: true`, the executor surfaces it as an error

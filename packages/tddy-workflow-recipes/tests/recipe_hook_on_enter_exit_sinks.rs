@@ -107,5 +107,4 @@ fn hooks_impl_without_sink_does_not_panic_on_enter_or_exit() {
         get_agent_sink().is_none(),
         "default on_exit_task must not leave any sink set"
     );
-
 }

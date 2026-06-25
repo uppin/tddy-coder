@@ -101,6 +101,12 @@ export const TEST_IDS = {
   sessionsInspectorRestore: "sessions-inspector-restore",
   sessionsInspectorMetadata: "sessions-inspector-metadata",
 
+  // Tasks drawer screen
+  tasksDrawerScreen: "tasks-drawer-screen",
+  tasksDrawer: "tasks-drawer",
+  tasksOutputPane: "tasks-output-pane",
+  tasksOutputPaneEmpty: "tasks-output-pane-empty",
+
   // Shell navigation
   shellMenuButton: "shell-menu-button",
   shellMenuRpcPlayground: "shell-menu-rpc-playground",
@@ -235,3 +241,33 @@ export const sessionsInspectorDeleteConfirm = (sessionId: string) =>
 /** `[data-testid="sessions-inspector-terminate-<sessionId>"]` — Terminate button in inspector */
 export const sessionsInspectorTerminateBtn = (sessionId: string) =>
   `sessions-inspector-terminate-${sessionId}`;
+
+// ---------------------------------------------------------------------------
+// Tasks drawer screen dynamic helpers
+// ---------------------------------------------------------------------------
+
+/** `[data-testid="tasks-drawer-item-<taskId>"]` — clickable drawer row */
+export const tasksDrawerItem = (taskId: string) => `tasks-drawer-item-${taskId}`;
+
+/** `[data-testid="tasks-drawer-item-status-<taskId>"]` — status indicator dot */
+export const tasksDrawerItemStatus = (taskId: string) => `tasks-drawer-item-status-${taskId}`;
+
+/** `[data-testid="tasks-drawer-item-kind-<taskId>"]` — kind text */
+export const tasksDrawerItemKind = (taskId: string) => `tasks-drawer-item-kind-${taskId}`;
+
+/** `[data-testid="tasks-drawer-item-cancel-<taskId>"]` — inline Cancel button in drawer row */
+export const tasksDrawerItemCancel = (taskId: string) => `tasks-drawer-item-cancel-${taskId}`;
+
+/** `[data-testid="tasks-output-pane-status-<taskId>"]` — status label in output pane */
+export const tasksOutputPaneStatus = (taskId: string) => `tasks-output-pane-status-${taskId}`;
+
+/** `[data-testid="tasks-output-pane-cancel-<taskId>"]` — Cancel button in output pane */
+export const tasksOutputPaneCancel = (taskId: string) => `tasks-output-pane-cancel-${taskId}`;
+
+/** `[data-testid="tasks-channel-tab-<taskId>-<channelId>"]` — channel tab */
+export const tasksChannelTab = (taskId: string, channelId: string) =>
+  `tasks-channel-tab-${taskId}-${channelId}`;
+
+/** `[data-testid="tasks-channel-output-<taskId>-<channelId>"]` — channel output area */
+export const tasksChannelOutput = (taskId: string, channelId: string) =>
+  `tasks-channel-output-${taskId}-${channelId}`;

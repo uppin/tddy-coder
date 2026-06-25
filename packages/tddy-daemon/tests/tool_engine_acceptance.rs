@@ -3,9 +3,9 @@
 //! Verifies the "every action is a task" invariant established in the background-tasks changeset.
 //! Tests are driven directly through `execute_tool` — no RPC transport, no daemon process.
 
-use tempfile::tempdir;
 use tddy_daemon::tool_engine::execute_tool;
 use tddy_task::{TaskRegistry, TaskStatus};
+use tempfile::tempdir;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -83,8 +83,14 @@ async fn failed_sync_tool_registers_a_failed_task() {
     .await;
 
     // Then — outcome is an error and a task is still registered
-    assert!(outcome.is_error, "Read on missing file must return an error");
-    assert!(!outcome.job_id.is_empty(), "even error outcomes must have a job_id");
+    assert!(
+        outcome.is_error,
+        "Read on missing file must return an error"
+    );
+    assert!(
+        !outcome.job_id.is_empty(),
+        "even error outcomes must have a job_id"
+    );
 
     let tasks = registry.list().await;
     assert_eq!(tasks.len(), 1, "error Read must still register a task");
@@ -113,16 +119,30 @@ async fn shell_background_job_registers_a_task_with_output_channel() {
     .await;
 
     // Then — outcome carries job_running=true and a non-empty job_id
-    assert!(outcome.job_running, "background Shell must return job_running=true");
-    assert!(!outcome.job_id.is_empty(), "background Shell must return a non-empty job_id");
+    assert!(
+        outcome.job_running,
+        "background Shell must return job_running=true"
+    );
+    assert!(
+        !outcome.job_id.is_empty(),
+        "background Shell must return a non-empty job_id"
+    );
 
     // And the task is registered with a combined output channel
     let tasks = registry.list().await;
-    assert_eq!(tasks.len(), 1, "background Shell must register exactly one task");
+    assert_eq!(
+        tasks.len(),
+        1,
+        "background Shell must register exactly one task"
+    );
     let task = &tasks[0];
     assert_eq!(task.id.0, outcome.job_id);
     assert_eq!(task.kind, "execute_tool:Shell");
-    assert_eq!(task.channels().len(), 1, "background Shell task must have one output channel");
+    assert_eq!(
+        task.channels().len(),
+        1,
+        "background Shell task must have one output channel"
+    );
 }
 
 #[tokio::test]
@@ -151,7 +171,11 @@ async fn await_tool_returns_when_background_shell_completes() {
     .await;
 
     // Then — Await completes without timing out
-    assert!(!result.is_error, "Await must not return an error; got {:?}", result.error_message);
+    assert!(
+        !result.is_error,
+        "Await must not return an error; got {:?}",
+        result.error_message
+    );
     let v: serde_json::Value =
         serde_json::from_str(&result.result_json).expect("Await result must be valid JSON");
     assert_eq!(

@@ -9,9 +9,9 @@ use prost::Message;
 use std::sync::Arc;
 use tddy_rpc::{Code, RequestMetadata, ResponseBody, RpcBridge, RpcMessage};
 use tddy_service::proto::tasks::{
-    CancelTaskRequest, CancelTaskResponse, GetTaskRequest, GetTaskResponse, ListTasksRequest,
-    ListTasksResponse, SendInputRequest, SendInputResponse, TaskOutputEvent, TaskServiceServer,
-    WatchTaskRequest,
+    task_list_event, CancelTaskRequest, CancelTaskResponse, GetTaskRequest, GetTaskResponse,
+    ListTasksRequest, ListTasksResponse, SendInputRequest, SendInputResponse, TaskListEvent,
+    TaskOutputEvent, TaskServiceServer, TaskStatusProto, WatchTaskListRequest, WatchTaskRequest,
 };
 use tddy_task::{ChannelKind, TaskBody, TaskChannel, TaskContext, TaskRegistry, TaskStatus};
 
@@ -494,6 +494,205 @@ async fn send_input_to_output_only_channel_returns_failed_precondition() {
             "SendInput to output-only channel must return FailedPrecondition"
         ),
         Ok(_) => panic!("expected FailedPrecondition for output-only channel"),
+    }
+}
+
+// ─── WatchTaskList ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn watch_task_list_with_bad_token_returns_unauthenticated() {
+    // Given
+    let bridge = test_bridge(TaskRegistry::new());
+    // When / Then
+    assert_unauthenticated(
+        &bridge,
+        "WatchTaskList",
+        WatchTaskListRequest {
+            session_token: BAD_TOKEN.to_string(),
+            daemon_instance_id: String::new(),
+        }
+        .encode_to_vec(),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn watch_task_list_initial_snapshot_includes_existing_tasks() {
+    // Given — a task already in the registry before the stream is opened
+    let registry = TaskRegistry::new();
+    let handle = registry
+        .spawn(
+            ImmediateBody {
+                result: TaskStatus::Completed { exit_code: Some(0) },
+            },
+            "execute_tool:Read",
+            "test-session",
+            vec![],
+        )
+        .await;
+    let task_id = handle.id.0.clone();
+    wait_terminal(&handle).await;
+
+    let bridge = test_bridge(registry);
+
+    // When — open WatchTaskList stream
+    let events: Vec<TaskListEvent> = call_streaming(
+        &bridge,
+        "WatchTaskList",
+        WatchTaskListRequest {
+            session_token: GOOD_TOKEN.to_string(),
+            daemon_instance_id: String::new(),
+        },
+    )
+    .await;
+
+    // Then — at least one snapshot event contains the existing task
+    let snapshot_events: Vec<_> = events.iter().filter(|e| e.is_snapshot).collect();
+    assert!(
+        !snapshot_events.is_empty(),
+        "WatchTaskList must emit at least one snapshot event"
+    );
+
+    let found = snapshot_events.iter().any(|e| {
+        if let Some(task_list_event::Event::TaskAdded(info)) = &e.event {
+            info.task_id == task_id
+        } else {
+            false
+        }
+    });
+    assert!(
+        found,
+        "snapshot must include the pre-existing task; got {} snapshot events",
+        snapshot_events.len()
+    );
+}
+
+#[tokio::test]
+async fn watch_task_list_streams_task_added_for_newly_spawned_task() {
+    // Given — empty registry, stream opened first
+    let registry = TaskRegistry::new();
+    let bridge = test_bridge(registry.clone());
+
+    // Spawn a task after opening the stream (in a concurrent task)
+    let registry_for_spawn = registry.clone();
+    let spawn_task = tokio::spawn(async move {
+        // Small yield to let the stream handler subscribe before spawning
+        tokio::task::yield_now().await;
+        registry_for_spawn
+            .spawn(
+                ImmediateBody {
+                    result: TaskStatus::Completed { exit_code: Some(0) },
+                },
+                "shell",
+                "test-session",
+                vec![],
+            )
+            .await
+    });
+
+    // When — stream events
+    let events: Vec<TaskListEvent> = call_streaming(
+        &bridge,
+        "WatchTaskList",
+        WatchTaskListRequest {
+            session_token: GOOD_TOKEN.to_string(),
+            daemon_instance_id: String::new(),
+        },
+    )
+    .await;
+
+    let spawned = spawn_task.await.unwrap();
+    let spawned_id = spawned.id.0.clone();
+
+    // Then — a task_added event (live, not snapshot) arrives for the new task
+    let added_live = events.iter().any(|e| {
+        !e.is_snapshot
+            && matches!(
+                &e.event,
+                Some(task_list_event::Event::TaskAdded(info)) if info.task_id == spawned_id
+            )
+    });
+    assert!(
+        added_live,
+        "must receive a live task_added event for newly spawned task; events: {}",
+        events.len()
+    );
+}
+
+#[tokio::test]
+async fn watch_task_list_streams_task_updated_on_status_transition() {
+    // Given — a long-running task
+    let registry = TaskRegistry::new();
+    let handle = registry
+        .spawn(WaitForCancelBody, "test", "test-session", vec![])
+        .await;
+    let task_id = handle.id.0.clone();
+    let bridge = test_bridge(registry.clone());
+
+    // Cancel the task concurrently so the stream sees the Updated event
+    let registry_for_cancel = registry.clone();
+    let handle_id = handle.id.clone();
+    tokio::spawn(async move {
+        tokio::task::yield_now().await;
+        registry_for_cancel.cancel_task(&handle_id).await;
+    });
+
+    // When — stream events until the task reaches terminal
+    let events: Vec<TaskListEvent> = call_streaming(
+        &bridge,
+        "WatchTaskList",
+        WatchTaskListRequest {
+            session_token: GOOD_TOKEN.to_string(),
+            daemon_instance_id: String::new(),
+        },
+    )
+    .await;
+
+    // Then — an Updated event arrives carrying a terminal status for the task
+    let non_terminal = [
+        TaskStatusProto::TaskStatusUnknown as i32,
+        TaskStatusProto::TaskStatusPending as i32,
+        TaskStatusProto::TaskStatusRunning as i32,
+    ];
+    let updated_terminal = events.iter().any(|e| {
+        if let Some(task_list_event::Event::TaskUpdated(info)) = &e.event {
+            info.task_id == task_id && !non_terminal.contains(&info.status)
+        } else {
+            false
+        }
+    });
+    assert!(
+        updated_terminal,
+        "must receive task_updated event with terminal status; events: {}",
+        events.len()
+    );
+}
+
+#[tokio::test]
+async fn watch_task_list_with_remote_daemon_instance_id_returns_failed_precondition() {
+    // Given
+    let bridge = test_bridge(TaskRegistry::new());
+    // When — request with a non-empty daemon_instance_id
+    let payload = WatchTaskListRequest {
+        session_token: GOOD_TOKEN.to_string(),
+        daemon_instance_id: "remote-daemon-456".to_string(),
+    }
+    .encode_to_vec();
+    let msg = RpcMessage {
+        payload,
+        metadata: RequestMetadata::default(),
+    };
+    let result = bridge
+        .handle_messages("tasks.TaskService", "WatchTaskList", &[msg])
+        .await;
+    // Then
+    match result {
+        Err(status) => assert_eq!(
+            status.code,
+            Code::FailedPrecondition,
+            "remote WatchTaskList must return FailedPrecondition"
+        ),
+        Ok(_) => panic!("expected FailedPrecondition for remote daemon_instance_id"),
     }
 }
 

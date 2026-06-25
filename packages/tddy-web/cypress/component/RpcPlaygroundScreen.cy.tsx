@@ -20,12 +20,12 @@ import { byTestId, TEST_IDS } from "../support/testIds";
 import { anAuthStatusAuthenticated, aGenerateTokenResponse } from "../support/rpc/responses";
 import { toArrayBuffer } from "../support/rpc/protoRpc";
 
-// These imports fail until the screen and route helpers are created.
 import { RpcPlaygroundScreen } from "../../src/rpc-playground/RpcPlaygroundScreen";
 import {
   RPC_PLAYGROUND_ROUTE,
   isRpcPlaygroundPath,
 } from "../../src/routing/appRoutes";
+import { DaemonNavMenu } from "../../src/components/shell/DaemonNavMenu";
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -95,7 +95,8 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
     cy.contains("Echo").should("be.visible");
     cy.contains("unary").should("be.visible");
     cy.contains("EchoServerStream").should("be.visible");
-    cy.contains("server_streaming").should("be.visible");
+    // KIND_LABELS formats "server_streaming" as "server stream" for display.
+    cy.contains("server stream").should("be.visible");
   });
 
   it("selecting a method seeds the request editor with default JSON", () => {
@@ -110,7 +111,7 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
 
     // When
     cy.contains("test.EchoService").click();
-    cy.contains("Echo").click();
+    cy.get("[data-testid='rpc-method-test.EchoService-Echo']").click();
 
     // Then — default JSON for a method with no schema is the empty object
     byTestId(TEST_IDS.rpcRequestEditor).should("exist");
@@ -127,11 +128,12 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
       />
     );
     cy.contains("test.EchoService").click();
-    cy.contains("Echo").click();
+    cy.get("[data-testid='rpc-method-test.EchoService-Echo']").click();
 
     // When — switch to raw JSON, type a value, toggle back and forth
     byTestId(TEST_IDS.rpcEditorToggleRaw).click();
-    byTestId(TEST_IDS.rpcRequestRawJson).clear().type('{"message":"retain-me"}');
+    // parseSpecialCharSequences: false prevents Cypress from interpreting '{' as a special key.
+    byTestId(TEST_IDS.rpcRequestRawJson).clear().type('{"message":"retain-me"}', { parseSpecialCharSequences: false });
     byTestId(TEST_IDS.rpcEditorToggleBuilder).click();
     byTestId(TEST_IDS.rpcEditorToggleRaw).click();
 
@@ -150,7 +152,7 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
       />
     );
     cy.contains("test.EchoService").click();
-    cy.contains("Echo").click();
+    cy.get("[data-testid='rpc-method-test.EchoService-Echo']").click();
 
     // When
     byTestId(TEST_IDS.rpcInvokeButton).click();
@@ -171,7 +173,7 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
       />
     );
     cy.contains("test.EchoService").click();
-    cy.contains("Echo").click();
+    cy.get("[data-testid='rpc-method-test.EchoService-Echo']").click();
 
     // When
     byTestId(TEST_IDS.rpcInvokeButton).click();
@@ -185,7 +187,6 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
 describe("DaemonNavMenu — RPC Playground entry", () => {
   it("renders shell-menu-rpc-playground menu item", () => {
     // Given
-    const { DaemonNavMenu } = require("../../src/components/shell/DaemonNavMenu");
     cy.mount(<DaemonNavMenu onNavigate={cy.stub().as("onNavigate")} />);
 
     // When
@@ -197,7 +198,6 @@ describe("DaemonNavMenu — RPC Playground entry", () => {
 
   it("clicking shell-menu-rpc-playground navigates to /rpc-playground", () => {
     // Given
-    const { DaemonNavMenu } = require("../../src/components/shell/DaemonNavMenu");
     cy.mount(<DaemonNavMenu onNavigate={cy.stub().as("onNavigate")} />);
     byTestId(TEST_IDS.shellMenuButton).click();
 
