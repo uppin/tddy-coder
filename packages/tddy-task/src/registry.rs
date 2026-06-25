@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::{watch, RwLock};
+use tokio::sync::{broadcast, watch, RwLock};
 
 use crate::task::{TaskBody, TaskContext, TaskHandle, TaskId, TaskStatus};
 
@@ -12,6 +12,24 @@ use crate::task::{TaskBody, TaskContext, TaskHandle, TaskId, TaskStatus};
 const TERMINAL_TASK_CAP: usize = 200;
 /// TTL for terminal tasks before they are automatically evicted.
 const TERMINAL_TASK_TTL: Duration = Duration::from_secs(5 * 60);
+
+/// Event broadcast on task lifecycle changes in the registry.
+#[derive(Clone)]
+pub enum TaskRegistryEvent {
+    Added(Arc<TaskHandle>),
+    Updated(Arc<TaskHandle>),
+    Removed(TaskId),
+}
+
+impl std::fmt::Debug for TaskRegistryEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TaskRegistryEvent::Added(h) => write!(f, "Added({:?})", h.id),
+            TaskRegistryEvent::Updated(h) => write!(f, "Updated({:?})", h.id),
+            TaskRegistryEvent::Removed(id) => write!(f, "Removed({:?})", id),
+        }
+    }
+}
 
 /// Thread-safe registry of background tasks.
 ///
@@ -23,6 +41,7 @@ const TERMINAL_TASK_TTL: Duration = Duration::from_secs(5 * 60);
 #[derive(Clone)]
 pub struct TaskRegistry {
     tasks: Arc<RwLock<HashMap<TaskId, Arc<TaskHandle>>>>,
+    task_events: Arc<broadcast::Sender<TaskRegistryEvent>>,
 }
 
 impl Default for TaskRegistry {
@@ -34,14 +53,20 @@ impl Default for TaskRegistry {
 impl TaskRegistry {
     /// Create an empty registry.
     pub fn new() -> Self {
+        let (tx, _) = broadcast::channel(256);
         Self {
             tasks: Arc::new(RwLock::new(HashMap::new())),
+            task_events: Arc::new(tx),
         }
     }
 
     /// Register a task handle that was created externally.
     pub async fn register(&self, handle: Arc<TaskHandle>) {
-        self.tasks.write().await.insert(handle.id.clone(), handle);
+        self.tasks
+            .write()
+            .await
+            .insert(handle.id.clone(), Arc::clone(&handle));
+        let _ = self.task_events.send(TaskRegistryEvent::Added(handle));
     }
 
     /// Look up a task by ID.
@@ -57,6 +82,9 @@ impl TaskRegistry {
     /// Remove a task from the registry.
     pub async fn remove(&self, id: &TaskId) {
         self.tasks.write().await.remove(id);
+        let _ = self
+            .task_events
+            .send(TaskRegistryEvent::Removed(id.clone()));
     }
 
     /// Return a snapshot of all currently registered tasks.
@@ -84,11 +112,15 @@ impl TaskRegistry {
             .write()
             .await
             .insert(handle.id.clone(), Arc::clone(&handle));
+        let _ = self
+            .task_events
+            .send(TaskRegistryEvent::Added(Arc::clone(&handle)));
 
         // Spawn the body and the exit-monitor.
         let handle_for_body = Arc::clone(&handle);
         let handle_for_monitor = Arc::clone(&handle);
         let registry_for_monitor = self.clone();
+        let event_tx = Arc::clone(&self.task_events);
 
         tokio::spawn(async move {
             handle_for_body.set_running();
@@ -101,6 +133,7 @@ impl TaskRegistry {
             handle_for_monitor,
             status_rx,
             registry_for_monitor,
+            event_tx,
         ));
 
         handle
@@ -120,7 +153,15 @@ impl TaskRegistry {
             .write()
             .await
             .insert(handle.id.clone(), Arc::clone(&handle));
-        tokio::spawn(exit_monitor(handle, status_rx, self.clone()));
+        let _ = self
+            .task_events
+            .send(TaskRegistryEvent::Added(Arc::clone(&handle)));
+        tokio::spawn(exit_monitor(
+            handle,
+            status_rx,
+            self.clone(),
+            Arc::clone(&self.task_events),
+        ));
     }
 
     /// Create and register a terminal task for an already-completed synchronous operation.
@@ -167,22 +208,50 @@ impl TaskRegistry {
 
     /// Evict the oldest terminal tasks beyond the cap.
     async fn evict_over_cap(&self) {
-        let mut tasks = self.tasks.write().await;
-        // Collect terminal task IDs with their creation timestamps.
-        let mut terminal: Vec<(u64, TaskId)> = tasks
-            .values()
-            .filter(|h| h.status().is_terminal())
-            .map(|h| (h.created_unix_ms, h.id.clone()))
-            .collect();
-        if terminal.len() <= TERMINAL_TASK_CAP {
-            return;
+        let evicted = {
+            let mut tasks = self.tasks.write().await;
+            // Collect terminal task IDs with their creation timestamps.
+            let mut terminal: Vec<(u64, TaskId)> = tasks
+                .values()
+                .filter(|h| h.status().is_terminal())
+                .map(|h| (h.created_unix_ms, h.id.clone()))
+                .collect();
+            if terminal.len() <= TERMINAL_TASK_CAP {
+                return;
+            }
+            // Sort oldest-first and remove the excess.
+            terminal.sort_by_key(|(ts, _)| *ts);
+            let excess = terminal.len() - TERMINAL_TASK_CAP;
+            let to_evict: Vec<TaskId> = terminal
+                .into_iter()
+                .take(excess)
+                .map(|(_, id)| id)
+                .collect();
+            for id in &to_evict {
+                tasks.remove(id);
+            }
+            to_evict
+        };
+        for id in evicted {
+            let _ = self.task_events.send(TaskRegistryEvent::Removed(id));
         }
-        // Sort oldest-first and remove the excess.
-        terminal.sort_by_key(|(ts, _)| *ts);
-        let excess = terminal.len() - TERMINAL_TASK_CAP;
-        for (_, id) in terminal.into_iter().take(excess) {
-            tasks.remove(&id);
-        }
+    }
+
+    /// Subscribe to task list events (added / updated / removed).
+    pub fn subscribe_list(&self) -> broadcast::Receiver<TaskRegistryEvent> {
+        self.task_events.subscribe()
+    }
+
+    /// Subscribe to task list events and atomically capture the current snapshot.
+    ///
+    /// Subscribes BEFORE reading the snapshot so no events are lost for tasks
+    /// spawned concurrently.
+    pub async fn list_and_subscribe(
+        &self,
+    ) -> (Vec<Arc<TaskHandle>>, broadcast::Receiver<TaskRegistryEvent>) {
+        let rx = self.task_events.subscribe();
+        let snapshot = self.list().await;
+        (snapshot, rx)
     }
 }
 
@@ -193,8 +262,9 @@ async fn exit_monitor(
     handle: Arc<TaskHandle>,
     mut status_rx: watch::Receiver<TaskStatus>,
     registry: TaskRegistry,
+    event_tx: Arc<broadcast::Sender<TaskRegistryEvent>>,
 ) {
-    // Wait until terminal.
+    // Wait until terminal, emitting Updated on each status change.
     loop {
         if status_rx.borrow().is_terminal() {
             break;
@@ -202,7 +272,11 @@ async fn exit_monitor(
         if status_rx.changed().await.is_err() {
             break;
         }
+        let _ = event_tx.send(TaskRegistryEvent::Updated(Arc::clone(&handle)));
     }
+
+    // Emit a final Updated for the terminal status.
+    let _ = event_tx.send(TaskRegistryEvent::Updated(Arc::clone(&handle)));
 
     // Trigger cap eviction immediately on completion (a new terminal task may push us over).
     registry.evict_over_cap().await;
@@ -335,7 +409,9 @@ mod tests {
         let registry = TaskRegistry::new();
 
         // When
-        let handle = registry.spawn(CompletingBody, "test", "session", vec![]).await;
+        let handle = registry
+            .spawn(CompletingBody, "test", "session", vec![])
+            .await;
 
         // Then
         wait_terminal(&handle).await;
@@ -407,5 +483,189 @@ mod tests {
             count <= TERMINAL_TASK_CAP,
             "registry must not exceed cap of {TERMINAL_TASK_CAP}; got {count}"
         );
+    }
+
+    // ── TaskRegistryEvent broadcast tests ────────────────────────────────────
+
+    #[tokio::test]
+    async fn subscribe_list_receives_added_event_on_spawn() {
+        // Given
+        let registry = TaskRegistry::new();
+        let mut rx = registry.subscribe_list();
+
+        // When
+        let handle = registry
+            .spawn(CompletingBody, "shell", "session", vec![])
+            .await;
+
+        // Then — first event must be Added with matching task_id
+        let event = rx
+            .recv()
+            .await
+            .expect("must receive Added event after spawn");
+        match event {
+            TaskRegistryEvent::Added(h) => {
+                assert_eq!(
+                    h.id, handle.id,
+                    "Added event must carry the spawned task's id"
+                );
+            }
+            other => panic!("expected Added, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn subscribe_list_receives_updated_event_on_running_transition() {
+        // Given — a task that stays running until cancelled so we can observe Running transition
+        let registry = TaskRegistry::new();
+        let mut rx = registry.subscribe_list();
+
+        let handle = registry
+            .spawn(WaitForCancelBody, "test", "session", vec![])
+            .await;
+
+        // Drain Added event
+        loop {
+            let event = rx.recv().await.expect("must receive event");
+            if matches!(&event, TaskRegistryEvent::Added(h) if h.id == handle.id) {
+                break;
+            }
+        }
+
+        // Then — an Updated event arrives with Running status
+        let event = rx
+            .recv()
+            .await
+            .expect("must receive Updated event for Running");
+        match event {
+            TaskRegistryEvent::Updated(h) => {
+                assert_eq!(h.id, handle.id);
+                assert_eq!(
+                    h.status(),
+                    TaskStatus::Running,
+                    "Updated event after spawn must carry Running status"
+                );
+            }
+            other => panic!("expected Updated(Running), got {:?}", other),
+        }
+
+        // Cleanup
+        registry.cancel_task(&handle.id).await;
+        wait_terminal(&handle).await;
+    }
+
+    #[tokio::test]
+    async fn subscribe_list_receives_removed_event_on_eviction() {
+        // Given — spawn a completing task and wait for it to finish, then force eviction
+        let registry = TaskRegistry::new();
+        let mut rx = registry.subscribe_list();
+
+        let handle = registry
+            .spawn(CompletingBody, "test", "session", vec![])
+            .await;
+        wait_terminal(&handle).await;
+
+        // Force immediate removal (simulates TTL expiry or cap eviction)
+        registry.remove(&handle.id).await;
+
+        // Then — a Removed event arrives with the task_id
+        loop {
+            let event = rx.recv().await.expect("must receive event");
+            if let TaskRegistryEvent::Removed(id) = event {
+                assert_eq!(
+                    id, handle.id,
+                    "Removed event must carry the evicted task's id"
+                );
+                return;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn list_and_subscribe_returns_snapshot_then_live_events() {
+        // Given — a task already in the registry before subscribe
+        let registry = TaskRegistry::new();
+        let existing = registry
+            .spawn(WaitForCancelBody, "existing", "session", vec![])
+            .await;
+        // Wait for Running so status is stable
+        let mut status_rx = existing.status_watch();
+        loop {
+            if matches!(*status_rx.borrow(), TaskStatus::Running) {
+                break;
+            }
+            status_rx.changed().await.unwrap();
+        }
+
+        // When — call list_and_subscribe
+        let (snapshot, mut rx) = registry.list_and_subscribe().await;
+
+        // Then — snapshot contains the existing task
+        assert!(
+            snapshot.iter().any(|h| h.id == existing.id),
+            "snapshot must include task that existed before subscribe"
+        );
+
+        // And — a new spawn fires an Added live event
+        let new_handle = registry
+            .spawn(CompletingBody, "new", "session", vec![])
+            .await;
+
+        let event = rx
+            .recv()
+            .await
+            .expect("must receive Added event for new task");
+        match event {
+            TaskRegistryEvent::Added(h) => {
+                assert_eq!(
+                    h.id, new_handle.id,
+                    "live Added event must carry new task id"
+                );
+            }
+            other => panic!("expected Added, got {:?}", other),
+        }
+
+        // Cleanup
+        registry.cancel_task(&existing.id).await;
+        wait_terminal(&existing).await;
+    }
+
+    #[tokio::test]
+    async fn list_and_subscribe_no_events_lost_when_spawn_races_subscribe() {
+        // Verify that list_and_subscribe() subscribes BEFORE reading the snapshot,
+        // so a task spawned concurrently appears in either the snapshot or the event stream.
+        let registry = TaskRegistry::new();
+
+        // Spawn a task concurrently with list_and_subscribe
+        let registry_clone = registry.clone();
+        let spawn_handle = tokio::spawn(async move {
+            registry_clone
+                .spawn(CompletingBody, "racing", "session", vec![])
+                .await
+        });
+
+        let (snapshot, mut rx) = registry.list_and_subscribe().await;
+        let raced_handle = spawn_handle.await.unwrap();
+
+        // The raced task must appear in snapshot OR in the first few live events
+        let in_snapshot = snapshot.iter().any(|h| h.id == raced_handle.id);
+        if !in_snapshot {
+            // Must appear as a live event — drain up to 10 events looking for it
+            let mut found = false;
+            for _ in 0..10 {
+                match rx.try_recv() {
+                    Ok(TaskRegistryEvent::Added(h)) if h.id == raced_handle.id => {
+                        found = true;
+                        break;
+                    }
+                    Ok(_) => continue,
+                    Err(_) => break,
+                }
+            }
+            assert!(
+                found,
+                "racing task must appear in snapshot or live events — no events lost"
+            );
+        }
     }
 }

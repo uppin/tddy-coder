@@ -93,6 +93,9 @@ describe("GhosttyTerminalLiveKit", () => {
 
   it("Opening the status menu shows Disconnect and conditionally Terminate", () => {
     // Given
+    // Use withDisconnect() so the driver's internal stub is both wired to the component
+    // and accessible via cy.get("@onDisconnect") — passing a separate stub via options
+    // causes an alias conflict (the driver also creates cy.stub().as("onDisconnect")).
     const driver = aGhosttyTerminalLiveKit().withDisconnect().mount();
 
     // When
@@ -276,12 +279,11 @@ describe("Terminal status bar acceptance (PRD)", () => {
 
   it("connection_menu_and_fullscreen_still_functional", () => {
     // Given
+    // Use withDisconnect() so the driver's internal onDisconnect stub is wired to the component.
     const driver = aGhosttyTerminalLiveKit({
       containerHeight: 420,
       containerWidth: 640,
-    })
-      .withDisconnect("menu-build")
-      .mount();
+    }).withDisconnect("menu-build").mount();
 
     // Stub fullscreen before interacting
     driver.stubRequestFullscreen();
