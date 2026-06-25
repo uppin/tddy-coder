@@ -1,10 +1,27 @@
 import type { mount } from "cypress/react";
 import type { TerminalSessionResult } from "./cypress/support/commands";
+import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 
 declare global {
   namespace Cypress {
     interface Chainable {
       mount: typeof mount;
+
+      /**
+       * Mount a React component with all ConnectRPC (HTTP + LiveKit) routed to
+       * an in-memory `InMemoryRpcBackend`. No real server or `cy.intercept` needed.
+       *
+       * @example
+       * ```ts
+       * const backend = anInMemoryRpcBackend()
+       *   .onUnary(AuthService.method.getAuthStatus, () => ({ isAuthenticated: false }));
+       * cy.mountWithRpc(<MyComponent />, backend);
+       * ```
+       */
+      mountWithRpc(
+        component: React.ReactElement,
+        backend: InMemoryRpcBackend,
+      ): Cypress.Chainable;
 
       /**
        * Start a terminal server session and yield its connection details.

@@ -1,6 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
+import { useCallback, useEffect, useState } from "react";
 import {
   ConnectionService,
   type EligibleDaemonEntry,
@@ -11,6 +9,7 @@ import { GitHubLoginButton } from "../GitHubLoginButton";
 import { UserAvatar } from "../UserAvatar";
 import { DaemonNavMenu } from "../shell/DaemonNavMenu";
 import { useAuth } from "../../hooks/useAuth";
+import { useHttpClient } from "../../rpc/transportProvider";
 import { WorktreesScreen, type WorktreesScreenMockRow } from "./WorktreesScreen";
 import { Button } from "@/components/ui/button";
 
@@ -19,14 +18,6 @@ const screenShellClassName =
 
 const selectClassName =
   "box-border min-w-[12rem] max-w-[24rem] rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-
-function createConnectionClient() {
-  const transport = createConnectTransport({
-    baseUrl: typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
-    useBinaryFormat: true,
-  });
-  return createClient(ConnectionService, transport);
-}
 
 function formatDiskBytes(n: bigint): string {
   const v = Number(n);
@@ -64,7 +55,7 @@ export function WorktreesAppPage({
   onNavigate: (path: string) => void;
 }) {
   const { user, isAuthenticated, login, logout, sessionToken } = useAuth();
-  const client = useMemo(() => createConnectionClient(), []);
+  const client = useHttpClient(ConnectionService);
 
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [daemons, setDaemons] = useState<EligibleDaemonEntry[]>([]);
