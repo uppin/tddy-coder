@@ -1,15 +1,43 @@
 {
   "permissions": {
+    "defaultMode": "acceptEdits",
     "allow": [
-      "Bash(tddy-tools list-actions*)",
-      "Bash(tddy-tools invoke-action*)",
-      "Bash(./test*)",
-      "Bash(./verify*)",
-      "Bash(./dev cargo check*)",
-      "Bash(./dev cargo build*)",
-      "Bash(./dev cargo test*)",
-      "Bash(./dev cargo clippy*)",
-      "Bash(./dev cargo fmt*)"
+      "Bash",
+      "Glob",
+      "Grep"
+    ],
+    "ask": [
+      "Read(//etc/**)",
+      "Read(//root/**)",
+      "Read(//home/**)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.config/**)",
+      "Read(~/.claude/**)",
+      "Edit(//etc/**)",
+      "Edit(//root/**)",
+      "Edit(//home/**)",
+      "Edit(~/.ssh/**)",
+      "Edit(~/.aws/**)",
+      "Edit(~/.gnupg/**)",
+      "Edit(~/.config/**)",
+      "Edit(~/.claude/**)",
+      "Write(//etc/**)",
+      "Write(//root/**)",
+      "Write(//home/**)",
+      "Write(~/.ssh/**)",
+      "Write(~/.aws/**)",
+      "Write(~/.gnupg/**)",
+      "Write(~/.config/**)",
+      "Write(~/.claude/**)"
+    ],
+    "deny": [
+      "Bash(git commit --no-verify*)",
+      "Bash(git push --no-verify*)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/.env)"
     ]
   }
 }
