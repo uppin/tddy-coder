@@ -174,3 +174,48 @@ export function useLiveKitTransportFactory(): (room: Room, targetIdentity: strin
   const ctx = useContext(RpcTransportContext);
   return ctx?.liveKitFactory ?? createDefaultLiveKitTransport;
 }
+
+/**
+ * Build and memoize the LiveKit transport for the given room and participant. Returns `null`
+ * when either `room` or `targetIdentity` is not yet available.
+ *
+ * Use when you need the raw transport (e.g. for a generic `invokeRpc` call alongside a
+ * service-specific client). When you only need a specific service client, prefer
+ * {@link useLiveKitClient} instead.
+ */
+export function useLiveKitTransport(
+  room: Room | null | undefined,
+  targetIdentity: string | null | undefined,
+  options?: LiveKitTransportOptions,
+): Transport | null {
+  const factory = useLiveKitTransportFactory();
+  return useMemo(
+    () => (room && targetIdentity ? factory(room, targetIdentity, options) : null),
+    // options intentionally omitted — pass a stable reference if needed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [factory, room, targetIdentity],
+  );
+}
+
+/**
+ * Create and memoize a ConnectRPC client over the LiveKit transport for the given room and
+ * participant. Returns `null` when either `room` or `targetIdentity` is not yet available.
+ *
+ * Use when both values are known at render time (e.g. a `room` from `useCommonRoom` and a
+ * selected participant ID from state). When the room is local to a `useEffect` callback,
+ * call `useLiveKitTransportFactory()` instead and construct the client inside the effect.
+ */
+export function useLiveKitClient<S extends DescService>(
+  service: S,
+  room: Room | null | undefined,
+  targetIdentity: string | null | undefined,
+  options?: LiveKitTransportOptions,
+): Client<S> | null {
+  const factory = useLiveKitTransportFactory();
+  return useMemo(
+    () => (room && targetIdentity ? createClient(service, factory(room, targetIdentity, options)) : null),
+    // options is intentionally omitted — callers should pass a stable reference if needed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [service, factory, room, targetIdentity],
+  );
+}
