@@ -93,9 +93,7 @@ describe("GhosttyTerminalLiveKit", () => {
 
   it("Opening the status menu shows Disconnect and conditionally Terminate", () => {
     // Given
-    const driver = aGhosttyTerminalLiveKit({
-      connectionOverlay: { onDisconnect: cy.stub().as("onDisconnect") },
-    }).mount();
+    const driver = aGhosttyTerminalLiveKit().withDisconnect().mount();
 
     // When
     driver.openStatusMenu();
@@ -279,29 +277,24 @@ describe("Terminal status bar acceptance (PRD)", () => {
   it("connection_menu_and_fullscreen_still_functional", () => {
     // Given
     const driver = aGhosttyTerminalLiveKit({
-      connectionOverlay: { onDisconnect: cy.stub().as("onDisconnect"), buildId: "menu-build" },
       containerHeight: 420,
       containerWidth: 640,
-    }).mount();
+    })
+      .withDisconnect("menu-build")
+      .mount();
 
     // Stub fullscreen before interacting
     driver.stubRequestFullscreen();
 
     // When — open menu and disconnect
-    cy.get("[data-testid='terminal-connection-status-bar'] [data-testid='connection-status-dot']", { timeout: 20000 })
-      .should("be.visible")
-      .click();
-    driver.disconnectMenuItem().should("be.visible").click();
+    driver.openStatusMenu();
+    driver.clickDisconnect();
 
     // Then
     driver.expectDisconnectCalled();
 
     // When — click fullscreen
-    cy.get("[data-testid='terminal-connection-status-bar'] [data-testid='terminal-fullscreen-button']", {
-      timeout: 20000,
-    })
-      .should("be.visible")
-      .click();
+    driver.clickFullscreen();
 
     // Then
     driver.expectRequestFullscreenCalled();

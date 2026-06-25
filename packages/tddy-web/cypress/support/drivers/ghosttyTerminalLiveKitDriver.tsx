@@ -186,13 +186,20 @@ export function aGhosttyTerminalLiveKit(
 
     /** Click the status dot to open the connection menu. */
     openStatusMenu() {
-      driver.statusDot().should("exist").click();
+      driver.statusDot().should("be.visible").click();
+      return driver;
+    },
+
+    /** Assert that the connection menu is open (disconnect item is visible). */
+    expectMenuOpen() {
+      driver.disconnectMenuItem().should("be.visible");
       return driver;
     },
 
     /** Click "Disconnect" in the open connection menu. */
     clickDisconnect() {
-      driver.disconnectMenuItem().should("be.visible").click();
+      // force:true bypasses coordinate-based mousedown interception from the canvas
+      driver.disconnectMenuItem().should("be.visible").click({ force: true });
       return driver;
     },
 
