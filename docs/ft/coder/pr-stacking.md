@@ -1,7 +1,7 @@
 # PR stacking
 
 **Product area:** Coder  
-**Updated:** 2026-06-21
+**Updated:** 2026-06-26
 
 ## Summary
 
@@ -172,8 +172,45 @@ A recovery guard at the top of every `assess` entry (`recover_in_flight_stack_op
 
 `--force-with-lease=<branch>:<expected-sha>` ensures that a concurrent child push aborts the repoint and routes to `MarkFailed` rather than silently clobbering work.
 
+## Web UI: session creation and drawer grouping
+
+### `orchestrator_session_id` in proto
+
+`Changeset.orchestrator_session_id` (a child-session back-reference to the orchestrating session) is surfaced to the web via `SessionEntry` proto field 21 (`orchestrator_session_id: string`). It is populated during enrichment by `session_list_enrichment.rs` reading the child's `changeset.yaml` (alongside `changeset.state.current`). Empty string for non-child sessions.
+
+### New-session screen: recipe dropdown and parent picker
+
+`CreateSessionPane` (`packages/tddy-web/src/components/sessions/`) gains two changes for tool sessions:
+
+- **Recipe dropdown** — the free-text recipe input is replaced with a `<select>` listing the canonical recipe set (`tdd`, `tdd-small`, `bugfix`, `free-prompting`, `grill-me`, `plan-pr-stack`, `orchestrate-pr-stack`). The canonical list lives in `packages/tddy-web/src/utils/recipeOptions.ts`. Both PR-stack recipes also need to be added to the `--recipe` `value_parser` in `packages/tddy-coder/src/run.rs` (they were previously omitted).
+- **Parent stack picker** — a new optional "Parent orchestrator" `<select>` (tool type only) that lists existing sessions identified as PR-stack orchestrators (sessions that have at least one child referencing them via `orchestratorSessionId`). A helper `stackParentCandidates(sessions)` in `packages/tddy-web/src/utils/stackParents.ts` computes the candidate set. Selecting a parent passes `stack_parent` (proto `StartSessionRequest` field 15) to the daemon, which threads it through `SpawnOptions` → `--stack-parent <id>` CLI arg.
+
+### Session drawer: children collapsed under the main stack session
+
+`SessionDrawer` (`packages/tddy-web/src/components/sessions/SessionDrawer.tsx`) renders PR-stack sessions in a collapsible group rather than a flat list.
+
+Grouping logic lives in `packages/tddy-web/src/utils/sessionStackGroups.ts`:
+
+```
+groupSessionsByStack(sessions) → { groups: { parent: SessionEntry, children: SessionEntry[] }[], flat: SessionEntry[] }
+```
+
+- **Child** = session with a non-empty `orchestratorSessionId` pointing at a present session.
+- **Parent** = session referenced as `orchestratorSessionId` by at least one child.
+- Children whose parent is absent fall into `flat` (like `isSessionOrphan` in `sessionProjectTable.ts`).
+- Within each group, parent and children are sorted by `sortSessionsByCreation`; groups themselves ordered by parent `createdAt` (newest first).
+
+`SessionDrawer` replaces its flat `sessions.map` with:
+- Per group: a native `<details data-testid="sessions-drawer-stack-<parentId>" open>` whose `<summary>` contains the parent's `SessionDrawerItem` and whose body renders children with `depth={1}`.
+- Then `flat` sessions with `depth={0}`.
+
+`SessionDrawerItem` gains `depth?: number` (indentation) and a chevron indicator for group parents. The native `<details>`/`<summary>` collapse pattern reuses `ConnectionScreen.tsx:2140-2154`.
+
+Only one nesting level is rendered for v1; the grouping utility is written to support recursion later.
+
 ## Related
 
+- [Session drawer](../web/session-drawer.md) — session drawer screen layout, create session, recipe field, grouping.
 - [Git integration base ref (worktrees)](git-integration-base-ref.md) — session chaining, `spawn_chain_child_worktree`, worktree base-ref validation.
 - [Session layout](session-layout.md) — session directory structure, `changeset.yaml`, artifact paths.
 - [Workflow recipes](workflow-recipes.md) — `WorkflowRecipe` trait, recipe resolution, `approval_policy`, shipped recipes.

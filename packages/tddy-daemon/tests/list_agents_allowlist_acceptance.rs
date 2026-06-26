@@ -201,6 +201,7 @@ allowed_agents:
         selected_branch_to_work_on: String::new(),
         initial_prompt: String::new(),
         permission_mode: String::new(),
+        stack_parent: String::new(),
     });
 
     // When

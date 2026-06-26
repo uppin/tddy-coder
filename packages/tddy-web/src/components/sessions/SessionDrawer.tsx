@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import type { SessionEntry } from "../../gen/connection_pb";
+import { groupSessionsByStack } from "../../utils/sessionStackGroups";
 import { ScrollArea } from "../ui/scroll-area";
 import { SessionDrawerItem } from "./SessionDrawerItem";
 
@@ -10,7 +11,57 @@ interface SessionDrawerProps {
   onCreateSession?: () => void;
 }
 
+interface StackGroup {
+  parent: SessionEntry;
+  children: SessionEntry[];
+}
+
+function SessionStackGroup({
+  group,
+  selectedSessionId,
+  onSelectSession,
+}: {
+  group: StackGroup;
+  selectedSessionId: string | null;
+  onSelectSession: (sessionId: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(true);
+
+  return (
+    <div data-testid={`sessions-drawer-stack-${group.parent.sessionId}`}>
+      <SessionDrawerItem
+        session={group.parent}
+        isSelected={group.parent.sessionId === selectedSessionId}
+        onClick={onSelectSession}
+      />
+      {/* <details> provides the <summary> toggle target; children visibility is controlled explicitly via React state */}
+      <details>
+        <summary
+          className="list-none cursor-pointer py-0.5"
+          onClick={(e) => {
+            e.preventDefault();
+            setIsOpen((v) => !v);
+          }}
+        />
+      </details>
+      <div style={isOpen ? undefined : { display: "none" }}>
+        {group.children.map((child) => (
+          <SessionDrawerItem
+            key={child.sessionId}
+            session={child}
+            isSelected={child.sessionId === selectedSessionId}
+            onClick={onSelectSession}
+            depth={1}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function SessionDrawer({ sessions, selectedSessionId, onSelectSession, onCreateSession }: SessionDrawerProps) {
+  const { groups, flat } = groupSessionsByStack(sessions);
+
   return (
     <div
       data-testid="sessions-drawer"
@@ -35,7 +86,15 @@ export function SessionDrawer({ sessions, selectedSessionId, onSelectSession, on
       </div>
       <ScrollArea className="flex-1 min-h-0">
         <div className="py-1 px-2 space-y-0.5">
-          {sessions.map((session) => (
+          {groups.map((group) => (
+            <SessionStackGroup
+              key={group.parent.sessionId}
+              group={group}
+              selectedSessionId={selectedSessionId}
+              onSelectSession={onSelectSession}
+            />
+          ))}
+          {flat.map((session) => (
             <SessionDrawerItem
               key={session.sessionId}
               session={session}

@@ -2,12 +2,14 @@
 
 mod actions;
 mod assess;
+pub mod bridge;
 mod git_ops;
 pub mod github;
 mod hooks;
 pub mod transient;
 
 pub use actions::{MergeTask, RepointTask, SpawnTask};
+pub use bridge::{execute_stack_merge, execute_stack_repoint, seed_orchestrator_stack_from_plan};
 pub use assess::{
     assemble_views, decide_next_action, effective_base_ref, AssessTask, ChildPhase, NodeView,
     OrchestratorAction, PrLiveStatus,

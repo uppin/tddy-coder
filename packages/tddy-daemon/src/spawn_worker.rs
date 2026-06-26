@@ -291,6 +291,7 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                         agent: req.agent.as_deref(),
                         mouse: req.mouse,
                         recipe: req.recipe.as_deref(),
+                        stack_parent: None,
                     },
                     req.child_log_level.as_str(),
                     req.child_log_format.as_str(),

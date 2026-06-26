@@ -99,6 +99,9 @@ message SessionEntry {
   string updated_at = 18;
   string livekit_room = 19;
   string previous_session_id = 20;
+  // Back-reference to the orchestrating PR-stack session that spawned this child session.
+  // Empty string for non-child sessions.
+  string orchestrator_session_id = 21;
 }
 
 message ProjectEntry {
@@ -162,6 +165,9 @@ message StartSessionRequest {
   // Valid values: "auto", "default", "acceptEdits", "plan", "bypassPermissions".
   // Passed as `--permission-mode <mode>` to the claude binary.
   string permission_mode = 14;
+  // Optional: session ID of the orchestrating PR-stack session. When set, the spawned tddy-coder
+  // receives `--stack-parent <id>` so it can back-reference the orchestrator.
+  string stack_parent = 15;
 }
 message StartSessionResponse {
   string session_id = 1;

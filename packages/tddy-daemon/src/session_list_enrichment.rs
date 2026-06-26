@@ -32,6 +32,9 @@ pub struct SessionListStatusDisplay {
     /// Granular activity status for claude-cli sessions (e.g. "Running", "WaitingForInput").
     /// Empty string for tool/workflow sessions.
     pub activity_status: String,
+    /// Back-reference to the orchestrating PR-stack session (from `Changeset.orchestrator_session_id`).
+    /// Empty string for non-child sessions or when absent.
+    pub orchestrator_session_id: String,
 }
 
 impl SessionListStatusDisplay {
@@ -44,6 +47,7 @@ impl SessionListStatusDisplay {
             agent: p.clone(),
             model: p,
             activity_status: String::new(),
+            orchestrator_session_id: String::new(),
         }
     }
 }
@@ -128,6 +132,7 @@ pub fn session_list_status_from_session_dir(
             agent: "claude-cli".to_string(),
             model: meta.model.clone().unwrap_or_default(),
             activity_status: meta.activity_status.clone().unwrap_or_default(),
+            orchestrator_session_id: String::new(),
         });
     }
 
@@ -159,6 +164,7 @@ pub fn session_list_status_from_session_dir(
             agent: "—".to_string(),
             model: "—".to_string(),
             activity_status: String::new(),
+            orchestrator_session_id: String::new(),
         });
     };
 
@@ -185,6 +191,10 @@ pub fn session_list_status_from_session_dir(
         agent,
         model,
         activity_status: String::new(),
+        orchestrator_session_id: changeset
+            .orchestrator_session_id
+            .clone()
+            .unwrap_or_default(),
     })
 }
 
@@ -215,6 +225,7 @@ pub fn apply_session_list_status_to_proto(
     entry.agent = status.agent;
     entry.model = status.model;
     entry.activity_status = status.activity_status;
+    entry.orchestrator_session_id = status.orchestrator_session_id;
     entry.pending_elicitation =
         crate::elicitation::pending_elicitation_for_session_dir(session_dir);
     Ok(())
@@ -403,6 +414,7 @@ state:
             updated_at: String::new(),
             livekit_room: String::new(),
             previous_session_id: String::new(),
+            orchestrator_session_id: String::new(),
         };
         apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
         assert_eq!(proto.workflow_goal, "acceptance-tests");
@@ -651,6 +663,7 @@ sessions:
             updated_at: String::new(),
             livekit_room: String::new(),
             previous_session_id: String::new(),
+            orchestrator_session_id: String::new(),
         };
         apply_session_list_status_to_proto(&session_dir, &mut proto).unwrap();
         assert_eq!(
@@ -688,6 +701,181 @@ sessions:
         assert!(
             crate::elicitation::pending_elicitation_for_session_dir(&session_dir),
             "pending_elicitation in .session.yaml must map to the Connection list flag"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Acceptance tests: orchestrator_session_id enrichment (Layer 2)
+    // ---------------------------------------------------------------------------
+
+    /// `enrichment_surfaces_orchestrator_session_id_from_changeset` — when a child session's
+    /// `changeset.yaml` contains `orchestrator_session_id: "orch-sess-abc"`,
+    /// `session_list_status_from_session_dir` must return that string in
+    /// `SessionListStatusDisplay.orchestrator_session_id`.
+    #[test]
+    fn enrichment_surfaces_orchestrator_session_id_from_changeset() {
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path();
+
+        // A child session's .session.yaml (tool session type)
+        fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            r"session_id: child-sess-1
+project_id: proj-stack-1
+created_at: '2026-06-26T10:00:00Z'
+updated_at: '2026-06-26T10:05:00Z'
+status: active
+repo_path: /tmp/repo
+pid: 99
+",
+        )
+        .unwrap();
+
+        // Child's changeset.yaml has orchestrator_session_id set
+        fs::write(
+            session_dir.join("changeset.yaml"),
+            r"version: 1
+models:
+  tdd: opus
+sessions:
+  - id: child-sess-1
+    agent: claude
+    tag: tdd
+    created_at: '2026-06-26T10:00:00Z'
+state:
+  current: Green
+  session_id: child-sess-1
+  updated_at: '2026-06-26T10:05:00Z'
+  history:
+    - state: Init
+      at: '2026-06-26T10:00:00Z'
+    - state: Green
+      at: '2026-06-26T10:05:00Z'
+orchestrator_session_id: orch-sess-abc
+",
+        )
+        .unwrap();
+
+        // When
+        let got = session_list_status_from_session_dir(session_dir)
+            .expect("enrichment must not error for child session with orchestrator_session_id");
+
+        // Then — the orchestrator back-reference is surfaced
+        assert_eq!(
+            got.orchestrator_session_id, "orch-sess-abc",
+            "orchestrator_session_id must be read from changeset.yaml and surfaced in SessionListStatusDisplay"
+        );
+    }
+
+    /// `enrichment_orchestrator_session_id_empty_when_absent` — when a session's
+    /// `changeset.yaml` has no `orchestrator_session_id` field (a normal non-child session),
+    /// the enrichment must return an empty string for `orchestrator_session_id`.
+    #[test]
+    fn enrichment_orchestrator_session_id_empty_when_absent() {
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path();
+
+        fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            r"session_id: regular-sess-1
+project_id: proj-regular
+created_at: '2026-06-26T10:00:00Z'
+updated_at: '2026-06-26T10:05:00Z'
+status: active
+repo_path: /tmp/repo
+pid: 99
+",
+        )
+        .unwrap();
+
+        // No orchestrator_session_id in changeset
+        fs::write(
+            session_dir.join("changeset.yaml"),
+            r"version: 1
+models:
+  tdd: opus
+sessions:
+  - id: regular-sess-1
+    agent: claude
+    tag: tdd
+    created_at: '2026-06-26T10:00:00Z'
+state:
+  current: Red
+  session_id: regular-sess-1
+  updated_at: '2026-06-26T10:05:00Z'
+  history:
+    - state: Red
+      at: '2026-06-26T10:05:00Z'
+",
+        )
+        .unwrap();
+
+        // When
+        let got = session_list_status_from_session_dir(session_dir)
+            .expect("enrichment must not error for regular session");
+
+        // Then — orchestrator_session_id must be empty string
+        assert_eq!(
+            got.orchestrator_session_id, "",
+            "orchestrator_session_id must be empty for sessions without the field"
+        );
+    }
+
+    /// `apply_orchestrator_session_id_to_proto_sets_field` — when `apply_session_list_status_to_proto`
+    /// enriches a child session, the `orchestrator_session_id` must be copied into the proto
+    /// `SessionEntry` field 21.
+    #[test]
+    fn apply_orchestrator_session_id_to_proto_sets_field() {
+        use tddy_service::proto::connection::SessionEntry as ProtoSessionEntry;
+
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path();
+
+        fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            r"session_id: child-proto-sess-1
+project_id: proj-proto-stack
+created_at: '2026-06-26T10:00:00Z'
+updated_at: '2026-06-26T10:05:00Z'
+status: active
+repo_path: /tmp/repo
+pid: 99
+",
+        )
+        .unwrap();
+
+        fs::write(
+            session_dir.join("changeset.yaml"),
+            r"version: 1
+models:
+  tdd: opus
+sessions:
+  - id: child-proto-sess-1
+    agent: claude
+    tag: tdd
+    created_at: '2026-06-26T10:00:00Z'
+state:
+  current: Green
+  session_id: child-proto-sess-1
+  updated_at: '2026-06-26T10:05:00Z'
+  history:
+    - state: Green
+      at: '2026-06-26T10:05:00Z'
+orchestrator_session_id: orch-sess-proto-xyz
+",
+        )
+        .unwrap();
+
+        let mut proto = ProtoSessionEntry {
+            session_id: "child-proto-sess-1".to_string(),
+            ..Default::default()
+        };
+        apply_session_list_status_to_proto(session_dir, &mut proto)
+            .expect("apply must not error");
+
+        assert_eq!(
+            proto.orchestrator_session_id, "orch-sess-proto-xyz",
+            "orchestrator_session_id from changeset must be copied into proto SessionEntry field 21"
         );
     }
 }

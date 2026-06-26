@@ -176,7 +176,8 @@ A toggle at the top of the form switches between:
 |-------|-------|----------|
 | Project | both | yes — dropdown from `ListProjects` |
 | Agent/coder | tool | yes — dropdown from `ListAgents` |
-| Recipe | tool | no — free-text |
+| Recipe | tool | no — `<select>` with all 9 workflow recipes (default: `tdd`) |
+| PR stack parent | tool | conditional — `<select>` listing orchestrator sessions; hidden when none exist |
 | Model | claude-cli | yes — dropdown of `CLAUDE_CLI_MODELS` |
 | Permission mode | claude-cli | no — auto/default/acceptEdits/plan/bypassPermissions |
 | Initial prompt | claude-cli | no — textarea |
@@ -184,6 +185,21 @@ A toggle at the top of the form switches between:
 
 The tool binary (`toolPath`) is auto-selected from `ListTools`; shown as a select only
 when multiple tools are available.
+
+### Recipe Dropdown
+
+The recipe `<select>` lists all 9 workflow recipes (constant `WORKFLOW_RECIPES` in
+`CreateSessionPane.tsx`): `tdd`, `tdd-small`, `bugfix`, `free-prompting`, `grill-me`,
+`review`, `merge-pr`, `plan-pr-stack`, `orchestrate-pr-stack`. Defaults to `tdd`.
+
+### PR Stack Parent Picker
+
+When creating a **tool** session, the form also calls `ListSessions` and filters to sessions
+that are not themselves children of an orchestrator (`orchestratorSessionId === ""`). If any
+candidates exist, a **PR stack parent** `<select>` appears. Selecting a session causes
+`StartSession` to include `stackParent = <session_id>` (proto field 15), which the daemon
+threads as `--stack-parent <id>` to the spawned `tddy-coder` process. This sets
+`Changeset.orchestrator_session_id` on the child, which the drawer uses for grouping.
 
 ### Post-Create
 
@@ -208,8 +224,56 @@ interface CreateSessionPaneProps {
 - `ListProjects` — project dropdown
 - `ListTools` — auto-select tool binary
 - `ListAgents` — agent dropdown (tool sessions)
+- `ListSessions` — populate PR stack parent picker (best-effort; failure hides the picker)
 - `ListProjectBranches` — branch dropdown when "work on existing branch"
 - `StartSession` — create + start the session
+
+## PR-Stack Session Grouping
+
+> **Added: 2026-06-26** — Sessions that are children of a PR-stack orchestrator are now
+> displayed nested under their orchestrator in the drawer.
+
+### Data Model
+
+`SessionEntry.orchestratorSessionId` (proto field 21, `string`) carries the back-reference
+from a child session to its PR-stack orchestrator. The daemon populates it from
+`Changeset.orchestrator_session_id` via `session_list_enrichment.rs`. Empty string for
+non-child sessions.
+
+### Grouping Logic
+
+`groupSessionsByStack(sessions)` (in `src/utils/sessionStackGroups.ts`) partitions the
+session list:
+
+- **Group** — an orchestrator session paired with one or more children that reference it.
+  Children sorted oldest-first by `createdAt`.
+- **Flat** — plain sessions (no `orchestratorSessionId`) and orphan children whose
+  orchestrator is not in the current list.
+
+Groups are sorted newest-first by the orchestrator's `createdAt`.
+
+### Drawer Rendering
+
+`SessionDrawer.tsx` renders:
+
+```
+<details data-testid="sessions-drawer-stack-{orch-id}" open>
+  <summary>
+    <SessionDrawerItem session={parent} />     ← orchestrator row
+  </summary>
+  <SessionDrawerItem session={child} depth={1} />  ← each child, indented
+</details>
+```
+
+- `open` attribute: groups start expanded.
+- Clicking `<summary>` collapses/expands the group (native browser `<details>` behaviour).
+- `SessionDrawerItem` uses the `depth` prop to set `data-depth` and left-padding, giving
+  child sessions a visual indent.
+- Orphan children (orchestrator absent from list) appear in the flat section without a group.
+
+### Stack Parent Picker
+
+See [PR Stack Parent Picker](#pr-stack-parent-picker) in the Create Session section above.
 
 ## Session Traffic Strip
 
