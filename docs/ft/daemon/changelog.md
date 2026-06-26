@@ -2,6 +2,13 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-06-26 — Single-screen terminal control mutex
+
+- Per-session exclusive control lease in `ClaudeCliSessionManager`: first browser tab to attach becomes the controller; subsequent tabs see a **"Claim terminal"** overlay and cannot send input
+- New `ConnectionService` RPCs: `ClaimTerminalControl` (unary, `steal` flag to evict the current holder) and `WatchTerminalControl` (server-stream, snapshot-then-delta via broadcast channel)
+- `control_token` field added to `SessionTerminalInput`, `SignalSessionRequest`, `StartTerminalSessionRequest`, `StopTerminalSessionRequest`; input RPCs return `FAILED_PRECONDITION` when the token is wrong
+- Uncontrolled sessions (no lease held) accept all inputs — fully backwards compatible
+
 ## 2026-06-25 — Multiple tools per session (Bash tool)
 
 - A session can run multiple identified tools, not just `claude`: the main terminal is the reserved id `"main"` (kind `"claude-cli"`); on-demand **Bash** tools (kind `"bash"`) run `$SHELL` (fallback `/bin/bash`) in the worktree, no inputs

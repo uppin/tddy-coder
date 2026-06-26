@@ -4,6 +4,14 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-06-26 — Single-screen terminal control mutex: Claim terminal CTA
+
+- `SessionMainPane` gains a `terminalControl` prop; when another screen holds the lease an absolute scrim overlay appears with the holder's screen id and a **"Claim terminal"** button
+- `useTerminalControl` hook: claims control (steal=false) on session attach, subscribes to `WatchTerminalControl` server-stream for real-time lease-change events, exposes `claim()` for steal=true
+- `terminalControlState.ts` pure reducer folds `TerminalControlEvent` stream into `{ isController, holderScreenId }`
+- `screenId.ts`: stable per-browser-tab identity persisted in `sessionStorage` (two tabs get different ids)
+- `SessionsDrawerScreen` owns the hook and passes `terminalControl` to `SessionMainPane` only when a session is connected
+
 ## 2026-06-25 — Session inspector Tools tab: invoke panel + durable call log
 
 - Session inspector drawer gains a **Details / Tools** tab strip; Details tab is selected by default (existing metadata/controls unchanged)
