@@ -393,16 +393,7 @@ describe("CreateSessionPane — submit behaviour", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Recipe dropdown + parent-picker tests (Layer 3 — currently FAILING)
-//
-// These tests describe behaviour that will be implemented in the Layer 3 green phase:
-// - Replace the free-text recipe input with a <select> listing all 7 recipes
-// - Add a parent-picker <select> that lists orchestrator sessions (tool type only)
-// - Submit includes the selected recipe and the optional stack parent session id
-//
-// Every test in this section FAILS right now because:
-// 1. The recipe input is still free-text (createSessionRecipeInput), not a select.
-// 2. The parent-picker select does not exist yet.
+// Recipe dropdown + parent-picker tests
 // ---------------------------------------------------------------------------
 
 function interceptBaselineWithSessions(orchestratorSessions: { sessionId: string }[] = []) {
@@ -420,7 +411,7 @@ function interceptBaselineWithSessions(orchestratorSessions: { sessionId: string
   }).as("listSessions");
 }
 
-describe("CreateSessionPane — recipe dropdown (Layer 3)", () => {
+describe("CreateSessionPane — recipe dropdown", () => {
   beforeEach(() => {
     interceptBaseline();
   });
@@ -500,7 +491,7 @@ describe("CreateSessionPane — recipe dropdown (Layer 3)", () => {
   });
 });
 
-describe("CreateSessionPane — stack parent picker (Layer 3)", () => {
+describe("CreateSessionPane — stack parent picker", () => {
   it("shows the parent picker <select> for tool sessions when orchestrators are available", () => {
     interceptBaselineWithSessions([{ sessionId: "orch-sess-1", recipe: "orchestrate-pr-stack" }]);
 

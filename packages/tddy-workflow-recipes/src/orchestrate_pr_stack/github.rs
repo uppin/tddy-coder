@@ -198,8 +198,11 @@ impl GithubPrApi for RealGithubPrApi {
                     .to_string(),
             )
         })?;
-        let body =
-            crate::github_rest_common::curl_github_get_json(&self.repo, "pulls", &[("state", "open"), ("head", head_branch)])?;
+        let body = crate::github_rest_common::curl_github_get_json(
+            &self.repo,
+            "pulls",
+            &[("state", "open"), ("head", head_branch)],
+        )?;
         let items: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
             tddy_core::WorkflowError::WriteFailed(format!("get_open_pr: JSON parse error: {e}"))
         })?;
@@ -229,12 +232,20 @@ impl GithubPrApi for RealGithubPrApi {
             .and_then(|s| s.as_str())
             .unwrap_or("")
             .to_string();
-        Ok(Some(PrRef { number, head_sha, base_branch, url }))
+        Ok(Some(PrRef {
+            number,
+            head_sha,
+            base_branch,
+            url,
+        }))
     }
 
     fn merge_pr(&self, number: u64) -> Result<String, tddy_core::WorkflowError> {
-        let body =
-            crate::github_rest_common::curl_github_put_json(&self.repo, &format!("pulls/{number}/merge"), r#"{"merge_method":"merge"}"#)?;
+        let body = crate::github_rest_common::curl_github_put_json(
+            &self.repo,
+            &format!("pulls/{number}/merge"),
+            r#"{"merge_method":"merge"}"#,
+        )?;
         let v: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
             tddy_core::WorkflowError::WriteFailed(format!("merge_pr: JSON parse: {e}"))
         })?;
@@ -246,7 +257,11 @@ impl GithubPrApi for RealGithubPrApi {
 
     fn patch_pr_base(&self, number: u64, new_base: &str) -> Result<(), tddy_core::WorkflowError> {
         let body = serde_json::json!({ "base": new_base }).to_string();
-        crate::github_rest_common::curl_github_patch_json(&self.repo, &format!("pulls/{number}"), &body)?;
+        crate::github_rest_common::curl_github_patch_json(
+            &self.repo,
+            &format!("pulls/{number}"),
+            &body,
+        )?;
         Ok(())
     }
 
@@ -264,18 +279,15 @@ impl GithubPrApi for RealGithubPrApi {
             "body": body,
         })
         .to_string();
-        let resp =
-            crate::github_rest_common::curl_github_post_json(&self.repo, "pulls", &payload)?;
+        let resp = crate::github_rest_common::curl_github_post_json(&self.repo, "pulls", &payload)?;
         let v: serde_json::Value = serde_json::from_str(&resp).map_err(|e| {
             tddy_core::WorkflowError::WriteFailed(format!("create_pr: JSON parse: {e}"))
         })?;
-        v.get("number")
-            .and_then(|n| n.as_u64())
-            .ok_or_else(|| {
-                tddy_core::WorkflowError::WriteFailed(format!(
-                    "create_pr: missing number in response: {resp}"
-                ))
-            })
+        v.get("number").and_then(|n| n.as_u64()).ok_or_else(|| {
+            tddy_core::WorkflowError::WriteFailed(format!(
+                "create_pr: missing number in response: {resp}"
+            ))
+        })
     }
 
     fn disable_auto_merge(&self, number: u64) -> Result<(), tddy_core::WorkflowError> {
@@ -284,8 +296,11 @@ impl GithubPrApi for RealGithubPrApi {
         // the PR to set auto_merge off via the REST API.
         // If the endpoint is unavailable, we best-effort ignore the error.
         let body = serde_json::json!({ "auto_merge": null }).to_string();
-        let _ =
-            crate::github_rest_common::curl_github_patch_json(&self.repo, &format!("pulls/{number}"), &body);
+        let _ = crate::github_rest_common::curl_github_patch_json(
+            &self.repo,
+            &format!("pulls/{number}"),
+            &body,
+        );
         Ok(())
     }
 }

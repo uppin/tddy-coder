@@ -48,6 +48,9 @@ pub struct SpawnRequest {
     /// Passed to spawned `tddy-coder` as `--recipe` when set (e.g. `bugfix`).
     #[serde(default)]
     pub recipe: Option<String>,
+    /// Back-reference to the orchestrating PR-stack session. Passed as `--stack-parent <id>`.
+    #[serde(default)]
+    pub stack_parent: Option<String>,
     /// `log.default.level` for the child's `--config` (from daemon YAML `log:`, e.g. `dev.desktop.yaml`).
     #[serde(default = "default_child_log_level")]
     pub child_log_level: String,
@@ -291,7 +294,7 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                         agent: req.agent.as_deref(),
                         mouse: req.mouse,
                         recipe: req.recipe.as_deref(),
-                        stack_parent: None,
+                        stack_parent: req.stack_parent.as_deref(),
                     },
                     req.child_log_level.as_str(),
                     req.child_log_format.as_str(),
@@ -381,6 +384,7 @@ pub fn build_spawn_request(
         common_room: livekit.common_room.clone(),
         daemon_instance_id: livekit.daemon_instance_id.clone(),
         recipe: opts.recipe.map(String::from),
+        stack_parent: opts.stack_parent.map(String::from),
         child_log_level,
         child_log_format,
     }

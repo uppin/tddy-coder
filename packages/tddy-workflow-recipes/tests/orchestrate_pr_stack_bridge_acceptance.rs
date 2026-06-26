@@ -6,7 +6,7 @@ use std::fs;
 
 use tddy_core::{read_changeset, write_changeset_atomic, Changeset};
 use tddy_workflow_recipes::orchestrate_pr_stack::seed_orchestrator_stack_from_plan;
-use tddy_workflow_recipes::plan_pr_stack::{StackPlanOutput, PlannedPr};
+use tddy_workflow_recipes::plan_pr_stack::{PlannedPr, StackPlanOutput};
 
 /// Helper: create a minimal changeset.yaml in a temp session dir.
 fn write_empty_orchestrator_changeset(session_dir: &std::path::Path) {
@@ -50,7 +50,9 @@ fn seed_orchestrator_stack_from_plan_populates_changeset_stack() {
 
     // Then — the orchestrator's changeset now carries a Stack with 2 nodes
     let cs = read_changeset(session_dir).expect("changeset must be readable");
-    let stack = cs.stack.expect("Changeset.stack must be Some after seeding");
+    let stack = cs
+        .stack
+        .expect("Changeset.stack must be Some after seeding");
     assert_eq!(stack.nodes.len(), 2, "must have 2 nodes matching the plan");
     assert_eq!(stack.nodes[0].node_id, "n1");
     assert_eq!(stack.nodes[1].node_id, "n2");
@@ -88,10 +90,7 @@ fn seed_orchestrator_stack_from_plan_is_idempotent_on_empty_plan() {
     // Then — the changeset may have a stack but it must be empty-or-None; either is OK
     let cs = read_changeset(session_dir).expect("changeset readable");
     let node_count = cs.stack.map(|s| s.nodes.len()).unwrap_or(0);
-    assert_eq!(
-        node_count, 0,
-        "empty plan must produce 0 stack nodes"
-    );
+    assert_eq!(node_count, 0, "empty plan must produce 0 stack nodes");
 }
 
 #[test]

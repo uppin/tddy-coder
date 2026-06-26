@@ -9,11 +9,11 @@ mod hooks;
 pub mod transient;
 
 pub use actions::{MergeTask, RepointTask, SpawnTask};
-pub use bridge::{execute_stack_merge, execute_stack_repoint, seed_orchestrator_stack_from_plan};
 pub use assess::{
     assemble_views, decide_next_action, effective_base_ref, AssessTask, ChildPhase, NodeView,
     OrchestratorAction, PrLiveStatus,
 };
+pub use bridge::{execute_stack_merge, execute_stack_repoint, seed_orchestrator_stack_from_plan};
 pub use github::{GithubPrApi, RealGithubPrApi};
 pub use hooks::OrchestratePrStackHooks;
 pub use transient::{

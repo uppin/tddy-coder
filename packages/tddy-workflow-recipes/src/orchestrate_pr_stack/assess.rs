@@ -171,7 +171,7 @@ pub fn assemble_views(
     sessions_root: &Path,
     stack: &Stack,
     gh: &dyn GithubPrApi,
-    default_branch: &str,
+    _default_branch: &str,
 ) -> Result<Vec<NodeView>, tddy_core::WorkflowError> {
     use tddy_core::changeset::read_changeset;
     use tddy_core::session_lifecycle::unified_session_dir_path;
@@ -207,8 +207,7 @@ pub fn assemble_views(
         };
 
         let pr = if node.session_id.is_some() {
-            let head = format!("{}:{}", default_branch, branch);
-            match gh.get_open_pr(&head)? {
+            match gh.get_open_pr(&branch)? {
                 Some(pr_ref) => PrLiveStatus::Open {
                     number: pr_ref.number,
                     base: pr_ref.base_branch,
@@ -464,10 +463,7 @@ mod tests {
                 url: "https://github.com/o/r/pull/1".into(),
             }))
         }
-        fn merge_pr(
-            &self,
-            _number: u64,
-        ) -> Result<String, tddy_core::WorkflowError> {
+        fn merge_pr(&self, _number: u64) -> Result<String, tddy_core::WorkflowError> {
             Ok("sha".into())
         }
         fn patch_pr_base(
@@ -500,10 +496,7 @@ mod tests {
         {
             Ok(None)
         }
-        fn merge_pr(
-            &self,
-            _number: u64,
-        ) -> Result<String, tddy_core::WorkflowError> {
+        fn merge_pr(&self, _number: u64) -> Result<String, tddy_core::WorkflowError> {
             Ok("sha".into())
         }
         fn patch_pr_base(
@@ -532,7 +525,7 @@ mod tests {
     /// `child_phase == NotSpawned`, and the views must be in topological order.
     #[test]
     fn assemble_views_marks_notspawned_when_session_id_absent() {
-        use tddy_core::changeset::{Stack, StackNode, write_changeset_atomic, Changeset};
+        use tddy_core::changeset::{write_changeset_atomic, Changeset, Stack, StackNode};
         use tddy_core::session_lifecycle::unified_session_dir_path;
 
         let tmp = tempfile::tempdir().unwrap();
@@ -600,7 +593,7 @@ mod tests {
     /// returns an open PR for a node's branch, `assemble_views` must map it to `PrLiveStatus::Open`.
     #[test]
     fn assemble_views_reports_propen_when_mock_returns_open_pr() {
-        use tddy_core::changeset::{Stack, StackNode, write_changeset_atomic, Changeset};
+        use tddy_core::changeset::{write_changeset_atomic, Changeset, Stack, StackNode};
         use tddy_core::session_lifecycle::unified_session_dir_path;
         use tddy_core::WorkflowState;
 
@@ -710,12 +703,32 @@ impl Task for AssessTask {
         let default_branch = context
             .get_sync::<String>("default_branch")
             .unwrap_or_else(|| "master".to_string());
-        let repo = context
-            .get_sync::<String>("repo")
-            .or_else(|| changeset.repo_path.clone())
-            .unwrap_or_default();
+        let repo_root = changeset
+            .repo_path
+            .clone()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| session_dir.clone());
+        // Derive "owner/repo" from the git remote URL so GitHub API calls use the
+        // correct namespace (changeset.repo_path is a filesystem path, not owner/repo).
+        let github_owner_repo = {
+            let remote_url = std::process::Command::new("git")
+                .current_dir(&repo_root)
+                .args(["remote", "get-url", "origin"])
+                .output()
+                .ok()
+                .and_then(|o| {
+                    if o.status.success() {
+                        Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
+            super::github::owner_repo_from_remote_url(&remote_url)
+                .unwrap_or_else(|| context.get_sync::<String>("repo").unwrap_or_default())
+        };
 
-        let gh = super::github::RealGithubPrApi::new(&repo);
+        let gh = super::github::RealGithubPrApi::new(&github_owner_repo);
 
         let views = assemble_views(&session_dir, &sessions_root, &stack, &gh, &default_branch)?;
         let autonomous_merge = context

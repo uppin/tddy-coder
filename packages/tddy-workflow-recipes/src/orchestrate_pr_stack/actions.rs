@@ -103,8 +103,7 @@ impl Task for MergeTask {
         let repo = context.get_sync::<String>("repo").unwrap_or_default();
         let gh = super::github::RealGithubPrApi::new(&repo);
 
-        let _sha =
-            super::bridge::execute_stack_merge(&session_dir, &node_id, pr_number, &gh)?;
+        let _sha = super::bridge::execute_stack_merge(&session_dir, &node_id, pr_number, &gh)?;
 
         Ok(TaskResult {
             response: format!("merged node {node_id} PR #{pr_number}"),

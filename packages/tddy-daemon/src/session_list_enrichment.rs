@@ -870,8 +870,7 @@ orchestrator_session_id: orch-sess-proto-xyz
             session_id: "child-proto-sess-1".to_string(),
             ..Default::default()
         };
-        apply_session_list_status_to_proto(session_dir, &mut proto)
-            .expect("apply must not error");
+        apply_session_list_status_to_proto(session_dir, &mut proto).expect("apply must not error");
 
         assert_eq!(
             proto.orchestrator_session_id, "orch-sess-proto-xyz",

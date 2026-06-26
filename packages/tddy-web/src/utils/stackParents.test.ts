@@ -5,10 +5,6 @@ import { stackParentCandidates } from "./stackParents";
 /**
  * Tests for `stackParentCandidates` — the function that identifies which sessions in a list act
  * as PR-stack orchestrators (i.e. are referenced as `orchestratorSessionId` by a child session).
- *
- * All tests below expect the function to return the correct answer once `orchestratorSessionId`
- * is available on `SessionEntry` (proto field 21, Layer 2). Currently the function throws, so
- * every test here FAILS — that is the intended red-phase state.
  */
 
 function aChildSession(sessionId: string, orchestratorSessionId: string) {

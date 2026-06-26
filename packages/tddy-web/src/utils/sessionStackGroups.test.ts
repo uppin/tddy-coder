@@ -5,10 +5,6 @@ import { groupSessionsByStack } from "./sessionStackGroups";
 /**
  * Tests for `groupSessionsByStack` — the util that partitions a session list into orchestrator
  * groups (parent + children) and flat (non-stack or orphan) entries.
- *
- * All tests below expect the function to produce the correct grouping once `orchestratorSessionId`
- * is available on `SessionEntry` (proto field 21, Layer 2). Currently the function throws, so
- * every test here FAILS — that is the intended red-phase state.
  */
 
 function aChildSession(sessionId: string, orchestratorSessionId: string, createdAt?: string) {

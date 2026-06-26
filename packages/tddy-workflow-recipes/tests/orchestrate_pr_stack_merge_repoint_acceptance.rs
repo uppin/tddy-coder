@@ -4,10 +4,14 @@
 
 use std::sync::Mutex;
 
-use tddy_core::changeset::{read_changeset, write_changeset_atomic, Changeset, GithubPrStatus, Stack, StackNode};
+use tddy_core::changeset::{
+    read_changeset, write_changeset_atomic, Changeset, GithubPrStatus, Stack, StackNode,
+};
 use tddy_core::WorkflowError;
 use tddy_workflow_recipes::orchestrate_pr_stack::github::{GithubPrApi, PrRef};
-use tddy_workflow_recipes::orchestrate_pr_stack::transient::{recover_in_flight_stack_op, MergePhase};
+use tddy_workflow_recipes::orchestrate_pr_stack::transient::{
+    recover_in_flight_stack_op, MergePhase,
+};
 use tddy_workflow_recipes::orchestrate_pr_stack::{execute_stack_merge, execute_stack_repoint};
 
 // ---------------------------------------------------------------------------
@@ -116,7 +120,11 @@ fn merge_task_writes_prmerged_journal_then_marks_node_merged() {
     // …and the stack node n1 has pr_status.phase == "merged"
     let cs = read_changeset(session_dir).expect("changeset readable");
     let stack = cs.stack.expect("stack must exist");
-    let n1 = stack.nodes.iter().find(|n| n.node_id == "n1").expect("n1 node");
+    let n1 = stack
+        .nodes
+        .iter()
+        .find(|n| n.node_id == "n1")
+        .expect("n1 node");
     assert_eq!(
         n1.pr_status.as_ref().map(|p| p.phase.as_str()),
         Some("merged"),
@@ -218,12 +226,15 @@ fn repoint_task_repoints_each_dependent_and_clears_journal() {
         "patch_pr_base must be called for each dependent"
     );
     assert!(
-        patched.iter().any(|(pr, base)| *pr == 2 && base == "master"),
+        patched
+            .iter()
+            .any(|(pr, base)| *pr == 2 && base == "master"),
         "n2's PR #2 must be rebased to master; got: {patched:?}"
     );
 
     // …and the crash-safe journal is deleted after a successful repoint
-    let recovered = recover_in_flight_stack_op(session_dir).expect("journal recovery must not error");
+    let recovered =
+        recover_in_flight_stack_op(session_dir).expect("journal recovery must not error");
     assert!(
         recovered.is_none(),
         "journal must be deleted after a complete repoint; still present: {recovered:?}"

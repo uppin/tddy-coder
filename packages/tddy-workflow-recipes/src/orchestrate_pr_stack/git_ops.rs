@@ -57,7 +57,12 @@ pub fn force_push_with_lease(
     let lease_spec = format!("{branch}:{expected_sha}");
     let out = run_git(
         repo_root,
-        &["push", &format!("--force-with-lease={lease_spec}"), "origin", branch],
+        &[
+            "push",
+            &format!("--force-with-lease={lease_spec}"),
+            "origin",
+            branch,
+        ],
     )?;
     if !out.status.success() {
         return Err(tddy_core::WorkflowError::WriteFailed(format!(

@@ -25,8 +25,9 @@ pub fn seed_orchestrator_stack_from_plan(
         return Ok(());
     }
     // Validate before touching disk.
-    crate::plan_pr_stack::validate_stack_plan(plan)
-        .map_err(|e| WorkflowError::ChangesetInvalid(format!("seed_orchestrator_stack_from_plan: {e}")))?;
+    crate::plan_pr_stack::validate_stack_plan(plan).map_err(|e| {
+        WorkflowError::ChangesetInvalid(format!("seed_orchestrator_stack_from_plan: {e}"))
+    })?;
 
     let nodes = crate::plan_pr_stack::planned_prs_into_stack_nodes(&plan.prs);
     tddy_core::changeset::update_stack_atomic(orchestrator_session_dir, |stack| {
@@ -49,9 +50,9 @@ pub fn execute_stack_merge(
     gh: &dyn crate::orchestrate_pr_stack::github::GithubPrApi,
 ) -> Result<String, WorkflowError> {
     use crate::orchestrate_pr_stack::transient::{
-        MergePhase, StackOpJournal, write_stack_op_journal,
+        write_stack_op_journal, MergePhase, StackOpJournal,
     };
-    use tddy_core::changeset::{GithubPrStatus, update_stack_atomic};
+    use tddy_core::changeset::{update_stack_atomic, GithubPrStatus};
 
     // 1. Write journal with Planned phase so crash recovery can resume.
     let dependents = {
@@ -111,9 +112,9 @@ pub fn execute_stack_repoint(
 ) -> Result<(), WorkflowError> {
     use crate::orchestrate_pr_stack::git_ops::{force_push_with_lease, merge_base, rebase_onto};
     use crate::orchestrate_pr_stack::transient::{
-        MergePhase, StackOpJournal, delete_stack_op_journal, write_stack_op_journal,
+        delete_stack_op_journal, write_stack_op_journal, MergePhase, StackOpJournal,
     };
-    use tddy_core::changeset::{GithubPrStatus, read_changeset, update_stack_atomic};
+    use tddy_core::changeset::{read_changeset, update_stack_atomic, GithubPrStatus};
 
     for (idx, dep_id) in dependents.iter().enumerate() {
         // Advance journal to current repoint step.
@@ -137,9 +138,7 @@ pub fn execute_stack_repoint(
         let dep_branch = match dep_node.branch.as_deref() {
             Some(b) => b.to_string(),
             None => {
-                log::warn!(
-                    "execute_stack_repoint: dependent {dep_id} has no branch; skipping"
-                );
+                log::warn!("execute_stack_repoint: dependent {dep_id} has no branch; skipping");
                 continue;
             }
         };
@@ -186,8 +185,7 @@ pub fn execute_stack_repoint(
                 } else {
                     // Real rebase conflict — mark dependent failed.
                     update_stack_atomic(orchestrator_session_dir, |stack| {
-                        if let Some(node) = stack.nodes.iter_mut().find(|n| &n.node_id == dep_id)
-                        {
+                        if let Some(node) = stack.nodes.iter_mut().find(|n| &n.node_id == dep_id) {
                             node.pr_status = Some(GithubPrStatus {
                                 phase: "error".to_string(),
                                 url: None,
@@ -224,9 +222,7 @@ pub fn execute_stack_repoint(
 
 /// Extract the PR number from a GitHub PR URL stored in `GithubPrStatus`.
 /// Parses `.../pull/{number}` from the URL.
-fn pr_number_from_status_url(
-    status: Option<&tddy_core::changeset::GithubPrStatus>,
-) -> Option<u64> {
+fn pr_number_from_status_url(status: Option<&tddy_core::changeset::GithubPrStatus>) -> Option<u64> {
     let url = status?.url.as_deref()?;
-    url.rsplitn(2, '/').next()?.parse::<u64>().ok()
+    url.rsplit('/').next()?.parse::<u64>().ok()
 }

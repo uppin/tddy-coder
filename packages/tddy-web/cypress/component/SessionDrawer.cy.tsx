@@ -4,10 +4,6 @@
  * Tests verify that when sessions include PR-stack children (identified via
  * `orchestratorSessionId`, proto field 21), the drawer renders them collapsed under a
  * `<details>/<summary>` group rooted at the orchestrator session.
- *
- * All tests below FAIL in the red phase because:
- * 1. `orchestratorSessionId` is not yet on `SessionEntry` (proto field 21, Layer 2).
- * 2. `SessionDrawer` renders a flat list; the `<details>` grouping doesn't exist yet (Layer 4).
  */
 import React from "react";
 import { create } from "@bufbuild/protobuf";
@@ -36,11 +32,7 @@ function aSession(sessionId: string, extra: Record<string, unknown> = {}) {
   };
 }
 
-/**
- * Builds a child session whose `orchestratorSessionId` references a parent.
- * Uses spread + `as` because `orchestratorSessionId` is not yet in the generated proto type
- * (it will be added by the Layer 2 green phase).
- */
+/** Builds a child session whose `orchestratorSessionId` references a parent. */
 function aChildSession(sessionId: string, orchestratorSessionId: string) {
   return aSession(sessionId, { orchestratorSessionId });
 }

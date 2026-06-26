@@ -58,15 +58,24 @@ fn run_curl_json_body(
     let out = std::process::Command::new("curl")
         .arg("-sS")
         .arg("-L")
-        .arg("-o").arg(&out_path)
-        .arg("-w").arg("%{http_code}")
-        .arg("-X").arg(method)
-        .arg("-H").arg(format!("Authorization: Bearer {token}"))
-        .arg("-H").arg(format!("Accept: {GITHUB_ACCEPT}"))
-        .arg("-H").arg("Content-Type: application/json")
-        .arg("-H").arg(format!("User-Agent: {USER_AGENT_MERGE_PR}"))
-        .arg("-H").arg(format!("X-GitHub-Api-Version: {GITHUB_API_VERSION}"))
-        .arg("--data-binary").arg(format!("@{}", body_path.display()))
+        .arg("-o")
+        .arg(&out_path)
+        .arg("-w")
+        .arg("%{http_code}")
+        .arg("-X")
+        .arg(method)
+        .arg("-H")
+        .arg(format!("Authorization: Bearer {token}"))
+        .arg("-H")
+        .arg(format!("Accept: {GITHUB_ACCEPT}"))
+        .arg("-H")
+        .arg("Content-Type: application/json")
+        .arg("-H")
+        .arg(format!("User-Agent: {USER_AGENT_MERGE_PR}"))
+        .arg("-H")
+        .arg(format!("X-GitHub-Api-Version: {GITHUB_API_VERSION}"))
+        .arg("--data-binary")
+        .arg(format!("@{}", body_path.display()))
         .arg(url)
         .output()
         .map_err(|e| curl_err(format!("curl ({method}): {e}")))?;
@@ -137,19 +146,27 @@ pub fn curl_github_get_json(
     let mut cmd = std::process::Command::new("curl");
     cmd.arg("-sS")
         .arg("-L")
-        .arg("-o").arg(&out_path)
-        .arg("-w").arg("%{http_code}")
+        .arg("-o")
+        .arg(&out_path)
+        .arg("-w")
+        .arg("%{http_code}")
         .arg("-G")
         .arg(&url);
     for (k, v) in query {
         cmd.arg("--data-urlencode").arg(format!("{k}={v}"));
     }
-    cmd.arg("-H").arg(format!("Authorization: Bearer {token}"))
-        .arg("-H").arg(format!("Accept: {GITHUB_ACCEPT}"))
-        .arg("-H").arg(format!("User-Agent: {USER_AGENT_MERGE_PR}"))
-        .arg("-H").arg(format!("X-GitHub-Api-Version: {GITHUB_API_VERSION}"));
+    cmd.arg("-H")
+        .arg(format!("Authorization: Bearer {token}"))
+        .arg("-H")
+        .arg(format!("Accept: {GITHUB_ACCEPT}"))
+        .arg("-H")
+        .arg(format!("User-Agent: {USER_AGENT_MERGE_PR}"))
+        .arg("-H")
+        .arg(format!("X-GitHub-Api-Version: {GITHUB_API_VERSION}"));
 
-    let out = cmd.output().map_err(|e| curl_err(format!("curl (GET): {e}")))?;
+    let out = cmd
+        .output()
+        .map_err(|e| curl_err(format!("curl (GET): {e}")))?;
     if !out.status.success() {
         std::fs::remove_file(&out_path).ok();
         return Err(curl_err(format!(
@@ -233,7 +250,11 @@ mod tests {
             std::env::remove_var("GH_TOKEN");
         }
 
-        let result = curl_github_post_json("owner/repo", "pulls", r#"{"title":"x","head":"y","base":"master"}"#);
+        let result = curl_github_post_json(
+            "owner/repo",
+            "pulls",
+            r#"{"title":"x","head":"y","base":"master"}"#,
+        );
 
         if let Some(t) = token_backup.0 {
             unsafe { std::env::set_var("GITHUB_TOKEN", t) };
