@@ -75,7 +75,7 @@ export function SessionInspectorDrawer({
         "flex flex-col h-full border-l border-border bg-background overflow-hidden",
         "absolute top-0 right-0 z-10",
         state === "closed" && "hidden",
-        state === "open" && "w-[360px]",
+        state === "open" && "w-full md:w-[360px]",
         state === "expanded" && "left-0 right-0 w-full",
       )}
     >

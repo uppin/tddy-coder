@@ -4,14 +4,9 @@
  * Changeset: `byte-traffic`
  * PRD: `docs/ft/web/session-drawer.md` (Session Traffic Strip — acceptance criteria)
  *
- * Tests that `SessionMainPane` renders the `SessionTrafficStrip` in the correct
- * states and that the strip wires up to the traffic meter and ping.
- *
- * ⚠️ These tests fail until:
- *   1. `SessionTrafficStrip.tsx` is created.
- *   2. `SessionMainPane.tsx` is updated to render the strip in the
- *      `connected-livekit` attachment state.
- *   3. The `TrafficMeterRegistry` context is wired up.
+ * The traffic strip has been moved out of SessionMainPane into SessionsDrawerScreen
+ * (as a top-level toolbar). These tests verify that SessionMainPane no longer renders
+ * the strip, and that the structural invariants inside the detail pane hold.
  */
 
 import React from "react";
@@ -51,8 +46,8 @@ const GRPC_ATTACHMENT: SessionAttachmentState = {
 
 const IDLE_ATTACHMENT: SessionAttachmentState = { status: "idle" };
 
-function closedInspectorState() {
-  return { open: false, expanded: false };
+function closedInspectorState(): import("../../src/components/sessions/SessionInspectorDrawer").InspectorDrawerState {
+  return "closed";
 }
 
 function mountMainPane(attachment: SessionAttachmentState) {
@@ -77,25 +72,22 @@ function mountMainPane(attachment: SessionAttachmentState) {
 // ---------------------------------------------------------------------------
 
 describe("SessionMainPane — traffic strip integration (Cypress)", () => {
-  // -------------------------------------------------------------------------
-  // AC1 (PRD): Strip is visible when connected-livekit
-  // -------------------------------------------------------------------------
+  // The strip has moved to SessionsDrawerScreen level; SessionMainPane must NOT render it.
 
-  it("renders the traffic strip when the session is connected via LiveKit", () => {
-    // Given / When
+  it("does NOT render the traffic strip inside sessions-detail-pane when connected via LiveKit", () => {
     mountMainPane(LIVEKIT_ATTACHMENT);
 
-    // Then
-    byTestId(TEST_IDS.sessionTrafficStrip).should("exist");
+    byTestId(TEST_IDS.sessionsDetailPane)
+      .find(`[data-testid="${TEST_IDS.sessionTrafficStrip}"]`)
+      .should("not.exist");
   });
 
-  // -------------------------------------------------------------------------
-  // AC2 (PRD): Strip is absent when not connected-livekit
-  // -------------------------------------------------------------------------
-
-  it("does NOT render the traffic strip when the session is connected via gRPC only", () => {
+  it("does NOT render the traffic strip inside sessions-detail-pane when connected via HTTP RPC", () => {
     mountMainPane(GRPC_ATTACHMENT);
-    byTestId(TEST_IDS.sessionTrafficStrip).should("not.exist");
+
+    byTestId(TEST_IDS.sessionsDetailPane)
+      .find(`[data-testid="${TEST_IDS.sessionTrafficStrip}"]`)
+      .should("not.exist");
   });
 
   it("does NOT render the traffic strip when no attachment is active (idle)", () => {
@@ -104,46 +96,14 @@ describe("SessionMainPane — traffic strip integration (Cypress)", () => {
   });
 
   // -------------------------------------------------------------------------
-  // AC3 (PRD): Strip starts at zero bytes
+  // Layout: inspector toggle row is present inside the detail pane
   // -------------------------------------------------------------------------
 
-  it("shows 0 B bytes in and out initially when the session first connects", () => {
+  it("renders the inspector toggle inside sessions-detail-pane when connected", () => {
     mountMainPane(LIVEKIT_ATTACHMENT);
 
-    byTestId(TEST_IDS.sessionTrafficBytesIn).should("contain.text", "0 B");
-    byTestId(TEST_IDS.sessionTrafficBytesOut).should("contain.text", "0 B");
-  });
-
-  it("shows 0 B/s rates initially (no traffic yet)", () => {
-    mountMainPane(LIVEKIT_ATTACHMENT);
-
-    byTestId(TEST_IDS.sessionTrafficRateIn).should("contain.text", "0 B/s");
-    byTestId(TEST_IDS.sessionTrafficRateOut).should("contain.text", "0 B/s");
-  });
-
-  // -------------------------------------------------------------------------
-  // AC6 (PRD): Ping shows — when RTT is unavailable
-  // -------------------------------------------------------------------------
-
-  it("shows — ping initially (Room not yet connected for RTT stats)", () => {
-    mountMainPane(LIVEKIT_ATTACHMENT);
-
-    byTestId(TEST_IDS.sessionTrafficPing).should("contain.text", "—");
-  });
-
-  // -------------------------------------------------------------------------
-  // Layout: strip sits above the inspector toggle row
-  // -------------------------------------------------------------------------
-
-  it("the traffic strip appears before the inspector toggle in DOM order", () => {
-    mountMainPane(LIVEKIT_ATTACHMENT);
-
-    byTestId(TEST_IDS.sessionsDetailPane).within(() => {
-      cy.get(`[data-testid="${TEST_IDS.sessionTrafficStrip}"], [data-testid="${TEST_IDS.sessionsInspectorToggle}"]`)
-        .then(($els) => {
-          // The strip must come before the inspector toggle in the DOM
-          expect($els[0].getAttribute("data-testid")).to.equal(TEST_IDS.sessionTrafficStrip);
-        });
-    });
+    byTestId(TEST_IDS.sessionsDetailPane)
+      .find(`[data-testid="${TEST_IDS.sessionsInspectorToggle}"]`)
+      .should("exist");
   });
 });

@@ -402,3 +402,51 @@ describe("SessionsDrawerAcceptance — URL deep-link pre-selection", () => {
     cy.contains("Select a session").should("not.exist");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Drawer toggle — close/open and strip mode
+// ---------------------------------------------------------------------------
+
+describe("SessionsDrawerAcceptance — drawer open/close toggle", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+  });
+
+  it("shows a close button in the drawer header that collapses the drawer", () => {
+    // Given
+    interceptConnectionRpcs([CONNECTED_SESSION_A]);
+
+    // When
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+
+    // Then — close button exists while drawer is open
+    sessionsDrawerPage.drawerCloseBtn().should("exist");
+
+    // When — close button is clicked
+    sessionsDrawerPage.drawerCloseBtn().click();
+
+    // Then — session labels are no longer visible; drawer is in strip/hidden state
+    sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "closed");
+    cy.contains(CONNECTED_SESSION_A.workflowGoal).should("not.exist");
+  });
+
+  it("shows an open button in strip mode that re-expands the drawer", () => {
+    // Given — drawer already closed
+    interceptConnectionRpcs([CONNECTED_SESSION_A]);
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+    sessionsDrawerPage.drawerCloseBtn().click();
+    sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "closed");
+
+    // When — open button is clicked
+    sessionsDrawerPage.drawerOpenBtn().click();
+
+    // Then — drawer is open again and session label is visible
+    sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "open");
+    sessionsDrawerPage.drawerItemLabel(CONNECTED_SESSION_A.sessionId)
+      .should("be.visible");
+  });
+});

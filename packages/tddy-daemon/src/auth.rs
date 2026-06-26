@@ -1,6 +1,7 @@
 //! Build AuthService from daemon config.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use tddy_github::{AuthServiceImpl, GitHubUser, RealGitHubProvider, StubGitHubProvider};
@@ -14,6 +15,14 @@ use crate::connection_service::SessionUserResolver;
 pub struct AuthBuildResult {
     pub entries: Vec<ServiceEntry>,
     pub user_resolver: Option<SessionUserResolver>,
+}
+
+/// Resolve the path where auth sessions are persisted across daemon restarts.
+/// Returns `None` when HOME is not set (sessions are in-memory only for that run).
+fn session_persist_path() -> Option<PathBuf> {
+    std::env::var("HOME").ok().map(|home| {
+        PathBuf::from(home).join(".tddy").join("auth-sessions.json")
+    })
 }
 
 /// Build RPC entries for AuthService when GitHub is configured.
@@ -31,6 +40,9 @@ pub fn build_auth_entries(config: &DaemonConfig, web_host: &str, web_port: u16) 
 
     let sessions = Arc::new(Mutex::new(HashMap::<String, GitHubUser>::new()));
     let sessions_for_resolver = Arc::clone(&sessions);
+
+    // Persist session tokens to disk so they survive daemon restarts.
+    let persist_path = session_persist_path();
 
     let auth_entry = if github.stub.unwrap_or(false) {
         let client_id = github.client_id.as_deref().unwrap_or("stub-client-id");
@@ -55,7 +67,10 @@ pub fn build_auth_entries(config: &DaemonConfig, web_host: &str, web_port: u16) 
                 }
             }
         }
-        let auth_service_impl = AuthServiceImpl::new_with_sessions(stub, sessions);
+        let auth_service_impl = match persist_path.clone() {
+            Some(p) => AuthServiceImpl::new_with_sessions_persisted(stub, sessions, p),
+            None => AuthServiceImpl::new_with_sessions(stub, sessions),
+        };
         let auth_server = AuthServiceServer::new(auth_service_impl);
         ServiceEntry {
             name: "auth.AuthService",
@@ -67,7 +82,10 @@ pub fn build_auth_entries(config: &DaemonConfig, web_host: &str, web_port: u16) 
             .clone()
             .unwrap_or_else(|| format!("http://{}:{}/auth/callback", web_host, web_port));
         let real = RealGitHubProvider::new(id, secret, &redirect_uri);
-        let auth_service_impl = AuthServiceImpl::new_with_sessions(real, sessions);
+        let auth_service_impl = match persist_path {
+            Some(p) => AuthServiceImpl::new_with_sessions_persisted(real, sessions, p),
+            None => AuthServiceImpl::new_with_sessions(real, sessions),
+        };
         let auth_server = AuthServiceServer::new(auth_service_impl);
         ServiceEntry {
             name: "auth.AuthService",
