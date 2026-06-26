@@ -211,6 +211,52 @@ interface CreateSessionPaneProps {
 - `ListProjectBranches` — branch dropdown when "work on existing branch"
 - `StartSession` — create + start the session
 
+## Terminal Control — "Claim terminal" CTA
+
+> **Updated: 2026-06-26** — Adds a single-screen control mutex to `SessionsDrawerScreen`.
+
+When a session has an active terminal controller (another browser tab or device), the
+`SessionMainPane` shows a **"Claim terminal"** overlay over the terminal container. The overlay
+names the holding screen and provides a button to steal control.
+
+### Overlay
+
+- Rendered inside `SessionMainPane` when `terminalControl.isController === false`.
+- Full-cover absolute scrim over the terminal container (`data-testid="terminal-control-overlay"`),
+  matching the `terminal-coder-unavailable` overlay style in `GhosttyTerminalLiveKit`.
+- Contains:
+  - A brief message: "Controlled by another screen".
+  - The holder screen identifier (`data-testid="terminal-control-holder"`).
+  - A primary `<Button>` labelled **"Claim terminal"** (`data-testid="terminal-claim-btn"`).
+- Clicking the button calls `onClaim()` → `ClaimTerminalControl({steal: true})`.
+- When this screen holds control (`isController === true`), no overlay is rendered.
+
+### Data flow
+
+1. `SessionsDrawerScreen` owns `useTerminalControl(connectedSessionId, sessionToken)`.
+2. On session attach, the hook calls `ClaimTerminalControl({steal: false})` to try to become
+   the controller. If denied, `controlState.isController = false` and the CTA shows.
+3. The hook then subscribes via `WatchTerminalControl` (reconnecting `for await` loop, same
+   pattern as `useTaskListStream`). Each `TerminalControlEvent` is folded through
+   `applyTerminalControlEvent` (pure reducer, `terminalControlState.ts`).
+4. `SessionsDrawerScreen` passes `{ ...controlState, onClaim }` as the `terminalControl` prop
+   to `SessionMainPane`.
+5. The `control_token` from `ClaimTerminalControlResponse` is stored in the hook and forwarded
+   in `SendTerminalInput` and any other control RPCs.
+
+### Screen identity
+
+`getScreenId()` (`src/lib/screenId.ts`) returns a stable per-tab id from `sessionStorage`,
+reusing the pattern of `presenceIdentity.ts`. Two browser tabs for the same user get distinct
+ids, so they do not share a lease.
+
+### New RPCs used
+
+- `ConnectionService.ClaimTerminalControl` — issued on session attach and on "Claim terminal" click.
+- `ConnectionService.WatchTerminalControl` — live stream of lease changes.
+
+---
+
 ## Known Limitations
 
 - The terminal in the main pane is a placeholder; real terminal mounting is out of scope.

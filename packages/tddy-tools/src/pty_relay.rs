@@ -590,6 +590,7 @@ async fn run_grpc_terminal(
                 session_id: input_session_id.clone(),
                 data,
                 terminal_id: String::new(),
+                control_token: String::new(),
             };
             let _ = connectrpc_post(
                 &input_client,

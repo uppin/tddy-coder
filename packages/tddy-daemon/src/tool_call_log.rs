@@ -166,7 +166,10 @@ mod tool_call_log_unit_tests {
 
         // Then
         assert_eq!(records.len(), 1, "must return exactly one record");
-        assert_eq!(records[0], record, "round-tripped record must equal the original");
+        assert_eq!(
+            records[0], record,
+            "round-tripped record must equal the original"
+        );
         assert_eq!(
             records[0].args_json, r#"{"path":"src/main.rs"}"#,
             "args_json must be preserved exactly"
@@ -186,7 +189,10 @@ mod tool_call_log_unit_tests {
         let records = read_tool_calls(&session_dir).unwrap();
 
         // Then
-        assert!(records.is_empty(), "missing file must return empty vec, not an error");
+        assert!(
+            records.is_empty(),
+            "missing file must return empty vec, not an error"
+        );
     }
 
     /// A malformed line in the middle of the log is skipped; valid lines before and after
@@ -212,7 +218,11 @@ mod tool_call_log_unit_tests {
         let records = read_tool_calls(&session_dir).unwrap();
 
         // Then
-        assert_eq!(records.len(), 2, "only the two valid lines must be returned");
+        assert_eq!(
+            records.len(),
+            2,
+            "only the two valid lines must be returned"
+        );
         assert_eq!(records[0].tool_name, "Read");
         assert_eq!(records[1].tool_name, "Shell");
     }
