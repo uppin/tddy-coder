@@ -1,6 +1,6 @@
 import React from "react";
 
-export type InspectorTab = "details" | "tools";
+export type InspectorTab = "details" | "tools" | "vnc";
 
 interface InspectorTabsProps {
   value: InspectorTab;
@@ -33,6 +33,18 @@ export function InspectorTabs({ value, onChange }: InspectorTabsProps) {
         }`}
       >
         Tools
+      </button>
+      <button
+        data-testid="sessions-inspector-tab-vnc"
+        aria-selected={value === "vnc"}
+        onClick={() => onChange("vnc")}
+        className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+          value === "vnc"
+            ? "border-foreground text-foreground"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        VNC
       </button>
     </div>
   );

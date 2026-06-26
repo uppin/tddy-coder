@@ -100,6 +100,9 @@ pub struct DaemonConfig {
     /// forwards RPCs to a remote peer via LiveKit.
     #[serde(default)]
     pub relay: Option<RelayConfig>,
+    /// VNC bridge binary configuration.
+    #[serde(default)]
+    pub vnc: Option<VncConfig>,
 
     /// Browser DEBUG mask exposed to tddy-web via `GET /api/config` (`debug` field). A `debug`-package
     /// namespace mask (e.g. `tddy:term:*`, or `tddy:term:write,tddy:term:resize`) that enables scoped
@@ -130,6 +133,7 @@ impl Default for DaemonConfig {
             telegram: None,
             claude_cli: None,
             relay: None,
+            vnc: None,
             debug: None,
         }
     }
@@ -144,6 +148,44 @@ pub struct TelegramConfig {
     pub bot_token: String,
     #[serde(default)]
     pub chat_ids: Vec<i64>,
+}
+
+fn default_vnc_binary_path() -> String {
+    // Sibling resolution happens at runtime, not at serde default time.
+    // Use empty string as sentinel; runtime resolves: config override → sibling → PATH fallback.
+    String::new()
+}
+
+/// VNC bridge binary configuration. Loaded from daemon YAML under `vnc:`.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VncConfig {
+    /// Path to the `tddy-vnc` bridge binary.
+    /// Empty string (default) → resolved at runtime: current_exe sibling, then PATH.
+    #[serde(default = "default_vnc_binary_path")]
+    pub binary_path: String,
+}
+
+/// Resolve the actual path to the `tddy-vnc` binary.
+///
+/// Resolution order:
+/// 1. Explicit `binary_path` in config (if non-empty).
+/// 2. Sibling of the current executable (same directory).
+/// 3. Fallback to `"tddy-vnc"` (PATH lookup).
+pub fn resolve_vnc_binary_path(config: &DaemonConfig) -> String {
+    let explicit = config
+        .vnc
+        .as_ref()
+        .map(|c| c.binary_path.as_str())
+        .unwrap_or("");
+    if !explicit.is_empty() {
+        return explicit.to_string();
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("tddy-vnc")))
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "tddy-vnc".to_string())
 }
 
 fn default_claude_cli_binary_path() -> String {

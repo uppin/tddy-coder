@@ -198,6 +198,7 @@ export function SessionMainPane({
                 onTerminate={onTerminate}
                 client={client}
                 sessionToken={sessionToken}
+                room={room}
               />
             </div>
           ) : (
@@ -219,6 +220,7 @@ export function SessionMainPane({
                 onTerminate={onTerminate}
                 client={client}
                 sessionToken={sessionToken}
+                room={room}
               />
             </div>
           )}
