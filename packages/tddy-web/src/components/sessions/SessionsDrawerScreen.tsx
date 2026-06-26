@@ -5,14 +5,13 @@ import { useHttpClient } from "../../rpc/transportProvider";
 import { TooltipProvider } from "../ui/tooltip";
 import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
-import { SessionTrafficBar } from "./SessionTrafficBar";
+import { StatusBar } from "./StatusBar";
 import { useSessionAttachment } from "./useSessionAttachment";
 import { nextInspectorState } from "./inspectorState";
 import { useTerminalControl } from "./useTerminalControl";
 import { sessionsDrawerPathForSession, parseSessionsDrawerSessionId } from "../../routing/appRoutes";
 import { Signal } from "../../gen/connection_pb";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
-
 // ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
@@ -31,18 +30,16 @@ export function SessionsDrawerScreen() {
     return parseSessionsDrawerSessionId(window.location.hash.slice(1));
   });
   const [inspectorState, setInspectorState] = useState<InspectorDrawerState>("closed");
+  // Track whether the inspector was auto-opened (by session select) vs manually opened by the user.
+  // When true, a successful connection should auto-close the inspector.
+  const inspectorAutoOpenRef = useRef(false);
   // Track whether the URL-seeded selectedSessionId has been activated after the session list loads
   const deepLinkActivatedRef = useRef(false);
   const [mode, setMode] = useState<"list" | "creating">("list");
 
-  const [sessionListOpen, setSessionListOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    const isMobile = window.innerWidth < 768;
-    const hasSelection = parseSessionsDrawerSessionId(window.location.hash.slice(1)) !== null;
-    return !(isMobile && hasSelection);
-  });
+  const [sessionListOpen, setSessionListOpen] = useState(true);
 
-  const { state: attachment, connectSession, resumeSession, deleteSession, signalSession } = useSessionAttachment();
+  const { state: attachment, connectSession, resumeSession, deleteSession, signalSession, reset: resetAttachment } = useSessionAttachment();
 
   const isConnected =
     attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
@@ -102,37 +99,48 @@ export function SessionsDrawerScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortedSessions]);
 
-  // React to attachment status changes — open inspector for non-connected states, close when connected.
+  // React to attachment status changes:
+  // - "connected-*" for the selected session → close inspector IF it was auto-opened
+  // - "idle" for an INACTIVE selected session → auto-open inspector
+  // - "error" → open inspector so the user sees the problem
+  // - "connecting" → no change (preserve state during handshake)
   useEffect(() => {
     if (!selectedSessionId) return;
-    const isConnected =
+    if (
       attachment.status === "connected-livekit" ||
-      attachment.status === "connected-grpc";
-    if (isConnected) {
-      setInspectorState("closed");
-    } else if (attachment.status === "idle" || attachment.status === "error") {
+      attachment.status === "connected-grpc"
+    ) {
+      if (
+        attachment.sessionId === selectedSessionId &&
+        inspectorAutoOpenRef.current
+      ) {
+        inspectorAutoOpenRef.current = false;
+        setInspectorState("closed");
+      }
+    } else if (attachment.status === "idle") {
+      // Only auto-open for inactive sessions; active sessions will connect shortly
+      const session = sortedSessions.find((s) => s.sessionId === selectedSessionId);
+      if (session && !session.isActive) {
+        setInspectorState((prev) => (prev === "expanded" ? "expanded" : "open"));
+      }
+    } else if (attachment.status === "error") {
       setInspectorState((prev) => (prev === "expanded" ? "expanded" : "open"));
     }
-    // "connecting": no change — preserve current state during the handshake
-  }, [attachment.status, selectedSessionId]);
+  }, [attachment.status, selectedSessionId, sortedSessions]);
 
   // When a session is selected in the drawer, auto-connect if it is active
   const handleSelectSession = (sessionId: string) => {
+    // Reset attachment so useEffect re-evaluates state for the newly selected session
+    resetAttachment();
     setSelectedSessionId(sessionId);
     const session = sortedSessions.find((s) => s.sessionId === sessionId);
-    // Update inspector state based on session active status
-    setInspectorState((prev) =>
-      nextInspectorState(
-        { open: prev !== "closed", expanded: prev === "expanded" },
-        { type: "select", isActive: session?.isActive ?? false },
-      ).open
-        ? "open"
-        : "closed",
-    );
-    // Auto-close the session list on mobile when a session is selected
-    if (typeof window !== "undefined" && window.innerWidth < 768) {
-      setSessionListOpen(false);
-    }
+    const willOpen = nextInspectorState(
+      { open: false, expanded: false },
+      { type: "select", isActive: session?.isActive ?? false },
+    ).open;
+    // Track auto-open so we know whether a subsequent connect should auto-close
+    inspectorAutoOpenRef.current = willOpen;
+    setInspectorState(willOpen ? "open" : "closed");
     if (session?.isActive) {
       connectSession(sessionId, sessionToken, client).catch((err) => {
         console.debug("[SessionsDrawerScreen] connectSession error", err);
@@ -159,6 +167,8 @@ export function SessionsDrawerScreen() {
   };
 
   const handleInspectorToggle = () => {
+    // Manual interaction — subsequent connection should not auto-close the inspector
+    inspectorAutoOpenRef.current = false;
     setInspectorState((prev) => {
       const prevState = { open: prev !== "closed", expanded: prev === "expanded" };
       const next = nextInspectorState(prevState, { type: "toggle" });
@@ -195,19 +205,19 @@ export function SessionsDrawerScreen() {
     <TooltipProvider delayDuration={0}>
       <div
         data-testid="sessions-drawer-screen"
-        className="flex h-screen w-full overflow-hidden font-sans text-foreground"
+        className="flex flex-col h-screen w-full overflow-hidden font-sans text-foreground"
       >
-        <SessionDrawer
-          sessions={sortedSessions}
-          selectedSessionId={selectedSessionId}
-          onSelectSession={handleSelectSession}
-          onCreateSession={handleCreateSession}
-          isOpen={sessionListOpen}
-          onClose={() => setSessionListOpen(false)}
-          onOpen={() => setSessionListOpen(true)}
-        />
-        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
-          {selectedSession && isConnected && <SessionTrafficBar attachment={attachment} />}
+        <StatusBar attachment={attachment} />
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <SessionDrawer
+            sessions={sortedSessions}
+            selectedSessionId={selectedSessionId}
+            onSelectSession={handleSelectSession}
+            onCreateSession={handleCreateSession}
+            isOpen={sessionListOpen}
+            onClose={() => setSessionListOpen(false)}
+            onOpen={() => setSessionListOpen(true)}
+          />
           <SessionMainPane
             selectedSession={selectedSession}
             attachment={attachment}

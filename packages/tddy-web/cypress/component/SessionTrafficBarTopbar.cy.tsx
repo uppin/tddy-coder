@@ -39,7 +39,7 @@ const CONNECTED_SESSION = {
 
 // ---------------------------------------------------------------------------
 
-describe("SessionTrafficBar — rendered as top toolbar, outside sessions-detail-pane", () => {
+describe("StatusBar — rendered as top toolbar, outside sessions-detail-pane", () => {
   beforeEach(() => {
     cy.clearLocalStorage();
     cy.clearAllSessionStorage();
@@ -136,6 +136,9 @@ describe("SessionTrafficBar — rendered as top toolbar, outside sessions-detail
     cy.wait("@listSessions");
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION.sessionId).click();
     cy.wait("@connectSession");
+
+    // Wait for the attachment useEffect to settle (connected → inspector auto-closes)
+    sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "closed");
 
     // Open the inspector, then expand it to full screen
     sessionsDrawerPage.inspectorToggle().click();

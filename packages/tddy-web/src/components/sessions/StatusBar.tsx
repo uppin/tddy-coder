@@ -22,11 +22,11 @@ function useMeterSnapshot(meter: TrafficMeter | null): MeterSnap {
   return snap;
 }
 
-interface SessionTrafficBarProps {
+interface StatusBarProps {
   attachment: SessionAttachmentState;
 }
 
-export function SessionTrafficBar({ attachment }: SessionTrafficBarProps) {
+export function StatusBar({ attachment }: StatusBarProps) {
   const livekitRoomName =
     attachment.status === "connected-livekit" ? attachment.livekitRoom : null;
   const { room } = useSessionLiveKitRoom(attachment);
