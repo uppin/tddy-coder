@@ -516,9 +516,9 @@ fn main() -> anyhow::Result<()> {
         let _kill_on_signal_task = tokio::spawn(async move {
             #[cfg(unix)]
             {
-                if let Ok(mut sig) = tokio::signal::unix::signal(
-                    tokio::signal::unix::SignalKind::terminate(),
-                ) {
+                if let Ok(mut sig) =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                {
                     sig.recv().await;
                     log::info!(
                         target: "tddy_daemon",

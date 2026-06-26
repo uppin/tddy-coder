@@ -77,6 +77,14 @@ pub mod proto {
     pub mod tasks {
         include!(concat!(env!("OUT_DIR"), "/tasks.rs"));
     }
+    #[allow(unused_imports, unused_variables)]
+    pub mod vnc {
+        include!(concat!(env!("OUT_DIR"), "/vnc.rs"));
+    }
+    #[allow(unused_imports, unused_variables)]
+    pub mod vnc_input {
+        include!(concat!(env!("OUT_DIR"), "/vnc_input.rs"));
+    }
     pub mod reflection {
         include!(concat!(env!("OUT_DIR"), "/grpc.reflection.v1.rs"));
     }

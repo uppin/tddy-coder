@@ -112,6 +112,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .compile_protos(&["proto/tasks.proto"], &["proto"])?;
 
+    // VNC control-plane service (VncService)
+    prost_build::Config::new()
+        .out_dir(std::env::var("OUT_DIR")?)
+        .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
+            generate_rpc_server: true,
+            generate_tonic_adapter: false,
+            rpc_crate_path: "tddy_rpc".to_string(),
+        }))
+        .compile_protos(&["proto/vnc.proto"], &["proto"])?;
+
+    // VNC input forwarding service (VncInputService — bidi stream, served by tddy-vnc bridge)
+    prost_build::Config::new()
+        .out_dir(std::env::var("OUT_DIR")?)
+        .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
+            generate_rpc_server: true,
+            generate_tonic_adapter: false,
+            rpc_crate_path: "tddy_rpc".to_string(),
+        }))
+        .compile_protos(&["proto/vnc_input.proto"], &["proto"])?;
+
     // Descriptor-only pass: emit a combined FileDescriptorSet for ALL service protos.
     // The reflection service reads this at runtime to serve descriptors.
     let descriptor_path = format!("{}/service_descriptors.bin", std::env::var("OUT_DIR")?);
@@ -130,6 +150,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/loopback_tunnel.proto",
                 "proto/vm.proto",
                 "proto/tasks.proto",
+                "proto/vnc.proto",
+                "proto/vnc_input.proto",
                 "proto/grpc/reflection/v1/reflection.proto",
             ],
             &["proto"],

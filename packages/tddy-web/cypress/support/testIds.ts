@@ -179,6 +179,26 @@ export const TEST_IDS = {
   terminalControlOverlay: "terminal-control-overlay",
   terminalClaimBtn: "terminal-claim-btn",
   terminalControlHolder: "terminal-control-holder",
+
+  // Session inspector — VNC tab
+  sessionsInspectorTabVnc: "sessions-inspector-tab-vnc",
+  sessionsVncTabPanel: "sessions-vnc-tab-panel",
+  sessionsVncTargetList: "sessions-vnc-target-list",
+  sessionsVncAddForm: "sessions-vnc-add-form",
+  sessionsVncAddLabel: "sessions-vnc-add-label",
+  sessionsVncAddHost: "sessions-vnc-add-host",
+  sessionsVncAddPort: "sessions-vnc-add-port",
+  sessionsVncAddPassword: "sessions-vnc-add-password",
+  sessionsVncAddSubmit: "sessions-vnc-add-submit",
+  sessionsVncPassphraseDialog: "sessions-vnc-passphrase-dialog",
+  sessionsVncPassphraseInput: "sessions-vnc-passphrase-input",
+  sessionsVncPassphraseConfirm: "sessions-vnc-passphrase-confirm",
+  sessionsVncPassphraseCancel: "sessions-vnc-passphrase-cancel",
+
+  // VNC overlay
+  vncOverlay: "vnc-overlay",
+  vncOverlayVideo: "vnc-overlay-video",
+  vncOverlayClose: "vnc-overlay-close",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -328,3 +348,20 @@ export const tasksChannelOutput = (taskId: string, channelId: string) =>
 
 /** `[data-testid="shortcut-button-<label>"]` — individual shortcut button */
 export const shortcutButton = (label: string) => `shortcut-button-${label}`;
+
+// ---------------------------------------------------------------------------
+// VNC tab dynamic helpers
+// ---------------------------------------------------------------------------
+
+/** `[data-testid="sessions-vnc-target-row-<targetId>"]` — a single VNC target row */
+export const sessionsVncTargetRow = (targetId: string) =>
+  `sessions-vnc-target-row-${targetId}`;
+
+/** `[data-testid="sessions-vnc-start-<targetId>"]` — Start stream button */
+export const sessionsVncStartBtn = (targetId: string) => `sessions-vnc-start-${targetId}`;
+
+/** `[data-testid="sessions-vnc-stop-<targetId>"]` — Stop stream button */
+export const sessionsVncStopBtn = (targetId: string) => `sessions-vnc-stop-${targetId}`;
+
+/** `[data-testid="sessions-vnc-remove-<targetId>"]` — Remove target button */
+export const sessionsVncRemoveBtn = (targetId: string) => `sessions-vnc-remove-${targetId}`;
