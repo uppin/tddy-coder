@@ -16,6 +16,7 @@ members = [
     "packages/tddy-coder",
     "packages/tddy-tui",
     "packages/tddy-demo",
+    "packages/tddy-demo-tui",
     "packages/tddy-tools",
     "packages/tddy-vm",
     "packages/tddy-service",

@@ -6,6 +6,7 @@ import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { SessionInspectorDrawer } from "./SessionInspectorDrawer";
 import { Button } from "../ui/button";
 import { CreateSessionPane } from "./CreateSessionPane";
+import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
@@ -93,13 +94,17 @@ export function SessionMainPane({
             >
               {attachment.status === "connected-livekit" && (
                 <div className="flex-1 min-h-0 text-xs text-muted-foreground p-4">
-                  {/* Terminal mounts here; in CT the LiveKit connection may not fully initialize */}
+                  {/* TODO: render GhosttyTerminalLiveKit here (needs token from TokenService) */}
                   Terminal connected to {attachment.livekitRoom}
                 </div>
               )}
-              {attachment.status === "connected-grpc" && (
-                <div className="flex-1 min-h-0 text-xs text-muted-foreground p-4">
-                  gRPC terminal connected
+              {attachment.status === "connected-grpc" && client && (
+                <div className="flex-1 min-h-0" style={{ minWidth: 0 }}>
+                  <GrpcSessionTerminal
+                    sessionId={attachment.sessionId}
+                    sessionToken={sessionToken}
+                    client={client}
+                  />
                 </div>
               )}
               {/* Inspector overlay */}

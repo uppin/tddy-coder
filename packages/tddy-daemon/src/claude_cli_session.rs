@@ -32,7 +32,9 @@ const OUTPUT_BROADCAST_CAPACITY: usize = 256;
 /// `stream_terminal_output` call is silently dropped (send returns `Err` with 0 receivers).
 /// The capture buffer accumulates all raw bytes from session start so that when a subscriber
 /// later connects it can replay the full screen state from the beginning.
-const CAPTURE_LIMIT_BYTES: usize = 65536; // 64 KB
+// Ratatui full-screen redraws are ~4–8 KB per frame; 64 KB only covers ~8–16 frames.
+// 512 KB gives ~64–128 frames of replay context for reconnecting clients.
+const CAPTURE_LIMIT_BYTES: usize = 524288; // 512 KB
 
 /// Reserved terminal id for the original `claude` terminal of a session.
 ///
@@ -95,6 +97,21 @@ impl PtyHandle {
                 pixel_height: 0,
             });
             let _ = m.resize(size);
+        }
+    }
+
+    /// Forward input data to the PTY stdin, stripping any embedded resize escape sequence.
+    ///
+    /// When `\x1b]resize;{cols};{rows}\x07` is found, the PTY is resized (SIGWINCH sent)
+    /// and the escape bytes are not forwarded to the subprocess. Used by both the bidi and
+    /// unary input paths so resize always works regardless of which transport the client uses.
+    pub fn send_input(&self, data: bytes::Bytes) {
+        let (resize, remaining) = strip_resize(&data);
+        if let Some((cols, rows)) = resize {
+            self.resize(rows, cols);
+        }
+        if !remaining.is_empty() {
+            let _ = self.stdin_tx.send(remaining);
         }
     }
 }
@@ -372,6 +389,53 @@ impl ClaudeCliSessionManager {
         }
     }
 
+    /// Kill all tracked PTY processes across every session: SIGTERM each, wait up to 5 s,
+    /// then SIGKILL any that remain. Clears the registry on completion.
+    ///
+    /// Called during daemon shutdown so that spawned `claude` / shell processes do not
+    /// outlive the daemon as orphans.
+    pub async fn kill_all(&self) {
+        let pids: Vec<u32> = {
+            let mut reg = self.registry.write().await;
+            let pids = reg
+                .values()
+                .flat_map(|tools| tools.values().map(|h| h.pid))
+                .collect();
+            reg.clear();
+            pids
+        };
+
+        if pids.is_empty() {
+            return;
+        }
+
+        tokio::task::spawn_blocking(move || {
+            #[cfg(unix)]
+            {
+                for &pid in &pids {
+                    let _ = crate::session_deletion::signal_pid(pid as i32, libc::SIGTERM);
+                }
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                while std::time::Instant::now() < deadline {
+                    let any_alive = pids
+                        .iter()
+                        .any(|&pid| unsafe { libc::kill(pid as i32, 0) } == 0);
+                    if !any_alive {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                for &pid in &pids {
+                    if unsafe { libc::kill(pid as i32, 0) } == 0 {
+                        let _ = crate::session_deletion::signal_pid(pid as i32, libc::SIGKILL);
+                    }
+                }
+            }
+        })
+        .await
+        .ok();
+    }
+
     // --- private helpers ---
 
     /// Spawn the child in a PTY. Runs in a dedicated OS thread (portable-pty I/O is blocking).
@@ -468,6 +532,12 @@ impl ClaudeCliSessionManager {
                                     if cap.len() > CAPTURE_LIMIT_BYTES {
                                         let excess = cap.len() - CAPTURE_LIMIT_BYTES;
                                         cap.drain(0..excess);
+                                        log::debug!(
+                                            target: "tddy_daemon::claude_cli_session",
+                                            "PTY capture trimmed: dropped {} bytes, buffer={} bytes",
+                                            excess,
+                                            cap.len()
+                                        );
                                     }
                                 }
                                 let chunk = Bytes::copy_from_slice(&buf[..n]);
@@ -707,19 +777,12 @@ impl RpcService for PtyLiveKitService {
 
         // Bidi input stream → PTY stdin. Resize escape sequences are intercepted and applied
         // to the PTY via SIGWINCH rather than forwarded as raw bytes.
-        let stdin_tx = self.handle.stdin_tx.clone();
         let handle_for_input = Arc::clone(&self.handle);
         tokio::spawn(async move {
             while let Some(msg) = input_rx.recv().await {
                 if let Ok(input) = TerminalInput::decode(&msg.payload[..]) {
                     if !input.data.is_empty() {
-                        let (resize, remaining) = strip_resize(&input.data);
-                        if let Some((cols, rows)) = resize {
-                            handle_for_input.resize(rows, cols);
-                        }
-                        if !remaining.is_empty() {
-                            let _ = stdin_tx.send(remaining);
-                        }
+                        handle_for_input.send_input(bytes::Bytes::from(input.data));
                     }
                 }
             }
@@ -773,4 +836,135 @@ pub async fn spawn_livekit_bridge(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pid_is_alive(pid: u32) -> bool {
+        // kill -0 checks existence without sending a signal; ESRCH means dead
+        let ret = unsafe { libc::kill(pid as i32, 0) };
+        ret == 0
+    }
+
+    fn wait_for_pid_to_die(pid: u32, timeout: std::time::Duration) -> bool {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if !pid_is_alive(pid) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        !pid_is_alive(pid)
+    }
+
+    /// kill_all terminates a running PTY process registered under a session.
+    ///
+    /// AC: After kill_all() returns, the process is dead (kill -0 → ESRCH).
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn kill_all_terminates_registered_pty_processes() {
+        let manager = ClaudeCliSessionManager::new();
+        let worktree = tempfile::tempdir().expect("temp dir");
+
+        let handle = manager
+            .start_terminal(
+                "kill-all-test-session-1",
+                worktree.path().to_path_buf(),
+                "/bin/sh",
+            )
+            .await
+            .expect("start_terminal should spawn a PTY process");
+        let pid = handle.pid;
+
+        assert!(pid_is_alive(pid), "process should be alive before kill_all");
+
+        manager.kill_all().await;
+
+        assert!(
+            wait_for_pid_to_die(pid, std::time::Duration::from_secs(5)),
+            "process pid={pid} should be dead after kill_all"
+        );
+    }
+
+    /// kill_all kills all sessions when multiple are tracked simultaneously.
+    ///
+    /// AC: Every PID in every registered session is dead after kill_all().
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn kill_all_terminates_all_sessions() {
+        let manager = ClaudeCliSessionManager::new();
+        let worktree = tempfile::tempdir().expect("temp dir");
+        let mut pids = Vec::new();
+
+        for i in 0..3 {
+            let session_id = format!("kill-all-multi-{i}");
+            let handle = manager
+                .start_terminal(&session_id, worktree.path().to_path_buf(), "/bin/sh")
+                .await
+                .expect("start_terminal should succeed");
+            pids.push(handle.pid);
+        }
+
+        for &pid in &pids {
+            assert!(
+                pid_is_alive(pid),
+                "pid {pid} should be alive before kill_all"
+            );
+        }
+
+        manager.kill_all().await;
+
+        for &pid in &pids {
+            assert!(
+                wait_for_pid_to_die(pid, std::time::Duration::from_secs(5)),
+                "pid {pid} should be dead after kill_all"
+            );
+        }
+    }
+
+    /// kill_all empties the registry so subsequent lookups return nothing.
+    ///
+    /// AC: list_terminals returns empty for all sessions after kill_all().
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn kill_all_clears_the_registry() {
+        let manager = ClaudeCliSessionManager::new();
+        let worktree = tempfile::tempdir().expect("temp dir");
+
+        manager
+            .start_terminal("registry-clear-a", worktree.path().to_path_buf(), "/bin/sh")
+            .await
+            .expect("start session a");
+        manager
+            .start_terminal("registry-clear-b", worktree.path().to_path_buf(), "/bin/sh")
+            .await
+            .expect("start session b");
+
+        assert!(
+            !manager.list_terminals("registry-clear-a").await.is_empty(),
+            "session-a should have terminals before kill_all"
+        );
+
+        manager.kill_all().await;
+
+        assert!(
+            manager.list_terminals("registry-clear-a").await.is_empty(),
+            "session-a should have no terminals after kill_all"
+        );
+        assert!(
+            manager.list_terminals("registry-clear-b").await.is_empty(),
+            "session-b should have no terminals after kill_all"
+        );
+    }
+
+    /// kill_all on an empty manager is safe and does not panic.
+    ///
+    /// AC: No panic or error on a freshly constructed manager.
+    #[tokio::test]
+    async fn kill_all_is_safe_on_empty_manager() {
+        let manager = ClaudeCliSessionManager::new();
+        manager.kill_all().await; // must not panic
+    }
 }

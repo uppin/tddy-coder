@@ -1,4 +1,5 @@
 use crate::vm::VmError;
+use bytes::Bytes;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tddy_build::discovery::discover_build_manifests;
@@ -8,7 +9,6 @@ use tddy_build::plugin::PluginRegistry;
 use tddy_build_qemu::QemuPlugin;
 use tddy_rpc::Status;
 use tddy_service::proto::vm::BuildVmImageProgress;
-use bytes::Bytes;
 use tddy_task::{TaskBody, TaskChannel, TaskContext, TaskStatus};
 use tokio::fs;
 use tokio_util::sync::CancellationToken;
@@ -148,8 +148,7 @@ impl TaskBody for VmBuildTaskBody {
         let cancel = ctx.cancel_token().clone();
         let log_ch = ctx.channel("0");
         let success =
-            build_vm_image_from_spec(&self.buildroot_spec, self.progress_tx, cancel, log_ch)
-                .await;
+            build_vm_image_from_spec(&self.buildroot_spec, self.progress_tx, cancel, log_ch).await;
         if ctx.is_cancelled() {
             TaskStatus::Cancelled
         } else if success {
@@ -196,7 +195,8 @@ pub async fn build_vm_image_from_spec(
         }
         _ => {
             log::error!("build_vm_image_from_spec: BUILDROOT_DIR not set");
-            let msg = "Buildroot not found: set BUILDROOT_DIR env var to the Buildroot source directory";
+            let msg =
+                "Buildroot not found: set BUILDROOT_DIR env var to the Buildroot source directory";
             send_progress(&tx, STAGE_ERROR, msg, "").await;
             write_to_channel(&log_ch, msg);
             return false;
@@ -308,7 +308,13 @@ pub async fn build_vm_image_from_spec(
     // Capture PID before taking stdio (id() requires mutable Child)
     let make_pid = make_build.id();
 
-    send_progress(&tx, STAGE_BUILDING, "Building rootfs (this takes several minutes)…", "").await;
+    send_progress(
+        &tx,
+        STAGE_BUILDING,
+        "Building rootfs (this takes several minutes)…",
+        "",
+    )
+    .await;
     write_to_channel(&log_ch, "Building rootfs (this takes several minutes)…");
     // Drain stdout and stderr concurrently — reading only one at a time risks a pipe-buffer deadlock
     // when the other fills up, and also hides error messages that make writes to stderr.
@@ -383,7 +389,13 @@ pub async fn build_vm_image_from_spec(
         "build_vm_image_from_spec: converting {} to qcow2",
         rootfs_ext2.display()
     );
-    send_progress(&tx, STAGE_CONVERTING, "Converting rootfs.ext2 to qcow2…", "").await;
+    send_progress(
+        &tx,
+        STAGE_CONVERTING,
+        "Converting rootfs.ext2 to qcow2…",
+        "",
+    )
+    .await;
     write_to_channel(&log_ch, "Converting rootfs.ext2 to qcow2…");
 
     let convert = Command::new("qemu-img")

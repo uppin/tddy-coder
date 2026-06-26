@@ -326,3 +326,79 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
       .should("not.have.attr", "aria-selected", "true");
   });
 });
+
+// ---------------------------------------------------------------------------
+// AC9-11: URL deep-link pre-selection
+// Bug: SessionsDrawerScreen never reads window.location.hash on mount, so
+// navigating to /#/sessions/:id shows an empty pane regardless of whether the
+// session exists in the list.
+// ---------------------------------------------------------------------------
+
+describe("SessionsDrawerAcceptance — URL deep-link pre-selection", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    // Reset hash so tests don't bleed into each other
+    window.location.hash = "";
+  });
+
+  // -------------------------------------------------------------------------
+  // AC9: Active session in the URL hash is selected in the drawer on mount
+  // -------------------------------------------------------------------------
+
+  it("auto-selects the active session from the URL hash when the screen mounts", () => {
+    // Given — hash is set BEFORE the component mounts
+    window.location.hash = `/sessions/${CONNECTED_SESSION_A.sessionId}`;
+    interceptConnectionRpcs([CONNECTED_SESSION_A]);
+    interceptConnectSession({ livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" });
+
+    // When
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+
+    // Then — the session from the hash is marked as selected
+    sessionsDrawerPage.drawerItem(CONNECTED_SESSION_A.sessionId)
+      .should("have.attr", "aria-selected", "true");
+  });
+
+  // -------------------------------------------------------------------------
+  // AC10: Active deep-link session is auto-connected (terminal appears)
+  // -------------------------------------------------------------------------
+
+  it("auto-connects to the active session identified in the URL hash on mount", () => {
+    // Given
+    window.location.hash = `/sessions/${CONNECTED_SESSION_A.sessionId}`;
+    interceptConnectionRpcs([CONNECTED_SESSION_A]);
+    interceptConnectSession({ livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" });
+
+    // When
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+    cy.wait("@connectSession");
+
+    // Then — terminal container is visible (auto-connected)
+    sessionsDrawerPage.detailTerminalContainer().should("exist");
+  });
+
+  // -------------------------------------------------------------------------
+  // AC11: Inactive deep-link session is selected but does not show placeholder
+  // -------------------------------------------------------------------------
+
+  it("selects an inactive session from the URL hash and shows session controls, not the empty placeholder", () => {
+    // Given
+    window.location.hash = `/sessions/${DISCONNECTED_SESSION.sessionId}`;
+    interceptConnectionRpcs([DISCONNECTED_SESSION]);
+
+    // When
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+
+    // Then — the drawer item is selected
+    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId)
+      .should("have.attr", "aria-selected", "true");
+
+    // And the empty placeholder is not shown
+    cy.contains("Select a session").should("not.exist");
+  });
+});

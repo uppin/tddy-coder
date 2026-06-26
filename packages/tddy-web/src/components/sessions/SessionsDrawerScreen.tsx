@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ConnectionService, type SessionEntry } from "../../gen/connection_pb";
 import { sortSessionsByCreation } from "../../utils/sessionSort";
 import { useHttpClient } from "../../rpc/transportProvider";
@@ -7,7 +7,8 @@ import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
 import { useSessionAttachment } from "./useSessionAttachment";
 import { nextInspectorState } from "./inspectorState";
-import { sessionsDrawerPathForSession } from "../../routing/appRoutes";
+import { sessionsDrawerPathForSession, parseSessionsDrawerSessionId } from "../../routing/appRoutes";
+import { Signal } from "../../gen/connection_pb";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 
 // ---------------------------------------------------------------------------
@@ -23,8 +24,13 @@ export function SessionsDrawerScreen() {
   const client = useHttpClient(ConnectionService);
 
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return parseSessionsDrawerSessionId(window.location.hash.slice(1));
+  });
   const [inspectorState, setInspectorState] = useState<InspectorDrawerState>("closed");
+  // Track whether the URL-seeded selectedSessionId has been activated after the session list loads
+  const deepLinkActivatedRef = useRef(false);
   const [mode, setMode] = useState<"list" | "creating">("list");
 
   const { state: attachment, connectSession, resumeSession, deleteSession, signalSession } = useSessionAttachment();
@@ -53,6 +59,30 @@ export function SessionsDrawerScreen() {
     () => sortedSessions.find((s) => s.sessionId === selectedSessionId) ?? null,
     [sortedSessions, selectedSessionId],
   );
+
+  // When the session list loads and a session was pre-selected from the URL hash,
+  // activate it (set inspector state + auto-connect) exactly once.
+  useEffect(() => {
+    if (deepLinkActivatedRef.current) return;
+    if (!selectedSessionId || sortedSessions.length === 0) return;
+    const session = sortedSessions.find((s) => s.sessionId === selectedSessionId);
+    if (!session) return;
+    deepLinkActivatedRef.current = true;
+    setInspectorState(
+      nextInspectorState(
+        { open: false, expanded: false },
+        { type: "select", isActive: session.isActive },
+      ).open
+        ? "open"
+        : "closed",
+    );
+    if (session.isActive) {
+      connectSession(selectedSessionId, sessionToken, client).catch((err) => {
+        console.debug("[SessionsDrawerScreen] deep-link connectSession error", err);
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortedSessions]);
 
   // When a session is selected in the drawer, auto-connect if it is active
   const handleSelectSession = (sessionId: string) => {
@@ -87,8 +117,7 @@ export function SessionsDrawerScreen() {
   };
 
   const handleTerminate = (sessionId: string) => {
-    // SIGTERM = 15
-    signalSession(sessionId, 15, sessionToken, client).catch((err) => {
+    signalSession(sessionId, Signal.SIGTERM, sessionToken, client).catch((err) => {
       console.debug("[SessionsDrawerScreen] signalSession error", err);
     });
   };
@@ -114,6 +143,16 @@ export function SessionsDrawerScreen() {
     connectSession(sessionId, sessionToken, client).catch((err) => {
       console.debug("[SessionsDrawerScreen] connectSession after create error", err);
     });
+    // Refresh the sessions list so the newly-created session appears in the drawer
+    // and selectedSession resolves to a non-null value.
+    client
+      .listSessions({ sessionToken })
+      .then((resp) => {
+        setSessions(resp.sessions as SessionEntry[]);
+      })
+      .catch((err) => {
+        console.debug("[SessionsDrawerScreen] listSessions after create error", err);
+      });
   };
 
   return (

@@ -522,6 +522,8 @@ fn main() -> anyhow::Result<()> {
         )
         .await;
 
+        shared_claude_cli_manager.kill_all().await;
+
         if let Some(t) = inbound_task {
             t.abort();
         }

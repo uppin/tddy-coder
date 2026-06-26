@@ -78,13 +78,16 @@ export function CreateSessionPane({
         setAgents(loadedAgents);
         setTools(loadedTools);
 
-        // Auto-select agent and toolPath but NOT projectId (user must select project
-        // explicitly so the button is disabled by default when no projects are loaded)
+        // Auto-select agent and toolPath.
         if (loadedAgents.length > 0) {
           setAgent(loadedAgents[0]!.id);
         }
         if (loadedTools.length > 0) {
           setToolPath(loadedTools[0]!.path);
+        }
+        // Auto-select projectId when there is exactly one choice — no meaningful decision.
+        if (loadedProjects.length === 1) {
+          setProjectId(loadedProjects[0]!.projectId);
         }
       })
       .catch((err) => {

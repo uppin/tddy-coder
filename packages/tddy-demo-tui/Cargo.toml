@@ -1,0 +1,15 @@
+[package]
+name = "tddy-demo-tui"
+version = "0.1.0"
+edition = "2021"
+description = "Demo TUI binary for terminal rendering e2e tests — draws DEMO TUI W={cols} H={rows}, redraws on SIGWINCH"
+
+[[bin]]
+name = "tddy-demo-tui"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

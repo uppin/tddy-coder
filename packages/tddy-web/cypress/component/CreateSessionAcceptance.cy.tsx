@@ -13,6 +13,7 @@ import {
 } from "../support/rpc/connectionRpcs";
 import { TEST_IDS, byTestId } from "../support/testIds";
 import { CLAUDE_CLI_MODELS } from "../../src/constants/claudeCliModels";
+import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -32,6 +33,20 @@ const CONNECTED_SESSION = {
 };
 
 const NEW_SESSION_ID = "new-session-bbbb-0000-0000-0000-000000000001";
+
+/** Fixture returned by the second listSessions call after creation. */
+const NEW_SESSION_FIXTURE = {
+  sessionId: NEW_SESSION_ID,
+  createdAt: "2026-06-26T12:10:00Z",
+  status: "active",
+  repoPath: "/home/dev/new-feature",
+  pid: 20001,
+  isActive: true,
+  projectId: "proj-1",
+  daemonInstanceId: "",
+  workflowGoal: "New work",
+  pendingElicitation: false,
+};
 
 // ---------------------------------------------------------------------------
 
@@ -327,5 +342,96 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
     byTestId(TEST_IDS.createSessionError).should("be.visible");
     // Form remains open
     byTestId(TEST_IDS.createSessionPane).should("be.visible");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC13-14: Post-creation list refresh
+// Bug: after handleSessionCreated(), sessions state is never re-fetched, so the
+// new session is absent from sortedSessions → selectedSession is null → empty pane.
+// ---------------------------------------------------------------------------
+
+describe("CreateSession acceptance — post-creation list refresh", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+  });
+
+  // -------------------------------------------------------------------------
+  // AC13: After creation the sessions list is re-fetched (second ListSessions call)
+  //       and the new session appears as a drawer item.
+  // -------------------------------------------------------------------------
+
+  it("re-fetches the sessions list after creation so the new session appears in the drawer", () => {
+    // Given — first listSessions returns empty; second returns the newly-created session
+    let callCount = 0;
+    interceptConnectionRpcs([], {
+      projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
+      agents: [{ id: "claude", label: "Claude (opus)" }],
+      listSessionsFactory: () => {
+        callCount++;
+        return callCount > 1 ? [NEW_SESSION_FIXTURE] : [];
+      },
+    });
+    interceptStartSession(NEW_SESSION_ID);
+    interceptConnectSession({ livekitRoom: `room-${NEW_SESSION_ID}` });
+
+    // When — mount, create a session
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions"); // 1st call on mount
+
+    byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
+    cy.wait("@listProjects");
+    cy.wait("@listAgents");
+    byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
+    byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
+    byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
+    cy.wait("@startSession");
+
+    // Then — a second listSessions call must be made after creation (fix triggers this)
+    cy.wait("@listSessions"); // 2nd call — times out without the fix
+
+    // And the new session appears in the drawer
+    sessionsDrawerPage.drawerItem(NEW_SESSION_ID).should("exist");
+  });
+
+  // -------------------------------------------------------------------------
+  // AC14: After creation the detail pane shows the new session's terminal,
+  //       not the "Select a session" empty placeholder.
+  // -------------------------------------------------------------------------
+
+  it("shows the new session's terminal in the detail pane rather than the empty placeholder", () => {
+    // Given — same two-phase list setup
+    let callCount = 0;
+    interceptConnectionRpcs([], {
+      projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
+      agents: [{ id: "claude", label: "Claude (opus)" }],
+      listSessionsFactory: () => {
+        callCount++;
+        return callCount > 1 ? [NEW_SESSION_FIXTURE] : [];
+      },
+    });
+    interceptStartSession(NEW_SESSION_ID);
+    interceptConnectSession({ livekitRoom: `room-${NEW_SESSION_ID}` });
+
+    // When
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+
+    byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
+    cy.wait("@listProjects");
+    cy.wait("@listAgents");
+    byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
+    byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
+    byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
+    cy.wait("@startSession");
+    cy.wait("@listSessions"); // wait for post-creation re-fetch
+
+    // Then — empty placeholder is gone
+    cy.contains("Select a session").should("not.exist");
+
+    // And the terminal container is visible (session was auto-connected)
+    sessionsDrawerPage.detailTerminalContainer().should("exist");
   });
 });
