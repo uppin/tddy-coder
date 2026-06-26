@@ -36,6 +36,7 @@ function HmrOverlay() {
   );
 }
 
+import { applyDebugMaskFromConfig, applyDebugMaskFromUrl } from "./lib/debugMask";
 import { TokenService } from "./gen/token_pb";
 import { useAuth } from "./hooks/useAuth";
 import { useVisualViewport } from "./hooks/useVisualViewport";
@@ -234,7 +235,8 @@ function ConnectionForm() {
 
     fetch("/api/config")
       .then((r) => (r.ok ? r.json() : null))
-      .then((config: { livekit_url?: string; livekit_room?: string } | null) => {
+      .then((config: { livekit_url?: string; livekit_room?: string; debug?: string } | null) => {
+        applyDebugMaskFromConfig(config?.debug);
         setUrl(params.url || config?.livekit_url || "");
         setIdentity(params.identity || "");
         setRoomName(params.roomName || config?.livekit_room || "terminal-e2e");
@@ -382,7 +384,9 @@ export function App() {
           livekit_url?: string;
           common_room?: string;
           allowed_agents?: { id: string; label: string }[];
+          debug?: string;
         } | null) => {
+          applyDebugMaskFromConfig(config?.debug);
           setAppConfig({
             daemonMode: config?.daemon_mode ?? false,
             livekitUrl: config?.livekit_url,
@@ -442,6 +446,9 @@ export function App() {
     </>
   );
 }
+
+// Honour `?debug=` immediately (before terminals mount); `/api/config` re-syncs afterwards.
+applyDebugMaskFromUrl();
 
 const root = document.getElementById("root");
 if (root) {
