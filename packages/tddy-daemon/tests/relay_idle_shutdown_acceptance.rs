@@ -30,6 +30,7 @@ async fn run_server_exits_cleanly_when_external_shutdown_channel_fires() {
         None,
         None,
         vec![],
+        None, // web_debug mask
         None,
         Some(rx), // NEW: external idle-timeout shutdown receiver
     )
@@ -64,6 +65,7 @@ async fn run_server_with_no_external_shutdown_compiles_and_accepts_none() {
         None,
         None,
         vec![],
+        None, // web_debug mask
         None,
         None, // no external shutdown channel
     );

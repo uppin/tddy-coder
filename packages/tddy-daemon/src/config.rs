@@ -103,6 +103,13 @@ pub struct DaemonConfig {
     /// VNC bridge binary configuration.
     #[serde(default)]
     pub vnc: Option<VncConfig>,
+
+    /// Browser DEBUG mask exposed to tddy-web via `GET /api/config` (`debug` field). A `debug`-package
+    /// namespace mask (e.g. `tddy:term:*`, or `tddy:term:write,tddy:term:resize`) that enables scoped
+    /// `[tddy]` diagnostics in the browser. Mainly for `./web-dev` to debug terminal garbling /
+    /// misalignment. The browser invalidates any local override when this value changes. None = off.
+    #[serde(default)]
+    pub debug: Option<String>,
 }
 
 impl Default for DaemonConfig {
@@ -127,6 +134,7 @@ impl Default for DaemonConfig {
             claude_cli: None,
             relay: None,
             vnc: None,
+            debug: None,
         }
     }
 }
@@ -644,5 +652,39 @@ claude_cli:
             Some("/usr/local/bin/tddy-tools")
         );
         assert_eq!(cli.daemon_url.as_deref(), Some("http://127.0.0.1:9000"));
+    }
+}
+
+#[cfg(test)]
+mod web_debug_mask_tests {
+    use super::*;
+
+    #[test]
+    fn debug_mask_defaults_to_none() {
+        let c = DaemonConfig::default();
+        assert!(c.debug.is_none());
+    }
+
+    #[test]
+    fn debug_mask_absent_in_yaml_is_none() {
+        let yaml = "
+users:
+  - github_user: u
+    os_user: u
+";
+        let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
+        assert!(c.debug.is_none());
+    }
+
+    #[test]
+    fn debug_mask_parses_from_yaml() {
+        let yaml = "
+debug: \"tddy:term:*\"
+users:
+  - github_user: u
+    os_user: u
+";
+        let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
+        assert_eq!(c.debug.as_deref(), Some("tddy:term:*"));
     }
 }

@@ -138,6 +138,9 @@ fn main() -> anyhow::Result<()> {
 
     let common_room = config.livekit.as_ref().and_then(|l| l.common_room.clone());
 
+    // Browser DEBUG mask (debug-package namespaces) exposed at /api/config; see DaemonConfig::debug.
+    let web_debug = config.debug.clone();
+
     let allowed_agents: Vec<tddy_coder::web_server::ClientAllowedAgent> =
         tddy_daemon::agent_list_mapping::agent_allowlist_rows(&config)
             .into_iter()
@@ -537,6 +540,7 @@ fn main() -> anyhow::Result<()> {
             livekit_url,
             common_room,
             allowed_agents,
+            web_debug,
             lifecycle_telegram,
             idle_rx_opt, // Some(rx) in relay mode; None otherwise
         )

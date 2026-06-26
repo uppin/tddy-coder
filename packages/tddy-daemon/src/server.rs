@@ -25,6 +25,7 @@ pub async fn run_server(
     livekit_url: Option<String>,
     common_room: Option<String>,
     allowed_agents: Vec<ClientAllowedAgent>,
+    debug: Option<String>,
     lifecycle_telegram: Option<(DaemonConfig, Arc<dyn TelegramSender + Send + Sync>)>,
     shutdown_rx: Option<tokio::sync::oneshot::Receiver<()>>,
 ) -> anyhow::Result<()> {
@@ -47,6 +48,7 @@ pub async fn run_server(
         common_room,
         daemon_mode: Some(true),
         allowed_agents,
+        debug,
     };
 
     let shutdown_copy = lifecycle_telegram.clone();

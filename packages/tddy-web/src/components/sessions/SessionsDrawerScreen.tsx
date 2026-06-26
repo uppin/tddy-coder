@@ -40,7 +40,7 @@ export function SessionsDrawerScreen() {
     attachment.status === "connected-grpc" || attachment.status === "connected-livekit"
       ? attachment.sessionId
       : null;
-  const { controlState, claim: claimControl } = useTerminalControl(connectedSessionId, sessionToken);
+  const { controlState, controlTokenRef, claim: claimControl } = useTerminalControl(connectedSessionId, sessionToken);
 
   // Fetch sessions on mount
   useEffect(() => {
@@ -191,6 +191,7 @@ export function SessionsDrawerScreen() {
           onCancelCreate={handleCancelCreate}
           onSessionCreated={handleSessionCreated}
           terminalControl={connectedSessionId ? { ...controlState, onClaim: claimControl } : undefined}
+          controlTokenRef={connectedSessionId ? controlTokenRef : undefined}
         />
       </div>
     </TooltipProvider>

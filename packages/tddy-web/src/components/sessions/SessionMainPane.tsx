@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, type MutableRefObject } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
@@ -55,6 +55,8 @@ interface SessionMainPaneProps {
   onSessionCreated?: (sessionId: string) => void;
   // Terminal control state — when present and not the controller, renders a "Claim terminal" CTA.
   terminalControl?: TerminalControlState & { onClaim: () => void };
+  /** Ref to the live control token from useTerminalControl. Passed through to GrpcSessionTerminal. */
+  controlTokenRef?: MutableRefObject<string>;
 }
 
 export function SessionMainPane({
@@ -74,6 +76,7 @@ export function SessionMainPane({
   onCancelCreate,
   onSessionCreated,
   terminalControl,
+  controlTokenRef,
 }: SessionMainPaneProps) {
   const isConnected =
     attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
@@ -155,6 +158,7 @@ export function SessionMainPane({
                     sessionId={attachment.sessionId}
                     sessionToken={sessionToken}
                     client={client}
+                    controlToken={controlTokenRef?.current}
                   />
                 </div>
               )}
