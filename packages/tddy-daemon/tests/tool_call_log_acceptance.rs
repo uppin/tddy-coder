@@ -73,8 +73,7 @@ async fn execute_tool_writes_durable_record_with_args_json() {
 
     // Then — the JSONL file must exist and contain exactly one record.
     let session_dir = unified_session_dir_path(sessions_tmp.path(), session_id);
-    let records = read_tool_calls(&session_dir)
-        .expect("read_tool_calls must not fail");
+    let records = read_tool_calls(&session_dir).expect("read_tool_calls must not fail");
     assert_eq!(
         records.len(),
         1,
@@ -253,18 +252,14 @@ async fn list_session_tool_calls_returns_records_chronologically_with_args_json(
 
     // Then
     let calls_out = &resp.get_ref().tool_calls;
-    assert_eq!(calls_out.len(), calls_in.len(), "must return all recorded calls");
+    assert_eq!(
+        calls_out.len(),
+        calls_in.len(),
+        "must return all recorded calls"
+    );
     for (i, ((exp_tool, exp_args), got)) in calls_in.iter().zip(calls_out.iter()).enumerate() {
-        assert_eq!(
-            got.tool_name, *exp_tool,
-            "call {} tool_name must match",
-            i
-        );
-        assert_eq!(
-            got.args_json, *exp_args,
-            "call {} args_json must match",
-            i
-        );
+        assert_eq!(got.tool_name, *exp_tool, "call {} tool_name must match", i);
+        assert_eq!(got.args_json, *exp_args, "call {} args_json must match", i);
     }
 }
 

@@ -657,8 +657,16 @@ async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow:
             break;
         }
         if !plan_approved && initial_text.contains("Choose an action") {
-            let _ = input_tx.send(TerminalInput { data: keys::DOWN.to_vec() }).await;
-            let _ = input_tx.send(TerminalInput { data: keys::ENTER.to_vec() }).await;
+            let _ = input_tx
+                .send(TerminalInput {
+                    data: keys::DOWN.to_vec(),
+                })
+                .await;
+            let _ = input_tx
+                .send(TerminalInput {
+                    data: keys::ENTER.to_vec(),
+                })
+                .await;
             plan_approved = true;
         }
     }

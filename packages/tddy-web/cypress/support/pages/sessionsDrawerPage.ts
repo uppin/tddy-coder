@@ -124,4 +124,20 @@ export const sessionsDrawerPage = {
   /** The Terminate button inside the inspector for the given session. */
   inspectorTerminateBtn: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsInspectorTerminateBtn(sessionId), { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
+  // Terminal control mutex — "Claim terminal" CTA
+  // ---------------------------------------------------------------------------
+
+  /** The overlay that appears when this screen is not the terminal controller. */
+  terminalControlOverlay: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.terminalControlOverlay, { timeout: 5000, ...options }),
+
+  /** The "Claim terminal" button inside the control overlay. */
+  terminalClaimBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.terminalClaimBtn, { timeout: 5000, ...options }),
+
+  /** The text element naming the screen currently holding control. */
+  terminalControlHolder: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.terminalControlHolder, { timeout: 5000, ...options }),
 };

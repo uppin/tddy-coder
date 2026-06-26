@@ -166,6 +166,11 @@ export const TEST_IDS = {
   // Shortcut drawer
   shortcutDrawer: "shortcut-drawer",
   shortcutDragHandle: "shortcut-drag-handle",
+
+  // Terminal control mutex — "Claim terminal" CTA
+  terminalControlOverlay: "terminal-control-overlay",
+  terminalClaimBtn: "terminal-claim-btn",
+  terminalControlHolder: "terminal-control-holder",
 } as const;
 
 // ---------------------------------------------------------------------------

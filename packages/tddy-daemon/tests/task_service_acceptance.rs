@@ -117,8 +117,8 @@ async fn collect_streaming_until_idle<Req: Message, Resp: Message + Default>(
                 let bytes = chunk.expect("stream chunk must not be an error");
                 messages.push(Resp::decode(&bytes[..]).expect("decode stream message"));
             }
-            Ok(None) => break,  // stream closed
-            Err(_) => break,    // idle timeout — no more events expected
+            Ok(None) => break, // stream closed
+            Err(_) => break,   // idle timeout — no more events expected
         }
     }
     messages
