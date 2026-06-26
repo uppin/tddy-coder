@@ -41,3 +41,5 @@ pub mod workspace_session;
 pub mod worktrees;
 
 pub mod test_util;
+pub mod vnc_service;
+pub mod vnc_vault;

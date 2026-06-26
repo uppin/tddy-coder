@@ -11,6 +11,22 @@ Release note history for the Web product area.
 - `SessionDrawer` groups PR-stack children under the orchestrator session in a collapsible `<details>/<summary>` element; children render at `depth={1}` (indented)
 - Orphan children (orchestrator not present in the list) fall through to the flat list
 - New utils: `stackParentCandidates(sessions)`, `groupSessionsByStack(sessions)`
+## 2026-06-26 — Browser DEBUG mask + fix SendTerminalInput unhandled rejections
+
+- `dev.daemon.yaml` ships `debug: "tddy:term:*"` — a [`debug`](https://www.npmjs.com/package/debug)-package namespace mask served at `GET /api/config`; browser adopts it on load with `localStorage` persistence (invalidated only when the config value changes); `?debug=` URL param overrides for a session
+- `GhosttyTerminal` / `GhosttyTerminalGrpc` replace ad-hoc `console.log` spam with namespaced loggers: `tddy:term:{write,data,resize,grpc,life,mouse}`
+- Fixed `GrpcSessionTerminal.send()`: unhandled `[failed_precondition]` promise rejections silenced via `.catch(() => {})`; `controlToken` prop added and forwarded in every `SendTerminalInput` call (internal ref pattern — stream is not recreated on token changes)
+- `useTerminalControl` exposes `controlTokenRef`; token threads `SessionsDrawerScreen` → `SessionMainPane` → `GrpcSessionTerminal`
+## 2026-06-26 — VNC sessions: inspector tab, encrypted vault, full-screen overlay
+
+- Session inspector drawer gains a **VNC** tab alongside Details and Tools; accessible regardless of session connection state
+- `SessionVncTab` lists configured VNC targets (label, host:port, per-target status) and provides an Add form (label, host, port, optional password)
+- First vault operation (add with password, start stream) triggers `VncPassphraseDialog`; passphrase creates/unlocks the vault (Argon2id + ChaCha20-Poly1305 AEAD, `.vnc.yaml` mode 0600); derived key cached in daemon memory for the session
+- Per-target **Start** calls `VncService.StartVncStream`; daemon spawns a `tddy-vnc` bridge binary that publishes a LiveKit video track; per-target **Stop** calls `StopVncStream` and tears down the process
+- **VNC overlay**: full-screen (`fixed inset-0 z-50`) darkened overlay renders the remote desktop video; dismiss via Escape, backdrop click, or close button
+- Per-target **Remove** calls `VncService.RemoveVncTarget` and deletes the encrypted credential
+- New `tddy-vnc` package scaffolded with `common.rs` (`char_to_keysym`, `rgba_to_abgr`); bridge pump loop and VncClient/VncStreamer are follow-up stubs (FIXME)
+- Feature: [vnc-sessions.md](vnc-sessions.md)
 
 ## 2026-06-26 — PTY terminal width fix — gRPC session terminal renders at correct width
 

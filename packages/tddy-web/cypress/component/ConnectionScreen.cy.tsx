@@ -416,7 +416,7 @@ describe("ConnectionScreen Signal Dropdown", () => {
     // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    connectionPage.signalDropdown(ACTIVE_SESSION.sessionId).click();
+    connectionPage.openSignalDropdown(ACTIVE_SESSION.sessionId);
 
     // Then
     connectionPage.signalSigint(ACTIVE_SESSION.sessionId)
@@ -439,7 +439,7 @@ describe("ConnectionScreen Signal Dropdown", () => {
     // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    connectionPage.signalDropdown(ACTIVE_SESSION.sessionId).click();
+    connectionPage.openSignalDropdown(ACTIVE_SESSION.sessionId);
     connectionPage.signalSigint(ACTIVE_SESSION.sessionId).click();
 
     // Then
@@ -455,7 +455,7 @@ describe("ConnectionScreen Signal Dropdown", () => {
     // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    connectionPage.signalDropdown(ACTIVE_SESSION.sessionId).click();
+    connectionPage.openSignalDropdown(ACTIVE_SESSION.sessionId);
     connectionPage.signalSigterm(ACTIVE_SESSION.sessionId).click();
 
     // Then
@@ -471,7 +471,7 @@ describe("ConnectionScreen Signal Dropdown", () => {
     // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    connectionPage.signalDropdown(ACTIVE_SESSION.sessionId).click();
+    connectionPage.openSignalDropdown(ACTIVE_SESSION.sessionId);
     connectionPage.signalSigkill(ACTIVE_SESSION.sessionId).click();
 
     // Then
@@ -487,8 +487,7 @@ describe("ConnectionScreen Signal Dropdown", () => {
     // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    connectionPage.signalDropdown(ACTIVE_SESSION.sessionId).click();
-    connectionPage.signalMenu(ACTIVE_SESSION.sessionId).should("exist");
+    connectionPage.openSignalDropdown(ACTIVE_SESSION.sessionId);
     connectionPage.signalSigint(ACTIVE_SESSION.sessionId).click();
 
     // Then
@@ -504,7 +503,7 @@ describe("ConnectionScreen Signal Dropdown", () => {
     // When
     cy.mount(<ConnectionScreen />);
     cy.wait("@getAuthStatus");
-    connectionPage.signalDropdown(ACTIVE_SESSION.sessionId).click();
+    connectionPage.openSignalDropdown(ACTIVE_SESSION.sessionId);
     connectionPage.signalSigint(ACTIVE_SESSION.sessionId).click();
 
     // Then

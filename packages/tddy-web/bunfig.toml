@@ -2,3 +2,6 @@
 # Playwright (`bun run playwright:concurrent` / `npx playwright test`), not `bun test`.
 [test]
 root = "src"
+# Polyfill minimal DOM APIs (e.g. KeyboardEvent) for unit tests running in
+# Bun's Node-like environment.
+preload = ["./src/test-utils/dom-preload.ts"]

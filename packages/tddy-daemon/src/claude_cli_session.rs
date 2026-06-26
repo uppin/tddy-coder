@@ -323,6 +323,12 @@ impl ClaudeCliSessionManager {
             .or_default()
             .insert(terminal_id.to_string(), Arc::clone(&handle));
 
+        log::info!(
+            target: "tddy_daemon::claude_cli_session",
+            "spawn_tool: registered session={} terminal={} kind={} pid={}",
+            session_id, terminal_id, kind, handle.pid
+        );
+
         Ok(handle)
     }
 
@@ -421,6 +427,31 @@ impl ClaudeCliSessionManager {
         }
     }
 
+    /// Stop all PTY terminals belonging to `session_id`: SIGTERM each and remove from registry.
+    ///
+    /// Called when a session ends (natural exit or explicit termination) so its processes don't
+    /// outlive the session. This is the per-session counterpart to [`kill_all`].
+    pub async fn stop_session(&self, session_id: &str) {
+        let handles = {
+            let mut reg = self.registry.write().await;
+            reg.remove(session_id).unwrap_or_default()
+        };
+
+        if handles.is_empty() {
+            return;
+        }
+
+        #[cfg(unix)]
+        for (terminal_id, handle) in &handles {
+            log::info!(
+                target: "tddy_daemon::claude_cli_session",
+                "stop_session: session={} terminal={} pid={} — sending SIGTERM",
+                session_id, terminal_id, handle.pid
+            );
+            let _ = crate::session_deletion::signal_pid(handle.pid as i32, libc::SIGTERM);
+        }
+    }
+
     /// Kill all tracked PTY processes across every session: SIGTERM each, wait up to 5 s,
     /// then SIGKILL any that remain. Clears the registry on completion.
     ///
@@ -438,8 +469,19 @@ impl ClaudeCliSessionManager {
         };
 
         if pids.is_empty() {
+            log::debug!(
+                target: "tddy_daemon::claude_cli_session",
+                "kill_all: no registered sessions — nothing to terminate"
+            );
             return;
         }
+
+        log::info!(
+            target: "tddy_daemon::claude_cli_session",
+            "kill_all: sending SIGTERM to {} process(es): {:?}",
+            pids.len(),
+            pids
+        );
 
         tokio::task::spawn_blocking(move || {
             #[cfg(unix)]
@@ -457,8 +499,24 @@ impl ClaudeCliSessionManager {
                     }
                     std::thread::sleep(std::time::Duration::from_millis(50));
                 }
-                for &pid in &pids {
-                    if unsafe { libc::kill(pid as i32, 0) } == 0 {
+                let still_alive: Vec<u32> = pids
+                    .iter()
+                    .copied()
+                    .filter(|&pid| unsafe { libc::kill(pid as i32, 0) } == 0)
+                    .collect();
+                if still_alive.is_empty() {
+                    log::info!(
+                        target: "tddy_daemon::claude_cli_session",
+                        "kill_all: all processes exited cleanly after SIGTERM"
+                    );
+                } else {
+                    log::warn!(
+                        target: "tddy_daemon::claude_cli_session",
+                        "kill_all: {} process(es) still alive after 5 s — sending SIGKILL: {:?}",
+                        still_alive.len(),
+                        still_alive
+                    );
+                    for &pid in &still_alive {
                         let _ = crate::session_deletion::signal_pid(pid as i32, libc::SIGKILL);
                     }
                 }

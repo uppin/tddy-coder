@@ -1,11 +1,15 @@
 import React, { useState } from "react";
 import type { Client } from "@connectrpc/connect";
+import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
+import { VncService } from "../../gen/vnc_pb";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "../../lib/utils";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
 import { SessionToolsTab } from "./SessionToolsTab";
+import { SessionVncTab } from "./SessionVncTab";
+import { useHttpClient } from "../../rpc/transportProvider";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,6 +28,7 @@ interface SessionInspectorDrawerProps {
   onTerminate: (sessionId: string) => void;
   client?: Client<typeof ConnectionService>;
   sessionToken?: string;
+  room?: Room | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,9 +60,11 @@ export function SessionInspectorDrawer({
   onTerminate,
   client,
   sessionToken,
+  room = null,
 }: SessionInspectorDrawerProps) {
   const [pendingDelete, setPendingDelete] = useState(false);
   const [tab, setTab] = useState<InspectorTab>("details");
+  const vncClient = useHttpClient(VncService);
 
   // Always render in DOM — data-state drives visibility and layout.
   return (
@@ -68,7 +75,7 @@ export function SessionInspectorDrawer({
         "flex flex-col h-full border-l border-border bg-background overflow-hidden",
         "absolute top-0 right-0 z-10",
         state === "closed" && "hidden",
-        state === "open" && "w-[360px]",
+        state === "open" && "w-full md:w-[360px]",
         state === "expanded" && "left-0 right-0 w-full",
       )}
     >
@@ -242,7 +249,7 @@ export function SessionInspectorDrawer({
               </div>
             </div>
           </ScrollArea>
-        ) : (
+        ) : tab === "tools" ? (
           <ScrollArea className="flex-1 min-h-0">
             <SessionToolsTab
               sessionId={session.sessionId}
@@ -274,6 +281,63 @@ export function SessionInspectorDrawer({
                       daemonInstanceId: "",
                     })
                   : Promise.resolve({ resultJson: "", isError: true, errorMessage: "no client" })
+              }
+            />
+          </ScrollArea>
+        ) : (
+          <ScrollArea className="flex-1 min-h-0">
+            <SessionVncTab
+              sessionId={session.sessionId}
+              sessionToken={sessionToken ?? ""}
+              room={room}
+              onListVncTargets={() =>
+                vncClient
+                  .listVncTargets({ sessionToken: sessionToken ?? "", sessionId: session.sessionId })
+                  .then((r) => r.targets.map((t) => ({ id: t.id, label: t.label, host: t.host, port: t.port })))
+              }
+              onAddVncTarget={(req) =>
+                vncClient
+                  .addVncTarget({
+                    sessionToken: sessionToken ?? "",
+                    sessionId: session.sessionId,
+                    label: req.label,
+                    host: req.host,
+                    port: req.port,
+                    password: req.password,
+                  })
+                  .then((r) => ({
+                    id: r.target?.id ?? "",
+                    label: r.target?.label ?? "",
+                    host: r.target?.host ?? "",
+                    port: r.target?.port ?? 0,
+                  }))
+              }
+              onRemoveVncTarget={(targetId) =>
+                vncClient
+                  .removeVncTarget({ sessionToken: sessionToken ?? "", sessionId: session.sessionId, targetId })
+                  .then(() => undefined)
+              }
+              onUnlockVncVault={(passphrase) =>
+                vncClient
+                  .unlockVncVault({ sessionToken: sessionToken ?? "", sessionId: session.sessionId, passphrase })
+                  .then(() => undefined)
+              }
+              onStartVncStream={(targetId) =>
+                vncClient
+                  .startVncStream({ sessionToken: sessionToken ?? "", sessionId: session.sessionId, targetId })
+                  .then((r) => ({
+                    livekitRoom: r.livekitRoom,
+                    livekitUrl: r.livekitUrl,
+                    bridgeIdentity: r.bridgeIdentity,
+                    trackName: r.trackName,
+                    width: r.width,
+                    height: r.height,
+                  }))
+              }
+              onStopVncStream={(targetId) =>
+                vncClient
+                  .stopVncStream({ sessionToken: sessionToken ?? "", sessionId: session.sessionId, targetId })
+                  .then(() => undefined)
               }
             />
           </ScrollArea>

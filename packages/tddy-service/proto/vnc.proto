@@ -1,0 +1,110 @@
+syntax = "proto3";
+package vnc;
+
+// Control-plane service: add/list/remove VNC targets per session, unlock the
+// credential vault, and start/stop the VNC→LiveKit bridge for a target.
+// Implemented by tddy-daemon and consumed by the browser via HTTP Connect.
+service VncService {
+  rpc ListVncTargets  (ListVncTargetsRequest)  returns (ListVncTargetsResponse);
+  rpc AddVncTarget    (AddVncTargetRequest)    returns (AddVncTargetResponse);
+  rpc RemoveVncTarget (RemoveVncTargetRequest) returns (RemoveVncTargetResponse);
+  rpc UnlockVncVault  (UnlockVncVaultRequest)  returns (UnlockVncVaultResponse);
+  rpc StartVncStream  (StartVncStreamRequest)  returns (StartVncStreamResponse);
+  rpc StopVncStream   (StopVncStreamRequest)   returns (StopVncStreamResponse);
+}
+
+// --- Shared types ---
+
+message VncTarget {
+  string id    = 1;  // UUID assigned by daemon on add
+  string label = 2;  // Human-readable name chosen by the user
+  string host  = 3;
+  uint32 port  = 4;
+}
+
+// --- ListVncTargets ---
+
+message ListVncTargetsRequest {
+  string session_token = 1;
+  string session_id    = 2;
+}
+
+message ListVncTargetsResponse {
+  repeated VncTarget targets = 1;
+}
+
+// --- AddVncTarget ---
+
+message AddVncTargetRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  string label         = 3;
+  string host          = 4;
+  uint32 port          = 5;
+  // Plaintext password; daemon encrypts it with the vault key.
+  // Requires vault to be unlocked (call UnlockVncVault first).
+  // Leave empty for password-less VNC.
+  string password      = 6;
+}
+
+message AddVncTargetResponse {
+  VncTarget target = 1;
+}
+
+// --- RemoveVncTarget ---
+
+message RemoveVncTargetRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  string target_id     = 3;
+}
+
+message RemoveVncTargetResponse {
+  bool ok = 1;
+}
+
+// --- UnlockVncVault ---
+
+// Called by the browser when the user enters the passphrase in VncPassphraseDialog.
+// The derived key is cached in daemon memory for the session lifetime.
+message UnlockVncVaultRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  string passphrase    = 3;
+}
+
+message UnlockVncVaultResponse {
+  bool ok = 1;
+}
+
+// --- StartVncStream ---
+
+message StartVncStreamRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  string target_id     = 3;
+}
+
+// Response carries the LiveKit coordinates so the browser knows which participant
+// and track to subscribe to, and which identity to send input events to.
+message StartVncStreamResponse {
+  string livekit_room      = 1;
+  string livekit_url       = 2;
+  string bridge_identity   = 3;  // e.g. "vnc-<session>-<target>"
+  string track_name        = 4;  // e.g. "vnc:<target_id>"
+  uint32 width             = 5;
+  uint32 height            = 6;
+}
+
+// --- StopVncStream ---
+
+message StopVncStreamRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  string target_id     = 3;
+}
+
+message StopVncStreamResponse {
+  bool ok = 1;
+}
+

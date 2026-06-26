@@ -141,9 +141,10 @@ describe("GhosttyTerminalGrpc", () => {
     cy.get("#resize-wrapper").invoke("css", "width", "600px").invoke("css", "height", "300px");
 
     // Then — at least one OSC resize sequence was sent: \x1b]resize;{cols};{rows}\x07
-    cy.then(() => {
-      const allSent = fake.sentChunks
-        .map((c) => new TextDecoder().decode(c))
+    // cy.wrap().should() retries until the assertion passes so we handle async resize events.
+    cy.wrap(fake).should((f) => {
+      const allSent = f.sentChunks
+        .map((c: Uint8Array) => new TextDecoder().decode(c))
         .join("");
       expect(allSent).to.match(/\x1b\]resize;\d+;\d+\x07/);
     });
