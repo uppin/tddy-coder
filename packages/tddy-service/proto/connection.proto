@@ -326,6 +326,11 @@ message StreamTerminalOutputRequest {
   string session_id    = 2;
   // Target terminal; empty resolves to the reserved main ("claude") terminal.
   string terminal_id   = 3;
+  // Terminal dimensions measured by the client before opening the stream.
+  // When non-zero, the daemon resizes the PTY to these dimensions before
+  // sending the replay buffer, so the TUI redraws at the correct width.
+  uint32 initial_cols  = 4;
+  uint32 initial_rows  = 5;
 }
 
 // Empty response for SendTerminalInput.

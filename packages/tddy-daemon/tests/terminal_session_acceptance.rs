@@ -523,6 +523,8 @@ async fn stream_terminal_output_routes_by_terminal_id() {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             terminal_id: "no-such-terminal".to_string(),
+            initial_cols: 0,
+            initial_rows: 0,
         }))
         .await
         .err()
@@ -539,6 +541,8 @@ async fn stream_terminal_output_routes_by_terminal_id() {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             terminal_id: started.clone(),
+            initial_cols: 0,
+            initial_rows: 0,
         }))
         .await;
     assert!(

@@ -26,6 +26,26 @@ export function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
  * Replaces the inline `connectRequestBodyToUint8` function in ConnectionScreen.cy.tsx.
  */
 export function decodeProtoRequestBody(body: unknown): Uint8Array {
+  return decodeProtoRequestBodyRaw(body);
+}
+
+/**
+ * Like decodeProtoRequestBody but strips the 5-byte ConnectRPC envelope header first.
+ *
+ * Server-streaming RPC requests use `application/connect+proto` which wraps each message
+ * with a 5-byte header: 1 flag byte + 4-byte big-endian length. Unary requests use raw
+ * proto without any framing. Use this variant when intercepting a server-streaming endpoint.
+ */
+export function decodeConnectStreamRequestBody(body: unknown): Uint8Array {
+  const raw = decodeProtoRequestBodyRaw(body);
+  // Sanity check: first byte is flags (0x00 = no compression), next 4 are length.
+  if (raw.length >= 5 && (raw[0] === 0x00 || raw[0] === 0x01)) {
+    return raw.slice(5);
+  }
+  return raw;
+}
+
+function decodeProtoRequestBodyRaw(body: unknown): Uint8Array {
   if (body instanceof Uint8Array) return body;
   // Use toString check for cross-realm ArrayBuffer (Cypress intercept handlers may run in a
   // different JS realm where `instanceof ArrayBuffer` returns false).

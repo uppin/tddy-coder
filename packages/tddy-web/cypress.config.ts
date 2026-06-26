@@ -7,6 +7,13 @@ import { fileURLToPath } from "url";
 import { execSync, spawn } from "child_process";
 import { AccessToken } from "livekit-server-sdk";
 import { LivekitDockerTestkit } from "./cypress/support/livekitDockerTestkit.js";
+import { create, toBinary, fromBinary } from "@bufbuild/protobuf";
+import {
+  ExchangeCodeRequestSchema,
+  ExchangeCodeResponseSchema,
+  GetAuthUrlRequestSchema,
+  GetAuthUrlResponseSchema,
+} from "./src/gen/auth_pb.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -45,6 +52,20 @@ function getWebBundlePath(): string {
   return path.join(__dirname, "dist");
 }
 
+function getTddyDaemonPath(): string {
+  const repoRoot = path.resolve(__dirname, "../..");
+  const debug = path.join(repoRoot, "target", "debug", "tddy-daemon");
+  const release = path.join(repoRoot, "target", "release", "tddy-daemon");
+  if (fs.existsSync(debug)) return debug;
+  if (fs.existsSync(release)) return release;
+  return debug;
+}
+
+function getTddyDemoTuiPath(): string {
+  const repoRoot = path.resolve(__dirname, "../..");
+  return path.join(repoRoot, "target", "debug", "tddy-demo-tui");
+}
+
 const testkit = new LivekitDockerTestkit();
 
 export default defineConfig({
@@ -71,6 +92,9 @@ export default defineConfig({
       let tddyCoderProcess: ReturnType<typeof spawn> | null = null;
       let echoTerminalProcess: ReturnType<typeof spawn> | null = null;
       let authFlowProcess: ReturnType<typeof spawn> | null = null;
+      let daemonProcess: ReturnType<typeof spawn> | null = null;
+      let daemonConfigPath: string | null = null;
+      let daemonE2eWorkDir: string | null = null;
 
       /** On POSIX, `script` + shell leaves a child process group; signal the whole group so LiveKit sees the server leave. */
       const stopSpawnedProcessTree = (child: ReturnType<typeof spawn>) => {
@@ -119,11 +143,27 @@ export default defineConfig({
         }
       };
 
+      const stopDaemon = () => {
+        if (daemonProcess) {
+          daemonProcess.kill("SIGTERM");
+          daemonProcess = null;
+        }
+        if (daemonConfigPath && fs.existsSync(daemonConfigPath)) {
+          try { fs.unlinkSync(daemonConfigPath); } catch { /* ignore */ }
+          daemonConfigPath = null;
+        }
+        if (daemonE2eWorkDir && fs.existsSync(daemonE2eWorkDir)) {
+          try { fs.rmSync(daemonE2eWorkDir, { recursive: true, force: true }); } catch { /* ignore */ }
+          daemonE2eWorkDir = null;
+        }
+      };
+
       on("after:run", () => {
         stopTerminalServer();
         stopTddyCoder();
         stopEchoTerminal();
         stopAuthFlow();
+        stopDaemon();
         testkit.stop();
       });
 
@@ -588,6 +628,169 @@ export default defineConfig({
         stopTddyCoderForAuthFlow() {
           stopAuthFlow();
           return null;
+        },
+
+        async startDaemonWithDemoTui(_options?: unknown) {
+          const demoTuiPath = getTddyDemoTuiPath();
+          if (!fs.existsSync(demoTuiPath)) {
+            throw new Error(
+              `tddy-demo-tui binary not found at ${demoTuiPath}. Run: cargo build -p tddy-demo-tui`,
+            );
+          }
+          const daemonBinPath = getTddyDaemonPath();
+          if (!fs.existsSync(daemonBinPath)) {
+            throw new Error(
+              `tddy-daemon binary not found at ${daemonBinPath}. Run: cargo build -p tddy-daemon`,
+            );
+          }
+          const webBundlePath = getWebBundlePath();
+          if (!fs.existsSync(webBundlePath)) {
+            throw new Error(
+              `Web bundle not found at ${webBundlePath}. Run: bun run build`,
+            );
+          }
+
+          const webPort = 8891;
+          const baseUrl = `http://127.0.0.1:${webPort}`;
+
+          stopDaemon();
+          if (process.platform !== "win32") {
+            try {
+              execSync(`fuser -k ${webPort}/tcp`, { stdio: "ignore" });
+            } catch { /* port free */ }
+          }
+
+          // Create an isolated work directory for this test run so we do not pollute
+          // the user's real ~/.tddy or the repository.
+          const workDir = path.join(os.tmpdir(), `tddy-e2e-demo-tui-${Date.now()}`);
+          fs.mkdirSync(workDir, { recursive: true });
+          daemonE2eWorkDir = workDir;
+
+          // Set up a minimal git project the daemon can use for claude-cli sessions:
+          //   1. a bare repo (acts as "remote" so git fetch origin works)
+          //   2. a clone of that bare repo (the main_repo_path shown in the UI)
+          const bareRepoPath = path.join(workDir, "bare.git");
+          const mainRepoPath = path.join(workDir, "main");
+          execSync(`git init --bare "${bareRepoPath}"`);
+          execSync(`git clone "file://${bareRepoPath}" "${mainRepoPath}"`);
+          execSync(`git -C "${mainRepoPath}" commit --allow-empty -m "e2e init"`, {
+            env: { ...process.env, GIT_AUTHOR_NAME: "e2e", GIT_AUTHOR_EMAIL: "e2e@e2e",
+                   GIT_COMMITTER_NAME: "e2e", GIT_COMMITTER_EMAIL: "e2e@e2e" },
+          });
+          execSync(`git -C "${mainRepoPath}" push origin HEAD:main`);
+
+          // Write projects.yaml so the daemon finds one project.
+          const projectsDir = path.join(workDir, "projects");
+          fs.mkdirSync(projectsDir, { recursive: true });
+          const projectId = `e2e-demo-tui-project`;
+          const projectsYaml = [
+            "projects:",
+            `- project_id: "${projectId}"`,
+            `  name: "E2E Demo TUI Project"`,
+            `  git_url: "file://${bareRepoPath}"`,
+            `  main_repo_path: "${mainRepoPath}"`,
+          ].join("\n") + "\n";
+          fs.writeFileSync(path.join(projectsDir, "projects.yaml"), projectsYaml);
+
+          const osUser = os.userInfo().username;
+          const configContent = [
+            `listen:`,
+            `  web_port: ${webPort}`,
+            `  web_host: 127.0.0.1`,
+            `web_bundle_path: ${webBundlePath}`,
+            `github:`,
+            `  stub: true`,
+            `  stub_codes: "test-code:testuser"`,
+            `users:`,
+            `  - github_user: "testuser"`,
+            `    os_user: "${osUser}"`,
+            `claude_cli:`,
+            `  binary_path: ${demoTuiPath}`,
+          ].join("\n");
+
+          const configFile = path.join(workDir, "daemon.yaml");
+          fs.writeFileSync(configFile, configContent);
+          daemonConfigPath = configFile;
+
+          const repoRoot = path.resolve(__dirname, "../..");
+          return new Promise<{ baseUrl: string }>((resolve, reject) => {
+            daemonProcess = spawn(daemonBinPath, ["--config", configFile], {
+              stdio: ["ignore", "ignore", "ignore"],
+              cwd: repoRoot,
+              env: { ...process.env, RUST_LOG: "info", TDDY_PROJECTS_DIR: projectsDir },
+            });
+
+            const timeout = setTimeout(() => {
+              stopDaemon();
+              reject(new Error("tddy-daemon did not become ready within 20s"));
+            }, 20000);
+
+            const interval = setInterval(() => {
+              fetch(`${baseUrl}/`)
+                .then((r) => {
+                  if (r.ok) {
+                    clearInterval(interval);
+                    clearTimeout(timeout);
+                    resolve({ baseUrl });
+                  }
+                })
+                .catch(() => {});
+            }, 300);
+
+            daemonProcess.on("error", (err) => {
+              clearInterval(interval);
+              clearTimeout(timeout);
+              reject(err);
+            });
+          });
+        },
+
+        stopDaemonWithDemoTui() {
+          stopDaemon();
+          return null;
+        },
+
+        async getTestSessionToken({ baseUrl }: { baseUrl: string }): Promise<string> {
+          // Two-step OAuth stub flow: GetAuthUrl (generates+stores state), then ExchangeCode.
+          // ConnectRPC unary endpoints use Content-Type: application/proto (raw binary protobuf).
+          async function rpc<Req, Res>(
+            method: string,
+            reqSchema: Parameters<typeof toBinary>[0],
+            reqMsg: Parameters<typeof toBinary>[1],
+            resSchema: Parameters<typeof fromBinary>[0],
+          ): Promise<Res> {
+            const body = toBinary(reqSchema, reqMsg);
+            const res = await fetch(`${baseUrl}/rpc/${method}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/proto", "Connect-Protocol-Version": "1" },
+              body,
+            });
+            if (!res.ok) {
+              const text = await res.text().catch(() => "(no body)");
+              throw new Error(`${method} HTTP ${res.status}: ${text}`);
+            }
+            return fromBinary(resSchema, new Uint8Array(await res.arrayBuffer())) as Res;
+          }
+
+          // Step 1: get auth URL — this generates and stores the OAuth state server-side.
+          const authUrlResp = await rpc<never, { state: string }>(
+            "auth.AuthService/GetAuthUrl",
+            GetAuthUrlRequestSchema,
+            create(GetAuthUrlRequestSchema, {}),
+            GetAuthUrlResponseSchema,
+          );
+          const state = (authUrlResp as { state: string }).state;
+
+          // Step 2: exchange stub code + stored state for a session token.
+          const exchangeResp = await rpc<never, { sessionToken: string }>(
+            "auth.AuthService/ExchangeCode",
+            ExchangeCodeRequestSchema,
+            create(ExchangeCodeRequestSchema, { code: "test-code", state }),
+            ExchangeCodeResponseSchema,
+          );
+          const token = (exchangeResp as { sessionToken: string }).sessionToken;
+          if (!token) throw new Error("ExchangeCode returned no sessionToken");
+          return token;
         },
       });
 

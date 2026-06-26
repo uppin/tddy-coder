@@ -1,0 +1,92 @@
+import React, { useEffect, useRef, useState } from "react";
+import type { Client } from "@connectrpc/connect";
+import type { ConnectionService, SessionTerminalOutput } from "../../gen/connection_pb";
+import { GhosttyTerminalGrpc, type GrpcStream } from "../GhosttyTerminalGrpc";
+
+type ConnectionClient = Client<typeof ConnectionService>;
+
+// Character cell size estimates for converting container pixels to terminal columns/rows.
+// Based on a monospace font rendered at the default terminal font size (14px).
+const CHAR_WIDTH_PX = 8;
+const CHAR_HEIGHT_PX = 17;
+
+interface GrpcSessionTerminalProps {
+  sessionId: string;
+  sessionToken: string;
+  client: ConnectionClient;
+  onDisconnect?: () => void;
+}
+
+export function GrpcSessionTerminal({
+  sessionId,
+  sessionToken,
+  client,
+  onDisconnect,
+}: GrpcSessionTerminalProps) {
+  const [stream, setStream] = useState<GrpcStream | null>(null);
+  // containerRef must be on a div that is ALWAYS rendered (not gated on stream),
+  // so getBoundingClientRect() returns real dimensions when the effect runs.
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const outputListeners: Array<(data: Uint8Array) => void> = [];
+    let closed = false;
+
+    const grpcStream: GrpcStream = {
+      send(data: Uint8Array) {
+        void client.sendTerminalInput({ sessionToken, sessionId, data });
+      },
+      onMessage(fn: (data: Uint8Array) => void) {
+        outputListeners.push(fn);
+      },
+      close() {
+        closed = true;
+      },
+    };
+    setStream(grpcStream);
+
+    // Measure container dimensions so the daemon can resize the PTY before
+    // replaying buffered output — eliminates the 220-col garbling on connect.
+    const rect = containerRef.current?.getBoundingClientRect();
+    const initialCols = rect && rect.width > 0 ? Math.max(1, Math.floor(rect.width / CHAR_WIDTH_PX)) : 0;
+    const initialRows = rect && rect.height > 0 ? Math.max(1, Math.floor(rect.height / CHAR_HEIGHT_PX)) : 0;
+    void (async () => {
+      try {
+        for await (const output of client.streamTerminalOutput({
+          sessionToken,
+          sessionId,
+          initialCols,
+          initialRows,
+        }) as AsyncIterable<SessionTerminalOutput>) {
+          if (closed) break;
+          if (output.data.length > 0) {
+            outputListeners.forEach((fn) => fn(output.data));
+          }
+        }
+        if (!closed) onDisconnect?.();
+      } catch (err) {
+        if (!closed) onDisconnect?.();
+      }
+    })();
+
+    return () => {
+      closed = true;
+    };
+  }, [client, sessionId, sessionToken]);
+
+  // Always render the outer div so containerRef.current is available when the
+  // effect above runs (before stream is set). Terminal renders once stream is ready.
+  return (
+    <div ref={containerRef} style={{ width: "100%", height: "100%" }}>
+      {stream && (
+        <GhosttyTerminalGrpc
+          sessionToken={sessionToken}
+          sessionId={sessionId}
+          stream={stream}
+          connectionOverlay
+          onDisconnect={onDisconnect}
+        />
+      )}
+    </div>
+  );
+}

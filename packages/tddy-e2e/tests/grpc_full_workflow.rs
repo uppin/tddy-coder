@@ -356,6 +356,20 @@ async fn full_workflow_asserts_each_state_transition() {
         state_transitions
     );
 
+    // The gRPC subscriber may connect before poll_workflow() first runs, capturing
+    // Init→Interviewing instead of the first Interviewing→Interviewing that before_task emits.
+    // Both represent the same moment; normalizing keeps the count and suffix comparison stable.
+    let state_transitions: Vec<_> = state_transitions
+        .into_iter()
+        .map(|(from, to)| {
+            if from == "Init" {
+                ("Interviewing".to_string(), to)
+            } else {
+                (from, to)
+            }
+        })
+        .collect();
+
     let expected = if state_transitions.iter().any(|(_, to)| to == "DemoComplete") {
         EXPECTED_WITH_DEMO
     } else {

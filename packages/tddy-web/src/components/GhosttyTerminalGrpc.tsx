@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "../lib/terminalZoom";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
@@ -32,6 +32,7 @@ export function GhosttyTerminalGrpc({
   const termRef = useRef<GhosttyTerminalHandle>(null);
   const termReadyRef = useRef(false);
   const outputBufferRef = useRef<Uint8Array[]>([]);
+  const [bufferText, setBufferText] = useState("");
 
   useEffect(() => {
     stream.onMessage((data) => {
@@ -45,6 +46,14 @@ export function GhosttyTerminalGrpc({
       stream.close();
     };
   }, [stream]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const text = termRef.current?.getBufferText?.() ?? "";
+      setBufferText(text);
+    }, 200);
+    return () => clearInterval(interval);
+  }, []);
 
   const terminal = (
     <GhosttyTerminal
@@ -98,6 +107,9 @@ export function GhosttyTerminalGrpc({
       ) : null}
       <div style={{ flex: 1, minHeight: 0, minWidth: 0, width: "100%", position: "relative" }}>
         {terminal}
+      </div>
+      <div data-testid="terminal-buffer-text" style={{ display: "none" }} aria-hidden>
+        {bufferText}
       </div>
     </div>
   );

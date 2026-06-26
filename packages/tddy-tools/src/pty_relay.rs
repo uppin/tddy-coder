@@ -561,6 +561,8 @@ async fn run_grpc_terminal(
         session_token: session_token.to_string(),
         session_id: session_id.to_string(),
         terminal_id: String::new(),
+        initial_cols: 0,
+        initial_rows: 0,
     };
     let mut resp = connectrpc_post_streaming(
         &http_client,

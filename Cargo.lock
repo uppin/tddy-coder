@@ -6936,6 +6936,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-demo-tui"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "libc",
+]
+
+[[package]]
 name = "tddy-discovery"
 version = "0.1.0"
 dependencies = [

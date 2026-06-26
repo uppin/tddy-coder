@@ -1,5 +1,7 @@
 # Multiple Tools per Session (Bash tool)
 
+> **Updated: 2026-06-26** — `StreamTerminalOutputRequest` gains `initial_cols`/`initial_rows`: daemon resizes PTY before replay, drains stale broadcast, triggers SIGWINCH — eliminates 220-col garbling on browser reconnect. `PtyHandle::send_input` strips OSC resize escapes. `kill_all()` added for clean daemon shutdown. Capture limit raised 64 KB → 512 KB.
+>
 > **Updated: 2026-06-25** — Reframed from "attachable terminal sessions" to **running multiple
 > tools per session**. A session hosts identified tool instances; this release defines the **Bash**
 > tool (a shell that takes no inputs and opens on the worktree). The RPC surface keeps its

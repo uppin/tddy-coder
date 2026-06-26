@@ -1759,18 +1759,44 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 Status::not_found("terminal not found or not running")
             })?;
 
+        // If the client supplied terminal dimensions, resize the PTY before replay so that
+        // the TUI redraws at the browser's actual width rather than the PTY's spawn-time default.
+        let has_initial_dims = req.initial_cols > 0 && req.initial_rows > 0;
+        if has_initial_dims {
+            handle.resize(req.initial_rows as u16, req.initial_cols as u16);
+            log::debug!(
+                target: "tddy_daemon::connection_service",
+                "stream_terminal_output: resized PTY to {}×{} for session {} before replay",
+                req.initial_cols,
+                req.initial_rows,
+                session_id
+            );
+        } else {
+            log::debug!(
+                target: "tddy_daemon::connection_service",
+                "stream_terminal_output: no initial dimensions from client for session {} (cols={} rows={}) — replay will use PTY default size",
+                session_id, req.initial_cols, req.initial_rows
+            );
+        }
+
         // Subscribe to broadcast BEFORE reading the capture buffer so there is no gap:
         // bytes produced between the capture snapshot and the first bridge recv() are
         // covered by the broadcast subscription.
         let (mpsc_tx, mpsc_rx) = tokio::sync::mpsc::unbounded_channel::<bytes::Bytes>();
         let mut broadcast_rx = handle.stdout_tx.subscribe();
 
-        // Replay capture buffer first — this contains all PTY output since session start,
-        // including the initial TUI render that arrived before the browser subscribed.
-        // The broadcast channel cannot buffer for receivers that didn't exist yet
-        // (send() silently fails with 0 receivers), so the capture is the only way to see
-        // historical output.
-        {
+        // Replay capture buffer only when the client did NOT supply terminal dimensions.
+        //
+        // When dimensions are provided we already sent SIGWINCH (above), which will make the
+        // TUI redraw at the correct size. Replaying the capture buffer here would send
+        // pre-resize content (drawn at the PTY's old width) to the browser before the
+        // post-SIGWINCH redraw arrives via broadcast — producing garbled output. Skipping
+        // the replay means the client sees a clean fresh frame once the TUI redraws.
+        //
+        // When no dimensions are provided (legacy / fallback path) the replay is still the
+        // only way to see historical content, so we keep it.
+        let replay_capture = !has_initial_dims;
+        if replay_capture {
             let historical = handle
                 .capture
                 .lock()
@@ -1784,6 +1810,42 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     session_id
                 );
                 let _ = mpsc_tx.send(historical);
+            }
+        } else {
+            log::debug!(
+                target: "tddy_daemon::connection_service",
+                "stream_terminal_output: skipping capture replay for session {} (dimensions {}×{} provided; relying on SIGWINCH redraw via broadcast)",
+                session_id, req.initial_cols, req.initial_rows
+            );
+        }
+
+        // Trigger a redraw before draining: this queues a second SIGWINCH so the TUI will
+        // produce a fresh frame at the correct size. The drain below discards any pre-resize
+        // output already buffered in the broadcast receiver, so the bridge task (started after
+        // the drain) only forwards the post-SIGWINCH fresh frame to the browser.
+        handle.trigger_redraw();
+
+        // When the client supplied terminal dimensions we already resized the PTY (above).
+        // Drain any messages that arrived in the broadcast receiver between subscribe() and
+        // now — those were produced at the old PTY width (220 cols) and would cause garbled
+        // output if forwarded. The trigger_redraw() above guarantees a fresh post-resize
+        // frame will be produced, so discarding the stale buffer is safe.
+        if has_initial_dims {
+            use tokio::sync::broadcast::error::TryRecvError;
+            let mut drained = 0usize;
+            loop {
+                match broadcast_rx.try_recv() {
+                    Ok(_) => drained += 1,
+                    Err(TryRecvError::Lagged(_)) => continue,
+                    Err(TryRecvError::Empty) | Err(TryRecvError::Closed) => break,
+                }
+            }
+            if drained > 0 {
+                log::debug!(
+                    target: "tddy_daemon::connection_service",
+                    "stream_terminal_output: drained {} stale pre-resize broadcast message(s) for session {}",
+                    drained, session_id
+                );
             }
         }
 
@@ -1810,11 +1872,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 }
             }
         });
-
-        // Trigger a redraw so if the initial TUI render was before session start logging, we
-        // get a fresh frame regardless. (The capture replay above already covers the common
-        // case, but SIGWINCH is a cheap belt-and-suspenders.)
-        handle.trigger_redraw();
 
         Ok(Response::new(MpscTerminalOutputStream { rx: mpsc_rx }))
     }
@@ -1860,7 +1917,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 req.data.len(),
                 String::from_utf8_lossy(&req.data)
             );
-            let _ = handle.stdin_tx.send(bytes::Bytes::from(req.data));
+            handle.send_input(bytes::Bytes::from(req.data));
         }
         Ok(Response::new(SendTerminalInputResponse {}))
     }
