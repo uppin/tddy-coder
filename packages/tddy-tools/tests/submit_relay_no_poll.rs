@@ -14,7 +14,9 @@ use tddy_core::toolcall::start_toolcall_listener;
 #[cfg(unix)]
 fn submit_exits_ok_when_presenter_never_polls() {
     // Given
-    let (socket_path, _hold_tool_rx) = start_toolcall_listener(None, None).expect("start listener");
+    let tddy_data_dir = std::env::temp_dir().join(format!("tddy-submit-relay-{}", std::process::id()));
+    std::fs::create_dir_all(&tddy_data_dir).unwrap();
+    let (socket_path, _hold_tool_rx) = start_toolcall_listener(None, None, tddy_data_dir).expect("start listener");
     let sock = socket_path.clone();
     let bin = cargo_bin_cmd!("tddy-tools").get_program().to_owned();
 

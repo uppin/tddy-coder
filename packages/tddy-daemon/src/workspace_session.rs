@@ -21,6 +21,7 @@ pub async fn start_workspace_session(
     session_id: &str,
     sessions_base: PathBuf,
     project_id: &str,
+    tddy_data_dir: &Path,
     request_timeout: std::time::Duration,
 ) -> Result<Response<StartSessionResponse>, Status> {
     let project_id = project_id.trim();
@@ -31,7 +32,7 @@ pub async fn start_workspace_session(
     }
 
     // Resolve project registry.
-    let projects_dir = projects_path_for_user(os_user)
+    let projects_dir = projects_path_for_user(os_user, Some(tddy_data_dir))
         .ok_or_else(|| Status::internal("could not resolve projects path"))?;
     let project = project_storage::find_project(&projects_dir, project_id)
         .map_err(|e| Status::internal(e.to_string()))?

@@ -43,8 +43,10 @@ pub fn run_list_actions(
         limit,
         offset,
     };
-    let result = list_action_summaries(Some(session_dir), repo_root.as_deref(), &query)
-        .map_err(anyhow::Error::from)?;
+    let tddy_data_dir = resolve_tddy_data_dir();
+    let result =
+        list_action_summaries(Some(session_dir), repo_root.as_deref(), &tddy_data_dir, &query)
+            .map_err(anyhow::Error::from)?;
     let out = ListActionsResponse {
         actions: result.actions,
         total: result.total,
@@ -69,12 +71,11 @@ pub fn run_invoke_action(
     );
 
     let repo_root = load_repo_root(session_dir).map_err(anyhow::Error::from)?;
-    let store_root = repo_root.as_ref().and_then(|r| {
+    let tddy_data_dir = resolve_tddy_data_dir();
+    let store_root = repo_root.as_ref().map(|r| {
         let canon = std::fs::canonicalize(r).unwrap_or_else(|_| r.clone());
         let key = derive_repo_key(&canon);
-        tddy_core::output::tddy_data_dir_path()
-            .ok()
-            .map(|d| repo_actions_root(&d, &key))
+        repo_actions_root(&tddy_data_dir, &key)
     });
 
     match invoke_action_core(
@@ -94,6 +95,14 @@ pub fn run_invoke_action(
             std::process::exit(code);
         }
     }
+}
+
+/// Resolve the tddy data directory using the profile default or `$HOME/.tddy`.
+fn resolve_tddy_data_dir() -> PathBuf {
+    tddy_core::output::default_tddy_data_dir().unwrap_or_else(|| {
+        let home = std::env::var("HOME").unwrap_or_default();
+        PathBuf::from(home).join(".tddy")
+    })
 }
 
 fn load_repo_root(session_dir: &Path) -> Result<Option<PathBuf>, SessionActionsError> {

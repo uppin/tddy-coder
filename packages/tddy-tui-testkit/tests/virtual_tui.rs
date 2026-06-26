@@ -35,12 +35,12 @@ fn spawn_stub_presenter_with_recipe(
     let (event_tx, _) = broadcast::channel(256);
     let (intent_tx, intent_rx) = std::sync::mpsc::channel();
 
-    let presenter = Presenter::new("stub", "opus", recipe)
-        .with_broadcast(event_tx)
-        .with_intent_sender(intent_tx);
     let output_dir =
         std::env::temp_dir().join(format!("tddy-tui-testkit-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&output_dir).unwrap();
+    let presenter = Presenter::new("stub", "opus", recipe, output_dir.clone())
+        .with_broadcast(event_tx)
+        .with_intent_sender(intent_tx);
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
     let mut presenter = presenter.with_worktree_dir(output_dir.clone());
     presenter.start_workflow(

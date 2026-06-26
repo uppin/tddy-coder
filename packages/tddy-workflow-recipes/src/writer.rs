@@ -315,7 +315,7 @@ pub fn write_evaluation_report(
     Ok(())
 }
 
-pub use tddy_core::output::{tddy_data_dir_path, SESSIONS_SUBDIR, TDDY_SESSIONS_DIR_ENV};
+pub use tddy_core::output::{default_tddy_data_dir, SESSIONS_SUBDIR};
 
 /// Create a session directory at `{base}/sessions/{uuid}/` and return its path.
 pub fn create_session_dir_in(base: &Path) -> Result<PathBuf, WorkflowError> {

@@ -1,4 +1,4 @@
-//! Contract: session trees under `TDDY_SESSIONS_DIR/sessions/` are allocated only by CLI / daemon /
+//! Contract: session trees under `{tddy_data_dir}/sessions/` are allocated only by CLI / daemon /
 //! RPC (or test harnesses mimicking them). TDD `before_plan` must not add a second UUID directory
 //! when common code has already created exactly one session folder.
 
@@ -6,9 +6,8 @@ mod common;
 
 use std::sync::Arc;
 
-use serial_test::serial;
 use tddy_core::changeset::{write_changeset, Changeset};
-use tddy_core::output::{create_session_dir_in, TDDY_SESSIONS_DIR_ENV};
+use tddy_core::output::create_session_dir_in;
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::workflow::session::workflow_engine_storage_dir;
 use tddy_core::{GoalId, MockBackend, SharedBackend};
@@ -22,7 +21,6 @@ fn count_dirs(path: &std::path::Path) -> usize {
 }
 
 #[tokio::test]
-#[serial]
 async fn plan_goal_does_not_allocate_second_session_dir_under_sessions_root() {
     // Given
     let base = common::unique_tddy_data_dir_for_test();
@@ -56,9 +54,6 @@ async fn plan_goal_does_not_allocate_second_session_dir_under_sessions_root() {
     let _ = std::fs::remove_dir_all(&repo);
     std::fs::create_dir_all(&repo).unwrap();
 
-    let prev_env = std::env::var(TDDY_SESSIONS_DIR_ENV).ok();
-    std::env::set_var(TDDY_SESSIONS_DIR_ENV, base.to_str().unwrap());
-
     let backend = Arc::new(MockBackend::new());
     backend.push_ok(PLANNING_OUTPUT);
 
@@ -86,11 +81,6 @@ async fn plan_goal_does_not_allocate_second_session_dir_under_sessions_root() {
         .expect("plan goal run");
 
     let after_count = count_dirs(&sessions_root);
-
-    match &prev_env {
-        Some(v) => std::env::set_var(TDDY_SESSIONS_DIR_ENV, v),
-        None => std::env::remove_var(TDDY_SESSIONS_DIR_ENV),
-    }
 
     assert!(
         !matches!(result.status, ExecutionStatus::Error(_)),

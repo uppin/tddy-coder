@@ -202,20 +202,35 @@ fn resolve_agent_for_full_workflow_plain(args: &Args) -> anyhow::Result<String> 
     Ok(agent.to_string())
 }
 
+/// Resolve the tddy data directory from args (CLI `--tddy-data-dir`), falling back to the
+/// profile default (`tmp/.tddy` in debug, `$HOME/.tddy` in release).
+fn resolve_tddy_data_dir(args: &Args) -> PathBuf {
+    args.tddy_data_dir
+        .clone()
+        .or_else(tddy_core::output::default_tddy_data_dir)
+        .unwrap_or_else(|| {
+            let home = std::env::var("HOME").expect("HOME must be set");
+            PathBuf::from(home).join(".tddy")
+        })
+}
+
 /// Shared main entry: panic hook, Ctrl+C handler, run_with_args, exit logic.
 /// Use from both tddy-coder and tddy-demo binaries.
 pub fn run_main(mut args: Args) {
     assign_default_session_id(&mut args);
-    tddy_core::output::set_tddy_data_dir_override(args.tddy_data_dir.clone());
 
-    if let Err(e) = merge_session_coder_config_for_resume(&mut args) {
+    // Initial resolve (args.tddy_data_dir set from CLI; config may override it below).
+    let initial_tddy_data_dir = resolve_tddy_data_dir(&args);
+
+    if let Err(e) = merge_session_coder_config_for_resume(&mut args, &initial_tddy_data_dir) {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
 
-    tddy_core::output::set_tddy_data_dir_override(args.tddy_data_dir.clone());
+    // Re-resolve after config merge — coder-config.yaml may have provided tddy_data_dir.
+    let tddy_data_dir = resolve_tddy_data_dir(&args);
 
-    if let Err(e) = sync_session_dir_from_args(&mut args) {
+    if let Err(e) = sync_session_dir_from_args(&mut args, &tddy_data_dir) {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
@@ -1195,7 +1210,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         anyhow::bail!("empty feature description");
     }
 
-    let base = tddy_core::output::tddy_data_dir_path().map_err(|e| anyhow::anyhow!("{}", e))?;
+    let base = resolve_tddy_data_dir(args);
     let session_dir = if let Some(ref sid) = args.session_id {
         tddy_core::output::create_session_dir_with_id(&base, sid)
     } else {
@@ -1308,8 +1323,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     // Do not call `init_tddy_logger` again: `log::set_logger` only succeeds once; a second
     // init would skip `set_max_level` and can leave FILE_OUTPUTS / routing inconsistent.
 
-    let tddy_data_dir =
-        tddy_core::output::tddy_data_dir_path().map_err(|e| anyhow::anyhow!("{}", e))?;
+    let tddy_data_dir = resolve_tddy_data_dir(args);
     let sessions_root = tddy_data_dir.join(tddy_core::output::SESSIONS_SUBDIR);
     std::fs::create_dir_all(&sessions_root).context("create sessions base dir")?;
 
@@ -1352,6 +1366,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 .as_deref()
                 .unwrap_or_else(|| default_model_for_agent(agent_str)),
             recipe_arc_for_args(args)?,
+            tddy_data_dir.clone(),
         )
         .with_broadcast(event_tx)
         .with_intent_sender(intent_tx)
@@ -1373,6 +1388,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             match tddy_core::toolcall::start_toolcall_listener(
                 Some(session_artifact_dir.clone()),
                 std::env::current_dir().ok(),
+                tddy_data_dir.clone(),
             ) {
                 Ok((path, rx)) => (Some(path), Some(rx)),
                 Err(_) => (None, None),
@@ -1745,9 +1761,10 @@ fn write_post_tui_workflow_exit<Wo: Write, We: Write>(
 }
 
 /// Compute session dir path from args (base/sessions/{session_id}/).
+/// Uses [`resolve_tddy_data_dir`] so the same resolution order as `run_main` applies.
 fn session_dir_path(args: &Args) -> Option<PathBuf> {
     let sid = args.session_id.as_deref()?;
-    let base = tddy_core::output::tddy_data_dir_path().ok()?;
+    let base = resolve_tddy_data_dir(args);
     Some(base.join(tddy_core::output::SESSIONS_SUBDIR).join(sid))
 }
 
@@ -1772,7 +1789,7 @@ fn align_session_id_with_explicit_session_dir(args: &mut Args) -> anyhow::Result
 }
 
 /// Sets [`Args::session_dir`] to `{tddy_data_dir}/sessions/<session_id>/` when not overridden by `--session-dir` or config.
-fn sync_session_dir_from_args(args: &mut Args) -> anyhow::Result<()> {
+fn sync_session_dir_from_args(args: &mut Args, tddy_data_dir: &Path) -> anyhow::Result<()> {
     if args.session_dir.is_some() {
         return Ok(());
     }
@@ -1780,19 +1797,26 @@ fn sync_session_dir_from_args(args: &mut Args) -> anyhow::Result<()> {
         .session_id
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("internal: session_id missing"))?;
-    let base = tddy_core::output::tddy_data_dir_path().map_err(|e| anyhow::anyhow!("{}", e))?;
-    args.session_dir = Some(base.join(tddy_core::output::SESSIONS_SUBDIR).join(sid));
+    args.session_dir = Some(
+        tddy_data_dir
+            .join(tddy_core::output::SESSIONS_SUBDIR)
+            .join(sid),
+    );
     Ok(())
 }
 
 /// Merges [`crate::config::SESSION_CODER_CONFIG_FILE`] from the session directory when
 /// [`Args::resume_from`] is set. Uses the same YAML schema and merge rules as `-c` / [`crate::config::merge_config_into_args`].
-pub fn merge_session_coder_config_for_resume(args: &mut Args) -> anyhow::Result<()> {
+pub fn merge_session_coder_config_for_resume(
+    args: &mut Args,
+    tddy_data_dir: &Path,
+) -> anyhow::Result<()> {
     let Some(ref sid) = args.resume_from else {
         return Ok(());
     };
-    let base = tddy_core::output::tddy_data_dir_path().map_err(|e| anyhow::anyhow!("{}", e))?;
-    let dir = base.join(tddy_core::output::SESSIONS_SUBDIR).join(sid);
+    let dir = tddy_data_dir
+        .join(tddy_core::output::SESSIONS_SUBDIR)
+        .join(sid);
     merge_session_coder_config_from_dir(args, &dir)
 }
 
@@ -2236,6 +2260,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     std::env::set_var("TDDY_QUIET", "1");
     log::set_max_level(log::LevelFilter::Debug);
 
+    let tddy_data_dir = resolve_tddy_data_dir(args);
+
     if let Some(session_dir) = session_artifact_dir_for_args(args) {
         let logs = session_dir.join("logs");
         tddy_core::toolcall::set_toolcall_log_dir(&logs);
@@ -2245,6 +2271,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     let (socket_path, tool_call_rx) = match tddy_core::toolcall::start_toolcall_listener(
         args.session_dir.clone(),
         std::env::current_dir().ok(),
+        tddy_data_dir.clone(),
     ) {
         Ok((path, rx)) => (Some(path), Some(rx)),
         Err(_) => (None, None),
@@ -2257,14 +2284,14 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 .model
                 .as_deref()
                 .unwrap_or_else(|| default_model_for_agent(a));
-            Presenter::new(a, m, recipe_arc_for_args(args)?)
+            Presenter::new(a, m, recipe_arc_for_args(args)?, tddy_data_dir.clone())
         }
         None => {
             let m = args
                 .model
                 .as_deref()
                 .unwrap_or_else(|| default_model_for_agent("claude"));
-            Presenter::new("claude", m, recipe_arc_for_args(args)?)
+            Presenter::new("claude", m, recipe_arc_for_args(args)?, tddy_data_dir.clone())
         }
     }
     .with_broadcast(event_tx.clone())
@@ -3073,7 +3100,7 @@ pub fn run_remote(args: &Args) -> anyhow::Result<()> {
     let discovery = serde_json::json!({ "port": port, "pid": 0, "started_at": 0 });
     std::fs::write(tmp_relay_dir.join("daemon.json"), discovery.to_string())
         .map_err(|e| anyhow::anyhow!("failed to write relay discovery file: {}", e))?;
-    cmd.env("TDDY_RELAY_BASE_DIR", &tmp_relay_dir);
+    cmd.args(["--base-dir", tmp_relay_dir.to_str().unwrap_or("")]);
 
     if let Some(token) = &args.remote_session_token {
         cmd.args(["--session-token", token.as_str()]);
@@ -3140,16 +3167,13 @@ fn parse_port_from_url(url: &str) -> anyhow::Result<u16> {
 mod resume_session_config_tests {
     use super::merge_session_coder_config_for_resume;
     use super::Args;
-    use serial_test::serial;
 
     #[test]
-    #[serial]
     fn resume_from_merges_coder_config_from_session_dir() {
         let tmp =
             std::env::temp_dir().join(format!("tddy-resume-config-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).expect("create temp sessions base");
-        std::env::set_var(tddy_core::output::TDDY_SESSIONS_DIR_ENV, &tmp);
 
         let sid = "019d105b-ac0f-78d3-9a89-409731145a36";
         let session_dir = tmp.join("sessions").join(sid);
@@ -3208,7 +3232,7 @@ mod resume_session_config_tests {
             fastcontext_max_turns: None,
         };
 
-        merge_session_coder_config_for_resume(&mut args).expect("merge");
+        merge_session_coder_config_for_resume(&mut args, &tmp).expect("merge");
 
         assert_eq!(args.agent.as_deref(), Some("cursor"));
         assert_eq!(
@@ -3216,7 +3240,6 @@ mod resume_session_config_tests {
             Some(std::path::Path::new("/persisted/cursor-agent"))
         );
 
-        std::env::remove_var(tddy_core::output::TDDY_SESSIONS_DIR_ENV);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
@@ -3287,16 +3310,13 @@ mod resume_session_identity_tests {
 mod session_dir_sync_tests {
     use super::sync_session_dir_from_args;
     use super::Args;
-    use serial_test::serial;
 
     #[test]
-    #[serial]
     fn session_dir_derived_from_session_id_when_unset() {
         let tmp =
             std::env::temp_dir().join(format!("tddy-plan-dir-session-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).expect("create temp sessions base");
-        std::env::set_var(tddy_core::output::TDDY_SESSIONS_DIR_ENV, &tmp);
 
         let sid = "019d105b-ac0f-78d3-9a89-409731145a36";
         let expected = tmp.join("sessions").join(sid);
@@ -3349,11 +3369,10 @@ mod session_dir_sync_tests {
             fastcontext_max_turns: None,
         };
 
-        sync_session_dir_from_args(&mut args).expect("apply");
+        sync_session_dir_from_args(&mut args, &tmp).expect("apply");
 
         assert_eq!(args.session_dir, Some(expected));
 
-        std::env::remove_var(tddy_core::output::TDDY_SESSIONS_DIR_ENV);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
@@ -3487,7 +3506,6 @@ mod livekit_daemon_path_contract_tests {
 #[cfg(test)]
 mod post_tui_workflow_exit_tests {
     use super::{sync_session_dir_from_args, write_post_tui_workflow_exit, Args};
-    use serial_test::serial;
 
     fn minimal_args(session_id: &str) -> Args {
         Args {
@@ -3543,16 +3561,14 @@ mod post_tui_workflow_exit_tests {
     /// stderr must still print session id and session dir so the user can open `changeset.yaml`
     /// and inspect the worktree path.
     #[test]
-    #[serial]
     fn workflow_error_after_tui_includes_session_hint_on_stderr() {
         let tmp = std::env::temp_dir().join(format!("tddy-post-tui-exit-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
-        std::env::set_var(tddy_core::output::TDDY_SESSIONS_DIR_ENV, &tmp);
 
         let sid = "019d105b-ac0f-78d3-9a89-409731145a36";
         let mut args = minimal_args(sid);
-        sync_session_dir_from_args(&mut args).unwrap();
+        sync_session_dir_from_args(&mut args, &tmp).unwrap();
 
         let mut out = Vec::new();
         let mut err = Vec::new();
@@ -3567,7 +3583,6 @@ mod post_tui_workflow_exit_tests {
         )
         .unwrap();
 
-        std::env::remove_var(tddy_core::output::TDDY_SESSIONS_DIR_ENV);
         let _ = std::fs::remove_dir_all(&tmp);
 
         let err_s = String::from_utf8(err).expect("utf8 stderr");

@@ -28,8 +28,9 @@ fn run_plan_via_flow_runner_produces_session_directory() {
     let sessions_base_str = sessions_base.to_str().expect("path");
 
     let mut cmd = cargo_bin_cmd!("tddy-coder");
-    cmd.env(tddy_core::output::TDDY_SESSIONS_DIR_ENV, sessions_base_str)
-        .args([
+    cmd.args([
+            "--tddy-data-dir",
+            sessions_base_str,
             "--agent",
             "stub",
             "--recipe",

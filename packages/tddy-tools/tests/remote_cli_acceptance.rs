@@ -117,8 +117,7 @@ async fn remote_list_tools_fetches_catalog_from_relay_daemon_not_from_discovery_
 
     // When
     let output = tddy_tools_bin()
-        .args(["remote", "list-tools"])
-        .env("TDDY_RELAY_BASE_DIR", relay_dir.path())
+        .args(["remote", "list-tools", "--base-dir", relay_dir.path().to_str().unwrap()])
         .output()
         .expect("tddy-tools remote list-tools must not panic");
 

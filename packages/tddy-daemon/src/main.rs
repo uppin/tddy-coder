@@ -119,6 +119,16 @@ fn main() -> anyhow::Result<()> {
     // Apply env overrides (e.g. from .env loaded by web-dev)
     apply_env_overrides(&mut config);
 
+    // Resolve the tddy home data directory: config is the single source of truth.
+    let tddy_data_dir: PathBuf = config
+        .tddy_data_dir
+        .clone()
+        .or_else(tddy_core::output::default_tddy_data_dir)
+        .unwrap_or_else(|| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+            PathBuf::from(home).join(".tddy")
+        });
+
     let (port, bundle_path_opt) = tddy_daemon::startup::startup_config_check(&config, args.relay)?;
     let host = config
         .listen
@@ -222,7 +232,7 @@ fn main() -> anyhow::Result<()> {
                     },
                 );
                 if let Some(sessions_base) =
-                    tddy_daemon::user_sessions_path::tddy_data_root_matching_child(&user)
+                    tddy_daemon::user_sessions_path::tddy_data_root_matching_child(&user, Some(&tddy_data_dir))
                 {
                     #[cfg(unix)]
                     let spawn_for_tg = spawn_client.as_ref().map(|(c, _)| Arc::new(c.clone()));
@@ -236,6 +246,7 @@ fn main() -> anyhow::Result<()> {
                             config: Arc::new(config.clone()),
                             spawn_client: spawn_for_tg,
                             os_user: user.clone(),
+                            tddy_data_dir: tddy_data_dir.clone(),
                             projects_dir_override: None,
                             telegram_hooks: Some(hooks.clone()),
                             child_grpc_by_session: Arc::new(StdMutex::new(HashMap::new())),
@@ -364,9 +375,16 @@ fn main() -> anyhow::Result<()> {
             };
             // Clone before moving into ConnectionServiceImpl — VmService needs the same resolver.
             let vm_user_resolver = user_resolver.clone();
+            let sessions_base_resolver: tddy_daemon::connection_service::SessionsBaseResolver = {
+                let dd = tddy_data_dir.clone();
+                Arc::new(move |user: &str| {
+                    tddy_daemon::user_sessions_path::sessions_base_for_user(user, Some(&dd))
+                })
+            };
             let mut connection_impl = tddy_daemon::connection_service::ConnectionServiceImpl::new(
                 config.clone(),
-                Arc::new(tddy_daemon::user_sessions_path::sessions_base_for_user),
+                sessions_base_resolver,
+                tddy_data_dir.clone(),
                 user_resolver,
                 spawn_client,
                 livekit_discovery,
@@ -398,7 +416,7 @@ fn main() -> anyhow::Result<()> {
             // VM lifecycle service — gated on auth being configured (same as ConnectionService).
             let vm_state_file = {
                 let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
-                let base = tddy_daemon::user_sessions_path::tddy_data_root_matching_child(&user)
+                let base = tddy_daemon::user_sessions_path::tddy_data_root_matching_child(&user, Some(&tddy_data_dir))
                     .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
                 base.join("vm-registry.json")
             };

@@ -48,7 +48,7 @@ fn list_action_summaries_must_be_sorted_ascending_by_id() {
 
     // When
     let result =
-        list_action_summaries(Some(session), None, &DiscoveryQuery::default()).expect("discovery");
+        list_action_summaries(Some(session), None, &std::env::temp_dir(), &DiscoveryQuery::default()).expect("discovery");
 
     // Then
     let ids: Vec<&str> = result.actions.iter().map(|s| s.id.as_str()).collect();

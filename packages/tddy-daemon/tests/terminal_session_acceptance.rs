@@ -45,6 +45,7 @@ fn minimal_service_with_manager(
     sessions_base: PathBuf,
     manager: Arc<ClaudeCliSessionManager>,
 ) -> ConnectionServiceImpl {
+    let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver = Arc::new(|token| {
@@ -57,6 +58,7 @@ fn minimal_service_with_manager(
     ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
+        tddy_data_dir,
         user_resolver,
         None,
         None,

@@ -75,20 +75,8 @@ fn worktree_list_contains_path(repo: &Path, needle: &Path) -> bool {
 fn stats_cache_persists_and_is_served_without_re_diff_on_each_list_call() {
     // Given
     let tmp = tempfile::tempdir().unwrap();
-    let prev = std::env::var("TDDY_PROJECTS_STATS_ROOT").ok();
-    std::env::set_var(
-        "TDDY_PROJECTS_STATS_ROOT",
-        tmp.path().to_str().expect("utf8 temp path"),
-    );
-    let _restore = scopeguard::guard(prev, |p| {
-        if let Some(v) = p {
-            std::env::set_var("TDDY_PROJECTS_STATS_ROOT", v);
-        } else {
-            std::env::remove_var("TDDY_PROJECTS_STATS_ROOT");
-        }
-    });
-    let root = projects_stats_cache_root();
-    assert_eq!(root, tmp.path());
+    let root = projects_stats_cache_root(tmp.path());
+    assert_eq!(root, tmp.path().join("projects"));
 
     let cache = WorktreeStatsCache::new(root);
     let project_id = "proj-acceptance-1";

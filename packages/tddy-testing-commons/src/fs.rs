@@ -54,6 +54,21 @@ pub fn temp_dir_with_git_repo(label: &str) -> PathBuf {
     repo
 }
 
+/// Create a unique isolated tddy home directory for use as `tddy_data_dir` in tests.
+///
+/// Each call returns a fresh directory with a UUID suffix so parallel tests do not collide.
+/// The caller is responsible for cleanup (e.g. by keeping the returned path in scope alongside
+/// a `tempfile::TempDir` guard, or simply letting the OS clean up `/tmp` at reboot).
+pub fn tddy_test_home() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "tddy-test-home-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&dir).expect("create tddy_test_home dir");
+    dir
+}
+
 /// Write a [`SessionMetadata`] YAML to `{session_dir}/.session.yaml`.
 ///
 /// Convenience wrapper over [`tddy_core::write_session_metadata`] for test setup.

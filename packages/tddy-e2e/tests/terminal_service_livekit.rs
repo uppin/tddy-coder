@@ -196,10 +196,6 @@ mod livekit_tests {
         });
         let daemon = std::process::Command::new(&tddy_coder)
             .env_clear()
-            .env(
-                tddy_core::output::TDDY_SESSIONS_DIR_ENV,
-                sessions_base.to_str().unwrap(),
-            )
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -207,6 +203,8 @@ mod livekit_tests {
                 "--agent",
                 "stub",
                 "--daemon",
+                "--tddy-data-dir",
+                sessions_base.to_str().unwrap(),
                 "--livekit-url",
                 &url,
                 "--livekit-token",

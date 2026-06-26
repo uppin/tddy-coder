@@ -17,7 +17,6 @@ mod common;
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
-use tddy_core::output::TDDY_SESSIONS_DIR_ENV;
 
 /// `--agent fastcontext` must be accepted as a valid value by the CLI argument parser.
 #[test]
@@ -29,7 +28,7 @@ fn fastcontext_agent_string_is_accepted_by_the_cli_arg_parser() {
     std::fs::create_dir_all(&tmp).expect("create tmp dir");
 
     let mut cmd: Command = cargo_bin_cmd!("tddy-coder");
-    cmd.env(TDDY_SESSIONS_DIR_ENV, tmp.to_str().unwrap()).args([
+    cmd.args(["--tddy-data-dir", tmp.to_str().unwrap()]).args([
         "--agent",
         "fastcontext",
         // --help exits 0 immediately without connecting to a backend server,

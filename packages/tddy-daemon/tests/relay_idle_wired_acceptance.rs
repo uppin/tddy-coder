@@ -27,6 +27,7 @@ fn minimal_service_with_tracker(tracker: Arc<IdleTimeoutTracker>) -> ConnectionS
     ConnectionServiceImpl::new(
         DaemonConfig::default(),
         sessions_base,
+        std::env::temp_dir().join("tddy-idle-test"),
         user_resolver,
         None,
         None,

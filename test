@@ -6,7 +6,6 @@
 #        ./test -- test_name       — run a specific test
 set -e
 cd "$(dirname "$0")"
-export TDDY_SESSIONS_DIR="${TMPDIR:-/tmp}/tddy-test-sessions"
 
 nix develop --profile ./.nix-profile -c bash -c '
   set -e

@@ -7,7 +7,6 @@ use std::sync::Arc;
 use tddy_daemon::claude_cli_session::{ClaudeCliSessionManager, PtyHandle};
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_daemon::user_sessions_path::TDDY_PROJECTS_DIR_ENV;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, StartSessionRequest,
@@ -49,6 +48,7 @@ fn minimal_service_with_manager(
     sessions_base: PathBuf,
     manager: Arc<ClaudeCliSessionManager>,
 ) -> ConnectionServiceImpl {
+    let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver = Arc::new(|token| {
@@ -61,6 +61,7 @@ fn minimal_service_with_manager(
     ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
+        tddy_data_dir,
         user_resolver,
         None,
         None,
@@ -414,15 +415,13 @@ async fn start_session_rpc_threads_permission_mode_to_pty() {
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
 
-    let projects_tmp = tempfile::tempdir().unwrap();
-    register_project(projects_tmp.path(), repo_dir.path());
-    std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
-    let _restore = scopeguard::guard((), |_| std::env::remove_var(TDDY_PROJECTS_DIR_ENV));
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    // Register project under {sessions_base}/projects/ — where connection_service looks.
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
 
     let stub_dir = tempfile::tempdir().unwrap();
     let stub_path = write_echo_argv_script(stub_dir.path());
 
-    let sessions_tmp = tempfile::tempdir().unwrap();
     let (_cfg_dir, config) = write_config_with_binary(stub_path.to_str().unwrap());
 
     let shared_manager = Arc::new(ClaudeCliSessionManager::new());

@@ -4,7 +4,6 @@
 use crate::error::WorkflowError;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 
 /// Inject a "Related Documents" section with relative links to peer .md files.
 pub fn inject_cross_references(content: &str, session_dir: &Path, self_name: &str) -> String {
@@ -48,13 +47,6 @@ pub fn slugify_directory_name(feature: &str) -> String {
 #[inline]
 pub fn plan_artifacts_root(session_dir: &Path) -> PathBuf {
     tddy_workflow::session_artifacts_root(session_dir)
-}
-
-/// Allocates a new session directory when no `session_dir` / `session_base`+`session_id` is in
-/// context yet: `{tddy_data_dir}/sessions/{uuid-v7}/`. The name does not derive from feature
-/// text; UUID v7 is time-ordered so canonical hyphenated form sorts lexicographically by creation time.
-pub fn new_session_dir() -> Result<PathBuf, WorkflowError> {
-    create_session_dir_in(&tddy_data_dir_path()?)
 }
 
 fn format_date_today() -> String {
@@ -105,53 +97,16 @@ pub fn read_impl_session_file(session_dir: &Path) -> Result<String, WorkflowErro
 /// Subdirectory name for session directories under a base path.
 pub const SESSIONS_SUBDIR: &str = "sessions";
 
-/// Environment variable to override the session base path. When set, sessions go to
-/// `{TDDY_SESSIONS_DIR}/sessions/{uuid-v7}/` instead of `$HOME/.tddy/sessions/{uuid-v7}/`.
-/// Use in tests to avoid writing to production ~/.tddy (e.g. set to `$TMPDIR/tddy-test`).
-pub const TDDY_SESSIONS_DIR_ENV: &str = "TDDY_SESSIONS_DIR";
-
-static TDDY_DATA_DIR_OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
-
-fn tddy_data_dir_override_mutex() -> &'static Mutex<Option<PathBuf>> {
-    TDDY_DATA_DIR_OVERRIDE.get_or_init(|| Mutex::new(None))
+/// Profile-aware default for the tddy data dir root.
+/// - debug: `Some("tmp/.tddy")` (repo-local, CWD-relative)
+/// - release: `None` (callers resolve per-user `$HOME/.tddy`)
+pub fn default_tddy_data_dir() -> Option<PathBuf> {
+    default_tddy_data_dir_for(cfg!(debug_assertions))
 }
 
-/// Set the Tddy data directory root from YAML (`tddy_data_dir`) or CLI (`--tddy-data-dir`).
-/// `None` clears the override so resolution falls through to `$HOME/.tddy` when the env var is unset.
-/// Called by tddy-coder after merging config. Ignored for resolution when [`TDDY_SESSIONS_DIR_ENV`] is set.
-pub fn set_tddy_data_dir_override(path: Option<PathBuf>) {
-    *tddy_data_dir_override_mutex()
-        .lock()
-        .expect("tddy data dir override lock") = path;
-}
-
-/// Resolve the Tddy data directory (parent of the `sessions/` subdir).
-///
-/// Order: `TDDY_SESSIONS_DIR` → in-process override ([`set_tddy_data_dir_override`]) → `$HOME/.tddy` (Unix).
-pub fn tddy_data_dir_path() -> Result<PathBuf, WorkflowError> {
-    if let Ok(path) = std::env::var(TDDY_SESSIONS_DIR_ENV) {
-        return Ok(PathBuf::from(path));
-    }
-    if let Some(path) = tddy_data_dir_override_mutex()
-        .lock()
-        .expect("tddy data dir override lock")
-        .clone()
-    {
-        return Ok(path);
-    }
-    #[cfg(unix)]
-    {
-        let home = std::env::var("HOME").map_err(|_| {
-            WorkflowError::WriteFailed("HOME not set; set TDDY_SESSIONS_DIR or HOME".into())
-        })?;
-        Ok(PathBuf::from(home).join(".tddy"))
-    }
-    #[cfg(not(unix))]
-    {
-        Err(WorkflowError::WriteFailed(
-            "TDDY_SESSIONS_DIR or HOME (Unix) required".into(),
-        ))
-    }
+/// Testable split: `debug=true` → `Some("tmp/.tddy")`, `debug=false` → `None`.
+pub fn default_tddy_data_dir_for(debug: bool) -> Option<PathBuf> {
+    debug.then(|| PathBuf::from("tmp").join(".tddy"))
 }
 
 /// Create a session directory at `{base}/sessions/{uuid-v7}/` and return its path.
@@ -183,38 +138,17 @@ mod tests {
     use super::*;
 
     #[test]
-    #[serial_test::serial]
-    fn tddy_data_dir_path_prefers_env_over_in_process_override() {
-        // Given
-        let via_env = std::env::temp_dir().join(format!("tddy-sbp-env-{}", std::process::id()));
-        let via_override =
-            std::env::temp_dir().join(format!("tddy-sbp-override-{}", std::process::id()));
-        std::env::set_var(TDDY_SESSIONS_DIR_ENV, &via_env);
-        set_tddy_data_dir_override(Some(via_override));
-
-        // Then
-        assert_eq!(tddy_data_dir_path().unwrap(), via_env);
-        std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
-        set_tddy_data_dir_override(None);
+    fn default_tddy_data_dir_debug_is_tmp_tddy() {
+        assert_eq!(default_tddy_data_dir_for(true), Some(PathBuf::from("tmp").join(".tddy")));
     }
 
     #[test]
-    #[serial_test::serial]
-    fn tddy_data_dir_path_uses_override_when_env_unset() {
-        // Given
-        std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
-        let via_override =
-            std::env::temp_dir().join(format!("tddy-sbp-only-override-{}", std::process::id()));
-        set_tddy_data_dir_override(Some(via_override.clone()));
-
-        // Then
-        assert_eq!(tddy_data_dir_path().unwrap(), via_override);
-        set_tddy_data_dir_override(None);
+    fn default_tddy_data_dir_release_is_none() {
+        assert_eq!(default_tddy_data_dir_for(false), None);
     }
 
     #[test]
     fn plan_artifacts_root_is_under_session_dir() {
-        // Given
         let root = std::env::temp_dir().join(format!(
             "tddy-plan-artifact-sessions-{}",
             std::process::id()
@@ -223,15 +157,12 @@ mod tests {
         let sessions = root.join("sessions");
         let sid = sessions.join("a97addd3-c31b-442b-a6b0-a63abe99e11d");
         std::fs::create_dir_all(&sid).unwrap();
-
-        // When / Then
         assert_eq!(plan_artifacts_root(&sid), sid.join("artifacts"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn create_session_dir_in_uses_explicit_base_not_repo_path() {
-        // Given
         let sessions_home =
             std::env::temp_dir().join(format!("tddy-core-sessions-home-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&sessions_home);
@@ -239,11 +170,7 @@ mod tests {
             std::env::temp_dir().join(format!("tddy-plan-artifact-repo-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&repo);
         std::fs::create_dir_all(&repo).unwrap();
-
-        // When
         let got = create_session_dir_in(&sessions_home).unwrap();
-
-        // Then
         assert!(
             !got.starts_with(&repo),
             "session dir must not be derived from repo path"

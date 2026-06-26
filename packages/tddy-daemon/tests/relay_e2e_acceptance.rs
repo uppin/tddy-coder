@@ -180,6 +180,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     let service_b = ConnectionServiceImpl::new(
         config_b,
         sessions_resolver(sessions_b.path().to_path_buf()),
+        sessions_b.path().to_path_buf(),
         valid_user_resolver(),
         None,
         None, // B has no discovery — it only serves its local tools
@@ -227,6 +228,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     let service_a = ConnectionServiceImpl::new(
         config_a,
         sessions_resolver(sessions_a.path().to_path_buf()),
+        sessions_a.path().to_path_buf(),
         valid_user_resolver(),
         None,
         Some(LiveKitDiscoveryHandles {

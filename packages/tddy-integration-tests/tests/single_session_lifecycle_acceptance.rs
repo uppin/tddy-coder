@@ -10,11 +10,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use serial_test::serial;
 use tddy_core::backend::{GoalId, InvokeResponse};
-use tddy_core::output::{
-    create_session_dir_under, create_session_dir_with_id, TDDY_SESSIONS_DIR_ENV,
-};
+use tddy_core::output::{create_session_dir_under, create_session_dir_with_id};
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{MockBackend, SharedBackend, WorkflowEngine};
 
@@ -159,7 +156,6 @@ async fn plan_task_reuses_session_dir_when_present() {
 /// `session_id` and `session_base` are set must not lose the startup id when the backend returns a
 /// different agent thread id. `{session_base}/sessions/{session_id}/` must exist before plan (entry layer).
 #[tokio::test]
-#[serial]
 async fn before_plan_does_not_allocate_second_dir_when_session_id_bound() {
     // Given
     let isolated_home =
@@ -211,7 +207,6 @@ async fn before_plan_does_not_allocate_second_dir_when_session_id_bound() {
 
     let before_global = count_dir_children(&isolated_home.join("sessions"));
 
-    std::env::set_var(TDDY_SESSIONS_DIR_ENV, isolated_home.as_os_str());
     let result = engine
         .run_goal(&GoalId::new("plan"), ctx)
         .await
@@ -250,7 +245,6 @@ async fn before_plan_does_not_allocate_second_dir_when_session_id_bound() {
         "startup session_id must not be replaced by backend agent id after before_plan + PlanTask"
     );
 
-    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
     let _ = std::fs::remove_dir_all(&isolated_home);
 }
 

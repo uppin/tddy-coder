@@ -10,7 +10,6 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::read_session_metadata;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_daemon::user_sessions_path::TDDY_PROJECTS_DIR_ENV;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectSessionRequest, ConnectionService as ConnectionServiceTrait, ExecuteToolRequest,
@@ -37,6 +36,7 @@ users:
 }
 
 fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceImpl {
+    let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver = Arc::new(|token| {
@@ -49,6 +49,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionSe
     ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
+        tddy_data_dir,
         user_resolver,
         None,
         None,
@@ -91,18 +92,13 @@ fn register_project(projects_dir: &std::path::Path, repo_path: &std::path::Path)
 /// persists `.session.yaml` with `session_type:"workspace"` and a real `repo_path`,
 /// and does NOT spawn any PTY process.
 #[tokio::test]
-#[serial_test::serial]
 async fn workspace_session_creates_worktree_with_no_pty() {
     // Given
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
 
-    let projects_tmp = tempfile::tempdir().unwrap();
-    register_project(projects_tmp.path(), repo_dir.path());
-    std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
-    let _restore = scopeguard::guard((), |_| std::env::remove_var(TDDY_PROJECTS_DIR_ENV));
-
     let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let (_cfg_dir, config) = write_config();
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
@@ -172,18 +168,13 @@ async fn workspace_session_creates_worktree_with_no_pty() {
 /// AC2: `ConnectSession` against a workspace session returns empty LiveKit credentials
 /// (there is no terminal to connect to).
 #[tokio::test]
-#[serial_test::serial]
 async fn connect_session_workspace_returns_empty_livekit() {
     // Given
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
 
-    let projects_tmp = tempfile::tempdir().unwrap();
-    register_project(projects_tmp.path(), repo_dir.path());
-    std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
-    let _restore = scopeguard::guard((), |_| std::env::remove_var(TDDY_PROJECTS_DIR_ENV));
-
     let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let (_cfg_dir, config) = write_config();
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
@@ -222,18 +213,13 @@ async fn connect_session_workspace_returns_empty_livekit() {
 /// AC1+AC5+AC6: after creating a workspace session, `ExecuteTool("Write")` creates a file
 /// in the worktree, and `ExecuteTool("Read")` on the same path returns the written content.
 #[tokio::test]
-#[serial_test::serial]
 async fn workspace_session_execute_tool_write_then_read_round_trips() {
     // Given
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
 
-    let projects_tmp = tempfile::tempdir().unwrap();
-    register_project(projects_tmp.path(), repo_dir.path());
-    std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
-    let _restore = scopeguard::guard((), |_| std::env::remove_var(TDDY_PROJECTS_DIR_ENV));
-
     let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let (_cfg_dir, config) = write_config();
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 

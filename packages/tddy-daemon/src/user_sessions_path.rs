@@ -1,18 +1,6 @@
 //! Resolve OS user to their sessions directory path.
 
-use std::path::PathBuf;
-
-use tddy_core::output::TDDY_SESSIONS_DIR_ENV;
-
-/// When set to a non-empty path, [`projects_path_for_user`] returns this directory (where
-/// `projects.yaml` lives) instead of `~/.tddy/projects`.
-///
-/// **Intended for integration tests only** (e.g. isolated `projects.yaml` without touching a real
-/// home directory). Leave unset in production. In CI, do **not** export this globally across unrelated
-/// test jobs: it affects every `projects_path_for_user` call in the same process. Prefer setting
-/// it only around suites that need it (see `multi_host_acceptance` restore pattern) or use
-/// `#[serial]` where the env is mutated.
-pub const TDDY_PROJECTS_DIR_ENV: &str = "TDDY_PROJECTS_DIR";
+use std::path::{Path, PathBuf};
 
 /// Home directory for an OS user (from passwd).
 #[cfg(unix)]
@@ -42,62 +30,50 @@ pub fn home_dir_for_user(_os_user: &str) -> Option<PathBuf> {
     None
 }
 
-/// Resolve the sessions base path for an OS user (~user/.tddy).
+/// Resolve the sessions base path for an OS user.
+///
+/// If `config_dir` is `Some`, it is used directly (config is the single source of truth).
+/// Otherwise falls back to the profile default (`tmp/.tddy` in debug, `$HOME/.tddy` in release).
 ///
 /// Callers (e.g. `list_sessions_in_dir`) append `SESSIONS_SUBDIR` ("sessions") to reach
 /// the actual session directories at `~/.tddy/sessions/{session_id}/`.
 #[cfg(unix)]
-pub fn sessions_base_for_user(os_user: &str) -> Option<PathBuf> {
-    Some(home_dir_for_user(os_user)?.join(".tddy"))
+pub fn sessions_base_for_user(os_user: &str, config_dir: Option<&Path>) -> Option<PathBuf> {
+    if let Some(d) = config_dir {
+        return Some(d.to_path_buf());
+    }
+    tddy_core::output::default_tddy_data_dir()
+        .or_else(|| home_dir_for_user(os_user).map(|h| h.join(".tddy")))
 }
 
-/// Data root (parent of `sessions/`) matching [`tddy_core::output::tddy_data_dir_path`] for a
-/// `tddy-coder` child that inherits this process environment and runs with `HOME` set to that user.
+/// Data root (parent of `sessions/`) for a `tddy-coder` child that runs with the same config.
+#[cfg(unix)]
+pub fn tddy_data_root_matching_child(os_user: &str, config_dir: Option<&Path>) -> Option<PathBuf> {
+    sessions_base_for_user(os_user, config_dir)
+}
+
+#[cfg(not(unix))]
+pub fn sessions_base_for_user(_os_user: &str, _config_dir: Option<&Path>) -> Option<PathBuf> {
+    None
+}
+
+#[cfg(not(unix))]
+pub fn tddy_data_root_matching_child(_os_user: &str, _config_dir: Option<&Path>) -> Option<PathBuf> {
+    None
+}
+
+/// Directory containing `projects.yaml` (`{tddy_data_dir}/projects/`).
 ///
-/// If `TDDY_SESSIONS_DIR` is set (same as the child sees), Telegram and other daemon code must use
-/// this root when writing `~/.tddy/sessions/...` artifacts; otherwise the child reads an empty or
-/// different `changeset.yaml` than the one the daemon wrote under `$HOME/.tddy`.
+/// When `config_dir` is `Some`, it is used as the data root.
+/// Otherwise falls back to the profile default or `$HOME/.tddy`.
 #[cfg(unix)]
-pub fn tddy_data_root_matching_child(os_user: &str) -> Option<PathBuf> {
-    if let Ok(p) = std::env::var(TDDY_SESSIONS_DIR_ENV) {
-        let t = p.trim();
-        if !t.is_empty() {
-            return Some(PathBuf::from(t));
-        }
-    }
-    sessions_base_for_user(os_user)
+pub fn projects_path_for_user(os_user: &str, config_dir: Option<&Path>) -> Option<PathBuf> {
+    let base = sessions_base_for_user(os_user, config_dir)?;
+    Some(base.join("projects"))
 }
 
 #[cfg(not(unix))]
-pub fn sessions_base_for_user(_os_user: &str) -> Option<PathBuf> {
-    None
-}
-
-#[cfg(not(unix))]
-pub fn tddy_data_root_matching_child(_os_user: &str) -> Option<PathBuf> {
-    None
-}
-
-/// Directory containing `projects.yaml` (~user/.tddy/projects/), unless [`TDDY_PROJECTS_DIR_ENV`] is set.
-#[cfg(unix)]
-pub fn projects_path_for_user(os_user: &str) -> Option<PathBuf> {
-    if let Ok(p) = std::env::var(TDDY_PROJECTS_DIR_ENV) {
-        let t = p.trim();
-        if !t.is_empty() {
-            return Some(PathBuf::from(t));
-        }
-    }
-    Some(home_dir_for_user(os_user)?.join(".tddy").join("projects"))
-}
-
-#[cfg(not(unix))]
-pub fn projects_path_for_user(_os_user: &str) -> Option<PathBuf> {
-    if let Ok(p) = std::env::var(TDDY_PROJECTS_DIR_ENV) {
-        let t = p.trim();
-        if !t.is_empty() {
-            return Some(PathBuf::from(t));
-        }
-    }
+pub fn projects_path_for_user(_os_user: &str, _config_dir: Option<&Path>) -> Option<PathBuf> {
     None
 }
 

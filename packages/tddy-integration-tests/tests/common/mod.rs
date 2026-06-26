@@ -1,9 +1,5 @@
 //! Shared helpers for WorkflowEngine integration tests.
 //! Each test file uses a subset; allow dead_code to avoid per-file unused warnings.
-//!
-//! A ctor writes a minimal YAML config under [`std::env::temp_dir`] with `tddy_data_dir` and
-//! applies [`tddy_core::output::set_tddy_data_dir_override`] so session resolution matches the
-//! production opt-in YAML shape and never targets `~/.tddy/sessions/` in this test process.
 
 #![allow(dead_code)]
 
@@ -19,23 +15,6 @@ use tddy_core::workflow::graph::{ExecutionResult, ExecutionStatus};
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::{GoalId, SharedBackend, WorkflowEngine, WorkflowRecipe};
 use tddy_workflow_recipes::{BugfixRecipe, SessionArtifactManifest, TddRecipe};
-
-#[ctor::ctor]
-fn ensure_test_tddy_data_dir_yaml_and_override() {
-    let dir =
-        std::env::temp_dir().join(format!("tddy-integration-sessions-{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&dir);
-    let cfg_path = dir.join("coder-test-harness-config.yaml");
-    let path_for_yaml = dir
-        .to_string_lossy()
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"");
-    let yaml = format!(
-        "# Test harness — `tddy_data_dir` under TMPDIR (tddy-coder YAML schema).\ntddy_data_dir: \"{path_for_yaml}\"\n"
-    );
-    std::fs::write(&cfg_path, yaml).expect("write integration test coder config");
-    tddy_core::output::set_tddy_data_dir_override(Some(dir));
-}
 
 static IT_SESSION_BASE_SEQ: AtomicU64 = AtomicU64::new(0);
 
