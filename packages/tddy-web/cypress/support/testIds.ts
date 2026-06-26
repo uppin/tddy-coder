@@ -138,6 +138,10 @@ export const TEST_IDS = {
   createSessionProjectSelect: "create-session-project-select",
   createSessionAgentSelect: "create-session-agent-select",
   createSessionRecipeInput: "create-session-recipe-input",
+  /** Replaces the free-text recipe input for tool sessions — a <select> with all 7 recipe options. */
+  createSessionRecipeSelect: "create-session-recipe-select",
+  /** Parent-picker <select> — lists sessions that act as orchestrators; tool sessions only. */
+  createSessionStackParentSelect: "create-session-stack-parent-select",
   createSessionModelSelect: "create-session-model-select",
   createSessionPermissionModeSelect: "create-session-permission-mode-select",
   createSessionInitialPromptInput: "create-session-initial-prompt-input",
@@ -283,6 +287,10 @@ export const sessionMoreActions = (sessionId: string) => `session-more-actions-$
 
 /** `[data-testid="sessions-drawer-item-<sessionId>"]` — clickable drawer row */
 export const sessionsDrawerItem = (sessionId: string) => `sessions-drawer-item-${sessionId}`;
+
+/** `[data-testid="sessions-drawer-stack-<parentSessionId>"]` — collapsible <details> group */
+export const sessionsDrawerStackGroup = (parentSessionId: string) =>
+  `sessions-drawer-stack-${parentSessionId}`;
 
 /** `[data-testid="sessions-drawer-item-label-<sessionId>"]` — derived label text */
 export const sessionsDrawerItemLabel = (sessionId: string) =>

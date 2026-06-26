@@ -22,6 +22,7 @@ import {
 import {
   listAgents,
   listProjects,
+  listSessions,
   listTools,
 } from "../support/rpc/responses";
 import { toArrayBuffer, decodeProtoRequestBody } from "../support/rpc/protoRpc";
@@ -104,12 +105,12 @@ describe("CreateSessionPane — tool session fields (default)", () => {
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).should("have.attr", "aria-pressed", "false");
   });
 
-  it("shows agent select and recipe input for tool session type", () => {
+  it("shows agent select and recipe select for tool session type", () => {
     mountCreateSessionPane();
     cy.wait(["@listProjects", "@listAgents", "@listTools"]);
 
     byTestId(TEST_IDS.createSessionAgentSelect).should("be.visible");
-    byTestId(TEST_IDS.createSessionRecipeInput).should("be.visible");
+    byTestId(TEST_IDS.createSessionRecipeSelect).should("be.visible");
   });
 
   it("does not show model, permission mode, or initial prompt for tool session type", () => {
@@ -138,14 +139,14 @@ describe("CreateSessionPane — claude-cli session fields", () => {
     byTestId(TEST_IDS.createSessionInitialPromptInput).should("be.visible");
   });
 
-  it("hides agent select and recipe input when Claude CLI type is selected", () => {
+  it("hides agent select and recipe select when Claude CLI type is selected", () => {
     mountCreateSessionPane();
     cy.wait(["@listProjects", "@listAgents", "@listTools"]);
 
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
 
     byTestId(TEST_IDS.createSessionAgentSelect).should("not.exist");
-    byTestId(TEST_IDS.createSessionRecipeInput).should("not.exist");
+    byTestId(TEST_IDS.createSessionRecipeSelect).should("not.exist");
   });
 
   it("model dropdown contains all CLAUDE_CLI_MODELS options", () => {
@@ -276,7 +277,7 @@ describe("CreateSessionPane — submit behaviour", () => {
 
     byTestId(TEST_IDS.createSessionProjectSelect).select("proj-test");
     byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
-    byTestId(TEST_IDS.createSessionRecipeInput).clear().type("tdd");
+    byTestId(TEST_IDS.createSessionRecipeSelect).select("tdd");
 
     byTestId(TEST_IDS.createSessionSubmitBtn).click();
     cy.wait("@startSession");
@@ -388,6 +389,164 @@ describe("CreateSessionPane — submit behaviour", () => {
     byTestId(TEST_IDS.createSessionError).should("be.visible");
     // onCreated never called
     byTestId(TEST_IDS.createSessionPane).should("be.visible");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recipe dropdown + parent-picker tests
+// ---------------------------------------------------------------------------
+
+function interceptBaselineWithSessions(orchestratorSessions: { sessionId: string }[] = []) {
+  interceptBaseline();
+
+  // ListSessions is called by the new-session screen to populate the parent picker.
+  const sessionsBody = toArrayBuffer(listSessions(orchestratorSessions.map((s) => ({
+    sessionId: s.sessionId,
+    status: "active",
+    isActive: true,
+    projectId: "proj-1",
+  }))));
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListSessions", (req) => {
+    req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: sessionsBody });
+  }).as("listSessions");
+}
+
+describe("CreateSessionPane — recipe dropdown", () => {
+  beforeEach(() => {
+    interceptBaseline();
+  });
+
+  it("renders a recipe <select> (not free-text input) for tool session type", () => {
+    mountCreateSessionPane();
+    cy.wait(["@listProjects", "@listAgents", "@listTools"]);
+
+    // The new select must exist; the old free-text input must not exist
+    byTestId(TEST_IDS.createSessionRecipeSelect).should("be.visible");
+    byTestId(TEST_IDS.createSessionRecipeInput).should("not.exist");
+  });
+
+  it("recipe select lists all 7 workflow recipes", () => {
+    mountCreateSessionPane();
+    cy.wait(["@listProjects", "@listAgents", "@listTools"]);
+
+    const expectedRecipes = [
+      "tdd",
+      "tdd-small",
+      "bugfix",
+      "free-prompting",
+      "grill-me",
+      "review",
+      "merge-pr",
+      "plan-pr-stack",
+      "orchestrate-pr-stack",
+    ];
+
+    byTestId(TEST_IDS.createSessionRecipeSelect).within(() => {
+      expectedRecipes.forEach((recipe) => {
+        cy.get(`option[value='${recipe}']`).should("exist");
+      });
+    });
+  });
+
+  it("recipe select defaults to 'tdd' on mount", () => {
+    mountCreateSessionPane();
+    cy.wait(["@listProjects", "@listAgents", "@listTools"]);
+
+    byTestId(TEST_IDS.createSessionRecipeSelect).should("have.value", "tdd");
+  });
+
+  it("startSession sends the selected recipe from the dropdown", () => {
+    interceptStartSession("recipe-dropdown-test-sess");
+    interceptListProjectBranches();
+
+    const capturedReqs: StartSessionRequest[] = [];
+    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+      capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
+      req.continue();
+    });
+
+    mountCreateSessionPane();
+    cy.wait(["@listProjects", "@listAgents", "@listTools"]);
+
+    byTestId(TEST_IDS.createSessionProjectSelect).select("proj-test");
+    byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
+    byTestId(TEST_IDS.createSessionRecipeSelect).select("tdd-small");
+
+    byTestId(TEST_IDS.createSessionSubmitBtn).click();
+    cy.wait("@startSession");
+
+    cy.then(() => {
+      expect(capturedReqs).to.have.length.at.least(1);
+      expect(capturedReqs[0]!.recipe).to.equal("tdd-small");
+    });
+  });
+
+  it("recipe select is hidden when Claude CLI session type is selected", () => {
+    mountCreateSessionPane();
+    cy.wait(["@listProjects", "@listAgents", "@listTools"]);
+
+    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+
+    byTestId(TEST_IDS.createSessionRecipeSelect).should("not.exist");
+  });
+});
+
+describe("CreateSessionPane — stack parent picker", () => {
+  it("shows the parent picker <select> for tool sessions when orchestrators are available", () => {
+    interceptBaselineWithSessions([{ sessionId: "orch-sess-1", recipe: "orchestrate-pr-stack" }]);
+
+    mountCreateSessionPane();
+    cy.wait(["@listProjects", "@listAgents", "@listTools", "@listSessions"]);
+
+    byTestId(TEST_IDS.createSessionStackParentSelect).should("be.visible");
+  });
+
+  it("parent picker is hidden when no orchestrator sessions exist", () => {
+    interceptBaselineWithSessions([]); // empty list of orchestrators
+
+    mountCreateSessionPane();
+    cy.wait(["@listProjects", "@listAgents", "@listTools", "@listSessions"]);
+
+    byTestId(TEST_IDS.createSessionStackParentSelect).should("not.exist");
+  });
+
+  it("parent picker is hidden when Claude CLI session type is selected", () => {
+    interceptBaselineWithSessions([{ sessionId: "orch-hidden", recipe: "orchestrate-pr-stack" }]);
+
+    mountCreateSessionPane();
+    cy.wait(["@listProjects", "@listAgents", "@listTools", "@listSessions"]);
+
+    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+
+    byTestId(TEST_IDS.createSessionStackParentSelect).should("not.exist");
+  });
+
+  it("startSession sends stackParent when a parent is selected", () => {
+    interceptBaselineWithSessions([{ sessionId: "orch-parent-123", recipe: "orchestrate-pr-stack" }]);
+    interceptStartSession("child-with-parent-sess");
+    interceptListProjectBranches();
+
+    const capturedReqs: StartSessionRequest[] = [];
+    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
+      capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
+      req.continue();
+    });
+
+    mountCreateSessionPane();
+    cy.wait(["@listProjects", "@listAgents", "@listTools", "@listSessions"]);
+
+    byTestId(TEST_IDS.createSessionProjectSelect).select("proj-test");
+    byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
+    byTestId(TEST_IDS.createSessionStackParentSelect).select("orch-parent-123");
+
+    byTestId(TEST_IDS.createSessionSubmitBtn).click();
+    cy.wait("@startSession");
+
+    cy.then(() => {
+      expect(capturedReqs).to.have.length.at.least(1);
+      // stackParent maps to the proto `stack_parent = 15` field on StartSessionRequest
+      expect((capturedReqs[0]! as Record<string, unknown>)["stackParent"]).to.equal("orch-parent-123");
+    });
   });
 });
 

@@ -217,6 +217,8 @@ pub struct SpawnOptions<'a> {
     pub mouse: bool,
     /// Passed to spawned `tddy-coder` as `--recipe` when non-empty (e.g. `bugfix`).
     pub recipe: Option<&'a str>,
+    /// Back-reference to the orchestrating PR-stack session. Passed as `--stack-parent <id>`.
+    pub stack_parent: Option<&'a str>,
 }
 
 /// Merge the daemon process `PATH` with an optional prefix (from the target user's `~/.tddy/config.yaml`).
@@ -521,6 +523,14 @@ pub fn spawn_as_user(
         if !r.is_empty() {
             log::debug!("spawner: passing --recipe {}", r);
             cmd.arg("--recipe").arg(r);
+        }
+    }
+
+    if let Some(sp) = opts.stack_parent {
+        let sp = sp.trim();
+        if !sp.is_empty() {
+            log::debug!("spawner: passing --stack-parent {}", sp);
+            cmd.arg("--stack-parent").arg(sp);
         }
     }
 
@@ -843,5 +853,29 @@ mod grpc_listen_port_tests {
         let port = holder.local_addr().expect("addr").port();
         let err = verify_tcp_listen_port_free(port).expect_err("second bind should fail");
         assert_eq!(err.kind(), ErrorKind::AddrInUse);
+    }
+}
+
+#[cfg(test)]
+mod stack_parent_spawn_tests {
+    use super::SpawnOptions;
+
+    /// `spawn_options_has_stack_parent_field` — `SpawnOptions` must expose a `stack_parent` field
+    /// so that the daemon can forward a parent orchestrator session id to the spawned child
+    /// `tddy-coder` process as `--stack-parent <id>`.
+    ///
+    /// This test will **fail to compile** until `stack_parent: Option<&'a str>` is added to
+    /// `SpawnOptions`. That compile failure is the intended red-phase signal for Layer 3.
+    #[test]
+    fn spawn_options_has_stack_parent_field() {
+        let opts = SpawnOptions {
+            stack_parent: Some("orch-session-id-42"),
+            ..Default::default()
+        };
+        assert_eq!(
+            opts.stack_parent,
+            Some("orch-session-id-42"),
+            "SpawnOptions::stack_parent must round-trip correctly"
+        );
     }
 }

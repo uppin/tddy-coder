@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use tddy_core::changeset::Stack;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::ids::WorkflowState;
-use tddy_core::workflow::task::{Task, TaskResult};
+use tddy_core::workflow::task::{NextAction, Task, TaskResult};
 
 use super::github::GithubPrApi;
 
@@ -143,22 +143,111 @@ pub fn decide_next_action(
     }
 }
 
-// TODO: implement — consolidate with Stack::effective_base_refs, deriving single-ref from NodeView slice
 /// Effective base ref for a node (skips merged ancestors; returns default_branch when all merged).
-pub fn effective_base_ref(_node_id: &str, _views: &[NodeView], _default_branch: &str) -> String {
-    unimplemented!("effective_base_ref: not yet implemented")
+pub fn effective_base_ref(node_id: &str, views: &[NodeView], default_branch: &str) -> String {
+    let Some(node) = views.iter().find(|v| v.node_id == node_id) else {
+        return default_branch.to_string();
+    };
+    if node.parent_dep_ids.is_empty() {
+        return default_branch.to_string();
+    }
+    // Walk each parent; if all are merged, collapse to default_branch.
+    // Otherwise return the branch of the nearest unmerged parent.
+    for parent_id in &node.parent_dep_ids {
+        let Some(parent_view) = views.iter().find(|v| &v.node_id == parent_id) else {
+            continue;
+        };
+        if !matches!(parent_view.pr, PrLiveStatus::Merged) {
+            return parent_view.branch.clone();
+        }
+    }
+    // All parents are merged → use default_branch
+    default_branch.to_string()
 }
 
-// TODO: implement — reads child changesets via unified_session_dir_path + read_changeset; calls GithubPrApi::get_open_pr
 /// Assemble NodeView list from orchestrator changeset + child changesets + live GitHub.
 pub fn assemble_views(
     _parent_dir: &Path,
-    _sessions_root: &Path,
-    _stack: &Stack,
-    _gh: &dyn GithubPrApi,
+    sessions_root: &Path,
+    stack: &Stack,
+    gh: &dyn GithubPrApi,
     _default_branch: &str,
 ) -> Result<Vec<NodeView>, tddy_core::WorkflowError> {
-    unimplemented!("assemble_views: not yet implemented")
+    use tddy_core::changeset::read_changeset;
+    use tddy_core::session_lifecycle::unified_session_dir_path;
+
+    let order = stack.topo_order()?;
+
+    let mut views: Vec<NodeView> = Vec::with_capacity(stack.nodes.len());
+
+    for node_id in &order {
+        let node = stack
+            .nodes
+            .iter()
+            .find(|n| &n.node_id == node_id)
+            .expect("topo_order only contains node ids from the stack");
+
+        let branch = node
+            .branch
+            .clone()
+            .unwrap_or_else(|| format!("feature/{node_id}"));
+
+        let (child_state, child_phase) = if let Some(ref session_id) = node.session_id {
+            let child_dir = unified_session_dir_path(sessions_root, session_id);
+            match read_changeset(&child_dir) {
+                Ok(cs) => {
+                    let state = cs.state.current.clone();
+                    let phase = workflow_state_to_child_phase(&state);
+                    (Some(state), phase)
+                }
+                Err(_) => (None, ChildPhase::Building),
+            }
+        } else {
+            (None, ChildPhase::NotSpawned)
+        };
+
+        let pr = if node.session_id.is_some() {
+            match gh.get_open_pr(&branch)? {
+                Some(pr_ref) => PrLiveStatus::Open {
+                    number: pr_ref.number,
+                    base: pr_ref.base_branch,
+                },
+                None => {
+                    if let Some(ref status) = node.pr_status {
+                        match status.phase.as_str() {
+                            "merged" => PrLiveStatus::Merged,
+                            "closed" => PrLiveStatus::Closed,
+                            _ => PrLiveStatus::None,
+                        }
+                    } else {
+                        PrLiveStatus::None
+                    }
+                }
+            }
+        } else {
+            PrLiveStatus::None
+        };
+
+        views.push(NodeView {
+            node_id: node_id.clone(),
+            branch,
+            parent_dep_ids: node.parents.clone(),
+            child_session_id: node.session_id.clone(),
+            child_state,
+            child_phase,
+            pr,
+        });
+    }
+
+    Ok(views)
+}
+
+fn workflow_state_to_child_phase(state: &tddy_core::workflow::ids::WorkflowState) -> ChildPhase {
+    match state.as_str() {
+        "Done" | "End" => ChildPhase::ReadyForPr,
+        "Failed" | "Error" => ChildPhase::Failed(state.to_string()),
+        _ => ChildPhase::Building,
+    }
 }
 
 #[cfg(test)]
@@ -250,6 +339,306 @@ mod tests {
         );
     }
 
+    // -----------------------------------------------------------------------
+    // effective_base_ref unit tests
+    // -----------------------------------------------------------------------
+
+    fn node_view_with_pr(
+        node_id: &str,
+        parents: &[&str],
+        phase: ChildPhase,
+        pr: PrLiveStatus,
+    ) -> NodeView {
+        NodeView {
+            node_id: node_id.to_string(),
+            branch: format!("feature/{node_id}"),
+            parent_dep_ids: parents.iter().map(|s| s.to_string()).collect(),
+            child_session_id: None,
+            child_state: None,
+            child_phase: phase,
+            pr,
+        }
+    }
+
+    /// `effective_base_ref_skips_merged_ancestor_returns_default_branch` — when the only
+    /// parent node's PR is merged, `effective_base_ref` must skip it and return `default_branch`.
+    #[test]
+    fn effective_base_ref_skips_merged_ancestor_returns_default_branch() {
+        // n1 (root) → merged PR
+        // n2 depends on n1 (which is merged) → effective base should collapse to default_branch
+        let views = vec![
+            node_view_with_pr("n1", &[], ChildPhase::PrOpen, PrLiveStatus::Merged),
+            node_view_with_pr(
+                "n2",
+                &["n1"],
+                ChildPhase::PrOpen,
+                PrLiveStatus::Open {
+                    number: 2,
+                    base: "feature/n1".into(),
+                },
+            ),
+        ];
+
+        let base = effective_base_ref("n2", &views, "master");
+
+        assert_eq!(
+            base, "master",
+            "effective base of n2 must be 'master' when its only parent (n1) is already merged"
+        );
+    }
+
+    /// `effective_base_ref_returns_nearest_unmerged_ancestor_branch` — when a middle ancestor is
+    /// not yet merged, `effective_base_ref` must return that ancestor's branch.
+    #[test]
+    fn effective_base_ref_returns_nearest_unmerged_ancestor_branch() {
+        // Linear: n1 (merged) → n2 (open PR, base=master after n1 merge) → n3 (open, base=feature/n2)
+        // n2 is still open, so n3's effective base is feature/n2
+        let views = vec![
+            node_view_with_pr("n1", &[], ChildPhase::PrOpen, PrLiveStatus::Merged),
+            node_view_with_pr(
+                "n2",
+                &["n1"],
+                ChildPhase::PrOpen,
+                PrLiveStatus::Open {
+                    number: 2,
+                    base: "master".into(),
+                },
+            ),
+            node_view_with_pr(
+                "n3",
+                &["n2"],
+                ChildPhase::PrOpen,
+                PrLiveStatus::Open {
+                    number: 3,
+                    base: "feature/n2".into(),
+                },
+            ),
+        ];
+
+        let base = effective_base_ref("n3", &views, "master");
+
+        assert_eq!(
+            base, "feature/n2",
+            "effective base of n3 must be feature/n2 (its unmerged parent branch), not 'master'"
+        );
+    }
+
+    /// `effective_base_ref_root_node_returns_default_branch` — a root node with no parents
+    /// must always return `default_branch` as its effective base.
+    #[test]
+    fn effective_base_ref_root_node_returns_default_branch() {
+        let views = vec![node_view_with_pr(
+            "n1",
+            &[],
+            ChildPhase::NotSpawned,
+            PrLiveStatus::None,
+        )];
+
+        let base = effective_base_ref("n1", &views, "master");
+
+        assert_eq!(
+            base, "master",
+            "root node with no parents must use default_branch as effective base"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // assemble_views unit tests (via MockGithubPrApi)
+    // -----------------------------------------------------------------------
+
+    struct AlwaysOpenMockGh {
+        pr_number: u64,
+        base: String,
+    }
+    impl crate::orchestrate_pr_stack::github::GithubPrApi for AlwaysOpenMockGh {
+        fn get_open_pr(
+            &self,
+            _head: &str,
+        ) -> Result<Option<crate::orchestrate_pr_stack::github::PrRef>, tddy_core::WorkflowError>
+        {
+            Ok(Some(crate::orchestrate_pr_stack::github::PrRef {
+                number: self.pr_number,
+                head_sha: "sha".into(),
+                base_branch: self.base.clone(),
+                url: "https://github.com/o/r/pull/1".into(),
+            }))
+        }
+        fn merge_pr(&self, _number: u64) -> Result<String, tddy_core::WorkflowError> {
+            Ok("sha".into())
+        }
+        fn patch_pr_base(
+            &self,
+            _number: u64,
+            _new_base: &str,
+        ) -> Result<(), tddy_core::WorkflowError> {
+            Ok(())
+        }
+        fn create_pr(
+            &self,
+            _head: &str,
+            _base: &str,
+            _title: &str,
+            _body: &str,
+        ) -> Result<u64, tddy_core::WorkflowError> {
+            Ok(99)
+        }
+        fn disable_auto_merge(&self, _number: u64) -> Result<(), tddy_core::WorkflowError> {
+            Ok(())
+        }
+    }
+
+    struct NoneOpenMockGh;
+    impl crate::orchestrate_pr_stack::github::GithubPrApi for NoneOpenMockGh {
+        fn get_open_pr(
+            &self,
+            _head: &str,
+        ) -> Result<Option<crate::orchestrate_pr_stack::github::PrRef>, tddy_core::WorkflowError>
+        {
+            Ok(None)
+        }
+        fn merge_pr(&self, _number: u64) -> Result<String, tddy_core::WorkflowError> {
+            Ok("sha".into())
+        }
+        fn patch_pr_base(
+            &self,
+            _number: u64,
+            _new_base: &str,
+        ) -> Result<(), tddy_core::WorkflowError> {
+            Ok(())
+        }
+        fn create_pr(
+            &self,
+            _head: &str,
+            _base: &str,
+            _title: &str,
+            _body: &str,
+        ) -> Result<u64, tddy_core::WorkflowError> {
+            Ok(99)
+        }
+        fn disable_auto_merge(&self, _number: u64) -> Result<(), tddy_core::WorkflowError> {
+            Ok(())
+        }
+    }
+
+    /// `assemble_views_marks_notspawned_when_session_id_absent` — when a `StackNode` has
+    /// `session_id == None`, `assemble_views` must produce a `NodeView` with
+    /// `child_phase == NotSpawned`, and the views must be in topological order.
+    #[test]
+    fn assemble_views_marks_notspawned_when_session_id_absent() {
+        use tddy_core::changeset::{write_changeset_atomic, Changeset, Stack, StackNode};
+        use tddy_core::session_lifecycle::unified_session_dir_path;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let parent_dir = tmp.path();
+        let sessions_root = tmp.path();
+
+        // Write an orchestrator changeset with two nodes: n1 (root), n2 (depends on n1)
+        let stack = Stack {
+            version: 1,
+            nodes: vec![
+                StackNode {
+                    node_id: "n1".into(),
+                    title: "Root".into(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: None,
+                    session_id: None, // not spawned
+                    parents: vec![],
+                    pr_status: None,
+                    child_state: None,
+                },
+                StackNode {
+                    node_id: "n2".into(),
+                    title: "Dep".into(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: None,
+                    session_id: None, // not spawned
+                    parents: vec!["n1".into()],
+                    pr_status: None,
+                    child_state: None,
+                },
+            ],
+        };
+        let mock_gh = NoneOpenMockGh;
+
+        let views = assemble_views(parent_dir, sessions_root, &stack, &mock_gh, "master")
+            .expect("assemble_views must not error for unspawned nodes");
+
+        assert_eq!(views.len(), 2, "must produce one view per node");
+
+        // Topological order: n1 before n2
+        assert_eq!(
+            views[0].node_id, "n1",
+            "n1 (root) must appear before n2 in topo order"
+        );
+        assert_eq!(
+            views[1].node_id, "n2",
+            "n2 (dependent) must appear after n1"
+        );
+
+        assert!(
+            matches!(views[0].child_phase, ChildPhase::NotSpawned),
+            "n1 must be NotSpawned (no session_id); got: {:?}",
+            views[0].child_phase
+        );
+        assert!(
+            matches!(views[1].child_phase, ChildPhase::NotSpawned),
+            "n2 must be NotSpawned (no session_id); got: {:?}",
+            views[1].child_phase
+        );
+    }
+
+    /// `assemble_views_reports_propen_when_mock_returns_open_pr` — when the `GithubPrApi` mock
+    /// returns an open PR for a node's branch, `assemble_views` must map it to `PrLiveStatus::Open`.
+    #[test]
+    fn assemble_views_reports_propen_when_mock_returns_open_pr() {
+        use tddy_core::changeset::{write_changeset_atomic, Changeset, Stack, StackNode};
+        use tddy_core::session_lifecycle::unified_session_dir_path;
+        use tddy_core::WorkflowState;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let parent_dir = tmp.path();
+        let sessions_root = tmp.path();
+
+        // Child session dir for n1
+        let child_dir = unified_session_dir_path(sessions_root, "child-sess-n1");
+        std::fs::create_dir_all(&child_dir).unwrap();
+        let mut child_cs = Changeset::default();
+        child_cs.state.current = WorkflowState::new("Done");
+        write_changeset_atomic(&child_dir, &child_cs).unwrap();
+
+        let stack = Stack {
+            version: 1,
+            nodes: vec![StackNode {
+                node_id: "n1".into(),
+                title: "Root".into(),
+                description: String::new(),
+                branch_suggestion: None,
+                branch: Some("feature/n1".into()),
+                session_id: Some("child-sess-n1".into()),
+                parents: vec![],
+                pr_status: None,
+                child_state: None,
+            }],
+        };
+
+        let mock_gh = AlwaysOpenMockGh {
+            pr_number: 7,
+            base: "master".into(),
+        };
+
+        let views = assemble_views(parent_dir, sessions_root, &stack, &mock_gh, "master")
+            .expect("assemble_views must not error");
+
+        assert_eq!(views.len(), 1);
+        assert!(
+            matches!(&views[0].pr, PrLiveStatus::Open { number: 7, .. }),
+            "PR status must be Open {{ number: 7 }} when mock returns an open PR; got: {:?}",
+            views[0].pr
+        );
+    }
+
     #[test]
     fn decide_next_action_wait_for_merge_gate_when_autonomous_merge_off() {
         // One node: deps merged, PR open and base is already master — normally ready to merge.
@@ -272,7 +661,6 @@ mod tests {
     }
 }
 
-// TODO: implement AssessTask::run — recover_in_flight_stack_op → assemble_views → decide_next_action → GoTo
 /// The assess Task: reads stack, calls assemble_views + decide_next_action, returns GoTo.
 pub struct AssessTask {}
 
@@ -296,8 +684,91 @@ impl Task for AssessTask {
 
     async fn run(
         &self,
-        _context: Context,
+        context: Context,
     ) -> Result<TaskResult, Box<dyn std::error::Error + Send + Sync>> {
-        unimplemented!("AssessTask::run: not yet implemented")
+        use tddy_core::changeset::read_changeset;
+
+        let session_dir = context
+            .get_sync::<std::path::PathBuf>("session_dir")
+            .ok_or("assess: session_dir not set in context")?;
+        // sessions_root = sessions_base (two levels above session_dir: .../sessions/{id}/ → ...)
+        let sessions_root = session_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| session_dir.clone());
+
+        let changeset = read_changeset(&session_dir)?;
+        let stack = changeset.stack.clone().unwrap_or_default();
+        let default_branch = context
+            .get_sync::<String>("default_branch")
+            .unwrap_or_else(|| "master".to_string());
+        let repo_root = changeset
+            .repo_path
+            .clone()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| session_dir.clone());
+        // Derive "owner/repo" from the git remote URL so GitHub API calls use the
+        // correct namespace (changeset.repo_path is a filesystem path, not owner/repo).
+        let github_owner_repo = {
+            let remote_url = std::process::Command::new("git")
+                .current_dir(&repo_root)
+                .args(["remote", "get-url", "origin"])
+                .output()
+                .ok()
+                .and_then(|o| {
+                    if o.status.success() {
+                        Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
+            super::github::owner_repo_from_remote_url(&remote_url)
+                .unwrap_or_else(|| context.get_sync::<String>("repo").unwrap_or_default())
+        };
+
+        let gh = super::github::RealGithubPrApi::new(&github_owner_repo);
+
+        let views = assemble_views(&session_dir, &sessions_root, &stack, &gh, &default_branch)?;
+        let autonomous_merge = context
+            .get_sync::<bool>("autonomous_merge")
+            .unwrap_or(false);
+        let approved: std::collections::HashSet<String> = context
+            .get_sync::<Vec<String>>("approved_nodes")
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+        let action = decide_next_action(&views, autonomous_merge, &approved);
+
+        let next_state = match &action {
+            OrchestratorAction::Spawn { node_ids } => {
+                context.set_sync("spawn_node_ids", node_ids.clone());
+                "spawn"
+            }
+            OrchestratorAction::Merge { node_id, pr_number } => {
+                context.set_sync("merge_node_id", node_id.clone());
+                context.set_sync("merge_pr_number", *pr_number);
+                "merge"
+            }
+            OrchestratorAction::Wait { reason } => {
+                context.set_sync("wait_reason", reason.clone());
+                "wait"
+            }
+            OrchestratorAction::MarkFailed { node_id, reason } => {
+                context.set_sync("failed_node_id", node_id.clone());
+                context.set_sync("failed_reason", reason.clone());
+                "failed"
+            }
+            OrchestratorAction::Done => "done",
+        };
+
+        Ok(TaskResult {
+            response: format!("assess → {next_state}"),
+            next_action: NextAction::GoTo(next_state.to_string()),
+            task_id: self.id().to_string(),
+            status_message: None,
+        })
     }
 }

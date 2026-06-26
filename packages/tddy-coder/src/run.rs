@@ -578,8 +578,8 @@ pub struct CoderArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`. Must match [`WorkflowRecipe::name`].
-    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr"])]
+    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`, `plan-pr-stack`, `orchestrate-pr-stack`. Must match [`WorkflowRecipe::name`].
+    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr", "plan-pr-stack", "orchestrate-pr-stack"])]
     pub recipe: Option<String>,
 
     /// Path to the Cursor `agent` CLI (defaults to `agent` on `PATH`, or `TDDY_CURSOR_AGENT` if set).
@@ -771,8 +771,8 @@ pub struct DemoArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`.
-    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr"])]
+    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`, `plan-pr-stack`, `orchestrate-pr-stack`.
+    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr", "plan-pr-stack", "orchestrate-pr-stack"])]
     pub recipe: Option<String>,
 }
 
@@ -3748,5 +3748,35 @@ mod start_goal_for_session_continue_contract_tests {
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(BugfixRecipe);
         let g = start_goal_for_session_continue(recipe.as_ref(), &cs);
         assert_eq!(g, GoalId::new("reproduce"));
+    }
+}
+
+#[cfg(test)]
+mod recipe_value_parser_tests {
+    use crate::run::{CoderArgs, DemoArgs};
+    use clap::Parser;
+
+    /// `recipe_value_parser_accepts_pr_stack_recipes` — `CoderArgs` and `DemoArgs` must accept
+    /// `plan-pr-stack` and `orchestrate-pr-stack` as valid `--recipe` values.
+    ///
+    /// Currently the value_parser on both structs lists only 7 values and omits both PR-stack
+    /// recipe names, so this test fails until the parser lists are expanded (Layer 3 green phase).
+    #[test]
+    fn recipe_value_parser_accepts_pr_stack_recipes() {
+        for recipe in ["plan-pr-stack", "orchestrate-pr-stack"] {
+            let result = CoderArgs::try_parse_from(["tddy-coder", "--recipe", recipe]);
+            assert!(
+                result.is_ok(),
+                "CoderArgs should accept --recipe {recipe}; got: {:?}",
+                result.err()
+            );
+
+            let result = DemoArgs::try_parse_from(["tddy-demo", "--recipe", recipe]);
+            assert!(
+                result.is_ok(),
+                "DemoArgs should accept --recipe {recipe}; got: {:?}",
+                result.err()
+            );
+        }
     }
 }

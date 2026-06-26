@@ -824,6 +824,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         updated_at: s.updated_at,
                         livekit_room: s.livekit_room,
                         previous_session_id: s.previous_session_id,
+                        orchestrator_session_id: String::new(),
                     };
                     if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
                         &session_dir,
@@ -1120,6 +1121,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 Some(t.to_string())
             }
         };
+        let stack_parent_for_spawn: Option<String> = {
+            let t = req.stack_parent.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        };
         let timeout = self.config.spawn_worker_request_timeout();
         let daemon_log = self.config.log.clone();
         let result = spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
@@ -1130,6 +1139,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             let pid = Some(pid_for_spawn.as_str());
             let agent = agent_for_spawn.as_deref();
             let recipe = recipe_for_spawn.as_deref();
+            let stack_parent = stack_parent_for_spawn.as_deref();
             if let Some(ref client) = spawn_client {
                 let spawn_req = spawn_worker::build_spawn_request(
                     &os_user,
@@ -1143,6 +1153,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         agent,
                         mouse: spawn_mouse,
                         recipe,
+                        stack_parent,
                     },
                     daemon_log.as_ref(),
                 );
@@ -1162,6 +1173,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         agent,
                         mouse: spawn_mouse,
                         recipe,
+                        stack_parent,
                     },
                     child_log_level.as_str(),
                     child_log_format.as_str(),
@@ -1303,6 +1315,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         agent: None,
                         mouse: spawn_mouse,
                         recipe: None,
+                        stack_parent: None,
                     },
                     daemon_log.as_ref(),
                 );
@@ -1322,6 +1335,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         agent: None,
                         mouse: spawn_mouse,
                         recipe: None,
+                        stack_parent: None,
                     },
                     child_log_level.as_str(),
                     child_log_format.as_str(),
