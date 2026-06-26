@@ -167,6 +167,14 @@ export const TEST_IDS = {
   shortcutDrawer: "shortcut-drawer",
   shortcutDragHandle: "shortcut-drag-handle",
 
+  // Session traffic strip
+  sessionTrafficStrip: "session-traffic-strip",
+  sessionTrafficBytesIn: "session-traffic-bytes-in",
+  sessionTrafficBytesOut: "session-traffic-bytes-out",
+  sessionTrafficRateIn: "session-traffic-rate-in",
+  sessionTrafficRateOut: "session-traffic-rate-out",
+  sessionTrafficPing: "session-traffic-ping",
+
   // Terminal control mutex — "Claim terminal" CTA
   terminalControlOverlay: "terminal-control-overlay",
   terminalClaimBtn: "terminal-claim-btn",

@@ -211,6 +211,67 @@ interface CreateSessionPaneProps {
 - `ListProjectBranches` — branch dropdown when "work on existing branch"
 - `StartSession` — create + start the session
 
+## Session Traffic Strip
+
+A thin `flex-shrink-0` strip rendered at the top of `SessionMainPane` whenever a session
+is in `connected-livekit` state. It provides live visibility into RPC throughput and
+connection health for the selected session.
+
+### Display
+
+The strip shows five values:
+
+| Field | Description |
+|-------|-------------|
+| ↓ rate | Live inbound throughput in B/s (or kB/s, MB/s) averaged over the last ~2 s |
+| ↑ rate | Live outbound throughput |
+| ↓ total | Cumulative session bytes received |
+| ↑ total | Cumulative session bytes sent |
+| Ping | Round-trip time to the LiveKit gateway in ms, or `—` when unavailable |
+
+### Metering scope
+
+Two transport layers are metered independently and summed for display:
+
+- **LiveKit data-channel** — per-session; counts exact wire payload bytes at the point
+  they are serialised/deserialised (outbound `publishRequest` payload, inbound
+  `DataReceived` payload).
+- **HTTP `/rpc`** — app-global; counts the binary-serialised protobuf message body of
+  each unary request and response via a Connect `Interceptor`.
+
+Both meters share a `TrafficMeterRegistry` (React context) keyed by scope:
+`"http"` for the HTTP transport and the LiveKit room name for the data-channel transport.
+
+### Ping measurement
+
+Ping uses the WebRTC peer-connection `getStats()` API (`currentRoundTripTime` from the
+succeeded candidate-pair), polled every 2 seconds. The value reflects the true network
+RTT to the LiveKit gateway. Displayed as `—` when the stats entry is absent or the Room
+is not yet connected.
+
+### Component hierarchy
+
+```
+SessionMainPane
+ ├─ SessionTrafficStrip        ← new, flex-shrink-0 top strip
+ ├─ Inspector toggle row       ← existing
+ └─ terminal container
+```
+
+`useSessionLiveKitRoom(attachment)` — new hook that connects a `Room` for the selected
+LiveKit session (mirrors `useCommonRoom`) and provides it to `useLiveKitPing` and the
+meter's room subscription.
+
+### Acceptance criteria
+
+1. The strip is visible at the top of `SessionMainPane` when a session is `connected-livekit`.
+2. The strip is absent when no session is selected or the session is `connected-grpc`/idle.
+3. Bytes-in and bytes-out counters start at 0 and grow monotonically within a session.
+4. Live rates reset toward 0 when no RPC traffic occurs for ≥ 2 s.
+5. Ping shows a numeric ms value when the WebRTC candidate-pair RTT is available.
+6. Ping shows `—` when RTT is null (Room not connected, stats unavailable).
+7. Switching sessions resets the session-scoped (LiveKit) meter to 0; the HTTP meter persists.
+
 ## Terminal Control — "Claim terminal" CTA
 
 > **Updated: 2026-06-26** — Adds a single-screen control mutex to `SessionsDrawerScreen`.
@@ -265,3 +326,5 @@ ids, so they do not share a lease.
 - The old `ConnectionScreen` monolith is not retired by this change.
 - Background Shell stdio is not durably captured; only available live via `WatchTask` while
   the task is in the in-memory registry.
+- The HTTP `/rpc` meter is app-global (shared across all open sessions); only the LiveKit
+  meter is strictly per-session.
