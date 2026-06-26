@@ -2,6 +2,7 @@ import React from "react";
 import { fromBinary } from "@bufbuild/protobuf";
 import {
   ResumeSessionRequestSchema,
+  Signal,
   SignalSessionRequestSchema,
 } from "../../src/gen/connection_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
@@ -279,7 +280,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
         decodeProtoRequestBody(interception.request.body),
       );
       expect(decoded.sessionId).to.equal(CONNECTED_SESSION_A.sessionId);
-      expect(decoded.signal).to.equal(15); // SIGTERM = 15
+      expect(decoded.signal).to.equal(Signal.SIGTERM);
     });
   });
 
