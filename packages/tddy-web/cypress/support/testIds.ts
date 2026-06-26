@@ -174,6 +174,11 @@ export const TEST_IDS = {
   sessionTrafficRateIn: "session-traffic-rate-in",
   sessionTrafficRateOut: "session-traffic-rate-out",
   sessionTrafficPing: "session-traffic-ping",
+
+  // Terminal control mutex — "Claim terminal" CTA
+  terminalControlOverlay: "terminal-control-overlay",
+  terminalClaimBtn: "terminal-claim-btn",
+  terminalControlHolder: "terminal-control-holder",
 } as const;
 
 // ---------------------------------------------------------------------------

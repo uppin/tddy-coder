@@ -13,10 +13,10 @@ use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id
 use tddy_core::{BranchWorktreeIntent, Changeset, ChangesetWorkflow};
 use tddy_rpc::{Request, Response, Status, Streaming};
 use tddy_service::proto::connection::{
-    AgentInfo, ConnectSessionRequest, ConnectSessionResponse,
-    ConnectionService as ConnectionServiceTrait, CreateProjectRequest, CreateProjectResponse,
-    DeleteSessionRequest, DeleteSessionResponse, EligibleDaemonEntry, ListAgentsRequest,
-    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
+    AgentInfo, ClaimTerminalControlRequest, ClaimTerminalControlResponse, ConnectSessionRequest,
+    ConnectSessionResponse, ConnectionService as ConnectionServiceTrait, CreateProjectRequest,
+    CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse, EligibleDaemonEntry,
+    ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
     ListProjectsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
     ListSessionsRequest, ListSessionsResponse, ListTerminalSessionsRequest,
@@ -29,12 +29,13 @@ use tddy_service::proto::connection::{
     SessionTerminalInput, SessionTerminalOutput, Signal, SignalSessionRequest,
     SignalSessionResponse, StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
     StartTerminalSessionResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    StreamTerminalOutputRequest, TerminalSessionInfo, ToolInfo, WorkflowFileEntry, WorktreeRow,
+    StreamTerminalOutputRequest, TerminalControlEvent, TerminalSessionInfo, ToolInfo,
+    WatchTerminalControlRequest, WorkflowFileEntry, WorktreeRow,
 };
 use uuid::Uuid;
 
 use crate::agent_list_mapping::agent_allowlist_rows;
-use crate::claude_cli_session::{ClaudeCliSessionManager, MAIN_TERMINAL_ID};
+use crate::claude_cli_session::{ClaimOutcome, ClaudeCliSessionManager, MAIN_TERMINAL_ID};
 use crate::config::DaemonConfig;
 use crate::livekit_peer_discovery::{local_instance_id_for_config, LiveKitDiscoveryHandles};
 use crate::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
@@ -55,8 +56,8 @@ use crate::worktrees::{self, RemoveWorktreeError, WorktreeStatsCache};
 use tddy_service::proto::connection::{
     DemoVmState, ExecuteToolRequest, ExecuteToolResponse, GetDemoVmStatusRequest,
     GetDemoVmStatusResponse, ListExecToolsRequest, ListExecToolsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ToolCallInfo as ProtoToolCallInfo,
-    StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse, StartDemoVmRequest,
+    StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, ToolCallInfo as ProtoToolCallInfo,
 };
 use tddy_task::TaskRegistry;
 
@@ -184,6 +185,60 @@ impl Stream for MpscTerminalOutputStream {
 }
 
 impl Unpin for MpscTerminalOutputStream {}
+
+/// Stream adapter backed by an mpsc channel for [`TerminalControlEvent`] server-streaming.
+pub struct MpscControlEventStream {
+    rx: tokio::sync::mpsc::UnboundedReceiver<TerminalControlEvent>,
+}
+
+impl Stream for MpscControlEventStream {
+    type Item = Result<TerminalControlEvent, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.rx.poll_recv(cx) {
+            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+impl Unpin for MpscControlEventStream {}
+
+/// Relay task for `WatchTerminalControl`: forwards `ControlChangeEvent` broadcasts scoped to
+/// `session_id` as `TerminalControlEvent` messages into `tx`, computing `you_are_controller`
+/// by re-validating the watcher's stored `control_token` on each change.
+async fn relay_control_events(
+    session_id: String,
+    control_token: String,
+    manager: Arc<crate::claude_cli_session::ClaudeCliSessionManager>,
+    mut broadcast_rx: tokio::sync::broadcast::Receiver<
+        crate::claude_cli_session::ControlChangeEvent,
+    >,
+    tx: tokio::sync::mpsc::UnboundedSender<TerminalControlEvent>,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+    loop {
+        match broadcast_rx.recv().await {
+            Ok(change) if change.session_id == session_id => {
+                let you = manager.verify_control(&session_id, &control_token).await;
+                let event = TerminalControlEvent {
+                    holder_screen_id: change.holder_screen_id,
+                    you_are_controller: you,
+                };
+                if tx.send(event).is_err() {
+                    break;
+                }
+            }
+            Ok(_) => {}
+            Err(RecvError::Lagged(_)) => {}
+            Err(RecvError::Closed) => break,
+        }
+    }
+}
 
 /// Per-session QEMU demo VM lifecycle state.
 enum DemoVmHandle {
@@ -1605,6 +1660,17 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             session_id,
             terminal_id
         );
+
+        if !self
+            .claude_cli_manager
+            .verify_control(&session_id, &first.control_token)
+            .await
+        {
+            return Err(Status::failed_precondition(
+                "terminal controlled by another screen",
+            ));
+        }
+
         let handle = self
             .claude_cli_manager
             .get_terminal(&session_id, &terminal_id)
@@ -1634,8 +1700,15 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         // Spawn a task to forward subsequent input chunks to stdin.
         let stdin_tx2 = stdin_tx.clone();
+        let manager2 = Arc::clone(&self.claude_cli_manager);
         tokio::spawn(async move {
             while let Some(Ok(msg)) = in_stream.next().await {
+                if !manager2
+                    .verify_control(&session_id, &msg.control_token)
+                    .await
+                {
+                    break;
+                }
                 if !msg.data.is_empty() {
                     let _ = stdin_tx2.send(bytes::Bytes::from(msg.data));
                 }
@@ -1761,6 +1834,17 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         let session_id = req.session_id.trim().to_string();
         let terminal_id = resolved_terminal_id(&req.terminal_id).to_string();
+
+        if !self
+            .claude_cli_manager
+            .verify_control(&session_id, &req.control_token)
+            .await
+        {
+            return Err(Status::failed_precondition(
+                "terminal controlled by another screen",
+            ));
+        }
+
         let handle = self
             .claude_cli_manager
             .get_terminal(&session_id, &terminal_id)
@@ -2115,7 +2199,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     .as_millis() as u64,
             };
             if let Err(e) = crate::tool_call_log::append_tool_call(&session_dir, &record) {
-                log::warn!("tool_call_log: failed to persist tool call for session {}: {}", req.session_id, e);
+                log::warn!(
+                    "tool_call_log: failed to persist tool call for session {}: {}",
+                    req.session_id,
+                    e
+                );
             }
         }
 
@@ -2239,9 +2327,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         body,
                     )
                     .await?;
-                    let inner = ListSessionToolCallsResponse::decode(out.as_slice()).map_err(|e| {
-                        Status::internal(format!("decode ListSessionToolCallsResponse: {e}"))
-                    })?;
+                    let inner =
+                        ListSessionToolCallsResponse::decode(out.as_slice()).map_err(|e| {
+                            Status::internal(format!("decode ListSessionToolCallsResponse: {e}"))
+                        })?;
                     return Ok(Response::new(inner));
                 }
                 Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
@@ -2543,6 +2632,82 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         };
         Ok(Response::new(resp))
     }
+
+    // --- terminal control mutex ---
+
+    type WatchTerminalControlStream = MpscControlEventStream;
+
+    /// Claim exclusive input control of a session's terminals.
+    async fn claim_terminal_control(
+        &self,
+        request: Request<ClaimTerminalControlRequest>,
+    ) -> Result<Response<ClaimTerminalControlResponse>, Status> {
+        let req = request.into_inner();
+        let _github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let outcome = self
+            .claude_cli_manager
+            .claim_control(&req.session_id, &req.screen_id, req.steal)
+            .await;
+        let resp = match outcome {
+            ClaimOutcome::Granted { control_token } => ClaimTerminalControlResponse {
+                granted: true,
+                control_token,
+                current_holder_screen_id: String::new(),
+            },
+            ClaimOutcome::Denied { holder_screen_id } => ClaimTerminalControlResponse {
+                granted: false,
+                control_token: String::new(),
+                current_holder_screen_id: holder_screen_id,
+            },
+        };
+        Ok(Response::new(resp))
+    }
+
+    /// Watch for control-lease changes on a session; emits a snapshot immediately, then one event
+    /// per lease change.
+    async fn watch_terminal_control(
+        &self,
+        request: Request<WatchTerminalControlRequest>,
+    ) -> Result<Response<Self::WatchTerminalControlStream>, Status> {
+        let req = request.into_inner();
+        let _github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+
+        let session_id = req.session_id.clone();
+        let control_token = req.control_token.clone();
+
+        let you_are_controller = self
+            .claude_cli_manager
+            .verify_control(&session_id, &control_token)
+            .await;
+        let holder_screen_id = self
+            .claude_cli_manager
+            .current_control(&session_id)
+            .await
+            .map(|l| l.holder_screen_id)
+            .unwrap_or_default();
+
+        let broadcast_rx = self.claude_cli_manager.subscribe_control();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<TerminalControlEvent>();
+
+        let snapshot = TerminalControlEvent {
+            holder_screen_id,
+            you_are_controller,
+        };
+        let _ = tx.send(snapshot);
+
+        let manager = Arc::clone(&self.claude_cli_manager);
+        tokio::spawn(relay_control_events(
+            session_id,
+            control_token,
+            manager,
+            broadcast_rx,
+            tx,
+        ));
+
+        Ok(Response::new(MpscControlEventStream { rx }))
+    }
 }
 
 fn map_remove_worktree_error(e: RemoveWorktreeError) -> Status {
@@ -2631,6 +2796,7 @@ mod signal_session_unit_tests {
             session_token: "bad-token".to_string(),
             session_id: "any".to_string(),
             signal: Signal::Sigint as i32,
+            control_token: String::new(),
         });
         let result = service.signal_session(request).await;
         assert!(result.is_err(), "invalid token should return error");
@@ -2646,6 +2812,7 @@ mod signal_session_unit_tests {
             session_token: "valid".to_string(),
             session_id: "no-such-session".to_string(),
             signal: Signal::Sigterm as i32,
+            control_token: String::new(),
         });
         let result = service.signal_session(request).await;
         assert!(result.is_err(), "missing session should return error");
@@ -2672,6 +2839,7 @@ mod signal_session_unit_tests {
             session_token: "valid".to_string(),
             session_id: "sigkill-session".to_string(),
             signal: Signal::Sigkill as i32,
+            control_token: String::new(),
         });
         let response = service.signal_session(request).await.unwrap();
         assert!(response.into_inner().ok);

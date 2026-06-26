@@ -40,6 +40,11 @@ service ConnectionService {
   rpc StartDemoVm(StartDemoVmRequest) returns (StartDemoVmResponse);
   rpc StopDemoVm(StopDemoVmRequest) returns (StopDemoVmResponse);
   rpc GetDemoVmStatus(GetDemoVmStatusRequest) returns (GetDemoVmStatusResponse);
+  // Single-screen terminal control mutex — at most one screen controls a session's terminals at a
+  // time. ClaimTerminalControl issues or steals the exclusive control token; WatchTerminalControl
+  // streams ownership changes so a displaced screen can render the "Claim terminal" CTA.
+  rpc ClaimTerminalControl(ClaimTerminalControlRequest) returns (ClaimTerminalControlResponse);
+  rpc WatchTerminalControl(WatchTerminalControlRequest) returns (stream TerminalControlEvent);
 }
 
 message ListToolsRequest {}
@@ -194,8 +199,10 @@ enum Signal {
 
 message SignalSessionRequest {
   string session_token = 1;
-  string session_id = 2;
-  int32 signal = 3;
+  string session_id    = 2;
+  int32  signal        = 3;
+  // Control token; required when the session has an active terminal controller.
+  string control_token = 4;
 }
 
 message SignalSessionResponse {
@@ -304,6 +311,9 @@ message SessionTerminalInput {
   bytes  data          = 3;
   // Target terminal; empty resolves to the reserved main ("claude") terminal.
   string terminal_id   = 4;
+  // Control token from ClaimTerminalControl; must match the current holder token or the input is
+  // rejected with FAILED_PRECONDITION (if the session has an active controller).
+  string control_token = 5;
 }
 
 message SessionTerminalOutput {
@@ -326,6 +336,8 @@ message SendTerminalInputResponse {}
 message StartTerminalSessionRequest {
   string session_token = 1;
   string session_id    = 2;
+  // Control token; required when the session has an active terminal controller.
+  string control_token = 3;
 }
 
 message StartTerminalSessionResponse {
@@ -337,6 +349,8 @@ message StopTerminalSessionRequest {
   string session_token = 1;
   string session_id    = 2;
   string terminal_id   = 3;
+  // Control token; required when the session has an active terminal controller.
+  string control_token = 4;
 }
 
 message StopTerminalSessionResponse {
@@ -472,4 +486,40 @@ message GetDemoVmStatusResponse {
   string      message       = 3;
   // Present when state = RUNNING and an app port is configured (e.g. "http://localhost:8080").
   string      share_url     = 4;
+}
+
+// --- Single-screen terminal control mutex ---
+
+message ClaimTerminalControlRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  // Stable per-browser-tab screen identity (see presenceIdentity.ts / screenId.ts).
+  string screen_id     = 3;
+  // When false, only grants if the lease is currently unheld or already held by this screen.
+  // When true, always grants — evicts the previous holder and notifies via WatchTerminalControl.
+  bool   steal         = 4;
+}
+
+message ClaimTerminalControlResponse {
+  bool   granted                  = 1;
+  // Set when granted = true; present this token in subsequent control RPCs.
+  string control_token            = 2;
+  // Set when granted = false; identifies the screen currently holding the lease.
+  string current_holder_screen_id = 3;
+}
+
+message WatchTerminalControlRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  // The control token held by this screen (from ClaimTerminalControlResponse). Empty is valid for
+  // a non-controlling observer that wants to watch for when the lease becomes available.
+  string control_token = 3;
+}
+
+// Emitted once on subscribe (snapshot) and again whenever the lease changes.
+message TerminalControlEvent {
+  // Screen id of the current holder; empty when no screen holds the lease.
+  string holder_screen_id   = 1;
+  // True if the subscribing screen is the current controller (its token matches the lease).
+  bool   you_are_controller = 2;
 }

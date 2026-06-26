@@ -11,6 +11,7 @@ import { useTrafficMeterRegistry } from "../../rpc/transportProvider";
 import type { TrafficMeter } from "../../rpc/trafficMeter";
 import { Button } from "../ui/button";
 import { CreateSessionPane } from "./CreateSessionPane";
+import type { TerminalControlState } from "./terminalControlState";
 
 // ---------------------------------------------------------------------------
 // Local hook — subscribe to a TrafficMeter and return a live snapshot.
@@ -51,6 +52,8 @@ interface SessionMainPaneProps {
   sessionToken?: string;
   onCancelCreate?: () => void;
   onSessionCreated?: (sessionId: string) => void;
+  // Terminal control state — when present and not the controller, renders a "Claim terminal" CTA.
+  terminalControl?: TerminalControlState & { onClaim: () => void };
 }
 
 export function SessionMainPane({
@@ -69,6 +72,7 @@ export function SessionMainPane({
   sessionToken = "",
   onCancelCreate,
   onSessionCreated,
+  terminalControl,
 }: SessionMainPaneProps) {
   const isConnected =
     attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
@@ -147,6 +151,29 @@ export function SessionMainPane({
               {attachment.status === "connected-grpc" && (
                 <div className="flex-1 min-h-0 text-xs text-muted-foreground p-4">
                   gRPC terminal connected
+                </div>
+              )}
+              {/* Terminal control mutex overlay */}
+              {terminalControl && !terminalControl.isController && (
+                <div
+                  data-testid="terminal-control-overlay"
+                  className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm"
+                >
+                  <p className="text-sm text-muted-foreground mb-1">
+                    Controlled by another screen
+                  </p>
+                  <p
+                    data-testid="terminal-control-holder"
+                    className="text-xs text-muted-foreground mb-4 font-mono"
+                  >
+                    {terminalControl.holderScreenId}
+                  </p>
+                  <Button
+                    data-testid="terminal-claim-btn"
+                    onClick={terminalControl.onClaim}
+                  >
+                    Claim terminal
+                  </Button>
                 </div>
               )}
               {/* Inspector overlay */}
