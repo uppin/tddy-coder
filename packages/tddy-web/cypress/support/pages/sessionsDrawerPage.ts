@@ -41,6 +41,14 @@ export const sessionsDrawerPage = {
   drawer: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsDrawer, { timeout: 5000, ...options }),
 
+  /** The close button in the drawer header (collapses to strip on desktop, hides on mobile). */
+  drawerCloseBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsDrawerCloseBtn, { timeout: 5000, ...options }),
+
+  /** The open button in strip mode (expands the drawer). */
+  drawerOpenBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsDrawerOpenBtn, { timeout: 5000, ...options }),
+
   /** A single clickable drawer item for the given session id. */
   drawerItem: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsDrawerItem(sessionId), { timeout: 5000, ...options }),

@@ -1,7 +1,8 @@
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 /// Domain model for a GitHub user (not proto — converted in auth_service).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitHubUser {
     pub id: u64,
     pub login: String,

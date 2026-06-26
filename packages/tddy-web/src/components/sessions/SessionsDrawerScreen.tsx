@@ -5,6 +5,7 @@ import { useHttpClient } from "../../rpc/transportProvider";
 import { TooltipProvider } from "../ui/tooltip";
 import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
+import { SessionTrafficBar } from "./SessionTrafficBar";
 import { useSessionAttachment } from "./useSessionAttachment";
 import { nextInspectorState } from "./inspectorState";
 import { useTerminalControl } from "./useTerminalControl";
@@ -34,7 +35,17 @@ export function SessionsDrawerScreen() {
   const deepLinkActivatedRef = useRef(false);
   const [mode, setMode] = useState<"list" | "creating">("list");
 
+  const [sessionListOpen, setSessionListOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    const isMobile = window.innerWidth < 768;
+    const hasSelection = parseSessionsDrawerSessionId(window.location.hash.slice(1)) !== null;
+    return !(isMobile && hasSelection);
+  });
+
   const { state: attachment, connectSession, resumeSession, deleteSession, signalSession } = useSessionAttachment();
+
+  const isConnected =
+    attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
 
   const connectedSessionId =
     attachment.status === "connected-grpc" || attachment.status === "connected-livekit"
@@ -91,6 +102,20 @@ export function SessionsDrawerScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortedSessions]);
 
+  // React to attachment status changes — open inspector for non-connected states, close when connected.
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    const isConnected =
+      attachment.status === "connected-livekit" ||
+      attachment.status === "connected-grpc";
+    if (isConnected) {
+      setInspectorState("closed");
+    } else if (attachment.status === "idle" || attachment.status === "error") {
+      setInspectorState((prev) => (prev === "expanded" ? "expanded" : "open"));
+    }
+    // "connecting": no change — preserve current state during the handshake
+  }, [attachment.status, selectedSessionId]);
+
   // When a session is selected in the drawer, auto-connect if it is active
   const handleSelectSession = (sessionId: string) => {
     setSelectedSessionId(sessionId);
@@ -104,6 +129,10 @@ export function SessionsDrawerScreen() {
         ? "open"
         : "closed",
     );
+    // Auto-close the session list on mobile when a session is selected
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      setSessionListOpen(false);
+    }
     if (session?.isActive) {
       connectSession(sessionId, sessionToken, client).catch((err) => {
         console.debug("[SessionsDrawerScreen] connectSession error", err);
@@ -173,25 +202,31 @@ export function SessionsDrawerScreen() {
           selectedSessionId={selectedSessionId}
           onSelectSession={handleSelectSession}
           onCreateSession={handleCreateSession}
+          isOpen={sessionListOpen}
+          onClose={() => setSessionListOpen(false)}
+          onOpen={() => setSessionListOpen(true)}
         />
-        <SessionMainPane
-          selectedSession={selectedSession}
-          attachment={attachment}
-          inspectorState={inspectorState}
-          onToggleInspector={handleInspectorToggle}
-          onInspectorClose={handleInspectorClose}
-          onInspectorExpand={handleInspectorExpand}
-          onInspectorRestore={handleInspectorRestore}
-          onResume={handleResume}
-          onDelete={handleDelete}
-          onTerminate={handleTerminate}
-          isCreating={mode === "creating"}
-          client={client}
-          sessionToken={sessionToken}
-          onCancelCreate={handleCancelCreate}
-          onSessionCreated={handleSessionCreated}
-          terminalControl={connectedSessionId ? { ...controlState, onClaim: claimControl } : undefined}
-        />
+        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
+          {selectedSession && isConnected && <SessionTrafficBar attachment={attachment} />}
+          <SessionMainPane
+            selectedSession={selectedSession}
+            attachment={attachment}
+            inspectorState={inspectorState}
+            onToggleInspector={handleInspectorToggle}
+            onInspectorClose={handleInspectorClose}
+            onInspectorExpand={handleInspectorExpand}
+            onInspectorRestore={handleInspectorRestore}
+            onResume={handleResume}
+            onDelete={handleDelete}
+            onTerminate={handleTerminate}
+            isCreating={mode === "creating"}
+            client={client}
+            sessionToken={sessionToken}
+            onCancelCreate={handleCancelCreate}
+            onSessionCreated={handleSessionCreated}
+            terminalControl={connectedSessionId ? { ...controlState, onClaim: claimControl } : undefined}
+          />
+        </div>
       </div>
     </TooltipProvider>
   );

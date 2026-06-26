@@ -334,3 +334,52 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
     cy.get(`[data-testid="sessions-inspector-tools-panel"]`, { timeout: 100 }).should("not.exist");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Attachment-driven inspector: auto-open/close based on connection status
+// ---------------------------------------------------------------------------
+
+describe("SessionInspectorAcceptance — attachment-driven auto-open/close", () => {
+  beforeEach(() => {
+    cy.clearLocalStorage();
+    cy.clearAllSessionStorage();
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+  });
+
+  it("closes the inspector when a session becomes connected", () => {
+    // Given — disconnected session selected; inspector starts open
+    interceptConnectionRpcs([DISCONNECTED_SESSION]);
+    interceptResumeSession(DISCONNECTED_SESSION.sessionId);
+
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
+
+    // When — user resumes the session (triggers attachment → connected-livekit)
+    sessionsDrawerPage.inspectorResumeBtn(DISCONNECTED_SESSION.sessionId).click();
+    cy.wait("@resumeSession");
+
+    // Then — inspector closes to reveal the terminal
+    sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "closed");
+  });
+
+  it("opens the inspector when a connected session attachment becomes idle", () => {
+    // Given — connected session selected; also list a disconnected session to switch to
+    interceptConnectionRpcs([CONNECTED_SESSION_A, DISCONNECTED_SESSION]);
+    interceptConnectSession({ livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" });
+
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+    sessionsDrawerPage.drawerItem(CONNECTED_SESSION_A.sessionId).click();
+    cy.wait("@connectSession");
+    sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "closed");
+
+    // When — simulate session going idle by selecting a disconnected session then reselecting
+    // (The attachment hook resets to idle when the session changes)
+    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+
+    // Then — inspector opens for the now-disconnected selection
+    sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
+  });
+});

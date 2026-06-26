@@ -1,38 +1,13 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { SessionInspectorDrawer } from "./SessionInspectorDrawer";
-import { SessionTrafficStrip } from "./SessionTrafficStrip";
-import { useSessionLiveKitRoom } from "./useSessionLiveKitRoom";
-import { useLiveKitPing } from "../../rpc/livekitPing";
-import { useTrafficMeterRegistry } from "../../rpc/transportProvider";
-import type { TrafficMeter } from "../../rpc/trafficMeter";
 import { Button } from "../ui/button";
 import { CreateSessionPane } from "./CreateSessionPane";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
 import type { TerminalControlState } from "./terminalControlState";
-
-// ---------------------------------------------------------------------------
-// Local hook — subscribe to a TrafficMeter and return a live snapshot.
-// ---------------------------------------------------------------------------
-
-type MeterSnap = { bytesIn: number; bytesOut: number; inRate: number; outRate: number };
-const ZERO_SNAP: MeterSnap = { bytesIn: 0, bytesOut: 0, inRate: 0, outRate: 0 };
-
-function useMeterSnapshot(meter: TrafficMeter | null): MeterSnap {
-  const [snap, setSnap] = useState<MeterSnap>(() => (meter ? meter.snapshot() : ZERO_SNAP));
-  useEffect(() => {
-    if (!meter) {
-      setSnap(ZERO_SNAP);
-      return;
-    }
-    setSnap(meter.snapshot());
-    return meter.subscribe(() => setSnap(meter.snapshot()));
-  }, [meter]);
-  return snap;
-}
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
@@ -78,17 +53,6 @@ export function SessionMainPane({
   const isConnected =
     attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
 
-  // Traffic strip data — live meter snapshots + WebRTC ping.
-  const livekitRoomName =
-    attachment.status === "connected-livekit" ? attachment.livekitRoom : null;
-  const { room } = useSessionLiveKitRoom(attachment);
-  const pingMs = useLiveKitPing(room);
-  const meterRegistry = useTrafficMeterRegistry();
-  const httpSnap = useMeterSnapshot(meterRegistry?.get("http") ?? null);
-  const livekitSnap = useMeterSnapshot(
-    livekitRoomName && meterRegistry ? meterRegistry.get(livekitRoomName) : null,
-  );
-
   return (
     <div
       data-testid="sessions-detail-pane"
@@ -105,17 +69,6 @@ export function SessionMainPane({
 
       {!isCreating && (
         <>
-          {/* Traffic strip — only visible when connected via LiveKit */}
-          {selectedSession && attachment.status === "connected-livekit" && (
-            <SessionTrafficStrip
-              bytesIn={httpSnap.bytesIn + livekitSnap.bytesIn}
-              bytesOut={httpSnap.bytesOut + livekitSnap.bytesOut}
-              inRate={httpSnap.inRate + livekitSnap.inRate}
-              outRate={httpSnap.outRate + livekitSnap.outRate}
-              pingMs={pingMs}
-            />
-          )}
-
           {/* Inspector toggle button — always visible when a session is selected */}
           {selectedSession && (
             <div className="flex justify-end px-2 py-1 border-b border-border flex-shrink-0">

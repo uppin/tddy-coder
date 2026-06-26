@@ -126,6 +126,10 @@ export const TEST_IDS = {
   tasksOutputPane: "tasks-output-pane",
   tasksOutputPaneEmpty: "tasks-output-pane-empty",
 
+  // Sessions drawer — open/close toggle
+  sessionsDrawerCloseBtn: "sessions-drawer-close-btn",
+  sessionsDrawerOpenBtn: "sessions-drawer-open-btn",
+
   // Sessions drawer — create session
   sessionsDrawerNewBtn: "sessions-drawer-new-btn",
   createSessionPane: "create-session-pane",
