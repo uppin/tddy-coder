@@ -126,12 +126,12 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
     /**
      * Assert that no element inside the terminal has document focus —
      * used by preventFocusOnTap tests.
+     * Uses .should() so Cypress retries until the assertion passes or times out.
      */
     expectNoFocus(message = "terminal should not have focus") {
-      cy.document().then((doc) => {
-        const active = doc.activeElement;
-        const term = doc.querySelector(`[data-testid='${TEST_IDS.ghosttyTerminal}']`);
-        expect(term && active && term.contains(active), message).to.be.false;
+      terminal().should(($term) => {
+        const active = $term[0].ownerDocument.activeElement;
+        expect($term[0].contains(active), message).to.be.false;
       });
       return this;
     },

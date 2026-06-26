@@ -55,9 +55,22 @@ export const connectionPage = {
   /** The open signal dropdown menu for a session. */
   signalMenu: (sessionId: string) => byTestId(signalMenu(sessionId)),
 
-  signalSigint: (sessionId: string) => byTestId(signalSigint(sessionId)),
-  signalSigterm: (sessionId: string) => byTestId(signalSigterm(sessionId)),
-  signalSigkill: (sessionId: string) => byTestId(signalSigkill(sessionId)),
+  /**
+   * Click the signal dropdown trigger and wait for the menu to appear.
+   * Use this instead of `signalDropdown(...).click()` so subsequent signal
+   * button lookups don't race against conditional rendering.
+   */
+  openSignalDropdown: (sessionId: string) => {
+    byTestId(signalDropdownId(sessionId), { timeout: 5000 }).click();
+    byTestId(signalMenu(sessionId), { timeout: 5000 }).should("exist");
+  },
+
+  signalSigint: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(signalSigint(sessionId), { timeout: 5000, ...options }),
+  signalSigterm: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(signalSigterm(sessionId), { timeout: 5000, ...options }),
+  signalSigkill: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(signalSigkill(sessionId), { timeout: 5000, ...options }),
 
   // ---------------------------------------------------------------------------
   // Bulk selection / delete
