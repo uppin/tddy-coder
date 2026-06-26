@@ -31,17 +31,24 @@ import { createConnectTransport } from "@connectrpc/connect-web";
 import type { DescService } from "@bufbuild/protobuf";
 import { createLiveKitTransport } from "tddy-livekit-web";
 import type { Room } from "livekit-client";
+import { TrafficMeterRegistry } from "./trafficMeter";
+import { createTrafficInterceptor } from "./httpTrafficInterceptor";
 
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
 
-/** Factory for the production HTTP transport (binary Connect protocol, same-origin /rpc). */
-function createDefaultHttpTransport(): Transport {
+/**
+ * Factory for the production HTTP transport (binary Connect protocol, same-origin /rpc).
+ * When a registry is provided, attaches a traffic-metering interceptor.
+ */
+function createDefaultHttpTransport(registry?: TrafficMeterRegistry): Transport {
+  const interceptors = registry ? [createTrafficInterceptor(registry.get("http"))] : [];
   return createConnectTransport({
     baseUrl:
       typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
     useBinaryFormat: true,
+    interceptors,
   });
 }
 
@@ -56,8 +63,14 @@ function createDefaultLiveKitTransport(
   room: Room,
   targetIdentity: string,
   options?: LiveKitTransportOptions,
+  registry?: TrafficMeterRegistry,
 ): Transport {
-  return createLiveKitTransport({ room, targetIdentity, debug: options?.debug });
+  return createLiveKitTransport({
+    room,
+    targetIdentity,
+    debug: options?.debug,
+    meter: registry?.get(room.name || "livekit"),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -67,6 +80,7 @@ function createDefaultLiveKitTransport(
 interface RpcTransportContextValue {
   readonly httpTransport: Transport;
   readonly liveKitFactory: (room: Room, targetIdentity: string, options?: LiveKitTransportOptions) => Transport;
+  readonly meterRegistry: TrafficMeterRegistry;
 }
 
 const RpcTransportContext = createContext<RpcTransportContextValue | null>(null);
@@ -103,6 +117,11 @@ export function RpcTransportProvider({
   liveKitFactory,
   children,
 }: RpcTransportProviderProps) {
+  // Each provider instance owns its own meter registry — isolated from other
+  // provider subtrees (prevents test pollution when multiple providers exist).
+  const registryRef = useRef<TrafficMeterRegistry | null>(null);
+  registryRef.current ??= new TrafficMeterRegistry();
+
   // Stable references — avoid rebuilding the context object on every render
   // when props haven't changed (the defaults are module-level constants).
   const httpRef = useRef<Transport | null>(null);
@@ -110,15 +129,18 @@ export function RpcTransportProvider({
     // Caller supplied an explicit transport — use it directly.
     httpRef.current = httpTransport;
   } else if (httpRef.current === null) {
-    // First render without an explicit transport — create the default once.
-    httpRef.current = createDefaultHttpTransport();
+    // First render without an explicit transport — create the default once, with metering.
+    httpRef.current = createDefaultHttpTransport(registryRef.current);
   }
 
-  const lkFactory = liveKitFactory ?? createDefaultLiveKitTransport;
+  const registry = registryRef.current;
+  const lkFactory = liveKitFactory ??
+    ((room, targetIdentity, opts) => createDefaultLiveKitTransport(room, targetIdentity, opts, registry));
 
   const value: RpcTransportContextValue = {
     httpTransport: httpRef.current,
     liveKitFactory: lkFactory,
+    meterRegistry: registry,
   };
 
   return (
@@ -133,11 +155,21 @@ export function RpcTransportProvider({
 // ---------------------------------------------------------------------------
 
 /**
+ * Return the traffic meter registry for this component's context, or null when
+ * no `RpcTransportProvider` wraps the component. Components that display meter
+ * data should treat null as "no provider → show zeros".
+ */
+export function useTrafficMeterRegistry(): TrafficMeterRegistry | null {
+  return useContext(RpcTransportContext)?.meterRegistry ?? null;
+}
+
+/**
  * Return the HTTP transport for this component's context.
  *
  * When no `RpcTransportProvider` wraps this component, a fresh default
  * transport is created and memoised per component instance — identical to the
- * pre-DI inline-factory behaviour.
+ * pre-DI inline-factory behaviour. The fallback transport has no metering
+ * interceptor (no registry is available without a provider).
  */
 export function useHttpTransport(): Transport {
   const ctx = useContext(RpcTransportContext);
@@ -172,6 +204,7 @@ export function useHttpClient<S extends DescService>(service: S): Client<S> {
  */
 export function useLiveKitTransportFactory(): (room: Room, targetIdentity: string, options?: LiveKitTransportOptions) => Transport {
   const ctx = useContext(RpcTransportContext);
+  // Fallback (no provider): no meter registry available, so no metering.
   return ctx?.liveKitFactory ?? createDefaultLiveKitTransport;
 }
 
