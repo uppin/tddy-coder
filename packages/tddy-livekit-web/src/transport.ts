@@ -71,6 +71,8 @@ export interface LiveKitTransportOptions {
   room: Room;
   targetIdentity: string;
   debug?: boolean;
+  /** Optional traffic meter for recording inbound/outbound payload bytes. */
+  meter?: { record(dir: "in" | "out", bytes: number): void };
 }
 
 export class LiveKitTransport implements Transport {
@@ -83,11 +85,13 @@ export class LiveKitTransport implements Transport {
   >();
   private pendingStreams = new Map<number, AsyncQueue<Uint8Array>>();
   private listener: ((payload: Uint8Array, participant?: { identity: string }, topic?: string) => void) | null = null;
+  private meter: { record(dir: "in" | "out", bytes: number): void } | undefined;
 
   constructor(options: LiveKitTransportOptions) {
     this.room = options.room;
     this.targetIdentity = options.targetIdentity;
     this.debug = options.debug ?? false;
+    this.meter = options.meter;
 
     this.listener = (
       payload: Uint8Array,
@@ -97,6 +101,8 @@ export class LiveKitTransport implements Transport {
     ) => {
       if (topic !== RPC_TOPIC) return;
       if (participant != null && participant.identity != null && participant.identity !== this.targetIdentity) return;
+
+      this.meter?.record("in", payload.length);
 
       try {
         const response = fromBinary(RpcResponseSchema, payload) as RpcResponse;
@@ -156,6 +162,7 @@ export class LiveKitTransport implements Transport {
 
   private publishRequest(request: RpcRequest): void {
     const payload = toBinary(RpcRequestSchema, request as any);
+    this.meter?.record("out", payload.length);
     if (this.debug) {
       console.log(
         `[LiveKitTransport] publish request_id=${request.requestId} bytes=${payload.length} target=${this.targetIdentity}`

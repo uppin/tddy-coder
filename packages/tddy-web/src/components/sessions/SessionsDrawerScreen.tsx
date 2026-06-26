@@ -7,6 +7,7 @@ import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
 import { useSessionAttachment } from "./useSessionAttachment";
 import { nextInspectorState } from "./inspectorState";
+import { useTerminalControl } from "./useTerminalControl";
 import { sessionsDrawerPathForSession, parseSessionsDrawerSessionId } from "../../routing/appRoutes";
 import { Signal } from "../../gen/connection_pb";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
@@ -34,6 +35,12 @@ export function SessionsDrawerScreen() {
   const [mode, setMode] = useState<"list" | "creating">("list");
 
   const { state: attachment, connectSession, resumeSession, deleteSession, signalSession } = useSessionAttachment();
+
+  const connectedSessionId =
+    attachment.status === "connected-grpc" || attachment.status === "connected-livekit"
+      ? attachment.sessionId
+      : null;
+  const { controlState, claim: claimControl } = useTerminalControl(connectedSessionId, sessionToken);
 
   // Fetch sessions on mount
   useEffect(() => {
@@ -183,6 +190,7 @@ export function SessionsDrawerScreen() {
           sessionToken={sessionToken}
           onCancelCreate={handleCancelCreate}
           onSessionCreated={handleSessionCreated}
+          terminalControl={connectedSessionId ? { ...controlState, onClaim: claimControl } : undefined}
         />
       </div>
     </TooltipProvider>

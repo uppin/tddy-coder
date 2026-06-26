@@ -211,6 +211,113 @@ interface CreateSessionPaneProps {
 - `ListProjectBranches` — branch dropdown when "work on existing branch"
 - `StartSession` — create + start the session
 
+## Session Traffic Strip
+
+A thin `flex-shrink-0` strip rendered at the top of `SessionMainPane` whenever a session
+is in `connected-livekit` state. It provides live visibility into RPC throughput and
+connection health for the selected session.
+
+### Display
+
+The strip shows five values:
+
+| Field | Description |
+|-------|-------------|
+| ↓ rate | Live inbound throughput in B/s (or kB/s, MB/s) averaged over the last ~2 s |
+| ↑ rate | Live outbound throughput |
+| ↓ total | Cumulative session bytes received |
+| ↑ total | Cumulative session bytes sent |
+| Ping | Round-trip time to the LiveKit gateway in ms, or `—` when unavailable |
+
+### Metering scope
+
+Two transport layers are metered independently and summed for display:
+
+- **LiveKit data-channel** — per-session; counts exact wire payload bytes at the point
+  they are serialised/deserialised (outbound `publishRequest` payload, inbound
+  `DataReceived` payload).
+- **HTTP `/rpc`** — app-global; counts the binary-serialised protobuf message body of
+  each unary request and response via a Connect `Interceptor`.
+
+Both meters share a `TrafficMeterRegistry` (React context) keyed by scope:
+`"http"` for the HTTP transport and the LiveKit room name for the data-channel transport.
+
+### Ping measurement
+
+Ping uses the WebRTC peer-connection `getStats()` API (`currentRoundTripTime` from the
+succeeded candidate-pair), polled every 2 seconds. The value reflects the true network
+RTT to the LiveKit gateway. Displayed as `—` when the stats entry is absent or the Room
+is not yet connected.
+
+### Component hierarchy
+
+```
+SessionMainPane
+ ├─ SessionTrafficStrip        ← new, flex-shrink-0 top strip
+ ├─ Inspector toggle row       ← existing
+ └─ terminal container
+```
+
+`useSessionLiveKitRoom(attachment)` — new hook that connects a `Room` for the selected
+LiveKit session (mirrors `useCommonRoom`) and provides it to `useLiveKitPing` and the
+meter's room subscription.
+
+### Acceptance criteria
+
+1. The strip is visible at the top of `SessionMainPane` when a session is `connected-livekit`.
+2. The strip is absent when no session is selected or the session is `connected-grpc`/idle.
+3. Bytes-in and bytes-out counters start at 0 and grow monotonically within a session.
+4. Live rates reset toward 0 when no RPC traffic occurs for ≥ 2 s.
+5. Ping shows a numeric ms value when the WebRTC candidate-pair RTT is available.
+6. Ping shows `—` when RTT is null (Room not connected, stats unavailable).
+7. Switching sessions resets the session-scoped (LiveKit) meter to 0; the HTTP meter persists.
+
+## Terminal Control — "Claim terminal" CTA
+
+> **Updated: 2026-06-26** — Adds a single-screen control mutex to `SessionsDrawerScreen`.
+
+When a session has an active terminal controller (another browser tab or device), the
+`SessionMainPane` shows a **"Claim terminal"** overlay over the terminal container. The overlay
+names the holding screen and provides a button to steal control.
+
+### Overlay
+
+- Rendered inside `SessionMainPane` when `terminalControl.isController === false`.
+- Full-cover absolute scrim over the terminal container (`data-testid="terminal-control-overlay"`),
+  matching the `terminal-coder-unavailable` overlay style in `GhosttyTerminalLiveKit`.
+- Contains:
+  - A brief message: "Controlled by another screen".
+  - The holder screen identifier (`data-testid="terminal-control-holder"`).
+  - A primary `<Button>` labelled **"Claim terminal"** (`data-testid="terminal-claim-btn"`).
+- Clicking the button calls `onClaim()` → `ClaimTerminalControl({steal: true})`.
+- When this screen holds control (`isController === true`), no overlay is rendered.
+
+### Data flow
+
+1. `SessionsDrawerScreen` owns `useTerminalControl(connectedSessionId, sessionToken)`.
+2. On session attach, the hook calls `ClaimTerminalControl({steal: false})` to try to become
+   the controller. If denied, `controlState.isController = false` and the CTA shows.
+3. The hook then subscribes via `WatchTerminalControl` (reconnecting `for await` loop, same
+   pattern as `useTaskListStream`). Each `TerminalControlEvent` is folded through
+   `applyTerminalControlEvent` (pure reducer, `terminalControlState.ts`).
+4. `SessionsDrawerScreen` passes `{ ...controlState, onClaim }` as the `terminalControl` prop
+   to `SessionMainPane`.
+5. The `control_token` from `ClaimTerminalControlResponse` is stored in the hook and forwarded
+   in `SendTerminalInput` and any other control RPCs.
+
+### Screen identity
+
+`getScreenId()` (`src/lib/screenId.ts`) returns a stable per-tab id from `sessionStorage`,
+reusing the pattern of `presenceIdentity.ts`. Two browser tabs for the same user get distinct
+ids, so they do not share a lease.
+
+### New RPCs used
+
+- `ConnectionService.ClaimTerminalControl` — issued on session attach and on "Claim terminal" click.
+- `ConnectionService.WatchTerminalControl` — live stream of lease changes.
+
+---
+
 ## Known Limitations
 
 - The terminal in the main pane is a placeholder; real terminal mounting is out of scope.
@@ -219,3 +326,5 @@ interface CreateSessionPaneProps {
 - The old `ConnectionScreen` monolith is not retired by this change.
 - Background Shell stdio is not durably captured; only available live via `WatchTask` while
   the task is in the in-memory registry.
+- The HTTP `/rpc` meter is app-global (shared across all open sessions); only the LiveKit
+  meter is strictly per-session.

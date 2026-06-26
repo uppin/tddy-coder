@@ -317,6 +317,7 @@ async fn start_terminal_session_returns_fresh_terminal_id() {
         .start_terminal_session(Request::new(StartTerminalSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
+            control_token: String::new(),
         }))
         .await
         .expect("StartTerminalSession must succeed");
@@ -344,6 +345,7 @@ async fn list_terminal_sessions_returns_main_and_started() {
         .start_terminal_session(Request::new(StartTerminalSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
+            control_token: String::new(),
         }))
         .await
         .expect("StartTerminalSession must succeed")
@@ -387,6 +389,7 @@ async fn stop_terminal_session_removes_from_list() {
         .start_terminal_session(Request::new(StartTerminalSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
+            control_token: String::new(),
         }))
         .await
         .expect("StartTerminalSession must succeed")
@@ -399,6 +402,7 @@ async fn stop_terminal_session_removes_from_list() {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             terminal_id: started.clone(),
+            control_token: String::new(),
         }))
         .await
         .expect("StopTerminalSession must succeed");
@@ -436,6 +440,7 @@ async fn stop_terminal_session_rejecting_main_returns_invalid_argument() {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             terminal_id: MAIN_TERMINAL_ID.to_string(),
+            control_token: String::new(),
         }))
         .await
         .expect_err("stopping the main terminal must be rejected");
@@ -461,6 +466,7 @@ async fn terminal_session_rpcs_require_valid_token() {
         .start_terminal_session(Request::new(StartTerminalSessionRequest {
             session_token: "bad-token".to_string(),
             session_id: SESSION_ID.to_string(),
+            control_token: String::new(),
         }))
         .await
         .expect_err("StartTerminalSession with bad token must fail");
@@ -482,6 +488,7 @@ async fn terminal_session_rpcs_require_valid_token() {
             session_token: "bad-token".to_string(),
             session_id: SESSION_ID.to_string(),
             terminal_id: "anything".to_string(),
+            control_token: String::new(),
         }))
         .await
         .expect_err("StopTerminalSession with bad token must fail");
@@ -502,6 +509,7 @@ async fn stream_terminal_output_routes_by_terminal_id() {
         .start_terminal_session(Request::new(StartTerminalSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
+            control_token: String::new(),
         }))
         .await
         .expect("StartTerminalSession must succeed")
@@ -557,6 +565,7 @@ async fn send_terminal_input_targets_identified_terminal() {
         .start_terminal_session(Request::new(StartTerminalSessionRequest {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
+            control_token: String::new(),
         }))
         .await
         .expect("StartTerminalSession must succeed")
@@ -572,6 +581,7 @@ async fn send_terminal_input_targets_identified_terminal() {
             session_id: SESSION_ID.to_string(),
             data: format!("echo {marker}\n").into_bytes(),
             terminal_id: started.clone(),
+            control_token: String::new(),
         }))
         .await
         .expect("SendTerminalInput must succeed");
