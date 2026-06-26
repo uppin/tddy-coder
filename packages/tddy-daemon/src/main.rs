@@ -509,6 +509,26 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
+        // Spawn a task that SIGTERMs claude-cli sessions as soon as the daemon receives
+        // SIGTERM, independent of how long the HTTP server takes to drain open connections.
+        // This prevents orphaned Claude processes when systemd escalates to SIGKILL.
+        let kill_on_signal_manager = Arc::clone(&shared_claude_cli_manager);
+        let _kill_on_signal_task = tokio::spawn(async move {
+            #[cfg(unix)]
+            {
+                if let Ok(mut sig) = tokio::signal::unix::signal(
+                    tokio::signal::unix::SignalKind::terminate(),
+                ) {
+                    sig.recv().await;
+                    log::info!(
+                        target: "tddy_daemon",
+                        "SIGTERM received — killing all claude-cli sessions"
+                    );
+                    kill_on_signal_manager.kill_all().await;
+                }
+            }
+        });
+
         let res = tddy_daemon::server::run_server(
             host.as_str(),
             port,
@@ -522,6 +542,8 @@ fn main() -> anyhow::Result<()> {
         )
         .await;
 
+        // Also call kill_all after the server finishes (covers graceful ctrl-c shutdown
+        // and any sessions started while the first kill_all was already running).
         shared_claude_cli_manager.kill_all().await;
 
         if let Some(t) = inbound_task {
