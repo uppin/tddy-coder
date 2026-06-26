@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import type { Client } from "@connectrpc/connect";
 import { ConnectionService } from "../../gen/connection_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
@@ -11,6 +11,8 @@ import {
 
 export interface UseTerminalControlResult {
   controlState: TerminalControlState;
+  /** Ref to the control token granted by ClaimTerminalControl. Empty string until granted. */
+  controlTokenRef: React.MutableRefObject<string>;
   /** Steal control from the current holder (steal=true ClaimTerminalControl). */
   claim(): Promise<void>;
   /** Reset state (call when detaching from a session). */
@@ -108,5 +110,5 @@ export function useTerminalControl(
     setControlState(initialTerminalControlState);
   }, []);
 
-  return { controlState, claim, reset };
+  return { controlState, controlTokenRef, claim, reset };
 }

@@ -2,6 +2,11 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-06-26 — Browser DEBUG mask — config-driven terminal diagnostics
+
+- `DaemonConfig.debug: Option<String>` threaded through `run_server` → `ClientConfig.debug` and served at `GET /api/config`; browser picks up the mask for scoped `[tddy]` console logging
+- `dev.daemon.yaml` ships `debug: "tddy:term:*"` — covers all terminal namespaces; comment out or set `""` to disable
+
 ## 2026-06-26 — PTY terminal width fix — correct cols/rows on gRPC reconnect
 
 - `StreamTerminalOutputRequest` now accepts `initial_cols`/`initial_rows`; when non-zero the daemon resizes the PTY, drains stale broadcast output, and triggers a SIGWINCH redraw before forwarding live output — eliminates 220-column garbling on browser reconnect

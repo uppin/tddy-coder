@@ -41,6 +41,27 @@ The dev overlay **`HMR: N`** (bottom-left) only increments when the Vite client 
 
 Before starting, the script sends **`fuser -k -9`** on the daemon and Vite TCP ports. On a machine where those ports are shared, free them first or expect processes listening there to be signalled.
 
+## Browser DEBUG mask
+
+`dev.daemon.yaml` carries a top-level **`debug:`** key — a [`debug`](https://www.npmjs.com/package/debug)-package namespace mask served to the browser at **`GET /api/config`**. When set, the web app turns on scoped `[tddy]` console diagnostics. The default `dev.daemon.yaml` ships **`debug: "tddy:term:*"`**, which is aimed at debugging **terminal garbling / misalignment**.
+
+| Namespace | What it logs |
+|-----------|--------------|
+| `tddy:term:write` | Bytes written **into** the terminal (length + hex/escaped preview) |
+| `tddy:term:data` | Keystrokes / input sent **out** (`onData`) |
+| `tddy:term:resize` | `cols`×`rows` resize events |
+| `tddy:term:grpc` | gRPC terminal byte stream: recv length, ready/buffered state, hex preview, resize sequence |
+| `tddy:term:life` | Terminal lifecycle (init, open, initial `cols`/`rows`) |
+| `tddy:term:mouse` | Mouse / SGR forwarding |
+
+**Precedence** (the daemon value is the baseline):
+
+1. **`?debug=<mask>`** URL param — applies immediately for the session.
+2. **`localStorage.debug`** — a per-browser override (e.g. DevTools: `localStorage.debug = 'tddy:term:write'`) persists across sessions.
+3. **`debug:` from `/api/config`** — adopted on load, and **re-applied (invalidating any local override) only when the config value changes**.
+
+Set `debug: ""` (or comment it out) in `dev.daemon.yaml` to disable. The legacy standalone **Debug logging** checkbox still force-enables `tddy:term:*` for that terminal.
+
 ## Automated checks
 
 Static contract tests live in **`packages/tddy-e2e`** (`web_dev_contract` module and `tests/web_dev_script.rs`). Run:
