@@ -31,6 +31,10 @@ pub struct ClientConfig {
     /// Daemon: same allowlist as `ListAgents` / `allowed_agents` in YAML (for UI before RPC hydrates).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_agents: Vec<ClientAllowedAgent>,
+    /// Browser DEBUG mask (`debug`-package namespaces, e.g. `tddy:term:*`). From daemon `debug:` YAML;
+    /// the web app enables scoped `[tddy]` diagnostics from this. None = off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debug: Option<String>,
 }
 
 /// Serve static files from `bundle_path` on the given `host` and `port`.
@@ -101,4 +105,42 @@ where
         .await
         .map_err(|e| anyhow::anyhow!("web server error: {}", e))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_config() -> ClientConfig {
+        ClientConfig {
+            livekit_url: None,
+            livekit_room: None,
+            common_room: None,
+            daemon_mode: None,
+            allowed_agents: vec![],
+            debug: None,
+        }
+    }
+
+    #[test]
+    fn debug_mask_is_omitted_from_api_config_when_none() {
+        let json = serde_json::to_value(empty_config()).expect("serialize");
+        assert!(
+            json.get("debug").is_none(),
+            "debug must be skipped when None: {json}"
+        );
+    }
+
+    #[test]
+    fn debug_mask_is_serialized_when_set() {
+        let cfg = ClientConfig {
+            debug: Some("tddy:term:*".to_string()),
+            ..empty_config()
+        };
+        let json = serde_json::to_value(cfg).expect("serialize");
+        assert_eq!(
+            json.get("debug").and_then(|v| v.as_str()),
+            Some("tddy:term:*")
+        );
+    }
 }

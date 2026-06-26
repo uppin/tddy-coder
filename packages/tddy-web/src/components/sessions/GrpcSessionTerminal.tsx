@@ -14,6 +14,7 @@ interface GrpcSessionTerminalProps {
   sessionId: string;
   sessionToken: string;
   client: ConnectionClient;
+  controlToken?: string;
   onDisconnect?: () => void;
 }
 
@@ -21,12 +22,17 @@ export function GrpcSessionTerminal({
   sessionId,
   sessionToken,
   client,
+  controlToken,
   onDisconnect,
 }: GrpcSessionTerminalProps) {
   const [stream, setStream] = useState<GrpcStream | null>(null);
   // containerRef must be on a div that is ALWAYS rendered (not gated on stream),
   // so getBoundingClientRect() returns real dimensions when the effect runs.
   const containerRef = useRef<HTMLDivElement>(null);
+  // Keep a ref so the send() closure always reads the latest token without
+  // needing to recreate the grpcStream (and remount the terminal) on each change.
+  const controlTokenRef = useRef<string>(controlToken ?? "");
+  controlTokenRef.current = controlToken ?? "";
 
   useEffect(() => {
     const outputListeners: Array<(data: Uint8Array) => void> = [];
@@ -34,7 +40,9 @@ export function GrpcSessionTerminal({
 
     const grpcStream: GrpcStream = {
       send(data: Uint8Array) {
-        void client.sendTerminalInput({ sessionToken, sessionId, data });
+        client.sendTerminalInput({ sessionToken, sessionId, data, controlToken: controlTokenRef.current }).catch(() => {
+          // Non-fatal — terminal still receives output; daemon may reject if not controller.
+        });
       },
       onMessage(fn: (data: Uint8Array) => void) {
         outputListeners.push(fn);
