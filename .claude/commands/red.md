@@ -2,6 +2,13 @@
 
 You are executing the RED phase of TDD. Your job is to write failing tests that define the expected behavior before any implementation exists.
 
+**Fluent-tests is the mandatory test style for this repo.** Before writing any tests, read
+`.claude/skills/fluent-tests/references/generic-guidelines.md` and the framework-specific
+reference matching the test type you're writing. Every test must comply with the fluent-tests
+standard: Given/When/Then structure, named page-object helpers (no raw selectors in test bodies),
+one behavior per test, meaningful fixture values, and in-memory backends instead of `cy.intercept`
+for Cypress component tests.
+
 ## Rules
 
 1. **Write fully implemented tests** -- every test must have real assertions, real setup, and real expected values. No skeleton tests, no `todo!()`, no `unimplemented!()`, no empty test bodies.
@@ -10,14 +17,16 @@ You are executing the RED phase of TDD. Your job is to write failing tests that 
 4. **No conditional logic in tests** -- no `if/else`, no match arms that skip assertions. Tests must be linear: setup, act, assert.
 5. **No try/catch workarounds** -- do not wrap assertions in error-swallowing blocks. If a test panics, that is the signal.
 6. **One behavior per test** -- each `#[test]` function should verify exactly one aspect of the behavior.
+7. **Follow fluent-tests style** -- see mandatory reading above. Violations are treated as test bugs.
 
 ## Process
 
-1. Read the current task or milestone requirements (from the changeset, TODO, or user description).
-2. Identify the behaviors that need to be tested.
-3. Write the test file(s) with all tests fully implemented.
-4. Run `cargo test` (scoped to the relevant package with `-p <package>`) to confirm every new test fails.
-5. Examine each failure -- verify it fails because the production code is missing or incomplete, not because the test itself is broken.
+1. Read `.claude/skills/fluent-tests/references/generic-guidelines.md` and the relevant framework reference.
+2. Read the current task or milestone requirements (from the changeset, TODO, or user description).
+3. Identify the behaviors that need to be tested.
+4. Write the test file(s) with all tests fully implemented in fluent-tests style.
+5. Run `cargo test` (scoped to the relevant package with `-p <package>`) to confirm every new test fails.
+6. Examine each failure -- verify it fails because the production code is missing or incomplete, not because the test itself is broken.
 
 ## Output Format
 

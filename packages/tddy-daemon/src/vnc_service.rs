@@ -25,12 +25,15 @@ use tddy_service::proto::vnc::{
 /// Populated by `UnlockVncVault`; read by `AddVncTarget` and `StartVncStream`.
 pub type VncKeyCache = Arc<Mutex<HashMap<String, DerivedKey>>>;
 
+type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+type SessionsBase = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
+
 /// Daemon-side implementation of `VncService`.
 pub struct VncServiceImpl {
     /// Resolves a session token to its OS user login.
-    user_resolver: Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
+    user_resolver: UserResolver,
     /// Resolves an OS user to the base path of their sessions directory.
-    sessions_base: Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>,
+    sessions_base: SessionsBase,
     /// In-memory cache of derived vault keys, keyed by session_id.
     key_cache: VncKeyCache,
     // FIXME: store daemon config reference here for bridge binary path resolution
@@ -39,8 +42,8 @@ pub struct VncServiceImpl {
 
 impl VncServiceImpl {
     pub fn new(
-        user_resolver: Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
-        sessions_base: Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>,
+        user_resolver: UserResolver,
+        sessions_base: SessionsBase,
         key_cache: VncKeyCache,
     ) -> Self {
         Self {

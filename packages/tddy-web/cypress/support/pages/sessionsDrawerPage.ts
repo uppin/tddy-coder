@@ -198,6 +198,22 @@ export const sessionsDrawerPage = {
     byTestId(TEST_IDS.sessionsVncPassphraseConfirm, { timeout: 5000, ...options }),
 
   // ---------------------------------------------------------------------------
+  // VNC overlay
+  // ---------------------------------------------------------------------------
+
+  /** The full-screen VNC desktop overlay. */
+  vncOverlay: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.vncOverlay, { timeout: 5000, ...options }),
+
+  /** The close button inside the VNC overlay. */
+  vncOverlayClose: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.vncOverlayClose, { timeout: 5000, ...options }),
+
+  /** The `<video>` element inside the VNC overlay. */
+  vncOverlayVideo: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.vncOverlayVideo, { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
   // Terminal control mutex — "Claim terminal" CTA
   // ---------------------------------------------------------------------------
 

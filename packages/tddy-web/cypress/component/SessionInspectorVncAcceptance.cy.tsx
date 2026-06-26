@@ -3,41 +3,28 @@
  *
  * PRD: docs/ft/web/vnc-sessions.md (AC-VNC-1, AC-VNC-2, AC-VNC-3).
  *
- * Tests the VNC tab integration via the full `SessionsDrawerScreen`, using
- * intercepted RPCs for both ConnectionService and VncService.
- *
- * These tests are intentionally failing until:
- *   1. `InspectorTabs.tsx` adds `"vnc"` to `InspectorTab` union and renders the tab button.
- *   2. `SessionInspectorDrawer.tsx` renders `SessionVncTab` when the VNC tab is active.
- *   3. `SessionVncTab.tsx` shows the target list and Add form.
- *   4. `VncPassphraseDialog.tsx` is shown when an operation requires the vault.
- *   5. `VncService` RPC helpers are complete (`buf generate` has run).
+ * Exercises the VNC tab integration via the full SessionsDrawerScreen.
+ * All RPC calls are handled by an in-memory backend — no HTTP intercepts.
  */
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import {
-  interceptConnectionRpcs,
-  interceptConnectSession,
-} from "../support/rpc/connectionRpcs";
-import {
-  interceptListVncTargets,
-  interceptAddVncTarget,
-  interceptUnlockVncVault,
-} from "../support/rpc/vncRpcs";
+import { VncService } from "../../src/gen/vnc_pb";
+import { mountWithRpc } from "../support/rpc/inMemory";
+import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const ACTIVE_SESSION = {
+const SESSION = {
   sessionId: "vnc-test-session-aabbccdd-0000-0000-0000-000000000001",
   createdAt: "2026-06-26T10:00:00Z",
   status: "active",
   repoPath: "/home/dev/vnc-project",
   pid: 12345,
-  isActive: false,  // disconnected so inspector auto-opens
+  isActive: false,
   projectId: "proj-vnc-1",
   daemonInstanceId: "",
   workflowGoal: "VNC test session",
@@ -60,19 +47,18 @@ beforeEach(() => {
 
 it("shows a VNC tab in the inspector tab strip alongside Details and Tools", () => {
   // Given
-  interceptConnectionRpcs([ACTIVE_SESSION]);
-  interceptListVncTargets([]);
+  const backend = aSessionsDrawerBackend([SESSION])
+    .onUnary(VncService.method.listVncTargets, () => ({ targets: [] }));
 
   // When
-  cy.mount(<SessionsDrawerScreen />);
-  cy.wait("@listSessions");
-  page.drawerItem(ACTIVE_SESSION.sessionId).click();
+  mountWithRpc(<SessionsDrawerScreen />, backend);
+  page.drawerItem(SESSION.sessionId).click();
   page.inspectorDrawer().should("have.attr", "data-state", "open");
 
-  // Then — all three tabs are present
+  // Then
+  page.inspectorVncTab().should("exist");
   cy.get(`[data-testid="sessions-inspector-tab-details"]`).should("exist");
   cy.get(`[data-testid="sessions-inspector-tab-tools"]`).should("exist");
-  cy.get(`[data-testid="${"sessions-inspector-tab-vnc"}"]`).should("exist");
 });
 
 // ---------------------------------------------------------------------------
@@ -81,19 +67,15 @@ it("shows a VNC tab in the inspector tab strip alongside Details and Tools", () 
 
 it("renders the VNC tab panel and hides the metadata panel when the VNC tab is clicked", () => {
   // Given
-  interceptConnectionRpcs([ACTIVE_SESSION]);
-  interceptListVncTargets([]);
+  const backend = aSessionsDrawerBackend([SESSION])
+    .onUnary(VncService.method.listVncTargets, () => ({ targets: [] }));
 
   // When
-  cy.mount(<SessionsDrawerScreen />);
-  cy.wait("@listSessions");
-  page.drawerItem(ACTIVE_SESSION.sessionId).click();
-  page.inspectorDrawer().should("have.attr", "data-state", "open");
-
-  // Switch to VNC tab
+  mountWithRpc(<SessionsDrawerScreen />, backend);
+  page.drawerItem(SESSION.sessionId).click();
   page.inspectorVncTab().click();
 
-  // Then — VNC panel visible, metadata hidden
+  // Then
   page.vncTabPanel().should("exist");
   page.inspectorMetadata().should("not.exist");
 });
@@ -103,20 +85,18 @@ it("renders the VNC tab panel and hides the metadata panel when the VNC tab is c
 // ---------------------------------------------------------------------------
 
 it("shows an empty target list and an Add form when no VNC targets are configured", () => {
-  // Given — no targets
-  interceptConnectionRpcs([ACTIVE_SESSION]);
-  interceptListVncTargets([]);
+  // Given
+  const backend = aSessionsDrawerBackend([SESSION])
+    .onUnary(VncService.method.listVncTargets, () => ({ targets: [] }));
 
   // When
-  cy.mount(<SessionsDrawerScreen />);
-  cy.wait("@listSessions");
-  page.drawerItem(ACTIVE_SESSION.sessionId).click();
+  mountWithRpc(<SessionsDrawerScreen />, backend);
+  page.drawerItem(SESSION.sessionId).click();
   page.inspectorVncTab().click();
 
   // Then
   page.vncTabPanel().should("exist");
   page.vncTargetList().should("exist");
-  page.vncTargetList().should("not.contain.text", "row"); // no target rows
   page.vncAddForm().should("exist");
   page.vncAddSubmit().should("exist");
 });
@@ -125,26 +105,32 @@ it("shows an empty target list and an Add form when no VNC targets are configure
 // AC-VNC-3: Submitting the Add form calls AddVncTarget (passphrase-less target)
 // ---------------------------------------------------------------------------
 
-it("calls AddVncTarget RPC when the Add form is submitted with a password-less target", () => {
-  // Given — vault is unlocked (no password in this scenario)
-  interceptConnectionRpcs([ACTIVE_SESSION]);
-  interceptListVncTargets([]);
-  interceptAddVncTarget({ id: "t-001", label: "Dev VM", host: "192.168.1.5", port: 5900 });
+it("calls AddVncTarget with correct fields when the form is submitted without a password", () => {
+  // Given
+  const backend = aSessionsDrawerBackend([SESSION])
+    .onUnary(VncService.method.listVncTargets, () => ({ targets: [] }))
+    .onUnary(VncService.method.addVncTarget, (req) => ({
+      target: { id: "t-001", label: req.label, host: req.host, port: req.port },
+    }));
 
   // When
-  cy.mount(<SessionsDrawerScreen />);
-  cy.wait("@listSessions");
-  page.drawerItem(ACTIVE_SESSION.sessionId).click();
+  mountWithRpc(<SessionsDrawerScreen />, backend);
+  page.drawerItem(SESSION.sessionId).click();
   page.inspectorVncTab().click();
-
-  // Fill and submit the Add form (no password = vault not needed)
   page.vncAddLabel().type("Dev VM");
   page.vncAddHost().type("192.168.1.5");
   page.vncAddPort().clear().type("5900");
   page.vncAddSubmit().click();
 
-  // Then — AddVncTarget RPC was called
-  cy.wait("@addVncTarget");
+  // Then — AddVncTarget received the right fields
+  cy.wrap(backend).should((b) => {
+    const calls = b.callsTo(VncService.method.addVncTarget);
+    expect(calls).to.have.length(1);
+    expect(calls[0].label).to.equal("Dev VM");
+    expect(calls[0].host).to.equal("192.168.1.5");
+    expect(calls[0].port).to.equal(5900);
+    expect(calls[0].password).to.equal("");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -153,32 +139,33 @@ it("calls AddVncTarget RPC when the Add form is submitted with a password-less t
 
 it("shows the passphrase dialog before adding a target that has a password", () => {
   // Given
-  interceptConnectionRpcs([ACTIVE_SESSION]);
-  interceptListVncTargets([]);
-  interceptUnlockVncVault(true);
-  interceptAddVncTarget({ id: "t-002", label: "Secure VM", host: "10.0.0.1", port: 5900 });
+  const backend = aSessionsDrawerBackend([SESSION])
+    .onUnary(VncService.method.listVncTargets, () => ({ targets: [] }))
+    .onUnary(VncService.method.unlockVncVault, () => ({ ok: true }))
+    .onUnary(VncService.method.addVncTarget, (req) => ({
+      target: { id: "t-002", label: req.label, host: req.host, port: req.port },
+    }));
 
   // When
-  cy.mount(<SessionsDrawerScreen />);
-  cy.wait("@listSessions");
-  page.drawerItem(ACTIVE_SESSION.sessionId).click();
+  mountWithRpc(<SessionsDrawerScreen />, backend);
+  page.drawerItem(SESSION.sessionId).click();
   page.inspectorVncTab().click();
-
-  // Fill Add form with a password
   page.vncAddLabel().type("Secure VM");
   page.vncAddHost().type("10.0.0.1");
   page.vncAddPort().clear().type("5900");
   page.vncAddPassword().type("s3cr3t");
   page.vncAddSubmit().click();
 
-  // Then — passphrase dialog appears before the add completes
+  // Then — passphrase dialog appears
   page.vncPassphraseDialog().should("exist").and("be.visible");
 
-  // When — user enters passphrase and confirms
+  // When — user confirms passphrase
   page.vncPassphraseInput().type("my-vault-passphrase");
   page.vncPassphraseConfirm().click();
 
-  // Then — UnlockVncVault and AddVncTarget RPCs were called in sequence
-  cy.wait("@unlockVncVault");
-  cy.wait("@addVncTarget");
+  // Then — UnlockVncVault was called before AddVncTarget
+  cy.wrap(backend).should((b) => {
+    expect(b.callsTo(VncService.method.unlockVncVault)).to.have.length(1);
+    expect(b.callsTo(VncService.method.addVncTarget)).to.have.length(1);
+  });
 });

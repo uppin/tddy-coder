@@ -3,44 +3,40 @@
  *
  * Mirrors the pattern in connectionRpcs.ts: each helper registers a cy.intercept
  * for one VncService RPC method and replies with a canned protobuf response.
- *
- * NOTE: The generated vnc_pb.ts does not exist yet (requires buf generate after proto
- * is added to tddy-service). Until then, helpers serialize responses manually using
- * empty protobuf binary blobs (all-zero fields = default values).
  */
 
+import { create, toBinary } from "@bufbuild/protobuf";
+import {
+  AddVncTargetResponseSchema,
+  ListVncTargetsResponseSchema,
+  RemoveVncTargetResponseSchema,
+  StartVncStreamResponseSchema,
+  StopVncStreamResponseSchema,
+  UnlockVncVaultResponseSchema,
+  VncTargetSchema,
+} from "../../../src/gen/vnc_pb";
 import { toArrayBuffer } from "./protoRpc";
-
-// ---------------------------------------------------------------------------
-// Raw empty-response helper
-// ---------------------------------------------------------------------------
-
-/** The minimal valid protobuf binary for a message with all default fields. */
-const EMPTY_PROTO_BYTES = new Uint8Array(0);
-
-function emptyProtoBody(): ArrayBuffer {
-  return toArrayBuffer(EMPTY_PROTO_BYTES);
-}
 
 // ---------------------------------------------------------------------------
 // Intercept helpers
 // ---------------------------------------------------------------------------
 
-/** Intercept ListVncTargets and reply with an empty target list. */
+/** Intercept ListVncTargets and reply with the given target list (default empty). */
 export function interceptListVncTargets(
   targets: Array<{ id: string; label: string; host: string; port: number }> = [],
 ): void {
-  // Build a minimal protobuf ListVncTargetsResponse.
-  // Field 1 (repeated VncTarget): encode each target as a length-delimited message.
-  // For stub purposes we use an empty response (no targets) by default.
-  void targets; // FIXME: encode real targets when vnc_pb.ts is generated
-
+  const body = toArrayBuffer(
+    toBinary(
+      ListVncTargetsResponseSchema,
+      create(ListVncTargetsResponseSchema, {
+        targets: targets.map((t) =>
+          create(VncTargetSchema, { id: t.id, label: t.label, host: t.host, port: t.port }),
+        ),
+      }),
+    ),
+  );
   cy.intercept("POST", "**/rpc/vnc.VncService/ListVncTargets", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: emptyProtoBody(),
-    });
+    req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
   }).as("listVncTargets");
 }
 
@@ -53,36 +49,45 @@ export function interceptAddVncTarget(
     port: 5900,
   },
 ): void {
-  void result; // FIXME: encode target in response when vnc_pb.ts is generated
+  const body = toArrayBuffer(
+    toBinary(
+      AddVncTargetResponseSchema,
+      create(AddVncTargetResponseSchema, {
+        target: create(VncTargetSchema, {
+          id: result.id,
+          label: result.label,
+          host: result.host,
+          port: result.port,
+        }),
+      }),
+    ),
+  );
   cy.intercept("POST", "**/rpc/vnc.VncService/AddVncTarget", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: emptyProtoBody(),
-    });
+    req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
   }).as("addVncTarget");
 }
 
 /** Intercept RemoveVncTarget and reply with ok=true. */
 export function interceptRemoveVncTarget(): void {
+  const body = toArrayBuffer(
+    toBinary(RemoveVncTargetResponseSchema, create(RemoveVncTargetResponseSchema, { ok: true })),
+  );
   cy.intercept("POST", "**/rpc/vnc.VncService/RemoveVncTarget", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: emptyProtoBody(),
-    });
+    req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
   }).as("removeVncTarget");
 }
 
-/** Intercept UnlockVncVault and reply with ok=true. */
+/** Intercept UnlockVncVault and reply with ok=true or an auth error. */
 export function interceptUnlockVncVault(succeed = true): void {
   if (succeed) {
+    const body = toArrayBuffer(
+      toBinary(
+        UnlockVncVaultResponseSchema,
+        create(UnlockVncVaultResponseSchema, { ok: true }),
+      ),
+    );
     cy.intercept("POST", "**/rpc/vnc.VncService/UnlockVncVault", (req) => {
-      req.reply({
-        statusCode: 200,
-        headers: { "Content-Type": "application/proto" },
-        body: emptyProtoBody(),
-      });
+      req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
     }).as("unlockVncVault");
   } else {
     cy.intercept("POST", "**/rpc/vnc.VncService/UnlockVncVault", (req) => {
@@ -106,23 +111,30 @@ export function interceptStartVncStream(
     height: number;
   }> = {},
 ): void {
-  void overrides; // FIXME: encode in response when vnc_pb.ts is generated
+  const body = toArrayBuffer(
+    toBinary(
+      StartVncStreamResponseSchema,
+      create(StartVncStreamResponseSchema, {
+        livekitRoom: overrides.livekitRoom ?? "room-vnc-test",
+        livekitUrl: overrides.livekitUrl ?? "ws://127.0.0.1:7880",
+        bridgeIdentity: overrides.bridgeIdentity ?? "vnc-test-session-t-001",
+        trackName: overrides.trackName ?? "vnc:t-001",
+        width: overrides.width ?? 1920,
+        height: overrides.height ?? 1080,
+      }),
+    ),
+  );
   cy.intercept("POST", "**/rpc/vnc.VncService/StartVncStream", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: emptyProtoBody(),
-    });
+    req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
   }).as("startVncStream");
 }
 
 /** Intercept StopVncStream and reply with ok=true. */
 export function interceptStopVncStream(): void {
+  const body = toArrayBuffer(
+    toBinary(StopVncStreamResponseSchema, create(StopVncStreamResponseSchema, { ok: true })),
+  );
   cy.intercept("POST", "**/rpc/vnc.VncService/StopVncStream", (req) => {
-    req.reply({
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: emptyProtoBody(),
-    });
+    req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
   }).as("stopVncStream");
 }

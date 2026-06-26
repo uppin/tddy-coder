@@ -81,7 +81,7 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
 }
 
 fn hex_to_bytes(hex: &str) -> anyhow::Result<Vec<u8>> {
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         anyhow::bail!("hex string has odd length");
     }
     (0..hex.len() / 2)
@@ -127,7 +127,7 @@ fn decrypt_bytes(
     if nonce_bytes.len() != 12 {
         anyhow::bail!("nonce must be 12 bytes, got {}", nonce_bytes.len());
     }
-    let nonce: chacha20poly1305::Nonce = (*chacha20poly1305::Nonce::from_slice(nonce_bytes)).into();
+    let nonce: chacha20poly1305::Nonce = *chacha20poly1305::Nonce::from_slice(nonce_bytes);
     let cipher = ChaCha20Poly1305::new(&key.0.into());
     cipher
         .decrypt(&nonce, ciphertext)

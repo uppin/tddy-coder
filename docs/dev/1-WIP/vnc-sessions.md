@@ -2,7 +2,7 @@
 
 **Feature slug:** `vnc-sessions`  
 **Branch:** `vnc-support`  
-**Status:** Green phase complete — vault + service + web state/input implemented; bridge binary stubs remain for a follow-up PR
+**Status:** Green phase complete — vault + service + web state/input + inspector tab UI implemented; bridge binary stubs remain for a follow-up PR
 
 ## Problem / Motivation
 
@@ -32,8 +32,11 @@ Reference implementation for the VNC↔LiveKit bridge:
   - `vncTabState.ts` reducer ✅
   - `vncInput.ts` helpers (coordinate scaling, keysym mapping, RFB masks) ✅
   - `VncStreamer`, `VncClient`, `bridge::run` — **stubs, follow-up PR** (bridge binary not yet wired)
-  - `SessionVncTab.tsx`, `VncOverlay.tsx`, `VncPassphraseDialog.tsx` — **stubs, follow-up PR**
-  - `InspectorTabs.tsx` + `SessionInspectorDrawer.tsx` — **follow-up PR**
+  - `VncOverlay.tsx` — **stub, follow-up PR**
+  - `SessionVncTab.tsx` ✅ — target list + Add form + passphrase-gated submit
+  - `VncPassphraseDialog.tsx` ✅ — passphrase input dialog
+  - `InspectorTabs.tsx` ✅ — "vnc" tab button added
+  - `SessionInspectorDrawer.tsx` ✅ — VncService client wired, renders SessionVncTab
 - [ ] Wrap changeset
 
 ## Files Changed
@@ -64,9 +67,13 @@ Reference implementation for the VNC↔LiveKit bridge:
 ### tddy-web
 - `packages/tddy-web/src/components/sessions/vncTabState.ts` *(new, implemented)* — `VncTabState` + `applyVncTabAction` reducer.
 - `packages/tddy-web/src/components/sessions/vncInput.ts` *(new, implemented)* — `scaleCoordinates`, `keyboardEventToKeysym`, `mouseButtonToRfbMask`, `wheelDeltaToRfbMask`.
-- `packages/tddy-web/src/components/sessions/SessionVncTab.tsx` *(new, stub)* — renders panel placeholder.
-- `packages/tddy-web/src/components/sessions/VncOverlay.tsx` *(new, stub)* — renders null.
-- `packages/tddy-web/src/components/sessions/VncPassphraseDialog.tsx` *(new, stub)* — renders null.
+- `packages/tddy-web/src/components/sessions/SessionVncTab.tsx` *(new, implemented)* — target list, Add form, passphrase-gated submit.
+- `packages/tddy-web/src/components/sessions/VncOverlay.tsx` *(new, stub)* — renders null; follow-up PR.
+- `packages/tddy-web/src/components/sessions/VncPassphraseDialog.tsx` *(new, implemented)* — passphrase input dialog with confirm/cancel.
+- `packages/tddy-web/src/components/sessions/InspectorTabs.tsx` — added `"vnc"` to `InspectorTab` union + VNC tab button.
+- `packages/tddy-web/src/components/sessions/SessionInspectorDrawer.tsx` — wires VncService client, renders `SessionVncTab` for the vnc tab.
+- `packages/tddy-web/src/gen/vnc_pb.ts` *(new, generated)* — VncService TypeScript descriptor (buf generate).
+- `packages/tddy-web/src/gen/vnc_input_pb.ts` *(new, generated)* — VncInputService TypeScript descriptor (buf generate).
 - `packages/tddy-web/cypress/support/testIds.ts` — add VNC test ID constants.
 - `packages/tddy-web/cypress/support/pages/sessionsDrawerPage.ts` — add VNC page helpers.
 - `packages/tddy-web/cypress/support/rpc/vncRpcs.ts` *(new)* — VNC RPC intercept helpers.
@@ -77,7 +84,7 @@ Reference implementation for the VNC↔LiveKit bridge:
 ### Tests
 - `packages/tddy-daemon/tests/vnc_vault_acceptance.rs` *(new)* — 7 tests, all pass
 - `packages/tddy-daemon/tests/vnc_service_acceptance.rs` *(new)* — 5 tests, all pass
-- `packages/tddy-web/cypress/component/SessionInspectorVncAcceptance.cy.tsx` *(new)* — 4 Cypress CT tests (failing — UI stubs not yet implemented)
+- `packages/tddy-web/cypress/component/SessionInspectorVncAcceptance.cy.tsx` *(new)* — 5 Cypress CT tests, all passing
 - `packages/tddy-web/src/components/sessions/vncTabState.test.ts` *(new)* — 5 bun tests, all pass
 - `packages/tddy-web/src/components/sessions/vncInput.test.ts` *(new)* — 15 bun tests, all pass
 
