@@ -16,3 +16,4 @@ pub mod schema_manifest;
 pub mod server;
 pub mod session_actions_cli;
 pub mod session_context;
+pub mod session_tool_client;

@@ -26,6 +26,8 @@ use tddy_service::tonic_sandbox::{
 
 use tddy_sandbox::{append_line, egress_log_path, SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG};
 
+use crate::session_tool_client::{session_id_from_env, ToolIpcRequest, ToolIpcResponse};
+
 fn egress_dir_from_env() -> Option<PathBuf> {
     std::env::var("TDDY_SANDBOX_EGRESS_DIR")
         .ok()
@@ -198,7 +200,7 @@ impl SandboxSessionRelay {
     async fn call_tool(&self, tool_name: &str, args_json: &str) -> ExecuteToolResponse {
         let (tx, rx) = oneshot::channel();
         let req = ExecuteToolRequest {
-            session_id: std::env::var("TDDY_SANDBOX_SESSION_ID").unwrap_or_default(),
+            session_id: session_id_from_env(),
             tool_name: tool_name.to_string(),
             args_json: args_json.to_string(),
             ..Default::default()
@@ -592,22 +594,13 @@ async fn start_tool_ipc_server(path: PathBuf, relay: Arc<SandboxSessionRelay>) -
                     if n == 0 {
                         return;
                     }
-                    let req: serde_json::Value = match serde_json::from_slice(&buf[..n]) {
+                    let req: ToolIpcRequest = match serde_json::from_slice(&buf[..n]) {
                         Ok(v) => v,
                         Err(_) => return,
                     };
-                    let tool_name = req.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
-                    let args_json = req
-                        .get("args_json")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("{}");
-                    let resp = relay.call_tool(tool_name, args_json).await;
-                    let out = serde_json::json!({
-                        "result_json": resp.result_json,
-                        "is_error": resp.is_error,
-                        "error_message": resp.error_message,
-                    });
-                    let _ = stream.write_all(out.to_string().as_bytes()).await;
+                    let resp = relay.call_tool(&req.tool_name, &req.args_json).await;
+                    let out = ToolIpcResponse::from_execute_tool(&resp);
+                    let _ = stream.write_all(out.to_json_string().as_bytes()).await;
                 }
             });
         }
@@ -844,42 +837,6 @@ pub async fn connect_sandbox_client(
     tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient::connect(endpoint)
         .await
         .context("connect sandbox grpc")
-}
-
-/// Dispatch a tool call via the sandbox tool IPC socket (used by `tddy-tools --mcp` in sandbox).
-pub async fn dispatch_sandbox_tool_ipc(tool_name: &str, args: serde_json::Value) -> String {
-    let Some(path) = std::env::var_os("TDDY_SANDBOX_TOOL_IPC") else {
-        return serde_json::json!({
-            "error": "TDDY_SANDBOX_TOOL_IPC not set",
-            "is_error": true
-        })
-        .to_string();
-    };
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let mut stream = match tokio::net::UnixStream::connect(path).await {
-        Ok(s) => s,
-        Err(e) => {
-            return serde_json::json!({"error": format!("tool ipc connect: {e}"), "is_error": true})
-                .to_string();
-        }
-    };
-    let req = serde_json::json!({
-        "tool_name": tool_name,
-        "args_json": args.to_string(),
-    });
-    if stream.write_all(req.to_string().as_bytes()).await.is_err() {
-        return serde_json::json!({"error": "tool ipc write failed", "is_error": true}).to_string();
-    }
-    let _ = stream.shutdown().await;
-    let mut buf = vec![0u8; 65536];
-    match stream.read(&mut buf).await {
-        Ok(n) if n > 0 => String::from_utf8_lossy(&buf[..n]).to_string(),
-        Ok(_) => {
-            serde_json::json!({"error": "tool ipc empty response", "is_error": true}).to_string()
-        }
-        Err(e) => serde_json::json!({"error": format!("tool ipc read: {e}"), "is_error": true})
-            .to_string(),
-    }
 }
 
 #[cfg(test)]

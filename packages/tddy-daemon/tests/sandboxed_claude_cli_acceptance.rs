@@ -361,21 +361,10 @@ async fn sandboxed_claude_cli_tool_exec_via_ipc_reads_host_worktree() {
     let args = serde_json::json!({
         "path": "README.md"
     });
-    let raw = tddy_tools::sandbox_runner::dispatch_sandbox_tool_ipc("Read", args).await;
+    let raw = tddy_tools::session_tool_client::dispatch_session_tool("Read", args).await;
 
-    // Then
-    let parsed: serde_json::Value = serde_json::from_str(&raw).expect("valid tool IPC json");
-    assert_eq!(
-        parsed.get("is_error").and_then(|v| v.as_bool()),
-        Some(false)
-    );
-    let result: serde_json::Value = serde_json::from_str(
-        parsed
-            .get("result_json")
-            .and_then(|v| v.as_str())
-            .expect("result_json"),
-    )
-    .expect("result_json must be valid JSON");
+    // Then — dispatch_session_tool returns tool result JSON directly on success
+    let result: serde_json::Value = serde_json::from_str(&raw).expect("valid tool result json");
     assert_eq!(
         result.get("content").and_then(|v| v.as_str()),
         Some("host-worktree-contents"),

@@ -369,7 +369,7 @@ async fn sandbox_runner_session_channel_tool_exec_round_trips() {
         // When
         let ipc_result = tokio::time::timeout(
             Duration::from_secs(10),
-            tddy_tools::sandbox_runner::dispatch_sandbox_tool_ipc(
+            tddy_tools::session_tool_client::dispatch_session_tool(
                 "Read",
                 serde_json::json!({"path": "README.md"}),
             ),
@@ -382,18 +382,14 @@ async fn sandbox_runner_session_channel_tool_exec_round_trips() {
             )
         });
 
-        // Then
+        // Then — dispatch_session_tool returns the tool result JSON directly on success
         let parsed: serde_json::Value =
             serde_json::from_str(&ipc_result).expect("valid json response");
         assert_eq!(
-            parsed.get("result_json").and_then(|v| v.as_str()),
-            Some(r#"{"path":"Read"}"#),
+            parsed.get("path").and_then(|v| v.as_str()),
+            Some("Read"),
             "tool IPC must return host response: {parsed}\n{}",
             format_egress_logs(&egress)
-        );
-        assert_eq!(
-            parsed.get("is_error").and_then(|v| v.as_bool()),
-            Some(false)
         );
 
         stop_runner(runner_task).await;
