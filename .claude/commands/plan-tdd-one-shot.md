@@ -2,6 +2,15 @@
 
 Complete feature development from planning through production readiness. This is the most comprehensive development command.
 
+**Fluent-tests is the mandatory test style for this repo.** Every test written during this
+workflow (acceptance, unit, integration, behavior-preservation) must comply with the
+`fluent-tests` skill at `.claude/skills/fluent-tests/`. Before writing tests, read
+`.claude/skills/fluent-tests/references/generic-guidelines.md` and the framework-specific
+reference for the test type. Required: Given/When/Then, intent-revealing names, one
+behavior per test, named page-object/driver helpers (no raw selectors in test bodies),
+meaningful fixtures, and in-memory backends instead of `cy.intercept` for Cypress
+component tests. `/validate-tests` enforces this standard in Phase 3.
+
 ## Step 1: Gather Requirements
 
 Ask the user what feature they want to build. Collect enough context to write a PRD. Then create the PRD document following the `/plan-ft` process.

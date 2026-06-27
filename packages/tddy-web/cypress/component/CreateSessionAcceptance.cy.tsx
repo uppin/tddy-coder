@@ -104,14 +104,14 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
 
     // By default: Tool fields visible
     byTestId(TEST_IDS.createSessionAgentSelect).should("be.visible");
-    byTestId(TEST_IDS.createSessionRecipeInput).should("be.visible");
+    byTestId(TEST_IDS.createSessionRecipeSelect).should("be.visible");
 
     // Switch to Claude CLI
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
 
     // Tool fields hidden
     byTestId(TEST_IDS.createSessionAgentSelect).should("not.exist");
-    byTestId(TEST_IDS.createSessionRecipeInput).should("not.exist");
+    byTestId(TEST_IDS.createSessionRecipeSelect).should("not.exist");
 
     // Claude CLI fields visible
     byTestId(TEST_IDS.createSessionModelSelect).should("be.visible");

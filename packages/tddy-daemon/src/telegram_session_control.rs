@@ -618,6 +618,7 @@ fn session_list_status_or_placeholders(session_dir: &Path) -> SessionListStatusD
             agent: "—".to_string(),
             model: "—".to_string(),
             activity_status: String::new(),
+            orchestrator_session_id: String::new(), // TODO: populate from changeset.orchestrator_session_id
         },
     }
 }
@@ -1020,6 +1021,7 @@ impl TelegramWorkflowSpawn {
             agent: agent_for_spawn,
             mouse: spawn_mouse,
             recipe: recipe_for_spawn.as_deref(),
+            stack_parent: None,
         };
         if let Some(ref client) = self.spawn_client {
             let req = spawn_worker::build_spawn_request(

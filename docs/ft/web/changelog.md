@@ -13,6 +13,13 @@ Release note history for the Web product area.
 - Inline error messages appear below the form on `AddTarget`, `UnlockVault`, or `StartStream` failures (no silent swallowing)
 - Username stored on the target and threaded through to the RDP `IronRDP` credential handshake (was hardcoded `"user"`)
 
+## 2026-06-26 — PR-stack session UI: recipe dropdown, parent picker, collapsible drawer groups
+
+- `CreateSessionPane` recipe field replaced with a `<select>` listing all 9 workflow recipes (tdd, tdd-small, bugfix, free-prompting, grill-me, review, merge-pr, plan-pr-stack, orchestrate-pr-stack); default is "tdd"
+- New parent-picker `<select>` (tool sessions only): lists orchestrator sessions so a child can be attached to an existing PR-stack; hidden for claude-cli sessions
+- `SessionDrawer` groups PR-stack children under the orchestrator session in a collapsible `<details>/<summary>` element; children render at `depth={1}` (indented)
+- Orphan children (orchestrator not present in the list) fall through to the flat list
+- New utils: `stackParentCandidates(sessions)`, `groupSessionsByStack(sessions)`
 ## 2026-06-26 — Browser DEBUG mask + fix SendTerminalInput unhandled rejections
 
 - `dev.daemon.yaml` ships `debug: "tddy:term:*"` — a [`debug`](https://www.npmjs.com/package/debug)-package namespace mask served at `GET /api/config`; browser adopts it on load with `localStorage` persistence (invalidated only when the config value changes); `?debug=` URL param overrides for a session

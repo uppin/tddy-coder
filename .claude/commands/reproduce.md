@@ -2,6 +2,13 @@
 
 Write a failing test that demonstrates a reported bug. The test becomes the acceptance criterion for the fix.
 
+**Fluent-tests is the mandatory test style for this repo.** Before writing the test,
+read `.claude/skills/fluent-tests/references/generic-guidelines.md` and the
+framework-specific reference for the test type. The reproduction test must comply:
+Given/When/Then structure, an intent-revealing name, one behavior per test, named
+page-object/driver helpers (no raw selectors or wire-format handling in the test
+body), and meaningful fixture values.
+
 ## Process
 
 ### 1. Gather Bug Information
@@ -16,7 +23,7 @@ Ask the user for any missing details:
 ### 2. Locate Test Suite
 
 - Find the existing test file for the affected module.
-- If no test file exists, create one following the project's test conventions (see CLAUDE.md for testing practices).
+- If no test file exists, create one following the project's test conventions (see CLAUDE.md and the `fluent-tests` skill at `.claude/skills/fluent-tests/`).
 
 ### 3. Write the Failing Test
 

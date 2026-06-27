@@ -1,9 +1,21 @@
 import React, { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
-import type { AgentInfo, ConnectionService, ProjectEntry, ToolInfo } from "../../gen/connection_pb";
+import type { AgentInfo, ConnectionService, ProjectEntry, SessionEntry, ToolInfo } from "../../gen/connection_pb";
 import { CLAUDE_CLI_MODELS } from "../../constants/claudeCliModels";
 import { Button } from "../ui/button";
+
+const WORKFLOW_RECIPES = [
+  "tdd",
+  "tdd-small",
+  "bugfix",
+  "free-prompting",
+  "grill-me",
+  "review",
+  "merge-pr",
+  "plan-pr-stack",
+  "orchestrate-pr-stack",
+] as const;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,7 +55,8 @@ export function CreateSessionPane({
   const [sessionType, setSessionType] = useState<SessionType>("tool");
   const [projectId, setProjectId] = useState("");
   const [agent, setAgent] = useState("");
-  const [recipe, setRecipe] = useState("");
+  const [recipe, setRecipe] = useState("tdd");
+  const [stackParent, setStackParent] = useState("");
   const [toolPath, setToolPath] = useState("");
   const [model, setModel] = useState(CLAUDE_CLI_MODELS[0]?.id ?? "");
   const [permissionMode, setPermissionMode] = useState("auto");
@@ -55,6 +68,7 @@ export function CreateSessionPane({
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [tools, setTools] = useState<ToolInfo[]>([]);
+  const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +76,21 @@ export function CreateSessionPane({
   // Load data on mount
   useEffect(() => {
     let cancelled = false;
+
+    // Fetch sessions separately so a network failure doesn't block the rest of the form.
+    client
+      .listSessions({ sessionToken })
+      .then((resp) => {
+        if (cancelled) return;
+        const loadedSessions = (resp.sessions as SessionEntry[]).filter(
+          (s) => !s.orchestratorSessionId,
+        );
+        setSessions(loadedSessions);
+      })
+      .catch(() => {
+        // Session list is best-effort; failing to fetch it just hides the parent picker.
+      });
+
     Promise.all([
       client.listProjects({ sessionToken }),
       client.listAgents({}),
@@ -157,6 +186,7 @@ export function CreateSessionPane({
           toolPath,
           agent,
           recipe,
+          stackParent,
           sessionType: "",
           model: "",
           permissionMode: "",
@@ -269,16 +299,42 @@ export function CreateSessionPane({
             <label className={labelClass} htmlFor="create-session-recipe">
               Recipe
             </label>
-            <input
+            <select
               id="create-session-recipe"
-              data-testid="create-session-recipe-input"
-              type="text"
+              data-testid="create-session-recipe-select"
               className={inputClass}
               value={recipe}
               onChange={(e) => setRecipe(e.target.value)}
-              placeholder="Optional recipe"
-            />
+            >
+              {WORKFLOW_RECIPES.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
           </div>
+
+          {sessions.length > 0 && (
+            <div>
+              <label className={labelClass} htmlFor="create-session-stack-parent">
+                PR stack parent
+              </label>
+              <select
+                id="create-session-stack-parent"
+                data-testid="create-session-stack-parent-select"
+                className={inputClass}
+                value={stackParent}
+                onChange={(e) => setStackParent(e.target.value)}
+              >
+                <option value="">None (standalone session)</option>
+                {sessions.map((s) => (
+                  <option key={s.sessionId} value={s.sessionId}>
+                    {s.sessionId}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </>
       )}
 

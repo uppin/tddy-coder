@@ -298,6 +298,6 @@ Ask the user if:
 
 **Commands**: `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`, `/wrap-context-docs`
 
-**Skills**: `@tdd` (used by test-writer and tdd-implementer)
+**Skills**: `@tdd` (used by test-writer and tdd-implementer), `fluent-tests` (mandatory test style for all tests written in this workflow)
 
 **Rules**: `@feature-doc`, `@dev-doc`, `@amendment-doc`, `@changeset-doc`, `@tdd`, `@testing-practices`

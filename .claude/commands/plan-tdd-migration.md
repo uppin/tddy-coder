@@ -2,6 +2,14 @@
 
 Plan and execute code migrations without changing features. Migrations restructure, rename, or reorganize code while preserving all existing behavior.
 
+**Fluent-tests is the mandatory test style for this repo.** Every behavior-preservation
+test written in this flow must comply with the `fluent-tests` skill at
+`.claude/skills/fluent-tests/`. Before writing tests, read
+`.claude/skills/fluent-tests/references/generic-guidelines.md` and the framework-specific
+reference for the test type. Required: Given/When/Then, intent-revealing names, one
+behavior per test, named page-object/driver helpers (no raw selectors in test bodies),
+and meaningful fixture values.
+
 ## Key Difference from Feature Development
 
 - **No new feature docs** - migrations don't add features
@@ -47,10 +55,10 @@ Document explicitly which behaviors must be preserved:
 
 ### Behavior Preservation Tests
 
-Write tests against the **current** implementation. These tests should **PASS immediately**:
+Write tests against the **current** implementation in fluent-tests style. These tests should **PASS immediately**:
 
 ```
-1. Write test that captures current behavior
+1. Write test that captures current behavior (fluent-tests compliant)
 2. Run test -> PASSES (confirms test is correct)
 3. Perform migration refactoring
 4. Run test -> should still PASS (confirms behavior preserved)
