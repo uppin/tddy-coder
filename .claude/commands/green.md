@@ -16,6 +16,8 @@ This command delegates to the tdd-implementer subagent to implement production-q
 2. **Tests failing for right reasons** - Missing implementation, not test bugs
 3. **Don't start** if failing test suite not ready
 
+**Test style note**: `fluent-tests` is the mandatory test style for this repo. Tests are normally left unchanged in green phase. If a test adjustment is truly necessary, the edited test must remain compliant with `.claude/skills/fluent-tests/` (Given/When/Then, one behavior per test, named helpers, meaningful fixtures). Never weaken test structure to force passage.
+
 ## Workflow
 
 ### 1. Review Failing Tests

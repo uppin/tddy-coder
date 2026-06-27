@@ -2,6 +2,13 @@
 
 Identify and fix failing tests methodically, one at a time.
 
+**Fluent-tests is the mandatory test style for this repo.** Before modifying any test,
+read `.claude/skills/fluent-tests/references/generic-guidelines.md` and the
+framework-specific reference for the test type. Any test edit must keep the test
+compliant with the fluent-tests standard (Given/When/Then, one behavior per test,
+named helpers, meaningful fixtures). Never "fix" a test by weakening its structure
+or assertions to bypass a fluent-tests violation — fix the underlying issue instead.
+
 ## Process
 
 ### 1. Discover Failures
@@ -30,11 +37,12 @@ For each failing test, in order:
 - For test issues: update the test to match current correct behavior. Never weaken assertions just to make tests pass -- if the expected behavior has genuinely changed, update the test; if not, fix the production code.
 - For infrastructure issues: fix the test setup/fixtures.
 
-**d. Validate alignment**: Ensure the fix follows testing practices (see CLAUDE.md):
+**d. Validate alignment**: Ensure the fix follows testing practices (see CLAUDE.md) and the fluent-tests standard:
 - No conditional logic in tests (no `if/else`, no match arms that skip assertions)
 - No try/catch workarounds
 - No test-specific branches in production code (`cfg!(test)`)
 - Tests are linear: setup, act, assert
+- Given/When/Then structure, one behavior per test, named page-object/driver helpers (no raw selectors in test bodies), meaningful fixture values
 
 **e. Verify**: Run `cargo test -p <package> -- <test_name>` to confirm the fix.
 

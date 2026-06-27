@@ -2,6 +2,15 @@
 
 You are developing a feature end-to-end using TDD. A development plan (changeset) should already exist. If it does not, ask the user to provide one or describe the feature.
 
+**Fluent-tests is the mandatory test style for this repo.** Every test written in this
+flow (acceptance, unit, integration) must comply with the `fluent-tests` skill at
+`.claude/skills/fluent-tests/`. Before writing tests, read
+`.claude/skills/fluent-tests/references/generic-guidelines.md` and the framework-specific
+reference for the test type. Required: Given/When/Then, intent-revealing names, one
+behavior per test, named page-object/driver helpers (no raw selectors in test bodies),
+meaningful fixtures, and in-memory backends instead of `cy.intercept` for Cypress
+component tests.
+
 ## Prerequisites
 
 - A changeset or development plan describing the feature milestones
@@ -20,6 +29,7 @@ You are developing a feature end-to-end using TDD. A development plan (changeset
 For the current milestone, write acceptance-level tests that define "done":
 
 - Tests must be **fully implemented** -- real assertions, real setup, real expected values. No empty test bodies, no `todo!()`, no placeholders.
+- Tests must follow the **fluent-tests** mandatory style (Given/When/Then, named page-object/driver helpers, one behavior per test, meaningful fixtures).
 - Tests should cover the milestone's key behaviors end-to-end.
 - Run `cargo test` to confirm they fail for the right reasons.
 
