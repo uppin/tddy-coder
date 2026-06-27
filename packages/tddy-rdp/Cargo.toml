@@ -1,0 +1,50 @@
+[package]
+name = "tddy-rdp"
+version = "0.1.0"
+edition = "2021"
+description = "RDP-to-LiveKit bridge: implements ScreenSharingClient via IronRDP"
+
+[[bin]]
+name = "tddy-rdp"
+path = "src/main.rs"
+
+[lib]
+name = "tddy_rdp"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+env_logger = "0.11"
+log = "0.4"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
+
+# IronRDP client stack
+ironrdp-connector = "0.9"
+ironrdp-session   = "0.10"
+ironrdp-tokio     = "0.9"
+ironrdp-tls       = { version = "0.2", features = ["rustls"] }
+ironrdp-graphics  = "0.8"
+ironrdp-pdu       = "0.8"
+
+# Shared screen-sharing bridge infrastructure
+tddy-screenshare = { path = "../tddy-screenshare" }
+
+[dev-dependencies]
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time"] }
+async-trait = "0.1"
+bytes = "1"
+
+# Fake RDP server for integration tests
+ironrdp-server = "0.12"
+
+# TLS certificate generation for fake RDP server
+rcgen = "0.13"
+
+# QR code generation + decoding for frame streaming assertions
+qrcode = "0.14"
+image  = "0.25"
+rqrr   = "0.10"

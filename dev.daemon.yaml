@@ -40,6 +40,14 @@ daemon_instance_id_append_startup_timestamp: false
 # ./web-dev and open the Vite port (default 5173), not this port — see docs/ft/web/local-web-dev.md.
 web_bundle_path: packages/tddy-web/dist
 
+# Browser DEBUG mask exposed at GET /api/config. A `debug`-package namespace mask that turns on scoped
+# `[tddy]` diagnostics in the browser console — handy for chasing terminal garbling / misalignment.
+# Namespaces: tddy:term:write (bytes in), tddy:term:data (keys out), tddy:term:resize (cols/rows),
+# tddy:term:grpc (gRPC byte stream), tddy:term:life, tddy:term:mouse. Use `tddy:term:*` for all.
+# Override per-browser in DevTools: `localStorage.debug = 'tddy:term:write'`; the browser invalidates
+# that override only when this value changes. Comment out (or set "") to disable. `?debug=` URL param wins.
+debug: "tddy:term:*"
+
 livekit:
   url: ws://127.0.0.1:7880
   api_key: devkey

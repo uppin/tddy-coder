@@ -1,0 +1,32 @@
+syntax = "proto3";
+package vnc_input;
+
+// Input forwarding service: browser sends pointer/keyboard events over a bidi
+// stream to the bridge (tddy-vnc), which forwards them to the VNC server.
+// Served by the tddy-vnc bridge via LiveKit data channel.
+service VncInputService {
+  // Browser → bridge: stream of pointer/key events.
+  // Bridge → browser: empty acks (server side drains input and may send nothing).
+  rpc StreamInput (stream VncInputEvent) returns (stream VncInputAck);
+}
+
+message VncPointerEvent {
+  uint32 x           = 1;
+  uint32 y           = 2;
+  uint32 button_mask = 3;  // RFB pointer button mask (bit 0 = left, 1 = middle, 2 = right, etc.)
+}
+
+message VncKeyEvent {
+  uint32 keysym  = 1;  // X11 keysym
+  bool   pressed = 2;
+}
+
+message VncInputEvent {
+  oneof event {
+    VncPointerEvent pointer = 1;
+    VncKeyEvent     key     = 2;
+  }
+}
+
+// Minimal ack sent by the bridge to keep the bidi stream alive.
+message VncInputAck {}

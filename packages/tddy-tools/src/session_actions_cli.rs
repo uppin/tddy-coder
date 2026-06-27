@@ -44,9 +44,13 @@ pub fn run_list_actions(
         offset,
     };
     let tddy_data_dir = resolve_tddy_data_dir();
-    let result =
-        list_action_summaries(Some(session_dir), repo_root.as_deref(), &tddy_data_dir, &query)
-            .map_err(anyhow::Error::from)?;
+    let result = list_action_summaries(
+        Some(session_dir),
+        repo_root.as_deref(),
+        &tddy_data_dir,
+        &query,
+    )
+    .map_err(anyhow::Error::from)?;
     let out = ListActionsResponse {
         actions: result.actions,
         total: result.total,

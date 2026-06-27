@@ -104,6 +104,7 @@ async fn relay_idle_monitor_triggers_server_shutdown() {
         None,
         None,
         vec![],
+        None, // web_debug mask
         None,
         Some(rx), // external idle-timeout shutdown channel
     )

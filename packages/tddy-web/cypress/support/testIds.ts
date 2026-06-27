@@ -126,6 +126,10 @@ export const TEST_IDS = {
   tasksOutputPane: "tasks-output-pane",
   tasksOutputPaneEmpty: "tasks-output-pane-empty",
 
+  // Sessions drawer — open/close toggle
+  sessionsDrawerCloseBtn: "sessions-drawer-close-btn",
+  sessionsDrawerOpenBtn: "sessions-drawer-open-btn",
+
   // Sessions drawer — create session
   sessionsDrawerNewBtn: "sessions-drawer-new-btn",
   createSessionPane: "create-session-pane",
@@ -134,6 +138,10 @@ export const TEST_IDS = {
   createSessionProjectSelect: "create-session-project-select",
   createSessionAgentSelect: "create-session-agent-select",
   createSessionRecipeInput: "create-session-recipe-input",
+  /** Replaces the free-text recipe input for tool sessions — a <select> with all 7 recipe options. */
+  createSessionRecipeSelect: "create-session-recipe-select",
+  /** Parent-picker <select> — lists sessions that act as orchestrators; tool sessions only. */
+  createSessionStackParentSelect: "create-session-stack-parent-select",
   createSessionModelSelect: "create-session-model-select",
   createSessionPermissionModeSelect: "create-session-permission-mode-select",
   createSessionInitialPromptInput: "create-session-initial-prompt-input",
@@ -166,6 +174,60 @@ export const TEST_IDS = {
   // Shortcut drawer
   shortcutDrawer: "shortcut-drawer",
   shortcutDragHandle: "shortcut-drag-handle",
+
+  // Session traffic strip
+  sessionTrafficStrip: "session-traffic-strip",
+  sessionTrafficBytesIn: "session-traffic-bytes-in",
+  sessionTrafficBytesOut: "session-traffic-bytes-out",
+  sessionTrafficRateIn: "session-traffic-rate-in",
+  sessionTrafficRateOut: "session-traffic-rate-out",
+  sessionTrafficPing: "session-traffic-ping",
+
+  // Terminal control mutex — "Claim terminal" CTA
+  terminalControlOverlay: "terminal-control-overlay",
+  terminalClaimBtn: "terminal-claim-btn",
+  terminalControlHolder: "terminal-control-holder",
+
+  // Session inspector — VNC tab
+  sessionsInspectorTabVnc: "sessions-inspector-tab-vnc",
+  sessionsVncTabPanel: "sessions-vnc-tab-panel",
+  sessionsVncTargetList: "sessions-vnc-target-list",
+  sessionsVncAddForm: "sessions-vnc-add-form",
+  sessionsVncAddLabel: "sessions-vnc-add-label",
+  sessionsVncAddHost: "sessions-vnc-add-host",
+  sessionsVncAddPort: "sessions-vnc-add-port",
+  sessionsVncAddPassword: "sessions-vnc-add-password",
+  sessionsVncAddSubmit: "sessions-vnc-add-submit",
+  sessionsVncPassphraseDialog: "sessions-vnc-passphrase-dialog",
+  sessionsVncPassphraseInput: "sessions-vnc-passphrase-input",
+  sessionsVncPassphraseConfirm: "sessions-vnc-passphrase-confirm",
+  sessionsVncPassphraseCancel: "sessions-vnc-passphrase-cancel",
+
+  // VNC overlay
+  vncOverlay: "vnc-overlay",
+  vncOverlayVideo: "vnc-overlay-video",
+  vncOverlayClose: "vnc-overlay-close",
+
+  // Session inspector — Screen Sharing tab
+  sessionsInspectorTabScreenSharing: "sessions-inspector-tab-screen-sharing",
+  sessionsScreenSharingTabPanel: "sessions-screen-sharing-tab-panel",
+  sessionsScreenSharingTargetList: "sessions-screen-sharing-target-list",
+  sessionsScreenSharingAddForm: "sessions-screen-sharing-add-form",
+  sessionsScreenSharingAddLabel: "sessions-screen-sharing-add-label",
+  sessionsScreenSharingAddHost: "sessions-screen-sharing-add-host",
+  sessionsScreenSharingAddPort: "sessions-screen-sharing-add-port",
+  sessionsScreenSharingAddPassword: "sessions-screen-sharing-add-password",
+  sessionsScreenSharingAddProtocol: "sessions-screen-sharing-add-protocol",
+  sessionsScreenSharingAddSubmit: "sessions-screen-sharing-add-submit",
+  sessionsScreenSharingPassphraseDialog: "sessions-screen-sharing-passphrase-dialog",
+  sessionsScreenSharingPassphraseInput: "sessions-screen-sharing-passphrase-input",
+  sessionsScreenSharingPassphraseConfirm: "sessions-screen-sharing-passphrase-confirm",
+  sessionsScreenSharingPassphraseCancel: "sessions-screen-sharing-passphrase-cancel",
+
+  // Screen Sharing overlay
+  screenSharingOverlay: "screen-sharing-overlay",
+  screenSharingOverlayVideo: "screen-sharing-overlay-video",
+  screenSharingOverlayClose: "screen-sharing-overlay-close",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -247,6 +309,10 @@ export const sessionMoreActions = (sessionId: string) => `session-more-actions-$
 /** `[data-testid="sessions-drawer-item-<sessionId>"]` — clickable drawer row */
 export const sessionsDrawerItem = (sessionId: string) => `sessions-drawer-item-${sessionId}`;
 
+/** `[data-testid="sessions-drawer-stack-<parentSessionId>"]` — collapsible <details> group */
+export const sessionsDrawerStackGroup = (parentSessionId: string) =>
+  `sessions-drawer-stack-${parentSessionId}`;
+
 /** `[data-testid="sessions-drawer-item-label-<sessionId>"]` — derived label text */
 export const sessionsDrawerItemLabel = (sessionId: string) =>
   `sessions-drawer-item-label-${sessionId}`;
@@ -315,3 +381,40 @@ export const tasksChannelOutput = (taskId: string, channelId: string) =>
 
 /** `[data-testid="shortcut-button-<label>"]` — individual shortcut button */
 export const shortcutButton = (label: string) => `shortcut-button-${label}`;
+
+// ---------------------------------------------------------------------------
+// VNC tab dynamic helpers
+// ---------------------------------------------------------------------------
+
+/** `[data-testid="sessions-vnc-target-row-<targetId>"]` — a single VNC target row */
+export const sessionsVncTargetRow = (targetId: string) =>
+  `sessions-vnc-target-row-${targetId}`;
+
+/** `[data-testid="sessions-vnc-start-<targetId>"]` — Start stream button */
+export const sessionsVncStartBtn = (targetId: string) => `sessions-vnc-start-${targetId}`;
+
+/** `[data-testid="sessions-vnc-stop-<targetId>"]` — Stop stream button */
+export const sessionsVncStopBtn = (targetId: string) => `sessions-vnc-stop-${targetId}`;
+
+/** `[data-testid="sessions-vnc-remove-<targetId>"]` — Remove target button */
+export const sessionsVncRemoveBtn = (targetId: string) => `sessions-vnc-remove-${targetId}`;
+
+// ---------------------------------------------------------------------------
+// Screen Sharing tab dynamic helpers
+// ---------------------------------------------------------------------------
+
+/** `[data-testid="sessions-screen-sharing-target-row-<targetId>"]` */
+export const sessionsScreenSharingTargetRow = (targetId: string) =>
+  `sessions-screen-sharing-target-row-${targetId}`;
+
+/** `[data-testid="sessions-screen-sharing-start-<targetId>"]` — Start stream button */
+export const sessionsScreenSharingStartBtn = (targetId: string) =>
+  `sessions-screen-sharing-start-${targetId}`;
+
+/** `[data-testid="sessions-screen-sharing-stop-<targetId>"]` — Stop stream button */
+export const sessionsScreenSharingStopBtn = (targetId: string) =>
+  `sessions-screen-sharing-stop-${targetId}`;
+
+/** `[data-testid="sessions-screen-sharing-remove-<targetId>"]` — Remove target button */
+export const sessionsScreenSharingRemoveBtn = (targetId: string) =>
+  `sessions-screen-sharing-remove-${targetId}`;

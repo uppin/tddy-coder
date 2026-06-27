@@ -83,7 +83,14 @@ fn start_session_prints_session_id_from_daemon_response() {
 
     // When
     let output = tddy_tools_bin()
-        .args(["remote", "start-session", "--base-dir", relay_dir.path().to_str().unwrap(), "--session-token", "test-token"])
+        .args([
+            "remote",
+            "start-session",
+            "--base-dir",
+            relay_dir.path().to_str().unwrap(),
+            "--session-token",
+            "test-token",
+        ])
         .output()
         .expect("remote start-session must not panic");
 
@@ -276,7 +283,12 @@ fn list_tools_parses_connect_list_exec_tools_response() {
 
     // When
     let output = tddy_tools_bin()
-        .args(["remote", "list-tools", "--base-dir", relay_dir.path().to_str().unwrap()])
+        .args([
+            "remote",
+            "list-tools",
+            "--base-dir",
+            relay_dir.path().to_str().unwrap(),
+        ])
         .output()
         .expect("remote list-tools must not panic");
 

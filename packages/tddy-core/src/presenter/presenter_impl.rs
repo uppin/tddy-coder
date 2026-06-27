@@ -2374,8 +2374,13 @@ mod tests {
 
         let resolver =
             Arc::new(|_: &str| Ok(Arc::new(EmptyPresenterTestRecipe) as Arc<dyn WorkflowRecipe>));
-        let mut p = Presenter::new("stub", "opus", Arc::new(EmptyPresenterTestRecipe), tmp.clone())
-            .with_recipe_resolver(resolver);
+        let mut p = Presenter::new(
+            "stub",
+            "opus",
+            Arc::new(EmptyPresenterTestRecipe),
+            tmp.clone(),
+        )
+        .with_recipe_resolver(resolver);
         let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
         p.start_workflow(
             backend,

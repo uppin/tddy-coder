@@ -139,7 +139,10 @@ mod tests {
 
     #[test]
     fn default_tddy_data_dir_debug_is_tmp_tddy() {
-        assert_eq!(default_tddy_data_dir_for(true), Some(PathBuf::from("tmp").join(".tddy")));
+        assert_eq!(
+            default_tddy_data_dir_for(true),
+            Some(PathBuf::from("tmp").join(".tddy"))
+        );
     }
 
     #[test]

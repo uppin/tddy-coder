@@ -116,15 +116,44 @@ impl PtyHandle {
     }
 }
 
+/// The outcome of a [`ClaudeCliSessionManager::claim_control`] call.
+pub enum ClaimOutcome {
+    /// The caller is now the controller. `control_token` must be presented in subsequent control RPCs.
+    Granted { control_token: String },
+    /// Another screen holds the lease. `holder_screen_id` identifies them.
+    Denied { holder_screen_id: String },
+}
+
+/// Per-session control lease snapshot.
+#[derive(Debug, Clone)]
+pub struct ControlLeaseInfo {
+    pub control_token: String,
+    pub holder_screen_id: String,
+}
+
+/// Broadcast payload emitted when a session's control lease changes.
+#[derive(Debug, Clone)]
+pub struct ControlChangeEvent {
+    pub session_id: String,
+    pub holder_screen_id: String,
+}
+
 /// Registry of active session tools: `session_id → (terminal_id → PtyHandle)`.
 ///
 /// Each session may run multiple identified tools — the main `claude` terminal under
 /// [`MAIN_TERMINAL_ID`] plus additional Bash tools under fresh ids.
 type TerminalRegistry = Arc<RwLock<HashMap<String, HashMap<String, Arc<PtyHandle>>>>>;
 
-/// Manages the [`TerminalRegistry`] of active session tools.
+/// Per-session control leases: `session_id → ControlLeaseInfo`.
+type ControlRegistry = Arc<RwLock<HashMap<String, ControlLeaseInfo>>>;
+
+/// Manages the [`TerminalRegistry`] of active session tools and the per-session control leases.
 pub struct ClaudeCliSessionManager {
     registry: TerminalRegistry,
+    /// Exclusive control lease per session.
+    control: ControlRegistry,
+    /// Fan-out channel for control-change events. Subscribers call [`Self::subscribe_control`].
+    control_tx: broadcast::Sender<ControlChangeEvent>,
 }
 
 impl Default for ClaudeCliSessionManager {
@@ -136,8 +165,11 @@ impl Default for ClaudeCliSessionManager {
 impl ClaudeCliSessionManager {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
+        let (control_tx, _) = broadcast::channel(64);
         Self {
             registry: Arc::new(RwLock::new(HashMap::new())),
+            control: Arc::new(RwLock::new(HashMap::new())),
+            control_tx,
         }
     }
 
@@ -291,6 +323,12 @@ impl ClaudeCliSessionManager {
             .or_default()
             .insert(terminal_id.to_string(), Arc::clone(&handle));
 
+        log::info!(
+            target: "tddy_daemon::claude_cli_session",
+            "spawn_tool: registered session={} terminal={} kind={} pid={}",
+            session_id, terminal_id, kind, handle.pid
+        );
+
         Ok(handle)
     }
 
@@ -389,6 +427,31 @@ impl ClaudeCliSessionManager {
         }
     }
 
+    /// Stop all PTY terminals belonging to `session_id`: SIGTERM each and remove from registry.
+    ///
+    /// Called when a session ends (natural exit or explicit termination) so its processes don't
+    /// outlive the session. This is the per-session counterpart to [`kill_all`].
+    pub async fn stop_session(&self, session_id: &str) {
+        let handles = {
+            let mut reg = self.registry.write().await;
+            reg.remove(session_id).unwrap_or_default()
+        };
+
+        if handles.is_empty() {
+            return;
+        }
+
+        #[cfg(unix)]
+        for (terminal_id, handle) in &handles {
+            log::info!(
+                target: "tddy_daemon::claude_cli_session",
+                "stop_session: session={} terminal={} pid={} — sending SIGTERM",
+                session_id, terminal_id, handle.pid
+            );
+            let _ = crate::session_deletion::signal_pid(handle.pid as i32, libc::SIGTERM);
+        }
+    }
+
     /// Kill all tracked PTY processes across every session: SIGTERM each, wait up to 5 s,
     /// then SIGKILL any that remain. Clears the registry on completion.
     ///
@@ -406,8 +469,19 @@ impl ClaudeCliSessionManager {
         };
 
         if pids.is_empty() {
+            log::debug!(
+                target: "tddy_daemon::claude_cli_session",
+                "kill_all: no registered sessions — nothing to terminate"
+            );
             return;
         }
+
+        log::info!(
+            target: "tddy_daemon::claude_cli_session",
+            "kill_all: sending SIGTERM to {} process(es): {:?}",
+            pids.len(),
+            pids
+        );
 
         tokio::task::spawn_blocking(move || {
             #[cfg(unix)]
@@ -425,8 +499,24 @@ impl ClaudeCliSessionManager {
                     }
                     std::thread::sleep(std::time::Duration::from_millis(50));
                 }
-                for &pid in &pids {
-                    if unsafe { libc::kill(pid as i32, 0) } == 0 {
+                let still_alive: Vec<u32> = pids
+                    .iter()
+                    .copied()
+                    .filter(|&pid| unsafe { libc::kill(pid as i32, 0) } == 0)
+                    .collect();
+                if still_alive.is_empty() {
+                    log::info!(
+                        target: "tddy_daemon::claude_cli_session",
+                        "kill_all: all processes exited cleanly after SIGTERM"
+                    );
+                } else {
+                    log::warn!(
+                        target: "tddy_daemon::claude_cli_session",
+                        "kill_all: {} process(es) still alive after 5 s — sending SIGKILL: {:?}",
+                        still_alive.len(),
+                        still_alive
+                    );
+                    for &pid in &still_alive {
                         let _ = crate::session_deletion::signal_pid(pid as i32, libc::SIGKILL);
                     }
                 }
@@ -434,6 +524,89 @@ impl ClaudeCliSessionManager {
         })
         .await
         .ok();
+    }
+
+    // --- terminal control lease (single-screen mutex) ---
+
+    /// Attempt to claim exclusive input control of a session's terminals.
+    ///
+    /// - `steal = false`: grants only when unheld or already held by `screen_id`.
+    /// - `steal = true`: always grants, evicting the previous holder and broadcasting a
+    ///   [`ControlChangeEvent`] to all [`Self::subscribe_control`] subscribers.
+    ///
+    /// Returns a [`ClaimOutcome`] the RPC handler maps to [`ClaimTerminalControlResponse`].
+    pub async fn claim_control(
+        &self,
+        session_id: &str,
+        screen_id: &str,
+        steal: bool,
+    ) -> ClaimOutcome {
+        let mut control = self.control.write().await;
+        match control.get(session_id) {
+            None => {
+                let token = uuid::Uuid::new_v4().to_string();
+                control.insert(
+                    session_id.to_string(),
+                    ControlLeaseInfo {
+                        control_token: token.clone(),
+                        holder_screen_id: screen_id.to_string(),
+                    },
+                );
+                ClaimOutcome::Granted {
+                    control_token: token,
+                }
+            }
+            Some(lease) if lease.holder_screen_id == screen_id => ClaimOutcome::Granted {
+                control_token: lease.control_token.clone(),
+            },
+            Some(lease) if !steal => ClaimOutcome::Denied {
+                holder_screen_id: lease.holder_screen_id.clone(),
+            },
+            Some(_) => {
+                let token = uuid::Uuid::new_v4().to_string();
+                control.insert(
+                    session_id.to_string(),
+                    ControlLeaseInfo {
+                        control_token: token.clone(),
+                        holder_screen_id: screen_id.to_string(),
+                    },
+                );
+                drop(control);
+                let _ = self.control_tx.send(ControlChangeEvent {
+                    session_id: session_id.to_string(),
+                    holder_screen_id: screen_id.to_string(),
+                });
+                ClaimOutcome::Granted {
+                    control_token: token,
+                }
+            }
+        }
+    }
+
+    /// Return `true` iff `control_token` matches the active control lease for `session_id`.
+    ///
+    /// An empty `control_token` is accepted when the session has no active lease (uncontrolled).
+    /// A session with no active lease is considered uncontrolled: all inputs are accepted.
+    pub async fn verify_control(&self, session_id: &str, control_token: &str) -> bool {
+        let control = self.control.read().await;
+        match control.get(session_id) {
+            None => true,
+            Some(lease) => lease.control_token == control_token,
+        }
+    }
+
+    /// Return the current control lease for `session_id`, or `None` if uncontrolled.
+    pub async fn current_control(&self, session_id: &str) -> Option<ControlLeaseInfo> {
+        let control = self.control.read().await;
+        control.get(session_id).cloned()
+    }
+
+    /// Subscribe to control-change events across all sessions.
+    ///
+    /// Each [`ControlChangeEvent`] identifies the affected `session_id` and the new holder's
+    /// `holder_screen_id`. The displaced screen should render the "Claim terminal" CTA.
+    pub fn subscribe_control(&self) -> broadcast::Receiver<ControlChangeEvent> {
+        self.control_tx.subscribe()
     }
 
     // --- private helpers ---

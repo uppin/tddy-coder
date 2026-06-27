@@ -63,7 +63,7 @@ Design testing options with trade-off analysis. Consider:
 
 ### 7. Define Acceptance Tests
 
-Write concrete acceptance test descriptions that map to the PRD acceptance criteria.
+Write concrete acceptance test descriptions that map to the PRD acceptance criteria. When these tests are later implemented (e.g. via `/plan-red` or `/ft-dev`), they must be written in the mandatory `fluent-tests` style (see `.claude/skills/fluent-tests/`).
 
 ### 8. Create Changeset Document
 

@@ -7,7 +7,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use tddy_core;
 
 /// Remote-codebase mode subcommands.
 #[derive(Parser)]
@@ -339,7 +338,9 @@ fn resolve_base_dir(override_dir: Option<PathBuf>) -> PathBuf {
     if let Some(d) = override_dir {
         return d;
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
     tddy_core::output::default_tddy_data_dir()
         .map(|b| b.join("relay"))
         .unwrap_or_else(|| home.join(".tddy").join("relay"))

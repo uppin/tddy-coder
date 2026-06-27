@@ -6,3 +6,24 @@ rustflags = ["-C", "link-arg=-ObjC"]
 
 [target.x86_64-apple-darwin]
 rustflags = ["-C", "link-arg=-ObjC"]
+
+# ---------------------------------------------------------------------------
+# Pre-extracted libwebrtc binaries — skips the GitHub download on every build.
+# Tag: webrtc-51ef663 (matches webrtc-sys-build WEBRTC_TAG).
+# To update: download the new zip, extract to the same dir, update this path.
+# ---------------------------------------------------------------------------
+[env]
+LK_CUSTOM_WEBRTC = "/Users/mantasi/.local/share/livekit-webrtc/mac-arm64-release"
+
+# ---------------------------------------------------------------------------
+# Local crates.io caching proxy (crates-io-proxy on 127.0.0.1:3080)
+# Lazy / on-demand: only fetches what you build; crate files cached permanently.
+# Start/stop: `launchctl load|unload ~/Library/LaunchAgents/dev.crates-io-proxy.plist`
+# Logs: ~/.cache/crates-io-proxy/proxy.log
+# To bypass (e.g. offline without proxy): comment out replace-with below.
+# ---------------------------------------------------------------------------
+[source.crates-io]
+replace-with = "crates-io-proxy"
+
+[source.crates-io-proxy]
+registry = "sparse+http://127.0.0.1:3080/index/"

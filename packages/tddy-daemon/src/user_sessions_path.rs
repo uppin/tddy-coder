@@ -58,7 +58,10 @@ pub fn sessions_base_for_user(_os_user: &str, _config_dir: Option<&Path>) -> Opt
 }
 
 #[cfg(not(unix))]
-pub fn tddy_data_root_matching_child(_os_user: &str, _config_dir: Option<&Path>) -> Option<PathBuf> {
+pub fn tddy_data_root_matching_child(
+    _os_user: &str,
+    _config_dir: Option<&Path>,
+) -> Option<PathBuf> {
     None
 }
 

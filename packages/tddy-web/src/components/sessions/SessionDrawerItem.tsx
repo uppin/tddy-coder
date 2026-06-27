@@ -9,6 +9,7 @@ interface SessionDrawerItemProps {
   session: SessionEntry;
   isSelected: boolean;
   onClick: (sessionId: string) => void;
+  depth?: number;
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -17,7 +18,7 @@ const STATUS_COLOR: Record<string, string> = {
   "needs-input": "bg-yellow-500",
 };
 
-export function SessionDrawerItem({ session, isSelected, onClick }: SessionDrawerItemProps) {
+export function SessionDrawerItem({ session, isSelected, onClick, depth }: SessionDrawerItemProps) {
   const label = sessionDrawerLabel(session);
   const status = connectionStatusForSession(session);
 
@@ -27,6 +28,7 @@ export function SessionDrawerItem({ session, isSelected, onClick }: SessionDrawe
         <button
           type="button"
           data-testid={`sessions-drawer-item-${session.sessionId}`}
+          data-depth={depth !== undefined ? String(depth) : undefined}
           aria-selected={isSelected ? "true" : undefined}
           onClick={() => onClick(session.sessionId)}
           className={cn(

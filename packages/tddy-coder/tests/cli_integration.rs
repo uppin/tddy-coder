@@ -22,7 +22,8 @@ fn cli_runs_full_workflow_when_goal_omitted() {
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .arg("--tddy-data-dir").arg(tmp.to_str().unwrap())
+        .arg("--tddy-data-dir")
+        .arg(tmp.to_str().unwrap())
         .args(["--agent", "stub", "--prompt", "SKIP_QUESTIONS Build auth"])
         .write_stdin("a\n");
 
@@ -50,7 +51,8 @@ fn cli_accepts_goal_plan() {
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .arg("--tddy-data-dir").arg(tmp.to_str().unwrap())
+        .arg("--tddy-data-dir")
+        .arg(tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
@@ -86,7 +88,8 @@ fn cli_plain_mode_plan_approval_approve_proceeds() {
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .arg("--tddy-data-dir").arg(tmp.to_str().unwrap())
+        .arg("--tddy-data-dir")
+        .arg(tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
@@ -160,7 +163,8 @@ fn cli_displays_agent_and_model_before_goal_execution() {
     // When
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .arg("--tddy-data-dir").arg(tmp.to_str().unwrap())
+        .arg("--tddy-data-dir")
+        .arg(tmp.to_str().unwrap())
         .args([
             "-c",
             config_path.to_str().unwrap(),
@@ -227,7 +231,8 @@ fn cli_displays_state_transitions() {
     // When
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .arg("--tddy-data-dir").arg(tmp.to_str().unwrap())
+        .arg("--tddy-data-dir")
+        .arg(tmp.to_str().unwrap())
         .args([
             "-c",
             config_path.to_str().unwrap(),
@@ -273,7 +278,8 @@ fn cli_accepts_prompt_flag_instead_of_stdin() {
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .arg("--tddy-data-dir").arg(tmp.to_str().unwrap())
+        .arg("--tddy-data-dir")
+        .arg(tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
@@ -374,7 +380,8 @@ fn cli_q_and_a_flow_produces_prd_after_answers() {
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .arg("--tddy-data-dir").arg(tmp.to_str().unwrap())
+        .arg("--tddy-data-dir")
+        .arg(tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
@@ -502,7 +509,8 @@ fn cli_accepts_goal_red_with_session_dir() {
     // When
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .arg("--tddy-data-dir").arg(tmp.to_str().unwrap())
+        .arg("--tddy-data-dir")
+        .arg(tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
@@ -557,7 +565,8 @@ fn cli_accepts_goal_green_with_session_dir() {
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .arg("--tddy-data-dir").arg(tmp.to_str().unwrap())
+        .arg("--tddy-data-dir")
+        .arg(tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
@@ -579,7 +588,8 @@ fn cli_accepts_goal_green_with_session_dir() {
 
     let mut cmd2 = tddy_coder_bin();
     cmd2.env_clear()
-        .arg("--tddy-data-dir").arg(tmp.to_str().unwrap())
+        .arg("--tddy-data-dir")
+        .arg(tmp.to_str().unwrap())
         .args([
             "--agent",
             "stub",
@@ -737,7 +747,8 @@ fn plan_goal_without_output_dir_creates_session_under_tddy_sessions_dir() {
 
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
-        .arg("--tddy-data-dir").arg(sessions_base.to_str().unwrap())
+        .arg("--tddy-data-dir")
+        .arg(sessions_base.to_str().unwrap())
         .args([
             "--agent",
             "stub",
@@ -840,7 +851,8 @@ fn cli_bugfix_plain_keeps_explicit_session_dir_when_fix_plan_missing() {
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
         .current_dir(&repo_dir)
-        .arg("--tddy-data-dir").arg(sessions_root.to_str().unwrap())
+        .arg("--tddy-data-dir")
+        .arg(sessions_root.to_str().unwrap())
         .args([
             "--agent",
             "stub",
@@ -914,7 +926,8 @@ fn cli_bugfix_resume_clears_stale_session_config_goal_plan() {
     let mut cmd = tddy_coder_bin();
     cmd.env_clear()
         .current_dir(&repo_dir)
-        .arg("--tddy-data-dir").arg(sessions_root.to_str().unwrap())
+        .arg("--tddy-data-dir")
+        .arg(sessions_root.to_str().unwrap())
         .args([
             "--agent",
             "stub",

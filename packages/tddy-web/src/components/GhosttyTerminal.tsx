@@ -27,6 +27,15 @@ import {
 } from "../lib/terminalZoomBridge";
 import { TERMINAL_OVERLAY_FIXED_GRID_CHAR_WIDTH_EM } from "./connection/config";
 import { clientPointToTerminalCell } from "../lib/terminalMouseCellCoords";
+import { tddyDebug } from "../lib/debugMask";
+
+// Namespaced `[tddy]` diagnostics enabled by the DEBUG mask (daemon `debug:` / localStorage.debug).
+// Scoped to the data flow behind terminal garbling / misalignment.
+const dLife = tddyDebug("tddy:term:life");
+const dData = tddyDebug("tddy:term:data");
+const dWrite = tddyDebug("tddy:term:write");
+const dResize = tddyDebug("tddy:term:resize");
+const dMouse = tddyDebug("tddy:term:mouse");
 
 /** Finger separation change (px) required before applying one font step during touch pinch. */
 const PINCH_FONT_STEP_SPAN_PX = 22;
@@ -129,9 +138,19 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     },
     ref
   ) {
-    const log = debugLogging
-      ? (...args: unknown[]) => console.log("[GhosttyTerminal]", ...args)
-      : () => {};
+    // Each logger fires when its namespace is in the active DEBUG mask, OR unconditionally when the
+    // legacy `debugLogging` prop is set (standalone "Debug logging" checkbox).
+    const mkLog =
+      (d: ReturnType<typeof tddyDebug>) =>
+      (fmt: string, ...args: unknown[]) => {
+        if (debugLogging) console.debug(`[${d.namespace}]`, fmt, ...args);
+        else if (d.enabled) d(fmt, ...args);
+      };
+    const logLife = mkLog(dLife);
+    const logData = mkLog(dData);
+    const logWrite = mkLog(dWrite);
+    const logResize = mkLog(dResize);
+    const logMouse = mkLog(dMouse);
     const zoomVerbose = debugLogging || isTerminalZoomDebugEnabled();
     const containerRef = useRef<HTMLDivElement>(null);
     const termRef = useRef<Terminal | null>(null);
@@ -188,10 +207,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       let isMounted = true;
 
       async function setup() {
-        log("lifecycle: init");
+        logLife("init cols=%d rows=%d fontSize=%d", cols, rows, fontSize);
         await init();
         if (!isMounted || !containerRef.current) return;
-        log("lifecycle: creating Terminal");
+        logLife("creating Terminal");
 
         const term = new Terminal({
           cols,
@@ -209,16 +228,21 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
         const disposables: { dispose: () => void }[] = [];
         if (onData) {
-          console.log("[GhosttyTerminal] keyboard event listener attached (onData)");
+          logLife("keyboard listener attached (onData)");
           disposables.push(
             term.onData((data) => {
-              log("dataflow: onData received", data.length, "chars", JSON.stringify(data.slice(0, 30)));
+              logData("onData %d chars %s", data.length, JSON.stringify(data.slice(0, 30)));
               onData(data);
             })
           );
         }
         if (onResize) {
-          disposables.push(term.onResize(({ cols: c, rows: r }) => onResize({ cols: c, rows: r })));
+          disposables.push(
+            term.onResize(({ cols: c, rows: r }) => {
+              logResize("term.onResize cols=%d rows=%d", c, r);
+              onResize({ cols: c, rows: r });
+            })
+          );
         }
         if (onBell) {
           disposables.push(term.onBell(onBell));
@@ -240,7 +264,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           fitAddon.observeResize();
         }
 
-        log("lifecycle: term opened, calling onReady");
+        logLife("term opened cols=%d rows=%d, calling onReady", term.cols, term.rows);
         setReady(true);
         onReady?.();
 
@@ -515,7 +539,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       if (!ready || !containerRef.current || !termRef.current || !onData) return;
       const container = containerRef.current;
       const term = termRef.current;
-      console.log("[GhosttyTerminal] mouse listeners attached to container", { ready, hasContainer: !!container, hasTerm: !!term });
+      logMouse("mouse listeners attached ready=%o", ready);
 
       const canvasGridRect = () => {
         const canvas = term.element?.querySelector("canvas");
@@ -538,20 +562,18 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const onMouseDown = (e: MouseEvent) => {
         const coords = toCellCoords(e.clientX, e.clientY);
         const tracking = term.hasMouseTracking?.() ?? false;
-        console.log("[GhosttyTerminal] mousedown", { col: coords?.col, row: coords?.row, offsetX: e.offsetX, offsetY: e.offsetY, hasMouseTracking: tracking });
+        logMouse("mousedown col=%o row=%o tracking=%o", coords?.col, coords?.row, tracking);
         if (!tracking) return;
         if (coords) {
-          log("mouse mousedown", "col=", coords.col, "row=", coords.row, "offsetX=", e.offsetX, "offsetY=", e.offsetY);
           sendSgr(0, coords.col, coords.row, false);
         }
       };
       const onMouseUp = (e: MouseEvent) => {
         const coords = toCellCoords(e.clientX, e.clientY);
         const tracking = term.hasMouseTracking?.() ?? false;
-        console.log("[GhosttyTerminal] mouseup", { col: coords?.col, row: coords?.row, hasMouseTracking: tracking });
+        logMouse("mouseup col=%o row=%o tracking=%o", coords?.col, coords?.row, tracking);
         if (!tracking) return;
         if (coords) {
-          log("mouse mouseup", "col=", coords.col, "row=", coords.row, "offsetX=", e.offsetX, "offsetY=", e.offsetY);
           sendSgr(0, coords.col, coords.row, true);
         }
       };
@@ -564,10 +586,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
         const coords = toCellCoords(e.clientX, e.clientY);
         const tracking = term.hasMouseTracking?.() ?? false;
-        console.log("[GhosttyTerminal] wheel", { col: coords?.col, row: coords?.row, deltaY: e.deltaY, hasMouseTracking: tracking });
+        logMouse("wheel col=%o row=%o deltaY=%d tracking=%o", coords?.col, coords?.row, e.deltaY, tracking);
         if (!tracking) return;
         if (coords) {
-          log("mouse wheel", "col=", coords.col, "row=", coords.row, "deltaY=", e.deltaY);
           const pb = e.deltaY < 0 ? 64 : 65;
           sendSgr(pb, coords.col, coords.row, false);
         }
@@ -690,8 +711,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           applyFontSizePx(px, { min: minFontSize, max: maxFontSize });
         },
       write(data: string | Uint8Array) {
-        const len = typeof data === "string" ? data.length : data.length;
-        log("dataflow: write", len, "bytes", typeof data === "string" ? JSON.stringify(data.slice(0, 40)) : "(Uint8Array)");
+        if (debugLogging || dWrite.enabled) {
+          const preview =
+            typeof data === "string"
+              ? JSON.stringify(data.slice(0, 40))
+              : Array.from(data.slice(0, 24), (b) => b.toString(16).padStart(2, "0")).join(" ");
+          logWrite("write %d %s %s", data.length, typeof data === "string" ? "chars" : "bytes", preview);
+        }
         termRef.current?.write(data);
       },
       clear() {

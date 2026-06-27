@@ -521,7 +521,8 @@ mod tests {
             intent_tx: intent_tx.clone(),
         };
 
-        let tddy_data_dir = std::env::temp_dir().join(format!("tddy-service-test-home-{}", uuid::Uuid::new_v4()));
+        let tddy_data_dir =
+            std::env::temp_dir().join(format!("tddy-service-test-home-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tddy_data_dir).unwrap();
         let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe), tddy_data_dir)
             .with_broadcast(event_tx)

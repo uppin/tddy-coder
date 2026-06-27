@@ -1,14 +1,26 @@
 Validate test quality across all changed files in the current branch.
 
+**Fluent-tests is the mandatory test style for this repo.** Before checking anti-patterns,
+read `.claude/skills/fluent-tests/references/generic-guidelines.md` and the relevant
+framework-specific reference (`rust/std-test.md`, `typescript/cypress-component.md`, etc.)
+to calibrate what compliant tests look like. Every issue found must be evaluated against
+the fluent-tests standard, not just general heuristics.
+
 ## Steps
 
-### 1. Identify Test Files
+### 1. Read Fluent-Tests References
+
+Load the fluent-tests skill and read:
+- `.claude/skills/fluent-tests/references/generic-guidelines.md` (universal principles)
+- The framework-specific reference matching the test files under review
+
+### 2. Identify Test Files
 
 Run `git diff main...HEAD --name-only` and filter for test files (files containing `#[cfg(test)]`, files in `tests/` directories, files ending in `_test.rs`).
 
-### 2. Detect Anti-Patterns
+### 3. Detect Anti-Patterns
 
-For each test file, check for:
+For each test file, check for **fluent-tests violations first**, then general anti-patterns:
 
 **Always-passing tests:**
 - Tests with no assertions
@@ -41,7 +53,15 @@ For each test file, check for:
 - No boundary condition tests
 - No error condition tests
 
-### 3. Output Format
+**Fluent-tests violations (mandatory style for this repo):**
+- Raw `cy.get("[data-testid=...]")` in test bodies instead of named page-object helpers
+- Missing Given/When/Then structure (or equivalent visual separation)
+- More than one behavior asserted per test
+- `cy.intercept` used in component tests that could use `mountWithRpc` + `anInMemoryRpcBackend`
+- Test data with no semantic meaning (e.g. `"foo"`, `"bar"`, `"test"` as values)
+- Wire format / RPC protocol handling inline in the test (belongs in a driver/helper)
+
+### 4. Output Format
 
 Present findings as:
 
@@ -65,7 +85,7 @@ Description: <what's wrong>
 Suggestion: <how to fix>
 ```
 
-### 4. Update Changeset
+### 5. Update Changeset
 
 If a changeset document exists in `docs/dev/1-WIP/`, update the validation results section with test quality findings.
 

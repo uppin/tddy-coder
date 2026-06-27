@@ -1,0 +1,123 @@
+syntax = "proto3";
+package screen_sharing;
+
+// Control-plane service: add/list/remove screen-sharing targets per session,
+// unlock the credential vault, and start/stop the bridge for a target.
+// Implemented by tddy-daemon and consumed by the browser via HTTP Connect.
+// Supports VNC and RDP protocols via the Protocol enum on each target.
+service ScreenSharingService {
+  rpc ListTargets  (ListTargetsRequest)  returns (ListTargetsResponse);
+  rpc AddTarget    (AddTargetRequest)    returns (AddTargetResponse);
+  rpc RemoveTarget (RemoveTargetRequest) returns (RemoveTargetResponse);
+  rpc UnlockVault  (UnlockVaultRequest)  returns (UnlockVaultResponse);
+  rpc StartStream  (StartStreamRequest)  returns (StartStreamResponse);
+  rpc StopStream   (StopStreamRequest)   returns (StopStreamResponse);
+}
+
+// --- Protocol ---
+
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_VNC = 1;
+  PROTOCOL_RDP = 2;
+}
+
+// --- Shared types ---
+
+message ScreenSharingTarget {
+  string   id       = 1;  // UUID assigned by daemon on add
+  string   label    = 2;  // Human-readable name chosen by the user
+  string   host     = 3;
+  uint32   port     = 4;
+  Protocol protocol = 5;
+  string   username = 6;  // Login user (required for RDP, optional for VNC)
+}
+
+// --- ListTargets ---
+
+message ListTargetsRequest {
+  string session_token = 1;
+  string session_id    = 2;
+}
+
+message ListTargetsResponse {
+  repeated ScreenSharingTarget targets = 1;
+}
+
+// --- AddTarget ---
+
+message AddTargetRequest {
+  string   session_token = 1;
+  string   session_id    = 2;
+  string   label         = 3;
+  string   host          = 4;
+  uint32   port          = 5;
+  // Plaintext password; daemon encrypts it with the vault key.
+  // Requires vault to be unlocked (call UnlockVault first).
+  // Leave empty for password-less targets.
+  string   password      = 6;
+  Protocol protocol      = 7;
+  // Login username (required for RDP, optional for VNC).
+  string   username      = 8;
+}
+
+message AddTargetResponse {
+  ScreenSharingTarget target = 1;
+}
+
+// --- RemoveTarget ---
+
+message RemoveTargetRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  string target_id     = 3;
+}
+
+message RemoveTargetResponse {
+  bool ok = 1;
+}
+
+// --- UnlockVault ---
+
+// Called by the browser when the user enters the passphrase.
+// The derived key is cached in daemon memory for the session lifetime.
+message UnlockVaultRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  string passphrase    = 3;
+}
+
+message UnlockVaultResponse {
+  bool ok = 1;
+}
+
+// --- StartStream ---
+
+message StartStreamRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  string target_id     = 3;
+}
+
+// Response carries the LiveKit coordinates so the browser knows which participant
+// and track to subscribe to, and which identity to send input events to.
+message StartStreamResponse {
+  string livekit_room    = 1;
+  string livekit_url     = 2;
+  string bridge_identity = 3;  // e.g. "screenshare-<session>-<target>"
+  string track_name      = 4;  // e.g. "screenshare:<target_id>"
+  uint32 width           = 5;
+  uint32 height          = 6;
+}
+
+// --- StopStream ---
+
+message StopStreamRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  string target_id     = 3;
+}
+
+message StopStreamResponse {
+  bool ok = 1;
+}

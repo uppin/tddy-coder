@@ -18,10 +18,7 @@ fn main() {
         cli_args.insert(1, "stub".to_string());
         cli_args.insert(1, "--agent".to_string());
     }
-    let has_tddy_data_dir = cli_args
-        .iter()
-        .skip(1)
-        .any(|a| a == "--tddy-data-dir");
+    let has_tddy_data_dir = cli_args.iter().skip(1).any(|a| a == "--tddy-data-dir");
     if !has_tddy_data_dir {
         let demo_dir = env::temp_dir().join("tddy-demo");
         cli_args.insert(1, demo_dir.to_str().unwrap_or("/tmp/tddy-demo").to_string());

@@ -78,16 +78,16 @@ impl EventCollector {
 /// Creates a Presenter with broadcast and an EventCollector for assertions.
 fn presenter_with_events(tddy_data_dir: PathBuf) -> (Presenter, EventCollector) {
     let (event_tx, event_rx) = broadcast::channel(256);
-    let presenter =
-        Presenter::new("stub", "default", Arc::new(TddRecipe), tddy_data_dir).with_broadcast(event_tx);
+    let presenter = Presenter::new("stub", "default", Arc::new(TddRecipe), tddy_data_dir)
+        .with_broadcast(event_tx);
     let collector = EventCollector::new(event_rx);
     (presenter, collector)
 }
 
 fn bugfix_presenter_with_events(tddy_data_dir: PathBuf) -> (Presenter, EventCollector) {
     let (event_tx, event_rx) = broadcast::channel(256);
-    let presenter =
-        Presenter::new("stub", "default", Arc::new(BugfixRecipe), tddy_data_dir).with_broadcast(event_tx);
+    let presenter = Presenter::new("stub", "default", Arc::new(BugfixRecipe), tddy_data_dir)
+        .with_broadcast(event_tx);
     let collector = EventCollector::new(event_rx);
     (presenter, collector)
 }
@@ -240,7 +240,10 @@ fn full_workflow_completes_with_stub_backend() {
 #[test]
 fn tdd_workflow_starts_plan_after_feature_submit() {
     // Given
-    let sessions_base = std::env::temp_dir().join(format!("tddy-presenter-tdd-feature-submit-{}", std::process::id()));
+    let sessions_base = std::env::temp_dir().join(format!(
+        "tddy-presenter-tdd-feature-submit-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
 
@@ -302,7 +305,10 @@ fn tdd_workflow_starts_plan_after_feature_submit() {
 #[test]
 fn bugfix_workflow_starts_reproduce_after_feature_submit() {
     // Given
-    let sessions_base = std::env::temp_dir().join(format!("tddy-presenter-bugfix-feature-submit-{}", std::process::id()));
+    let sessions_base = std::env::temp_dir().join(format!(
+        "tddy-presenter-bugfix-feature-submit-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
 
@@ -365,7 +371,10 @@ fn bugfix_workflow_starts_reproduce_after_feature_submit() {
 #[test]
 fn bugfix_workflow_emits_interview_before_reproduce() {
     // Given
-    let sessions_base = std::env::temp_dir().join(format!("tddy-presenter-bugfix-interview-order-{}", std::process::id()));
+    let sessions_base = std::env::temp_dir().join(format!(
+        "tddy-presenter-bugfix-interview-order-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
 
@@ -451,8 +460,10 @@ fn bugfix_workflow_emits_interview_before_reproduce() {
 #[test]
 fn bugfix_preloaded_then_first_typed_submit_without_poll_spawns_extra_session_dir() {
     // Given
-    let sessions_base =
-        std::env::temp_dir().join(format!("tddy-presenter-bugfix-preload-first-submit-race-{}", std::process::id()));
+    let sessions_base = std::env::temp_dir().join(format!(
+        "tddy-presenter-bugfix-preload-first-submit-race-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
 
@@ -534,7 +545,10 @@ fn bugfix_preloaded_then_first_typed_submit_without_poll_spawns_extra_session_di
 #[test]
 fn bugfix_second_run_reuses_presenter_session_dir_after_workflow_complete() {
     // Given
-    let sessions_base = std::env::temp_dir().join(format!("tddy-presenter-bugfix-reuse-fixed-session-dir-{}", std::process::id()));
+    let sessions_base = std::env::temp_dir().join(format!(
+        "tddy-presenter-bugfix-reuse-fixed-session-dir-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
 
@@ -732,7 +746,10 @@ fn submit_feature_input_after_completion_restarts_workflow() {
 #[test]
 fn session_dir_under_sessions_base_when_output_dir_is_dot() {
     // Given
-    let sessions_base = std::env::temp_dir().join(format!("tddy-session-dir-test-sessions-{}", std::process::id()));
+    let sessions_base = std::env::temp_dir().join(format!(
+        "tddy-session-dir-test-sessions-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("create sessions base");
     let sessions_base_str = sessions_base.to_str().expect("path");
@@ -828,7 +845,8 @@ fn session_dir_under_sessions_base_when_output_dir_is_dot() {
 #[test]
 fn session_dir_under_sessions_refine_uses_repo_as_working_dir() {
     // Given
-    let sessions_base = std::env::temp_dir().join(format!("tddy-plan-refine-sessions-{}", std::process::id()));
+    let sessions_base =
+        std::env::temp_dir().join(format!("tddy-plan-refine-sessions-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("create sessions base");
     let sessions_base_str = sessions_base.to_str().expect("path");
@@ -1593,7 +1611,10 @@ const QUEUED_PROMPT_ACTIVITY_PREFIX: &str = "Queued: ";
 #[test]
 fn submit_feature_input_appends_user_prompt_activity() {
     // Given
-    let sessions_base = std::env::temp_dir().join(format!("tddy-presenter-user-prompt-activity-{}", std::process::id()));
+    let sessions_base = std::env::temp_dir().join(format!(
+        "tddy-presenter-user-prompt-activity-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
 
@@ -1633,7 +1654,6 @@ fn submit_feature_input_appends_user_prompt_activity() {
         "expected ActivityLogged broadcast for user prompt (remote sessions); events: {:?}",
         events.events()
     );
-
 }
 
 #[test]

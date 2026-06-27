@@ -148,6 +148,9 @@ fn main() -> anyhow::Result<()> {
 
     let common_room = config.livekit.as_ref().and_then(|l| l.common_room.clone());
 
+    // Browser DEBUG mask (debug-package namespaces) exposed at /api/config; see DaemonConfig::debug.
+    let web_debug = config.debug.clone();
+
     let allowed_agents: Vec<tddy_coder::web_server::ClientAllowedAgent> =
         tddy_daemon::agent_list_mapping::agent_allowlist_rows(&config)
             .into_iter()
@@ -157,7 +160,8 @@ fn main() -> anyhow::Result<()> {
             })
             .collect();
 
-    let auth_result = tddy_daemon::auth::build_auth_entries(&config, host.as_str(), port);
+    let auth_result =
+        tddy_daemon::auth::build_auth_entries(&config, host.as_str(), port, &tddy_data_dir);
     let mut rpc_entries = auth_result.entries;
 
     if let Some(ref lk) = config.livekit {
@@ -232,7 +236,10 @@ fn main() -> anyhow::Result<()> {
                     },
                 );
                 if let Some(sessions_base) =
-                    tddy_daemon::user_sessions_path::tddy_data_root_matching_child(&user, Some(&tddy_data_dir))
+                    tddy_daemon::user_sessions_path::tddy_data_root_matching_child(
+                        &user,
+                        Some(&tddy_data_dir),
+                    )
                 {
                     #[cfg(unix)]
                     let spawn_for_tg = spawn_client.as_ref().map(|(c, _)| Arc::new(c.clone()));
@@ -363,7 +370,7 @@ fn main() -> anyhow::Result<()> {
                     Some(tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles {
                         eligible_daemon_source: Arc::new(
                             tddy_daemon::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
-                                config_arc, registry,
+                                config_arc.clone(), registry,
                             ),
                         )
                             as Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource>,
@@ -373,7 +380,7 @@ fn main() -> anyhow::Result<()> {
                     None
                 }
             };
-            // Clone before moving into ConnectionServiceImpl — VmService needs the same resolver.
+            // Clone before moving into ConnectionServiceImpl — VmService and ScreenSharingService need the same resolver.
             let vm_user_resolver = user_resolver.clone();
             let sessions_base_resolver: tddy_daemon::connection_service::SessionsBaseResolver = {
                 let dd = tddy_data_dir.clone();
@@ -381,6 +388,7 @@ fn main() -> anyhow::Result<()> {
                     tddy_daemon::user_sessions_path::sessions_base_for_user(user, Some(&dd))
                 })
             };
+            let ss_user_resolver = user_resolver.clone();
             let mut connection_impl = tddy_daemon::connection_service::ConnectionServiceImpl::new(
                 config.clone(),
                 sessions_base_resolver,
@@ -416,8 +424,11 @@ fn main() -> anyhow::Result<()> {
             // VM lifecycle service — gated on auth being configured (same as ConnectionService).
             let vm_state_file = {
                 let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
-                let base = tddy_daemon::user_sessions_path::tddy_data_root_matching_child(&user, Some(&tddy_data_dir))
-                    .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+                let base = tddy_daemon::user_sessions_path::tddy_data_root_matching_child(
+                    &user,
+                    Some(&tddy_data_dir),
+                )
+                .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
                 base.join("vm-registry.json")
             };
             let vm_manager = Arc::new(tddy_vm::VmManager::new(
@@ -433,6 +444,30 @@ fn main() -> anyhow::Result<()> {
             rpc_entries.push(tddy_rpc::ServiceEntry {
                 name: "vm.VmService",
                 service: Arc::new(vm_server) as Arc<dyn tddy_rpc::RpcService>,
+            });
+
+            // Screen sharing service — vault management + VNC/RDP bridge spawning.
+            // Wire `sessions_base` with the daemon's resolved `tddy_data_dir` so vaults live
+            // under the config-only tddy home (config → profile default → `$HOME/.tddy`),
+            // matching `sessions_base_resolver` above — not a statically-derived `$HOME/.tddy`.
+            let ss_key_cache: tddy_daemon::screen_sharing_service::ScreenSharingKeyCache =
+                Arc::new(Mutex::new(HashMap::new()));
+            let ss_sessions_base: tddy_daemon::screen_sharing_service::SessionsBase = {
+                let dd = tddy_data_dir.clone();
+                Arc::new(move |user: &str| {
+                    tddy_daemon::user_sessions_path::sessions_base_for_user(user, Some(&dd))
+                })
+            };
+            let ss_svc = tddy_daemon::screen_sharing_service::ScreenSharingServiceImpl::new(
+                ss_user_resolver,
+                ss_sessions_base,
+                Arc::clone(&ss_key_cache),
+            )
+            .with_config(Arc::clone(&config_arc));
+            let ss_server = tddy_service::ScreenSharingServiceServer::new(ss_svc);
+            rpc_entries.push(tddy_rpc::ServiceEntry {
+                name: "screen_sharing.ScreenSharingService",
+                service: Arc::new(ss_server) as Arc<dyn tddy_rpc::RpcService>,
             });
         }
 
@@ -527,6 +562,26 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
+        // Spawn a task that SIGTERMs claude-cli sessions as soon as the daemon receives
+        // SIGTERM, independent of how long the HTTP server takes to drain open connections.
+        // This prevents orphaned Claude processes when systemd escalates to SIGKILL.
+        let kill_on_signal_manager = Arc::clone(&shared_claude_cli_manager);
+        let _kill_on_signal_task = tokio::spawn(async move {
+            #[cfg(unix)]
+            {
+                if let Ok(mut sig) =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                {
+                    sig.recv().await;
+                    log::info!(
+                        target: "tddy_daemon",
+                        "SIGTERM received — killing all claude-cli sessions"
+                    );
+                    kill_on_signal_manager.kill_all().await;
+                }
+            }
+        });
+
         let res = tddy_daemon::server::run_server(
             host.as_str(),
             port,
@@ -535,11 +590,14 @@ fn main() -> anyhow::Result<()> {
             livekit_url,
             common_room,
             allowed_agents,
+            web_debug,
             lifecycle_telegram,
             idle_rx_opt, // Some(rx) in relay mode; None otherwise
         )
         .await;
 
+        // Also call kill_all after the server finishes (covers graceful ctrl-c shutdown
+        // and any sessions started while the first kill_all was already running).
         shared_claude_cli_manager.kill_all().await;
 
         if let Some(t) = inbound_task {

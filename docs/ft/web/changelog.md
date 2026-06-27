@@ -4,12 +4,52 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-06-26 — Screen Sharing tab with VNC and RDP protocol selector
+
+- Session inspector gains a **Screen Sharing** tab (alongside Details, Tools, and VNC) accessible from any session
+- Add form has a **protocol selector** (VNC / RDP) that auto-fills the default port (5900 / 3389); selecting RDP reveals a **username field**
+- First vault operation (add target with password) prompts for the vault passphrase; subsequent adds in the same session skip the dialog (`vaultUnlocked` session guard)
+- **Start** calls `ScreenSharingService.StartStream`; daemon dispatches to the VNC or RDP bridge binary and opens the full-screen LiveKit overlay
+- Inline error messages appear below the form on `AddTarget`, `UnlockVault`, or `StartStream` failures (no silent swallowing)
+- Username stored on the target and threaded through to the RDP `IronRDP` credential handshake (was hardcoded `"user"`)
+
+## 2026-06-26 — PR-stack session UI: recipe dropdown, parent picker, collapsible drawer groups
+
+- `CreateSessionPane` recipe field replaced with a `<select>` listing all 9 workflow recipes (tdd, tdd-small, bugfix, free-prompting, grill-me, review, merge-pr, plan-pr-stack, orchestrate-pr-stack); default is "tdd"
+- New parent-picker `<select>` (tool sessions only): lists orchestrator sessions so a child can be attached to an existing PR-stack; hidden for claude-cli sessions
+- `SessionDrawer` groups PR-stack children under the orchestrator session in a collapsible `<details>/<summary>` element; children render at `depth={1}` (indented)
+- Orphan children (orchestrator not present in the list) fall through to the flat list
+- New utils: `stackParentCandidates(sessions)`, `groupSessionsByStack(sessions)`
+## 2026-06-26 — Browser DEBUG mask + fix SendTerminalInput unhandled rejections
+
+- `dev.daemon.yaml` ships `debug: "tddy:term:*"` — a [`debug`](https://www.npmjs.com/package/debug)-package namespace mask served at `GET /api/config`; browser adopts it on load with `localStorage` persistence (invalidated only when the config value changes); `?debug=` URL param overrides for a session
+- `GhosttyTerminal` / `GhosttyTerminalGrpc` replace ad-hoc `console.log` spam with namespaced loggers: `tddy:term:{write,data,resize,grpc,life,mouse}`
+- Fixed `GrpcSessionTerminal.send()`: unhandled `[failed_precondition]` promise rejections silenced via `.catch(() => {})`; `controlToken` prop added and forwarded in every `SendTerminalInput` call (internal ref pattern — stream is not recreated on token changes)
+- `useTerminalControl` exposes `controlTokenRef`; token threads `SessionsDrawerScreen` → `SessionMainPane` → `GrpcSessionTerminal`
+## 2026-06-26 — VNC sessions: inspector tab, encrypted vault, full-screen overlay
+
+- Session inspector drawer gains a **VNC** tab alongside Details and Tools; accessible regardless of session connection state
+- `SessionVncTab` lists configured VNC targets (label, host:port, per-target status) and provides an Add form (label, host, port, optional password)
+- First vault operation (add with password, start stream) triggers `VncPassphraseDialog`; passphrase creates/unlocks the vault (Argon2id + ChaCha20-Poly1305 AEAD, `.vnc.yaml` mode 0600); derived key cached in daemon memory for the session
+- Per-target **Start** calls `VncService.StartVncStream`; daemon spawns a `tddy-vnc` bridge binary that publishes a LiveKit video track; per-target **Stop** calls `StopVncStream` and tears down the process
+- **VNC overlay**: full-screen (`fixed inset-0 z-50`) darkened overlay renders the remote desktop video; dismiss via Escape, backdrop click, or close button
+- Per-target **Remove** calls `VncService.RemoveVncTarget` and deletes the encrypted credential
+- New `tddy-vnc` package scaffolded with `common.rs` (`char_to_keysym`, `rgba_to_abgr`); bridge pump loop and VncClient/VncStreamer are follow-up stubs (FIXME)
+- Feature: [vnc-sessions.md](vnc-sessions.md)
+
 ## 2026-06-26 — PTY terminal width fix — gRPC session terminal renders at correct width
 
 - New `GrpcSessionTerminal` component: measures its container's pixel width/height, computes `initial_cols`/`initial_rows` (8px × 17px character-cell estimates), and passes them to the `StreamTerminalOutput` gRPC request so the daemon resizes the PTY before forwarding output
 - `GhosttyTerminalGrpc` gains a hidden `data-testid="terminal-buffer-text"` div (200 ms polling) enabling Cypress to assert visible terminal text without OCR
 - New `GrpcSessionTerminalResize.cy.tsx` component tests (3) verify `initial_cols > 0`, `initial_rows > 0`, and that cols match container width
 - New `terminal-rendering.cy.ts` e2e tests (4) against a live daemon with `tddy-demo-tui`: AC1 width ≠ 220, AC2 no horizontal overflow, AC3 resize updates cols, AC4 reconnect shows correct width immediately
+## 2026-06-26 — Single-screen terminal control mutex: Claim terminal CTA
+
+- `SessionMainPane` gains a `terminalControl` prop; when another screen holds the lease an absolute scrim overlay appears with the holder's screen id and a **"Claim terminal"** button
+- `useTerminalControl` hook: claims control (steal=false) on session attach, subscribes to `WatchTerminalControl` server-stream for real-time lease-change events, exposes `claim()` for steal=true
+- `terminalControlState.ts` pure reducer folds `TerminalControlEvent` stream into `{ isController, holderScreenId }`
+- `screenId.ts`: stable per-browser-tab identity persisted in `sessionStorage` (two tabs get different ids)
+- `SessionsDrawerScreen` owns the hook and passes `terminalControl` to `SessionMainPane` only when a session is connected
 
 ## 2026-06-25 — Session inspector Tools tab: invoke panel + durable call log
 

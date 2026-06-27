@@ -60,6 +60,61 @@ session and manage them over RPC, so I can run a shell in the session's worktree
 9. Every RPC validates `session_token` (→ GitHub user → OS user) exactly like the existing session
    RPCs; an invalid token yields `UNAUTHENTICATED`.
 
+## Terminal Control Ownership (Single-Screen Mutex)
+
+> **Updated: 2026-06-26** — Extends the multi-tool RPC surface with a per-session control mutex
+> so that exactly one screen can send input at a time.
+
+### Summary
+
+A tddy session's terminals — the main `claude` terminal plus any Bash tools — may be connected
+from multiple browser tabs or clients simultaneously. Today each client can send input, causing
+conflicting keystrokes. The control mutex ensures exactly **one screen is the controller** at any
+given moment; all other connected screens are **observers** (they still receive output).
+
+### Acceptance Criteria
+
+#### Control Lease
+
+10. `ClaimTerminalControl(session_id, screen_id, steal=false)` grants a `control_token` when the
+    session is uncontrolled or already controlled by the same `screen_id`.
+11. `ClaimTerminalControl(session_id, screen_id, steal=false)` is **denied** (returns
+    `granted=false`, `current_holder_screen_id` set) when another `screen_id` holds the lease.
+12. `ClaimTerminalControl(session_id, screen_id, steal=true)` always grants a new `control_token`,
+    evicting the previous holder and emitting a `ControlChangeEvent` to all
+    `WatchTerminalControl` subscribers for that session.
+13. A session with no active lease is "uncontrolled": all input RPCs are accepted regardless of
+    `control_token` (backwards-compatible with clients that do not yet send the field).
+
+#### Input Enforcement
+
+14. `SendTerminalInput` and `StreamSessionTerminalIO` with a `control_token` that does not match
+    the current lease return `FAILED_PRECONDITION` ("terminal controlled by another screen").
+15. The enforcement is transport-agnostic: the token is validated at the `ClaudeCliSessionManager`
+    level, independent of whether the RPC arrived over HTTP Connect or LiveKit.
+
+#### Watch / Notification
+
+16. `WatchTerminalControl(session_id, control_token)` emits an immediate snapshot event
+    (`TerminalControlEvent`) containing `holder_screen_id` and `you_are_controller` (true iff
+    the subscriber's token matches the current lease).
+17. When the lease changes (steal), all active `WatchTerminalControl` subscribers receive a new
+    `TerminalControlEvent` reflecting the new holder.
+
+#### Auth
+
+18. `ClaimTerminalControl` and `WatchTerminalControl` require a valid `session_token`
+    (→ GitHub user → OS user); an invalid token yields `UNAUTHENTICATED`.
+
+### Non-goals (this iteration)
+
+- No heartbeat-based auto-release when the controlling browser tab closes. A disconnected
+  controller retains the lease; the next screen reclaims via `ClaimTerminalControl(steal=true)`.
+- No persistence across daemon restart (the control registry is in-memory).
+- The lease granularity is **per-session**, not per-terminal-id within a session.
+
+---
+
 ## Non-goals (out of scope)
 
 - Web UI integration (deferred).

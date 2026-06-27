@@ -66,7 +66,8 @@ fn start_backend(
     let (event_tx, _) = tokio::sync::broadcast::channel(256);
     let (intent_tx, intent_rx) = std::sync::mpsc::channel();
 
-    let tddy_data_dir = std::env::temp_dir().join(format!("tddy-rpc-demo-home-{}", uuid::Uuid::new_v4()));
+    let tddy_data_dir =
+        std::env::temp_dir().join(format!("tddy-rpc-demo-home-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&tddy_data_dir).unwrap();
     let presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe), tddy_data_dir)
         .with_broadcast(event_tx)

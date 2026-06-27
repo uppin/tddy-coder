@@ -221,10 +221,10 @@ async fn handle_connection(
             let store_root: Option<PathBuf> = rr.as_ref().map(|r| {
                 let canon = std::fs::canonicalize(r).unwrap_or_else(|_| r.clone());
                 let key = derive_repo_key(&canon);
-                repo_actions_root(&*dd, &key)
+                repo_actions_root(&dd, &key)
             });
 
-            list_action_summaries(sd.as_deref(), rr.as_deref(), &*dd, &discovery_query)
+            list_action_summaries(sd.as_deref(), rr.as_deref(), &dd, &discovery_query)
                 .map(|result| (result, store_root))
         })
         .await;
@@ -279,7 +279,7 @@ async fn handle_connection(
             let store_root: Option<PathBuf> = rr.as_ref().map(|r| {
                 let canon = std::fs::canonicalize(r).unwrap_or_else(|_| r.clone());
                 let key = derive_repo_key(&canon);
-                repo_actions_root(&*dd, &key)
+                repo_actions_root(&dd, &key)
             });
 
             invoke_action_core(

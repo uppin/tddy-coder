@@ -104,6 +104,16 @@ pub struct DaemonConfig {
     /// (`tmp/.tddy` in debug builds, `$HOME/.tddy` in release builds).
     #[serde(default)]
     pub tddy_data_dir: Option<PathBuf>,
+    /// Screen-sharing bridge binary configuration (VNC + RDP paths).
+    #[serde(default)]
+    pub screen_sharing: Option<ScreenSharingConfig>,
+
+    /// Browser DEBUG mask exposed to tddy-web via `GET /api/config` (`debug` field). A `debug`-package
+    /// namespace mask (e.g. `tddy:term:*`, or `tddy:term:write,tddy:term:resize`) that enables scoped
+    /// `[tddy]` diagnostics in the browser. Mainly for `./web-dev` to debug terminal garbling /
+    /// misalignment. The browser invalidates any local override when this value changes. None = off.
+    #[serde(default)]
+    pub debug: Option<String>,
 }
 
 impl Default for DaemonConfig {
@@ -128,6 +138,8 @@ impl Default for DaemonConfig {
             claude_cli: None,
             relay: None,
             tddy_data_dir: None,
+            screen_sharing: None,
+            debug: None,
         }
     }
 }
@@ -141,6 +153,64 @@ pub struct TelegramConfig {
     pub bot_token: String,
     #[serde(default)]
     pub chat_ids: Vec<i64>,
+}
+
+/// Screen-sharing bridge binary configuration. Loaded from daemon YAML under `screen_sharing:`.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenSharingConfig {
+    /// Path to the `tddy-vnc` bridge binary.
+    /// Empty string (default) → resolved at runtime: current_exe sibling, then PATH.
+    #[serde(default)]
+    pub vnc_binary_path: String,
+    /// Path to the `tddy-rdp` bridge binary.
+    /// Empty string (default) → resolved at runtime: current_exe sibling, then PATH.
+    #[serde(default)]
+    pub rdp_binary_path: String,
+}
+
+/// Resolve the actual path to the `tddy-vnc` binary.
+///
+/// Resolution order:
+/// 1. Explicit `vnc_binary_path` in `screen_sharing` config (if non-empty).
+/// 2. Sibling of the current executable (same directory).
+/// 3. Fallback to `"tddy-vnc"` (PATH lookup).
+pub fn resolve_vnc_binary_path(config: &DaemonConfig) -> String {
+    let explicit = config
+        .screen_sharing
+        .as_ref()
+        .map(|c| c.vnc_binary_path.as_str())
+        .unwrap_or("");
+    if !explicit.is_empty() {
+        return explicit.to_string();
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("tddy-vnc")))
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "tddy-vnc".to_string())
+}
+
+/// Resolve the actual path to the `tddy-rdp` binary.
+///
+/// Resolution order:
+/// 1. Explicit `rdp_binary_path` in `screen_sharing` config (if non-empty).
+/// 2. Sibling of the current executable (same directory).
+/// 3. Fallback to `"tddy-rdp"` (PATH lookup).
+pub fn resolve_rdp_binary_path(config: &DaemonConfig) -> String {
+    let explicit = config
+        .screen_sharing
+        .as_ref()
+        .map(|c| c.rdp_binary_path.as_str())
+        .unwrap_or("");
+    if !explicit.is_empty() {
+        return explicit.to_string();
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("tddy-rdp")))
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "tddy-rdp".to_string())
 }
 
 fn default_claude_cli_binary_path() -> String {
@@ -607,5 +677,39 @@ claude_cli:
             Some("/usr/local/bin/tddy-tools")
         );
         assert_eq!(cli.daemon_url.as_deref(), Some("http://127.0.0.1:9000"));
+    }
+}
+
+#[cfg(test)]
+mod web_debug_mask_tests {
+    use super::*;
+
+    #[test]
+    fn debug_mask_defaults_to_none() {
+        let c = DaemonConfig::default();
+        assert!(c.debug.is_none());
+    }
+
+    #[test]
+    fn debug_mask_absent_in_yaml_is_none() {
+        let yaml = "
+users:
+  - github_user: u
+    os_user: u
+";
+        let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
+        assert!(c.debug.is_none());
+    }
+
+    #[test]
+    fn debug_mask_parses_from_yaml() {
+        let yaml = "
+debug: \"tddy:term:*\"
+users:
+  - github_user: u
+    os_user: u
+";
+        let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
+        assert_eq!(c.debug.as_deref(), Some("tddy:term:*"));
     }
 }

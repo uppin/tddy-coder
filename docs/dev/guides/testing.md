@@ -2,6 +2,24 @@
 
 This document defines testing standards, anti-patterns, and guidelines for unit, integration, and production tests.
 
+## Mandatory Test Style: `fluent-tests`
+
+**`fluent-tests` is the mandatory test style for this repo.** Every test — new, refactored, or fixed — must comply with the `fluent-tests` skill at `.claude/skills/fluent-tests/`. Before writing or modifying any test, read:
+
+- `.claude/skills/fluent-tests/references/generic-guidelines.md` (universal principles)
+- The framework-specific reference for the test type (`rust/std-test.md`, `typescript/cypress-component.md`, etc.)
+
+Required compliance:
+- **Three-act structure** — every test has Given/When/Then, visually separated
+- **Intent-revealing names** — test names form a sentence describing behavior
+- **One behavior per test** — each test proves exactly one thing
+- **Encapsulate access** — selectors, wire formats, and raw protocol calls live in drivers/page objects, never in the test body
+- **Concrete values** — meaningful literals (`alice@example.com`), not `foo`/`bar`/`test`
+- **Builders for data** — complex objects built fluently with sensible defaults
+- **In-memory backends** for Cypress component tests (`mountWithRpc` + `anInMemoryRpcBackend`), not `cy.intercept`
+
+Violations are treated as test bugs. The anti-patterns below are in addition to, not instead of, the fluent-tests standard.
+
 ## Success Rate
 
 There is no partial success rate. The only production-ready rate is 100% passing tests.

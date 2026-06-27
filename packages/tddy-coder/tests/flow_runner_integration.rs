@@ -29,18 +29,18 @@ fn run_plan_via_flow_runner_produces_session_directory() {
 
     let mut cmd = cargo_bin_cmd!("tddy-coder");
     cmd.args([
-            "--tddy-data-dir",
-            sessions_base_str,
-            "--agent",
-            "stub",
-            "--recipe",
-            "tdd",
-            "--goal",
-            "plan",
-            "--prompt",
-            "Add user authentication SKIP_QUESTIONS",
-        ])
-        .write_stdin("a\n");
+        "--tddy-data-dir",
+        sessions_base_str,
+        "--agent",
+        "stub",
+        "--recipe",
+        "tdd",
+        "--goal",
+        "plan",
+        "--prompt",
+        "Add user authentication SKIP_QUESTIONS",
+    ])
+    .write_stdin("a\n");
 
     // When
     cmd.assert().success();

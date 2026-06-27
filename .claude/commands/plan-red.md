@@ -19,11 +19,16 @@ Check off the first two TODO items in the changeset (`Create/update PRD document
 
 ### Step 6: Create Failing Acceptance Tests
 
+**Before writing any tests**, read `.claude/skills/fluent-tests/references/generic-guidelines.md`
+and the framework-specific reference for the test type (Cypress component, Rust, etc.).
+Fluent-tests is the mandatory test style — all acceptance tests must comply.
+
 For each acceptance test defined in changeset:
-1. Write test that captures desired behavior
+1. Write test in fluent-tests style: Given/When/Then, page-object helpers, one behavior per test
 2. **CRITICAL**: Fully implement test — not a placeholder
-3. Test should fail due to missing functionality
-4. Verify test fails for the right reason
+3. Use `mountWithRpc` + `anInMemoryRpcBackend` for Cypress component tests (not `cy.intercept`)
+4. Test should fail due to missing functionality
+5. Verify test fails for the right reason
 
 **MANDATORY — Present to user**:
 - List of all test titles created
@@ -36,7 +41,7 @@ Wait for user approval before proceeding.
 
 ### Step 7: Red Phase — Write Failing Unit/Integration Tests
 
-Use `/red` approach for smaller-scope tests:
+Use `/red` approach for smaller-scope tests (fluent-tests style is mandatory here too):
 1. Write comprehensive failing tests covering:
    - Main functionality
    - Edge cases
@@ -67,6 +72,7 @@ During planning and code analysis, if you identify enhancements or improvements 
 - Never assume user approval without explicit confirmation
 - Take extra time on testing strategy — don't rush
 - Tests must be fully implemented, not placeholders
+- Tests must follow fluent-tests style (mandatory for this repo)
 - No conditional logic in tests
 - No try/catch blocks or fallbacks
 - Never put "red phase" or "green phase" in code comments or test descriptions

@@ -17,6 +17,14 @@ import {
   sessionsInspectorDeleteBtn,
   sessionsInspectorDeleteConfirm,
   sessionsInspectorTerminateBtn,
+  sessionsVncTargetRow,
+  sessionsVncStartBtn,
+  sessionsVncStopBtn,
+  sessionsVncRemoveBtn,
+  sessionsScreenSharingTargetRow,
+  sessionsScreenSharingStartBtn,
+  sessionsScreenSharingStopBtn,
+  sessionsScreenSharingRemoveBtn,
   TEST_IDS,
 } from "../testIds";
 
@@ -40,6 +48,14 @@ export const sessionsDrawerPage = {
   /** The scrollable drawer containing all session items. */
   drawer: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsDrawer, { timeout: 5000, ...options }),
+
+  /** The close button in the drawer header (collapses to strip on desktop, hides on mobile). */
+  drawerCloseBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsDrawerCloseBtn, { timeout: 5000, ...options }),
+
+  /** The open button in strip mode (expands the drawer). */
+  drawerOpenBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsDrawerOpenBtn, { timeout: 5000, ...options }),
 
   /** A single clickable drawer item for the given session id. */
   drawerItem: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
@@ -124,4 +140,204 @@ export const sessionsDrawerPage = {
   /** The Terminate button inside the inspector for the given session. */
   inspectorTerminateBtn: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsInspectorTerminateBtn(sessionId), { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
+  // Inspector tab strip
+  // ---------------------------------------------------------------------------
+
+  /** The Details tab button in the inspector tab strip. */
+  inspectorDetailsTab: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorTabDetails, { timeout: 5000, ...options }),
+
+  /** The Tools tab button in the inspector tab strip. */
+  inspectorToolsTab: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorTabTools, { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
+  // VNC tab
+  // ---------------------------------------------------------------------------
+
+  /** The VNC tab button in the inspector tab strip. */
+  inspectorVncTab: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorTabVnc, { timeout: 5000, ...options }),
+
+  /** The VNC tab panel (rendered when the VNC tab is active). */
+  vncTabPanel: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsVncTabPanel, { timeout: 5000, ...options }),
+
+  /** The list of VNC targets. */
+  vncTargetList: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsVncTargetList, { timeout: 5000, ...options }),
+
+  /** A single VNC target row. */
+  vncTargetRow: (targetId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsVncTargetRow(targetId), { timeout: 5000, ...options }),
+
+  /** The Start button for a given target. */
+  vncStartBtn: (targetId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsVncStartBtn(targetId), { timeout: 5000, ...options }),
+
+  /** The Stop button for a given target. */
+  vncStopBtn: (targetId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsVncStopBtn(targetId), { timeout: 5000, ...options }),
+
+  /** The Remove button for a given target. */
+  vncRemoveBtn: (targetId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsVncRemoveBtn(targetId), { timeout: 5000, ...options }),
+
+  /** The Add VNC target form. */
+  vncAddForm: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsVncAddForm, { timeout: 5000, ...options }),
+
+  /** The label input in the Add form. */
+  vncAddLabel: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsVncAddLabel, options),
+
+  /** The host input in the Add form. */
+  vncAddHost: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsVncAddHost, options),
+
+  /** The port input in the Add form. */
+  vncAddPort: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsVncAddPort, options),
+
+  /** The password input in the Add form. */
+  vncAddPassword: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsVncAddPassword, options),
+
+  /** The submit button in the Add form. */
+  vncAddSubmit: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsVncAddSubmit, { timeout: 5000, ...options }),
+
+  /** The passphrase dialog. */
+  vncPassphraseDialog: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsVncPassphraseDialog, { timeout: 5000, ...options }),
+
+  /** The passphrase input in the dialog. */
+  vncPassphraseInput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsVncPassphraseInput, options),
+
+  /** The confirm button in the passphrase dialog. */
+  vncPassphraseConfirm: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsVncPassphraseConfirm, { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
+  // VNC overlay
+  // ---------------------------------------------------------------------------
+
+  /** The full-screen VNC desktop overlay. */
+  vncOverlay: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.vncOverlay, { timeout: 5000, ...options }),
+
+  /** The close button inside the VNC overlay. */
+  vncOverlayClose: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.vncOverlayClose, { timeout: 5000, ...options }),
+
+  /** The `<video>` element inside the VNC overlay. */
+  vncOverlayVideo: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.vncOverlayVideo, { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
+  // Terminal control mutex — "Claim terminal" CTA
+  // ---------------------------------------------------------------------------
+
+  /** The overlay that appears when this screen is not the terminal controller. */
+  terminalControlOverlay: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.terminalControlOverlay, { timeout: 5000, ...options }),
+
+  /** The "Claim terminal" button inside the control overlay. */
+  terminalClaimBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.terminalClaimBtn, { timeout: 5000, ...options }),
+
+  /** The text element naming the screen currently holding control. */
+  terminalControlHolder: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.terminalControlHolder, { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
+  // Screen Sharing tab
+  // ---------------------------------------------------------------------------
+
+  /** The Screen Sharing tab button in the inspector tab strip. */
+  inspectorScreenSharingTab: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorTabScreenSharing, { timeout: 5000, ...options }),
+
+  /** The Screen Sharing tab panel (rendered when the Screen Sharing tab is active). */
+  screenSharingTabPanel: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsScreenSharingTabPanel, { timeout: 5000, ...options }),
+
+  /** The list of screen-sharing targets. */
+  screenSharingTargetList: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsScreenSharingTargetList, { timeout: 5000, ...options }),
+
+  /** A single screen-sharing target row. */
+  screenSharingTargetRow: (targetId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsScreenSharingTargetRow(targetId), { timeout: 5000, ...options }),
+
+  /** The Start button for a given screen-sharing target. */
+  screenSharingStartBtn: (targetId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsScreenSharingStartBtn(targetId), { timeout: 5000, ...options }),
+
+  /** The Stop button for a given screen-sharing target. */
+  screenSharingStopBtn: (targetId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsScreenSharingStopBtn(targetId), { timeout: 5000, ...options }),
+
+  /** The Remove button for a given screen-sharing target. */
+  screenSharingRemoveBtn: (targetId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsScreenSharingRemoveBtn(targetId), { timeout: 5000, ...options }),
+
+  /** The Add screen-sharing target form. */
+  screenSharingAddForm: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsScreenSharingAddForm, { timeout: 5000, ...options }),
+
+  /** The label input in the Add form. */
+  screenSharingAddLabel: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsScreenSharingAddLabel, options),
+
+  /** The host input in the Add form. */
+  screenSharingAddHost: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsScreenSharingAddHost, options),
+
+  /** The port input in the Add form. */
+  screenSharingAddPort: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsScreenSharingAddPort, options),
+
+  /** The password input in the Add form. */
+  screenSharingAddPassword: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsScreenSharingAddPassword, options),
+
+  /** The protocol selector in the Add form (VNC | RDP). */
+  screenSharingAddProtocol: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsScreenSharingAddProtocol, options),
+
+  /** The submit button in the Add form. */
+  screenSharingAddSubmit: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsScreenSharingAddSubmit, { timeout: 5000, ...options }),
+
+  /** The passphrase dialog. */
+  screenSharingPassphraseDialog: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsScreenSharingPassphraseDialog, { timeout: 5000, ...options }),
+
+  /** The passphrase input in the dialog. */
+  screenSharingPassphraseInput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsScreenSharingPassphraseInput, options),
+
+  /** The confirm button in the passphrase dialog. */
+  screenSharingPassphraseConfirm: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsScreenSharingPassphraseConfirm, { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
+  // Screen Sharing overlay
+  // ---------------------------------------------------------------------------
+
+  /** The full-screen screen-sharing desktop overlay. */
+  screenSharingOverlay: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.screenSharingOverlay, { timeout: 5000, ...options }),
+
+  /** The close button inside the screen-sharing overlay. */
+  screenSharingOverlayClose: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.screenSharingOverlayClose, { timeout: 5000, ...options }),
+
+  /** The `<video>` element inside the screen-sharing overlay. */
+  screenSharingOverlayVideo: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.screenSharingOverlayVideo, { timeout: 5000, ...options }),
 };

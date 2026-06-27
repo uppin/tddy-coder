@@ -1,8 +1,18 @@
 import React, { useEffect, useRef, useState } from "react";
 import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "../lib/terminalZoom";
+import { tddyDebug } from "../lib/debugMask";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
 import { TerminalConnectionStatusBar } from "./connection/TerminalConnectionStatusBar";
+
+// `[tddy]` diagnostics for the gRPC terminal byte stream (enabled by the DEBUG mask).
+// The 220-col garbling on reconnect lived here, so log incoming bytes / buffering / resize.
+const dGrpc = tddyDebug("tddy:term:grpc");
+
+/** Hex preview of the first `n` bytes for diagnosing garbled / misaligned output. */
+function hexPreview(data: Uint8Array, n = 24): string {
+  return Array.from(data.slice(0, n), (b) => b.toString(16).padStart(2, "0")).join(" ");
+}
 
 export interface GrpcStream {
   send(data: Uint8Array): void;
@@ -36,7 +46,11 @@ export function GhosttyTerminalGrpc({
 
   useEffect(() => {
     stream.onMessage((data) => {
-      if (termReadyRef.current && termRef.current) {
+      const ready = termReadyRef.current && !!termRef.current;
+      if (dGrpc.enabled) {
+        dGrpc("recv %d bytes ready=%o %s", data.length, ready, hexPreview(data));
+      }
+      if (ready && termRef.current) {
         termRef.current.write(data);
       } else {
         outputBufferRef.current.push(data);
@@ -67,6 +81,7 @@ export function GhosttyTerminalGrpc({
         outputBufferRef.current = [];
         const term = termRef.current;
         if (term) {
+          dGrpc("ready — flushing %d buffered chunk(s)", buf.length);
           for (const chunk of buf) {
             term.write(chunk);
           }
@@ -77,6 +92,7 @@ export function GhosttyTerminalGrpc({
         stream.send(new TextEncoder().encode(data));
       }}
       onResize={(size) => {
+        dGrpc("resize → cols=%d rows=%d", size.cols, size.rows);
         const seq = `\x1b]resize;${size.cols};${size.rows}\x07`;
         stream.send(new TextEncoder().encode(seq));
       }}
