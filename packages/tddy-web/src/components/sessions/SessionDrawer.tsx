@@ -23,6 +23,8 @@ interface SessionDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   onOpen: () => void;
+  /** On mobile the open list is a full-width overlay (out of flow) so it doesn't resize the terminal. */
+  isMobile?: boolean;
 }
 
 interface StackGroup {
@@ -81,9 +83,11 @@ export function SessionDrawer({
   isOpen,
   onClose,
   onOpen,
+  isMobile = false,
 }: SessionDrawerProps) {
   if (!isOpen) {
-    // Strip mode on desktop; hidden on mobile
+    // Strip mode on desktop; hidden on mobile (mobile uses the floating overlay
+    // open button rendered by SessionsDrawerScreen).
     return (
       <div
         data-testid="sessions-drawer"
@@ -140,11 +144,18 @@ export function SessionDrawer({
 
   const { groups, flat } = groupSessionsByStack(sessions);
 
+  // On mobile, the open list is a full-width overlay (absolute, out of flow) so it
+  // sits on top of the terminal instead of resizing it. On desktop it's an in-flow
+  // 280px column.
   return (
     <div
       data-testid="sessions-drawer"
       data-drawer-state="open"
-      className="flex flex-col h-full border-r border-border bg-background flex-shrink-0 w-[280px]"
+      className={cn(
+        "flex flex-col h-full border-r border-border bg-background",
+        isMobile ? "w-full" : "flex-shrink-0 w-[280px]",
+      )}
+      style={isMobile ? { position: "absolute", inset: 0, width: "100%", zIndex: 30 } : undefined}
     >
       <div className="px-3 py-2 border-b border-border flex items-center gap-1">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex-1">

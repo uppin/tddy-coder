@@ -36,6 +36,7 @@ const SESSION = {
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
+  cy.viewport(1280, 800); // desktop: session list defaults open so drawer items are clickable
   cy.clearLocalStorage();
   cy.clearAllSessionStorage();
   window.localStorage.setItem("tddy_session_token", "fake-token");

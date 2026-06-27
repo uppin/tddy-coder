@@ -102,6 +102,7 @@ const SESSION_NEEDS_INPUT = {
 
 describe("SessionsDrawerAcceptance — session list, status, labels, and detail pane", () => {
   beforeEach(() => {
+    cy.viewport(1280, 800); // desktop: session list defaults open (mobile defaults closed)
     cy.clearLocalStorage();
     cy.clearAllSessionStorage();
     window.localStorage.setItem("tddy_session_token", "fake-token");
@@ -336,6 +337,7 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
 describe("SessionsDrawerAcceptance — URL deep-link pre-selection", () => {
   beforeEach(() => {
+    cy.viewport(1280, 800); // desktop: session list defaults open (mobile defaults closed)
     cy.clearLocalStorage();
     cy.clearAllSessionStorage();
     window.localStorage.setItem("tddy_session_token", "fake-token");
@@ -409,6 +411,7 @@ describe("SessionsDrawerAcceptance — URL deep-link pre-selection", () => {
 
 describe("SessionsDrawerAcceptance — drawer open/close toggle", () => {
   beforeEach(() => {
+    cy.viewport(1280, 800); // desktop: session list defaults open (mobile defaults closed)
     cy.clearLocalStorage();
     cy.clearAllSessionStorage();
     window.localStorage.setItem("tddy_session_token", "fake-token");
@@ -448,5 +451,96 @@ describe("SessionsDrawerAcceptance — drawer open/close toggle", () => {
     sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "open");
     sessionsDrawerPage.drawerItemLabel(CONNECTED_SESSION_A.sessionId)
       .should("be.visible");
+  });
+
+  it("defaults the session list to closed on a mobile-width viewport", () => {
+    // Given — a mobile viewport (narrower than the md breakpoint)
+    cy.viewport(375, 667);
+    interceptConnectionRpcs([CONNECTED_SESSION_A]);
+
+    // When — the screen mounts
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+
+    // Then — the session list starts collapsed so it does not cover the main pane
+    sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "closed");
+  });
+
+  it("shows a floating overlay open control on a mobile viewport when the list is collapsed", () => {
+    // Given — a mobile viewport where the session list starts collapsed
+    cy.viewport(375, 667);
+    interceptConnectionRpcs([CONNECTED_SESSION_A]);
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+    sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "closed");
+
+    // Then — a floating overlay control to open the list is visible
+    sessionsDrawerPage.drawerOpenOverlayBtn().should("be.visible");
+  });
+
+  it("expands the session list when the overlay open control is tapped on mobile", () => {
+    // Given — a mobile viewport with the session list collapsed
+    cy.viewport(375, 667);
+    interceptConnectionRpcs([CONNECTED_SESSION_A]);
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+
+    // When — the user taps the floating overlay open control
+    sessionsDrawerPage.drawerOpenOverlayBtn().click();
+
+    // Then — the list expands, its sessions appear, and the overlay control is gone
+    sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "open");
+    sessionsDrawerPage.drawerItemLabel(CONNECTED_SESSION_A.sessionId).should("be.visible");
+    sessionsDrawerPage.drawerOpenOverlayBtn().should("not.exist");
+  });
+
+  it("opens the session list as a full-width overlay on mobile, without resizing the detail pane", () => {
+    // Given — a mobile viewport with the list collapsed
+    cy.viewport(375, 667);
+    interceptConnectionRpcs([CONNECTED_SESSION_A]);
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+
+    // When — the user opens the list
+    sessionsDrawerPage.drawerOpenOverlayBtn().click();
+    sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "open");
+
+    // Then — the open list is an overlay (out of flow) spanning the full container width
+    sessionsDrawerPage.drawer().should("have.css", "position", "absolute");
+    sessionsDrawerPage.drawer().then(($drawer) => {
+      const containerWidth = $drawer.parent().outerWidth();
+      expect($drawer.outerWidth()).to.eq(containerWidth);
+    });
+  });
+
+  it("closes the session list after selecting a session on a mobile viewport", () => {
+    // Given — a mobile viewport with the list opened over the terminal
+    cy.viewport(375, 667);
+    interceptConnectionRpcs([CONNECTED_SESSION_A]);
+    interceptConnectSession({
+      livekitRoom: "room-session-a",
+      livekitUrl: "ws://127.0.0.1:7880",
+      livekitServerIdentity: "server",
+    });
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+    sessionsDrawerPage.drawerOpenOverlayBtn().click();
+    sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "open");
+
+    // When — the user selects a session
+    sessionsDrawerPage.drawerItem(CONNECTED_SESSION_A.sessionId).click();
+
+    // Then — the list closes so the terminal is visible
+    sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "closed");
+  });
+
+  it("does not show the floating overlay open control on a desktop viewport", () => {
+    // Given — a desktop viewport where the session list is open by default
+    interceptConnectionRpcs([CONNECTED_SESSION_A]);
+    cy.mount(<SessionsDrawerScreen />);
+    cy.wait("@listSessions");
+
+    // Then — the desktop strip handles opening; no floating overlay control is rendered
+    sessionsDrawerPage.drawerOpenOverlayBtn().should("not.exist");
   });
 });

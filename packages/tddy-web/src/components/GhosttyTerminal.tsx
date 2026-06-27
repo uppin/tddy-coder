@@ -264,6 +264,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           fitAddon.observeResize();
         }
 
+        // Proactively report the size on mount so the PTY is resized to match the screen
+        // immediately — don't rely on the terminal only emitting onResize when the grid
+        // changes (it may already match the default, so no event would fire).
+        onResize?.({ cols: term.cols, rows: term.rows });
+
         logLife("term opened cols=%d rows=%d, calling onReady", term.cols, term.rows);
         setReady(true);
         onReady?.();
@@ -425,6 +430,34 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       document.addEventListener("keydown", onKeyDown);
       return () => document.removeEventListener("keydown", onKeyDown);
     }, [sessionActive, minFontSize, maxFontSize, fontSize, fixedViewportGrid]);
+
+    // Desktop key combinations the browser would otherwise swallow (Shift+Tab → focus
+    // traversal; Alt+letter → menu mnemonics) but which terminal apps expect. When the
+    // terminal is focused, forward them to the PTY as the equivalent escape sequences.
+    useEffect(() => {
+      if (!sessionActive) return;
+      const onKeyDown = (e: KeyboardEvent) => {
+        const send = onDataRef.current;
+        if (!send) return;
+        const container = containerRef.current;
+        if (!container || !container.contains(document.activeElement)) return;
+
+        // Shift+Tab → reverse tab (CSI Z).
+        if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+          e.preventDefault();
+          send("\x1b[Z");
+          return;
+        }
+
+        // Alt+<letter> → meta-sends-escape (ESC followed by the key).
+        if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.length === 1) {
+          e.preventDefault();
+          send("\x1b" + e.key);
+        }
+      };
+      document.addEventListener("keydown", onKeyDown);
+      return () => document.removeEventListener("keydown", onKeyDown);
+    }, [sessionActive]);
 
     // Two-finger pinch → font pitch in/out (mobile); uses finger span like browser zoom.
     useEffect(() => {

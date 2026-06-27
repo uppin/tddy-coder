@@ -15,6 +15,7 @@ import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
 import { TerminalConnectionStatusBar } from "./connection/TerminalConnectionStatusBar";
 import { ShortcutDrawer } from "./connection/ShortcutDrawer";
+import { MobileTerminalKeyboard } from "./connection/MobileTerminalKeyboard";
 import type { ToolShortcutDef } from "../lib/toolShortcuts";
 
 /** Human-readable description of a terminal input byte sequence. */
@@ -107,7 +108,7 @@ export interface GhosttyTerminalLiveKitProps {
    * / session teardown, not the user choosing Disconnect in the menu.
    */
   onRemoteSessionEnded?: () => void;
-  /** Mobile shortcut presets. When non-empty and showMobileKeyboard is true, renders ShortcutDrawer. */
+  /** Shortcut presets. When non-empty, renders the ShortcutDrawer overlay (desktop and mobile). */
   mobileShortcuts?: ToolShortcutDef[];
   /** Viewport height for ShortcutDrawer snap positioning. 0 = use window.innerHeight. */
   mobileShortcutsViewportHeight?: number;
@@ -138,7 +139,6 @@ export function GhosttyTerminalLiveKit({
   fixedViewportGrid,
   onRemoteSessionEnded,
   mobileShortcuts,
-  mobileShortcutsViewportHeight = 0,
 }: GhosttyTerminalLiveKitProps) {
   const liveKitFactory = useLiveKitTransportFactory();
   const log = debugLogging
@@ -454,61 +454,6 @@ export function GhosttyTerminalLiveKit({
     enqueueTerminalInput(encoded);
   };
 
-  const handleMobileKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // Ctrl+letter must send control bytes (e.g. Ctrl+C → 0x03). Otherwise `onInput` only sees "c"
-    // (0x63) — the same bug as VirtualTui view_state swallowing Ctrl as text.
-    if (e.ctrlKey && e.key.length === 1) {
-      const lower = e.key.toLowerCase();
-      if (lower >= "a" && lower <= "z") {
-        e.preventDefault();
-        pushInput(new Uint8Array([lower.charCodeAt(0) - 96]));
-        return;
-      }
-    }
-    const key = e.key;
-    if (key === "Enter") {
-      e.preventDefault();
-      pushInput(new Uint8Array([0x0d]));
-      return;
-    }
-    if (key === "Backspace") {
-      e.preventDefault();
-      pushInput(new Uint8Array([0x7f]));
-      return;
-    }
-    if (key === "Tab") {
-      e.preventDefault();
-      pushInput(new Uint8Array([0x09]));
-      return;
-    }
-    if (key === "Escape") {
-      e.preventDefault();
-      pushInput(new Uint8Array([0x1b]));
-      return;
-    }
-    if (key.startsWith("Arrow")) {
-      e.preventDefault();
-      const seq =
-        key === "ArrowUp"
-          ? "\x1b[A"
-          : key === "ArrowDown"
-            ? "\x1b[B"
-            : key === "ArrowRight"
-              ? "\x1b[C"
-              : key === "ArrowLeft"
-                ? "\x1b[D"
-                : null;
-      if (seq) pushInput(seq);
-    }
-  };
-
-  const handleMobileInput = (e: React.FormEvent<HTMLInputElement>) => {
-    const input = e.currentTarget;
-    const data = (e.nativeEvent as InputEvent).data;
-    if (data) pushInput(data);
-    input.value = "";
-  };
-
   const showLiveKitStatusStrip = shouldShowVisibleLiveKitStatusStrip({
     connectionOverlayEnabled: !!connectionOverlay,
     status,
@@ -517,24 +462,7 @@ export function GhosttyTerminalLiveKit({
   const statusBarCompact = connectionChromePlacement === "none";
 
   const mobileKeyboardAffordance = showMobileKeyboard ? (
-    <label
-      data-testid="mobile-keyboard-button"
-      className="relative inline-flex shrink-0 cursor-pointer items-center rounded border border-input bg-background px-3 py-1 text-xs text-foreground"
-    >
-      <input
-        type="text"
-        autoComplete="off"
-        autoCorrect="off"
-        autoCapitalize="off"
-        spellCheck={false}
-        aria-label="Open keyboard for terminal input"
-        className="absolute inset-0 h-full w-full opacity-0"
-        style={{ margin: 0, border: "none", fontSize: 1 }}
-        onKeyDown={handleMobileKeyDown}
-        onInput={handleMobileInput}
-      />
-      <span className="pointer-events-none">Keyboard</span>
-    </label>
+    <MobileTerminalKeyboard onSend={pushInput} />
   ) : null;
 
   tddyDevDebug("[GhosttyTerminalLiveKit] render chrome", {
@@ -672,14 +600,10 @@ export function GhosttyTerminalLiveKit({
             }}
           />
         )}
+        {mobileShortcuts && mobileShortcuts.length > 0 && (
+          <ShortcutDrawer shortcuts={mobileShortcuts} onSend={pushInput} />
+        )}
       </div>
-      {showMobileKeyboard && mobileShortcuts && mobileShortcuts.length > 0 && (
-        <ShortcutDrawer
-          shortcuts={mobileShortcuts}
-          onSend={pushInput}
-          viewportHeight={mobileShortcutsViewportHeight}
-        />
-      )}
       {firstOutputReceived && (
         <div data-testid="first-output-received" style={{ display: "none" }} aria-hidden />
       )}

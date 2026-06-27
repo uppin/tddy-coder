@@ -71,6 +71,7 @@ const SESSION_WITH_NEW_FIELDS = {
 
 describe("SessionInspectorAcceptance — inspector drawer open/expand/close and controls", () => {
   beforeEach(() => {
+    cy.viewport(1280, 800); // desktop: session list defaults open so drawer items are clickable
     cy.clearLocalStorage();
     cy.clearAllSessionStorage();
     window.localStorage.setItem("tddy_session_token", "fake-token");
@@ -342,6 +343,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
 describe("SessionInspectorAcceptance — attachment-driven auto-open/close", () => {
   beforeEach(() => {
+    cy.viewport(1280, 800); // desktop: session list defaults open so drawer items are clickable
     cy.clearLocalStorage();
     cy.clearAllSessionStorage();
     window.localStorage.setItem("tddy_session_token", "fake-token");

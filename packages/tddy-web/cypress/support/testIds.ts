@@ -129,6 +129,7 @@ export const TEST_IDS = {
   // Sessions drawer — open/close toggle
   sessionsDrawerCloseBtn: "sessions-drawer-close-btn",
   sessionsDrawerOpenBtn: "sessions-drawer-open-btn",
+  sessionsDrawerOpenOverlayBtn: "sessions-drawer-open-overlay-btn",
 
   // Sessions drawer — create session
   sessionsDrawerNewBtn: "sessions-drawer-new-btn",

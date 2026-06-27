@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionTerminalOutput } from "../../gen/connection_pb";
 import { GhosttyTerminalGrpc, type GrpcStream } from "../GhosttyTerminalGrpc";
+import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
@@ -16,6 +17,7 @@ interface GrpcSessionTerminalProps {
   client: ConnectionClient;
   controlToken?: string;
   onDisconnect?: () => void;
+  mobileShortcuts?: ToolShortcutDef[];
 }
 
 export function GrpcSessionTerminal({
@@ -24,6 +26,7 @@ export function GrpcSessionTerminal({
   client,
   controlToken,
   onDisconnect,
+  mobileShortcuts,
 }: GrpcSessionTerminalProps) {
   const [stream, setStream] = useState<GrpcStream | null>(null);
   // containerRef must be on a div that is ALWAYS rendered (not gated on stream),
@@ -33,6 +36,18 @@ export function GrpcSessionTerminal({
   // needing to recreate the grpcStream (and remount the terminal) on each change.
   const controlTokenRef = useRef<string>(controlToken ?? "");
   controlTokenRef.current = controlToken ?? "";
+
+  // Disconnect fires automatically when the terminal goes away — either the remote
+  // stream ends or this component unmounts (e.g. the user switches sessions). Read
+  // the latest callback via a ref and guard so it fires at most once.
+  const onDisconnectRef = useRef(onDisconnect);
+  onDisconnectRef.current = onDisconnect;
+  const disconnectedRef = useRef(false);
+  const emitDisconnect = () => {
+    if (disconnectedRef.current) return;
+    disconnectedRef.current = true;
+    onDisconnectRef.current?.();
+  };
 
   useEffect(() => {
     const outputListeners: Array<(data: Uint8Array) => void> = [];
@@ -71,9 +86,9 @@ export function GrpcSessionTerminal({
             outputListeners.forEach((fn) => fn(output.data));
           }
         }
-        if (!closed) onDisconnect?.();
+        if (!closed) emitDisconnect();
       } catch (err) {
-        if (!closed) onDisconnect?.();
+        if (!closed) emitDisconnect();
       }
     })();
 
@@ -81,6 +96,14 @@ export function GrpcSessionTerminal({
       closed = true;
     };
   }, [client, sessionId, sessionToken]);
+
+  // Tear down the attachment when the terminal unmounts (session switch / screen
+  // close). Empty deps so the cleanup runs only on real unmount, not on prop changes.
+  useEffect(() => {
+    return () => {
+      emitDisconnect();
+    };
+  }, []);
 
   // Always render the outer div so containerRef.current is available when the
   // effect above runs (before stream is set). Terminal renders once stream is ready.
@@ -91,8 +114,7 @@ export function GrpcSessionTerminal({
           sessionToken={sessionToken}
           sessionId={sessionId}
           stream={stream}
-          connectionOverlay
-          onDisconnect={onDisconnect}
+          mobileShortcuts={mobileShortcuts}
         />
       )}
     </div>

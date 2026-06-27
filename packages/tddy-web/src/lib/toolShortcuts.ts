@@ -10,6 +10,8 @@ export const TOOL_SHORTCUTS: Record<string, ToolShortcutDef[]> = {
     { label: "Escape", keys: ["Escape"] },
   ],
   "claude-cli": [
+    { label: "Shift+Tab", keys: ["Shift", "Tab"] },
+    { label: "Alt+M", keys: ["Alt", "M"] },
     { label: "Escape", keys: ["Escape"] },
     { label: "Ctrl+R", keys: ["Ctrl", "R"] },
     { label: "Ctrl+C", keys: ["Ctrl", "C"] },
@@ -61,6 +63,19 @@ export function keySequenceToBytes(keys: string[]): Uint8Array {
       const code = lower.charCodeAt(0);
       if (code >= 0x61 && code <= 0x7a) {
         return new Uint8Array([code - 96]);
+      }
+    }
+    return new Uint8Array(0);
+  }
+
+  // Alt+letter → meta-sends-escape: ESC followed by the lowercased letter (e.g. Alt+M → ESC m).
+  if (keys.length === 2 && keys[0] === "Alt") {
+    const letter = keys[1];
+    if (letter.length === 1) {
+      const lower = letter.toLowerCase();
+      const code = lower.charCodeAt(0);
+      if (code >= 0x61 && code <= 0x7a) {
+        return new Uint8Array([0x1b, code]);
       }
     }
     return new Uint8Array(0);

@@ -41,6 +41,7 @@ const CONNECTED_SESSION = {
 
 describe("StatusBar — rendered as top toolbar, outside sessions-detail-pane", () => {
   beforeEach(() => {
+    cy.viewport(1280, 800); // desktop: session list defaults open so drawer items are clickable
     cy.clearLocalStorage();
     cy.clearAllSessionStorage();
     window.localStorage.setItem("tddy_session_token", "fake-token");

@@ -31,6 +31,7 @@ import { GitHubLoginButton } from "./GitHubLoginButton";
 import { UserAvatar } from "./UserAvatar";
 import { BUILD_ID } from "../buildId";
 import { useVisualViewport } from "../hooks/useVisualViewport";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { TokenService } from "../gen/token_pb";
 import {
   formatSessionCreatedAt,
@@ -73,6 +74,7 @@ import {
   applyDedicatedTerminalBackToMini,
   clampTerminalOverlayPaneSize,
   TERMINAL_OVERLAY_COLS,
+  TERMINAL_OVERLAY_COLS_MOBILE,
   TERMINAL_OVERLAY_FONT_MIN_PX,
   TERMINAL_OVERLAY_PANE_HEIGHT_PX,
   TERMINAL_OVERLAY_PANE_WIDTH_PX,
@@ -682,9 +684,7 @@ function ConnectedTerminal({
   const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { height: viewportHeight, isKeyboardOpen } = useVisualViewport();
-  const isMobile =
-    typeof window !== "undefined" &&
-    (("ontouchstart" in window) || window.innerWidth < 768);
+  const isMobile = useIsMobile();
 
   const [compactPaneWidth, setCompactPaneWidth] = useState(TERMINAL_OVERLAY_PANE_WIDTH_PX);
   const [compactPaneHeight, setCompactPaneHeight] = useState(TERMINAL_OVERLAY_PANE_HEIGHT_PX);
@@ -1137,7 +1137,10 @@ function ConnectedTerminal({
           terminalContainerMinHeightPx={isCompact ? 0 : undefined}
           fixedViewportGrid={
             isCompact
-              ? { cols: TERMINAL_OVERLAY_COLS, rows: TERMINAL_OVERLAY_ROWS }
+              ? {
+                  cols: isMobile ? TERMINAL_OVERLAY_COLS_MOBILE : TERMINAL_OVERLAY_COLS,
+                  rows: TERMINAL_OVERLAY_ROWS,
+                }
               : undefined
           }
           onRemoteSessionEnded={onRemoteSessionEnded}

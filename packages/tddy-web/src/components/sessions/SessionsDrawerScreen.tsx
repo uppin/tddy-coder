@@ -12,6 +12,10 @@ import { useTerminalControl } from "./useTerminalControl";
 import { sessionsDrawerPathForSession, parseSessionsDrawerSessionId } from "../../routing/appRoutes";
 import { Signal } from "../../gen/connection_pb";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
+import { detectIsMobile, useIsMobile } from "../../hooks/useIsMobile";
+import { resolveShortcutsForSession } from "../../lib/toolShortcuts";
+import { isClaudeCliSession } from "../../constants/claudeCliModels";
+import { PanelLeftOpen } from "lucide-react";
 // ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
@@ -37,7 +41,10 @@ export function SessionsDrawerScreen() {
   const deepLinkActivatedRef = useRef(false);
   const [mode, setMode] = useState<"list" | "creating">("list");
 
-  const [sessionListOpen, setSessionListOpen] = useState(true);
+  // Default closed on mobile (the open 280px panel would cover the main pane);
+  // open on desktop.
+  const [sessionListOpen, setSessionListOpen] = useState(() => !detectIsMobile());
+  const isMobile = useIsMobile();
 
   const { state: attachment, connectSession, resumeSession, deleteSession, signalSession, reset: resetAttachment } = useSessionAttachment();
 
@@ -73,6 +80,16 @@ export function SessionsDrawerScreen() {
   const selectedSession = useMemo(
     () => sortedSessions.find((s) => s.sessionId === selectedSessionId) ?? null,
     [sortedSessions, selectedSessionId],
+  );
+
+  // Key-press shortcuts for the connected session's tool (shown as the mobile overlay).
+  const mobileShortcuts = useMemo(
+    () =>
+      resolveShortcutsForSession(
+        isClaudeCliSession(selectedSession?.agent ?? ""),
+        selectedSession?.tool ?? "",
+      ),
+    [selectedSession],
   );
 
   // When the session list loads and a session was pre-selected from the URL hash,
@@ -133,6 +150,8 @@ export function SessionsDrawerScreen() {
     // Reset attachment so useEffect re-evaluates state for the newly selected session
     resetAttachment();
     setSelectedSessionId(sessionId);
+    // On mobile the list is a full-screen overlay — close it so the terminal is visible.
+    if (isMobile) setSessionListOpen(false);
     const session = sortedSessions.find((s) => s.sessionId === sessionId);
     const willOpen = nextInspectorState(
       { open: false, expanded: false },
@@ -205,10 +224,23 @@ export function SessionsDrawerScreen() {
     <TooltipProvider delayDuration={0}>
       <div
         data-testid="sessions-drawer-screen"
-        className="flex flex-col h-screen w-full overflow-hidden font-sans text-foreground"
+        // 100dvh (not 100vh/h-screen): on mobile 100vh includes the area behind the
+        // browser chrome, which pushes the bottom keyboard bar off the visible screen.
+        className="flex flex-col h-[100dvh] w-full overflow-hidden font-sans text-foreground"
       >
         <StatusBar attachment={attachment} />
-        <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="flex flex-1 min-h-0 overflow-hidden relative">
+          {isMobile && !sessionListOpen && (
+            <button
+              type="button"
+              data-testid="sessions-drawer-open-overlay-btn"
+              onClick={() => setSessionListOpen(true)}
+              title="Open session list"
+              className="absolute top-2 left-2 z-20 flex items-center justify-center h-9 w-9 rounded-md border border-border bg-background/90 text-foreground shadow-md backdrop-blur-sm hover:bg-muted transition-colors"
+            >
+              <PanelLeftOpen className="h-5 w-5" />
+            </button>
+          )}
           <SessionDrawer
             sessions={sortedSessions}
             selectedSessionId={selectedSessionId}
@@ -217,6 +249,7 @@ export function SessionsDrawerScreen() {
             isOpen={sessionListOpen}
             onClose={() => setSessionListOpen(false)}
             onOpen={() => setSessionListOpen(true)}
+            isMobile={isMobile}
           />
           <SessionMainPane
             selectedSession={selectedSession}
@@ -236,6 +269,8 @@ export function SessionsDrawerScreen() {
             onSessionCreated={handleSessionCreated}
             terminalControl={connectedSessionId ? { ...controlState, onClaim: claimControl } : undefined}
             controlTokenRef={connectedSessionId ? controlTokenRef : undefined}
+            onDisconnect={resetAttachment}
+            mobileShortcuts={mobileShortcuts}
           />
         </div>
       </div>
