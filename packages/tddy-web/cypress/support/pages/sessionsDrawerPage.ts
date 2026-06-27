@@ -142,6 +142,18 @@ export const sessionsDrawerPage = {
     byTestId(sessionsInspectorTerminateBtn(sessionId), { timeout: 5000, ...options }),
 
   // ---------------------------------------------------------------------------
+  // Inspector tab strip
+  // ---------------------------------------------------------------------------
+
+  /** The Details tab button in the inspector tab strip. */
+  inspectorDetailsTab: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorTabDetails, { timeout: 5000, ...options }),
+
+  /** The Tools tab button in the inspector tab strip. */
+  inspectorToolsTab: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorTabTools, { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
   // VNC tab
   // ---------------------------------------------------------------------------
 

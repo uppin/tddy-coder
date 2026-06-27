@@ -25,6 +25,10 @@ use tddy_service::proto::screen_sharing::{
     StopStreamRequest, StopStreamResponse, UnlockVaultRequest, UnlockVaultResponse,
 };
 
+const DEFAULT_STREAM_WIDTH: u32 = 1920;
+const DEFAULT_STREAM_HEIGHT: u32 = 1080;
+const DEFAULT_STREAM_FPS: u32 = 30;
+
 /// Per-session derived key cache: session_id → DerivedKey.
 ///
 /// Populated by `UnlockVault`; read by `AddTarget` and `StartStream`.
@@ -106,7 +110,6 @@ impl ScreenSharingServiceImpl {
     ///
     /// Logs all errors; never returns an error — the caller returns pre-computed LiveKit
     /// coordinates regardless of whether the bridge process spawns successfully.
-    #[allow(clippy::too_many_arguments)]
     async fn try_spawn_bridge(
         &self,
         config: &DaemonConfig,
@@ -117,66 +120,16 @@ impl ScreenSharingServiceImpl {
         livekit_room: &str,
         session_id: &str,
     ) {
-        let lk = match config.livekit.as_ref() {
-            Some(lk) => lk,
-            None => {
-                info!("bridge spawn skipped: LiveKit not configured");
-                return;
-            }
-        };
-
-        let livekit_url_internal = match lk.url.as_deref().filter(|s| !s.is_empty()) {
-            Some(u) => u.to_string(),
-            None => {
-                info!("bridge spawn skipped: LiveKit URL not configured");
-                return;
-            }
-        };
-
-        let api_key = match lk.api_key.as_deref().filter(|s| !s.is_empty()) {
-            Some(k) => k.to_string(),
-            None => {
-                info!("bridge spawn skipped: LiveKit API key not configured");
-                return;
-            }
-        };
-        let api_secret = match lk.api_secret.as_deref().filter(|s| !s.is_empty()) {
-            Some(s) => s.to_string(),
-            None => {
-                info!("bridge spawn skipped: LiveKit API secret not configured");
-                return;
-            }
-        };
-
-        let token = match tddy_livekit::token::TokenGenerator::new(
-            api_key,
-            api_secret,
-            livekit_room.to_string(),
-            bridge_identity.to_string(),
-            std::time::Duration::from_secs(tddy_livekit::token::DEFAULT_LIVEKIT_JWT_TTL_SECS),
-        )
-        .generate()
-        {
-            Ok(t) => t,
-            Err(e) => {
-                error!("bridge spawn skipped: failed to generate LiveKit token: {}", e);
-                return;
-            }
-        };
-
-        let spawn_config = BridgeSpawnConfig {
-            host: target.host.clone(),
-            port: target.port,
+        let spawn_config = match build_bridge_spawn_config(
+            config,
+            target,
             password,
-            livekit_url: livekit_url_internal,
-            livekit_token: token,
-            livekit_room: livekit_room.to_string(),
-            livekit_identity: bridge_identity.to_string(),
-            track_name: track_name.to_string(),
-            width: 1920,
-            height: 1080,
-            target_id: target.id.clone(),
-            fps: 30,
+            bridge_identity,
+            track_name,
+            livekit_room,
+        ) {
+            Some(c) => c,
+            None => return, // already logged
         };
 
         let config_json = match serde_json::to_vec(&spawn_config) {
@@ -248,6 +201,69 @@ impl ScreenSharingServiceImpl {
             active_bridges.lock().await.remove(&bridge_key);
         });
     }
+}
+
+/// Extract LiveKit credentials, mint a token, and assemble a `BridgeSpawnConfig`.
+///
+/// Returns `None` (after logging) when any required config field is absent or token
+/// generation fails, signalling `try_spawn_bridge` to skip the spawn silently.
+fn build_bridge_spawn_config(
+    config: &DaemonConfig,
+    target: &ScreenSharingTarget,
+    password: String,
+    bridge_identity: &str,
+    track_name: &str,
+    livekit_room: &str,
+) -> Option<BridgeSpawnConfig> {
+    let lk = match config.livekit.as_ref() {
+        Some(lk) => lk,
+        None => {
+            info!("bridge spawn skipped: LiveKit not configured");
+            return None;
+        }
+    };
+
+    macro_rules! require_field {
+        ($opt:expr, $msg:literal) => {
+            match $opt.as_deref().filter(|s| !s.is_empty()) {
+                Some(v) => v.to_string(),
+                None => {
+                    info!($msg);
+                    return None;
+                }
+            }
+        };
+    }
+
+    let livekit_url_internal = require_field!(lk.url, "bridge spawn skipped: LiveKit URL not configured");
+    let api_key = require_field!(lk.api_key, "bridge spawn skipped: LiveKit API key not configured");
+    let api_secret = require_field!(lk.api_secret, "bridge spawn skipped: LiveKit API secret not configured");
+
+    let token = tddy_livekit::token::TokenGenerator::new(
+        api_key,
+        api_secret,
+        livekit_room.to_string(),
+        bridge_identity.to_string(),
+        std::time::Duration::from_secs(tddy_livekit::token::DEFAULT_LIVEKIT_JWT_TTL_SECS),
+    )
+    .generate()
+    .map_err(|e| error!("bridge spawn skipped: failed to generate LiveKit token: {}", e))
+    .ok()?;
+
+    Some(BridgeSpawnConfig {
+        host: target.host.clone(),
+        port: target.port,
+        password,
+        livekit_url: livekit_url_internal,
+        livekit_token: token,
+        livekit_room: livekit_room.to_string(),
+        livekit_identity: bridge_identity.to_string(),
+        track_name: track_name.to_string(),
+        width: DEFAULT_STREAM_WIDTH,
+        height: DEFAULT_STREAM_HEIGHT,
+        target_id: target.id.clone(),
+        fps: DEFAULT_STREAM_FPS,
+    })
 }
 
 fn vault_target_to_proto(t: &ScreenSharingTarget) -> ProtoScreenSharingTarget {
@@ -431,8 +447,8 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
             livekit_url,
             bridge_identity,
             track_name,
-            width: 1920,
-            height: 1080,
+            width: DEFAULT_STREAM_WIDTH,
+            height: DEFAULT_STREAM_HEIGHT,
         }))
     }
 
@@ -448,6 +464,10 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
         if let Some(pid) = pid_opt {
             info!("stop_stream: sending SIGTERM to bridge pid={} key={}", pid, bridge_key);
             #[cfg(unix)]
+            // SAFETY: pid > 0 is enforced by the `if pid > 0` guard in `try_spawn_bridge`
+            // that filters out the zero sentinel before inserting into `active_bridges`.
+            // Sending SIGTERM to a pid is safe — the signal is delivered to the process
+            // group and the call does not affect memory safety.
             unsafe {
                 libc::kill(pid as libc::pid_t, libc::SIGTERM);
             }

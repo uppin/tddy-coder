@@ -1,8 +1,5 @@
 /**
  * Unit tests for the screen sharing tab reducer.
- *
- * These tests FAIL until the green phase creates `screenSharingTabState.ts`
- * with `applyScreenSharingTabAction` and `initialScreenSharingTabState`.
  */
 
 import { describe, expect, it } from "bun:test";

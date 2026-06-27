@@ -65,7 +65,7 @@ const PROTOCOL_OPTIONS: { value: Protocol; label: string; defaultPort: number }[
 ];
 
 function defaultPortForProtocol(p: Protocol): number {
-  return p === Protocol.RDP ? 3389 : 5900;
+  return PROTOCOL_OPTIONS.find((o) => o.value === p)?.defaultPort ?? 5900;
 }
 
 function protocolLabel(p: Protocol): string {

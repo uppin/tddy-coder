@@ -183,6 +183,16 @@ fn protocol_from_i32(v: i32) -> Protocol {
     Protocol::try_from(v).unwrap_or(Protocol::Unspecified)
 }
 
+fn encrypted_to_target(t: &EncryptedTarget) -> ScreenSharingTarget {
+    ScreenSharingTarget {
+        id: t.id.clone(),
+        label: t.label.clone(),
+        host: t.host.clone(),
+        port: t.port,
+        protocol: protocol_from_i32(t.protocol),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ScreenSharingVault
 // ---------------------------------------------------------------------------
@@ -294,17 +304,7 @@ impl ScreenSharingVault {
 
     /// Return all known targets (without their decrypted passwords).
     pub fn list_targets(&self) -> Vec<ScreenSharingTarget> {
-        self.data
-            .targets
-            .iter()
-            .map(|t| ScreenSharingTarget {
-                id: t.id.clone(),
-                label: t.label.clone(),
-                host: t.host.clone(),
-                port: t.port,
-                protocol: protocol_from_i32(t.protocol),
-            })
-            .collect()
+        self.data.targets.iter().map(encrypted_to_target).collect()
     }
 
     /// Remove a target by id.
@@ -365,17 +365,7 @@ impl ScreenSharingVault {
         path: &Path,
     ) -> anyhow::Result<Vec<ScreenSharingTarget>> {
         let data = read_vault_file(path)?;
-        Ok(data
-            .targets
-            .iter()
-            .map(|t| ScreenSharingTarget {
-                id: t.id.clone(),
-                label: t.label.clone(),
-                host: t.host.clone(),
-                port: t.port,
-                protocol: protocol_from_i32(t.protocol),
-            })
-            .collect())
+        Ok(data.targets.iter().map(encrypted_to_target).collect())
     }
 
     /// Check whether the passphrase is correct for an existing vault without fully

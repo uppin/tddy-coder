@@ -5,17 +5,10 @@
  *
  * Exercises the Screen Sharing tab integration via the full SessionsDrawerScreen.
  * All RPC calls are handled by an in-memory backend — no HTTP intercepts.
- *
- * These tests FAIL until the green phase:
- *   - renames VncService → ScreenSharingService in the proto layer
- *   - regenerates src/gen/screen_sharing_pb.ts
- *   - renames SessionVncTab → SessionScreenSharingTab with a protocol selector
- *   - updates InspectorTabs to emit "sessions-inspector-tab-screen-sharing"
  */
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-// This import will fail until the proto is renamed and the client regenerated.
 import { Protocol, ScreenSharingService } from "../../src/gen/screen_sharing_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/screenSharingBackend";
@@ -64,8 +57,8 @@ it("shows a Screen Sharing tab in the inspector tab strip alongside Details and 
 
   // Then
   page.inspectorScreenSharingTab().should("exist");
-  cy.get(`[data-testid="sessions-inspector-tab-details"]`).should("exist");
-  cy.get(`[data-testid="sessions-inspector-tab-tools"]`).should("exist");
+  page.inspectorDetailsTab().should("exist");
+  page.inspectorToolsTab().should("exist");
 });
 
 // ---------------------------------------------------------------------------

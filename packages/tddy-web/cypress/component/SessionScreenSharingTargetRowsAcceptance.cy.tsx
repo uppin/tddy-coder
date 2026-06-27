@@ -6,16 +6,10 @@
  * Tests per-target row UI (Start / Stop / Remove buttons) and the
  * ScreenSharingOverlay lifecycle. All RPC calls flow through the in-memory
  * backend — no HTTP intercepts.
- *
- * These tests FAIL until the green phase:
- *   - renames the proto and regenerates src/gen/screen_sharing_pb.ts
- *   - renames SessionVncTab → SessionScreenSharingTab (target rows use new testids)
- *   - renames VncOverlay → ScreenSharingOverlay (uses screenshare: track prefix)
  */
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-// This import will fail until the proto is renamed and the client regenerated.
 import { Protocol, ScreenSharingService } from "../../src/gen/screen_sharing_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/screenSharingBackend";

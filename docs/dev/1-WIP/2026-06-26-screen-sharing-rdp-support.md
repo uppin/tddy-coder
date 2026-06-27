@@ -40,6 +40,34 @@
 - [ ] `packages/tddy-rdp/src/` — `RdpClient` integration test against xrdp container (testcontainers reuse)
 - [ ] `packages/tddy-vnc/src/` — `VncClient` integration test against VNC server container
 
+## Validation Results
+
+### /validate-changes (step 1)
+- ✅ All packages build cleanly
+- ✅ No unsafe blocks without SAFETY comments (added to `stop_stream` SIGTERM block)
+- ✅ No hardcoded secrets or tokens
+- ✅ Stale FIXME comments removed from `tddy-rdp/src/lib.rs` and `main.rs`
+
+### /validate-tests (step 2)
+- ✅ All test bodies use page-object helpers (no raw `cy.get()`)
+- ✅ Given/When/Then structure throughout
+- ✅ Stale "FAIL until green phase" planning comments removed from 3 test files
+- ✅ `inspectorDetailsTab()` and `inspectorToolsTab()` page-object helpers added
+
+### /validate-prod-ready (step 3)
+- ✅ No `println!`/`eprintln!`/`dbg!` in production code
+- ✅ No mock/fake code outside `#[cfg(test)]`
+- ✅ `#[allow(dead_code)]` on `_room`/`_video_track` in `streamer.rs` — intentional ownership holders
+- ✅ `unwrap_or_default`/`unwrap_or(0)` in `screen_sharing_service.rs` — all justified (pid sentinel, Protocol::Unspecified default)
+- ⚠️ Pre-existing `TODO` in `SessionMainPane.tsx:108` — predates this branch, not this PR's concern
+
+### /analyze-clean-code (step 4) — Score: B
+- ✅ No "must refactor" blockers for shipping
+- ⚠️ `try_spawn_bridge()` — 141 lines, 7 params (already suppressed with `#[allow(clippy::too_many_arguments)]`) — candidate for splitting into `build_bridge_spawn_config()` helper
+- ⚠️ Duplicated `EncryptedTarget → ScreenSharingTarget` closure in vault (`list_targets()` and `list_targets_from_file()`)
+- ⚠️ Magic constants `1920`/`1080`/`30` in two places in `screen_sharing_service.rs`
+- ⚠️ `defaultPortForProtocol()` in `SessionScreenSharingTab.tsx` re-derives what `PROTOCOL_OPTIONS` already holds
+
 ## Delta summary (to be filled in during green phase)
 
 ### `tddy-service`
