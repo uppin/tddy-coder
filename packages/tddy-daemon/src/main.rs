@@ -355,7 +355,7 @@ fn main() -> anyhow::Result<()> {
                     Some(tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles {
                         eligible_daemon_source: Arc::new(
                             tddy_daemon::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
-                                config_arc, registry,
+                                config_arc.clone(), registry,
                             ),
                         )
                             as Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource>,
@@ -365,8 +365,9 @@ fn main() -> anyhow::Result<()> {
                     None
                 }
             };
-            // Clone before moving into ConnectionServiceImpl — VmService needs the same resolver.
+            // Clone before moving into ConnectionServiceImpl — VmService and ScreenSharingService need the same resolver.
             let vm_user_resolver = user_resolver.clone();
+            let ss_user_resolver = user_resolver.clone();
             let mut connection_impl = tddy_daemon::connection_service::ConnectionServiceImpl::new(
                 config.clone(),
                 Arc::new(tddy_daemon::user_sessions_path::sessions_base_for_user),
@@ -418,6 +419,21 @@ fn main() -> anyhow::Result<()> {
             rpc_entries.push(tddy_rpc::ServiceEntry {
                 name: "vm.VmService",
                 service: Arc::new(vm_server) as Arc<dyn tddy_rpc::RpcService>,
+            });
+
+            // Screen sharing service — vault management + VNC/RDP bridge spawning.
+            let ss_key_cache: tddy_daemon::screen_sharing_service::ScreenSharingKeyCache =
+                Arc::new(Mutex::new(HashMap::new()));
+            let ss_svc = tddy_daemon::screen_sharing_service::ScreenSharingServiceImpl::new(
+                ss_user_resolver,
+                Arc::new(tddy_daemon::user_sessions_path::sessions_base_for_user),
+                Arc::clone(&ss_key_cache),
+            )
+            .with_config(Arc::clone(&config_arc));
+            let ss_server = tddy_service::ScreenSharingServiceServer::new(ss_svc);
+            rpc_entries.push(tddy_rpc::ServiceEntry {
+                name: "screen_sharing.ScreenSharingService",
+                service: Arc::new(ss_server) as Arc<dyn tddy_rpc::RpcService>,
             });
         }
 

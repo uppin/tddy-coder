@@ -35,6 +35,8 @@ members = [
     "packages/tddy-integration-tests",
     "packages/tddy-livekit-screen-capture",
     "packages/tddy-vnc",
+    "packages/tddy-screenshare",
+    "packages/tddy-rdp",
 ]
 exclude = [
     # Real cargo workspace used as a tddy-build example fixture; built by the

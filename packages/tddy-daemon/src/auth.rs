@@ -20,9 +20,9 @@ pub struct AuthBuildResult {
 /// Resolve the path where auth sessions are persisted across daemon restarts.
 /// Returns `None` when HOME is not set (sessions are in-memory only for that run).
 fn session_persist_path() -> Option<PathBuf> {
-    std::env::var("HOME").ok().map(|home| {
-        PathBuf::from(home).join(".tddy").join("auth-sessions.json")
-    })
+    std::env::var("HOME")
+        .ok()
+        .map(|home| PathBuf::from(home).join(".tddy").join("auth-sessions.json"))
 }
 
 /// Build RPC entries for AuthService when GitHub is configured.
