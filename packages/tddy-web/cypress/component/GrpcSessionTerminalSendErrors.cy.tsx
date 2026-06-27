@@ -32,7 +32,7 @@ import { createConnectTransport } from "@connectrpc/connect-web";
 import {
   ConnectionService,
   ClaimTerminalControlResponseSchema,
-  SendTerminalInputRequestSchema,
+  SessionTerminalInputSchema,
   SendTerminalInputResponseSchema,
 } from "../../src/gen/connection_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
@@ -154,9 +154,9 @@ describe("GrpcSessionTerminal — SendTerminalInput error handling", () => {
     interceptStreamTerminalOutput();
 
     // Given — sendTerminalInput succeeds; capture every request body
-    const capturedRequests: ReturnType<typeof fromBinary<typeof SendTerminalInputRequestSchema>>[] = [];
+    const capturedRequests: ReturnType<typeof fromBinary<typeof SessionTerminalInputSchema>>[] = [];
     cy.intercept("POST", "**/rpc/connection.ConnectionService/SendTerminalInput", (req) => {
-      const decoded = fromBinary(SendTerminalInputRequestSchema, decodeProtoRequestBody(req.body));
+      const decoded = fromBinary(SessionTerminalInputSchema, decodeProtoRequestBody(req.body));
       capturedRequests.push(decoded);
       req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: OK_SEND_INPUT });
     }).as("sendTerminalInput");

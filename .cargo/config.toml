@@ -1,29 +1,14 @@
 # Required for libwebrtc on macOS: ObjC categories must be loaded.
 # Without this, Room::connect crashes with NSInvalidArgumentException in
 # RTCVideoEncoderVP9/PeerConnectionFactory (livekit/rust-sdks#340).
+#
+# This file holds ONLY project-wide, portable settings. Machine-specific config
+# (a custom pre-extracted libwebrtc dir via LK_CUSTOM_WEBRTC, a local crates.io
+# caching proxy, etc.) belongs in your per-machine ~/.cargo/config.toml, which
+# Cargo merges automatically and which is never committed. See
+# docs/dev/guides/tech-stack.md (or the README) for an example.
 [target.aarch64-apple-darwin]
 rustflags = ["-C", "link-arg=-ObjC"]
 
 [target.x86_64-apple-darwin]
 rustflags = ["-C", "link-arg=-ObjC"]
-
-# ---------------------------------------------------------------------------
-# Pre-extracted libwebrtc binaries — skips the GitHub download on every build.
-# Tag: webrtc-51ef663 (matches webrtc-sys-build WEBRTC_TAG).
-# To update: download the new zip, extract to the same dir, update this path.
-# ---------------------------------------------------------------------------
-[env]
-LK_CUSTOM_WEBRTC = "/Users/mantasi/.local/share/livekit-webrtc/mac-arm64-release"
-
-# ---------------------------------------------------------------------------
-# Local crates.io caching proxy (crates-io-proxy on 127.0.0.1:3080)
-# Lazy / on-demand: only fetches what you build; crate files cached permanently.
-# Start/stop: `launchctl load|unload ~/Library/LaunchAgents/dev.crates-io-proxy.plist`
-# Logs: ~/.cache/crates-io-proxy/proxy.log
-# To bypass (e.g. offline without proxy): comment out replace-with below.
-# ---------------------------------------------------------------------------
-[source.crates-io]
-replace-with = "crates-io-proxy"
-
-[source.crates-io-proxy]
-registry = "sparse+http://127.0.0.1:3080/index/"

@@ -311,10 +311,23 @@ async fn bugfix_demo_asks_two_questions_after_first_prompt() {
     tk.type_text("Login page crashes on submit").await.unwrap();
     tk.press_enter().await.unwrap();
 
-    // Then two follow-up questions are posed before the stub response appears
-    tk.wait_for_text("Question 1", Duration::from_secs(10))
+    // The bugfix recipe is interview-first (interview → analyze → reproduce), so the
+    // interview clarification questions are posed before the reproduce-phase triage questions.
+    tk.wait_for_text("Feature scope", Duration::from_secs(10))
         .await
-        .expect("first question should appear after submitting bug description");
+        .expect("first interview question should appear after submitting bug description");
+    tk.press_enter().await.unwrap();
+
+    tk.wait_for_text("Constraints", Duration::from_secs(10))
+        .await
+        .expect("second interview question should appear");
+    tk.press_enter().await.unwrap();
+
+    // Then, once the reproduce phase is reached, two triage questions are posed before
+    // the stub response appears.
+    tk.wait_for_text("Question 1", Duration::from_secs(30))
+        .await
+        .expect("first reproduce question should appear after the interview completes");
 
     let screen_q1 = tk.screen_contents().await;
     log::info!("Screen at Q1:\n{}", screen_q1);

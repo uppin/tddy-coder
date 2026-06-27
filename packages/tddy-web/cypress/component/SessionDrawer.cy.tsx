@@ -51,12 +51,17 @@ function mountDrawer(
     onSelectSession?: (id: string) => void;
   } = {},
 ) {
+  // The drawer only renders its session items in the open state; closed it
+  // collapses to a status-dot strip. Stack-grouping behaviour lives in the open drawer.
   cy.mount(
     <TooltipProvider delayDuration={0}>
       <SessionDrawer
         sessions={sessions as Parameters<typeof SessionDrawer>[0]["sessions"]}
         selectedSessionId={selectedSessionId}
         onSelectSession={onSelectSession}
+        isOpen
+        onClose={cy.stub().as("onClose")}
+        onOpen={cy.stub().as("onOpen")}
       />
     </TooltipProvider>,
   );
