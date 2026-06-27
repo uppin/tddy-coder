@@ -31,3 +31,8 @@ tddy-screenshare = { path = "../tddy-screenshare" }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time"] }
+qrcode = "0.14"
+image = "0.25"
+rqrr = "0.10"
+tddy-screenshare = { path = "../tddy-screenshare" }
