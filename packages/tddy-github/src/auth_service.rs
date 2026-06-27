@@ -70,14 +70,24 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
         if path.exists() {
             match std::fs::read_to_string(&path)
                 .map_err(|e| format!("{e}"))
-                .and_then(|s| serde_json::from_str::<HashMap<String, GitHubUser>>(&s).map_err(|e| format!("{e}")))
-            {
+                .and_then(|s| {
+                    serde_json::from_str::<HashMap<String, GitHubUser>>(&s)
+                        .map_err(|e| format!("{e}"))
+                }) {
                 Ok(loaded) => {
-                    log::info!("auth: loaded {} persisted session(s) from {}", loaded.len(), path.display());
+                    log::info!(
+                        "auth: loaded {} persisted session(s) from {}",
+                        loaded.len(),
+                        path.display()
+                    );
                     *sessions.lock().unwrap() = loaded;
                 }
                 Err(e) => {
-                    log::warn!("auth: could not load persisted sessions from {}: {}", path.display(), e);
+                    log::warn!(
+                        "auth: could not load persisted sessions from {}: {}",
+                        path.display(),
+                        e
+                    );
                 }
             }
         }
@@ -90,26 +100,41 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
 
     /// Persist the current session store to disk. Errors are logged, never propagated.
     fn persist(&self) {
-        let Some(ref path) = self.persist_path else { return };
+        let Some(ref path) = self.persist_path else {
+            return;
+        };
         let snapshot: HashMap<String, GitHubUser> = self.sessions.lock().unwrap().clone();
         let json = match serde_json::to_string_pretty(&snapshot) {
             Ok(j) => j,
-            Err(e) => { log::warn!("auth: failed to serialize sessions: {e}"); return; }
+            Err(e) => {
+                log::warn!("auth: failed to serialize sessions: {e}");
+                return;
+            }
         };
         // Atomic write: write to a sibling `.tmp` file then rename.
         let tmp = path.with_extension("json.tmp");
         if let Some(parent) = path.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
-                log::warn!("auth: could not create parent dir {}: {e}", parent.display());
+                log::warn!(
+                    "auth: could not create parent dir {}: {e}",
+                    parent.display()
+                );
                 return;
             }
         }
         if let Err(e) = std::fs::write(&tmp, &json) {
-            log::warn!("auth: failed to write tmp sessions file {}: {e}", tmp.display());
+            log::warn!(
+                "auth: failed to write tmp sessions file {}: {e}",
+                tmp.display()
+            );
             return;
         }
         if let Err(e) = std::fs::rename(&tmp, path) {
-            log::warn!("auth: failed to rename {} -> {}: {e}", tmp.display(), path.display());
+            log::warn!(
+                "auth: failed to rename {} -> {}: {e}",
+                tmp.display(),
+                path.display()
+            );
         }
     }
 
@@ -364,7 +389,10 @@ mod tests {
         code: &str,
         state: &str,
     ) -> String {
-        let req = ExchangeCodeRequest { code: code.to_string(), state: state.to_string() };
+        let req = ExchangeCodeRequest {
+            code: code.to_string(),
+            state: state.to_string(),
+        };
         let msg = tddy_rpc::RpcMessage {
             payload: prost::Message::encode_to_vec(&req),
             metadata: Default::default(),
@@ -373,7 +401,10 @@ mod tests {
             .handle_messages("auth.AuthService", "ExchangeCode", &[msg])
             .await
             .expect("ExchangeCode should succeed");
-        let chunks = match resp { tddy_rpc::ResponseBody::Complete(c) => c, _ => panic!("expected Complete") };
+        let chunks = match resp {
+            tddy_rpc::ResponseBody::Complete(c) => c,
+            _ => panic!("expected Complete"),
+        };
         <ExchangeCodeResponse as prost::Message>::decode(&chunks[0][..])
             .unwrap()
             .session_token
@@ -384,7 +415,9 @@ mod tests {
         bridge: &RpcBridge<AuthServiceServer<AuthServiceImpl<StubGitHubProvider>>>,
         token: &str,
     ) -> (bool, Option<String>) {
-        let req = GetAuthStatusRequest { session_token: token.to_string() };
+        let req = GetAuthStatusRequest {
+            session_token: token.to_string(),
+        };
         let msg = tddy_rpc::RpcMessage {
             payload: prost::Message::encode_to_vec(&req),
             metadata: Default::default(),
@@ -393,7 +426,10 @@ mod tests {
             .handle_messages("auth.AuthService", "GetAuthStatus", &[msg])
             .await
             .expect("GetAuthStatus should succeed");
-        let chunks = match resp { tddy_rpc::ResponseBody::Complete(c) => c, _ => panic!("expected Complete") };
+        let chunks = match resp {
+            tddy_rpc::ResponseBody::Complete(c) => c,
+            _ => panic!("expected Complete"),
+        };
         let r = <GetAuthStatusResponse as prost::Message>::decode(&chunks[0][..]).unwrap();
         (r.authenticated, r.user.map(|u| u.login))
     }
@@ -419,9 +455,18 @@ mod tests {
 
         // Obtain a valid state token via GetAuthUrl
         let url_req = GetAuthUrlRequest {};
-        let msg = tddy_rpc::RpcMessage { payload: prost::Message::encode_to_vec(&url_req), metadata: Default::default() };
-        let resp = bridge1.handle_messages("auth.AuthService", "GetAuthUrl", &[msg]).await.unwrap();
-        let chunks = match resp { tddy_rpc::ResponseBody::Complete(c) => c, _ => panic!() };
+        let msg = tddy_rpc::RpcMessage {
+            payload: prost::Message::encode_to_vec(&url_req),
+            metadata: Default::default(),
+        };
+        let resp = bridge1
+            .handle_messages("auth.AuthService", "GetAuthUrl", &[msg])
+            .await
+            .unwrap();
+        let chunks = match resp {
+            tddy_rpc::ResponseBody::Complete(c) => c,
+            _ => panic!(),
+        };
         let auth_url_resp = <GetAuthUrlResponse as prost::Message>::decode(&chunks[0][..]).unwrap();
 
         let token = do_exchange(&bridge1, "persist-code", &auth_url_resp.state).await;
@@ -454,17 +499,34 @@ mod tests {
         let bridge = persisted_bridge("logout-code", persist_path.clone());
 
         let url_req = GetAuthUrlRequest {};
-        let msg = tddy_rpc::RpcMessage { payload: prost::Message::encode_to_vec(&url_req), metadata: Default::default() };
-        let resp = bridge.handle_messages("auth.AuthService", "GetAuthUrl", &[msg]).await.unwrap();
-        let chunks = match resp { tddy_rpc::ResponseBody::Complete(c) => c, _ => panic!() };
+        let msg = tddy_rpc::RpcMessage {
+            payload: prost::Message::encode_to_vec(&url_req),
+            metadata: Default::default(),
+        };
+        let resp = bridge
+            .handle_messages("auth.AuthService", "GetAuthUrl", &[msg])
+            .await
+            .unwrap();
+        let chunks = match resp {
+            tddy_rpc::ResponseBody::Complete(c) => c,
+            _ => panic!(),
+        };
         let auth_url_resp = <GetAuthUrlResponse as prost::Message>::decode(&chunks[0][..]).unwrap();
 
         let token = do_exchange(&bridge, "logout-code", &auth_url_resp.state).await;
 
         // When — logout
-        let logout_req = LogoutRequest { session_token: token.clone() };
-        let msg = tddy_rpc::RpcMessage { payload: prost::Message::encode_to_vec(&logout_req), metadata: Default::default() };
-        bridge.handle_messages("auth.AuthService", "Logout", &[msg]).await.expect("logout should succeed");
+        let logout_req = LogoutRequest {
+            session_token: token.clone(),
+        };
+        let msg = tddy_rpc::RpcMessage {
+            payload: prost::Message::encode_to_vec(&logout_req),
+            metadata: Default::default(),
+        };
+        bridge
+            .handle_messages("auth.AuthService", "Logout", &[msg])
+            .await
+            .expect("logout should succeed");
 
         // Then — a new "daemon" (fresh service loading the same file) no longer recognises the token
         drop(bridge);
@@ -475,6 +537,9 @@ mod tests {
         let bridge2 = RpcBridge::new(AuthServiceServer::new(service2));
 
         let (auth_after, _) = do_get_status(&bridge2, &token).await;
-        assert!(!auth_after, "logged-out session should not be valid after restart");
+        assert!(
+            !auth_after,
+            "logged-out session should not be valid after restart"
+        );
     }
 }

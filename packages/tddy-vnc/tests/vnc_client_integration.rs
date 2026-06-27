@@ -62,9 +62,9 @@ const BGRA_PIXEL_FORMAT: [u8; 16] = [
     0, 255, // red_max   (u16 BE)
     0, 255, // green_max (u16 BE)
     0, 255, // blue_max  (u16 BE)
-    16, // red_shift   (R is byte 2 in BGRA = bits 16-23)
-    8,  // green_shift (G is byte 1      = bits  8-15)
-    0,  // blue_shift  (B is byte 0      = bits  0- 7)
+    16,  // red_shift   (R is byte 2 in BGRA = bits 16-23)
+    8,   // green_shift (G is byte 1      = bits  8-15)
+    0,   // blue_shift  (B is byte 0      = bits  0- 7)
     0, 0, 0, // padding
 ];
 
@@ -94,7 +94,11 @@ impl FakeVncServer {
                 tokio::spawn(handle_connection(stream, s));
             }
         });
-        Self { port, _task: task, state }
+        Self {
+            port,
+            _task: task,
+            state,
+        }
     }
 
     fn pointer_events(&self) -> Vec<(u16, u16, u8)> {
@@ -249,7 +253,10 @@ async fn receive_next_qr_frame(client: &mut VncClientState, prev: Option<&str>) 
         }
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
-    panic!("timeout waiting for next distinct QR frame (prev={:?})", prev);
+    panic!(
+        "timeout waiting for next distinct QR frame (prev={:?})",
+        prev
+    );
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -258,7 +265,7 @@ async fn receive_next_qr_frame(client: &mut VncClientState, prev: Option<&str>) 
 async fn frames_stream_with_incrementing_qr_content() {
     // Given: fake VNC server generating one QR code per FramebufferUpdateRequest
     let server = FakeVncServer::start().await;
-    let mut client = VncClientState::connect("127.0.0.1", server.port, None)
+    let mut client = VncClientState::connect("127.0.0.1", server.port, None, None)
         .await
         .expect("VNC connect failed");
     wait_for_dimensions(&mut client).await;
@@ -283,7 +290,7 @@ async fn frames_stream_with_incrementing_qr_content() {
 async fn framebuffer_dimensions_match_server_init() {
     // Given: fake VNC server advertising 256×256
     let server = FakeVncServer::start().await;
-    let mut client = VncClientState::connect("127.0.0.1", server.port, None)
+    let mut client = VncClientState::connect("127.0.0.1", server.port, None, None)
         .await
         .unwrap();
 
@@ -298,7 +305,7 @@ async fn framebuffer_dimensions_match_server_init() {
 async fn inject_pointer_is_recorded_by_server() {
     // Given: connected client
     let server = FakeVncServer::start().await;
-    let mut client = VncClientState::connect("127.0.0.1", server.port, None)
+    let mut client = VncClientState::connect("127.0.0.1", server.port, None, None)
         .await
         .unwrap();
     wait_for_dimensions(&mut client).await;
@@ -317,7 +324,7 @@ async fn inject_pointer_is_recorded_by_server() {
 async fn inject_key_is_recorded_by_server() {
     // Given: connected client
     let server = FakeVncServer::start().await;
-    let mut client = VncClientState::connect("127.0.0.1", server.port, None)
+    let mut client = VncClientState::connect("127.0.0.1", server.port, None, None)
         .await
         .unwrap();
     wait_for_dimensions(&mut client).await;
@@ -336,7 +343,7 @@ async fn inject_key_is_recorded_by_server() {
 async fn stop_closes_connection_cleanly() {
     // Given: connected client
     let server = FakeVncServer::start().await;
-    let mut client = VncClientState::connect("127.0.0.1", server.port, None)
+    let mut client = VncClientState::connect("127.0.0.1", server.port, None, None)
         .await
         .unwrap();
     wait_for_dimensions(&mut client).await;

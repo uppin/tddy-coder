@@ -48,7 +48,7 @@ beforeEach(() => {
 it("shows a Screen Sharing tab in the inspector tab strip alongside Details and Tools", () => {
   // Given
   const backend = aSessionsDrawerBackend([SESSION])
-    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] }));
+    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] as never[] }));
 
   // When
   mountWithRpc(<SessionsDrawerScreen />, backend);
@@ -68,7 +68,7 @@ it("shows a Screen Sharing tab in the inspector tab strip alongside Details and 
 it("renders the Screen Sharing tab panel when the Screen Sharing tab is clicked", () => {
   // Given
   const backend = aSessionsDrawerBackend([SESSION])
-    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] }));
+    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] as never[] }));
 
   // When
   mountWithRpc(<SessionsDrawerScreen />, backend);
@@ -87,7 +87,7 @@ it("renders the Screen Sharing tab panel when the Screen Sharing tab is clicked"
 it("shows an empty target list and an Add form with protocol selector when no targets are configured", () => {
   // Given
   const backend = aSessionsDrawerBackend([SESSION])
-    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] }));
+    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] as never[] }));
 
   // When
   mountWithRpc(<SessionsDrawerScreen />, backend);
@@ -109,7 +109,7 @@ it("shows an empty target list and an Add form with protocol selector when no ta
 it("selecting VNC protocol defaults the port to 5900", () => {
   // Given
   const backend = aSessionsDrawerBackend([SESSION])
-    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] }));
+    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] as never[] }));
 
   // When
   mountWithRpc(<SessionsDrawerScreen />, backend);
@@ -132,7 +132,7 @@ it("selecting VNC protocol defaults the port to 5900", () => {
 it("selecting RDP protocol defaults the port to 3389", () => {
   // Given
   const backend = aSessionsDrawerBackend([SESSION])
-    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] }));
+    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] as never[] }));
 
   // When
   mountWithRpc(<SessionsDrawerScreen />, backend);
@@ -155,7 +155,7 @@ it("selecting RDP protocol defaults the port to 3389", () => {
 it("submitting VNC target calls AddTarget with protocol VNC and correct fields", () => {
   // Given
   const backend = aSessionsDrawerBackend([SESSION])
-    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] }))
+    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] as never[] }))
     .onUnary(ScreenSharingService.method.addTarget, (req) => ({
       target: {
         id: "t-vnc-001",
@@ -163,6 +163,7 @@ it("submitting VNC target calls AddTarget with protocol VNC and correct fields",
         host: req.host,
         port: req.port,
         protocol: req.protocol,
+        username: req.username,
       },
     }));
 
@@ -194,7 +195,7 @@ it("submitting VNC target calls AddTarget with protocol VNC and correct fields",
 it("submitting RDP target calls AddTarget with protocol RDP and correct fields", () => {
   // Given
   const backend = aSessionsDrawerBackend([SESSION])
-    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] }))
+    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] as never[] }))
     .onUnary(ScreenSharingService.method.addTarget, (req) => ({
       target: {
         id: "t-rdp-001",
@@ -202,6 +203,7 @@ it("submitting RDP target calls AddTarget with protocol RDP and correct fields",
         host: req.host,
         port: req.port,
         protocol: req.protocol,
+        username: req.username,
       },
     }));
 
@@ -233,7 +235,7 @@ it("submitting RDP target calls AddTarget with protocol RDP and correct fields",
 it("shows the passphrase dialog before adding a target that has a password", () => {
   // Given
   const backend = aSessionsDrawerBackend([SESSION])
-    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] }))
+    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] as never[] }))
     .onUnary(ScreenSharingService.method.unlockVault, () => ({ ok: true }))
     .onUnary(ScreenSharingService.method.addTarget, (req) => ({
       target: {
@@ -242,6 +244,7 @@ it("shows the passphrase dialog before adding a target that has a password", () 
         host: req.host,
         port: req.port,
         protocol: req.protocol,
+        username: req.username,
       },
     }));
 

@@ -46,6 +46,7 @@ pub struct ScreenSharingTarget {
     pub host: String,
     pub port: u16,
     pub protocol: Protocol,
+    pub username: String,
 }
 
 /// A 32-byte derived key — the result of Argon2id(passphrase, salt).
@@ -73,6 +74,8 @@ struct EncryptedTarget {
     host: String,
     port: u16,
     protocol: i32,
+    #[serde(default)]
+    username: String,
     pw_nonce: String,
     pw_ct: String,
 }
@@ -149,6 +152,16 @@ fn write_vault_file(path: &Path, vault_file: &VaultFile) -> anyhow::Result<()> {
     let yaml = serde_yaml::to_string(vault_file)
         .map_err(|e| anyhow::anyhow!("failed to serialize vault: {}", e))?;
 
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            anyhow::anyhow!(
+                "failed to create vault directory {}: {}",
+                parent.display(),
+                e
+            )
+        })?;
+    }
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -190,6 +203,7 @@ fn encrypted_to_target(t: &EncryptedTarget) -> ScreenSharingTarget {
         host: t.host.clone(),
         port: t.port,
         protocol: protocol_from_i32(t.protocol),
+        username: t.username.clone(),
     }
 }
 
@@ -272,6 +286,7 @@ impl ScreenSharingVault {
         label: &str,
         host: &str,
         port: u16,
+        username: &str,
         password: &str,
         protocol: Protocol,
         key: &DerivedKey,
@@ -286,6 +301,7 @@ impl ScreenSharingVault {
             host: host.to_string(),
             port,
             protocol: protocol as i32,
+            username: username.to_string(),
             pw_nonce: bytes_to_hex(&pw_nonce),
             pw_ct: bytes_to_hex(&pw_ct),
         };
@@ -299,6 +315,7 @@ impl ScreenSharingVault {
             host: host.to_string(),
             port,
             protocol,
+            username: username.to_string(),
         })
     }
 
@@ -361,9 +378,7 @@ impl ScreenSharingVault {
     }
 
     /// Read non-secret target metadata from a vault file without needing the key.
-    pub(crate) fn list_targets_from_file(
-        path: &Path,
-    ) -> anyhow::Result<Vec<ScreenSharingTarget>> {
+    pub(crate) fn list_targets_from_file(path: &Path) -> anyhow::Result<Vec<ScreenSharingTarget>> {
         let data = read_vault_file(path)?;
         Ok(data.targets.iter().map(encrypted_to_target).collect())
     }

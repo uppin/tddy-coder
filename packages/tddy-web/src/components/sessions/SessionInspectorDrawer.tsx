@@ -360,6 +360,7 @@ export function SessionInspectorDrawer({
                       host: t.host,
                       port: t.port,
                       protocol: t.protocol,
+                      username: t.username,
                     }))
                   )
               }
@@ -371,6 +372,7 @@ export function SessionInspectorDrawer({
                     label: req.label,
                     host: req.host,
                     port: req.port,
+                    username: req.username,
                     password: req.password,
                     protocol: req.protocol,
                   })
@@ -380,6 +382,7 @@ export function SessionInspectorDrawer({
                     host: r.target?.host ?? "",
                     port: r.target?.port ?? 0,
                     protocol: r.target?.protocol ?? 0,
+                    username: r.target?.username ?? "",
                   }))
               }
               onRemoveTarget={(targetId) =>

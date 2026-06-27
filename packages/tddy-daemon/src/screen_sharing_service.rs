@@ -16,7 +16,9 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 
 use crate::config::{resolve_rdp_binary_path, resolve_vnc_binary_path, DaemonConfig};
-use crate::screen_sharing_vault::{vault_path, DerivedKey, ScreenSharingTarget, ScreenSharingVault};
+use crate::screen_sharing_vault::{
+    vault_path, DerivedKey, ScreenSharingTarget, ScreenSharingVault,
+};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::screen_sharing::{
     AddTargetRequest, AddTargetResponse, ListTargetsRequest, ListTargetsResponse, Protocol,
@@ -42,6 +44,7 @@ type SessionsBase = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 struct BridgeSpawnConfig {
     host: String,
     port: u16,
+    username: String,
     password: String,
     livekit_url: String,
     livekit_token: String,
@@ -114,6 +117,7 @@ impl ScreenSharingServiceImpl {
         &self,
         config: &DaemonConfig,
         target: &ScreenSharingTarget,
+        username: String,
         password: String,
         bridge_identity: &str,
         track_name: &str,
@@ -123,6 +127,7 @@ impl ScreenSharingServiceImpl {
         let spawn_config = match build_bridge_spawn_config(
             config,
             target,
+            username,
             password,
             bridge_identity,
             track_name,
@@ -186,7 +191,10 @@ impl ScreenSharingServiceImpl {
                 .insert(bridge_key.clone(), pid);
         }
 
-        info!("bridge spawned: binary={} pid={} key={}", binary, pid, bridge_key);
+        info!(
+            "bridge spawned: binary={} pid={} key={}",
+            binary, pid, bridge_key
+        );
 
         // Background task: wait for the process to exit (prevents zombie processes) and
         // removes the PID from the active map when done.
@@ -210,6 +218,7 @@ impl ScreenSharingServiceImpl {
 fn build_bridge_spawn_config(
     config: &DaemonConfig,
     target: &ScreenSharingTarget,
+    username: String,
     password: String,
     bridge_identity: &str,
     track_name: &str,
@@ -235,9 +244,16 @@ fn build_bridge_spawn_config(
         };
     }
 
-    let livekit_url_internal = require_field!(lk.url, "bridge spawn skipped: LiveKit URL not configured");
-    let api_key = require_field!(lk.api_key, "bridge spawn skipped: LiveKit API key not configured");
-    let api_secret = require_field!(lk.api_secret, "bridge spawn skipped: LiveKit API secret not configured");
+    let livekit_url_internal =
+        require_field!(lk.url, "bridge spawn skipped: LiveKit URL not configured");
+    let api_key = require_field!(
+        lk.api_key,
+        "bridge spawn skipped: LiveKit API key not configured"
+    );
+    let api_secret = require_field!(
+        lk.api_secret,
+        "bridge spawn skipped: LiveKit API secret not configured"
+    );
 
     let token = tddy_livekit::token::TokenGenerator::new(
         api_key,
@@ -247,12 +263,18 @@ fn build_bridge_spawn_config(
         std::time::Duration::from_secs(tddy_livekit::token::DEFAULT_LIVEKIT_JWT_TTL_SECS),
     )
     .generate()
-    .map_err(|e| error!("bridge spawn skipped: failed to generate LiveKit token: {}", e))
+    .map_err(|e| {
+        error!(
+            "bridge spawn skipped: failed to generate LiveKit token: {}",
+            e
+        )
+    })
     .ok()?;
 
     Some(BridgeSpawnConfig {
         host: target.host.clone(),
         port: target.port,
+        username,
         password,
         livekit_url: livekit_url_internal,
         livekit_token: token,
@@ -273,6 +295,7 @@ fn vault_target_to_proto(t: &ScreenSharingTarget) -> ProtoScreenSharingTarget {
         host: t.host.clone(),
         port: t.port as u32,
         protocol: t.protocol as i32,
+        username: t.username.clone(),
     }
 }
 
@@ -326,7 +349,15 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
         let protocol = Protocol::try_from(req.protocol).unwrap_or(Protocol::Unspecified);
 
         let target = vault
-            .add_target(&req.label, &req.host, req.port as u16, &req.password, protocol, &key)
+            .add_target(
+                &req.label,
+                &req.host,
+                req.port as u16,
+                &req.username,
+                &req.password,
+                protocol,
+                &key,
+            )
             .map_err(|e| Status::internal(format!("failed to add target: {}", e)))?;
 
         Ok(Response::new(AddTargetResponse {
@@ -416,12 +447,14 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
                 Ok((vault, _)) => {
                     let targets = vault.list_targets();
                     if let Some(target) = targets.into_iter().find(|t| t.id == req.target_id) {
+                        let username = target.username.clone();
                         let password = vault
                             .decrypt_password(&req.target_id, &key)
                             .unwrap_or_default();
                         self.try_spawn_bridge(
                             config,
                             &target,
+                            username,
                             password,
                             &bridge_identity,
                             &track_name,
@@ -462,7 +495,10 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
         let pid_opt = self.active_bridges.lock().await.remove(&bridge_key);
 
         if let Some(pid) = pid_opt {
-            info!("stop_stream: sending SIGTERM to bridge pid={} key={}", pid, bridge_key);
+            info!(
+                "stop_stream: sending SIGTERM to bridge pid={} key={}",
+                pid, bridge_key
+            );
             #[cfg(unix)]
             // SAFETY: pid > 0 is enforced by the `if pid > 0` guard in `try_spawn_bridge`
             // that filters out the zero sentinel before inserting into `active_bridges`.

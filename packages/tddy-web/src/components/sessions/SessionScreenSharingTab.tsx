@@ -36,12 +36,14 @@ export interface ScreenSharingTargetInfo {
   host: string;
   port: number;
   protocol: Protocol;
+  username: string;
 }
 
 export interface AddScreenSharingTargetReq {
   label: string;
   host: string;
   port: number;
+  username: string;
   password: string;
   protocol: Protocol;
 }
@@ -92,14 +94,19 @@ export function SessionScreenSharingTab({
   const [host, setHost] = useState("");
   const [protocol, setProtocol] = useState<Protocol>(Protocol.VNC);
   const [port, setPort] = useState("5900");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
   // Pending add request — held while passphrase dialog is open
   const [pendingAdd, setPendingAdd] = useState<AddScreenSharingTargetReq | null>(null);
   const [passphraseOpen, setPassphraseOpen] = useState(false);
+  // Tracks whether UnlockVault has succeeded in this session — skips re-prompting.
+  const [vaultUnlocked, setVaultUnlocked] = useState(false);
 
   // Active stream result — stored when StartStream succeeds
   const [activeStreamResult, setActiveStreamResult] = useState<StartStreamResult | null>(null);
+  // Transient error message shown below the form.
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     onListTargets()
@@ -129,11 +136,12 @@ export function SessionScreenSharingTab({
       label,
       host,
       port: parseInt(port, 10) || defaultPortForProtocol(protocol),
+      username,
       password,
       protocol,
     };
 
-    if (password) {
+    if (password && !vaultUnlocked) {
       setPendingAdd(req);
       setPassphraseOpen(true);
     } else {
@@ -142,6 +150,7 @@ export function SessionScreenSharingTab({
   };
 
   const submitAdd = (req: AddScreenSharingTargetReq) => {
+    setErrorMsg(null);
     onAddTarget(req)
       .then((target) => {
         dispatch({
@@ -155,9 +164,12 @@ export function SessionScreenSharingTab({
         setHost("");
         setProtocol(Protocol.VNC);
         setPort("5900");
+        setUsername("");
         setPassword("");
       })
-      .catch(() => {/* errors handled silently for now */});
+      .catch((e: unknown) => {
+        setErrorMsg(e instanceof Error ? e.message : "Failed to add target");
+      });
   };
 
   const handlePassphraseConfirm = (passphrase: string) => {
@@ -167,8 +179,13 @@ export function SessionScreenSharingTab({
     setPendingAdd(null);
 
     onUnlockVault(passphrase)
-      .then(() => submitAdd(req))
-      .catch(() => {/* errors handled silently for now */});
+      .then(() => {
+        setVaultUnlocked(true);
+        submitAdd(req);
+      })
+      .catch((e: unknown) => {
+        setErrorMsg(e instanceof Error ? e.message : "Failed to unlock vault — wrong passphrase?");
+      });
   };
 
   const handlePassphraseCancel = () => {
@@ -177,6 +194,7 @@ export function SessionScreenSharingTab({
   };
 
   const handleStart = (targetId: string) => {
+    setErrorMsg(null);
     dispatch({ type: "set_stream_status", targetId, status: "starting" });
     onStartStream(targetId)
       .then((result) => {
@@ -184,8 +202,9 @@ export function SessionScreenSharingTab({
         dispatch({ type: "open_overlay", targetId });
         setActiveStreamResult(result);
       })
-      .catch(() => {
+      .catch((e: unknown) => {
         dispatch({ type: "set_stream_status", targetId, status: "error" });
+        setErrorMsg(e instanceof Error ? e.message : "Failed to start stream");
       });
   };
 
@@ -273,6 +292,16 @@ export function SessionScreenSharingTab({
               </option>
             ))}
           </select>
+          {protocol === Protocol.RDP && (
+            <input
+              data-testid="sessions-screen-sharing-add-username"
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Username"
+              className="border border-border rounded px-2 py-1 text-xs bg-background"
+            />
+          )}
           <input
             data-testid="sessions-screen-sharing-add-port"
             type="text"
@@ -297,6 +326,12 @@ export function SessionScreenSharingTab({
             Add target
           </button>
         </form>
+
+        {errorMsg && (
+          <p className="text-xs text-destructive px-1" role="alert">
+            {errorMsg}
+          </p>
+        )}
 
         <ScreenSharingPassphraseDialog
           open={passphraseOpen}

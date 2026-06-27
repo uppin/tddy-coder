@@ -34,7 +34,9 @@ const PASSPHRASE: &str = "hunter2-passphrase";
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn make_service(sessions_dir: &std::path::Path) -> (ScreenSharingServiceImpl, ScreenSharingKeyCache) {
+fn make_service(
+    sessions_dir: &std::path::Path,
+) -> (ScreenSharingServiceImpl, ScreenSharingKeyCache) {
     let sessions_path = sessions_dir.to_path_buf();
     let sessions_base: Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync> =
         Arc::new(move |_user| Some(sessions_path.clone()));
@@ -46,8 +48,7 @@ fn make_service(sessions_dir: &std::path::Path) -> (ScreenSharingServiceImpl, Sc
         }
     });
     let key_cache: ScreenSharingKeyCache = Arc::new(Mutex::new(HashMap::new()));
-    let svc =
-        ScreenSharingServiceImpl::new(user_resolver, sessions_base, Arc::clone(&key_cache));
+    let svc = ScreenSharingServiceImpl::new(user_resolver, sessions_base, Arc::clone(&key_cache));
     (svc, key_cache)
 }
 

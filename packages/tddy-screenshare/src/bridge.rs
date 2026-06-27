@@ -33,6 +33,9 @@ pub struct BridgeConfig {
     pub host: String,
     /// Remote desktop port (e.g. 5900 for VNC, 3389 for RDP).
     pub port: u16,
+    /// Login username (required for RDP; empty for VNC/password-only targets).
+    #[serde(default)]
+    pub username: String,
     /// Decrypted password (empty string for password-less targets).
     pub password: String,
     /// LiveKit server WebSocket URL.
@@ -126,13 +129,18 @@ pub async fn run_bridge<C: ScreenSharingClient>(config: BridgeConfig) -> Result<
         config.target_id, config.host, config.port, config.livekit_room
     );
 
+    let username = if config.username.is_empty() {
+        None
+    } else {
+        Some(config.username.as_str())
+    };
     let password = if config.password.is_empty() {
         None
     } else {
         Some(config.password.as_str())
     };
 
-    let mut client = C::connect(&config.host, config.port, password)
+    let mut client = C::connect(&config.host, config.port, username, password)
         .await
         .context("screen sharing connect failed")?;
 
@@ -170,9 +178,17 @@ pub async fn run_bridge<C: ScreenSharingClient>(config: BridgeConfig) -> Result<
     client.request_frame_update(false).await?;
 
     let frame_interval = Duration::from_millis(1000 / config.fps.max(1) as u64);
-    let mut sigterm = signal(SignalKind::terminate()).context("failed to install SIGTERM handler")?;
+    let mut sigterm =
+        signal(SignalKind::terminate()).context("failed to install SIGTERM handler")?;
 
-    let result = pump_loop(&mut client, &streamer, frame_interval, &mut sigterm, input_rx).await;
+    let result = pump_loop(
+        &mut client,
+        &streamer,
+        frame_interval,
+        &mut sigterm,
+        input_rx,
+    )
+    .await;
 
     if let Err(e) = streamer.stop().await {
         warn!("bridge: streamer stop error: {}", e);

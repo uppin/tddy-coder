@@ -30,6 +30,7 @@ message ScreenSharingTarget {
   string   host     = 3;
   uint32   port     = 4;
   Protocol protocol = 5;
+  string   username = 6;  // Login user (required for RDP, optional for VNC)
 }
 
 // --- ListTargets ---
@@ -56,6 +57,8 @@ message AddTargetRequest {
   // Leave empty for password-less targets.
   string   password      = 6;
   Protocol protocol      = 7;
+  // Login username (required for RDP, optional for VNC).
+  string   username      = 8;
 }
 
 message AddTargetResponse {

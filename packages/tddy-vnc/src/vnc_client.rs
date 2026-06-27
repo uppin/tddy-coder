@@ -1,7 +1,10 @@
 //! RFB VNC client — connection, framebuffer capture, and input forwarding.
 
 use anyhow::{Context, Result};
-use vnc::{ClientKeyEvent, ClientMouseEvent, PixelFormat, VncClient, VncConnector, VncEncoding, VncEvent, X11Event};
+use vnc::{
+    ClientKeyEvent, ClientMouseEvent, PixelFormat, VncClient, VncConnector, VncEncoding, VncEvent,
+    X11Event,
+};
 
 use tddy_screenshare::common::char_to_keysym;
 
@@ -69,7 +72,12 @@ impl VncClientState {
     ///
     /// Returns `true` if an update was applied, `false` if no event arrived.
     pub async fn update(&mut self) -> Result<bool> {
-        match self.client.poll_event().await.context("VNC poll_event error")? {
+        match self
+            .client
+            .poll_event()
+            .await
+            .context("VNC poll_event error")?
+        {
             None => Ok(false),
             Some(event) => {
                 self.apply_event(event)?;
@@ -114,7 +122,13 @@ impl VncClientState {
     /// Press or release a mouse button.
     ///
     /// `button_mask` follows the RFB convention: bit 0 = left, bit 1 = middle, bit 2 = right.
-    pub async fn mouse_button(&mut self, x: u16, y: u16, button_mask: u8, pressed: bool) -> Result<()> {
+    pub async fn mouse_button(
+        &mut self,
+        x: u16,
+        y: u16,
+        button_mask: u8,
+        pressed: bool,
+    ) -> Result<()> {
         let mask = if pressed { button_mask } else { 0 };
         self.client
             .input(X11Event::PointerEvent(ClientMouseEvent {
@@ -217,9 +231,9 @@ impl VncClientState {
                 }
                 let dst = (dst_row * self.width + dst_col) as usize * 4;
                 // BGRA → RGBA
-                self.framebuffer[dst] = bgra[src + 2];     // R
+                self.framebuffer[dst] = bgra[src + 2]; // R
                 self.framebuffer[dst + 1] = bgra[src + 1]; // G
-                self.framebuffer[dst + 2] = bgra[src];     // B
+                self.framebuffer[dst + 2] = bgra[src]; // B
                 self.framebuffer[dst + 3] = bgra[src + 3]; // A
                 src += 4;
             }
@@ -263,7 +277,12 @@ impl VncClientState {
 
 #[async_trait::async_trait]
 impl tddy_screenshare::ScreenSharingClient for VncClientState {
-    async fn connect(host: &str, port: u16, password: Option<&str>) -> anyhow::Result<Self> {
+    async fn connect(
+        host: &str,
+        port: u16,
+        _username: Option<&str>,
+        password: Option<&str>,
+    ) -> anyhow::Result<Self> {
         VncClientState::connect(host, port, password).await
     }
 
@@ -284,7 +303,8 @@ impl tddy_screenshare::ScreenSharingClient for VncClientState {
     }
 
     async fn inject_pointer(&mut self, x: u32, y: u32, button_mask: u32) -> anyhow::Result<()> {
-        self.pointer_event(x as u16, y as u16, button_mask as u8).await
+        self.pointer_event(x as u16, y as u16, button_mask as u8)
+            .await
     }
 
     async fn inject_key(&mut self, keysym: u32, pressed: bool) -> anyhow::Result<()> {

@@ -108,11 +108,19 @@ fn vault_vnc_target_protocol_roundtrips() {
     // Given — a fresh vault
     let tmp = tempfile::tempdir().unwrap();
     let path = vault_path(tmp.path());
-    let (mut vault, key) = ScreenSharingVault::create(&path, PASSPHRASE).expect("create must succeed");
+    let (mut vault, key) =
+        ScreenSharingVault::create(&path, PASSPHRASE).expect("create must succeed");
 
     // When — add a VNC target
     let target = vault
-        .add_target("VNC Desktop", "192.168.1.100", 5900, "", Protocol::Vnc, &key)
+        .add_target(
+            "VNC Desktop",
+            "192.168.1.100",
+            5900,
+            "",
+            Protocol::Vnc,
+            &key,
+        )
         .expect("add_target must succeed");
 
     // Then — protocol is preserved in list
@@ -148,7 +156,8 @@ fn vault_rdp_target_protocol_roundtrips() {
     // Given — a fresh vault
     let tmp = tempfile::tempdir().unwrap();
     let path = vault_path(tmp.path());
-    let (mut vault, key) = ScreenSharingVault::create(&path, PASSPHRASE).expect("create must succeed");
+    let (mut vault, key) =
+        ScreenSharingVault::create(&path, PASSPHRASE).expect("create must succeed");
 
     // When — add an RDP target
     let target = vault
@@ -187,7 +196,8 @@ fn vault_add_list_remove_target() {
     // Given — a fresh vault
     let tmp = tempfile::tempdir().unwrap();
     let path = vault_path(tmp.path());
-    let (mut vault, key) = ScreenSharingVault::create(&path, PASSPHRASE).expect("create must succeed");
+    let (mut vault, key) =
+        ScreenSharingVault::create(&path, PASSPHRASE).expect("create must succeed");
 
     // When — add a target
     let target = vault
@@ -196,7 +206,11 @@ fn vault_add_list_remove_target() {
 
     // Then — it appears in the list
     let targets = vault.list_targets();
-    assert_eq!(targets.len(), 1, "vault must contain exactly one target after add");
+    assert_eq!(
+        targets.len(),
+        1,
+        "vault must contain exactly one target after add"
+    );
     assert_eq!(targets[0].id, target.id);
     assert_eq!(targets[0].label, "My Desktop");
     assert_eq!(targets[0].host, "192.168.1.100");
@@ -223,18 +237,29 @@ fn vault_password_encrypt_decrypt_roundtrip() {
     // Given
     let tmp = tempfile::tempdir().unwrap();
     let path = vault_path(tmp.path());
-    let (mut vault, key) = ScreenSharingVault::create(&path, PASSPHRASE).expect("create must succeed");
+    let (mut vault, key) =
+        ScreenSharingVault::create(&path, PASSPHRASE).expect("create must succeed");
 
     // When
     let target = vault
-        .add_target("Secure Desktop", "10.0.0.1", 5901, "s3cr3t!", Protocol::Vnc, &key)
+        .add_target(
+            "Secure Desktop",
+            "10.0.0.1",
+            5901,
+            "s3cr3t!",
+            Protocol::Vnc,
+            &key,
+        )
         .expect("add_target must succeed");
 
     // Then — password decrypts to original
     let decrypted = vault
         .decrypt_password(&target.id, &key)
         .expect("decrypt_password must succeed");
-    assert_eq!(decrypted, "s3cr3t!", "decrypted password must equal the original");
+    assert_eq!(
+        decrypted, "s3cr3t!",
+        "decrypted password must equal the original"
+    );
 }
 
 // ---------------------------------------------------------------------------

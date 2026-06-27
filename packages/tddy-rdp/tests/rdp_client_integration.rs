@@ -17,13 +17,13 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bytes::Bytes;
 use ironrdp_server::{
-    BitmapUpdate, DesktopSize, DisplayUpdate, KeyboardEvent, MouseEvent, PixelFormat,
-    RdpServer, RdpServerDisplay, RdpServerDisplayUpdates, RdpServerInputHandler,
+    BitmapUpdate, DesktopSize, DisplayUpdate, KeyboardEvent, MouseEvent, PixelFormat, RdpServer,
+    RdpServerDisplay, RdpServerDisplayUpdates, RdpServerInputHandler,
 };
 use tokio::sync::mpsc;
 
-use tddy_screenshare::client::ScreenSharingClient as _;
 use tddy_rdp::rdp_client::RdpClient;
+use tddy_screenshare::client::ScreenSharingClient as _;
 
 // ── Crypto provider ───────────────────────────────────────────────────────────
 
@@ -100,11 +100,17 @@ struct QrDisplay {
 #[async_trait]
 impl RdpServerDisplay for QrDisplay {
     async fn size(&mut self) -> DesktopSize {
-        DesktopSize { width: 256, height: 256 }
+        DesktopSize {
+            width: 256,
+            height: 256,
+        }
     }
 
     async fn updates(&mut self) -> anyhow::Result<Box<dyn RdpServerDisplayUpdates>> {
-        let rx = self.frame_rx.take().expect("updates() called more than once");
+        let rx = self
+            .frame_rx
+            .take()
+            .expect("updates() called more than once");
         Ok(Box::new(QrDisplayUpdates { frame_rx: rx }))
     }
 }
@@ -178,9 +184,8 @@ fn make_tls_acceptor() -> ironrdp_server::tokio_rustls::TlsAcceptor {
 
     ensure_crypto_provider();
 
-    let cert =
-        rcgen::generate_simple_self_signed(vec!["127.0.0.1".into(), "localhost".into()])
-            .expect("rcgen cert generation failed");
+    let cert = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into(), "localhost".into()])
+        .expect("rcgen cert generation failed");
     let cert_der = cert.cert.der().to_vec();
     let key_der = cert.key_pair.serialize_der();
 
@@ -233,7 +238,9 @@ impl FakeRdpServer {
             let local = tokio::task::LocalSet::new();
             local.block_on(&rt, async move {
                 let listener = tokio::net::TcpListener::from_std(std_listener).unwrap();
-                let display = QrDisplay { frame_rx: Some(frame_rx) };
+                let display = QrDisplay {
+                    frame_rx: Some(frame_rx),
+                };
                 let input_handler = RecordingInputHandler {
                     state: state_for_thread,
                     event_notify: notify_for_thread,
@@ -254,7 +261,13 @@ impl FakeRdpServer {
         // Give the server thread a moment to start accepting before clients connect.
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        Self { port, _thread: thread, frame_tx, state, event_notify }
+        Self {
+            port,
+            _thread: thread,
+            frame_tx,
+            state,
+            event_notify,
+        }
     }
 
     /// Push a QR-coded frame (encoding `"frame:{n}"`) to the connected client.
@@ -302,13 +315,15 @@ async fn receive_next_qr_frame(client: &mut RdpClient, prev: Option<&str>) -> St
                 }
             }
             // Drive the event loop; timeout is the fallback if no PDU arrives yet.
-            let _ =
-                tokio::time::timeout(Duration::from_millis(50), client.poll_events()).await;
+            let _ = tokio::time::timeout(Duration::from_millis(50), client.poll_events()).await;
         }
     })
     .await
     .unwrap_or_else(|_| {
-        panic!("server did not deliver a new QR frame within 5s (prev={:?})", prev)
+        panic!(
+            "server did not deliver a new QR frame within 5s (prev={:?})",
+            prev
+        )
     })
 }
 
@@ -318,7 +333,7 @@ async fn receive_next_qr_frame(client: &mut RdpClient, prev: Option<&str>) -> St
 async fn streams_qr_coded_frames_with_incrementing_content() {
     // Given: a fake RDP server that delivers QR-coded frames on demand
     let server = FakeRdpServer::start().await;
-    let mut client = RdpClient::connect("127.0.0.1", server.port, None)
+    let mut client = RdpClient::connect("127.0.0.1", server.port, None, None)
         .await
         .expect("RDP connect failed");
 
@@ -343,7 +358,7 @@ async fn framebuffer_dimensions_match_server_desktop_size() {
     let server = FakeRdpServer::start().await;
 
     // When: client completes the connection handshake
-    let client = RdpClient::connect("127.0.0.1", server.port, None)
+    let client = RdpClient::connect("127.0.0.1", server.port, None, None)
         .await
         .expect("RDP connect failed");
 
@@ -355,22 +370,30 @@ async fn framebuffer_dimensions_match_server_desktop_size() {
 async fn pointer_event_is_received_by_server() {
     // Given: connected client and a server ready to record input
     let server = FakeRdpServer::start().await;
-    let mut client = RdpClient::connect("127.0.0.1", server.port, None)
+    let mut client = RdpClient::connect("127.0.0.1", server.port, None, None)
         .await
         .expect("RDP connect failed");
 
     // When: a pointer move event is injected
-    client.inject_pointer(42, 17, 0).await.expect("inject_pointer failed");
+    client
+        .inject_pointer(42, 17, 0)
+        .await
+        .expect("inject_pointer failed");
 
     // Then: the server records a move event for the same coordinates
     // 500ms: covers PDU round-trip + server dispatch; no sleep needed because
     // RecordingInputHandler calls Notify::notify_one() on every event.
     let received = server.await_event(Duration::from_millis(500)).await;
-    assert!(received, "server did not receive any input event within 500ms");
+    assert!(
+        received,
+        "server did not receive any input event within 500ms"
+    );
 
     let events = server.mouse_events();
     assert!(
-        events.iter().any(|e| matches!(e, RecordedMouse::Move { x: 42, y: 17 })),
+        events
+            .iter()
+            .any(|e| matches!(e, RecordedMouse::Move { x: 42, y: 17 })),
         "expected Move{{x:42, y:17}} in recorded events, got {:?}",
         events
     );
@@ -380,20 +403,32 @@ async fn pointer_event_is_received_by_server() {
 async fn keyboard_press_is_received_by_server() {
     // Given: connected client and a server ready to record input
     let server = FakeRdpServer::start().await;
-    let mut client = RdpClient::connect("127.0.0.1", server.port, None)
+    let mut client = RdpClient::connect("127.0.0.1", server.port, None, None)
         .await
         .expect("RDP connect failed");
 
     // When: key-down for X11 keysym 0x41 ('A') is injected — PS/2 scancode 0x1e
-    client.inject_key(0x41, true).await.expect("inject_key failed");
+    client
+        .inject_key(0x41, true)
+        .await
+        .expect("inject_key failed");
 
     // Then: the server records a Pressed event for scancode 0x1e, no extended bit
     let received = server.await_event(Duration::from_millis(500)).await;
-    assert!(received, "server did not receive any input event within 500ms");
+    assert!(
+        received,
+        "server did not receive any input event within 500ms"
+    );
 
     let events = server.key_events();
     assert!(
-        events.iter().any(|e| matches!(e, RecordedKey::Pressed { code: 0x1e, extended: false })),
+        events.iter().any(|e| matches!(
+            e,
+            RecordedKey::Pressed {
+                code: 0x1e,
+                extended: false
+            }
+        )),
         "expected Pressed{{code:0x1e, extended:false}} in recorded events, got {:?}",
         events
     );
@@ -403,7 +438,7 @@ async fn keyboard_press_is_received_by_server() {
 async fn closes_connection_cleanly_on_stop() {
     // Given: connected client
     let server = FakeRdpServer::start().await;
-    let mut client = RdpClient::connect("127.0.0.1", server.port, None)
+    let mut client = RdpClient::connect("127.0.0.1", server.port, None, None)
         .await
         .expect("RDP connect failed");
 
@@ -411,4 +446,3 @@ async fn closes_connection_cleanly_on_stop() {
     client.stop().await.expect("stop() failed");
     drop(server);
 }
-

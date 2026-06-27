@@ -38,7 +38,13 @@ impl ScreenSharingStreamer {
     ///
     /// Use this when the bridge owns the room connection. If a `LiveKitParticipant` already
     /// holds the room, prefer [`Self::from_local_participant`] to avoid a second connection.
-    pub async fn start(url: &str, token: &str, track_name: &str, width: u32, height: u32) -> Result<Self> {
+    pub async fn start(
+        url: &str,
+        token: &str,
+        track_name: &str,
+        width: u32,
+        height: u32,
+    ) -> Result<Self> {
         let (room, mut room_events) = Room::connect(url, token, RoomOptions::default())
             .await
             .context("failed to connect to LiveKit room")?;

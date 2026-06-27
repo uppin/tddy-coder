@@ -10,7 +10,9 @@
 use std::net::SocketAddr;
 
 use anyhow::{Context, Result};
-use ironrdp_connector::{BitmapConfig, ClientConnector, Config, Credentials, DesktopSize, ServerName};
+use ironrdp_connector::{
+    BitmapConfig, ClientConnector, Config, Credentials, DesktopSize, ServerName,
+};
 use ironrdp_graphics::image_processing::PixelFormat;
 use ironrdp_pdu::{
     gcc::KeyboardType,
@@ -21,7 +23,9 @@ use ironrdp_pdu::{
     rdp::capability_sets::{BitmapCodecs, MajorPlatformType},
 };
 use ironrdp_session::{image::DecodedImage, ActiveStage, ActiveStageOutput};
-use ironrdp_tokio::{connect_begin, connect_finalize, mark_as_upgraded, FramedWrite as _, TokioFramed};
+use ironrdp_tokio::{
+    connect_begin, connect_finalize, mark_as_upgraded, FramedWrite as _, TokioFramed,
+};
 use tokio::net::TcpStream;
 
 /// Dummy `NetworkClient` — no CredSSP is performed in TLS-only mode.
@@ -45,7 +49,12 @@ pub struct RdpClient {
 
 #[async_trait::async_trait]
 impl tddy_screenshare::ScreenSharingClient for RdpClient {
-    async fn connect(host: &str, port: u16, password: Option<&str>) -> Result<Self> {
+    async fn connect(
+        host: &str,
+        port: u16,
+        username: Option<&str>,
+        password: Option<&str>,
+    ) -> Result<Self> {
         // 1. TCP
         let stream = TcpStream::connect(format!("{host}:{port}"))
             .await
@@ -54,10 +63,13 @@ impl tddy_screenshare::ScreenSharingClient for RdpClient {
 
         // 2. Connector config
         let config = Config {
-            desktop_size: DesktopSize { width: 256, height: 256 },
+            desktop_size: DesktopSize {
+                width: 256,
+                height: 256,
+            },
             desktop_scale_factor: 0,
             credentials: Credentials::UsernamePassword {
-                username: "user".into(),
+                username: username.unwrap_or("").into(),
                 password: password.unwrap_or("").into(),
             },
             enable_tls: true,
@@ -138,7 +150,11 @@ impl tddy_screenshare::ScreenSharingClient for RdpClient {
         );
         let active = ActiveStage::new(result);
 
-        Ok(Self { image, active, framed })
+        Ok(Self {
+            image,
+            active,
+            framed,
+        })
     }
 
     fn framebuffer_dimensions(&self) -> (u32, u32) {
@@ -267,8 +283,8 @@ fn keysym_to_scancode(keysym: u32) -> u8 {
         0x69 | 0x49 => 0x17, // i I
         0x6f | 0x4f => 0x18, // o O
         0x70 | 0x50 => 0x19, // p P
-        0x5b => 0x1a,         // [ {
-        0x5d => 0x1b,         // ] }
+        0x5b => 0x1a,        // [ {
+        0x5d => 0x1b,        // ] }
         // Home row
         0x61 | 0x41 => 0x1e, // a A
         0x73 | 0x53 => 0x1f, // s S
@@ -279,9 +295,9 @@ fn keysym_to_scancode(keysym: u32) -> u8 {
         0x6a | 0x4a => 0x24, // j J
         0x6b | 0x4b => 0x25, // k K
         0x6c | 0x4c => 0x26, // l L
-        0x3b => 0x27,         // ; :
-        0x27 => 0x28,         // ' "
-        0x5c => 0x2b,         // \ |
+        0x3b => 0x27,        // ; :
+        0x27 => 0x28,        // ' "
+        0x5c => 0x2b,        // \ |
         // Bottom row
         0x7a | 0x5a => 0x2c, // z Z
         0x78 | 0x58 => 0x2d, // x X
@@ -290,9 +306,9 @@ fn keysym_to_scancode(keysym: u32) -> u8 {
         0x62 | 0x42 => 0x30, // b B
         0x6e | 0x4e => 0x31, // n N
         0x6d | 0x4d => 0x32, // m M
-        0x2c => 0x33,         // , <
-        0x2e => 0x34,         // . >
-        0x2f => 0x35,         // / ?
+        0x2c => 0x33,        // , <
+        0x2e => 0x34,        // . >
+        0x2f => 0x35,        // / ?
         // Special keys
         0x20 => 0x39,   // Space
         0xff08 => 0x0e, // BackSpace

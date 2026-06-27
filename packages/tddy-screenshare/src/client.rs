@@ -6,8 +6,13 @@
 pub trait ScreenSharingClient: Sized + Send + 'static {
     /// Open a connection to the remote desktop at `host:port`.
     ///
-    /// `password` is `None` for password-less targets.
-    async fn connect(host: &str, port: u16, password: Option<&str>) -> anyhow::Result<Self>;
+    /// `username` and `password` are `None` for targets that don't require them.
+    async fn connect(
+        host: &str,
+        port: u16,
+        username: Option<&str>,
+        password: Option<&str>,
+    ) -> anyhow::Result<Self>;
 
     /// Current framebuffer dimensions `(width, height)` in pixels.
     ///
