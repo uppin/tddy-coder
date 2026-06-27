@@ -90,6 +90,36 @@ A background task monitors the child with `child.wait()`; on exit the entry is r
 
 **`ReportSessionStatus`**: Hook-driven RPC. `tddy-tools session-hook` calls this after mapping a Claude Code lifecycle event to a `SessionActivityStatus`. The handler validates `session_id` (path traversal guard), resolves `sessions_base` from `os_user` directly (no web-token path), reads `.session.yaml`, requires `session_type == "claude-cli"`, constant-time-compares `hook_token`, then calls `update_activity_status(session_dir, status)`. Sessions with `hook_token: None` (e.g. Telegram-started) return `PermissionDenied`. See [claude-cli-session.md](../../../docs/ft/daemon/claude-cli-session.md#session-activity-status-via-per-worktree-hooks) for the full hook flow.
 
+## Sandboxed Claude Code CLI sessions
+
+When `StartSessionRequest.session_type == "claude-cli"` **and** `sandbox == true` on macOS, the daemon uses the sandbox spawn path instead of `ClaudeCliSessionManager::start()`:
+
+1. Creates the same git worktree as a non-sandbox claude-cli session (host `tool_engine::execute_tool` operates on this worktree).
+2. Prepares a read-only **context dir** (`SandboxContextDir`: synced `CLAUDE.md`/`AGENTS.md`/skills + `REMOTE_APPENDIX`).
+3. Renders an SBPL profile and spawns `tddy-tools sandbox-runner` via `sandbox-exec` (`tddy-sandbox-darwin`).
+4. Waits for the in-jail gRPC ready marker, then **`dial_and_bridge`** on a single bidi **`SessionChannel`** (`sandbox_session.rs`).
+5. Writes `.session.yaml` with `sandbox: true`; returns empty LiveKit fields.
+
+**`SessionChannel`** (`packages/tddy-service/proto/sandbox.proto`) multiplexes PTY output, MCP tool exec, and LLM egress on one host-poll-driven bidi stream:
+
+| Host → sandbox | Sandbox → host |
+|----------------|----------------|
+| `SubscribeTerminal`, `HostPoll`, `SandboxInput`, `ExecuteToolResponse`, `EgressResponse` | `SessionTerminalOutput`, `ExecuteToolRequest`, `EgressRequest` |
+
+Outbound network from the jail is **`(deny network*)`**. The sandbox never dials the daemon; the host performs outbound HTTP when it receives `EgressRequest` frames.
+
+**In-jail runner** (`tddy-tools sandbox-runner`): binds loopback gRPC, spawns `claude` in a PTY with `mcp__tddy-tools__*` allowlist (`sandbox_claude_spawn.rs`), routes MCP `call_tool` through tool IPC → relay queue → `ExecuteToolRequest` on `HostPoll`.
+
+**Terminal I/O**: `StreamTerminalOutput` / `SendTerminalInput` on the daemon delegate to `SandboxSessionManager` when `metadata.sandbox == true`.
+
+**Lifecycle**:
+- **`DeleteSession`**: stops the `SandboxHandle` (SIGTERM → SIGKILL), removes worktree and session dir.
+- **`ResumeSession`**: `relaunch_sandboxed_runner()` respawns the jail process and re-dials `SessionChannel`; worktree is reused.
+
+**Non-macOS**: `tddy-sandbox` returns `Unsupported`; the RPC maps to `failed_precondition` (no fallback).
+
+**Seatbelt troubleshooting**: [tddy-sandbox-darwin troubleshooting](../../../packages/tddy-sandbox-darwin/docs/troubleshooting.md). Agent skill: [.agents/skills/darwin-sandbox/SKILL.md](../../../../.agents/skills/darwin-sandbox/SKILL.md).
+
 **`config.rs`**: Optional `claude_cli:` block:
 
 ```yaml

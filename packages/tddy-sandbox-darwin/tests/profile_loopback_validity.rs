@@ -15,7 +15,7 @@ use tddy_sandbox_darwin::render_profile;
 /// 6". The weaker `code() != Some(6)` check gave false confidence during the SIGABRT
 /// investigation: a child that aborts in `dyld` is terminated by a signal, so
 /// `status.code()` is `None` (never `Some(6)`) and the old assertion passed while `echo`
-/// never ran. See docs/dev/1-WIP/2026-06-27-darwin-sandbox-seatbelt-investigation.md.
+/// never ran. See packages/tddy-sandbox-darwin/docs/troubleshooting.md.
 #[test]
 fn loopback_network_profile_is_accepted_by_sandbox_exec() {
     // Given

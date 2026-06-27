@@ -31,6 +31,7 @@ As a developer, I want to start a raw Claude Code CLI session from the tddy web 
 9. The session directory `~/.tddy/sessions/<session-id>/` is created with `.session.yaml` containing:
    - `session_type: claude-cli`
    - `model: <model-id>`
+   - `sandbox: true` (optional; darwin Seatbelt spawn when set)
    - `repo_path: <worktree-absolute-path>`
    - `pid: <claude-process-pid>`
    - `status: active`
@@ -70,13 +71,22 @@ codebase only through `mcp__tddy-tools__*` tool calls relayed over a host-initia
 | Resume / delete | PTY respawn / SIGTERM | Stop sandbox child + relaunch runner; same worktree teardown |
 | Non-macOS | Supported | `failed_precondition` (no fallback) |
 
-`.session.yaml` records `sandbox: true`. Implementation:
-`sandbox_session.rs`, `tddy-sandbox`, `tddy-sandbox-darwin`. See
-[remote-codebase-mode.md](remote-codebase-mode.md) (local sandbox sibling) and
-[changeset](../../dev/1-WIP/2026-06-27-darwin-sandbox-claude-cli.md).
+`.session.yaml` records `sandbox: true`. See [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md#sandboxed-claude-code-cli-sessions) and [remote-codebase-mode.md](remote-codebase-mode.md).
+
+### Sandboxed start (macOS)
+
+19. `StartSession` with `session_type = "claude-cli"` and **`sandbox = true`** on macOS spawns
+    `tddy-tools sandbox-runner` inside Seatbelt; the daemon dials the in-jail **`SessionChannel`**
+    for terminal I/O, MCP tool exec, and LLM egress relay.
+20. Sandboxed sessions return empty LiveKit credentials; terminal access uses the same
+    `StreamTerminalOutput` / `SendTerminalInput` RPCs as non-sandbox claude-cli.
+21. The agent reads a read-only context dir in the jail; codebase mutations flow through
+    `mcp__tddy-tools__*` tool calls executed on the host worktree.
+22. On non-macOS, `sandbox = true` returns `failed_precondition` (no fallback).
 
 ## Non-goals (out of scope)
 
+- Web UI support for sandboxed sessions (service-level only; same as remote mode).
 - TDD/bugfix workflow integration — Claude Code CLI sessions have no recipe.
 - Telegram elicitation via the structured `PresenterObserver` / `ModeChanged` pipeline (that path is for tddy-coder workflow sessions only). Claude Code CLI elicitation alerts are delivered via the `ReportSessionStatus` / `WaitingForInput` path — see [telegram-notifications.md § Claude Code CLI session activity alerts](telegram-notifications.md#claude-code-cli-session-activity-alerts).
 - Model switching after session start.
@@ -92,8 +102,9 @@ codebase only through `mcp__tddy-tools__*` tool calls relayed over a host-initia
 ### `SessionMetadata` additions
 
 ```yaml
-session_type: claude-cli    # new optional field; absent/empty = "tool"
-model: claude-opus-4-8      # new optional field; stored for resume
+session_type: claude-cli    # optional; absent/empty = "tool"
+model: claude-opus-4-8      # optional; stored for resume
+sandbox: true               # optional; darwin Seatbelt jail (macOS only)
 ```
 
 `repo_path` reuses the existing field to store the **worktree absolute path** (not the main repo path, unlike tool sessions which may store the project repo root).
@@ -216,6 +227,7 @@ message StartSessionRequest {
   // ... existing fields ...
   string session_type = 7;  // "tool" (default) or "claude-cli"
   string model        = 8;  // model id for claude-cli sessions
+  bool   sandbox      = 15; // when true with session_type "claude-cli": darwin Seatbelt spawn (macOS only)
 }
 
 rpc StreamSessionTerminalIO(stream SessionTerminalInput) returns (stream SessionTerminalOutput);

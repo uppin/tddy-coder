@@ -4,6 +4,8 @@ Wrapped changeset history for tddy-service.
 
 **Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
 
+- **2026-06-27** [Feature] **Darwin sandbox protos** — `sandbox.proto`: `SandboxService` with bidi `SessionChannel` (PTY, `ExecuteToolRequest`/`Response`, `EgressRequest`/`Response`); `connection.proto`: `StartSessionRequest.sandbox` (bool); TypeScript + tonic codegen. Feature [claude-cli-session.md](../../../docs/ft/daemon/claude-cli-session.md). (tddy-service, tddy-daemon, tddy-tools)
+
 - **2026-06-26** [Fix] **PTY terminal width fix — connection.proto** — `StreamTerminalOutputRequest` gains `initial_cols` (uint32, field 4) and `initial_rows` (uint32, field 5); zero means "use PTY default"; TypeScript codegen regenerated. Feature [terminal-sessions.md](../../../docs/ft/daemon/terminal-sessions.md). (tddy-service)
 
 - **2026-06-26** [Feature] **Screen sharing protos — screen_sharing.proto + screen_sharing_input.proto** — new `screen_sharing.proto`: `ScreenSharingService` (6 RPCs: `ListTargets`, `AddTarget`, `RemoveTarget`, `UnlockVault`, `StartStream`, `StopStream`); `Protocol` enum (VNC=1, RDP=2); `ScreenSharingTarget` with `id`, `label`, `host`, `port`, `protocol`, `username`; `AddTargetRequest` includes `username`; new `screen_sharing_input.proto`: `ScreenSharingInputService.StreamInput` (bidi; `ScreenSharingInputEvent` oneof pointer/key); both wired in `build.rs` with descriptor entries; `src/lib.rs` exposes `proto::screen_sharing` + `proto::screen_sharing_input`; TypeScript codegen regenerated. Feature [screen-sharing-sessions.md](../../../docs/ft/web/screen-sharing-sessions.md). (tddy-service)

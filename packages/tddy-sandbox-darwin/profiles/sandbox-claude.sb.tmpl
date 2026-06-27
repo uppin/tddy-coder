@@ -33,7 +33,7 @@
 ;; node to locate the dyld shared cache at process startup; without it the
 ;; sandboxed child SIGABRTs in dyld before reaching main() (abort trap 6 / exit
 ;; 134) — independent of any network rules. See
-;; docs/dev/1-WIP/2026-06-27-darwin-sandbox-seatbelt-investigation.md.
+;; packages/tddy-sandbox-darwin/docs/troubleshooting.md.
 (allow file-read*
   (literal "/")
   (subpath "@PROJECT_ROOT@")

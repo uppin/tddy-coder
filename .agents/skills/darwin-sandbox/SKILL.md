@@ -37,7 +37,7 @@ Client → tddy-daemon (ConnectionService, sandbox=true)
 
 When `sandbox-runner` never reaches the ready marker, **do not assume network policy**. Follow the investigation playbook:
 
-**Doc:** [docs/dev/1-WIP/2026-06-27-darwin-sandbox-seatbelt-investigation.md](../../../docs/dev/1-WIP/2026-06-27-darwin-sandbox-seatbelt-investigation.md)
+**Doc:** [packages/tddy-sandbox-darwin/docs/troubleshooting.md](../../../packages/tddy-sandbox-darwin/docs/troubleshooting.md)
 
 **Repro at profile level (not test level):**
 
@@ -70,7 +70,7 @@ sandbox-exec -f /path/to/rendered.sb /bin/echo hi
 
 - Run seatbelt confinement test: `packages/tddy-sandbox-darwin/tests/seatbelt_confinement_acceptance.rs`
 - Re-run full sandbox daemon acceptance suite (above)
-- Update investigation doc if you discover a new blocker pattern
+- Update [troubleshooting.md](../../../packages/tddy-sandbox-darwin/docs/troubleshooting.md) if you discover a new blocker pattern
 - **Never** add fallbacks for unsupported platforms — map to `failed_precondition`
 
 ## Superseded designs (do not reintroduce)
@@ -80,6 +80,7 @@ sandbox-exec -f /path/to/rendered.sb /bin/echo hi
 
 ## Related docs
 
-- PRD: [docs/ft/1-WIP/PRD-2026-06-27-darwin-sandbox-claude-cli.md](../../../docs/ft/1-WIP/PRD-2026-06-27-darwin-sandbox-claude-cli.md)
-- Changeset: [docs/dev/1-WIP/2026-06-27-darwin-sandbox-claude-cli.md](../../../docs/dev/1-WIP/2026-06-27-darwin-sandbox-claude-cli.md)
-- Claude CLI sessions: [docs/ft/daemon/claude-cli-session.md](../../../docs/ft/daemon/claude-cli-session.md) (sandbox flag section)
+- Feature: [claude-cli-session.md](../../../docs/ft/daemon/claude-cli-session.md)
+- Feature: [remote-codebase-mode.md](../../../docs/ft/daemon/remote-codebase-mode.md)
+- Technical: [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md#sandboxed-claude-code-cli-sessions)
+- Architecture: [tddy-sandbox architecture](../../../packages/tddy-sandbox/docs/architecture.md)
