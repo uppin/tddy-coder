@@ -2,6 +2,13 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-06-27 — Darwin-sandboxed Claude CLI sessions (local gRPC)
+
+- `StartSessionRequest.sandbox`: when `session_type:"claude-cli"` and `sandbox:true` on macOS, spawns `claude` inside Seatbelt via `tddy-tools sandbox-runner`; host daemon dials in-jail `SessionChannel` for PTY I/O, MCP tool exec, and LLM egress relay
+- New crates `tddy-sandbox` (trait + context dir) and `tddy-sandbox-darwin` (SBPL profile + `sandbox-exec` spawn); non-macOS returns `failed_precondition`
+- `ResumeSession` / `DeleteSession` stop the sandbox child and tear down the worktree; `.session.yaml` records `sandbox: true`
+- Feature: [PRD](../../ft/1-WIP/PRD-2026-06-27-darwin-sandbox-claude-cli.md). Changeset: [docs/dev/1-WIP/2026-06-27-darwin-sandbox-claude-cli.md](../../dev/1-WIP/2026-06-27-darwin-sandbox-claude-cli.md).
+
 ## 2026-06-26 — Browser DEBUG mask — config-driven terminal diagnostics
 
 - `DaemonConfig.debug: Option<String>` threaded through `run_server` → `ClientConfig.debug` and served at `GET /api/config`; browser picks up the mask for scoped `[tddy]` console logging

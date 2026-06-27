@@ -70,6 +70,7 @@ tokio-stream = "0.1"
 [dev-dependencies]
 assert_cmd = "2"
 tddy-tools = { path = "../tddy-tools" }
+tddy-demo-tui = { path = "../tddy-demo-tui" }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 tddy-github = { path = "../tddy-github" }
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }

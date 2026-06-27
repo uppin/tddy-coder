@@ -3,14 +3,13 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpListener;
 use tddy_sandbox::format_egress_logs;
 use tddy_testing_commons::{
-    write_egress_probe_claude_script, EGRESS_PROBE_SESSION_CHANNEL_OK,
-    SandboxSessionChannelHost,
+    write_egress_probe_claude_script, SandboxSessionChannelHost, EGRESS_PROBE_SESSION_CHANNEL_OK,
 };
 use tddy_tools::sandbox_runner::{run_sandbox_runner, SandboxRunnerArgs};
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpListener;
 
 const SESSION_ID: &str = "sandbox-runner-behavior-session";
 const TEST_MODEL: &str = "claude-opus-4-8";
@@ -80,7 +79,8 @@ async fn spawn_llm_echo_server() -> u16 {
                 continue;
             };
             tokio::spawn(async move {
-                let response = b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\nLLM_ECHO\n";
+                let response =
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\nLLM_ECHO\n";
                 let _ = stream.write_all(response).await;
             });
         }

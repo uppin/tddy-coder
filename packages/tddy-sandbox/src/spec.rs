@@ -33,10 +33,14 @@ impl SandboxSpec {
     /// macOS), regardless of how deep the session directory is. Lives under the real per-user
     /// temp (`std::env::temp_dir()`, canonicalized) with a short session-derived name.
     pub fn short_ipc_socket_path(session_id: &str) -> PathBuf {
-        let tmp = std::fs::canonicalize(std::env::temp_dir())
-            .unwrap_or_else(|_| std::env::temp_dir());
+        let tmp =
+            std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
         // Keep the name short and collision-resistant without pulling in a hashing crate.
-        let short: String = session_id.chars().filter(|c| c.is_ascii_alphanumeric()).take(10).collect();
+        let short: String = session_id
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .take(10)
+            .collect();
         tmp.join(format!("tddy-{short}-{}.sock", std::process::id()))
     }
 }

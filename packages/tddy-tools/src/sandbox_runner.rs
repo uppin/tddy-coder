@@ -10,21 +10,21 @@ use anyhow::{Context, Result};
 use bytes::Bytes;
 use clap::Parser;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status, Streaming};
 
-use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse, SessionTerminalOutput};
+use tddy_service::proto::connection::{
+    ExecuteToolRequest, ExecuteToolResponse, SessionTerminalOutput,
+};
 use tddy_service::tonic_sandbox::sandbox_service_server::{SandboxService, SandboxServiceServer};
 use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::tonic_sandbox::{
     EchoRequest, EchoResponse, EchoStreamFrame, EgressRequest, EgressResponse, SessionFrame,
 };
 
-use tddy_sandbox::{
-    append_line, egress_log_path, SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG,
-};
+use tddy_sandbox::{append_line, egress_log_path, SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG};
 
 fn egress_dir_from_env() -> Option<PathBuf> {
     std::env::var("TDDY_SANDBOX_EGRESS_DIR")
@@ -189,16 +189,20 @@ struct SandboxSessionRelay {
     queued_egress: Mutex<VecDeque<PendingEgressCall>>,
     awaiting_egress: Mutex<Option<PendingEgressCall>>,
     terminal_subscribed: Mutex<bool>,
+    /// PTY bytes produced before the host sends `SubscribeTerminal` (broadcast drops them).
+    terminal_backlog: Mutex<VecDeque<Bytes>>,
     egress_seq: AtomicU64,
 }
 
 impl SandboxSessionRelay {
     async fn call_tool(&self, tool_name: &str, args_json: &str) -> ExecuteToolResponse {
         let (tx, rx) = oneshot::channel();
-        let mut req = ExecuteToolRequest::default();
-        req.session_id = std::env::var("TDDY_SANDBOX_SESSION_ID").unwrap_or_default();
-        req.tool_name = tool_name.to_string();
-        req.args_json = args_json.to_string();
+        let req = ExecuteToolRequest {
+            session_id: std::env::var("TDDY_SANDBOX_SESSION_ID").unwrap_or_default(),
+            tool_name: tool_name.to_string(),
+            args_json: args_json.to_string(),
+            ..Default::default()
+        };
         self.queued_tools
             .lock()
             .unwrap()
@@ -243,10 +247,13 @@ impl SandboxSessionRelay {
             url: url.to_string(),
             ..Default::default()
         };
-        self.queued_egress.lock().unwrap().push_back(PendingEgressCall {
-            response_tx: tx,
-            request,
-        });
+        self.queued_egress
+            .lock()
+            .unwrap()
+            .push_back(PendingEgressCall {
+                response_tx: tx,
+                request,
+            });
 
         match tokio::time::timeout(Duration::from_secs(30), rx).await {
             Ok(Ok(resp)) => resp,
@@ -263,10 +270,16 @@ impl SandboxSessionRelay {
         }
     }
 
+    fn push_terminal(&self, chunk: Bytes) {
+        if chunk.is_empty() {
+            return;
+        }
+        self.terminal_backlog.lock().unwrap().push_back(chunk);
+    }
+
     fn handle_host_poll(
         &self,
         out_tx: &tokio::sync::mpsc::UnboundedSender<Result<SessionFrame, Status>>,
-        terminal_rx: &mut broadcast::Receiver<Bytes>,
     ) {
         if self.awaiting_tool.lock().unwrap().is_none() {
             if let Some(call) = self.queued_tools.lock().unwrap().pop_front() {
@@ -306,22 +319,18 @@ impl SandboxSessionRelay {
             return;
         }
         loop {
-            match terminal_rx.try_recv() {
-                Ok(chunk) if !chunk.is_empty() => {
-                    let frame = SessionFrame {
-                        payload: Some(SessionPayload::TerminalOutput(SessionTerminalOutput {
-                            data: chunk.to_vec(),
-                        })),
-                    };
-                    if out_tx.send(Ok(frame)).is_err() {
-                        break;
-                    }
-                }
-                Ok(_) => continue,
-                Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
-                Err(broadcast::error::TryRecvError::Closed | broadcast::error::TryRecvError::Empty) => {
-                    break;
-                }
+            let chunk = self.terminal_backlog.lock().unwrap().pop_front();
+            let Some(chunk) = chunk else { break };
+            if chunk.is_empty() {
+                continue;
+            }
+            let frame = SessionFrame {
+                payload: Some(SessionPayload::TerminalOutput(SessionTerminalOutput {
+                    data: chunk.to_vec(),
+                })),
+            };
+            if out_tx.send(Ok(frame)).is_err() {
+                break;
             }
         }
     }
@@ -329,7 +338,6 @@ impl SandboxSessionRelay {
 
 struct SandboxRunnerService {
     session_id: String,
-    stdout_tx: broadcast::Sender<Bytes>,
     stdin_tx: std::sync::mpsc::Sender<Bytes>,
     relay: Arc<SandboxSessionRelay>,
 }
@@ -348,7 +356,6 @@ impl SandboxService for SandboxRunnerService {
         let relay = Arc::clone(&self.relay);
         let session_id = self.session_id.clone();
         let stdin_tx = self.stdin_tx.clone();
-        let mut terminal_rx = self.stdout_tx.subscribe();
 
         tokio::spawn(async move {
             while let Some(Ok(frame)) = inbound.next().await {
@@ -368,7 +375,7 @@ impl SandboxService for SandboxRunnerService {
                         relay.deliver_egress_response(resp)
                     }
                     Some(SessionPayload::HostPoll(_)) => {
-                        relay.handle_host_poll(&out_tx, &mut terminal_rx);
+                        relay.handle_host_poll(&out_tx);
                     }
                     _ => {}
                 }
@@ -408,7 +415,6 @@ impl SandboxService for SandboxRunnerService {
 }
 
 struct PtyState {
-    stdout_tx: broadcast::Sender<Bytes>,
     stdin_tx: std::sync::mpsc::Sender<Bytes>,
 }
 
@@ -416,7 +422,7 @@ fn run_claude_pty_thread(
     argv: Vec<String>,
     context_dir: PathBuf,
     egress_shim: String,
-    stdout_tx: broadcast::Sender<Bytes>,
+    relay: Arc<SandboxSessionRelay>,
     stdin_rx: std::sync::mpsc::Receiver<Bytes>,
 ) -> Result<()> {
     boot_log(
@@ -463,6 +469,7 @@ fn run_claude_pty_thread(
     let master = Arc::new(Mutex::new(pair.master));
 
     let master_reader = Arc::clone(&master);
+    let relay_reader = Arc::clone(&relay);
     std::thread::spawn(move || {
         if let Ok(mut r) = master_reader.lock().unwrap().try_clone_reader() {
             let mut buf = [0u8; 4096];
@@ -470,7 +477,7 @@ fn run_claude_pty_thread(
                 match std::io::Read::read(&mut r, &mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        let _ = stdout_tx.send(Bytes::copy_from_slice(&buf[..n]));
+                        relay_reader.push_terminal(Bytes::copy_from_slice(&buf[..n]));
                     }
                     Err(e) => {
                         boot_log("ERROR", &format!("pty: stdout read failed: {e}"));
@@ -512,8 +519,8 @@ fn spawn_claude_pty(
     permission_mode: &str,
     session_id: &str,
     egress_shim: &str,
+    relay: Arc<SandboxSessionRelay>,
 ) -> Result<PtyState> {
-    let (stdout_tx, _) = broadcast::channel(256);
     let (stdin_tx, stdin_rx) = std::sync::mpsc::channel::<Bytes>();
 
     let mut argv = vec![claude_binary.to_string()];
@@ -526,22 +533,38 @@ fn spawn_claude_pty(
     argv.push("--permission-mode".into());
     argv.push(permission_mode.to_string());
 
+    let scratch_dir = crate::sandbox_claude_spawn::sandbox_claude_scratch_dir(context_dir);
+    let tddy_tools_path =
+        std::env::current_exe().context("resolve tddy-tools path for MCP config")?;
+    crate::sandbox_claude_spawn::append_sandbox_claude_mcp_args(
+        &mut argv,
+        &scratch_dir,
+        &tddy_tools_path,
+    )
+    .context("append sandbox claude MCP allowlist args")?;
+    boot_log(
+        "INFO",
+        &format!(
+            "pty: sandbox claude allowlist wired ({} tools, mcp_config scratch={})",
+            tddy_sandbox::workspace_exec_tool_names().len(),
+            scratch_dir.display()
+        ),
+    );
+
     let context_dir = context_dir.to_path_buf();
-    let stdout_tx_thread = stdout_tx.clone();
+    let relay_thread = Arc::clone(&relay);
     let egress_shim = egress_shim.to_string();
 
     std::thread::spawn(move || {
-        if let Err(e) = run_claude_pty_thread(argv, context_dir, egress_shim, stdout_tx_thread, stdin_rx)
+        if let Err(e) =
+            run_claude_pty_thread(argv, context_dir, egress_shim, relay_thread, stdin_rx)
         {
             boot_log_error("spawn_claude_pty", format!("{e:#}"));
             write_failure_marker(&format!("spawn_claude_pty failed: {e:#}"));
         }
     });
 
-    Ok(PtyState {
-        stdout_tx,
-        stdin_tx,
-    })
+    Ok(PtyState { stdin_tx })
 }
 
 async fn start_tool_ipc_server(path: PathBuf, relay: Arc<SandboxSessionRelay>) -> Result<()> {
@@ -573,10 +596,7 @@ async fn start_tool_ipc_server(path: PathBuf, relay: Arc<SandboxSessionRelay>) -
                         Ok(v) => v,
                         Err(_) => return,
                     };
-                    let tool_name = req
-                        .get("tool_name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let tool_name = req.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
                     let args_json = req
                         .get("args_json")
                         .and_then(|v| v.as_str())
@@ -598,10 +618,7 @@ async fn start_tool_ipc_server(path: PathBuf, relay: Arc<SandboxSessionRelay>) -
     Ok(())
 }
 
-async fn start_egress_shim(
-    relay: Arc<SandboxSessionRelay>,
-    port: Option<u16>,
-) -> Result<u16> {
+async fn start_egress_shim(relay: Arc<SandboxSessionRelay>, port: Option<u16>) -> Result<u16> {
     // Bind to the literal loopback IP, never "localhost": inside the Seatbelt jail the
     // process runs under a clean `env -i` with no resolver, so getaddrinfo("localhost")
     // fails with "nodename nor servname provided". 127.0.0.1 needs no name resolution.
@@ -613,7 +630,10 @@ async fn start_egress_shim(
             .await
             .context("bind egress shim")?,
     };
-    let port = listener.local_addr().context("egress shim local addr")?.port();
+    let port = listener
+        .local_addr()
+        .context("egress shim local addr")?
+        .port();
     tokio::spawn(async move {
         loop {
             let Ok((stream, _)) = listener.accept().await else {
@@ -645,9 +665,7 @@ async fn handle_egress_shim_connection(
     let first = req.lines().next().unwrap_or("");
     if !first.starts_with("GET /probe") {
         let _ = stream
-            .write_all(
-                b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-            )
+            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
             .await;
         return;
     }
@@ -723,7 +741,10 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         .await
         .inspect_err(|e| boot_log_error("start_egress_shim", format!("{e:#}")))?;
     let egress_shim = format!("http://127.0.0.1:{shim_port}");
-    boot_log("INFO", &format!("boot: egress shim listening on {egress_shim}"));
+    boot_log(
+        "INFO",
+        &format!("boot: egress shim listening on {egress_shim}"),
+    );
 
     boot_log(
         "INFO",
@@ -748,13 +769,13 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         &args.permission_mode,
         &args.session_id,
         &egress_shim,
+        Arc::clone(&relay),
     )
     .inspect_err(|e| boot_log_error("spawn_claude_pty", format!("{e:#}")))?;
     boot_log("INFO", "boot: claude pty thread spawned");
 
     let service = SandboxRunnerService {
         session_id: args.session_id.clone(),
-        stdout_tx: pty.stdout_tx,
         stdin_tx: pty.stdin_tx,
         relay,
     };
@@ -811,8 +832,11 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
 /// Connect a tonic client to the sandbox gRPC endpoint (port read from ready marker).
 pub async fn connect_sandbox_client(
     ready_marker: &Path,
-) -> Result<tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient<tonic::transport::Channel>>
-{
+) -> Result<
+    tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient<
+        tonic::transport::Channel,
+    >,
+> {
     let port_str = std::fs::read_to_string(ready_marker).context("read ready marker")?;
     let port: u16 = port_str.trim().parse().context("parse grpc port")?;
     let endpoint = format!("http://127.0.0.1:{port}");
@@ -843,19 +867,16 @@ pub async fn dispatch_sandbox_tool_ipc(tool_name: &str, args: serde_json::Value)
         "tool_name": tool_name,
         "args_json": args.to_string(),
     });
-    if stream
-        .write_all(req.to_string().as_bytes())
-        .await
-        .is_err()
-    {
+    if stream.write_all(req.to_string().as_bytes()).await.is_err() {
         return serde_json::json!({"error": "tool ipc write failed", "is_error": true}).to_string();
     }
     let _ = stream.shutdown().await;
     let mut buf = vec![0u8; 65536];
     match stream.read(&mut buf).await {
         Ok(n) if n > 0 => String::from_utf8_lossy(&buf[..n]).to_string(),
-        Ok(_) => serde_json::json!({"error": "tool ipc empty response", "is_error": true})
-            .to_string(),
+        Ok(_) => {
+            serde_json::json!({"error": "tool ipc empty response", "is_error": true}).to_string()
+        }
         Err(e) => serde_json::json!({"error": format!("tool ipc read: {e}"), "is_error": true})
             .to_string(),
     }
@@ -872,8 +893,6 @@ mod tests {
         // Given
         let relay = Arc::new(SandboxSessionRelay::default());
         let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (_stdout_tx, _) = broadcast::channel(4);
-        let mut terminal_rx = _stdout_tx.subscribe();
 
         let call = tokio::spawn({
             let relay = Arc::clone(&relay);
@@ -881,8 +900,12 @@ mod tests {
         });
 
         // When — host poll flushes the queued request
-        relay.handle_host_poll(&out_tx, &mut terminal_rx);
-        let frame = out_rx.recv().await.expect("tool request frame").expect("ok frame");
+        relay.handle_host_poll(&out_tx);
+        let frame = out_rx
+            .recv()
+            .await
+            .expect("tool request frame")
+            .expect("ok frame");
         let req = match frame.payload {
             Some(SessionPayload::ToolRequest(req)) => req,
             _ => panic!("expected tool request frame"),

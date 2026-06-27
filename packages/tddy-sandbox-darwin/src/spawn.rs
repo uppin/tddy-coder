@@ -1,6 +1,9 @@
 use std::fs::{File, OpenOptions};
 use std::process::{Command, Stdio};
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 use tddy_sandbox::{
     append_line, egress_log_path, SandboxError, SandboxHandle, SandboxSpec,
     SANDBOX_EXEC_STDERR_LOG, SANDBOX_EXEC_STDOUT_LOG, SANDBOX_SPAWN_MANIFEST,
@@ -85,6 +88,14 @@ pub fn spawn(spec: SandboxSpec) -> Result<SandboxHandle, SandboxError> {
     cmd.stdout(Stdio::from(stdout_log));
     cmd.stderr(Stdio::from(stderr_log));
 
+    #[cfg(unix)]
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setpgid(0, 0);
+            Ok(())
+        });
+    }
+
     log::info!(
         target: "tddy_sandbox_darwin::spawn",
         "spawning sandbox-exec profile={} egress={} command={:?}",
@@ -101,7 +112,10 @@ pub fn spawn(spec: SandboxSpec) -> Result<SandboxHandle, SandboxError> {
     write_spawn_manifest(&spec, pid, &spec.profile_path)?;
     let _ = append_line(
         &egress_log_path(&spec.egress_dir, SANDBOX_EXEC_STDERR_LOG),
-        &format!("sandbox-exec spawned pid={pid} profile={}", spec.profile_path.display()),
+        &format!(
+            "sandbox-exec spawned pid={pid} profile={}",
+            spec.profile_path.display()
+        ),
     );
 
     log::info!(
@@ -138,10 +152,7 @@ pub fn detect_allow_read_paths() -> Vec<std::path::PathBuf> {
             }
         }
     }
-    if let Ok(brew) = std::process::Command::new("brew")
-        .arg("--prefix")
-        .output()
-    {
+    if let Ok(brew) = std::process::Command::new("brew").arg("--prefix").output() {
         if brew.status.success() {
             let p = String::from_utf8_lossy(&brew.stdout).trim().to_string();
             push_allow_path(&mut paths, p);

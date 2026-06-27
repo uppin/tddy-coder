@@ -143,6 +143,17 @@ pub fn remote_codebase_allowlist() -> Vec<String> {
     vec!["AskUserQuestion".to_string()]
 }
 
+/// Builds the agent allowlist for remote/sandbox mode: prefixes each discovered tool name with
+/// `mcp__tddy-tools__` and always appends `AskUserQuestion`.
+pub fn build_remote_allowlist(discovered_tools: &[&str]) -> Vec<String> {
+    let mut allowlist: Vec<String> = discovered_tools
+        .iter()
+        .map(|name| format!("mcp__tddy-tools__{}", name))
+        .collect();
+    allowlist.push("AskUserQuestion".to_string());
+    allowlist
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +189,24 @@ mod tests {
             &remote_codebase_allowlist(),
             "remote-codebase",
         );
+    }
+
+    #[test]
+    fn build_remote_allowlist_prefixes_discovered_tools_and_includes_ask_user_question() {
+        // Given
+        let discovered_tools = ["Read", "Write", "Grep", "Shell"];
+
+        // When
+        let allowlist = build_remote_allowlist(&discovered_tools);
+
+        // Then
+        for tool in &discovered_tools {
+            let prefixed = format!("mcp__tddy-tools__{}", tool);
+            assert!(
+                allowlist.contains(&prefixed),
+                "allowlist must contain '{prefixed}'; got: {allowlist:?}"
+            );
+        }
+        assert_allowlist_contains_ask_user_question(&allowlist, "build_remote_allowlist");
     }
 }

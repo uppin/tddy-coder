@@ -1,11 +1,7 @@
 # Investigation: Seatbelt spawn (sandbox-runner never started in jail)
 
 **Date:** 2026-06-27  
-**Status:** ✅ **Resolved.** The full in-jail spawn chain works: the runner boots, binds its
-sockets, writes the ready marker, allocates a PTY, **and forks/execs the agent**; host
-SessionChannel egress relay works. Sandbox acceptance went from **0/5 → 4/5**; the one
-remaining test (`streams_demo_tui_dimensions`) is a **terminal output-replay timing race, not
-a sandbox issue** — see [Remaining test](#-remaining-test-not-a-sandbox-issue).  
+**Status:** ✅ **Resolved.** Full in-jail spawn, SessionChannel egress, daemon acceptance, lifecycle (delete/resume), and claude-cli integration tests are green.  
 **The original diagnosis (loopback network rules cause the SIGABRT) was wrong.**  
 **Related changeset:** [2026-06-27-darwin-sandbox-claude-cli.md](./2026-06-27-darwin-sandbox-claude-cli.md)  
 **Feature PRD:** [docs/ft/1-WIP/PRD-2026-06-27-darwin-sandbox-claude-cli.md](../../ft/1-WIP/PRD-2026-06-27-darwin-sandbox-claude-cli.md)
@@ -40,18 +36,29 @@ boot: ready marker written …         ✅   EGRESS_PROBE: direct=denied   ✅
 gRPC listening …                     ✅   EGRESS_PROBE: session_channel=ok  ✅ (relayed)
 ```
 
-### Test results
+### Test results (2026-06-27, post-handoff)
 
 ```
-tddy-sandbox-darwin                         ok  (4/4, incl. strengthened loopback test)
-tddy-daemon  sandbox_runner_spawn_smoke     ok
-tddy-daemon  sandbox_behavior_acceptance    4/5
-   ✅ child_is_alive_after_demo_tui_start
-   ✅ spawn_manifest_records_session_channel_egress
-   ✅ relays_claude_llm_egress_via_session_channel      (egress relay works end to end)
-   ✅ denies_direct_outbound_network_from_jail          (direct TCP denied; relay still ok)
-   ❌ streams_demo_tui_dimensions_in_terminal           (terminal-replay race — not seatbelt)
+tddy-sandbox-darwin                         ok
+tddy-tools  sandbox_runner_acceptance         ok
+tddy-tools  sandbox_runner_behavior_acceptance ok
+tddy-daemon sandbox_runner_spawn_smoke        ok
+tddy-daemon sandbox_behavior_acceptance       5/5 ok
+tddy-daemon sandboxed_claude_cli_acceptance   4/4 ok
+tddy-daemon sandboxed_session_lifecycle       2/2 ok
 ```
+
+### Follow-up fixes (second agent pass)
+
+| Issue | Fix |
+|-------|-----|
+| Integration tests used `target/debug/deps/tddy-tools` (exit 127) | `resolve_tddy_tools_path()` — config → `CARGO_BIN_EXE` → parent of `deps/` |
+| Tool IPC test looked for socket under session dir | Use `SandboxSpec::short_ipc_socket_path(session_id)` |
+| Read probe failed (uncommitted README) | Commit README before worktree spawn in acceptance test |
+| `streams_demo_tui_dimensions` race (empty terminal replay) | PTY backlog in runner relay + host capture buffer on `StreamTerminalOutput` |
+| Delete did not kill sandbox child | Keep `SandboxHandle` in `SandboxSessionState::stop()` |
+| Resume called full `start_sandboxed` (worktree EPERM) | `relaunch_sandboxed_runner()` — respawn only; clear `context_dir` before copy |
+| `SessionMetadata { sandbox }` missing in unit tests | Added `sandbox: None` to test initializers |
 
 ---
 

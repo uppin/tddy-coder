@@ -65,8 +65,7 @@ allowed_tools:
 claude_cli:
   binary_path: {stub_binary}
   tddy_tools_path: {tddy_tools}
-"#
-        ,
+"#,
         tddy_tools = tddy_tools.display()
     );
     let config_path = dir.path().join("daemon.yaml");
@@ -172,9 +171,7 @@ async fn collect_terminal_text_until(
     let mut collected = String::new();
     let end = tokio::time::Instant::now() + deadline;
     while tokio::time::Instant::now() < end {
-        if let Ok(Some(Ok(msg))) =
-            tokio::time::timeout(TERMINAL_POLL, stream.next()).await
-        {
+        if let Ok(Some(Ok(msg))) = tokio::time::timeout(TERMINAL_POLL, stream.next()).await {
             collected.push_str(&String::from_utf8_lossy(&msg.data));
             if collected.contains(needle) {
                 return collected;
@@ -195,7 +192,8 @@ async fn spawn_llm_echo_server() -> u16 {
                 continue;
             };
             tokio::spawn(async move {
-                let response = b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\nLLM_ECHO\n";
+                let response =
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\nLLM_ECHO\n";
                 let _ = stream.write_all(response).await;
             });
         }
@@ -204,9 +202,7 @@ async fn spawn_llm_echo_server() -> u16 {
 }
 
 fn read_spawn_manifest(session_dir: &Path) -> serde_json::Value {
-    let path = session_dir
-        .join("egress")
-        .join(SANDBOX_SPAWN_MANIFEST);
+    let path = session_dir.join("egress").join(SANDBOX_SPAWN_MANIFEST);
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("spawn manifest must exist at {}: {e}", path.display()));
     serde_json::from_str(&text).expect("spawn manifest json")
@@ -232,9 +228,11 @@ async fn sandboxed_session_streams_demo_tui_dimensions_in_terminal() {
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let demo_tui = demo_tui_binary();
-    assert!(demo_tui.exists(), "build tddy-demo-tui before running this test");
-    let (_cfg_dir, config) =
-        write_config_with_claude_cli_binary(demo_tui.to_str().unwrap());
+    assert!(
+        demo_tui.exists(),
+        "build tddy-demo-tui before running this test"
+    );
+    let (_cfg_dir, config) = write_config_with_claude_cli_binary(demo_tui.to_str().unwrap());
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     // When
@@ -245,13 +243,8 @@ async fn sandboxed_session_streams_demo_tui_dimensions_in_terminal() {
         .into_inner()
         .session_id;
 
-    let terminal_text = collect_terminal_text_until(
-        &service,
-        &session_id,
-        TERMINAL_DEADLINE,
-        "DEMO TUI W=",
-    )
-    .await;
+    let terminal_text =
+        collect_terminal_text_until(&service, &session_id, TERMINAL_DEADLINE, "DEMO TUI W=").await;
 
     // Then
     assert!(
@@ -271,8 +264,7 @@ async fn sandboxed_session_spawn_manifest_records_session_channel_egress() {
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let demo_tui = demo_tui_binary();
-    let (_cfg_dir, config) =
-        write_config_with_claude_cli_binary(demo_tui.to_str().unwrap());
+    let (_cfg_dir, config) = write_config_with_claude_cli_binary(demo_tui.to_str().unwrap());
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     // When
@@ -312,8 +304,7 @@ async fn sandboxed_session_relays_claude_llm_egress_via_session_channel() {
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let probe_claude = write_egress_probe_claude_script(repo_dir.path());
-    let (_cfg_dir, config) =
-        write_config_with_claude_cli_binary(probe_claude.to_str().unwrap());
+    let (_cfg_dir, config) = write_config_with_claude_cli_binary(probe_claude.to_str().unwrap());
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     // When
@@ -353,8 +344,7 @@ async fn sandboxed_session_denies_direct_outbound_network_from_jail() {
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let probe_claude = write_egress_probe_claude_script(repo_dir.path());
-    let (_cfg_dir, config) =
-        write_config_with_claude_cli_binary(probe_claude.to_str().unwrap());
+    let (_cfg_dir, config) = write_config_with_claude_cli_binary(probe_claude.to_str().unwrap());
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     // When
@@ -398,8 +388,7 @@ async fn sandboxed_session_child_is_alive_after_demo_tui_start() {
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let demo_tui = demo_tui_binary();
-    let (_cfg_dir, config) =
-        write_config_with_claude_cli_binary(demo_tui.to_str().unwrap());
+    let (_cfg_dir, config) = write_config_with_claude_cli_binary(demo_tui.to_str().unwrap());
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     // When

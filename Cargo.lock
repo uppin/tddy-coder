@@ -8610,6 +8610,7 @@ dependencies = [
  "tddy-connectrpc",
  "tddy-core",
  "tddy-demo-runner",
+ "tddy-demo-tui",
  "tddy-github",
  "tddy-livekit",
  "tddy-livekit-testkit",
@@ -8895,6 +8896,7 @@ dependencies = [
 name = "tddy-sandbox-darwin"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "log",
  "serde_json",
  "tddy-sandbox",
@@ -9023,6 +9025,7 @@ dependencies = [
  "tddy-build-rust",
  "tddy-build-typescript",
  "tddy-core",
+ "tddy-demo-tui",
  "tddy-livekit",
  "tddy-sandbox",
  "tddy-service",

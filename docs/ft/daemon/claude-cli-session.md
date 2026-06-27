@@ -54,6 +54,27 @@ As a developer, I want to start a raw Claude Code CLI session from the tddy web 
 17. `SignalSession` sends the signal to the `claude` PTY process.
 18. `DeleteSession` sends SIGTERM, waits for exit, removes the session directory and worktree.
 
+## Darwin sandbox mode (`StartSessionRequest.sandbox = true`)
+
+On macOS, `StartSession` with `session_type = "claude-cli"` and **`sandbox = true`** runs
+`claude` inside a **Seatbelt jail** on the same host. The daemon still creates a git worktree
+and executes tools against it via `tool_engine::execute_tool`; the sandboxed agent reaches the
+codebase only through `mcp__tddy-tools__*` tool calls relayed over a host-initiated gRPC
+**`SessionChannel`**. No LiveKit credentials are returned.
+
+| Aspect | Non-sandbox claude-cli | Sandboxed claude-cli |
+|--------|------------------------|----------------------|
+| `claude` spawn | Direct PTY in worktree | `sandbox-exec` → `tddy-tools sandbox-runner` → PTY |
+| Filesystem | Full host worktree | Read-only context dir in jail; writes via MCP tools on host |
+| Network from agent | Host network | `(deny network*)`; LLM HTTP relayed as `EgressRequest` frames |
+| Resume / delete | PTY respawn / SIGTERM | Stop sandbox child + relaunch runner; same worktree teardown |
+| Non-macOS | Supported | `failed_precondition` (no fallback) |
+
+`.session.yaml` records `sandbox: true`. Implementation:
+`sandbox_session.rs`, `tddy-sandbox`, `tddy-sandbox-darwin`. See
+[remote-codebase-mode.md](remote-codebase-mode.md) (local sandbox sibling) and
+[changeset](../../dev/1-WIP/2026-06-27-darwin-sandbox-claude-cli.md).
+
 ## Non-goals (out of scope)
 
 - TDD/bugfix workflow integration — Claude Code CLI sessions have no recipe.

@@ -5,13 +5,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use tokio::sync::{mpsc, Mutex};
-use tokio_stream::wrappers::ReceiverStream;
 use tddy_service::proto::connection::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::tonic_sandbox::{
     EgressRequest, EgressResponse, HostPoll, SessionFrame, SubscribeTerminal,
 };
+use tokio::sync::{mpsc, Mutex};
+use tokio_stream::wrappers::ReceiverStream;
 
 /// Host client that mirrors daemon `dial_and_bridge` for tests.
 pub struct SandboxSessionChannelHost {

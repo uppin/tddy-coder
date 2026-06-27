@@ -10,12 +10,12 @@ use tddy_core::session_metadata::read_session_metadata;
 use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_testing_commons::process_is_alive;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ResumeSessionRequest,
     StartSessionRequest,
 };
+use tddy_testing_commons::process_is_alive;
 
 const VALID_TOKEN: &str = "valid-token";
 const TEST_MODEL: &str = "claude-opus-4-8";
@@ -24,8 +24,17 @@ const TEST_PROJECT_ID: &str = "sandbox-lifecycle-project";
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
+fn tddy_tools_binary() -> PathBuf {
+    std::env::var_os("CARGO_BIN_EXE_tddy-tools")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/tddy-tools")
+        })
+}
+
 fn write_config_with_claude_cli_binary(stub_binary: &str) -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
+    let tddy_tools = tddy_tools_binary();
     let yaml = format!(
         r#"
 users:
@@ -36,11 +45,16 @@ allowed_tools:
     label: true
 claude_cli:
   binary_path: {stub_binary}
-"#
+  tddy_tools_path: {tddy_tools}
+"#,
+        tddy_tools = tddy_tools.display()
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    (dir, DaemonConfig::load(&config_path).expect("config must parse"))
+    (
+        dir,
+        DaemonConfig::load(&config_path).expect("config must parse"),
+    )
 }
 
 fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceImpl {
@@ -165,7 +179,10 @@ async fn delete_sandbox_session_stops_child_and_removes_directory() {
     // Then
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(!session_dir.exists(), "session directory must be removed");
-    assert!(!process_is_alive(pid), "sandbox child pid must be terminated");
+    assert!(
+        !process_is_alive(pid),
+        "sandbox child pid must be terminated"
+    );
 }
 
 /// **resume_sandbox_session_respawns_and_updates_pid**: `ResumeSession` re-spawns the sandbox

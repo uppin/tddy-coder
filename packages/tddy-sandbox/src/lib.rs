@@ -17,6 +17,24 @@ pub use log::{
 };
 pub use spec::{SandboxHandle, SandboxSpec};
 
+/// Exec tool names served by the daemon `ExecuteTool` RPC for workspace/sandbox sessions.
+///
+/// Must stay in sync with `tddy_daemon::tool_catalog::tool_catalog`.
+pub fn workspace_exec_tool_names() -> &'static [&'static str] {
+    &[
+        "Read",
+        "Write",
+        "StrReplace",
+        "Delete",
+        "Grep",
+        "Glob",
+        "Shell",
+        "Await",
+        "ReadLints",
+        "SemanticSearch",
+    ]
+}
+
 /// Spawn a process inside a platform sandbox.
 ///
 /// On macOS, callers should use `tddy_sandbox_darwin::spawn` directly.

@@ -6,25 +6,27 @@
 
 use std::path::PathBuf;
 
-use tddy_sandbox::SandboxSpec;
 use tddy_sandbox::format_egress_logs;
+use tddy_sandbox::SandboxSpec;
 
-fn assert_sandbox_exit(
-    egress: &PathBuf,
-    exit: i32,
-    expect_success: bool,
-    context: &str,
-) {
-    assert_ne!(exit, 6, "{context}: sandbox-exec profile invalid (exit 6)\n{}", format_egress_logs(egress));
+fn assert_sandbox_exit(egress: &PathBuf, exit: i32, expect_success: bool, context: &str) {
+    assert_ne!(
+        exit,
+        6,
+        "{context}: sandbox-exec profile invalid (exit 6)\n{}",
+        format_egress_logs(egress)
+    );
     if expect_success {
         assert_eq!(
-            exit, 0,
+            exit,
+            0,
             "{context}: expected exit 0, got {exit}\n{}",
             format_egress_logs(egress)
         );
     } else {
         assert_ne!(
-            exit, 0,
+            exit,
+            0,
             "{context}: expected non-zero exit, got 0\n{}",
             format_egress_logs(egress)
         );
@@ -67,10 +69,7 @@ fn run_in_sandbox_with_command(
     };
 
     let mut handle = tddy_sandbox_darwin::spawn(spec).expect("sandbox spawn must succeed");
-    let status = handle
-        .child_mut()
-        .wait()
-        .expect("wait for sandbox child");
+    let status = handle.child_mut().wait().expect("wait for sandbox child");
     let code = status.code().unwrap_or(1);
     code
 }
@@ -138,7 +137,8 @@ fn seatbelt_denies_read_of_non_allowlisted_path() {
     let project_root = tmp.path().join("project");
     let egress = tmp.path().join("egress");
     std::fs::create_dir_all(&project_root).unwrap();
-    let secret_file = PathBuf::from("/private/tmp/tddy-sandbox-secret-probe.txt");
+    let home = std::env::var("HOME").expect("HOME");
+    let secret_file = PathBuf::from(&home).join(".tddy-sandbox-read-probe.txt");
     std::fs::write(&secret_file, "top-secret").unwrap();
 
     // When — cat must fail for a path outside allow-list
@@ -148,4 +148,6 @@ fn seatbelt_denies_read_of_non_allowlisted_path() {
         &format!("cat '{}'", secret_file.display()),
         "seatbelt_denies_read_of_non_allowlisted_path",
     );
+
+    let _ = std::fs::remove_file(&secret_file);
 }

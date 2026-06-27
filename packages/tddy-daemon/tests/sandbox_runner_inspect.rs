@@ -45,7 +45,10 @@ fn sandbox_runner_inspect_seatbelt_spawn() {
         "--context-dir".into(),
         context.to_string_lossy().to_string(),
         "--grpc-socket".into(),
-        project.join("sandbox.grpc.sock").to_string_lossy().to_string(),
+        project
+            .join("sandbox.grpc.sock")
+            .to_string_lossy()
+            .to_string(),
         "--tool-ipc-socket".into(),
         project.join("tool_ipc.sock").to_string_lossy().to_string(),
         "--ready-marker".into(),
@@ -93,37 +96,28 @@ fn sandbox_runner_inspect_seatbelt_spawn() {
     eprintln!("profile bytes={}", profile_text.len());
 
     let probes: [(&str, Vec<String>); 4] = [
-        (
-            "echo",
-            vec!["/bin/echo".into(), "hi".into()],
-        ),
+        ("echo", vec!["/bin/echo".into(), "hi".into()]),
         (
             "tools-help-direct",
             vec![tools.to_string_lossy().to_string(), "--help".into()],
         ),
-        (
-            "tools-help-via-env-i",
-            {
-                let mut v = vec!["/usr/bin/env".into(), "-i".into()];
-                for (k, val) in &env {
-                    v.push(format!("{k}={val}"));
-                }
-                v.push(tools.to_string_lossy().to_string());
-                v.push("--help".into());
-                v
-            },
-        ),
-        (
-            "runner-via-env-i",
-            {
-                let mut v = vec!["/usr/bin/env".into(), "-i".into()];
-                for (k, val) in &env {
-                    v.push(format!("{k}={val}"));
-                }
-                v.extend(runner_argv.clone());
-                v
-            },
-        ),
+        ("tools-help-via-env-i", {
+            let mut v = vec!["/usr/bin/env".into(), "-i".into()];
+            for (k, val) in &env {
+                v.push(format!("{k}={val}"));
+            }
+            v.push(tools.to_string_lossy().to_string());
+            v.push("--help".into());
+            v
+        }),
+        ("runner-via-env-i", {
+            let mut v = vec!["/usr/bin/env".into(), "-i".into()];
+            for (k, val) in &env {
+                v.push(format!("{k}={val}"));
+            }
+            v.extend(runner_argv.clone());
+            v
+        }),
     ];
 
     for (label, argv) in probes {
@@ -215,8 +209,5 @@ fn sandbox_runner_inspect_seatbelt_spawn() {
     std::thread::sleep(Duration::from_secs(2));
     let exit = handle.child_mut().try_wait().ok().flatten();
     eprintln!("child try_wait after 2s: {exit:?}");
-    eprintln!(
-        "{}",
-        format_sandbox_diagnostics(&egress, Some(&project))
-    );
+    eprintln!("{}", format_sandbox_diagnostics(&egress, Some(&project)));
 }

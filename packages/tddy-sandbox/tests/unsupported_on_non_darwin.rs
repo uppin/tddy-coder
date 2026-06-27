@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use tddy_sandbox::{SandboxError, SandboxSpec, spawn};
+use tddy_sandbox::{spawn, SandboxError, SandboxSpec};
 
 fn minimal_spec() -> SandboxSpec {
     SandboxSpec {

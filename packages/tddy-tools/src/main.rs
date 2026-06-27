@@ -7,12 +7,12 @@ mod build_cli;
 mod cli;
 mod pty_relay;
 mod remote_cli;
-mod sandbox_runner;
 mod session_hook;
 
 use anyhow::Result;
 use clap::Parser;
 use rmcp::ServiceExt;
+use tddy_tools::sandbox_runner;
 use tddy_tools::server::PermissionServer;
 
 #[derive(Parser)]

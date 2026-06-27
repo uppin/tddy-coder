@@ -5,10 +5,12 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use tddy_daemon::sandbox_session::{build_allow_read_paths, pick_free_loopback_port, spawn_sandbox_runner};
+use tddy_daemon::sandbox_session::{
+    build_allow_read_paths, pick_free_loopback_port, spawn_sandbox_runner, SandboxRunnerSpawn,
+};
 use tddy_sandbox::format_sandbox_diagnostics;
-use tddy_sandbox_darwin::render_profile;
 use tddy_sandbox::SandboxSpec;
+use tddy_sandbox_darwin::render_profile;
 
 fn tools_binary() -> PathBuf {
     std::env::var_os("CARGO_BIN_EXE_tddy-tools")
@@ -64,7 +66,10 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
         "--context-dir".into(),
         context.to_string_lossy().to_string(),
         "--grpc-socket".into(),
-        project.join("sandbox.grpc.sock").to_string_lossy().to_string(),
+        project
+            .join("sandbox.grpc.sock")
+            .to_string_lossy()
+            .to_string(),
         "--tool-ipc-socket".into(),
         project.join("tool_ipc.sock").to_string_lossy().to_string(),
         "--ready-marker".into(),
@@ -121,7 +126,10 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
         "profile must be valid before spawn\nallow_read_paths={allow_read_paths:#?}\n--- profile ---\n{profile_text}"
     );
     for (label, args) in [
-        ("tools-help", vec![tools.to_string_lossy().to_string(), "--help".into()]),
+        (
+            "tools-help",
+            vec![tools.to_string_lossy().to_string(), "--help".into()],
+        ),
         (
             "runner-help",
             vec![
@@ -142,16 +150,16 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
     }
 
     // When
-    let mut handle = spawn_sandbox_runner(
-        project.clone(),
-        scratch,
-        egress.clone(),
+    let mut handle = spawn_sandbox_runner(SandboxRunnerSpawn {
+        project_root: project.clone(),
+        scratch_dir: scratch,
+        egress_dir: egress.clone(),
         profile_path,
         runner_argv,
         env,
         loopback_allow_ports,
-        None,
-    )
+        ipc_socket: None,
+    })
     .expect("spawn sandbox-runner");
 
     let deadline = Duration::from_secs(15);

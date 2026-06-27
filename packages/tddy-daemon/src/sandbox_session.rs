@@ -6,17 +6,17 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use bytes::Bytes;
+use tddy_rpc::Status;
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tddy_rpc::Status;
 
 use tddy_sandbox::{SandboxContextDir, SandboxError, SandboxSpec};
 use tddy_service::proto::connection::ExecuteToolResponse;
+use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
 use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::tonic_sandbox::{
     EgressRequest, EgressResponse, HostPoll, SandboxInput, SessionFrame, SubscribeTerminal,
 };
-use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
 
 use crate::tool_engine;
 
@@ -30,6 +30,44 @@ pub struct SandboxSessionState {
     pub stdin_tx: mpsc::UnboundedSender<Bytes>,
     pub grpc_socket: PathBuf,
     pub ready_marker: PathBuf,
+    /// Kept so delete/resume can SIGKILL the sandbox-exec tree reliably.
+    handle: StdMutex<Option<tddy_sandbox::SandboxHandle>>,
+}
+
+/// Fields required to register an active sandbox session on the host.
+pub struct SandboxSessionStateInit {
+    pub pid: u32,
+    pub worktree_path: PathBuf,
+    pub stdout_tx: broadcast::Sender<Bytes>,
+    pub capture: Arc<StdMutex<Vec<u8>>>,
+    pub stdin_tx: mpsc::UnboundedSender<Bytes>,
+    pub grpc_socket: PathBuf,
+    pub ready_marker: PathBuf,
+    pub handle: tddy_sandbox::SandboxHandle,
+}
+
+impl SandboxSessionState {
+    pub fn new(init: SandboxSessionStateInit) -> Self {
+        Self {
+            pid: init.pid,
+            worktree_path: init.worktree_path,
+            stdout_tx: init.stdout_tx,
+            capture: init.capture,
+            stdin_tx: init.stdin_tx,
+            grpc_socket: init.grpc_socket,
+            ready_marker: init.ready_marker,
+            handle: StdMutex::new(Some(init.handle)),
+        }
+    }
+
+    pub fn stop(&self) {
+        if let Some(mut handle) = self.handle.lock().unwrap().take() {
+            let _ = handle.child_mut().kill();
+            let _ = handle.child_mut().wait();
+        } else {
+            terminate_sandbox_process(self.pid);
+        }
+    }
 }
 
 /// Registry of sandbox sessions keyed by session_id.
@@ -292,9 +330,9 @@ async fn relay_egress_request(req: EgressRequest) -> EgressResponse {
 /// Map [`SandboxError`] to gRPC status for StartSession failures.
 pub fn sandbox_error_to_status(err: SandboxError) -> Status {
     match err {
-        SandboxError::Unsupported { platform, message } => Status::failed_precondition(format!(
-            "sandbox unsupported on {platform}: {message}"
-        )),
+        SandboxError::Unsupported { platform, message } => {
+            Status::failed_precondition(format!("sandbox unsupported on {platform}: {message}"))
+        }
         SandboxError::Io(msg) | SandboxError::InvalidSpec(msg) => {
             Status::internal(format!("sandbox error: {msg}"))
         }
@@ -311,14 +349,8 @@ pub fn build_sandbox_runner_env(
 ) -> std::collections::BTreeMap<String, String> {
     let mut env = std::collections::BTreeMap::new();
     env.insert("HOME".into(), scratch_home.to_string_lossy().to_string());
-    env.insert(
-        "TMPDIR".into(),
-        scratch_tmp.to_string_lossy().to_string(),
-    );
-    env.insert(
-        "TDDY_SANDBOX_SESSION_ID".into(),
-        session_id.to_string(),
-    );
+    env.insert("TMPDIR".into(), scratch_tmp.to_string_lossy().to_string());
+    env.insert("TDDY_SANDBOX_SESSION_ID".into(), session_id.to_string());
     env.insert(
         "TDDY_SANDBOX_TOOL_IPC".into(),
         tool_ipc_socket.to_string_lossy().to_string(),
@@ -466,11 +498,7 @@ fn canonical_binary_path(binary: &str) -> Option<PathBuf> {
     if path.is_absolute() {
         std::fs::canonicalize(path).ok()
     } else {
-        std::env::current_dir()
-            .ok()?
-            .join(path)
-            .canonicalize()
-            .ok()
+        std::env::current_dir().ok()?.join(path).canonicalize().ok()
     }
 }
 
@@ -501,42 +529,61 @@ pub fn pick_free_loopback_port() -> Result<u16, String> {
     Ok(port)
 }
 
+/// Terminate a sandbox-exec process group (leader pid from [`SandboxHandle::pid`]).
+#[cfg(unix)]
+pub fn terminate_sandbox_process(pid: u32) {
+    fn pid_alive(pid: u32) -> bool {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+    unsafe {
+        libc::kill(-(pid as i32), libc::SIGTERM);
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    if pid_alive(pid) {
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
+            libc::kill(-(pid as i32), libc::SIGKILL);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+pub fn terminate_sandbox_process(_pid: u32) {}
+
+/// Parameters for spawning `tddy-tools sandbox-runner` inside Seatbelt.
+pub struct SandboxRunnerSpawn {
+    pub project_root: PathBuf,
+    pub scratch_dir: PathBuf,
+    pub egress_dir: PathBuf,
+    pub profile_path: PathBuf,
+    pub runner_argv: Vec<String>,
+    pub env: std::collections::BTreeMap<String, String>,
+    pub loopback_allow_ports: Vec<u16>,
+    pub ipc_socket: Option<PathBuf>,
+}
+
 /// Spawn sandbox-runner inside Seatbelt jail.
 #[cfg(target_os = "macos")]
 pub fn spawn_sandbox_runner(
-    project_root: PathBuf,
-    scratch_dir: PathBuf,
-    egress_dir: PathBuf,
-    profile_path: PathBuf,
-    runner_argv: Vec<String>,
-    env: std::collections::BTreeMap<String, String>,
-    loopback_allow_ports: Vec<u16>,
-    ipc_socket: Option<PathBuf>,
+    params: SandboxRunnerSpawn,
 ) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
     let spec = SandboxSpec {
-        project_root,
-        scratch_dir,
-        egress_dir,
-        allow_read_paths: build_allow_read_paths(&runner_argv),
-        command: runner_argv,
-        env,
-        profile_path,
-        loopback_allow_ports,
-        ipc_socket,
+        project_root: params.project_root,
+        scratch_dir: params.scratch_dir,
+        egress_dir: params.egress_dir,
+        allow_read_paths: build_allow_read_paths(&params.runner_argv),
+        command: params.runner_argv,
+        env: params.env,
+        profile_path: params.profile_path,
+        loopback_allow_ports: params.loopback_allow_ports,
+        ipc_socket: params.ipc_socket,
     };
     tddy_sandbox_darwin::spawn(spec)
 }
 
 #[cfg(not(target_os = "macos"))]
 pub fn spawn_sandbox_runner(
-    _project_root: PathBuf,
-    _scratch_dir: PathBuf,
-    _egress_dir: PathBuf,
-    _profile_path: PathBuf,
-    _runner_argv: Vec<String>,
-    _env: std::collections::BTreeMap<String, String>,
-    _loopback_allow_ports: Vec<u16>,
-    _ipc_socket: Option<PathBuf>,
+    _params: SandboxRunnerSpawn,
 ) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
     Err(SandboxError::Unsupported {
         platform: std::env::consts::OS.to_string(),

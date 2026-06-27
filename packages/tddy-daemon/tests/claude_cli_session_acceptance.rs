@@ -182,6 +182,7 @@ async fn claude_cli_session_metadata_fields_persisted() {
             initial_prompt: String::new(),
             permission_mode: String::new(),
             stack_parent: String::new(),
+            sandbox: false,
         }))
         .await
         .expect("StartSession with session_type=claude-cli must succeed");
@@ -267,6 +268,7 @@ async fn claude_cli_session_livekit_fields_empty() {
             initial_prompt: String::new(),
             permission_mode: String::new(),
             stack_parent: String::new(),
+            sandbox: false,
         }))
         .await
         .expect("StartSession must succeed")
@@ -483,6 +485,7 @@ users:
             initial_prompt: String::new(),
             permission_mode: String::new(),
             stack_parent: String::new(),
+            sandbox: false,
         }))
         .await
         .expect_err("StartSession with claude-cli and empty model must fail");
@@ -530,6 +533,7 @@ async fn claude_cli_start_session_requires_project() {
             initial_prompt: String::new(),
             permission_mode: String::new(),
             stack_parent: String::new(),
+            sandbox: false,
         }))
         .await
         .expect_err("StartSession with empty project_id must fail");
@@ -559,6 +563,7 @@ async fn claude_cli_start_session_requires_project() {
             initial_prompt: String::new(),
             permission_mode: String::new(),
             stack_parent: String::new(),
+            sandbox: false,
         }))
         .await
         .expect_err("StartSession with unknown project_id must fail");
@@ -795,6 +800,7 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
             initial_prompt: "hello from rpc".to_string(),
             permission_mode: String::new(),
             stack_parent: String::new(),
+            sandbox: false,
         }))
         .await
         .expect("StartSession with initial_prompt must succeed");

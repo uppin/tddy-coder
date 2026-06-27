@@ -98,16 +98,7 @@ fn make_readonly_recursive(dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Builds the agent allowlist for remote mode: prefixes each discovered tool name with
-/// `mcp__tddy-tools__` and always appends `AskUserQuestion`.
-pub fn build_remote_allowlist(discovered_tools: &[&str]) -> Vec<String> {
-    let mut allowlist: Vec<String> = discovered_tools
-        .iter()
-        .map(|name| format!("mcp__tddy-tools__{}", name))
-        .collect();
-    allowlist.push("AskUserQuestion".to_string());
-    allowlist
-}
+pub use tddy_workflow_recipes::permissions::build_remote_allowlist;
 
 /// Parse a JSON array of tool names (as produced by `tddy-tools remote list-tools`) and
 /// return the remote allowlist built by [`build_remote_allowlist`].

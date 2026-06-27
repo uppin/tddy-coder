@@ -1,7 +1,7 @@
 //! ConnectionService implementation for daemon session/tool management.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use futures_util::stream::{Stream, StreamExt};
@@ -837,10 +837,10 @@ impl ConnectionServiceImpl {
             permission_mode.trim()
         };
 
-        let grpc_listen_port = crate::sandbox_session::pick_free_loopback_port()
-            .map_err(Status::internal)?;
-        let egress_shim_port = crate::sandbox_session::pick_free_loopback_port()
-            .map_err(Status::internal)?;
+        let grpc_listen_port =
+            crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
+        let egress_shim_port =
+            crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
         let loopback_allow_ports = vec![grpc_listen_port, egress_shim_port];
 
         let runner_argv = vec![
@@ -877,14 +877,16 @@ impl ConnectionServiceImpl {
         );
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
-            sandbox_root.clone(),
-            scratch_dir.clone(),
-            egress_dir.clone(),
-            profile_path,
-            runner_argv,
-            env,
-            loopback_allow_ports,
-            Some(tool_ipc_socket.clone()),
+            crate::sandbox_session::SandboxRunnerSpawn {
+                project_root: sandbox_root.clone(),
+                scratch_dir: scratch_dir.clone(),
+                egress_dir: egress_dir.clone(),
+                profile_path,
+                runner_argv,
+                env,
+                loopback_allow_ports,
+                ipc_socket: Some(tool_ipc_socket.clone()),
+            },
         )
         .map_err(|e| {
             let logs = tddy_sandbox::format_egress_logs(&egress_dir);
@@ -900,7 +902,7 @@ impl ConnectionServiceImpl {
             &egress_dir,
         )
         .await
-        .map_err(|e| Status::deadline_exceeded(e))?;
+        .map_err(Status::deadline_exceeded)?;
 
         let (stdout_tx, _) = tokio::sync::broadcast::channel(256);
         let capture = Arc::new(StdMutex::new(Vec::new()));
@@ -919,15 +921,18 @@ impl ConnectionServiceImpl {
         .map_err(Status::internal)?;
 
         let pid = handle.pid();
-        let state = Arc::new(crate::sandbox_session::SandboxSessionState {
-            pid,
-            worktree_path: worktree_path.clone(),
-            stdout_tx,
-            capture,
-            stdin_tx,
-            grpc_socket: grpc_socket.clone(),
-            ready_marker: ready_marker.clone(),
-        });
+        let state = Arc::new(crate::sandbox_session::SandboxSessionState::new(
+            crate::sandbox_session::SandboxSessionStateInit {
+                pid,
+                worktree_path: worktree_path.clone(),
+                stdout_tx,
+                capture,
+                stdin_tx,
+                grpc_socket: grpc_socket.clone(),
+                ready_marker: ready_marker.clone(),
+                handle,
+            },
+        ));
         self.sandbox_manager
             .insert(session_id.to_string(), state)
             .await;
@@ -1034,38 +1039,228 @@ impl ConnectionServiceImpl {
     /// Re-spawn and re-dial a sandboxed claude-cli session.
     async fn resume_sandboxed_claude_cli_session(
         &self,
-        os_user: &str,
+        _os_user: &str,
         session_id: &str,
         session_dir: PathBuf,
         meta: tddy_core::SessionMetadata,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
-        let _ = self.sandbox_manager.remove(session_id).await;
+        if let Some(state) = self.sandbox_manager.remove(session_id).await {
+            state.stop();
+        } else if let Some(pid) = meta.pid {
+            crate::sandbox_session::terminate_sandbox_process(pid);
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
         let model = meta.model.clone().unwrap_or_default();
-        let project_id = meta.project_id.clone();
-        let sessions_base = session_dir
-            .parent()
-            .and_then(|p| p.parent())
+        let worktree_path = meta
+            .repo_path
+            .as_ref()
             .map(PathBuf::from)
-            .ok_or_else(|| Status::internal("could not resolve sessions base"))?;
-        self.start_sandboxed_claude_cli_session(
-            os_user,
-            session_id,
-            sessions_base,
-            &model,
-            &project_id,
-            "",
-            "",
-            "",
-            "",
-            "auto",
-        )
-        .await?;
+            .ok_or_else(|| Status::internal("sandbox session missing repo_path in metadata"))?;
+
+        let pid = self
+            .relaunch_sandboxed_runner(session_id, &session_dir, &worktree_path, &model, "auto")
+            .await?;
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let updated = tddy_core::SessionMetadata {
+            updated_at: now,
+            status: "active".to_string(),
+            pid: Some(pid),
+            ..meta
+        };
+        tddy_core::write_session_metadata(&session_dir, &updated)
+            .map_err(|e| Status::internal(format!("failed to update session metadata: {e}")))?;
+
         Ok(Response::new(ResumeSessionResponse {
             session_id: session_id.to_string(),
             livekit_room: String::new(),
             livekit_url: String::new(),
             livekit_server_identity: String::new(),
         }))
+    }
+
+    /// Spawn sandbox-runner + SessionChannel bridge for an existing session directory.
+    async fn relaunch_sandboxed_runner(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+        worktree_path: &Path,
+        model: &str,
+        permission_mode: &str,
+    ) -> Result<u32, Status> {
+        let sandbox_root = session_dir.join("sandbox");
+        let egress_dir = session_dir.join("egress");
+        std::fs::create_dir_all(sandbox_root.join(".work").join("home"))
+            .map_err(|e| Status::internal(format!("mkdir sandbox scratch: {e}")))?;
+        std::fs::create_dir_all(sandbox_root.join(".work").join("tmp"))
+            .map_err(|e| Status::internal(format!("mkdir sandbox tmp: {e}")))?;
+        std::fs::create_dir_all(sandbox_root.join("context"))
+            .map_err(|e| Status::internal(format!("mkdir sandbox context: {e}")))?;
+        std::fs::create_dir_all(&egress_dir)
+            .map_err(|e| Status::internal(format!("mkdir sandbox egress: {e}")))?;
+
+        let sandbox_root = std::fs::canonicalize(&sandbox_root).unwrap_or(sandbox_root);
+        let egress_dir = std::fs::canonicalize(&egress_dir).unwrap_or(egress_dir);
+        let scratch_dir = sandbox_root.join(".work");
+        let scratch_home = scratch_dir.join("home");
+        let scratch_tmp = scratch_dir.join("tmp");
+        let context_dir = sandbox_root.join("context");
+
+        let ctx = crate::sandbox_session::prepare_context_dir(worktree_path)
+            .map_err(|e| Status::internal(format!("prepare context dir: {e}")))?;
+        if context_dir.exists() {
+            std::fs::remove_dir_all(&context_dir)
+                .map_err(|e| Status::internal(format!("clear context dir: {e}")))?;
+        }
+        std::fs::create_dir_all(&context_dir)
+            .map_err(|e| Status::internal(format!("mkdir context dir: {e}")))?;
+        crate::sandbox_session::copy_dir_all(ctx.path(), &context_dir)
+            .map_err(|e| Status::internal(format!("copy context dir: {e}")))?;
+
+        let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
+            self.config
+                .claude_cli
+                .as_ref()
+                .and_then(|c| c.tddy_tools_path.as_deref()),
+        );
+        let claude_binary_cfg = self
+            .config
+            .claude_cli
+            .as_ref()
+            .map(|c| c.binary_path.as_str())
+            .unwrap_or("claude");
+        let canonicalize_exec = |p: &str| -> String {
+            if p.contains('/') {
+                std::fs::canonicalize(p)
+                    .map(|c| c.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| p.to_string())
+            } else {
+                p.to_string()
+            }
+        };
+        let tddy_tools_path = canonicalize_exec(&tddy_tools_path);
+        let claude_binary = canonicalize_exec(claude_binary_cfg);
+
+        let grpc_socket = sandbox_root.join("sandbox.grpc.sock");
+        let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(session_id);
+        let ready_marker = sandbox_root.join("sandbox.ready");
+        let _ = std::fs::remove_file(&tool_ipc_socket);
+        let _ = std::fs::remove_file(&ready_marker);
+        let _ = std::fs::remove_file(&grpc_socket);
+        let profile_path = sandbox_root.join("sandbox.sb");
+        let perm = if permission_mode.trim().is_empty() {
+            "auto"
+        } else {
+            permission_mode.trim()
+        };
+
+        let grpc_listen_port =
+            crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
+        let egress_shim_port =
+            crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
+        let loopback_allow_ports = vec![grpc_listen_port, egress_shim_port];
+
+        let runner_argv = vec![
+            tddy_tools_path,
+            "sandbox-runner".into(),
+            "--session-id".into(),
+            session_id.to_string(),
+            "--context-dir".into(),
+            context_dir.to_string_lossy().to_string(),
+            "--grpc-socket".into(),
+            grpc_socket.to_string_lossy().to_string(),
+            "--tool-ipc-socket".into(),
+            tool_ipc_socket.to_string_lossy().to_string(),
+            "--ready-marker".into(),
+            ready_marker.to_string_lossy().to_string(),
+            "--claude-binary".into(),
+            claude_binary,
+            "--model".into(),
+            model.to_string(),
+            "--permission-mode".into(),
+            perm.to_string(),
+            "--grpc-listen-port".into(),
+            grpc_listen_port.to_string(),
+            "--egress-shim-port".into(),
+            egress_shim_port.to_string(),
+        ];
+
+        let env = crate::sandbox_session::build_sandbox_runner_env(
+            &scratch_home,
+            &scratch_tmp,
+            session_id,
+            &tool_ipc_socket,
+            &egress_dir,
+        );
+
+        let mut handle = crate::sandbox_session::spawn_sandbox_runner(
+            crate::sandbox_session::SandboxRunnerSpawn {
+                project_root: sandbox_root.clone(),
+                scratch_dir: scratch_dir.clone(),
+                egress_dir: egress_dir.clone(),
+                profile_path,
+                runner_argv,
+                env,
+                loopback_allow_ports,
+                ipc_socket: Some(tool_ipc_socket.clone()),
+            },
+        )
+        .map_err(|e| {
+            let logs = tddy_sandbox::format_egress_logs(&egress_dir);
+            let mut status = crate::sandbox_session::sandbox_error_to_status(e);
+            status.message = format!("{}\n{logs}", status.message);
+            status
+        })?;
+
+        crate::sandbox_session::wait_for_sandbox_ready(
+            &mut handle,
+            &ready_marker,
+            std::time::Duration::from_secs(120),
+            &egress_dir,
+        )
+        .await
+        .map_err(|e| {
+            let logs = tddy_sandbox::format_egress_logs(&egress_dir);
+            Status::deadline_exceeded(format!("wait for sandbox ready: {e}\n{logs}"))
+        })?;
+
+        let (stdout_tx, _) = tokio::sync::broadcast::channel(256);
+        let capture = Arc::new(StdMutex::new(Vec::new()));
+        let (stdin_tx, stdin_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        crate::sandbox_session::dial_and_bridge(
+            session_id,
+            worktree_path.to_path_buf(),
+            ready_marker.clone(),
+            self.task_registry.clone(),
+            stdout_tx.clone(),
+            Arc::clone(&capture),
+            stdin_rx,
+        )
+        .await
+        .map_err(|e| {
+            let logs = tddy_sandbox::format_egress_logs(&egress_dir);
+            Status::internal(format!("dial sandbox SessionChannel: {e}\n{logs}"))
+        })?;
+
+        let pid = handle.pid();
+        let state = Arc::new(crate::sandbox_session::SandboxSessionState::new(
+            crate::sandbox_session::SandboxSessionStateInit {
+                pid,
+                worktree_path: worktree_path.to_path_buf(),
+                stdout_tx,
+                capture,
+                stdin_tx,
+                grpc_socket,
+                ready_marker,
+                handle,
+            },
+        ));
+        self.sandbox_manager
+            .insert(session_id.to_string(), state)
+            .await;
+        Ok(pid)
     }
 }
 
@@ -1850,6 +2045,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             os_user
         );
         let projects_dir_opt = projects_path_for_user(os_user, Some(&self.tddy_data_dir));
+        if let Some(sandbox) = self.sandbox_manager.get(session_id).await {
+            sandbox.stop();
+        }
         let _ = self.sandbox_manager.remove(session_id).await;
         session_deletion::delete_session_directory(
             &sessions_base,
@@ -2354,9 +2552,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 return Err(Status::not_found("terminal not found or not running"));
             }
             if !req.data.is_empty() {
-                let _ = sandbox
-                    .stdin_tx
-                    .send(bytes::Bytes::from(req.data));
+                let _ = sandbox.stdin_tx.send(bytes::Bytes::from(req.data));
             }
             return Ok(Response::new(SendTerminalInputResponse {}));
         }
@@ -3587,6 +3783,7 @@ mod report_session_status_unit_tests {
             model: Some("claude-sonnet-4-6".to_string()),
             activity_status: None,
             hook_token: Some(hook_token.to_string()),
+            sandbox: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }

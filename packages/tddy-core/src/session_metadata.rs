@@ -179,6 +179,7 @@ mod tests {
 
                 activity_status: None,
                 hook_token: None,
+                sandbox: None,
             },
         )
         .unwrap();
@@ -224,6 +225,7 @@ mod tests {
 
                 activity_status: None,
                 hook_token: None,
+                sandbox: None,
             },
         )
         .unwrap();

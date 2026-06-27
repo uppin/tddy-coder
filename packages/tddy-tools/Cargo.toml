@@ -71,5 +71,6 @@ serial_test = "3"
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
+tddy-demo-tui = { path = "../tddy-demo-tui" }
 # Relay integration: `start_toolcall_listener` + CLI subprocess (`submit_relay_no_poll`).
 tddy-core = { path = "../tddy-core" }

@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use tokio_stream::wrappers::ReceiverStream;
 use tddy_sandbox::format_egress_logs;
 use tddy_service::proto::connection::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
@@ -12,6 +11,7 @@ use tddy_service::tonic_sandbox::{
     EchoRequest, EchoStreamFrame, HostPoll, SandboxInput, SessionFrame, SubscribeTerminal,
 };
 use tddy_tools::sandbox_runner::{run_sandbox_runner, SandboxRunnerArgs};
+use tokio_stream::wrappers::ReceiverStream;
 
 const SESSION_ID: &str = "sandbox-runner-test-session";
 const TEST_MODEL: &str = "claude-opus-4-8";
@@ -241,7 +241,8 @@ async fn sandbox_runner_echo_stream_bidi_round_trips() {
 
         // Then
         assert_eq!(
-            echoed, echo_message,
+            echoed,
+            echo_message,
             "EchoStream must echo the inbound message\n{}",
             format_egress_logs(&egress)
         );
@@ -390,7 +391,10 @@ async fn sandbox_runner_session_channel_tool_exec_round_trips() {
             "tool IPC must return host response: {parsed}\n{}",
             format_egress_logs(&egress)
         );
-        assert_eq!(parsed.get("is_error").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            parsed.get("is_error").and_then(|v| v.as_bool()),
+            Some(false)
+        );
 
         stop_runner(runner_task).await;
     })

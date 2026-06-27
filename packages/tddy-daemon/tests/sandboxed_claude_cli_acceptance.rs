@@ -12,12 +12,12 @@ use tddy_core::session_metadata::read_session_metadata;
 use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_testing_commons::process_is_alive;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectSessionRequest, ConnectionService as ConnectionServiceTrait, StartSessionRequest,
     StreamTerminalOutputRequest,
 };
+use tddy_testing_commons::process_is_alive;
 
 const VALID_TOKEN: &str = "valid-token";
 const TEST_MODEL: &str = "claude-opus-4-8";
@@ -193,10 +193,7 @@ async fn sandboxed_claude_cli_start_persists_metadata_and_empty_livekit() {
         "sandboxed claude-cli must not allocate LiveKit"
     );
 
-    let session_dir = sessions_tmp
-        .path()
-        .join("sessions")
-        .join(&inner.session_id);
+    let session_dir = sessions_tmp.path().join("sessions").join(&inner.session_id);
     let meta = read_session_metadata(&session_dir).expect(".session.yaml must exist");
     assert_eq!(meta.sandbox, Some(true));
     assert_eq!(meta.session_type.as_deref(), Some("claude-cli"));
@@ -275,19 +272,39 @@ async fn sandboxed_claude_cli_terminal_io_round_trips() {
         .expect("stream_terminal_output must succeed for sandbox session");
     let mut stream = stream_resp.into_inner();
 
-    let saw_argv = tokio::time::timeout(Duration::from_secs(30), async {
+    let terminal_capture = tokio::time::timeout(Duration::from_secs(30), async {
+        let mut saw_argv = false;
+        let mut saw_mcp_allowlist = false;
         while let Some(Ok(msg)) = stream.next().await {
-            if String::from_utf8_lossy(&msg.data).contains("ARGV:") {
-                return true;
+            let text = String::from_utf8_lossy(&msg.data);
+            if text.contains("ARGV:") {
+                saw_argv = true;
+            }
+            if text.contains("--allowedTools")
+                && text.contains("mcp__tddy-tools__Read")
+                && text.contains("--mcp-config")
+                && text.contains("--permission-prompt-tool")
+            {
+                saw_mcp_allowlist = true;
+            }
+            if saw_argv && saw_mcp_allowlist {
+                break;
             }
         }
-        false
+        (saw_argv, saw_mcp_allowlist)
     })
     .await
-    .unwrap_or(false);
+    .unwrap_or((false, false));
 
     // Then
-    assert!(saw_argv, "terminal stream must include stub claude PTY output");
+    assert!(
+        terminal_capture.0,
+        "terminal stream must include stub claude PTY output"
+    );
+    assert!(
+        terminal_capture.1,
+        "stub claude argv must include MCP allowlist flags (mcp__tddy-tools__Read, --mcp-config)"
+    );
 }
 
 /// **sandboxed_claude_cli_tool_exec_via_ipc_reads_host_worktree**: tool IPC inside the sandbox
@@ -305,7 +322,10 @@ async fn sandboxed_claude_cli_tool_exec_via_ipc_reads_host_worktree() {
         ("GIT_COMMITTER_NAME", "Test"),
         ("GIT_COMMITTER_EMAIL", "t@t.com"),
     ];
-    for args in [&["add", "README.md"][..], &["commit", "-m", "add readme"][..]] {
+    for args in [
+        &["add", "README.md"][..],
+        &["commit", "-m", "add readme"][..],
+    ] {
         let mut cmd = std::process::Command::new("git");
         cmd.args(args).current_dir(repo_dir.path());
         for (k, v) in git_env {
@@ -345,7 +365,10 @@ async fn sandboxed_claude_cli_tool_exec_via_ipc_reads_host_worktree() {
 
     // Then
     let parsed: serde_json::Value = serde_json::from_str(&raw).expect("valid tool IPC json");
-    assert_eq!(parsed.get("is_error").and_then(|v| v.as_bool()), Some(false));
+    assert_eq!(
+        parsed.get("is_error").and_then(|v| v.as_bool()),
+        Some(false)
+    );
     let result: serde_json::Value = serde_json::from_str(
         parsed
             .get("result_json")
