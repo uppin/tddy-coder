@@ -145,10 +145,14 @@ async fn list_worktrees_refresh_returns_git_worktree_rows() {
     // Given — a git repo with a secondary worktree, registered in the project registry
     require_git();
     let os_user = std::env::var("USER").expect("USER must be set");
-    let projects_dir = projects_path_for_user(&os_user, None).expect("projects dir");
 
-    // stats root is now derived from the service's tddy_data_dir (base.join("projects"))
-    let service = test_service(tempfile::tempdir().unwrap().path().to_path_buf(), &os_user);
+    // The service derives its projects registry from its tddy_data_dir
+    // (`{tddy_data_dir}/projects/`), so the test must register the project under the
+    // same data dir the service was constructed with — not the profile/global default.
+    let data_dir = tempfile::tempdir().unwrap();
+    let service = test_service(data_dir.path().to_path_buf(), &os_user);
+    let projects_dir =
+        projects_path_for_user(&os_user, Some(data_dir.path())).expect("projects dir");
 
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path().join("main");
@@ -182,7 +186,6 @@ async fn list_worktrees_refresh_returns_git_worktree_rows() {
         host_repo_paths: std::collections::HashMap::new(),
     };
 
-    let prev_projects = project_storage::read_projects(&projects_dir).unwrap_or_default();
     project_storage::add_project(&projects_dir, project).unwrap();
 
     // When
@@ -206,6 +209,4 @@ async fn list_worktrees_refresh_returns_git_worktree_rows() {
         "expected secondary worktree path in response, got {:?}",
         paths
     );
-
-    project_storage::write_projects(&projects_dir, &prev_projects).unwrap();
 }

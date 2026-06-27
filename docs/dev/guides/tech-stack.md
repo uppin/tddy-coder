@@ -116,6 +116,32 @@ With **direnv**: add `use flake` to `.envrc`, run `direnv allow` once, and the e
 
 The dev shell provides: `rustc`, `cargo`, `rustfmt`, `clippy`, `rust-analyzer`.
 
+### Per-machine Cargo config
+
+The committed `.cargo/config.toml` holds **only project-wide, portable settings** (currently the macOS `-ObjC` rustflags that libwebrtc requires). Anything tied to a specific machine — absolute paths, a local crates.io proxy — must **not** be committed, because it breaks every other clone and OS (a hard-coded `/Users/...` path, for example, makes the libwebrtc native build fail on Linux/CI).
+
+Put machine-specific settings in your **per-machine `~/.cargo/config.toml`** instead. Cargo merges it with the project config automatically and it is never part of the repo. Typical contents:
+
+```toml
+# ~/.cargo/config.toml — never committed
+
+# Pre-extracted libwebrtc binaries for the livekit Rust SDK, so the native build
+# skips the GitHub download. The tag must match webrtc-sys-build's WEBRTC_TAG
+# (currently webrtc-51ef663). Point at the dir for YOUR platform:
+[env]
+# macOS:  LK_CUSTOM_WEBRTC = "/Users/<you>/.local/share/livekit-webrtc/mac-arm64-release"
+# Linux:  LK_CUSTOM_WEBRTC = "/home/<you>/.local/share/livekit-webrtc/linux-x64-release"
+LK_CUSTOM_WEBRTC = "/home/<you>/.local/share/livekit-webrtc/linux-x64-release"
+
+# Optional: a local crates.io caching proxy, if you run one.
+# [source.crates-io]
+# replace-with = "crates-io-proxy"
+# [source.crates-io-proxy]
+# registry = "sparse+http://127.0.0.1:3080/index/"
+```
+
+Without `LK_CUSTOM_WEBRTC`, `webrtc-sys` downloads libwebrtc from the livekit GitHub release on the first build (needs network); with it, the build reuses the local copy.
+
 ## Commands Reference
 
 | Action | Command |

@@ -356,7 +356,7 @@ pub fn clone_as_user(os_user: &str, git_url: &str, destination: &Path) -> anyhow
                 if libc::setgid(gid) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
-                if libc::initgroups(pw_name.as_ptr(), gid as libc::c_int) != 0 {
+                if libc::initgroups(pw_name.as_ptr(), gid as _) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
                 if libc::setuid(uid) != 0 {
@@ -591,7 +591,7 @@ pub fn spawn_as_user(
                 if libc::setgid(gid) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
-                if libc::initgroups(pw_name.as_ptr(), gid as libc::c_int) != 0 {
+                if libc::initgroups(pw_name.as_ptr(), gid as _) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
                 if libc::setuid(uid) != 0 {
