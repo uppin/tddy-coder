@@ -35,6 +35,7 @@ users:
 
 fn test_service(sessions_base: PathBuf, os_user: &str) -> ConnectionServiceImpl {
     let config = test_config_for_os_user(os_user);
+    let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver = Arc::new(|token| {
@@ -47,6 +48,7 @@ fn test_service(sessions_base: PathBuf, os_user: &str) -> ConnectionServiceImpl 
     ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
+        tddy_data_dir,
         user_resolver,
         None,
         None,
@@ -99,7 +101,7 @@ async fn list_worktrees_rejects_invalid_session() {
 async fn list_worktrees_unknown_project_not_found() {
     // Given
     let os_user = std::env::var("USER").expect("USER must be set");
-    projects_path_for_user(&os_user).expect("projects path for current user");
+    projects_path_for_user(&os_user, None).expect("projects path for current user");
     let service = test_service(tempfile::tempdir().unwrap().path().to_path_buf(), &os_user);
 
     // When
@@ -143,22 +145,9 @@ async fn list_worktrees_refresh_returns_git_worktree_rows() {
     // Given — a git repo with a secondary worktree, registered in the project registry
     require_git();
     let os_user = std::env::var("USER").expect("USER must be set");
-    let projects_dir = projects_path_for_user(&os_user).expect("projects dir");
+    let projects_dir = projects_path_for_user(&os_user, None).expect("projects dir");
 
-    let tmp_stats = tempfile::tempdir().unwrap();
-    let prev_stats = std::env::var("TDDY_PROJECTS_STATS_ROOT").ok();
-    std::env::set_var(
-        "TDDY_PROJECTS_STATS_ROOT",
-        tmp_stats.path().to_str().expect("utf8 temp"),
-    );
-    let _restore_stats = scopeguard::guard(prev_stats, |p| {
-        if let Some(v) = p {
-            std::env::set_var("TDDY_PROJECTS_STATS_ROOT", v);
-        } else {
-            std::env::remove_var("TDDY_PROJECTS_STATS_ROOT");
-        }
-    });
-
+    // stats root is now derived from the service's tddy_data_dir (base.join("projects"))
     let service = test_service(tempfile::tempdir().unwrap().path().to_path_buf(), &os_user);
 
     let tmp = tempfile::tempdir().unwrap();

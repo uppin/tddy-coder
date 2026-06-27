@@ -83,8 +83,14 @@ fn start_session_prints_session_id_from_daemon_response() {
 
     // When
     let output = tddy_tools_bin()
-        .args(["remote", "start-session", "--session-token", "test-token"])
-        .env("TDDY_RELAY_BASE_DIR", relay_dir.path())
+        .args([
+            "remote",
+            "start-session",
+            "--base-dir",
+            relay_dir.path().to_str().unwrap(),
+            "--session-token",
+            "test-token",
+        ])
         .output()
         .expect("remote start-session must not panic");
 
@@ -139,12 +145,13 @@ fn connect_session_prints_livekit_info_from_daemon_response() {
         .args([
             "remote",
             "connect-session",
+            "--base-dir",
+            relay_dir.path().to_str().unwrap(),
             "--session-id",
             "sess-existing-123",
             "--session-token",
             "test-token",
         ])
-        .env("TDDY_RELAY_BASE_DIR", relay_dir.path())
         .output()
         .expect("remote connect-session must not panic");
 
@@ -203,12 +210,13 @@ fn sync_context_writes_context_files_to_dest_directory() {
         .args([
             "remote",
             "sync-context",
+            "--base-dir",
+            relay_dir.path().to_str().unwrap(),
             "--dest",
             dest_dir.path().to_str().unwrap(),
             "--session-token",
             "test-token",
         ])
-        .env("TDDY_RELAY_BASE_DIR", relay_dir.path())
         .output()
         .expect("remote sync-context must not panic");
 
@@ -275,8 +283,12 @@ fn list_tools_parses_connect_list_exec_tools_response() {
 
     // When
     let output = tddy_tools_bin()
-        .args(["remote", "list-tools"])
-        .env("TDDY_RELAY_BASE_DIR", relay_dir.path())
+        .args([
+            "remote",
+            "list-tools",
+            "--base-dir",
+            relay_dir.path().to_str().unwrap(),
+        ])
         .output()
         .expect("remote list-tools must not panic");
 

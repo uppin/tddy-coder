@@ -108,6 +108,8 @@ pub struct Presenter {
     /// Shared critical state for broadcast lag recovery.
     /// Updated on every GoalStarted/StateChanged; views read after Lagged.
     critical_state: Arc<std::sync::Mutex<CriticalPresenterState>>,
+    /// Tddy data directory root — passed to workflow runner to avoid global state.
+    tddy_data_dir: PathBuf,
 }
 
 fn format_session_id_for_log(id: &str) -> String {
@@ -125,6 +127,7 @@ impl Presenter {
         agent: impl Into<String>,
         model: impl Into<String>,
         workflow_recipe: Arc<dyn WorkflowRecipe>,
+        tddy_data_dir: PathBuf,
     ) -> Self {
         let state = PresenterState {
             agent: agent.into(),
@@ -175,6 +178,7 @@ impl Presenter {
             recipe_resolver: None,
             start_slash_structured_run_active: false,
             critical_state: Arc::new(std::sync::Mutex::new(CriticalPresenterState::default())),
+            tddy_data_dir,
         }
     }
 
@@ -1422,6 +1426,7 @@ impl Presenter {
 
         let model_for_workflow = self.state.model.clone();
         let recipe = self.workflow_recipe.clone();
+        let tddy_data_dir = self.tddy_data_dir.clone();
         let handle = thread::spawn(move || {
             workflow_runner::run_workflow(
                 recipe,
@@ -1438,6 +1443,7 @@ impl Presenter {
                 debug,
                 socket_path,
                 worktree_dir,
+                tddy_data_dir,
             );
         });
 
@@ -1586,33 +1592,14 @@ mod tests {
     use crate::presenter::state::AppMode;
     use crate::{ClarificationQuestion, QuestionOption};
 
-    /// RAII guard that redirects [`crate::output::tddy_data_dir_path`] to an isolated temp
-    /// directory, preventing sessions from being written to `~/.tddy` during tests.
-    /// Tests using this must be annotated with `#[serial_test::serial]`.
-    struct TempSessionsBase {
-        _tmp: tempfile::TempDir,
-    }
-
-    impl TempSessionsBase {
-        fn new() -> Self {
-            let tmp = tempfile::tempdir().expect("TempSessionsBase: create temp dir");
-            crate::output::set_tddy_data_dir_override(Some(tmp.path().to_path_buf()));
-            Self { _tmp: tmp }
-        }
-    }
-
-    impl Drop for TempSessionsBase {
-        fn drop(&mut self) {
-            crate::output::set_tddy_data_dir_override(None);
-        }
-    }
-
     fn make_presenter() -> Presenter {
+        let tmp = tempfile::tempdir().expect("make_presenter: create temp dir");
         Presenter::new(
             "agent",
             "model",
             std::sync::Arc::new(crate::presenter::presenter_test_recipe::EmptyPresenterTestRecipe)
                 as std::sync::Arc<dyn WorkflowRecipe>,
+            tmp.path().to_path_buf(),
         )
     }
 
@@ -2376,21 +2363,24 @@ mod tests {
     /// `/start-*` calls `restart_workflow` while the first run may still be blocked on the first
     /// `answer_rx.recv()` (no `session_dir`, no `initial_prompt`). The old workflow thread must
     /// exit when the answer channel closes so `join()` cannot deadlock.
-    #[serial_test::serial]
     #[test]
     fn start_slash_restart_unblocks_workflow_waiting_for_first_feature_input() {
         use crate::presenter::presenter_test_recipe::EmptyPresenterTestRecipe;
         use crate::{AnyBackend, StubBackend};
 
         // Given
-        let _sessions = TempSessionsBase::new();
         let tmp_guard = tempfile::tempdir().unwrap();
         let tmp = tmp_guard.path().to_path_buf();
 
         let resolver =
             Arc::new(|_: &str| Ok(Arc::new(EmptyPresenterTestRecipe) as Arc<dyn WorkflowRecipe>));
-        let mut p = Presenter::new("stub", "opus", Arc::new(EmptyPresenterTestRecipe))
-            .with_recipe_resolver(resolver);
+        let mut p = Presenter::new(
+            "stub",
+            "opus",
+            Arc::new(EmptyPresenterTestRecipe),
+            tmp.clone(),
+        )
+        .with_recipe_resolver(resolver);
         let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
         p.start_workflow(
             backend,

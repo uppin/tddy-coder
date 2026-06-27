@@ -48,6 +48,9 @@ fn make_service(
 ) -> (ConnectionServiceImpl, tempfile::TempDir, tempfile::TempDir) {
     let (cfg_dir, config) = test_config();
     let sessions = tempfile::tempdir().unwrap();
+    // `tddy_data_dir` is the daemon's resolved tddy home (config-only source of truth). The test
+    // reuses the sessions tempdir path; the TempDir stays alive via the `sessions_base` closure.
+    let tddy_data_dir = sessions.path().to_path_buf();
     let sessions_base: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions.path().to_path_buf()));
     let user_resolver: UserResolver = Arc::new(|token| {
@@ -60,6 +63,7 @@ fn make_service(
     let service = ConnectionServiceImpl::new(
         config,
         sessions_base,
+        tddy_data_dir,
         user_resolver,
         None,
         None,

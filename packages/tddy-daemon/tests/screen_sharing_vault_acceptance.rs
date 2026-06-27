@@ -118,6 +118,7 @@ fn vault_vnc_target_protocol_roundtrips() {
             "192.168.1.100",
             5900,
             "",
+            "",
             Protocol::Vnc,
             &key,
         )
@@ -161,7 +162,7 @@ fn vault_rdp_target_protocol_roundtrips() {
 
     // When — add an RDP target
     let target = vault
-        .add_target("Windows Server", "10.0.0.10", 3389, "", Protocol::Rdp, &key)
+        .add_target("Windows Server", "10.0.0.10", 3389, "", "", Protocol::Rdp, &key)
         .expect("add_target must succeed");
 
     // Then — protocol is preserved in list
@@ -201,7 +202,7 @@ fn vault_add_list_remove_target() {
 
     // When — add a target
     let target = vault
-        .add_target("My Desktop", "192.168.1.100", 5900, "", Protocol::Vnc, &key)
+        .add_target("My Desktop", "192.168.1.100", 5900, "", "", Protocol::Vnc, &key)
         .expect("add_target must succeed");
 
     // Then — it appears in the list
@@ -246,6 +247,7 @@ fn vault_password_encrypt_decrypt_roundtrip() {
             "Secure Desktop",
             "10.0.0.1",
             5901,
+            "",
             "s3cr3t!",
             Protocol::Vnc,
             &key,

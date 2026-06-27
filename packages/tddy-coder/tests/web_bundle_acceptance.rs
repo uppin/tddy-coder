@@ -7,7 +7,6 @@ mod common;
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
 use std::process::Command as StdCommand;
-use tddy_core::output::TDDY_SESSIONS_DIR_ENV;
 
 fn tddy_coder_bin() -> Command {
     cargo_bin_cmd!("tddy-coder")
@@ -154,7 +153,7 @@ fn daemon_with_web_flags_serves_index_html_at_root() {
 
     let child = StdCommand::new(assert_cmd::cargo::cargo_bin!("tddy-coder"))
         .env_clear()
-        .env(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap())
+        .args(["--tddy-data-dir", sessions_base.to_str().unwrap()])
         .args([
             "--agent",
             "stub",

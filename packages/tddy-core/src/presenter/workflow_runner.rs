@@ -366,19 +366,12 @@ fn run_start_goal_without_output_dir(
     debug_output_path: Option<&Path>,
     debug: bool,
     socket_path: Option<&PathBuf>,
+    tddy_data_dir: &Path,
 ) -> Option<PathBuf> {
     let inherit_stdin = false;
     let (output_dir_for_ctx, session_base_opt) = if output_dir == Path::new(".") {
-        match crate::output::tddy_data_dir_path() {
-            Ok(base) => {
-                let agent_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-                (agent_cwd, Some(base))
-            }
-            Err(e) => {
-                let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(format!("{}", e))));
-                return None;
-            }
-        }
+        let agent_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        (agent_cwd, Some(tddy_data_dir.to_path_buf()))
     } else if session_id.is_some() {
         (output_dir.to_path_buf(), Some(output_dir.to_path_buf()))
     } else {
@@ -411,17 +404,11 @@ fn run_start_goal_without_output_dir(
 
     // Recipes whose first task does not run TDD `before_plan` (e.g. bugfix `reproduce` echo) never
     // call `new_session_dir()`; the engine session would then lack `session_dir`. Allocate under
-    // `session_base_opt` or `tddy_data_dir_path()` so context and disk layout match TDD entry.
+    // `session_base_opt` or `tddy_data_dir` so context and disk layout match TDD entry.
     if session_dir.is_none() {
         let base = match session_base_opt.clone() {
             Some(b) => b,
-            None => match crate::output::tddy_data_dir_path() {
-                Ok(b) => b,
-                Err(e) => {
-                    let _ = event_tx.send(WorkflowEvent::WorkflowComplete(Err(format!("{}", e))));
-                    return None;
-                }
-            },
+            None => tddy_data_dir.to_path_buf(),
         };
         if !context_values.contains_key("session_base") {
             context_values.insert(
@@ -656,6 +643,7 @@ pub fn run_workflow(
     debug: bool,
     socket_path: Option<PathBuf>,
     worktree_dir: Option<PathBuf>,
+    tddy_data_dir: PathBuf,
 ) {
     let inherit_stdin = false;
     let initial_prompt_for_ctx = initial_prompt.clone();
@@ -702,6 +690,7 @@ pub fn run_workflow(
                 debug_output_path.as_deref(),
                 debug,
                 socket_path.as_ref(),
+                &tddy_data_dir,
             ) {
                 Some(p) => p,
                 None => return,

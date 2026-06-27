@@ -24,6 +24,7 @@ fn write_config(yaml: &str) -> (tempfile::TempDir, PathBuf) {
 }
 
 fn service_with_config(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceImpl {
+    let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver = Arc::new(|token| {
@@ -36,6 +37,7 @@ fn service_with_config(config: DaemonConfig, sessions_base: PathBuf) -> Connecti
     ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
+        tddy_data_dir,
         user_resolver,
         None,
         None,

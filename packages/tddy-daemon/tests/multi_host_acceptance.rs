@@ -71,17 +71,6 @@ livekit:
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-struct RestoreTddyProjectsDirEnv(Option<String>);
-impl Drop for RestoreTddyProjectsDirEnv {
-    fn drop(&mut self) {
-        let key = tddy_daemon::user_sessions_path::TDDY_PROJECTS_DIR_ENV;
-        match self.0.take() {
-            Some(v) => std::env::set_var(key, v),
-            None => std::env::remove_var(key),
-        }
-    }
-}
-
 fn write_exited_session(session_dir: &std::path::Path, session_id: &str, pid: u32) {
     let metadata = a_session_metadata()
         .with_session_id(session_id)
@@ -245,16 +234,6 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
 
     let os_user = std::env::var("USER").expect("USER required for spawn identity (passwd entry)");
 
-    let projects_tmp = tempfile::tempdir().unwrap();
-    let projects_dir = projects_tmp.path().to_path_buf();
-    std::fs::create_dir_all(&projects_dir).unwrap();
-    let _restore_projects_env = RestoreTddyProjectsDirEnv(
-        std::env::var(tddy_daemon::user_sessions_path::TDDY_PROJECTS_DIR_ENV).ok(),
-    );
-    std::env::set_var(
-        tddy_daemon::user_sessions_path::TDDY_PROJECTS_DIR_ENV,
-        projects_dir.as_os_str(),
-    );
     let project = tddy_daemon::project_storage::ProjectData {
         project_id: REMOTE_ROUTING_PROJECT_ID.to_string(),
         name: "remote-routing".to_string(),
@@ -263,7 +242,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         main_branch_ref: None,
         host_repo_paths: HashMap::new(),
     };
-    tddy_daemon::project_storage::write_projects(&projects_dir, &[project]).unwrap();
+    // Project will be written to sessions_b/projects/ after sessions_b is created below.
 
     let (_tmp_a, path_a) = write_livekit_daemon_yaml(&ws_url, None, &os_user);
     let (_tmp_b, path_b) =
@@ -280,11 +259,15 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     });
 
     let sessions_b = tempfile::tempdir().unwrap();
+    // Register project where connection_service looks: {tddy_data_dir}/projects/
+    let projects_dir_b = sessions_b.path().join("projects");
+    tddy_daemon::project_storage::write_projects(&projects_dir_b, &[project]).unwrap();
     let base_b = sessions_b.path().to_path_buf();
     let resolver_b: SessionsBaseResolver = Arc::new(move |_| Some(base_b.clone()));
     let service_b = ConnectionServiceImpl::new(
         config_b,
         resolver_b,
+        sessions_b.path().to_path_buf(),
         user_resolver.clone(),
         None,
         None,
@@ -335,6 +318,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     let service_a = ConnectionServiceImpl::new(
         config_a,
         resolver_a,
+        sessions_a.path().to_path_buf(),
         user_resolver,
         None,
         Some(

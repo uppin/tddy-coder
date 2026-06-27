@@ -88,7 +88,8 @@ fn service_with_known_remote_peer(
     };
     ConnectionServiceImpl::new(
         config,
-        sessions_resolver(sessions_base),
+        sessions_resolver(sessions_base.clone()),
+        sessions_base,
         user_resolver_valid(),
         None,
         Some(discovery),
@@ -208,6 +209,7 @@ async fn execute_tool_with_unknown_remote_instance_id_returns_invalid_argument()
     let service = ConnectionServiceImpl::new(
         test_config(),
         sessions_resolver(sessions_tmp.path().to_path_buf()),
+        sessions_tmp.path().to_path_buf(),
         user_resolver_valid(),
         None,
         None, // no livekit discovery
@@ -282,6 +284,7 @@ async fn list_exec_tools_with_unknown_instance_id_returns_invalid_argument() {
     let service = ConnectionServiceImpl::new(
         test_config(),
         sessions_resolver(sessions_tmp.path().to_path_buf()),
+        sessions_tmp.path().to_path_buf(),
         user_resolver_valid(),
         None,
         None, // no livekit discovery

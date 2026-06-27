@@ -77,6 +77,7 @@ fn connection_service_with_livekit_discovery(
     let service = ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
+        sessions_tmp.path().to_path_buf(),
         user_resolver,
         None,
         Some(

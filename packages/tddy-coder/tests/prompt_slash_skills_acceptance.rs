@@ -48,7 +48,9 @@ fn write_skill_md(
 }
 
 fn presenter_with_recipe() -> Presenter {
-    Presenter::new("stub", "default", Arc::new(TddRecipe))
+    let tmp = std::env::temp_dir().join(format!("tddy-slash-skills-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).expect("create tmp");
+    Presenter::new("stub", "default", Arc::new(TddRecipe), tmp)
 }
 
 /// **skill_discovery_loads_agents_skills_directories**

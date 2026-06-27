@@ -22,7 +22,6 @@ use tddy_daemon::telegram_session_control::{
     collect_outbound_messages, read_changeset_routing_snapshot, StartClaudeCommand,
     TelegramSessionControlHarness, TelegramWorkflowSpawn, CLAUDE_CLI_MODELS,
 };
-use tddy_daemon::user_sessions_path::TDDY_PROJECTS_DIR_ENV;
 
 const AUTHORIZED_CHAT: i64 = 777_001;
 const TEST_USER_ID: u64 = 42;
@@ -116,6 +115,7 @@ fn build_harness(
         config: Arc::new(config),
         spawn_client: None,
         os_user: "testuser".to_string(),
+        tddy_data_dir: sessions_base.clone(),
         projects_dir_override: Some(projects_dir),
         telegram_hooks: None,
         child_grpc_by_session: Arc::new(Mutex::new(HashMap::new())),
@@ -263,9 +263,7 @@ async fn start_claude_project_then_branch_routes_to_model_keyboard() {
     let projects_tmp = tempfile::tempdir().unwrap();
     register_project(projects_tmp.path(), repo_dir.path());
 
-    // env var is needed by branch callback to list remote branches.
-    std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
-    let _restore = scopeguard::guard((), |_| std::env::remove_var(TDDY_PROJECTS_DIR_ENV));
+    // projects_dir is passed explicitly via TelegramWorkflowSpawn.projects_dir_override
 
     let stub_dir = tempfile::tempdir().unwrap();
     let stub_path = write_echo_argv_script(stub_dir.path());
@@ -366,8 +364,7 @@ async fn start_claude_model_callback_launches_claude_cli() {
     let projects_tmp = tempfile::tempdir().unwrap();
     register_project(projects_tmp.path(), repo_dir.path());
 
-    std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
-    let _restore = scopeguard::guard((), |_| std::env::remove_var(TDDY_PROJECTS_DIR_ENV));
+    // projects_dir is passed explicitly via TelegramWorkflowSpawn.projects_dir_override
 
     let stub_dir = tempfile::tempdir().unwrap();
     let stub_path = write_echo_argv_script(stub_dir.path());
@@ -473,8 +470,7 @@ async fn start_claude_uses_shared_manager() {
     let projects_tmp = tempfile::tempdir().unwrap();
     register_project(projects_tmp.path(), repo_dir.path());
 
-    std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
-    let _restore = scopeguard::guard((), |_| std::env::remove_var(TDDY_PROJECTS_DIR_ENV));
+    // projects_dir is passed explicitly via TelegramWorkflowSpawn.projects_dir_override
 
     let stub_dir = tempfile::tempdir().unwrap();
     let stub_path = write_echo_argv_script(stub_dir.path());

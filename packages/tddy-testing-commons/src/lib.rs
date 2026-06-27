@@ -21,7 +21,7 @@ pub use builders::{
 pub use fakes::{
     mock_backend, mock_backend_returning_ok, mock_backend_returning_outputs, MockBackend,
 };
-pub use fs::{temp_dir_with_git_repo, temp_session_dir, write_session_yaml};
+pub use fs::{tddy_test_home, temp_dir_with_git_repo, temp_session_dir, write_session_yaml};
 
 /// Convenience re-export so converted tests have one path for pretty diffs.
 pub use pretty_assertions::assert_eq;

@@ -43,7 +43,9 @@ pub fn spawn_presenter_with_grpc(
         intent_tx: intent_tx.clone(),
     };
 
-    let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe))
+    let tddy_data_dir =
+        std::env::temp_dir().join(format!("tddy-e2e-grpc-home-{}", uuid::Uuid::new_v4()));
+    let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe), tddy_data_dir)
         .with_broadcast(event_tx)
         .with_intent_sender(intent_tx);
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
@@ -151,7 +153,9 @@ pub fn spawn_presenter_with_grpc_and_tui(
         intent_tx: intent_tx.clone(),
     };
 
-    let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe))
+    let tddy_data_dir =
+        std::env::temp_dir().join(format!("tddy-e2e-grpc-tui-home-{}", uuid::Uuid::new_v4()));
+    let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe), tddy_data_dir)
         .with_broadcast(event_tx.clone())
         .with_intent_sender(intent_tx.clone());
     let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
@@ -358,7 +362,9 @@ fn spawn_presenter_stub_workflow(
         intent_tx: intent_tx.clone(),
     };
 
-    let presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe))
+    let tddy_data_dir =
+        std::env::temp_dir().join(format!("tddy-e2e-vt-home-{}", uuid::Uuid::new_v4()));
+    let presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe), tddy_data_dir)
         .with_broadcast(event_tx)
         .with_intent_sender(intent_tx)
         .with_recipe_resolver(Arc::new(|name: &str| {

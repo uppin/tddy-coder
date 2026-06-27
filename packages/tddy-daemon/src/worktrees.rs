@@ -106,21 +106,10 @@ fn parse_git_worktree_list_line(line: &str) -> Option<WorktreeListRow> {
     })
 }
 
-/// Root directory for persisted per-project worktree stats (`~/.tddy/projects/...` by default).
-/// Override with `TDDY_PROJECTS_STATS_ROOT` for integration tests.
-pub fn projects_stats_cache_root() -> PathBuf {
-    debug!("projects_stats_cache_root: resolving cache root");
-    if let Ok(p) = std::env::var("TDDY_PROJECTS_STATS_ROOT") {
-        info!(
-            "projects_stats_cache_root: using TDDY_PROJECTS_STATS_ROOT={}",
-            p
-        );
-        return PathBuf::from(p);
-    }
-    let home = std::env::var("HOME").expect("HOME must be set for default stats cache root");
-    let root = PathBuf::from(home).join(".tddy").join("projects");
-    info!("projects_stats_cache_root: default {:?}", root);
-    root
+/// Root directory for persisted per-project worktree stats (`{base}/projects/`).
+pub fn projects_stats_cache_root(base: &Path) -> PathBuf {
+    debug!("projects_stats_cache_root: base={:?}", base);
+    base.join("projects")
 }
 
 /// Lexical path normalization (resolves `.` and `..`) without filesystem access.

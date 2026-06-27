@@ -5,7 +5,7 @@ mod writer;
 
 pub use writer::{
     create_session_dir_in, create_session_dir_under, create_session_dir_with_id,
-    inject_cross_references, new_session_dir, plan_artifacts_root, read_impl_session_file,
-    read_session_file, set_tddy_data_dir_override, slugify_directory_name, tddy_data_dir_path,
-    write_impl_session_file, write_session_file, SESSIONS_SUBDIR, TDDY_SESSIONS_DIR_ENV,
+    default_tddy_data_dir, default_tddy_data_dir_for, inject_cross_references, plan_artifacts_root,
+    read_impl_session_file, read_session_file, slugify_directory_name, write_impl_session_file,
+    write_session_file, SESSIONS_SUBDIR,
 };

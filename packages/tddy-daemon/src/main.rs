@@ -119,6 +119,16 @@ fn main() -> anyhow::Result<()> {
     // Apply env overrides (e.g. from .env loaded by web-dev)
     apply_env_overrides(&mut config);
 
+    // Resolve the tddy home data directory: config is the single source of truth.
+    let tddy_data_dir: PathBuf = config
+        .tddy_data_dir
+        .clone()
+        .or_else(tddy_core::output::default_tddy_data_dir)
+        .unwrap_or_else(|| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+            PathBuf::from(home).join(".tddy")
+        });
+
     let (port, bundle_path_opt) = tddy_daemon::startup::startup_config_check(&config, args.relay)?;
     let host = config
         .listen
@@ -150,7 +160,8 @@ fn main() -> anyhow::Result<()> {
             })
             .collect();
 
-    let auth_result = tddy_daemon::auth::build_auth_entries(&config, host.as_str(), port);
+    let auth_result =
+        tddy_daemon::auth::build_auth_entries(&config, host.as_str(), port, &tddy_data_dir);
     let mut rpc_entries = auth_result.entries;
 
     if let Some(ref lk) = config.livekit {
@@ -225,7 +236,10 @@ fn main() -> anyhow::Result<()> {
                     },
                 );
                 if let Some(sessions_base) =
-                    tddy_daemon::user_sessions_path::tddy_data_root_matching_child(&user)
+                    tddy_daemon::user_sessions_path::tddy_data_root_matching_child(
+                        &user,
+                        Some(&tddy_data_dir),
+                    )
                 {
                     #[cfg(unix)]
                     let spawn_for_tg = spawn_client.as_ref().map(|(c, _)| Arc::new(c.clone()));
@@ -239,6 +253,7 @@ fn main() -> anyhow::Result<()> {
                             config: Arc::new(config.clone()),
                             spawn_client: spawn_for_tg,
                             os_user: user.clone(),
+                            tddy_data_dir: tddy_data_dir.clone(),
                             projects_dir_override: None,
                             telegram_hooks: Some(hooks.clone()),
                             child_grpc_by_session: Arc::new(StdMutex::new(HashMap::new())),
@@ -367,10 +382,17 @@ fn main() -> anyhow::Result<()> {
             };
             // Clone before moving into ConnectionServiceImpl — VmService and ScreenSharingService need the same resolver.
             let vm_user_resolver = user_resolver.clone();
+            let sessions_base_resolver: tddy_daemon::connection_service::SessionsBaseResolver = {
+                let dd = tddy_data_dir.clone();
+                Arc::new(move |user: &str| {
+                    tddy_daemon::user_sessions_path::sessions_base_for_user(user, Some(&dd))
+                })
+            };
             let ss_user_resolver = user_resolver.clone();
             let mut connection_impl = tddy_daemon::connection_service::ConnectionServiceImpl::new(
                 config.clone(),
-                Arc::new(tddy_daemon::user_sessions_path::sessions_base_for_user),
+                sessions_base_resolver,
+                tddy_data_dir.clone(),
                 user_resolver,
                 spawn_client,
                 livekit_discovery,
@@ -402,8 +424,11 @@ fn main() -> anyhow::Result<()> {
             // VM lifecycle service — gated on auth being configured (same as ConnectionService).
             let vm_state_file = {
                 let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
-                let base = tddy_daemon::user_sessions_path::tddy_data_root_matching_child(&user)
-                    .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+                let base = tddy_daemon::user_sessions_path::tddy_data_root_matching_child(
+                    &user,
+                    Some(&tddy_data_dir),
+                )
+                .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
                 base.join("vm-registry.json")
             };
             let vm_manager = Arc::new(tddy_vm::VmManager::new(
@@ -422,11 +447,20 @@ fn main() -> anyhow::Result<()> {
             });
 
             // Screen sharing service — vault management + VNC/RDP bridge spawning.
+            // Wire `sessions_base` with the daemon's resolved `tddy_data_dir` so vaults live
+            // under the config-only tddy home (config → profile default → `$HOME/.tddy`),
+            // matching `sessions_base_resolver` above — not a statically-derived `$HOME/.tddy`.
             let ss_key_cache: tddy_daemon::screen_sharing_service::ScreenSharingKeyCache =
                 Arc::new(Mutex::new(HashMap::new()));
+            let ss_sessions_base: tddy_daemon::screen_sharing_service::SessionsBase = {
+                let dd = tddy_data_dir.clone();
+                Arc::new(move |user: &str| {
+                    tddy_daemon::user_sessions_path::sessions_base_for_user(user, Some(&dd))
+                })
+            };
             let ss_svc = tddy_daemon::screen_sharing_service::ScreenSharingServiceImpl::new(
                 ss_user_resolver,
-                Arc::new(tddy_daemon::user_sessions_path::sessions_base_for_user),
+                ss_sessions_base,
                 Arc::clone(&ss_key_cache),
             )
             .with_config(Arc::clone(&config_arc));

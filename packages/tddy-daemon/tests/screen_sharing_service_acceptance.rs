@@ -111,6 +111,7 @@ async fn add_target_before_unlock_is_rejected() {
             port: 5900,
             password: "secret".to_string(),
             protocol: Protocol::Vnc as i32,
+            username: String::new(),
         }))
         .await
         .expect_err("add without unlock must fail");
@@ -155,6 +156,7 @@ async fn unlock_then_add_vnc_target_then_list_returns_vnc_protocol() {
         port: 5900,
         password: String::new(),
         protocol: Protocol::Vnc as i32,
+        username: String::new(),
     }))
     .await
     .expect("add VNC target must succeed");
@@ -215,6 +217,7 @@ async fn unlock_then_add_rdp_target_then_list_returns_rdp_protocol() {
         port: 3389,
         password: String::new(),
         protocol: Protocol::Rdp as i32,
+        username: "tester".to_string(),
     }))
     .await
     .expect("add RDP target must succeed");
@@ -335,6 +338,7 @@ async fn start_stream_returns_screenshare_prefixed_track_and_identity() {
             port: 5900,
             password: String::new(),
             protocol: Protocol::Vnc as i32,
+            username: String::new(),
         }))
         .await
         .expect("add must succeed")

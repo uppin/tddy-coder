@@ -11,7 +11,6 @@ use tddy_core::session_metadata::{read_session_metadata, write_session_metadata,
 use tddy_daemon::claude_cli_session::{ClaudeCliSessionManager, PtyHandle};
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_daemon::user_sessions_path::TDDY_PROJECTS_DIR_ENV;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ListSessionsRequest, ResumeSessionRequest,
@@ -58,6 +57,7 @@ fn minimal_service_with_manager(
     sessions_base: PathBuf,
     manager: Arc<tddy_daemon::claude_cli_session::ClaudeCliSessionManager>,
 ) -> ConnectionServiceImpl {
+    let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: UserResolver = Arc::new(|token| {
@@ -70,6 +70,7 @@ fn minimal_service_with_manager(
     ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
+        tddy_data_dir,
         user_resolver,
         None,
         None,
@@ -152,19 +153,13 @@ async fn wait_for_capture_contains(handle: &Arc<PtyHandle>, needle: &str, timeou
 /// contain `session_type = "claude-cli"` and `model = TEST_MODEL`. The `repo_path` must point to
 /// a real linked git worktree of the project repo (visible in `git worktree list`).
 #[tokio::test]
-#[serial_test::serial]
 async fn claude_cli_session_metadata_fields_persisted() {
     // Given
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
 
-    // Register the project and override the projects path via env var.
-    let projects_tmp = tempfile::tempdir().unwrap();
-    register_project(projects_tmp.path(), repo_dir.path());
-    std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
-    let _restore = scopeguard::guard((), |_| std::env::remove_var(TDDY_PROJECTS_DIR_ENV));
-
     let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     // `/bin/cat` as a stub for `claude` — works in a PTY without the real binary.
     let (_cfg_dir, config) = write_config_with_claude_cli_binary("/bin/cat");
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
@@ -244,18 +239,13 @@ async fn claude_cli_session_metadata_fields_persisted() {
 /// `session_type = "claude-cli"` must return empty `livekit_room`, `livekit_url`, and
 /// `livekit_server_identity` — no LiveKit room is created for these sessions.
 #[tokio::test]
-#[serial_test::serial]
 async fn claude_cli_session_livekit_fields_empty() {
     // Given
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
 
-    let projects_tmp = tempfile::tempdir().unwrap();
-    register_project(projects_tmp.path(), repo_dir.path());
-    std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
-    let _restore = scopeguard::guard((), |_| std::env::remove_var(TDDY_PROJECTS_DIR_ENV));
-
     let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let (_cfg_dir, config) = write_config_with_claude_cli_binary("/bin/cat");
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
@@ -512,15 +502,11 @@ users:
 /// **claude_cli_start_session_requires_project**: `StartSession` with `session_type = "claude-cli"`
 /// and an empty `project_id` must return `INVALID_ARGUMENT`.
 #[tokio::test]
-#[serial_test::serial]
 async fn claude_cli_start_session_requires_project() {
     // Given
-    // Point TDDY_PROJECTS_DIR at an empty temp dir so find_project returns None cleanly.
-    let projects_tmp = tempfile::tempdir().unwrap();
-    std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
-    let _restore = scopeguard::guard((), |_| std::env::remove_var(TDDY_PROJECTS_DIR_ENV));
-
+    // Empty projects dir so find_project returns None cleanly.
     let sessions_tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(sessions_tmp.path().join("projects")).unwrap();
     let (_cfg_dir, config) = write_config_with_claude_cli_binary("/bin/cat");
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
@@ -769,21 +755,17 @@ async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
 /// threads `initial_prompt` down to the PTY process; the shared manager registry holds the
 /// session (proving it is attachable via terminal-stream RPCs).
 #[tokio::test]
-#[serial_test::serial]
 async fn start_session_claude_cli_threads_initial_prompt_from_request() {
     // Given
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
 
-    let projects_tmp = tempfile::tempdir().unwrap();
-    register_project(projects_tmp.path(), repo_dir.path());
-    std::env::set_var(TDDY_PROJECTS_DIR_ENV, projects_tmp.path());
-    let _restore = scopeguard::guard((), |_| std::env::remove_var(TDDY_PROJECTS_DIR_ENV));
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
 
     let stub_dir = tempfile::tempdir().unwrap();
     let stub_path = write_echo_argv_script(stub_dir.path());
 
-    let sessions_tmp = tempfile::tempdir().unwrap();
     let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub_path.to_str().unwrap());
 
     let shared_manager = Arc::new(ClaudeCliSessionManager::new());

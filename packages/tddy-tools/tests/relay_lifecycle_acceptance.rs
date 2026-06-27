@@ -24,8 +24,12 @@ fn remote_list_tools_reads_catalog_from_relay() {
 
     // When
     let mut cmd = tddy_tools_bin();
-    cmd.env("TDDY_RELAY_BASE_DIR", relay_dir.path());
-    cmd.args(["remote", "list-tools"]);
+    cmd.args([
+        "remote",
+        "list-tools",
+        "--base-dir",
+        relay_dir.path().to_str().unwrap(),
+    ]);
 
     // No relay daemon is running in this test environment — the command must fail gracefully.
     let output = cmd
@@ -60,8 +64,12 @@ fn remote_list_tools_does_not_double_start_relay() {
 
     let run = || -> std::process::Output {
         let mut cmd = tddy_tools_bin();
-        cmd.env("TDDY_RELAY_BASE_DIR", relay_dir.path());
-        cmd.args(["remote", "list-tools"]);
+        cmd.args([
+            "remote",
+            "list-tools",
+            "--base-dir",
+            relay_dir.path().to_str().unwrap(),
+        ]);
         cmd.output()
             .expect("tddy-tools remote list-tools must not crash")
     };
@@ -106,8 +114,12 @@ fn remote_list_tools_writes_persistent_discovery_file() {
 
     // When
     let mut cmd = tddy_tools_bin();
-    cmd.env("TDDY_RELAY_BASE_DIR", relay_dir.path());
-    cmd.args(["remote", "list-tools"]);
+    cmd.args([
+        "remote",
+        "list-tools",
+        "--base-dir",
+        relay_dir.path().to_str().unwrap(),
+    ]);
     let output = cmd.output().expect("must not crash");
 
     // Then — without a real relay the command must fail non-zero and not panic.

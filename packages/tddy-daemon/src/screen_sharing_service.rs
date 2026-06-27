@@ -37,7 +37,11 @@ const DEFAULT_STREAM_FPS: u32 = 30;
 pub type ScreenSharingKeyCache = Arc<Mutex<HashMap<String, DerivedKey>>>;
 
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
-type SessionsBase = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
+/// Per-OS-user sessions base resolver: `Arc<dyn Fn(&str) -> Option<PathBuf>>`.
+///
+/// Wired in `main.rs` with the daemon's resolved `tddy_data_dir` (config-only tddy home) so
+/// screen-sharing vaults live under the same data root as session trees, not a static `$HOME/.tddy`.
+pub type SessionsBase = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 
 /// Bridge config serialized to the bridge binary's stdin (field names match `tddy_screenshare::BridgeConfig`).
 #[derive(serde::Serialize)]
@@ -113,6 +117,7 @@ impl ScreenSharingServiceImpl {
     ///
     /// Logs all errors; never returns an error — the caller returns pre-computed LiveKit
     /// coordinates regardless of whether the bridge process spawns successfully.
+    #[allow(clippy::too_many_arguments)]
     async fn try_spawn_bridge(
         &self,
         config: &DaemonConfig,

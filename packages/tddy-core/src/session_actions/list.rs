@@ -63,6 +63,7 @@ pub struct ActionSummary {
 pub fn list_action_summaries(
     session_dir: Option<&Path>,
     repo_root: Option<&Path>,
+    tddy_data_dir: &Path,
     query: &DiscoveryQuery,
 ) -> Result<ActionListResult, SessionActionsError> {
     debug!(
@@ -78,19 +79,17 @@ pub fn list_action_summaries(
 
     // 1. Per-repo store (if we have a repo root to derive the key from).
     if let Some(repo) = repo_root {
-        if let Ok(data_dir) = crate::output::tddy_data_dir_path() {
-            let repo_canon = std::fs::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
-            let key = derive_repo_key(&repo_canon);
-            let store = repo_actions_root(&data_dir, &key);
-            if store.is_dir() {
-                collect_from_root(&store, &store, query, &mut by_path);
-            } else {
-                debug!(
-                    target: "tddy_core::session_actions::list",
-                    "per-repo store does not exist yet: {}",
-                    store.display()
-                );
-            }
+        let repo_canon = std::fs::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
+        let key = derive_repo_key(&repo_canon);
+        let store = repo_actions_root(tddy_data_dir, &key);
+        if store.is_dir() {
+            collect_from_root(&store, &store, query, &mut by_path);
+        } else {
+            debug!(
+                target: "tddy_core::session_actions::list",
+                "per-repo store does not exist yet: {}",
+                store.display()
+            );
         }
     }
 

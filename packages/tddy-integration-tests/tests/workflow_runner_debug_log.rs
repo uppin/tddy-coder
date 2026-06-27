@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 
-use serial_test::serial;
 use tddy_core::presenter::workflow_runner::run_workflow;
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::{MockBackend, SharedBackend, WorkflowRecipe};
@@ -14,7 +13,6 @@ use tddy_workflow_recipes::TddRecipe;
 /// run_plan_without_output_dir; on error the function returns None before
 /// reaching the resolve_log_defaults call.
 #[test]
-#[serial]
 #[cfg(unix)]
 fn debug_log_written_to_session_dir_when_plan_fails() {
     // Given
@@ -47,6 +45,7 @@ fn debug_log_written_to_session_dir_when_plan_fails() {
         false,
         None,
         None,
+        tmp.clone(),
     );
 
     let mut got_error = false;

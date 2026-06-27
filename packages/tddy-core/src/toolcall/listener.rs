@@ -54,6 +54,7 @@ pub fn set_toolcall_log_dir(log_dir: &std::path::Path) {
 pub fn start_toolcall_listener(
     session_dir: Option<PathBuf>,
     repo_root: Option<PathBuf>,
+    tddy_data_dir: PathBuf,
 ) -> Result<
     (
         std::path::PathBuf,
@@ -70,13 +71,14 @@ pub fn start_toolcall_listener(
     let socket_path_cleanup = socket_path.clone();
     let session_dir = Arc::new(session_dir);
     let repo_root = Arc::new(repo_root);
+    let tddy_data_dir = Arc::new(tddy_data_dir);
 
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         rt.block_on(async {
             let listener = UnixListener::bind(&socket_path_cleanup).expect("bind socket");
             path_tx.send(socket_path_cleanup.clone()).ok();
-            accept_loop(listener, tx, session_dir, repo_root).await;
+            accept_loop(listener, tx, session_dir, repo_root, tddy_data_dir).await;
         });
         let _ = std::fs::remove_file(&socket_path_cleanup);
     });
@@ -92,6 +94,7 @@ pub fn start_toolcall_listener(
 pub fn start_toolcall_listener(
     _session_dir: Option<PathBuf>,
     _repo_root: Option<PathBuf>,
+    _tddy_data_dir: PathBuf,
 ) -> Result<
     (
         std::path::PathBuf,
@@ -110,6 +113,7 @@ async fn accept_loop(
     tx: std::sync::mpsc::SyncSender<ToolCallRequest>,
     session_dir: Arc<Option<PathBuf>>,
     repo_root: Arc<Option<PathBuf>>,
+    tddy_data_dir: Arc<PathBuf>,
 ) {
     loop {
         let (stream, _) = match listener.accept().await {
@@ -119,8 +123,9 @@ async fn accept_loop(
         let tx = tx.clone();
         let sd = Arc::clone(&session_dir);
         let rr = Arc::clone(&repo_root);
+        let dd = Arc::clone(&tddy_data_dir);
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, tx, sd, rr).await {
+            if let Err(e) = handle_connection(stream, tx, sd, rr, dd).await {
                 toolcall_log(&format!("[error] connection error: {}", e));
                 log::debug!("[toolcall] connection error: {}", e);
             }
@@ -133,6 +138,7 @@ async fn handle_connection(
     tx: std::sync::mpsc::SyncSender<ToolCallRequest>,
     session_dir: Arc<Option<PathBuf>>,
     repo_root: Arc<Option<PathBuf>>,
+    tddy_data_dir: Arc<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
@@ -201,6 +207,7 @@ async fn handle_connection(
 
         let sd = (*session_dir).clone();
         let rr = (*repo_root).clone();
+        let dd = Arc::clone(&tddy_data_dir);
 
         let discovery_query = DiscoveryQuery {
             path_prefix: wire.path_prefix,
@@ -211,15 +218,13 @@ async fn handle_connection(
 
         let result = tokio::task::spawn_blocking(move || {
             // Compute the per-repo store root (if we have a repo root).
-            let store_root: Option<PathBuf> = rr.as_ref().and_then(|r| {
+            let store_root: Option<PathBuf> = rr.as_ref().map(|r| {
                 let canon = std::fs::canonicalize(r).unwrap_or_else(|_| r.clone());
                 let key = derive_repo_key(&canon);
-                crate::output::tddy_data_dir_path()
-                    .ok()
-                    .map(|d| repo_actions_root(&d, &key))
+                repo_actions_root(&dd, &key)
             });
 
-            list_action_summaries(sd.as_deref(), rr.as_deref(), &discovery_query)
+            list_action_summaries(sd.as_deref(), rr.as_deref(), &dd, &discovery_query)
                 .map(|result| (result, store_root))
         })
         .await;
@@ -268,14 +273,13 @@ async fn handle_connection(
 
         let sd = (*session_dir).clone();
         let rr = (*repo_root).clone();
+        let dd = Arc::clone(&tddy_data_dir);
 
         let result = tokio::task::spawn_blocking(move || {
-            let store_root: Option<PathBuf> = rr.as_ref().and_then(|r| {
+            let store_root: Option<PathBuf> = rr.as_ref().map(|r| {
                 let canon = std::fs::canonicalize(r).unwrap_or_else(|_| r.clone());
                 let key = derive_repo_key(&canon);
-                crate::output::tddy_data_dir_path()
-                    .ok()
-                    .map(|d| repo_actions_root(&d, &key))
+                repo_actions_root(&dd, &key)
             });
 
             invoke_action_core(

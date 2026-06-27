@@ -265,7 +265,7 @@ async fn receive_next_qr_frame(client: &mut VncClientState, prev: Option<&str>) 
 async fn frames_stream_with_incrementing_qr_content() {
     // Given: fake VNC server generating one QR code per FramebufferUpdateRequest
     let server = FakeVncServer::start().await;
-    let mut client = VncClientState::connect("127.0.0.1", server.port, None, None)
+    let mut client = VncClientState::connect("127.0.0.1", server.port, None)
         .await
         .expect("VNC connect failed");
     wait_for_dimensions(&mut client).await;
@@ -290,7 +290,7 @@ async fn frames_stream_with_incrementing_qr_content() {
 async fn framebuffer_dimensions_match_server_init() {
     // Given: fake VNC server advertising 256×256
     let server = FakeVncServer::start().await;
-    let mut client = VncClientState::connect("127.0.0.1", server.port, None, None)
+    let mut client = VncClientState::connect("127.0.0.1", server.port, None)
         .await
         .unwrap();
 
@@ -305,7 +305,7 @@ async fn framebuffer_dimensions_match_server_init() {
 async fn inject_pointer_is_recorded_by_server() {
     // Given: connected client
     let server = FakeVncServer::start().await;
-    let mut client = VncClientState::connect("127.0.0.1", server.port, None, None)
+    let mut client = VncClientState::connect("127.0.0.1", server.port, None)
         .await
         .unwrap();
     wait_for_dimensions(&mut client).await;
@@ -324,7 +324,7 @@ async fn inject_pointer_is_recorded_by_server() {
 async fn inject_key_is_recorded_by_server() {
     // Given: connected client
     let server = FakeVncServer::start().await;
-    let mut client = VncClientState::connect("127.0.0.1", server.port, None, None)
+    let mut client = VncClientState::connect("127.0.0.1", server.port, None)
         .await
         .unwrap();
     wait_for_dimensions(&mut client).await;
@@ -343,7 +343,7 @@ async fn inject_key_is_recorded_by_server() {
 async fn stop_closes_connection_cleanly() {
     // Given: connected client
     let server = FakeVncServer::start().await;
-    let mut client = VncClientState::connect("127.0.0.1", server.port, None, None)
+    let mut client = VncClientState::connect("127.0.0.1", server.port, None)
         .await
         .unwrap();
     wait_for_dimensions(&mut client).await;

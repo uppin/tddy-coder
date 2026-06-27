@@ -20,8 +20,8 @@ pub struct RemoteArgs {
 pub enum RemoteSubcommand {
     /// List available remote tools from the relay daemon.
     ///
-    /// Reads the relay discovery file (`daemon.json`) from `--base-dir` or `TDDY_RELAY_BASE_DIR`
-    /// (default: `~/.tddy/relay/`). Contacts the relay daemon via HTTP Connect RPC and prints
+    /// Reads the relay discovery file (`daemon.json`) from `--base-dir`
+    /// (default: `~/.tddy/relay/` in release, `tmp/.tddy/relay/` in debug). Contacts the relay daemon via HTTP Connect RPC and prints
     /// the tool names. If no relay is running, prints a clear error to stderr and exits non-zero.
     ListTools(ListToolsArgs),
 
@@ -44,7 +44,7 @@ pub enum RemoteSubcommand {
 /// Args for `remote list-tools`.
 #[derive(Parser)]
 pub struct ListToolsArgs {
-    /// Base directory for the relay discovery file. Defaults to `TDDY_RELAY_BASE_DIR` or `~/.tddy/relay/`.
+    /// Base directory for the relay discovery file. Defaults to `~/.tddy/relay/` (release) or `tmp/.tddy/relay/` (debug).
     #[arg(long, value_name = "DIR")]
     pub base_dir: Option<PathBuf>,
 
@@ -56,7 +56,7 @@ pub struct ListToolsArgs {
 /// Args for `remote start-session`.
 #[derive(Parser)]
 pub struct StartSessionArgs {
-    /// Base directory for the relay discovery file. Defaults to `TDDY_RELAY_BASE_DIR` or `~/.tddy/relay/`.
+    /// Base directory for the relay discovery file. Defaults to `~/.tddy/relay/` (release) or `tmp/.tddy/relay/` (debug).
     #[arg(long, value_name = "DIR")]
     pub base_dir: Option<PathBuf>,
 
@@ -68,7 +68,7 @@ pub struct StartSessionArgs {
 /// Args for `remote connect-session`.
 #[derive(Parser)]
 pub struct ConnectSessionArgs {
-    /// Base directory for the relay discovery file. Defaults to `TDDY_RELAY_BASE_DIR` or `~/.tddy/relay/`.
+    /// Base directory for the relay discovery file. Defaults to `~/.tddy/relay/` (release) or `tmp/.tddy/relay/` (debug).
     #[arg(long, value_name = "DIR")]
     pub base_dir: Option<PathBuf>,
 
@@ -84,7 +84,7 @@ pub struct ConnectSessionArgs {
 /// Args for `remote sync-context`.
 #[derive(Parser)]
 pub struct SyncContextArgs {
-    /// Base directory for the relay discovery file. Defaults to `TDDY_RELAY_BASE_DIR` or `~/.tddy/relay/`.
+    /// Base directory for the relay discovery file. Defaults to `~/.tddy/relay/` (release) or `tmp/.tddy/relay/` (debug).
     #[arg(long, value_name = "DIR")]
     pub base_dir: Option<PathBuf>,
 
@@ -149,7 +149,7 @@ fn resolve_base_url(base_dir: Option<PathBuf>) -> anyhow::Result<String> {
     if !discovery_path.exists() {
         anyhow::bail!(
             "no relay discovery file found at {}. \
-             Start a tddy-daemon relay first or set TDDY_RELAY_BASE_DIR.",
+             Start a tddy-daemon relay first, or use --base-dir to specify the relay directory.",
             discovery_path.display()
         );
     }
@@ -338,12 +338,10 @@ fn resolve_base_dir(override_dir: Option<PathBuf>) -> PathBuf {
     if let Some(d) = override_dir {
         return d;
     }
-    if let Ok(env_dir) = std::env::var("TDDY_RELAY_BASE_DIR") {
-        return PathBuf::from(env_dir);
-    }
-    // Default: ~/.tddy/relay/
-    if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home).join(".tddy").join("relay");
-    }
-    PathBuf::from(".tddy/relay")
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    tddy_core::output::default_tddy_data_dir()
+        .map(|b| b.join("relay"))
+        .unwrap_or_else(|| home.join(".tddy").join("relay"))
 }

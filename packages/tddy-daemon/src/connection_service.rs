@@ -257,7 +257,10 @@ enum DemoVmHandle {
 /// ConnectionService implementation.
 pub struct ConnectionServiceImpl {
     config: DaemonConfig,
+    #[allow(dead_code)]
+    // Kept for API compatibility; callers pass a resolver but tddy_data_dir is used directly.
     sessions_base_for_user: SessionsBaseResolver,
+    tddy_data_dir: PathBuf,
     user_resolver: SessionUserResolver,
     spawn_client: Option<Arc<spawn_worker::SpawnClient>>,
     eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
@@ -275,9 +278,11 @@ pub struct ConnectionServiceImpl {
 }
 
 impl ConnectionServiceImpl {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: DaemonConfig,
         sessions_base_for_user: SessionsBaseResolver,
+        tddy_data_dir: PathBuf,
         user_resolver: SessionUserResolver,
         spawn_client: Option<(spawn_worker::SpawnClient, i32)>,
         livekit_discovery: Option<LiveKitDiscoveryHandles>,
@@ -293,13 +298,14 @@ impl ConnectionServiceImpl {
             ),
         };
         let worktree_stats_cache = Arc::new(WorktreeStatsCache::new(
-            worktrees::projects_stats_cache_root(),
+            worktrees::projects_stats_cache_root(&tddy_data_dir),
         ));
         let task_registry = TaskRegistry::new();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         Self {
             config,
             sessions_base_for_user,
+            tddy_data_dir,
             user_resolver,
             spawn_client,
             eligible_daemon_source,
@@ -379,7 +385,7 @@ impl ConnectionServiceImpl {
                 "project_id is required for claude-cli sessions",
             ));
         }
-        let projects_dir = projects_path_for_user(os_user)
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
         let project = project_storage::find_project(&projects_dir, project_id)
             .map_err(|e| Status::internal(e.to_string()))?
@@ -789,8 +795,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let sessions_base = (self.sessions_base_for_user)(os_user)
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let timeout = self.config.spawn_worker_request_timeout();
         let sessions_base_blocking = sessions_base.clone();
         let local_daemon_id = local_instance_id_for_config(&self.config);
@@ -856,7 +863,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let projects_dir = projects_path_for_user(os_user)
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
         let projects = project_storage::read_projects(&projects_dir)
             .map_err(|e| Status::internal(e.to_string()))?;
@@ -909,7 +916,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Err(Status::invalid_argument("git_url is required"));
         }
 
-        let projects_dir = projects_path_for_user(os_user)
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
 
         let user_rel = req.user_relative_path.trim();
@@ -1040,8 +1047,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         // --- workspace branch: no LiveKit, no PTY; resolves project, creates a git worktree ---
         if req.session_type.trim() == "workspace" {
-            let sessions_base = (self.sessions_base_for_user)(os_user)
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
+                os_user,
+                Some(&self.tddy_data_dir),
+            )
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
             let session_id = Uuid::now_v7().to_string();
             let timeout = self.config.spawn_worker_request_timeout();
             return workspace_session::start_workspace_session(
@@ -1049,6 +1059,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 &session_id,
                 sessions_base,
                 req.project_id.trim(),
+                &self.tddy_data_dir,
                 timeout,
             )
             .await;
@@ -1056,8 +1067,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         // --- claude-cli branch: no LiveKit; resolves project and creates a real git worktree ---
         if req.session_type.trim() == "claude-cli" {
-            let sessions_base = (self.sessions_base_for_user)(os_user)
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
+                os_user,
+                Some(&self.tddy_data_dir),
+            )
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
             let session_id = Uuid::now_v7().to_string();
             return self
                 .start_claude_cli_session(
@@ -1084,7 +1098,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Err(Status::invalid_argument("project_id is required"));
         }
 
-        let projects_dir = projects_path_for_user(os_user)
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
         let project = project_storage::find_project(&projects_dir, project_id_req)
             .map_err(|e| Status::internal(e.to_string()))?
@@ -1205,8 +1219,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let sessions_base = (self.sessions_base_for_user)(os_user)
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
@@ -1260,8 +1275,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let sessions_base = (self.sessions_base_for_user)(os_user)
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
@@ -1369,8 +1385,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let sessions_base = (self.sessions_base_for_user)(os_user)
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
 
@@ -1453,14 +1470,15 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let sessions_base = (self.sessions_base_for_user)(os_user)
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         log::debug!(
             "DeleteSession: resolved sessions_base={:?} for os_user={}",
             sessions_base,
             os_user
         );
-        let projects_dir_opt = projects_path_for_user(os_user);
+        let projects_dir_opt = projects_path_for_user(os_user, Some(&self.tddy_data_dir));
         session_deletion::delete_session_directory(
             &sessions_base,
             session_id,
@@ -1512,8 +1530,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let sessions_base = (self.sessions_base_for_user)(os_user)
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
@@ -1552,8 +1571,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let sessions_base = (self.sessions_base_for_user)(os_user)
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
@@ -1589,7 +1609,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Err(Status::invalid_argument("project_id is required"));
         }
 
-        let projects_dir = projects_path_for_user(os_user)
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
         project_storage::find_project(&projects_dir, project_id)
             .map_err(|e| Status::internal(e.to_string()))?
@@ -2054,7 +2074,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Err(Status::invalid_argument("worktree_path is required"));
         }
 
-        let projects_dir = projects_path_for_user(os_user)
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
         project_storage::find_project(&projects_dir, project_id)
             .map_err(|e| Status::internal(e.to_string()))?
@@ -2118,7 +2138,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Err(Status::invalid_argument("project_id is required"));
         }
 
-        let projects_dir = projects_path_for_user(os_user)
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
         let project = project_storage::find_project(&projects_dir, project_id)
             .map_err(|e| Status::internal(e.to_string()))?
@@ -2219,8 +2239,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .map_err(|e| Status::invalid_argument(e.message()))?;
 
         // Resolve the sessions base and the session's worktree root.
-        let sessions_base = (self.sessions_base_for_user)(os_user)
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
 
         let worktree_root =
             workspace_session::resolve_worktree_root_for_session(&sessions_base, &req.session_id)?;
@@ -2423,8 +2444,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .map_err(|e| Status::invalid_argument(e.message()))?;
 
         // Resolve the sessions base path.
-        let sessions_base = (self.sessions_base_for_user)(os_user)
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
 
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
 
@@ -2462,8 +2484,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::invalid_argument(format!("unknown status: {}", req.status)))?;
 
         // Resolve sessions_base from os_user (no web session token available for hooks).
-        let sessions_base = (self.sessions_base_for_user)(&req.os_user)
-            .ok_or_else(|| Status::not_found("unknown os_user or sessions_base not found"))?;
+        let sessions_base = crate::user_sessions_path::sessions_base_for_user(
+            &req.os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::not_found("unknown os_user or sessions_base not found"))?;
 
         let session_dir = tddy_core::unified_session_dir_path(&sessions_base, &req.session_id);
 
@@ -2520,8 +2545,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let sessions_base = (self.sessions_base_for_user)(os_user)
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
@@ -2823,6 +2849,7 @@ mod signal_session_unit_tests {
         ConnectionServiceImpl::new(
             config,
             sessions_base_resolver,
+            sessions_base.clone(),
             user_resolver,
             None,
             None,
@@ -2947,6 +2974,7 @@ mod delete_session_unit_tests {
         ConnectionServiceImpl::new(
             config,
             sessions_base_resolver,
+            sessions_base.clone(),
             user_resolver,
             None,
             None,
@@ -3000,6 +3028,7 @@ mod list_sessions_unit_tests {
         ConnectionServiceImpl::new(
             config,
             sessions_base_resolver,
+            sessions_base.clone(),
             user_resolver,
             None,
             None,
@@ -3089,6 +3118,7 @@ mod report_session_status_unit_tests {
         ConnectionServiceImpl::new(
             config,
             sessions_base_resolver,
+            sessions_base,
             user_resolver,
             None,
             None,

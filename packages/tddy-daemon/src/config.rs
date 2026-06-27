@@ -100,6 +100,10 @@ pub struct DaemonConfig {
     /// forwards RPCs to a remote peer via LiveKit.
     #[serde(default)]
     pub relay: Option<RelayConfig>,
+    /// Override the tddy home data directory. When absent, the profile default is used
+    /// (`tmp/.tddy` in debug builds, `$HOME/.tddy` in release builds).
+    #[serde(default)]
+    pub tddy_data_dir: Option<PathBuf>,
     /// Screen-sharing bridge binary configuration (VNC + RDP paths).
     #[serde(default)]
     pub screen_sharing: Option<ScreenSharingConfig>,
@@ -133,6 +137,7 @@ impl Default for DaemonConfig {
             telegram: None,
             claude_cli: None,
             relay: None,
+            tddy_data_dir: None,
             screen_sharing: None,
             debug: None,
         }

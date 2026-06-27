@@ -281,6 +281,7 @@ impl ScreenSharingVault {
     ///
     /// `password` is encrypted with `key` before being persisted. An empty
     /// `password` is valid (password-less target).
+    #[allow(clippy::too_many_arguments)]
     pub fn add_target(
         &mut self,
         label: &str,

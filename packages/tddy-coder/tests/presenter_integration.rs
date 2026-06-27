@@ -4,7 +4,6 @@
 
 mod common;
 
-use serial_test::serial;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,7 +12,7 @@ use async_trait::async_trait;
 use tddy_coder::{ActivityEntry, AppMode, Presenter, UserIntent};
 use tddy_core::{
     backend::{CodingBackend, InvokeRequest, InvokeResponse},
-    output::{SESSIONS_SUBDIR, TDDY_SESSIONS_DIR_ENV},
+    output::SESSIONS_SUBDIR,
     post_workflow_github_pr_operator_elicitation_pending, read_changeset,
     should_reprompt_github_pr_on_resume, write_changeset, write_initial_tool_session_metadata,
     BackendError, ChangesetWorkflow, InitialToolSessionMetadataOpts, PresenterEvent, SharedBackend,
@@ -77,19 +76,26 @@ impl EventCollector {
 }
 
 /// Creates a Presenter with broadcast and an EventCollector for assertions.
-fn presenter_with_events() -> (Presenter, EventCollector) {
+fn presenter_with_events(tddy_data_dir: PathBuf) -> (Presenter, EventCollector) {
     let (event_tx, event_rx) = broadcast::channel(256);
-    let presenter = Presenter::new("stub", "default", Arc::new(TddRecipe)).with_broadcast(event_tx);
+    let presenter = Presenter::new("stub", "default", Arc::new(TddRecipe), tddy_data_dir)
+        .with_broadcast(event_tx);
     let collector = EventCollector::new(event_rx);
     (presenter, collector)
 }
 
-fn bugfix_presenter_with_events() -> (Presenter, EventCollector) {
+fn bugfix_presenter_with_events(tddy_data_dir: PathBuf) -> (Presenter, EventCollector) {
     let (event_tx, event_rx) = broadcast::channel(256);
-    let presenter =
-        Presenter::new("stub", "default", Arc::new(BugfixRecipe)).with_broadcast(event_tx);
+    let presenter = Presenter::new("stub", "default", Arc::new(BugfixRecipe), tddy_data_dir)
+        .with_broadcast(event_tx);
     let collector = EventCollector::new(event_rx);
     (presenter, collector)
+}
+
+fn fresh_tddy_home(label: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("tddy-pi-{}-{}", label, uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).expect("create fresh_tddy_home");
+    dir
 }
 
 fn create_stub_backend() -> SharedBackend {
@@ -142,10 +148,9 @@ fn create_asserting_repo_backend() -> SharedBackend {
 
 /// Full workflow scenario: SubmitFeatureInput → run to completion → assert WorkflowComplete(Ok).
 #[test]
-#[serial]
 fn full_workflow_completes_with_stub_backend() {
     // Given
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(fresh_tddy_home("full-wf"));
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-full");
 
@@ -233,15 +238,16 @@ fn full_workflow_completes_with_stub_backend() {
 
 /// Baseline: TDD recipe reaches `plan` after the user submits feature text with no initial prompt.
 #[test]
-#[serial]
 fn tdd_workflow_starts_plan_after_feature_submit() {
     // Given
-    let sessions_base = std::env::temp_dir().join("tddy-presenter-tdd-feature-submit");
+    let sessions_base = std::env::temp_dir().join(format!(
+        "tddy-presenter-tdd-feature-submit-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
-    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
 
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(sessions_base.clone());
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-tdd-start");
 
@@ -260,7 +266,6 @@ fn tdd_workflow_starts_plan_after_feature_submit() {
         events.drain();
         for e in events.events() {
             if let TestEvent::WorkflowComplete(Err(msg)) = e {
-                std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
                 panic!("tdd workflow failed before plan: {}", msg);
             }
         }
@@ -285,7 +290,6 @@ fn tdd_workflow_starts_plan_after_feature_submit() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
-    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
     // Then
     assert!(
         saw_plan,
@@ -299,15 +303,16 @@ fn tdd_workflow_starts_plan_after_feature_submit() {
 /// Bugfix recipe: after the user submits feature text (same as pressing Enter in the TUI), the
 /// workflow must emit [`GoalStarted`] for `reproduce` instead of failing during session bootstrap.
 #[test]
-#[serial]
 fn bugfix_workflow_starts_reproduce_after_feature_submit() {
     // Given
-    let sessions_base = std::env::temp_dir().join("tddy-presenter-bugfix-feature-submit");
+    let sessions_base = std::env::temp_dir().join(format!(
+        "tddy-presenter-bugfix-feature-submit-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
-    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
 
-    let (mut presenter, mut events) = bugfix_presenter_with_events();
+    let (mut presenter, mut events) = bugfix_presenter_with_events(sessions_base.clone());
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-bugfix-start");
 
@@ -328,7 +333,6 @@ fn bugfix_workflow_starts_reproduce_after_feature_submit() {
         events.drain();
         for e in events.events() {
             if let TestEvent::WorkflowComplete(Err(msg)) = e {
-                std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
                 panic!("bugfix workflow failed before reproduce goal: {}", msg);
             }
         }
@@ -353,7 +357,6 @@ fn bugfix_workflow_starts_reproduce_after_feature_submit() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
-    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
     // Then
     assert!(
         saw_reproduce,
@@ -366,15 +369,16 @@ fn bugfix_workflow_starts_reproduce_after_feature_submit() {
 
 /// Bugfix graph starts at **`interview`**: presenter must emit **`GoalStarted(interview)`** before **`reproduce`**.
 #[test]
-#[serial]
 fn bugfix_workflow_emits_interview_before_reproduce() {
     // Given
-    let sessions_base = std::env::temp_dir().join("tddy-presenter-bugfix-interview-order");
+    let sessions_base = std::env::temp_dir().join(format!(
+        "tddy-presenter-bugfix-interview-order-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
-    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
 
-    let (mut presenter, mut events) = bugfix_presenter_with_events();
+    let (mut presenter, mut events) = bugfix_presenter_with_events(sessions_base.clone());
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-bugfix-interview-order");
 
@@ -395,7 +399,6 @@ fn bugfix_workflow_emits_interview_before_reproduce() {
         events.drain();
         for e in events.events() {
             if let TestEvent::WorkflowComplete(Err(msg)) = e {
-                std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
                 panic!("bugfix workflow failed before reproduce goal: {}", msg);
             }
         }
@@ -420,7 +423,6 @@ fn bugfix_workflow_emits_interview_before_reproduce() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
-    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
     // Then
     assert!(
         saw_reproduce,
@@ -456,20 +458,20 @@ fn bugfix_workflow_emits_interview_before_reproduce() {
 /// `workflow_result` is still unset. The next `SubmitFeatureInput` gets `SendError` on `answer_tx`
 /// and is misrouted through `restart_workflow` (must reuse `workflow_session_dir` so no extra folder).
 #[test]
-#[serial]
 fn bugfix_preloaded_then_first_typed_submit_without_poll_spawns_extra_session_dir() {
     // Given
-    let sessions_base =
-        std::env::temp_dir().join("tddy-presenter-bugfix-preload-first-submit-race");
+    let sessions_base = std::env::temp_dir().join(format!(
+        "tddy-presenter-bugfix-preload-first-submit-race-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
-    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
 
     let fixed_sid = "019d38cf-b74f-7d40-93ae-dcc2bf3f6936";
     let session_path = sessions_base.join(SESSIONS_SUBDIR).join(fixed_sid);
     std::fs::create_dir_all(&session_path).expect("pre-created session dir");
 
-    let (mut presenter, mut events) = bugfix_presenter_with_events();
+    let (mut presenter, mut events) = bugfix_presenter_with_events(sessions_base.clone());
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-bugfix-preload-race");
 
@@ -526,7 +528,6 @@ fn bugfix_preloaded_then_first_typed_submit_without_poll_spawns_extra_session_di
         .filter(|e| e.path().is_dir())
         .count();
 
-    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
     assert_eq!(
         dir_count, 1,
         "only the bound session directory may exist under sessions/; extra directories indicate \
@@ -539,22 +540,23 @@ fn bugfix_preloaded_then_first_typed_submit_without_poll_spawns_extra_session_di
 
 /// After a bugfix run completes, the user often submits another feature from the same web or CLI
 /// session folder. `restart_workflow` must pass that session directory into `run_workflow` so the
-/// second run does not silently allocate a new UUID directory under `TDDY_SESSIONS_DIR` (which makes
+/// second run does not silently allocate a new UUID directory under tddy_data_dir (which makes
 /// the original path look abandoned and resembles a failed start).
 #[test]
-#[serial]
 fn bugfix_second_run_reuses_presenter_session_dir_after_workflow_complete() {
     // Given
-    let sessions_base = std::env::temp_dir().join("tddy-presenter-bugfix-reuse-fixed-session-dir");
+    let sessions_base = std::env::temp_dir().join(format!(
+        "tddy-presenter-bugfix-reuse-fixed-session-dir-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
-    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
 
     let fixed_sid = "019d38cf-b74f-7d40-93ae-dcc2bf3f6936";
     let session_path = sessions_base.join(SESSIONS_SUBDIR).join(fixed_sid);
     std::fs::create_dir_all(&session_path).expect("pre-created session dir");
 
-    let (mut presenter, mut events) = bugfix_presenter_with_events();
+    let (mut presenter, mut events) = bugfix_presenter_with_events(sessions_base.clone());
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-bugfix-reuse");
 
@@ -603,7 +605,6 @@ fn bugfix_second_run_reuses_presenter_session_dir_after_workflow_complete() {
         events.drain();
         for e in events.events() {
             if let TestEvent::WorkflowComplete(Err(msg)) = e {
-                std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
                 panic!("second bugfix workflow failed: {}", msg);
             }
         }
@@ -626,7 +627,6 @@ fn bugfix_second_run_reuses_presenter_session_dir_after_workflow_complete() {
         }
     });
 
-    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
     assert_eq!(
         last_session_dir,
         Some(session_path.clone()),
@@ -639,10 +639,9 @@ fn bugfix_second_run_reuses_presenter_session_dir_after_workflow_complete() {
 /// Acceptance: SubmitFeatureInput after completion spawns new workflow.
 /// Workflow completes -> FeatureInput -> user submits new feature -> new workflow runs to completion.
 #[test]
-#[serial]
 fn submit_feature_input_after_completion_restarts_workflow() {
     // Given
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(fresh_tddy_home("restart-wf"));
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-restart");
 
@@ -745,18 +744,19 @@ fn submit_feature_input_after_completion_restarts_workflow() {
 /// When output_dir is "." (TUI default), session_dir must be under tddy_data_dir_path (~/.tddy/sessions),
 /// not under the resolved current_dir. MDs (PRD.md, progress.md, etc.) go to session_dir.
 #[test]
-#[serial]
 fn session_dir_under_sessions_base_when_output_dir_is_dot() {
     // Given
-    let sessions_base = std::env::temp_dir().join("tddy-session-dir-test-sessions");
+    let sessions_base = std::env::temp_dir().join(format!(
+        "tddy-session-dir-test-sessions-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("create sessions base");
     let sessions_base_str = sessions_base.to_str().expect("path");
-    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base_str);
 
     let (repo_dir, _) = common::temp_dir_with_git_repo("session-dir-test");
 
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(sessions_base.clone());
     let backend = create_stub_backend();
 
     let original_cwd = std::env::current_dir().expect("cwd");
@@ -843,18 +843,17 @@ fn session_dir_under_sessions_base_when_output_dir_is_dot() {
 /// When session_dir is under sessions (output_dir "."), RefinePlan must use repo_path from changeset
 /// for output_dir, not session_dir.parent(). AssertingRepoBackend fails if plan working_dir lacks .git.
 #[test]
-#[serial]
 fn session_dir_under_sessions_refine_uses_repo_as_working_dir() {
     // Given
-    let sessions_base = std::env::temp_dir().join("tddy-plan-refine-sessions");
+    let sessions_base =
+        std::env::temp_dir().join(format!("tddy-plan-refine-sessions-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("create sessions base");
     let sessions_base_str = sessions_base.to_str().expect("path");
-    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base_str);
 
     let (repo_dir, _) = common::temp_dir_with_git_repo("plan-refine-repo");
 
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(sessions_base.clone());
     let backend = create_asserting_repo_backend();
 
     let original_cwd = std::env::current_dir().expect("cwd");
@@ -939,10 +938,9 @@ fn session_dir_under_sessions_refine_uses_repo_as_working_dir() {
 
 /// Clarification scenario: StubBackend with CLARIFY → AnswerSelect → assert answers sent.
 #[test]
-#[serial]
 fn clarification_roundtrip_sends_answers() {
     // Given
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(fresh_tddy_home("clarify"));
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-clarify");
 
@@ -1007,10 +1005,9 @@ fn clarification_roundtrip_sends_answers() {
 
 /// Inbox scenario: QueuePrompt during Running → WorkflowComplete → assert dequeued.
 #[test]
-#[serial]
 fn inbox_queue_and_dequeue() {
     // Given
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(fresh_tddy_home("inbox"));
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-inbox");
 
@@ -1071,10 +1068,9 @@ fn inbox_queue_and_dequeue() {
 
 /// Plan approval: After plan completes, DocumentReview mode appears. ApprovePlan proceeds to next step.
 #[test]
-#[serial]
 fn plan_approval_approve_proceeds_to_next_step() {
     // Given
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(fresh_tddy_home("plan-approve"));
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-plan-approve");
 
@@ -1136,10 +1132,9 @@ fn plan_approval_approve_proceeds_to_next_step() {
 
 /// Plan approval: ViewPlan opens MarkdownViewer, DismissViewer returns to DocumentReview, ApprovePlan proceeds.
 #[test]
-#[serial]
 fn plan_approval_view_then_approve() {
     // Given
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(fresh_tddy_home("plan-view"));
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-plan-view");
 
@@ -1206,10 +1201,9 @@ fn plan_approval_view_then_approve() {
 /// PRD (activity pane): Refine from the markdown plan view must not replace the PRD with a
 /// full-screen TextInput — refinement is entered via the prompt bar while PRD stays visible.
 #[test]
-#[serial]
 fn plan_view_refinement_submits_without_dismissing_markdown() {
     // Given
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(fresh_tddy_home("plan-refine-notext"));
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-refine-without-textinput");
 
@@ -1267,10 +1261,9 @@ fn plan_view_refinement_submits_without_dismissing_markdown() {
 
 /// Plan approval: RefinePlan opens MarkdownViewer + prompt refinement; AnswerText sends feedback; plan re-runs, approval re-appears.
 #[test]
-#[serial]
 fn plan_approval_refine_re_shows_approval() {
     // Given
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(fresh_tddy_home("plan-refine"));
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-plan-refine");
 
@@ -1334,10 +1327,9 @@ fn plan_approval_refine_re_shows_approval() {
 /// Plan approval from viewer: ViewPlan → ApprovePlan directly in MarkdownViewer (no DismissViewer) → workflow completes.
 /// Asserts presenter is_done() and DocumentReview appears exactly once (no return to DocumentReview after viewer approval).
 #[test]
-#[serial]
 fn plan_approval_from_markdown_viewer() {
     // Given
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(fresh_tddy_home("viewer-approve"));
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-viewer-approve");
 
@@ -1403,10 +1395,9 @@ fn plan_approval_from_markdown_viewer() {
 
 /// Error scenario: StubBackend with FAIL_INVOKE → assert WorkflowComplete(Err).
 #[test]
-#[serial]
 fn workflow_error_propagates() {
     // Given
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(fresh_tddy_home("error-propagate"));
     let backend = create_stub_backend();
     let output_dir = std::env::temp_dir().join("tddy-presenter-test-error");
 
@@ -1466,7 +1457,6 @@ fn workflow_error_propagates() {
 }
 
 #[test]
-#[serial]
 fn github_pr_post_workflow_elicitation_precedes_workflow_complete_when_opted_in() {
     // Given
     let session_dir = common::isolated_presenter_session_dir("presenter-post-wf-pr");
@@ -1513,7 +1503,7 @@ fn github_pr_post_workflow_elicitation_precedes_workflow_complete_when_opted_in(
         "seeded changeset must request the post-workflow GitHub PR operator prompt"
     );
 
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(fresh_tddy_home("post-wf-pr"));
     let backend = create_stub_backend();
 
     // When
@@ -1619,15 +1609,16 @@ fn github_pr_post_workflow_elicitation_precedes_workflow_complete_when_opted_in(
 const QUEUED_PROMPT_ACTIVITY_PREFIX: &str = "Queued: ";
 
 #[test]
-#[serial]
 fn submit_feature_input_appends_user_prompt_activity() {
     // Given
-    let sessions_base = std::env::temp_dir().join("tddy-presenter-user-prompt-activity");
+    let sessions_base = std::env::temp_dir().join(format!(
+        "tddy-presenter-user-prompt-activity-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("sessions base");
-    std::env::set_var(TDDY_SESSIONS_DIR_ENV, sessions_base.to_str().unwrap());
 
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(sessions_base.clone());
     let backend = create_stub_backend();
     let (output_dir, _) = common::temp_dir_with_git_repo("presenter-user-prompt-activity");
 
@@ -1663,15 +1654,12 @@ fn submit_feature_input_appends_user_prompt_activity() {
         "expected ActivityLogged broadcast for user prompt (remote sessions); events: {:?}",
         events.events()
     );
-
-    std::env::remove_var(TDDY_SESSIONS_DIR_ENV);
 }
 
 #[test]
-#[serial]
 fn queue_prompt_appends_queued_prompt_activity() {
     // Given
-    let (mut presenter, mut events) = presenter_with_events();
+    let (mut presenter, mut events) = presenter_with_events(fresh_tddy_home("queue-prompt"));
     let text = "follow-up prompt for activity log";
 
     // When

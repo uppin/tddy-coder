@@ -35,6 +35,7 @@ pub fn test_config() -> DaemonConfig {
 /// [`TEST_TOKEN`] resolves to [`TEST_USER`]; any other token returns `None`.
 pub fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
     let config = test_config();
+    let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
     let user_resolver: SessionUserResolver = Arc::new(|token| {
@@ -47,6 +48,7 @@ pub fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
     ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,
+        tddy_data_dir,
         user_resolver,
         None,
         None,

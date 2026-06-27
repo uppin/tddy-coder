@@ -16,7 +16,11 @@ use tokio::time::timeout;
 #[cfg(unix)]
 async fn relay_accepts_submit_when_presenter_never_polls() {
     // Given
-    let (socket_path, _hold_tool_rx) = start_toolcall_listener(None, None).expect("start listener");
+    let tddy_data_dir =
+        std::env::temp_dir().join(format!("tddy-toolcall-relay-{}", std::process::id()));
+    std::fs::create_dir_all(&tddy_data_dir).unwrap();
+    let (socket_path, _hold_tool_rx) =
+        start_toolcall_listener(None, None, tddy_data_dir).expect("start listener");
 
     let path = socket_path.clone();
     let client = tokio::spawn(async move {

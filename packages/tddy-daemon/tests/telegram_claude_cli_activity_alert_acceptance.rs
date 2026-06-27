@@ -78,6 +78,7 @@ fn make_service(
     sender: Arc<InMemoryTelegramSender>,
     tracked: SharedTelegramTrackedSessionCoordinator,
 ) -> ConnectionServiceImpl {
+    let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_os_user| Some(sessions_base.clone()));
     let user_resolver: UserResolver = Arc::new(|token| {
@@ -107,6 +108,7 @@ fn make_service(
     ConnectionServiceImpl::new(
         test_daemon_config(),
         sessions_base_resolver,
+        tddy_data_dir,
         user_resolver,
         None,
         None,

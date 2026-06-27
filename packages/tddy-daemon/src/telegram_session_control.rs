@@ -917,7 +917,7 @@ fn projects_dir_for_telegram_workflow_spawn(
 ) -> anyhow::Result<PathBuf> {
     match &deps.projects_dir_override {
         Some(p) => Ok(p.clone()),
-        None => projects_path_for_user(&deps.os_user)
+        None => projects_path_for_user(&deps.os_user, Some(&deps.tddy_data_dir))
             .ok_or_else(|| anyhow::anyhow!("could not resolve projects path")),
     }
 }
@@ -947,6 +947,8 @@ pub struct TelegramWorkflowSpawn {
     pub config: Arc<DaemonConfig>,
     pub spawn_client: Option<Arc<spawn_worker::SpawnClient>>,
     pub os_user: String,
+    /// tddy home data directory (config is the single source of truth).
+    pub tddy_data_dir: PathBuf,
     /// When set (e.g. integration tests), read `projects.yaml` from this directory instead of `~/.tddy/projects`.
     pub projects_dir_override: Option<PathBuf>,
     pub telegram_hooks: Option<Arc<TelegramDaemonHooks>>,
@@ -974,7 +976,7 @@ impl TelegramWorkflowSpawn {
     ) -> anyhow::Result<spawner::SpawnResult> {
         let livekit = spawner::livekit_creds_from_config(&self.config)
             .ok_or_else(|| anyhow::anyhow!("LiveKit not configured"))?;
-        let projects_dir = projects_path_for_user(&self.os_user)
+        let projects_dir = projects_path_for_user(&self.os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| anyhow::anyhow!("could not resolve projects path"))?;
         let project = project_storage::find_project(&projects_dir, project_id)?
             .ok_or_else(|| anyhow::anyhow!("project not found"))?;
