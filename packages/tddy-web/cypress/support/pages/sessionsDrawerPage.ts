@@ -57,6 +57,10 @@ export const sessionsDrawerPage = {
   drawerOpenBtn: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsDrawerOpenBtn, { timeout: 5000, ...options }),
 
+  /** The floating overlay open button shown on mobile when the list is collapsed. */
+  drawerOpenOverlayBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsDrawerOpenOverlayBtn, { timeout: 5000, ...options }),
+
   /** A single clickable drawer item for the given session id. */
   drawerItem: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsDrawerItem(sessionId), { timeout: 5000, ...options }),

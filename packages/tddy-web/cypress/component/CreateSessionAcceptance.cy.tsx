@@ -52,6 +52,7 @@ const NEW_SESSION_FIXTURE = {
 
 describe("CreateSession acceptance — button, form, and post-create navigation", () => {
   beforeEach(() => {
+    cy.viewport(1280, 800); // desktop: session list defaults open so drawer items are clickable
     cy.clearLocalStorage();
     cy.clearAllSessionStorage();
     window.localStorage.setItem("tddy_session_token", "fake-token");
@@ -353,6 +354,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
 
 describe("CreateSession acceptance — post-creation list refresh", () => {
   beforeEach(() => {
+    cy.viewport(1280, 800); // desktop: session list defaults open so drawer items are clickable
     cy.clearLocalStorage();
     cy.clearAllSessionStorage();
     window.localStorage.setItem("tddy_session_token", "fake-token");

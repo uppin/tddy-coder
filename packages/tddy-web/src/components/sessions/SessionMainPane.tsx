@@ -9,6 +9,7 @@ import { Button } from "../ui/button";
 import { CreateSessionPane } from "./CreateSessionPane";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
 import type { TerminalControlState } from "./terminalControlState";
+import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
@@ -35,6 +36,10 @@ interface SessionMainPaneProps {
   controlTokenRef?: MutableRefObject<string>;
   /** LiveKit room for the connected session (used by VNC / screen-sharing overlay). Null when no room is available. */
   room?: Room | null;
+  /** Fired when the connected terminal disconnects — including automatically when it unmounts (session switch). */
+  onDisconnect?: () => void;
+  /** Shortcut presets for the connected session — shown as the mobile shortcut overlay. */
+  mobileShortcuts?: ToolShortcutDef[];
 }
 
 export function SessionMainPane({
@@ -56,6 +61,8 @@ export function SessionMainPane({
   terminalControl,
   controlTokenRef,
   room = null,
+  onDisconnect,
+  mobileShortcuts,
 }: SessionMainPaneProps) {
   const isConnected =
     attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
@@ -116,6 +123,8 @@ export function SessionMainPane({
                     sessionToken={sessionToken}
                     client={client}
                     controlToken={controlTokenRef?.current}
+                    onDisconnect={onDisconnect}
+                    mobileShortcuts={mobileShortcuts}
                   />
                 </div>
               )}

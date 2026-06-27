@@ -107,6 +107,14 @@ describe("keySequenceToBytes", () => {
     expect(keySequenceToBytes(["Ctrl", "Tab"])).toEqual(new Uint8Array(0));
   });
 
+  it("encodes Alt+M as ESC m", () => {
+    expect(keySequenceToBytes(["Alt", "M"])).toEqual(new Uint8Array([0x1b, 0x6d]));
+  });
+
+  it("returns empty Uint8Array for Alt with a non-letter key", () => {
+    expect(keySequenceToBytes(["Alt", "Tab"])).toEqual(new Uint8Array(0));
+  });
+
   it("encodes F1 as ESC O P", () => {
     expect(keySequenceToBytes(["F1"])).toEqual(
       new Uint8Array([0x1b, 0x4f, 0x50]),

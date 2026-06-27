@@ -213,7 +213,7 @@ describe("GhosttyTerminalLiveKit — ShortcutDrawer integration", () => {
     driver.expectShortcutDrawerNotExists();
   });
 
-  it("does not render the shortcut drawer when showMobileKeyboard is false even with shortcuts provided", () => {
+  it("renders the shortcut drawer when shortcuts are provided even if the mobile keyboard is hidden", () => {
     // Given
     const driver = aGhosttyTerminalLiveKit({
       showMobileKeyboard: false,
@@ -221,7 +221,7 @@ describe("GhosttyTerminalLiveKit — ShortcutDrawer integration", () => {
     }).mount();
 
     // Then
-    driver.expectShortcutDrawerNotExists();
+    driver.expectShortcutDrawerExists();
   });
 });
 

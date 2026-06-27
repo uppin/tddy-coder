@@ -40,6 +40,7 @@ import { applyDebugMaskFromConfig, applyDebugMaskFromUrl } from "./lib/debugMask
 import { TokenService } from "./gen/token_pb";
 import { useAuth } from "./hooks/useAuth";
 import { useVisualViewport } from "./hooks/useVisualViewport";
+import { useIsMobile } from "./hooks/useIsMobile";
 import { GitHubLoginButton } from "./components/GitHubLoginButton";
 import { AuthCallback } from "./components/AuthCallback";
 import { UserAvatar } from "./components/UserAvatar";
@@ -138,9 +139,7 @@ function ConnectedTerminal({
   const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { height: viewportHeight, isKeyboardOpen } = useVisualViewport();
-  const isMobile =
-    typeof window !== "undefined" &&
-    (("ontouchstart" in window) || window.innerWidth < 768);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     client

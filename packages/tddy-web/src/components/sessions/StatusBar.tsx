@@ -9,6 +9,9 @@ import type { TrafficMeter } from "../../rpc/trafficMeter";
 type MeterSnap = { bytesIn: number; bytesOut: number; inRate: number; outRate: number };
 const ZERO_SNAP: MeterSnap = { bytesIn: 0, bytesOut: 0, inRate: 0, outRate: 0 };
 
+/** Refresh the traffic readout at least this often so idle rates decay even without new traffic. */
+const TRAFFIC_REFRESH_MS = 5000;
+
 function useMeterSnapshot(meter: TrafficMeter | null): MeterSnap {
   const [snap, setSnap] = useState<MeterSnap>(() => (meter ? meter.snapshot() : ZERO_SNAP));
   useEffect(() => {
@@ -17,7 +20,12 @@ function useMeterSnapshot(meter: TrafficMeter | null): MeterSnap {
       return;
     }
     setSnap(meter.snapshot());
-    return meter.subscribe(() => setSnap(meter.snapshot()));
+    const unsubscribe = meter.subscribe(() => setSnap(meter.snapshot()));
+    const interval = setInterval(() => setSnap(meter.snapshot()), TRAFFIC_REFRESH_MS);
+    return () => {
+      unsubscribe();
+      clearInterval(interval);
+    };
   }, [meter]);
   return snap;
 }

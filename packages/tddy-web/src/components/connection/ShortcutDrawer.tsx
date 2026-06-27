@@ -5,73 +5,40 @@ import { keySequenceToBytes, type ToolShortcutDef } from "../../lib/toolShortcut
 export interface ShortcutDrawerProps {
   shortcuts: ToolShortcutDef[];
   onSend: (bytes: Uint8Array) => void;
-  /** Visual viewport height in px; 0 = use window.innerHeight. */
-  viewportHeight: number;
+  /** @deprecated No longer used — the overlay is now bounded to its terminal container. */
+  viewportHeight?: number;
 }
 
-type SnapEdge = "top" | "bottom" | "left" | "right";
+/** The overlay snaps to the left or right side of its terminal, keeping its vertical position. */
+type SnapEdge = "left" | "right";
 
 interface SnapState {
   edge: SnapEdge;
-  /** Position along the edge (left/right for top/bottom snaps; top/bottom for left/right snaps). */
-  offset: number;
+  /** Vertical position (px from the top of the terminal container). */
+  top: number;
 }
 
 const MARGIN = 8;
+/** Pointer movement (px) beyond which a press is treated as a drag rather than a tap. */
+const DRAG_THRESHOLD_PX = 5;
+/** Size (px) of the collapsed control. */
+const COLLAPSED_PX = 28;
 
-function resolveViewportHeight(viewportHeight: number): number {
-  if (viewportHeight > 0) return viewportHeight;
-  return typeof window !== "undefined" ? window.innerHeight : 600;
+function snapStateToStyle(snap: SnapState): React.CSSProperties {
+  const top = Math.max(snap.top, MARGIN);
+  // Position by the snapped side (relative to the terminal container) so the panel
+  // can never leave the terminal and the exact panel width never matters.
+  return snap.edge === "left" ? { left: MARGIN, top } : { right: MARGIN, top };
 }
 
-function snapStateToStyle(
-  snap: SnapState,
-  panelWidth: number,
-  panelHeight: number,
-  viewportHeight: number,
-): React.CSSProperties {
-  const vh = resolveViewportHeight(viewportHeight);
-  const vw = typeof window !== "undefined" ? window.innerWidth : 800;
-
-  const clampH = (v: number) => Math.min(Math.max(v, MARGIN), vh - panelHeight - MARGIN);
-  const clampW = (v: number) => Math.min(Math.max(v, MARGIN), vw - panelWidth - MARGIN);
-
-  switch (snap.edge) {
-    case "top":
-      return { top: MARGIN, left: clampW(snap.offset) };
-    case "bottom":
-      return { top: vh - panelHeight - MARGIN, left: clampW(snap.offset) };
-    case "left":
-      return { left: MARGIN, top: clampH(snap.offset) };
-    case "right":
-      return { left: vw - panelWidth - MARGIN, top: clampH(snap.offset) };
-  }
-}
-
-function nearestEdge(
-  centerX: number,
-  centerY: number,
-  vw: number,
-  vh: number,
-): SnapEdge {
-  const toTop = centerY;
-  const toBottom = vh - centerY;
-  const toLeft = centerX;
-  const toRight = vw - centerX;
-  const min = Math.min(toTop, toBottom, toLeft, toRight);
-  if (min === toBottom) return "bottom";
-  if (min === toTop) return "top";
-  if (min === toLeft) return "left";
-  return "right";
-}
-
-export function ShortcutDrawer({ shortcuts, onSend, viewportHeight }: ShortcutDrawerProps) {
+export function ShortcutDrawer({ shortcuts, onSend }: ShortcutDrawerProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const [snap, setSnap] = useState<SnapState>(() => {
-    const vw = typeof window !== "undefined" ? window.innerWidth : 800;
-    return { edge: "bottom", offset: vw / 2 - 60 };
-  });
+  // Collapsed by default — shows only the draggable control; tap it to reveal the shortcuts.
+  const [collapsed, setCollapsed] = useState(true);
+
+  // Default position: upper-right of the terminal.
+  const [snap, setSnap] = useState<SnapState>({ edge: "right", top: MARGIN });
 
   const dragRef = useRef<{
     pointerId: number;
@@ -79,143 +46,166 @@ export function ShortcutDrawer({ shortcuts, onSend, viewportHeight }: ShortcutDr
     startClientY: number;
     startLeft: number;
     startTop: number;
+    moved: boolean;
   } | null>(null);
 
-  const onPointerDown = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      const panel = panelRef.current;
-      if (!panel) return;
-      const rect = panel.getBoundingClientRect();
-      (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-      dragRef.current = {
-        pointerId: e.pointerId,
-        startClientX: e.clientX,
-        startClientY: e.clientY,
-        startLeft: rect.left,
-        startTop: rect.top,
-      };
-    },
-    [],
-  );
+  /** The positioned container the overlay is bounded to (its offset parent). */
+  const boundsOf = (panel: HTMLDivElement): { width: number; height: number } => {
+    const parent = panel.offsetParent as HTMLElement | null;
+    if (parent) return { width: parent.clientWidth, height: parent.clientHeight };
+    return { width: window.innerWidth, height: window.innerHeight };
+  };
 
-  const onPointerMove = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      const drag = dragRef.current;
-      if (!drag || drag.pointerId !== e.pointerId) return;
-      const dx = e.clientX - drag.startClientX;
-      const dy = e.clientY - drag.startClientY;
-      const panel = panelRef.current;
-      if (!panel) return;
-      const vw = window.innerWidth;
-      const vh = resolveViewportHeight(viewportHeight);
-      const { width: pw, height: ph } = panel.getBoundingClientRect();
-      const newLeft = Math.min(Math.max(drag.startLeft + dx, MARGIN), vw - pw - MARGIN);
-      const newTop = Math.min(Math.max(drag.startTop + dy, MARGIN), vh - ph - MARGIN);
-      panel.style.left = `${newLeft}px`;
-      panel.style.top = `${newTop}px`;
-      panel.style.bottom = "auto";
-      panel.style.right = "auto";
-    },
-    [viewportHeight],
-  );
+  const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const panel = panelRef.current;
+    if (!panel) return;
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startLeft: panel.offsetLeft,
+      startTop: panel.offsetTop,
+      moved: false,
+    };
+  }, []);
+
+  const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const dx = e.clientX - drag.startClientX;
+    const dy = e.clientY - drag.startClientY;
+    // Ignore sub-threshold jitter so a tap isn't mistaken for a drag.
+    if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+    drag.moved = true;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const { width: cw, height: ch } = boundsOf(panel);
+    const pw = panel.offsetWidth;
+    const ph = panel.offsetHeight;
+    const newLeft = Math.min(Math.max(drag.startLeft + dx, MARGIN), cw - pw - MARGIN);
+    const newTop = Math.min(Math.max(drag.startTop + dy, MARGIN), ch - ph - MARGIN);
+    panel.style.left = `${newLeft}px`;
+    panel.style.top = `${newTop}px`;
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
+  }, []);
+
+  const endPointer = useCallback((e: React.PointerEvent<HTMLDivElement>, cancelled: boolean) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    dragRef.current = null;
+    try {
+      (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+    const panel = panelRef.current;
+    if (!panel) return;
+
+    // A press without movement is a tap → toggle collapsed (unless the gesture was cancelled).
+    if (!drag.moved) {
+      if (!cancelled) setCollapsed((c) => !c);
+      return;
+    }
+
+    // Snap to whichever side the handle is currently in (its center relative to the
+    // container midpoint). Vertical position is preserved.
+    const { width: cw } = boundsOf(panel);
+    const centerX = panel.offsetLeft + panel.offsetWidth / 2;
+    const edge: SnapEdge = centerX < cw / 2 ? "left" : "right";
+    const top = panel.offsetTop;
+    setSnap({ edge, top });
+    // Clear inline styles so the snapped position from React takes over.
+    panel.style.left = "";
+    panel.style.top = "";
+    panel.style.right = "";
+    panel.style.bottom = "";
+  }, []);
 
   const onPointerUp = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      const drag = dragRef.current;
-      if (!drag || drag.pointerId !== e.pointerId) return;
-      dragRef.current = null;
-      try {
-        (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
-      } catch {
-        /* already released */
-      }
-      const panel = panelRef.current;
-      if (!panel) return;
-      const rect = panel.getBoundingClientRect();
-      const vw = window.innerWidth;
-      const vh = resolveViewportHeight(viewportHeight);
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-      const edge = nearestEdge(centerX, centerY, vw, vh);
-      const offset = edge === "top" || edge === "bottom" ? rect.left : rect.top;
-      setSnap({ edge, offset });
-      // Clear inline styles so CSS takes over from snap state
-      panel.style.left = "";
-      panel.style.top = "";
-      panel.style.bottom = "";
-      panel.style.right = "";
-    },
-    [viewportHeight],
+    (e: React.PointerEvent<HTMLDivElement>) => endPointer(e, false),
+    [endPointer],
+  );
+  const onPointerCancel = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => endPointer(e, true),
+    [endPointer],
   );
 
   if (shortcuts.length === 0) return null;
 
-  const isHorizontal = snap.edge === "top" || snap.edge === "bottom";
-  const panelWidth = isHorizontal ? shortcuts.length * 80 + 28 : 80;
-  const panelHeight = isHorizontal ? 40 : shortcuts.length * 36 + 28;
-
-  const posStyle = snapStateToStyle(snap, panelWidth, panelHeight, viewportHeight);
+  const posStyle = snapStateToStyle(snap);
 
   return (
     <div
       ref={panelRef}
       data-testid="shortcut-drawer"
       data-snap-edge={snap.edge}
+      data-collapsed={collapsed}
       style={{
-        position: "fixed",
+        position: "absolute",
         zIndex: 200,
         backgroundColor: "rgba(0,0,0,0.82)",
         border: "1px solid #555",
         borderRadius: 6,
         boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
         display: "flex",
-        flexDirection: isHorizontal ? "row" : "column",
+        flexDirection: "column",
         alignItems: "center",
         gap: 4,
         padding: "4px 6px",
         userSelect: "none",
         touchAction: "none",
+        maxHeight: `calc(100% - ${2 * MARGIN}px)`,
+        overflowY: "auto",
         ...posStyle,
       }}
     >
       <div
         data-testid="shortcut-drag-handle"
-        style={{ cursor: "grab", display: "flex", alignItems: "center", padding: "0 2px" }}
+        title="Shortcuts — tap to expand, drag to move"
+        style={{
+          cursor: "grab",
+          display: "flex",
+          alignItems: "center",
+          padding: "0 2px",
+          // Without this, a touch starting on the handle is treated as a scroll/pan
+          // and the pointer is cancelled before a drag can register (mobile).
+          touchAction: "none",
+        }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
+        onPointerCancel={onPointerCancel}
       >
-        <GripVertical
-          size={14}
-          style={{ color: "#888" }}
-          aria-hidden
-        />
+        <GripVertical size={14} style={{ color: "#888" }} aria-hidden />
       </div>
-      {shortcuts.map((s) => (
-        <button
-          key={s.label}
-          type="button"
-          data-testid={`shortcut-button-${s.label}`}
-          onClick={() => {
-            const bytes = keySequenceToBytes(s.keys);
-            if (bytes.length > 0) onSend(bytes);
-          }}
-          style={{
-            padding: "3px 8px",
-            fontSize: 11,
-            cursor: "pointer",
-            backgroundColor: "rgba(255,255,255,0.1)",
-            color: "#ddd",
-            border: "1px solid #666",
-            borderRadius: 4,
-            whiteSpace: "nowrap",
-          }}
-        >
-          {s.label}
-        </button>
-      ))}
+      {!collapsed &&
+        shortcuts.map((s) => (
+          <button
+            key={s.label}
+            type="button"
+            data-testid={`shortcut-button-${s.label}`}
+            onClick={() => {
+              const bytes = keySequenceToBytes(s.keys);
+              if (bytes.length > 0) onSend(bytes);
+            }}
+            style={{
+              padding: "3px 8px",
+              fontSize: 11,
+              cursor: "pointer",
+              backgroundColor: "rgba(255,255,255,0.1)",
+              color: "#ddd",
+              border: "1px solid #666",
+              borderRadius: 4,
+              whiteSpace: "nowrap",
+              width: "100%",
+            }}
+          >
+            {s.label}
+          </button>
+        ))}
     </div>
   );
 }

@@ -105,6 +105,37 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
       return this;
     },
 
+    /**
+     * Simulate a physical key press (with modifiers) arriving at the document
+     * while the terminal window is the active context — e.g. a desktop user
+     * pressing Shift+Tab or Alt+M with the terminal focused. Dispatched on
+     * `document` (not the inner textarea) so it exercises an app-level shortcut
+     * handler rather than ghostty-web's own textarea key mapping.
+     */
+    pressPhysicalKey(init: {
+      key: string;
+      code?: string;
+      shiftKey?: boolean;
+      altKey?: boolean;
+      ctrlKey?: boolean;
+      metaKey?: boolean;
+    }) {
+      cy.document().then((doc) => {
+        doc.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            bubbles: true,
+            cancelable: true,
+            shiftKey: false,
+            altKey: false,
+            ctrlKey: false,
+            metaKey: false,
+            ...init,
+          }),
+        );
+      });
+      return this;
+    },
+
     /** Assert the `@onData` stub was called (at least once). */
     expectOnDataCalled() {
       cy.get("@onData").should("have.been.called");

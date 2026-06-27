@@ -9,6 +9,13 @@
 export const TERMINAL_OVERLAY_COLS = 80;
 export const TERMINAL_OVERLAY_ROWS = 24;
 
+/**
+ * Logical columns for the compact / overlay pane on mobile — double the desktop
+ * default so the narrow mobile pane still fits a usable amount of terminal width
+ * (font scales down to fit the grid).
+ */
+export const TERMINAL_OVERLAY_COLS_MOBILE = TERMINAL_OVERLAY_COLS * 2;
+
 /** Default height of the terminal region in pixels (how tall the pane opens). */
 export const TERMINAL_OVERLAY_PANE_HEIGHT_PX = 180;
 

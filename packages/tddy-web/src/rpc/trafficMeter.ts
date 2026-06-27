@@ -57,6 +57,11 @@ export class TrafficMeter {
   }
 
   snapshot(): { bytesIn: number; bytesOut: number; inRate: number; outRate: number } {
+    // Recompute rates as of now so a read reflects the current window — when traffic
+    // stops, the rate decays to 0 instead of being frozen at its last recorded value.
+    const now = Date.now();
+    this.inRate = this._computeRate(this.samplesIn, now);
+    this.outRate = this._computeRate(this.samplesOut, now);
     return {
       bytesIn: this.bytesIn,
       bytesOut: this.bytesOut,
