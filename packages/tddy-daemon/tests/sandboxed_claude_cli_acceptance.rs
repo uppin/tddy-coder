@@ -1,0 +1,361 @@
+//! Acceptance: sandboxed `claude-cli` sessions (`StartSession.sandbox = true`).
+//!
+//! macOS-only integration tests use Seatbelt + `tddy-tools sandbox-runner`.
+//! Non-darwin platforms get `failed_precondition` without fallback.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+use futures_util::StreamExt;
+use tddy_core::session_metadata::read_session_metadata;
+use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
+use tddy_daemon::config::DaemonConfig;
+use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_testing_commons::process_is_alive;
+use tddy_rpc::Request;
+use tddy_service::proto::connection::{
+    ConnectSessionRequest, ConnectionService as ConnectionServiceTrait, StartSessionRequest,
+    StreamTerminalOutputRequest,
+};
+
+const VALID_TOKEN: &str = "valid-token";
+const TEST_MODEL: &str = "claude-opus-4-8";
+const TEST_PROJECT_ID: &str = "sandbox-test-project";
+
+type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
+type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+fn write_config_with_claude_cli_binary(stub_binary: &str) -> (tempfile::TempDir, DaemonConfig) {
+    let dir = tempfile::tempdir().unwrap();
+    let yaml = format!(
+        r#"
+users:
+  - github_user: "testuser"
+    os_user: "testuser"
+allowed_tools:
+  - path: /bin/true
+    label: true
+claude_cli:
+  binary_path: {stub_binary}
+"#
+    );
+    let config_path = dir.path().join("daemon.yaml");
+    std::fs::write(&config_path, yaml).unwrap();
+    let config = DaemonConfig::load(&config_path).expect("config must parse");
+    (dir, config)
+}
+
+fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceImpl {
+    let tddy_data_dir = sessions_base.clone();
+    let sessions_base_resolver: SessionsBaseResolver =
+        Arc::new(move |_| Some(sessions_base.clone()));
+    let user_resolver: UserResolver = Arc::new(|token| {
+        if token == VALID_TOKEN {
+            Some("testuser".to_string())
+        } else {
+            None
+        }
+    });
+    ConnectionServiceImpl::new(
+        config,
+        sessions_base_resolver,
+        tddy_data_dir,
+        user_resolver,
+        None,
+        None,
+        None,
+        Arc::new(ClaudeCliSessionManager::new()),
+    )
+}
+
+fn create_test_repo_with_origin(dir: &std::path::Path) {
+    let run = |args: &[&str], envs: &[(&str, &str)]| {
+        let mut cmd = std::process::Command::new("git");
+        cmd.args(args).current_dir(dir);
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
+        cmd.output().expect("git command failed");
+    };
+    let author_env = &[
+        ("GIT_AUTHOR_NAME", "Test"),
+        ("GIT_AUTHOR_EMAIL", "t@t.com"),
+        ("GIT_COMMITTER_NAME", "Test"),
+        ("GIT_COMMITTER_EMAIL", "t@t.com"),
+    ];
+    run(&["init", "-b", "main"], &[]);
+    run(&["config", "user.email", "t@t.com"], &[]);
+    run(&["config", "user.name", "Test"], &[]);
+    run(&["commit", "--allow-empty", "-m", "init"], author_env);
+    run(&["remote", "add", "origin", dir.to_str().unwrap()], &[]);
+    run(&["push", "-u", "origin", "main"], &[]);
+}
+
+fn register_project(projects_dir: &std::path::Path, repo_path: &std::path::Path) {
+    std::fs::create_dir_all(projects_dir).unwrap();
+    let yaml = format!(
+        "projects:\n  - project_id: {}\n    name: sandbox-test\n    git_url: \"\"\n    main_repo_path: {}\n",
+        TEST_PROJECT_ID,
+        repo_path.to_str().unwrap()
+    );
+    std::fs::write(projects_dir.join("projects.yaml"), yaml).unwrap();
+}
+
+fn write_echo_argv_script(dir: &std::path::Path) -> std::path::PathBuf {
+    let script_path = dir.join("stub_claude.sh");
+    std::fs::write(&script_path, "#!/bin/sh\necho \"ARGV: $@\"\ncat\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    script_path
+}
+
+fn sandbox_start_request() -> StartSessionRequest {
+    StartSessionRequest {
+        session_token: VALID_TOKEN.to_string(),
+        tool_path: String::new(),
+        project_id: TEST_PROJECT_ID.to_string(),
+        agent: String::new(),
+        daemon_instance_id: String::new(),
+        recipe: String::new(),
+        session_type: "claude-cli".to_string(),
+        model: TEST_MODEL.to_string(),
+        branch_worktree_intent: String::new(),
+        new_branch_name: String::new(),
+        selected_integration_base_ref: String::new(),
+        selected_branch_to_work_on: String::new(),
+        initial_prompt: String::new(),
+        permission_mode: String::new(),
+        stack_parent: String::new(),
+        sandbox: true,
+    }
+}
+
+/// **start_session_sandbox_unsupported_on_non_darwin**: requesting a sandboxed claude-cli session
+/// on non-macOS hosts returns `failed_precondition` — no silent fallback to unsandboxed spawn.
+#[cfg(not(target_os = "macos"))]
+#[tokio::test]
+async fn start_session_sandbox_unsupported_on_non_darwin() {
+    // Given
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+    let (_cfg_dir, config) = write_config_with_claude_cli_binary("claude");
+    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+
+    // When
+    let err = service
+        .start_session(Request::new(sandbox_start_request()))
+        .await
+        .expect_err("sandbox StartSession must fail on non-darwin");
+
+    // Then
+    assert_eq!(
+        err.code,
+        Code::FailedPrecondition,
+        "unsupported sandbox must map to failed_precondition"
+    );
+    assert!(
+        err.message.contains("sandbox unsupported"),
+        "error must explain sandbox is unavailable: {}",
+        err.message
+    );
+}
+
+/// **sandboxed_claude_cli_start_persists_metadata_and_empty_livekit**: `StartSession(sandbox=true)`
+/// writes `sandbox: true` metadata and returns empty LiveKit fields.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn sandboxed_claude_cli_start_persists_metadata_and_empty_livekit() {
+    // Given
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+    let stub = write_echo_argv_script(repo_dir.path());
+    let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
+    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+
+    // When
+    let resp = service
+        .start_session(Request::new(sandbox_start_request()))
+        .await
+        .expect("sandbox StartSession must succeed on darwin");
+    let inner = resp.into_inner();
+
+    // Then — response
+    assert!(
+        inner.livekit_room.is_empty() && inner.livekit_url.is_empty(),
+        "sandboxed claude-cli must not allocate LiveKit"
+    );
+
+    let session_dir = sessions_tmp
+        .path()
+        .join("sessions")
+        .join(&inner.session_id);
+    let meta = read_session_metadata(&session_dir).expect(".session.yaml must exist");
+    assert_eq!(meta.sandbox, Some(true));
+    assert_eq!(meta.session_type.as_deref(), Some("claude-cli"));
+    assert!(meta.pid.is_some());
+    assert!(process_is_alive(meta.pid.unwrap()));
+}
+
+/// **sandboxed_claude_cli_connect_session_returns_empty_livekit**: `ConnectSession` for a sandboxed
+/// session returns empty LiveKit credentials.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn sandboxed_claude_cli_connect_session_returns_empty_livekit() {
+    // Given
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+    let stub = write_echo_argv_script(repo_dir.path());
+    let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
+    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+
+    let session_id = service
+        .start_session(Request::new(sandbox_start_request()))
+        .await
+        .expect("StartSession")
+        .into_inner()
+        .session_id;
+
+    // When
+    let connect = service
+        .connect_session(Request::new(ConnectSessionRequest {
+            session_token: VALID_TOKEN.to_string(),
+            session_id: session_id.clone(),
+        }))
+        .await
+        .expect("ConnectSession must succeed")
+        .into_inner();
+
+    // Then
+    assert!(connect.livekit_room.is_empty());
+    assert!(connect.livekit_url.is_empty());
+    assert!(connect.livekit_server_identity.is_empty());
+}
+
+/// **sandboxed_claude_cli_terminal_io_round_trips**: daemon bridges PTY output from the sandbox
+/// runner and accepts keystrokes via `SendSandboxInput`.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn sandboxed_claude_cli_terminal_io_round_trips() {
+    // Given
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+    let stub = write_echo_argv_script(repo_dir.path());
+    let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
+    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+
+    let session_id = service
+        .start_session(Request::new(sandbox_start_request()))
+        .await
+        .expect("StartSession")
+        .into_inner()
+        .session_id;
+
+    // When — stream terminal output
+    let stream_resp = service
+        .stream_terminal_output(Request::new(StreamTerminalOutputRequest {
+            session_token: VALID_TOKEN.to_string(),
+            session_id: session_id.clone(),
+            terminal_id: String::new(),
+            initial_cols: 80,
+            initial_rows: 24,
+        }))
+        .await
+        .expect("stream_terminal_output must succeed for sandbox session");
+    let mut stream = stream_resp.into_inner();
+
+    let saw_argv = tokio::time::timeout(Duration::from_secs(30), async {
+        while let Some(Ok(msg)) = stream.next().await {
+            if String::from_utf8_lossy(&msg.data).contains("ARGV:") {
+                return true;
+            }
+        }
+        false
+    })
+    .await
+    .unwrap_or(false);
+
+    // Then
+    assert!(saw_argv, "terminal stream must include stub claude PTY output");
+}
+
+/// **sandboxed_claude_cli_tool_exec_via_ipc_reads_host_worktree**: tool IPC inside the sandbox
+/// forwards `Read` to the daemon, which executes against the host git worktree.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn sandboxed_claude_cli_tool_exec_via_ipc_reads_host_worktree() {
+    // Given
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    std::fs::write(repo_dir.path().join("README.md"), "host-worktree-contents").unwrap();
+    let git_env = [
+        ("GIT_AUTHOR_NAME", "Test"),
+        ("GIT_AUTHOR_EMAIL", "t@t.com"),
+        ("GIT_COMMITTER_NAME", "Test"),
+        ("GIT_COMMITTER_EMAIL", "t@t.com"),
+    ];
+    for args in [&["add", "README.md"][..], &["commit", "-m", "add readme"][..]] {
+        let mut cmd = std::process::Command::new("git");
+        cmd.args(args).current_dir(repo_dir.path());
+        for (k, v) in git_env {
+            cmd.env(k, v);
+        }
+        cmd.output().expect("git commit README for worktree");
+    }
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+    let stub = write_echo_argv_script(repo_dir.path());
+    let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
+    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+
+    let session_id = service
+        .start_session(Request::new(sandbox_start_request()))
+        .await
+        .expect("StartSession")
+        .into_inner()
+        .session_id;
+
+    let tool_ipc = tddy_sandbox::SandboxSpec::short_ipc_socket_path(&session_id);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while !tool_ipc.exists() {
+        if tokio::time::Instant::now() >= deadline {
+            panic!("tool IPC socket never appeared at {}", tool_ipc.display());
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // When — invoke Read via the same IPC path MCP uses in the sandbox
+    std::env::set_var("TDDY_SANDBOX_TOOL_IPC", &tool_ipc);
+    let args = serde_json::json!({
+        "path": "README.md"
+    });
+    let raw = tddy_tools::sandbox_runner::dispatch_sandbox_tool_ipc("Read", args).await;
+
+    // Then
+    let parsed: serde_json::Value = serde_json::from_str(&raw).expect("valid tool IPC json");
+    assert_eq!(parsed.get("is_error").and_then(|v| v.as_bool()), Some(false));
+    let result: serde_json::Value = serde_json::from_str(
+        parsed
+            .get("result_json")
+            .and_then(|v| v.as_str())
+            .expect("result_json"),
+    )
+    .expect("result_json must be valid JSON");
+    assert_eq!(
+        result.get("content").and_then(|v| v.as_str()),
+        Some("host-worktree-contents"),
+        "Read must return host worktree file contents, got: {result}"
+    );
+}

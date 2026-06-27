@@ -1,6 +1,6 @@
 ---
 name: refactor
-model: composer-1
+model: composer-2.5
 description: Performs code refactoring to fix identified issues. Actively improves code quality, doesn't just report problems. Use after validation steps to fix issues.
 ---
 

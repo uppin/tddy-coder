@@ -1,0 +1,13 @@
+[package]
+name = "tddy-sandbox-darwin"
+version = "0.1.0"
+edition = "2021"
+description = "macOS Seatbelt sandbox implementation for tddy-sandbox"
+
+[dependencies]
+tddy-sandbox = { path = "../tddy-sandbox" }
+log = "0.4"
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

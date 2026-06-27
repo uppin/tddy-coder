@@ -18,6 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 tddy-core = { path = "../tddy-core" }
+tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-build = { path = "../tddy-build" }
 tddy-build-rust = { path = "../tddy-build-rust" }
 tddy-build-typescript = { path = "../tddy-build-typescript" }
@@ -44,6 +45,13 @@ tddy-service = { path = "../tddy-service" }
 prost = { version = "0.13" }
 # Relay dispatch: HTTP forwarding for dispatch_dynamic_tool.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+tonic = { version = "0.12", default-features = false, features = ["transport"] }
+hyper = "1"
+hyper-util = { version = "0.1", features = ["tokio"] }
+http = "1"
+tower = "0.5"
+futures-util = "0.3"
+tokio-stream = "0.1"
 # LiveKit connect mode (tddy-tools pty-relay --livekit-url ...)
 tddy-livekit = { path = "../tddy-livekit", optional = true }
 livekit = { version = "0.7", optional = true }
@@ -53,7 +61,6 @@ livekit-api = { version = "0.5", optional = true }
 livekit = ["dep:tddy-livekit", "dep:livekit", "dep:livekit-api"]
 
 [target.'cfg(unix)'.dependencies]
-tokio = { version = "1", features = ["net"] }
 libc = "0.2"
 
 [dev-dependencies]

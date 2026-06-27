@@ -1,0 +1,13 @@
+[package]
+name = "tddy-sandbox"
+version = "0.1.0"
+edition = "2021"
+description = "Cross-platform sandbox abstraction for running confined agent processes"
+
+[dependencies]
+anyhow = "1"
+tempfile = "3"
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"

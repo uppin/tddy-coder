@@ -1250,6 +1250,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
 
             activity_status: None,
             hook_token: None,
+            sandbox: None,
         },
     )
     .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;
@@ -1412,6 +1413,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
 
                 activity_status: None,
                 hook_token: None,
+                sandbox: None,
             },
         )
         .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;
@@ -2937,6 +2939,7 @@ fn run_plan_bootstrap_in_session_dir(
 
             activity_status: None,
             hook_token: None,
+            sandbox: None,
         },
     )
     .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;

@@ -480,6 +480,9 @@ pub fn is_native_tool_denied_in_remote_mode(tool_name: &str) -> bool {
 /// When both env vars are set, attempts an HTTP POST to the relay daemon's ExecuteTool endpoint.
 /// On connection failure, returns a `relay connection error` (not the stub "not yet implemented").
 pub async fn dispatch_dynamic_tool(tool_name: &str, args: serde_json::Value) -> String {
+    if std::env::var_os("TDDY_SANDBOX_TOOL_IPC").is_some() {
+        return crate::sandbox_runner::dispatch_sandbox_tool_ipc(tool_name, args).await;
+    }
     let session_id = std::env::var("TDDY_REMOTE_SESSION_ID").ok();
     let daemon_url = std::env::var("TDDY_REMOTE_DAEMON_URL").ok();
     if session_id.is_none() || daemon_url.is_none() {

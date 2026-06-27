@@ -1,7 +1,7 @@
 //! ConnectionService implementation for daemon session/tool management.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::stream::{Stream, StreamExt};
@@ -269,6 +269,8 @@ pub struct ConnectionServiceImpl {
     telegram: Option<Arc<TelegramDaemonHooks>>,
     worktree_stats_cache: Arc<WorktreeStatsCache>,
     claude_cli_manager: Arc<ClaudeCliSessionManager>,
+    /// Sandboxed claude-cli sessions (darwin Seatbelt).
+    sandbox_manager: Arc<crate::sandbox_session::SandboxSessionManager>,
     /// Registry for Tasks created by tool invocations (every ExecuteTool call).
     task_registry: TaskRegistry,
     /// Optional idle-timeout tracker for relay mode — bumped on every RPC call.
@@ -313,6 +315,7 @@ impl ConnectionServiceImpl {
             telegram,
             worktree_stats_cache,
             claude_cli_manager,
+            sandbox_manager: Arc::new(crate::sandbox_session::SandboxSessionManager::new()),
             task_registry,
             idle_tracker: None,
             demo_vm_state,
@@ -477,20 +480,12 @@ impl ConnectionServiceImpl {
         )
         .await?;
 
-        // Resolve tddy-tools path: config → current_exe sibling → PATH fallback.
-        let tddy_tools_path = self
-            .config
-            .claude_cli
-            .as_ref()
-            .and_then(|c| c.tddy_tools_path.as_deref())
-            .map(|s| s.to_string())
-            .or_else(|| {
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|p| p.parent().map(|d| d.join("tddy-tools")))
-                    .map(|p| p.to_string_lossy().to_string())
-            })
-            .unwrap_or_else(|| "tddy-tools".to_string());
+        let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
+            self.config
+                .claude_cli
+                .as_ref()
+                .and_then(|c| c.tddy_tools_path.as_deref()),
+        );
 
         // Resolve daemon URL: config → http://127.0.0.1:{web_port}.
         let daemon_url = self
@@ -589,6 +584,7 @@ impl ConnectionServiceImpl {
             model: Some(model.to_string()),
             activity_status: None,
             hook_token: Some(hook_token),
+            sandbox: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
@@ -656,13 +652,335 @@ impl ConnectionServiceImpl {
         }))
     }
 
+    /// Handle `StartSession` for sandboxed `claude-cli` sessions (darwin Seatbelt, local gRPC).
+    #[allow(clippy::too_many_arguments)]
+    async fn start_sandboxed_claude_cli_session(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        sessions_base: PathBuf,
+        model: &str,
+        project_id: &str,
+        branch_worktree_intent: &str,
+        new_branch_name: &str,
+        selected_integration_base_ref: &str,
+        selected_branch_to_work_on: &str,
+        permission_mode: &str,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        if model.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "model is required for claude-cli sessions",
+            ));
+        }
+        let project_id = project_id.trim();
+        if project_id.is_empty() {
+            return Err(Status::invalid_argument(
+                "project_id is required for claude-cli sessions",
+            ));
+        }
+
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        let project = project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+        let repo_root = PathBuf::from(&project.main_repo_path);
+        if !repo_root.exists() {
+            return Err(Status::invalid_argument(
+                "project main repo path does not exist",
+            ));
+        }
+
+        let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+        std::fs::create_dir_all(&session_dir)
+            .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
+
+        let short_id = &session_id[..8.min(session_id.len())];
+        let (intent, resolved_new_branch, resolved_selected_branch) = match branch_worktree_intent
+            .trim()
+        {
+            "new_branch_from_base" => {
+                if new_branch_name.trim().is_empty() {
+                    return Err(Status::invalid_argument(
+                        "new_branch_name is required when branch_worktree_intent is new_branch_from_base",
+                    ));
+                }
+                (
+                    BranchWorktreeIntent::NewBranchFromBase,
+                    Some(new_branch_name.trim().to_string()),
+                    None,
+                )
+            }
+            "work_on_selected_branch" => {
+                if selected_branch_to_work_on.trim().is_empty() {
+                    return Err(Status::invalid_argument(
+                        "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
+                    ));
+                }
+                (
+                    BranchWorktreeIntent::WorkOnSelectedBranch,
+                    None,
+                    Some(selected_branch_to_work_on.trim().to_string()),
+                )
+            }
+            _ => (
+                BranchWorktreeIntent::NewBranchFromBase,
+                Some(format!("claude-cli/{short_id}")),
+                None,
+            ),
+        };
+
+        let cs_workflow = ChangesetWorkflow {
+            branch_worktree_intent: Some(intent),
+            new_branch_name: resolved_new_branch,
+            selected_integration_base_ref: if selected_integration_base_ref.trim().is_empty() {
+                None
+            } else {
+                Some(selected_integration_base_ref.trim().to_string())
+            },
+            selected_branch_to_work_on: resolved_selected_branch,
+            ..ChangesetWorkflow::default()
+        };
+        let cs = Changeset {
+            workflow: Some(cs_workflow),
+            ..Changeset::default()
+        };
+        tddy_core::write_changeset(&session_dir, &cs)
+            .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
+
+        let repo_root_clone = repo_root.clone();
+        let session_dir_clone = session_dir.clone();
+        let timeout = self.config.spawn_worker_request_timeout();
+        let worktree_path = spawn_blocking_with_timeout(
+            timeout,
+            "start_sandboxed_claude_cli_session: create worktree",
+            move || {
+                tddy_core::setup_worktree_for_session_with_optional_chain_base(
+                    &repo_root_clone,
+                    &session_dir_clone,
+                    None,
+                )
+                .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
+            },
+        )
+        .await?;
+
+        let sandbox_root = session_dir.join("sandbox");
+        let egress_dir = session_dir.join("egress");
+        std::fs::create_dir_all(sandbox_root.join(".work").join("home"))
+            .map_err(|e| Status::internal(format!("mkdir sandbox scratch: {e}")))?;
+        std::fs::create_dir_all(sandbox_root.join(".work").join("tmp"))
+            .map_err(|e| Status::internal(format!("mkdir sandbox tmp: {e}")))?;
+        std::fs::create_dir_all(sandbox_root.join("context"))
+            .map_err(|e| Status::internal(format!("mkdir sandbox context: {e}")))?;
+        std::fs::create_dir_all(&egress_dir)
+            .map_err(|e| Status::internal(format!("mkdir sandbox egress: {e}")))?;
+
+        // Resolve to the real (symlink-free) paths now that the dirs exist. Seatbelt
+        // evaluates file rules — including AF_UNIX socket bind — against the fully
+        // resolved path, so the socket/marker paths the runner binds must match the
+        // canonical paths baked into the SBPL profile. Session dirs live under TMPDIR,
+        // which on macOS is reached via the /tmp -> /private/tmp symlink; without this
+        // the tool-IPC socket bind fails with "Operation not permitted".
+        let sandbox_root = std::fs::canonicalize(&sandbox_root).unwrap_or(sandbox_root);
+        let egress_dir = std::fs::canonicalize(&egress_dir).unwrap_or(egress_dir);
+        let scratch_dir = sandbox_root.join(".work");
+        let scratch_home = scratch_dir.join("home");
+        let scratch_tmp = scratch_dir.join("tmp");
+        let context_dir = sandbox_root.join("context");
+
+        let ctx = crate::sandbox_session::prepare_context_dir(&worktree_path)
+            .map_err(Status::internal)?;
+        crate::sandbox_session::copy_dir_all(ctx.path(), &context_dir).map_err(Status::internal)?;
+
+        let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
+            self.config
+                .claude_cli
+                .as_ref()
+                .and_then(|c| c.tddy_tools_path.as_deref()),
+        );
+
+        let claude_binary_cfg = self
+            .config
+            .claude_cli
+            .as_ref()
+            .map(|c| c.binary_path.as_str())
+            .unwrap_or("claude");
+        // Canonicalize the binary paths the runner will exec: the SBPL allow-list is built
+        // from the canonical (symlink-resolved) parent dirs, so a symlinked spelling (e.g. a
+        // binary under /tmp -> /private/tmp) would be denied at exec time ("doesn't exist /
+        // Operation not permitted"). A relative/PATH-resolved name (no '/') is left as-is.
+        let canonicalize_exec = |p: &str| -> String {
+            if p.contains('/') {
+                std::fs::canonicalize(p)
+                    .map(|c| c.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| p.to_string())
+            } else {
+                p.to_string()
+            }
+        };
+        let tddy_tools_path = canonicalize_exec(&tddy_tools_path);
+        let claude_binary = canonicalize_exec(claude_binary_cfg);
+        let claude_binary = claude_binary.as_str();
+
+        let grpc_socket = sandbox_root.join("sandbox.grpc.sock");
+        // The tool-IPC AF_UNIX socket must fit within SUN_LEN (104 bytes on macOS); the
+        // canonical session dir is far too deep, so use a short out-of-tree path that the
+        // SBPL profile grants an explicit literal allow (see SandboxSpec::ipc_socket).
+        let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(session_id);
+        let ready_marker = sandbox_root.join("sandbox.ready");
+        let profile_path = sandbox_root.join("sandbox.sb");
+
+        let perm = if permission_mode.trim().is_empty() {
+            "auto"
+        } else {
+            permission_mode.trim()
+        };
+
+        let grpc_listen_port = crate::sandbox_session::pick_free_loopback_port()
+            .map_err(Status::internal)?;
+        let egress_shim_port = crate::sandbox_session::pick_free_loopback_port()
+            .map_err(Status::internal)?;
+        let loopback_allow_ports = vec![grpc_listen_port, egress_shim_port];
+
+        let runner_argv = vec![
+            tddy_tools_path,
+            "sandbox-runner".into(),
+            "--session-id".into(),
+            session_id.to_string(),
+            "--context-dir".into(),
+            context_dir.to_string_lossy().to_string(),
+            "--grpc-socket".into(),
+            grpc_socket.to_string_lossy().to_string(),
+            "--tool-ipc-socket".into(),
+            tool_ipc_socket.to_string_lossy().to_string(),
+            "--ready-marker".into(),
+            ready_marker.to_string_lossy().to_string(),
+            "--claude-binary".into(),
+            claude_binary.to_string(),
+            "--model".into(),
+            model.to_string(),
+            "--permission-mode".into(),
+            perm.to_string(),
+            "--grpc-listen-port".into(),
+            grpc_listen_port.to_string(),
+            "--egress-shim-port".into(),
+            egress_shim_port.to_string(),
+        ];
+
+        let env = crate::sandbox_session::build_sandbox_runner_env(
+            &scratch_home,
+            &scratch_tmp,
+            session_id,
+            &tool_ipc_socket,
+            &egress_dir,
+        );
+
+        let mut handle = crate::sandbox_session::spawn_sandbox_runner(
+            sandbox_root.clone(),
+            scratch_dir.clone(),
+            egress_dir.clone(),
+            profile_path,
+            runner_argv,
+            env,
+            loopback_allow_ports,
+            Some(tool_ipc_socket.clone()),
+        )
+        .map_err(|e| {
+            let logs = tddy_sandbox::format_egress_logs(&egress_dir);
+            let mut status = crate::sandbox_session::sandbox_error_to_status(e);
+            status.message = format!("{}\n{logs}", status.message);
+            status
+        })?;
+
+        crate::sandbox_session::wait_for_sandbox_ready(
+            &mut handle,
+            &ready_marker,
+            std::time::Duration::from_secs(120),
+            &egress_dir,
+        )
+        .await
+        .map_err(|e| Status::deadline_exceeded(e))?;
+
+        let (stdout_tx, _) = tokio::sync::broadcast::channel(256);
+        let capture = Arc::new(StdMutex::new(Vec::new()));
+        let (stdin_tx, stdin_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        crate::sandbox_session::dial_and_bridge(
+            session_id,
+            worktree_path.clone(),
+            ready_marker.clone(),
+            self.task_registry.clone(),
+            stdout_tx.clone(),
+            Arc::clone(&capture),
+            stdin_rx,
+        )
+        .await
+        .map_err(Status::internal)?;
+
+        let pid = handle.pid();
+        let state = Arc::new(crate::sandbox_session::SandboxSessionState {
+            pid,
+            worktree_path: worktree_path.clone(),
+            stdout_tx,
+            capture,
+            stdin_tx,
+            grpc_socket: grpc_socket.clone(),
+            ready_marker: ready_marker.clone(),
+        });
+        self.sandbox_manager
+            .insert(session_id.to_string(), state)
+            .await;
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let meta = tddy_core::SessionMetadata {
+            session_id: session_id.to_string(),
+            project_id: project_id.to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            status: "active".to_string(),
+            repo_path: Some(worktree_path.to_string_lossy().to_string()),
+            pid: Some(pid),
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("claude-cli".to_string()),
+            model: Some(model.to_string()),
+            activity_status: None,
+            hook_token: None,
+            sandbox: Some(true),
+        };
+        tddy_core::write_session_metadata(&session_dir, &meta)
+            .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
+
+        log::info!(
+            target: "tddy_daemon::connection_service",
+            "started sandboxed claude-cli session {session_id} pid={pid} worktree={}",
+            worktree_path.display()
+        );
+
+        Ok(Response::new(StartSessionResponse {
+            session_id: session_id.to_string(),
+            livekit_room: String::new(),
+            livekit_url: String::new(),
+            livekit_server_identity: String::new(),
+        }))
+    }
+
     /// Handle `ResumeSession` for `session_type = "claude-cli"` sessions.
     async fn resume_claude_cli_session(
         &self,
+        os_user: &str,
         session_id: &str,
         session_dir: PathBuf,
         meta: tddy_core::SessionMetadata,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
+        if meta.sandbox == Some(true) {
+            return self
+                .resume_sandboxed_claude_cli_session(os_user, session_id, session_dir, meta)
+                .await;
+        }
         let model = meta.model.clone().unwrap_or_default();
         let worktree_path = meta
             .repo_path
@@ -705,6 +1023,43 @@ impl ConnectionServiceImpl {
             session_id, pid
         );
 
+        Ok(Response::new(ResumeSessionResponse {
+            session_id: session_id.to_string(),
+            livekit_room: String::new(),
+            livekit_url: String::new(),
+            livekit_server_identity: String::new(),
+        }))
+    }
+
+    /// Re-spawn and re-dial a sandboxed claude-cli session.
+    async fn resume_sandboxed_claude_cli_session(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        session_dir: PathBuf,
+        meta: tddy_core::SessionMetadata,
+    ) -> Result<Response<ResumeSessionResponse>, Status> {
+        let _ = self.sandbox_manager.remove(session_id).await;
+        let model = meta.model.clone().unwrap_or_default();
+        let project_id = meta.project_id.clone();
+        let sessions_base = session_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .map(PathBuf::from)
+            .ok_or_else(|| Status::internal("could not resolve sessions base"))?;
+        self.start_sandboxed_claude_cli_session(
+            os_user,
+            session_id,
+            sessions_base,
+            &model,
+            &project_id,
+            "",
+            "",
+            "",
+            "",
+            "auto",
+        )
+        .await?;
         Ok(Response::new(ResumeSessionResponse {
             session_id: session_id.to_string(),
             livekit_room: String::new(),
@@ -1073,6 +1428,22 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             )
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
             let session_id = Uuid::now_v7().to_string();
+            if req.sandbox {
+                return self
+                    .start_sandboxed_claude_cli_session(
+                        os_user,
+                        &session_id,
+                        sessions_base,
+                        req.model.trim(),
+                        req.project_id.trim(),
+                        req.branch_worktree_intent.trim(),
+                        req.new_branch_name.trim(),
+                        req.selected_integration_base_ref.trim(),
+                        req.selected_branch_to_work_on.trim(),
+                        req.permission_mode.trim(),
+                    )
+                    .await;
+            }
             return self
                 .start_claude_cli_session(
                     os_user,
@@ -1287,7 +1658,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // --- claude-cli branch: resume without LiveKit ---
         if metadata.session_type.as_deref() == Some("claude-cli") {
             return self
-                .resume_claude_cli_session(&req.session_id, session_dir, metadata)
+                .resume_claude_cli_session(os_user, &req.session_id, session_dir, metadata)
                 .await;
         }
 
@@ -1479,6 +1850,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             os_user
         );
         let projects_dir_opt = projects_path_for_user(os_user, Some(&self.tddy_data_dir));
+        let _ = self.sandbox_manager.remove(session_id).await;
         session_deletion::delete_session_directory(
             &sessions_base,
             session_id,
@@ -1695,6 +2067,26 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             terminal_id
         );
 
+        if let Some(sandbox) = self.sandbox_manager.get(&session_id).await {
+            if terminal_id != MAIN_TERMINAL_ID {
+                return Err(Status::not_found("terminal not found or not running"));
+            }
+            let stdin_tx = sandbox.stdin_tx.clone();
+            let stdout_rx = sandbox.stdout_tx.subscribe();
+            if !first.data.is_empty() {
+                let _ = stdin_tx.send(bytes::Bytes::from(first.data));
+            }
+            let stdin_tx2 = stdin_tx.clone();
+            tokio::spawn(async move {
+                while let Some(Ok(msg)) = in_stream.next().await {
+                    if !msg.data.is_empty() {
+                        let _ = stdin_tx2.send(bytes::Bytes::from(msg.data));
+                    }
+                }
+            });
+            return Ok(Response::new(TerminalOutputStream { rx: stdout_rx }));
+        }
+
         if !self
             .claude_cli_manager
             .verify_control(&session_id, &first.control_token)
@@ -1779,6 +2171,37 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             session_id,
             terminal_id
         );
+
+        if let Some(sandbox) = self.sandbox_manager.get(&session_id).await {
+            if terminal_id != MAIN_TERMINAL_ID {
+                return Err(Status::not_found("terminal not found or not running"));
+            }
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            let historical = sandbox
+                .capture
+                .lock()
+                .map(|cap| bytes::Bytes::copy_from_slice(&cap))
+                .unwrap_or_default();
+            if !historical.is_empty() {
+                let _ = tx.send(historical);
+            }
+            let mut stdout_rx = sandbox.stdout_tx.subscribe();
+            tokio::spawn(async move {
+                loop {
+                    match stdout_rx.recv().await {
+                        Ok(chunk) => {
+                            if tx.send(chunk).is_err() {
+                                break;
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            });
+            return Ok(Response::new(MpscTerminalOutputStream { rx }));
+        }
+
         let handle = self
             .claude_cli_manager
             .get_terminal(&session_id, &terminal_id)
@@ -1925,6 +2348,18 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         let session_id = req.session_id.trim().to_string();
         let terminal_id = resolved_terminal_id(&req.terminal_id).to_string();
+
+        if let Some(sandbox) = self.sandbox_manager.get(&session_id).await {
+            if terminal_id != MAIN_TERMINAL_ID {
+                return Err(Status::not_found("terminal not found or not running"));
+            }
+            if !req.data.is_empty() {
+                let _ = sandbox
+                    .stdin_tx
+                    .send(bytes::Bytes::from(req.data));
+            }
+            return Ok(Response::new(SendTerminalInputResponse {}));
+        }
 
         if !self
             .claude_cli_manager
@@ -2881,6 +3316,7 @@ mod signal_session_unit_tests {
             model: None,
             activity_status: None,
             hook_token: None,
+            sandbox: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -3060,6 +3496,7 @@ mod list_sessions_unit_tests {
             model: None,
             activity_status: None,
             hook_token: None,
+            sandbox: None,
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -3245,6 +3682,7 @@ mod report_session_status_unit_tests {
             model: None,
             activity_status: None,
             hook_token: None,
+            sandbox: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 

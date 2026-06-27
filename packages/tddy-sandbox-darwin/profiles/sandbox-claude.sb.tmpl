@@ -1,0 +1,88 @@
+(version 1)
+
+;; Tight Seatbelt profile for sandboxed Claude Code CLI sessions.
+;; Write confinement: project + egress + OS per-user scratch only.
+;; Read confinement: explicit allow-list of toolchain and system paths.
+
+;; Baseline deny for writes (last-match-wins re-allows below).
+(deny file-write*)
+
+(allow file-write*
+  (subpath "@PROJECT_ROOT@")
+  (subpath "@SCRATCH_DIR@")
+  (subpath "@OUTPUT_DIR@")
+  (subpath "@DARWIN_BASE@")
+  (subpath "/var/folders"))
+
+(allow file-write*
+  (literal "/dev/null")
+  (literal "/dev/zero")
+  (literal "/dev/random")
+  (literal "/dev/urandom")
+  (literal "/dev/dtracehelper")
+  (literal "/dev/stdin")
+  (literal "/dev/stdout")
+  (literal "/dev/stderr")
+  (literal "/dev/ptmx")
+  (regex #"^/dev/tty.*")
+  (regex #"^/dev/ttys[0-9]+$")
+  (regex #"^/dev/fd/[0-9]+$"))
+
+;; Explicit read allow-list (tight policy).
+;; NOTE: (literal "/") is REQUIRED. dyld4's CacheFinder reads the root directory
+;; node to locate the dyld shared cache at process startup; without it the
+;; sandboxed child SIGABRTs in dyld before reaching main() (abort trap 6 / exit
+;; 134) — independent of any network rules. See
+;; docs/dev/1-WIP/2026-06-27-darwin-sandbox-seatbelt-investigation.md.
+(allow file-read*
+  (literal "/")
+  (subpath "@PROJECT_ROOT@")
+  (subpath "@SCRATCH_DIR@")
+  (subpath "@OUTPUT_DIR@")
+  (subpath "@DARWIN_BASE@")
+  (subpath "/var/folders")
+@ALLOW_READ_PATHS@
+  (subpath "/usr/bin")
+  (subpath "/usr/lib")
+  (subpath "/usr/libexec")
+  (subpath "/bin")
+  (subpath "/sbin")
+  (subpath "/System")
+  (subpath "/Library")
+  (subpath "/private/var/db/dyld")
+  (subpath "/private/etc")
+  (subpath "/Applications")
+  (subpath "/opt/homebrew")
+  (subpath "/opt/local")
+  ;; PTY devices: openpty() opens /dev/ptmx and the allocated /dev/ttysN slave O_RDWR,
+  ;; so they need read as well as the write/ioctl allows below. Without this, spawning
+  ;; the agent in a PTY fails with "openpty: Operation not permitted".
+  (literal "/dev/ptmx")
+  (regex #"^/dev/ttys[0-9]+$"))
+
+(allow process-exec*
+  (subpath "/usr/bin")
+  (subpath "/usr/libexec")
+  (subpath "/bin")
+  (subpath "/sbin")
+  (subpath "/System")
+  (subpath "/Library")
+  (subpath "@PROJECT_ROOT@")
+  (subpath "/Applications")
+  (subpath "/opt/homebrew")
+  (subpath "/opt/local")
+@ALLOW_READ_PATHS@)
+
+;; process-exec is allow-listed by path above, but spawning the agent into its PTY also
+;; forks a child — and macOS sandbox-exec does NOT allow process-fork by default (it is
+;; denied unless granted). Without this, the PTY child spawn fails with
+;; "spawn claude in pty: Operation not permitted". fork inherits this same profile, so the
+;; child is still confined by every rule here.
+(allow process-fork)
+(allow mach-lookup)
+(allow sysctl-read)
+(allow pseudo-tty)
+(allow file-ioctl
+  (literal "/dev/ptmx")
+  (regex #"^/dev/ttys[0-9]+$"))
+@NETWORK_POLICY@

@@ -1,6 +1,6 @@
 ---
 name: test-writer
-model: gpt-5.2
+model: composer-2.5
 description: TDD test writing specialist for red phase. Writes comprehensive failing tests before implementation. Use proactively when starting new features or following TDD workflow.
 ---
 

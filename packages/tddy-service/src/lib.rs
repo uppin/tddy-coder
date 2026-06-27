@@ -94,6 +94,10 @@ pub mod proto {
     pub mod screen_sharing_input {
         include!(concat!(env!("OUT_DIR"), "/screen_sharing_input.rs"));
     }
+    #[allow(unused_imports, unused_variables)]
+    pub mod sandbox {
+        include!(concat!(env!("OUT_DIR"), "/sandbox.rs"));
+    }
     pub mod reflection {
         include!(concat!(env!("OUT_DIR"), "/grpc.reflection.v1.rs"));
     }
@@ -109,6 +113,12 @@ pub static SERVICE_DESCRIPTOR_BYTES: &[u8] =
 pub mod tonic_terminal {
     #![allow(unused_imports, clippy::all)]
     include!(concat!(env!("OUT_DIR"), "/tonic_terminal/terminal.rs"));
+}
+
+/// Tonic-generated gRPC server/client for sandbox.proto.
+pub mod tonic_sandbox {
+    #![allow(unused_imports, clippy::all)]
+    include!(concat!(env!("OUT_DIR"), "/tonic_sandbox/sandbox.rs"));
 }
 
 #[cfg(test)]
