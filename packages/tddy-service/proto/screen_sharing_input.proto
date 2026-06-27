@@ -1,0 +1,32 @@
+syntax = "proto3";
+package screen_sharing_input;
+
+// Input forwarding service: browser sends pointer/keyboard events over a bidi
+// stream to the bridge (tddy-vnc or tddy-rdp), which forwards them to the
+// remote desktop server. Served by each bridge via LiveKit data channel.
+service ScreenSharingInputService {
+  // Browser → bridge: stream of pointer/key events.
+  // Bridge → browser: empty acks (server side drains input and may send nothing).
+  rpc StreamInput (stream ScreenSharingInputEvent) returns (stream ScreenSharingInputAck);
+}
+
+message ScreenSharingPointerEvent {
+  uint32 x           = 1;
+  uint32 y           = 2;
+  uint32 button_mask = 3;  // button mask (protocol-specific encoding; bridge translates)
+}
+
+message ScreenSharingKeyEvent {
+  uint32 keysym  = 1;  // neutral key code; bridge maps to protocol-native scancode/keysym
+  bool   pressed = 2;
+}
+
+message ScreenSharingInputEvent {
+  oneof event {
+    ScreenSharingPointerEvent pointer = 1;
+    ScreenSharingKeyEvent     key     = 2;
+  }
+}
+
+// Minimal ack sent by the bridge to keep the bidi stream alive.
+message ScreenSharingInputAck {}

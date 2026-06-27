@@ -43,3 +43,5 @@ pub mod worktrees;
 pub mod test_util;
 pub mod vnc_service;
 pub mod vnc_vault;
+pub mod screen_sharing_service;
+pub mod screen_sharing_vault;

@@ -1,8 +1,6 @@
-//! Shared pixel and keysym helpers.
-//!
-//! Ported from ~/Code/makers-lt/common/vnc-livekit/src/common.rs.
+//! Shared pixel and keysym helpers used by screensharing bridge implementations.
 
-/// Convert an RGBA pixel buffer to ABGR in-place (required by LiveKit's yuv_helper).
+/// Convert an RGBA pixel buffer to ABGR (required by LiveKit's yuv_helper).
 pub fn rgba_to_abgr(pixels: &[u8]) -> Vec<u8> {
     let mut abgr = Vec::with_capacity(pixels.len());
     for chunk in pixels.chunks_exact(4) {
@@ -35,11 +33,8 @@ mod tests {
 
     #[test]
     fn rgba_to_abgr_swaps_channels() {
-        // Given RGBA pixel [R, G, B, A]
         let rgba = vec![10u8, 20, 30, 40];
-        // When
         let abgr = rgba_to_abgr(&rgba);
-        // Then [A, B, G, R]
         assert_eq!(abgr, vec![40, 30, 20, 10]);
     }
 

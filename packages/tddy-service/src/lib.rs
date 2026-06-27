@@ -30,6 +30,7 @@ pub use proto::auth::AuthServiceServer;
 pub use proto::connection::ConnectionServiceServer;
 pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
 pub use proto::reflection::ServerReflectionServer;
+pub use proto::screen_sharing::ScreenSharingServiceServer;
 pub use proto::tasks::TaskServiceServer;
 pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
@@ -84,6 +85,14 @@ pub mod proto {
     #[allow(unused_imports, unused_variables)]
     pub mod vnc_input {
         include!(concat!(env!("OUT_DIR"), "/vnc_input.rs"));
+    }
+    #[allow(unused_imports, unused_variables)]
+    pub mod screen_sharing {
+        include!(concat!(env!("OUT_DIR"), "/screen_sharing.rs"));
+    }
+    #[allow(unused_imports, unused_variables)]
+    pub mod screen_sharing_input {
+        include!(concat!(env!("OUT_DIR"), "/screen_sharing_input.rs"));
     }
     pub mod reflection {
         include!(concat!(env!("OUT_DIR"), "/grpc.reflection.v1.rs"));

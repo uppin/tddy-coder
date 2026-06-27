@@ -132,6 +132,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .compile_protos(&["proto/vnc_input.proto"], &["proto"])?;
 
+    // Screen sharing control-plane service (ScreenSharingService — VNC + RDP)
+    prost_build::Config::new()
+        .out_dir(std::env::var("OUT_DIR")?)
+        .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
+            generate_rpc_server: true,
+            generate_tonic_adapter: false,
+            rpc_crate_path: "tddy_rpc".to_string(),
+        }))
+        .compile_protos(&["proto/screen_sharing.proto"], &["proto"])?;
+
+    // Screen sharing input forwarding service (bidi stream, served by protocol bridges)
+    prost_build::Config::new()
+        .out_dir(std::env::var("OUT_DIR")?)
+        .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
+            generate_rpc_server: true,
+            generate_tonic_adapter: false,
+            rpc_crate_path: "tddy_rpc".to_string(),
+        }))
+        .compile_protos(&["proto/screen_sharing_input.proto"], &["proto"])?;
+
     // Descriptor-only pass: emit a combined FileDescriptorSet for ALL service protos.
     // The reflection service reads this at runtime to serve descriptors.
     let descriptor_path = format!("{}/service_descriptors.bin", std::env::var("OUT_DIR")?);
@@ -152,6 +172,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/tasks.proto",
                 "proto/vnc.proto",
                 "proto/vnc_input.proto",
+                "proto/screen_sharing.proto",
+                "proto/screen_sharing_input.proto",
                 "proto/grpc/reflection/v1/reflection.proto",
             ],
             &["proto"],

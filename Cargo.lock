@@ -7245,6 +7245,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-rdp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "env_logger",
+ "log",
+ "serde_json",
+ "tddy-screenshare",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-rpc"
 version = "0.1.0"
 dependencies = [
@@ -7254,6 +7267,28 @@ dependencies = [
  "rstest 0.24.0",
  "tokio",
  "tonic 0.11.0",
+]
+
+[[package]]
+name = "tddy-screenshare"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures-util",
+ "livekit",
+ "livekit-api",
+ "log",
+ "pretty_assertions",
+ "prost 0.13.5",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "tddy-livekit",
+ "tddy-rpc",
+ "tddy-service",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -7416,19 +7451,14 @@ name = "tddy-vnc"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "env_logger",
- "image",
- "livekit",
- "livekit-api",
  "log",
  "pretty_assertions",
- "prost 0.13.5",
  "rstest 0.24.0",
  "serde",
  "serde_json",
- "tddy-livekit",
- "tddy-rpc",
- "tddy-service",
+ "tddy-screenshare",
  "tempfile",
  "tokio",
  "vnc-rs",

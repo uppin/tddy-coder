@@ -4,15 +4,13 @@
 //! then runs the VNC↔LiveKit bridge until the target VNC connection closes or an error
 //! occurs.
 
-use tddy_vnc::bridge::{run, BridgeConfig};
+use tddy_screenshare::{run_bridge, BridgeConfig};
+use tddy_vnc::vnc_client::VncClientState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    // Read BridgeConfig from stdin as a single JSON object.
-    let stdin = std::io::stdin();
-    let config: BridgeConfig = serde_json::from_reader(stdin)?;
-
-    run(config).await
+    let config: BridgeConfig = serde_json::from_reader(std::io::stdin())?;
+    run_bridge::<VncClientState>(config).await
 }

@@ -100,9 +100,9 @@ pub struct DaemonConfig {
     /// forwards RPCs to a remote peer via LiveKit.
     #[serde(default)]
     pub relay: Option<RelayConfig>,
-    /// VNC bridge binary configuration.
+    /// Screen-sharing bridge binary configuration (VNC + RDP paths).
     #[serde(default)]
-    pub vnc: Option<VncConfig>,
+    pub screen_sharing: Option<ScreenSharingConfig>,
 
     /// Browser DEBUG mask exposed to tddy-web via `GET /api/config` (`debug` field). A `debug`-package
     /// namespace mask (e.g. `tddy:term:*`, or `tddy:term:write,tddy:term:resize`) that enables scoped
@@ -133,7 +133,7 @@ impl Default for DaemonConfig {
             telegram: None,
             claude_cli: None,
             relay: None,
-            vnc: None,
+            screen_sharing: None,
             debug: None,
         }
     }
@@ -150,33 +150,31 @@ pub struct TelegramConfig {
     pub chat_ids: Vec<i64>,
 }
 
-fn default_vnc_binary_path() -> String {
-    // Sibling resolution happens at runtime, not at serde default time.
-    // Use empty string as sentinel; runtime resolves: config override → sibling → PATH fallback.
-    String::new()
-}
-
-/// VNC bridge binary configuration. Loaded from daemon YAML under `vnc:`.
-#[derive(Debug, Clone, serde::Deserialize)]
+/// Screen-sharing bridge binary configuration. Loaded from daemon YAML under `screen_sharing:`.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct VncConfig {
+pub struct ScreenSharingConfig {
     /// Path to the `tddy-vnc` bridge binary.
     /// Empty string (default) → resolved at runtime: current_exe sibling, then PATH.
-    #[serde(default = "default_vnc_binary_path")]
-    pub binary_path: String,
+    #[serde(default)]
+    pub vnc_binary_path: String,
+    /// Path to the `tddy-rdp` bridge binary.
+    /// Empty string (default) → resolved at runtime: current_exe sibling, then PATH.
+    #[serde(default)]
+    pub rdp_binary_path: String,
 }
 
 /// Resolve the actual path to the `tddy-vnc` binary.
 ///
 /// Resolution order:
-/// 1. Explicit `binary_path` in config (if non-empty).
+/// 1. Explicit `vnc_binary_path` in `screen_sharing` config (if non-empty).
 /// 2. Sibling of the current executable (same directory).
 /// 3. Fallback to `"tddy-vnc"` (PATH lookup).
 pub fn resolve_vnc_binary_path(config: &DaemonConfig) -> String {
     let explicit = config
-        .vnc
+        .screen_sharing
         .as_ref()
-        .map(|c| c.binary_path.as_str())
+        .map(|c| c.vnc_binary_path.as_str())
         .unwrap_or("");
     if !explicit.is_empty() {
         return explicit.to_string();
@@ -186,6 +184,28 @@ pub fn resolve_vnc_binary_path(config: &DaemonConfig) -> String {
         .and_then(|p| p.parent().map(|d| d.join("tddy-vnc")))
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| "tddy-vnc".to_string())
+}
+
+/// Resolve the actual path to the `tddy-rdp` binary.
+///
+/// Resolution order:
+/// 1. Explicit `rdp_binary_path` in `screen_sharing` config (if non-empty).
+/// 2. Sibling of the current executable (same directory).
+/// 3. Fallback to `"tddy-rdp"` (PATH lookup).
+pub fn resolve_rdp_binary_path(config: &DaemonConfig) -> String {
+    let explicit = config
+        .screen_sharing
+        .as_ref()
+        .map(|c| c.rdp_binary_path.as_str())
+        .unwrap_or("");
+    if !explicit.is_empty() {
+        return explicit.to_string();
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("tddy-rdp")))
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "tddy-rdp".to_string())
 }
 
 fn default_claude_cli_binary_path() -> String {

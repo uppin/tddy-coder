@@ -1,6 +1,6 @@
 import React from "react";
 
-export type InspectorTab = "details" | "tools" | "vnc";
+export type InspectorTab = "details" | "tools" | "vnc" | "screen-sharing";
 
 interface InspectorTabsProps {
   value: InspectorTab;
@@ -45,6 +45,18 @@ export function InspectorTabs({ value, onChange }: InspectorTabsProps) {
         }`}
       >
         VNC
+      </button>
+      <button
+        data-testid="sessions-inspector-tab-screen-sharing"
+        aria-selected={value === "screen-sharing"}
+        onClick={() => onChange("screen-sharing")}
+        className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+          value === "screen-sharing"
+            ? "border-foreground text-foreground"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        Screen Sharing
       </button>
     </div>
   );

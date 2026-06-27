@@ -3,12 +3,14 @@ import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
 import { VncService } from "../../gen/vnc_pb";
+import { ScreenSharingService } from "../../gen/screen_sharing_pb";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "../../lib/utils";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
 import { SessionToolsTab } from "./SessionToolsTab";
 import { SessionVncTab } from "./SessionVncTab";
+import { SessionScreenSharingTab } from "./SessionScreenSharingTab";
 import { useHttpClient } from "../../rpc/transportProvider";
 
 // ---------------------------------------------------------------------------
@@ -65,6 +67,7 @@ export function SessionInspectorDrawer({
   const [pendingDelete, setPendingDelete] = useState(false);
   const [tab, setTab] = useState<InspectorTab>("details");
   const vncClient = useHttpClient(VncService);
+  const screenSharingClient = useHttpClient(ScreenSharingService);
 
   // Always render in DOM — data-state drives visibility and layout.
   return (
@@ -284,7 +287,7 @@ export function SessionInspectorDrawer({
               }
             />
           </ScrollArea>
-        ) : (
+        ) : tab === "vnc" ? (
           <ScrollArea className="flex-1 min-h-0">
             <SessionVncTab
               sessionId={session.sessionId}
@@ -337,6 +340,73 @@ export function SessionInspectorDrawer({
               onStopVncStream={(targetId) =>
                 vncClient
                   .stopVncStream({ sessionToken: sessionToken ?? "", sessionId: session.sessionId, targetId })
+                  .then(() => undefined)
+              }
+            />
+          </ScrollArea>
+        ) : (
+          <ScrollArea className="flex-1 min-h-0">
+            <SessionScreenSharingTab
+              sessionId={session.sessionId}
+              sessionToken={sessionToken ?? ""}
+              room={room}
+              onListTargets={() =>
+                screenSharingClient
+                  .listTargets({ sessionToken: sessionToken ?? "", sessionId: session.sessionId })
+                  .then((r) =>
+                    r.targets.map((t) => ({
+                      id: t.id,
+                      label: t.label,
+                      host: t.host,
+                      port: t.port,
+                      protocol: t.protocol,
+                    }))
+                  )
+              }
+              onAddTarget={(req) =>
+                screenSharingClient
+                  .addTarget({
+                    sessionToken: sessionToken ?? "",
+                    sessionId: session.sessionId,
+                    label: req.label,
+                    host: req.host,
+                    port: req.port,
+                    password: req.password,
+                    protocol: req.protocol,
+                  })
+                  .then((r) => ({
+                    id: r.target?.id ?? "",
+                    label: r.target?.label ?? "",
+                    host: r.target?.host ?? "",
+                    port: r.target?.port ?? 0,
+                    protocol: r.target?.protocol ?? 0,
+                  }))
+              }
+              onRemoveTarget={(targetId) =>
+                screenSharingClient
+                  .removeTarget({ sessionToken: sessionToken ?? "", sessionId: session.sessionId, targetId })
+                  .then(() => undefined)
+              }
+              onUnlockVault={(passphrase) =>
+                screenSharingClient
+                  .unlockVault({ sessionToken: sessionToken ?? "", sessionId: session.sessionId, passphrase })
+                  .then(() => undefined)
+              }
+              onStartStream={(targetId) =>
+                screenSharingClient
+                  .startStream({ sessionToken: sessionToken ?? "", sessionId: session.sessionId, targetId })
+                  .then((r) => ({
+                    livekitRoom: r.livekitRoom,
+                    livekitUrl: r.livekitUrl,
+                    bridgeIdentity: r.bridgeIdentity,
+                    trackName: r.trackName,
+                    width: r.width,
+                    height: r.height,
+                  }))
+              }
+              onStopStream={(targetId) =>
+                screenSharingClient
+                  .stopStream({ sessionToken: sessionToken ?? "", sessionId: session.sessionId, targetId })
                   .then(() => undefined)
               }
             />

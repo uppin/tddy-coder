@@ -1,5 +1,6 @@
 import React, { type MutableRefObject } from "react";
 import type { Client } from "@connectrpc/connect";
+import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
@@ -32,6 +33,8 @@ interface SessionMainPaneProps {
   terminalControl?: TerminalControlState & { onClaim: () => void };
   /** Ref to the live control token from useTerminalControl. Passed through to GrpcSessionTerminal. */
   controlTokenRef?: MutableRefObject<string>;
+  /** LiveKit room for the connected session (used by VNC / screen-sharing overlay). Null when no room is available. */
+  room?: Room | null;
 }
 
 export function SessionMainPane({
@@ -52,6 +55,7 @@ export function SessionMainPane({
   onSessionCreated,
   terminalControl,
   controlTokenRef,
+  room = null,
 }: SessionMainPaneProps) {
   const isConnected =
     attachment.status === "connected-livekit" || attachment.status === "connected-grpc";

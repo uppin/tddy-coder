@@ -203,6 +203,27 @@ export const TEST_IDS = {
   vncOverlay: "vnc-overlay",
   vncOverlayVideo: "vnc-overlay-video",
   vncOverlayClose: "vnc-overlay-close",
+
+  // Session inspector — Screen Sharing tab
+  sessionsInspectorTabScreenSharing: "sessions-inspector-tab-screen-sharing",
+  sessionsScreenSharingTabPanel: "sessions-screen-sharing-tab-panel",
+  sessionsScreenSharingTargetList: "sessions-screen-sharing-target-list",
+  sessionsScreenSharingAddForm: "sessions-screen-sharing-add-form",
+  sessionsScreenSharingAddLabel: "sessions-screen-sharing-add-label",
+  sessionsScreenSharingAddHost: "sessions-screen-sharing-add-host",
+  sessionsScreenSharingAddPort: "sessions-screen-sharing-add-port",
+  sessionsScreenSharingAddPassword: "sessions-screen-sharing-add-password",
+  sessionsScreenSharingAddProtocol: "sessions-screen-sharing-add-protocol",
+  sessionsScreenSharingAddSubmit: "sessions-screen-sharing-add-submit",
+  sessionsScreenSharingPassphraseDialog: "sessions-screen-sharing-passphrase-dialog",
+  sessionsScreenSharingPassphraseInput: "sessions-screen-sharing-passphrase-input",
+  sessionsScreenSharingPassphraseConfirm: "sessions-screen-sharing-passphrase-confirm",
+  sessionsScreenSharingPassphraseCancel: "sessions-screen-sharing-passphrase-cancel",
+
+  // Screen Sharing overlay
+  screenSharingOverlay: "screen-sharing-overlay",
+  screenSharingOverlayVideo: "screen-sharing-overlay-video",
+  screenSharingOverlayClose: "screen-sharing-overlay-close",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -369,3 +390,23 @@ export const sessionsVncStopBtn = (targetId: string) => `sessions-vnc-stop-${tar
 
 /** `[data-testid="sessions-vnc-remove-<targetId>"]` — Remove target button */
 export const sessionsVncRemoveBtn = (targetId: string) => `sessions-vnc-remove-${targetId}`;
+
+// ---------------------------------------------------------------------------
+// Screen Sharing tab dynamic helpers
+// ---------------------------------------------------------------------------
+
+/** `[data-testid="sessions-screen-sharing-target-row-<targetId>"]` */
+export const sessionsScreenSharingTargetRow = (targetId: string) =>
+  `sessions-screen-sharing-target-row-${targetId}`;
+
+/** `[data-testid="sessions-screen-sharing-start-<targetId>"]` — Start stream button */
+export const sessionsScreenSharingStartBtn = (targetId: string) =>
+  `sessions-screen-sharing-start-${targetId}`;
+
+/** `[data-testid="sessions-screen-sharing-stop-<targetId>"]` — Stop stream button */
+export const sessionsScreenSharingStopBtn = (targetId: string) =>
+  `sessions-screen-sharing-stop-${targetId}`;
+
+/** `[data-testid="sessions-screen-sharing-remove-<targetId>"]` — Remove target button */
+export const sessionsScreenSharingRemoveBtn = (targetId: string) =>
+  `sessions-screen-sharing-remove-${targetId}`;
