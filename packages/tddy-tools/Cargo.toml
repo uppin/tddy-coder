@@ -18,6 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 tddy-core = { path = "../tddy-core" }
+tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-build = { path = "../tddy-build" }
 tddy-build-rust = { path = "../tddy-build-rust" }
 tddy-build-typescript = { path = "../tddy-build-typescript" }
@@ -53,7 +54,6 @@ livekit-api = { version = "0.5", optional = true }
 livekit = ["dep:tddy-livekit", "dep:livekit", "dep:livekit-api"]
 
 [target.'cfg(unix)'.dependencies]
-tokio = { version = "1", features = ["net"] }
 libc = "0.2"
 
 [dev-dependencies]

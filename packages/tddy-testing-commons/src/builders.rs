@@ -122,6 +122,7 @@ pub struct SessionMetadataBuilder {
     model: Option<String>,
     activity_status: Option<String>,
     hook_token: Option<String>,
+    sandbox: Option<bool>,
 }
 
 /// Start building a [`SessionMetadata`] with sensible defaults.
@@ -144,6 +145,7 @@ pub fn a_session_metadata() -> SessionMetadataBuilder {
         model: None,
         activity_status: None,
         hook_token: None,
+        sandbox: None,
     }
 }
 
@@ -215,6 +217,7 @@ impl SessionMetadataBuilder {
             model: self.model,
             activity_status: self.activity_status,
             hook_token: self.hook_token,
+            sandbox: self.sandbox,
         }
     }
 }

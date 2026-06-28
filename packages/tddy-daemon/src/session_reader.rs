@@ -114,6 +114,7 @@ mod tests {
             model: None,
             activity_status: None,
             hook_token: None,
+            sandbox: None,
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 

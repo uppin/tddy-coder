@@ -168,6 +168,8 @@ message StartSessionRequest {
   // Optional: session ID of the orchestrating PR-stack session. When set, the spawned tddy-coder
   // receives `--stack-parent <id>` so it can back-reference the orchestrator.
   string stack_parent = 15;
+  // When true with session_type = "claude-cli", spawn claude inside a platform sandbox (darwin Seatbelt).
+  bool sandbox = 16;
 }
 message StartSessionResponse {
   string session_id = 1;

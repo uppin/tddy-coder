@@ -1,0 +1,30 @@
+[package]
+name = "tddy-sandbox-app"
+version = "0.1.0"
+edition = "2021"
+description = "Standalone terminal app: spawn darwin sandbox + Claude and proxy PTY via SessionChannel gRPC (no host daemon)"
+
+[[bin]]
+name = "tddy-sandbox-app"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+env_logger = "0.11"
+log = "0.4"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+futures-util = "0.3"
+bytes = "1"
+uuid = { version = "1", features = ["v7"] }
+tddy-core = { path = "../tddy-core" }
+tddy-daemon = { path = "../tddy-daemon" }
+tddy-sandbox = { path = "../tddy-sandbox" }
+tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
+tddy-service = { path = "../tddy-service" }
+tddy-task = { path = "../tddy-task" }
+tonic = { version = "0.12", default-features = false, features = ["transport"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

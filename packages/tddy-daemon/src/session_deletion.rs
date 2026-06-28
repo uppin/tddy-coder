@@ -270,6 +270,7 @@ mod tests {
             model: None,
             activity_status: None,
             hook_token: None,
+            sandbox: None,
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }

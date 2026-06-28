@@ -8590,6 +8590,8 @@ dependencies = [
  "futures-util",
  "glob",
  "hmac 0.12.1",
+ "http 1.4.2",
+ "hyper-util",
  "libc",
  "livekit",
  "log",
@@ -8608,13 +8610,17 @@ dependencies = [
  "tddy-connectrpc",
  "tddy-core",
  "tddy-demo-runner",
+ "tddy-demo-tui",
  "tddy-github",
  "tddy-livekit",
  "tddy-livekit-testkit",
  "tddy-rpc",
+ "tddy-sandbox",
+ "tddy-sandbox-darwin",
  "tddy-service",
  "tddy-task",
  "tddy-testing-commons",
+ "tddy-tools",
  "tddy-vm",
  "tddy-workflow-recipes",
  "teloxide",
@@ -8622,6 +8628,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic 0.12.3",
+ "tower 0.5.3",
  "url",
  "uuid",
 ]
@@ -8877,6 +8884,67 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-sandbox"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tddy-workflow-recipes",
+ "tempfile",
+ "walkdir",
+]
+
+[[package]]
+name = "tddy-sandbox-app"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap",
+ "env_logger",
+ "futures-util",
+ "libc",
+ "log",
+ "tddy-core",
+ "tddy-daemon",
+ "tddy-sandbox",
+ "tddy-sandbox-darwin",
+ "tddy-service",
+ "tddy-task",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.12.3",
+ "uuid",
+]
+
+[[package]]
+name = "tddy-sandbox-darwin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap",
+ "env_logger",
+ "futures-util",
+ "libc",
+ "log",
+ "portable-pty 0.9.0",
+ "prost 0.13.5",
+ "serde_json",
+ "serial_test",
+ "tddy-demo-tui",
+ "tddy-sandbox",
+ "tddy-service",
+ "tddy-testing-commons",
+ "tddy-tools",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.12.3",
+]
+
+[[package]]
 name = "tddy-screenshare"
 version = "0.1.0"
 dependencies = [
@@ -8948,9 +9016,18 @@ dependencies = [
 name = "tddy-testing-commons"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
+ "libc",
  "pretty_assertions",
+ "reqwest 0.12.28",
  "tddy-core",
+ "tddy-sandbox",
+ "tddy-sandbox-darwin",
+ "tddy-service",
+ "tddy-tools",
  "tempfile",
+ "tokio",
+ "tokio-stream",
  "uuid",
 ]
 
@@ -8988,6 +9065,7 @@ dependencies = [
  "tddy-build-typescript",
  "tddy-core",
  "tddy-livekit",
+ "tddy-sandbox",
  "tddy-service",
  "tddy-testing-commons",
  "tddy-workflow-recipes",

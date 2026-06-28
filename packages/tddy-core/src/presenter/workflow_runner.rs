@@ -474,6 +474,7 @@ fn run_start_goal_without_output_dir(
                 model: None,
                 activity_status: None,
                 hook_token: None,
+                sandbox: None,
             },
         ) {
             log::warn!("write_initial_tool_session_metadata: {}", e);

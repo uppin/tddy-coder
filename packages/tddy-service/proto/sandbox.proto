@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package sandbox;
+
+import "connection.proto";
+
+// gRPC service exposed INSIDE the darwin sandbox. The host daemon is the client.
+service SandboxService {
+  // Single host-initiated bidi channel: terminal I/O and tool exec.
+  // Host sends all control on the client stream; sandbox replies on the server
+  // stream only after receiving host inbound frames (typically HostPoll).
+  rpc SessionChannel(stream SessionFrame) returns (stream SessionFrame);
+  // Unary connectivity probe (daemon ↔ sandbox-runner).
+  rpc Echo(EchoRequest) returns (EchoResponse);
+  // Bidi connectivity probe — echoes each inbound frame on the outbound stream.
+  rpc EchoStream(stream EchoStreamFrame) returns (stream EchoStreamFrame);
+}
+
+message SessionFrame {
+  oneof payload {
+    // Host → sandbox (client stream)
+    HostPoll host_poll = 1;
+    SubscribeTerminal subscribe_terminal = 2;
+    SandboxInput terminal_input = 3;
+    connection.ExecuteToolResponse tool_response = 4;
+    EgressResponse egress_response = 7;
+    TunnelOpenAck tunnel_open_ack = 9;
+    // Sandbox → host (server stream; only after host inbound)
+    connection.ExecuteToolRequest tool_request = 5;
+    connection.SessionTerminalOutput terminal_output = 6;
+    EgressRequest egress_request = 8;
+    TunnelOpen tunnel_open = 10;
+    // Bidirectional: TunnelData/TunnelClose flow in both directions (direction by context).
+    TunnelData tunnel_data = 11;
+    TunnelClose tunnel_close = 12;
+  }
+}
+
+message HostPoll {}
+
+message SubscribeTerminal {
+  string session_id = 1;
+  string terminal_id = 2;
+  uint32 initial_cols = 3;
+  uint32 initial_rows = 4;
+}
+
+message SandboxInput {
+  string session_id = 1;
+  string terminal_id = 2;
+  bytes data = 3;
+}
+
+message EchoRequest {
+  string message = 1;
+}
+
+message EchoResponse {
+  string message = 1;
+}
+
+message EchoStreamFrame {
+  string message = 1;
+}
+
+// HTTP egress relay: sandbox → host (after HostPoll), host performs outbound fetch.
+message EgressRequest {
+  string request_id = 1;
+  string method = 2;
+  string url = 3;
+  repeated EgressHeader headers = 4;
+  bytes body = 5;
+}
+
+message EgressResponse {
+  string request_id = 1;
+  uint32 status_code = 2;
+  repeated EgressHeader headers = 3;
+  bytes body = 4;
+  string error_message = 5;
+}
+
+message EgressHeader {
+  string name = 1;
+  string value = 2;
+}
+
+// Raw TCP CONNECT tunnel relayed over SessionChannel. The in-jail runner is the
+// HTTPS_PROXY endpoint: it accepts `CONNECT host:port`, the host opens the real
+// outbound TCP connection, and encrypted bytes are pumped both ways. TLS stays
+// end-to-end between the agent and the target — the host never sees plaintext.
+message TunnelOpen {
+  string tunnel_id = 1;
+  string host = 2;
+  uint32 port = 3;
+}
+
+message TunnelOpenAck {
+  string tunnel_id = 1;
+  bool ok = 2;
+  string error = 3;
+}
+
+message TunnelData {
+  string tunnel_id = 1;
+  bytes data = 2;
+}
+
+message TunnelClose {
+  string tunnel_id = 1;
+  string error = 2;
+}

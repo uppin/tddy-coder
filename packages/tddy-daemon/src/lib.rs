@@ -40,6 +40,7 @@ pub mod user_sessions_path;
 pub mod workspace_session;
 pub mod worktrees;
 
+pub mod sandbox_session;
 pub mod screen_sharing_service;
 pub mod screen_sharing_vault;
 pub mod test_util;

@@ -204,6 +204,7 @@ allowed_agents:
         initial_prompt: String::new(),
         permission_mode: String::new(),
         stack_parent: String::new(),
+        sandbox: false,
     });
 
     // When

@@ -61,7 +61,8 @@ enum Subcommand {
     Build(build_cli::BuildArgs),
 
     /// Spawn a command in a PTY and relay keyboard+output — same wiring as the daemon uses
-    /// for claude-cli sessions. Useful for verifying the PTY pipeline independently.
+    /// for claude-cli sessions. Also start/connect to daemon sessions (including sandbox):
+    /// `pty-relay --daemon-url URL --project-id ID --sandbox`
     /// Example: tddy-tools pty-relay -- claude --model claude-opus-4-8
     PtyRelay(Box<pty_relay::PtyRelayArgs>),
 

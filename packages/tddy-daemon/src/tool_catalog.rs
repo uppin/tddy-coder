@@ -59,3 +59,29 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         },
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn workspace_exec_tool_names_match_tool_catalog() {
+        // Given
+        let catalog: HashSet<String> = tool_catalog().into_iter().map(|t| t.name).collect();
+        let sandbox: HashSet<&str> = tddy_sandbox::workspace_exec_tool_names()
+            .iter()
+            .copied()
+            .collect();
+
+        // Then — sandbox claude allowlist must cover the same exec tools as ListExecTools
+        assert_eq!(
+            catalog,
+            sandbox
+                .into_iter()
+                .map(String::from)
+                .collect::<HashSet<_>>(),
+            "workspace_exec_tool_names must stay in sync with tool_catalog"
+        );
+    }
+}

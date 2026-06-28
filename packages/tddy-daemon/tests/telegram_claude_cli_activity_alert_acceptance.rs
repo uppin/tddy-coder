@@ -65,6 +65,7 @@ fn write_claude_cli_session(
         model: Some("claude-opus-4-8".to_string()),
         activity_status: initial_activity_status.map(str::to_owned),
         hook_token: Some(hook_token.to_string()),
+        sandbox: None,
     };
     write_session_metadata(session_dir, &meta).unwrap();
 }

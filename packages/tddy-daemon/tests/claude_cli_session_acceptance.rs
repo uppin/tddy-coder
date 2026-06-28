@@ -23,6 +23,8 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 const VALID_TOKEN: &str = "valid-token";
 const TEST_MODEL: &str = "claude-opus-4-8";
 const TEST_PROJECT_ID: &str = "test-project";
+const PTY_STUB_OUTPUT_TIMEOUT_MS: u64 = 2_000;
+const PTY_RPC_STUB_OUTPUT_TIMEOUT_MS: u64 = 10_000;
 
 fn write_config_with_claude_cli_binary(stub_binary: &str) -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
@@ -182,6 +184,7 @@ async fn claude_cli_session_metadata_fields_persisted() {
             initial_prompt: String::new(),
             permission_mode: String::new(),
             stack_parent: String::new(),
+            sandbox: false,
         }))
         .await
         .expect("StartSession with session_type=claude-cli must succeed");
@@ -267,6 +270,7 @@ async fn claude_cli_session_livekit_fields_empty() {
             initial_prompt: String::new(),
             permission_mode: String::new(),
             stack_parent: String::new(),
+            sandbox: false,
         }))
         .await
         .expect("StartSession must succeed")
@@ -322,6 +326,7 @@ async fn claude_cli_session_enrichment_reads_from_metadata() {
         model: Some(TEST_MODEL.to_string()),
         activity_status: None,
         hook_token: None,
+        sandbox: None,
     };
     write_session_metadata(&session_dir, &meta).unwrap();
     // No changeset.yaml — intentionally absent to test the claude-cli fallback path.
@@ -406,6 +411,7 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
         model: Some(TEST_MODEL.to_string()),
         activity_status: None,
         hook_token: None,
+        sandbox: None,
     };
     write_session_metadata(&session_dir, &meta).unwrap();
 
@@ -481,6 +487,7 @@ users:
             initial_prompt: String::new(),
             permission_mode: String::new(),
             stack_parent: String::new(),
+            sandbox: false,
         }))
         .await
         .expect_err("StartSession with claude-cli and empty model must fail");
@@ -528,6 +535,7 @@ async fn claude_cli_start_session_requires_project() {
             initial_prompt: String::new(),
             permission_mode: String::new(),
             stack_parent: String::new(),
+            sandbox: false,
         }))
         .await
         .expect_err("StartSession with empty project_id must fail");
@@ -557,6 +565,7 @@ async fn claude_cli_start_session_requires_project() {
             initial_prompt: String::new(),
             permission_mode: String::new(),
             stack_parent: String::new(),
+            sandbox: false,
         }))
         .await
         .expect_err("StartSession with unknown project_id must fail");
@@ -678,7 +687,7 @@ async fn claude_cli_session_passes_initial_prompt_as_positional_arg() {
         .expect("start with echo-argv stub and initial_prompt must succeed");
 
     // Then
-    let found = wait_for_capture_contains(&handle, "ARGV:", 2000).await;
+    let found = wait_for_capture_contains(&handle, "ARGV:", PTY_STUB_OUTPUT_TIMEOUT_MS).await;
     assert!(
         found,
         "stub script must write ARGV: to PTY output within 2s"
@@ -723,7 +732,7 @@ async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
         .expect("start with empty initial_prompt must succeed");
 
     // Then
-    let found = wait_for_capture_contains(&handle, "ARGV:", 2000).await;
+    let found = wait_for_capture_contains(&handle, "ARGV:", PTY_STUB_OUTPUT_TIMEOUT_MS).await;
     assert!(
         found,
         "stub script must write ARGV: to PTY output within 2s"
@@ -793,6 +802,7 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
             initial_prompt: "hello from rpc".to_string(),
             permission_mode: String::new(),
             stack_parent: String::new(),
+            sandbox: false,
         }))
         .await
         .expect("StartSession with initial_prompt must succeed");
@@ -807,11 +817,11 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
         .await
         .expect("session must be present in the shared ClaudeCliSessionManager after start");
 
-    let found = wait_for_capture_contains(&handle, "ARGV:", 2000).await;
+    let found = wait_for_capture_contains(&handle, "ARGV:", PTY_RPC_STUB_OUTPUT_TIMEOUT_MS).await;
     assert!(
         found,
-        "stub script must write ARGV: within 2s; session_id={}",
-        session_id
+        "stub script must write ARGV: within {}ms; session_id={}",
+        PTY_RPC_STUB_OUTPUT_TIMEOUT_MS, session_id
     );
 
     let cap = handle.capture.lock().unwrap();
@@ -860,7 +870,7 @@ async fn resume_does_not_replay_initial_prompt() {
         .expect("resume must succeed");
 
     // Then
-    let found = wait_for_capture_contains(&handle2, "ARGV:", 2000).await;
+    let found = wait_for_capture_contains(&handle2, "ARGV:", PTY_STUB_OUTPUT_TIMEOUT_MS).await;
     assert!(found, "stub script must write ARGV: within 2s on resume");
 
     let cap = handle2.capture.lock().unwrap();

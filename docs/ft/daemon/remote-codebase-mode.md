@@ -109,6 +109,22 @@ remote `tddy-daemon`) so that my agent can plan, read, write, and test code in a
     workspace session.
 28. `tddy-coder --remote --resume-from <id>` resumes an existing remote session.
 
+## Local sandbox sibling (darwin, same host)
+
+**Darwin-sandboxed Claude CLI sessions** apply the same *remote codebase* tool model locally:
+the agent runs inside a macOS Seatbelt jail and accesses the host git worktree only via
+`mcp__tddy-tools__*` calls on a host-initiated gRPC **`SessionChannel`**. There is no LiveKit
+relay and no remote daemon — loopback gRPC only, no auth on the sandbox path.
+
+Reuse from this feature area:
+
+- `build_remote_allowlist` / read-only context dir with `REMOTE_APPENDIX`
+- `tool_engine::execute_tool` against the host worktree
+- Workspace exec tool catalog (`ListExecTools` shapes)
+
+Entry point: `StartSession` with `session_type:"claude-cli"` and `sandbox:true`.
+Details: [claude-cli-session.md](claude-cli-session.md#darwin-sandbox-mode-startsessionrequestsandbox--true).
+
 ## Non-goals (out of scope)
 
 - Web UI support for remote sessions (no new web screens; operators use the CLI).

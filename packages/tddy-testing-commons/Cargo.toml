@@ -6,6 +6,17 @@ description = "Shared test builders, fakes, and assertion helpers for the tddy w
 
 [dependencies]
 tddy-core = { path = "../tddy-core" }
+tddy-sandbox = { path = "../tddy-sandbox" }
+tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
+tddy-service = { path = "../tddy-service" }
+tddy-tools = { path = "../tddy-tools" }
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
 pretty_assertions = { workspace = true }
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }
+tokio-stream = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

@@ -452,6 +452,7 @@ state:
             model: Some("claude-opus-4-8".to_string()),
             activity_status: None,
             hook_token: None,
+            sandbox: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         // Intentionally NO changeset.yaml — claude-cli sessions never have one.
@@ -505,6 +506,7 @@ state:
             model: Some("claude-sonnet-4-6".to_string()),
             activity_status: Some("WaitingForInput".to_string()),
             hook_token: None,
+            sandbox: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -543,6 +545,7 @@ state:
             model: Some("claude-opus-4-8".to_string()),
             activity_status: None,
             hook_token: None,
+            sandbox: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -581,6 +584,7 @@ state:
             model: None,
             activity_status: None,
             hook_token: None,
+            sandbox: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -639,6 +643,7 @@ sessions:
             model: Some("claude-sonnet-4-6".to_string()),
             activity_status: Some("Done".to_string()),
             hook_token: None,
+            sandbox: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -696,6 +701,7 @@ sessions:
             model: None,
             activity_status: None,
             hook_token: None,
+            sandbox: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         assert!(

@@ -44,6 +44,9 @@ pub struct SessionMetadata {
     /// sessions and legacy files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hook_token: Option<String>,
+    /// When true, the claude-cli session runs inside a platform sandbox (darwin Seatbelt).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<bool>,
 }
 
 pub const SESSION_METADATA_FILENAME: &str = ".session.yaml";
@@ -66,6 +69,8 @@ pub struct InitialToolSessionMetadataOpts {
     pub activity_status: Option<String>,
     /// Per-session hook token for claude-cli sessions. `None` for tool sessions.
     pub hook_token: Option<String>,
+    /// When true, the claude-cli session runs inside a platform sandbox (darwin Seatbelt).
+    pub sandbox: Option<bool>,
 }
 
 /// Writes `.session.yaml` for a newly created session directory.
@@ -104,6 +109,7 @@ pub fn write_initial_tool_session_metadata(
         model: opts.model,
         activity_status: opts.activity_status,
         hook_token: opts.hook_token,
+        sandbox: opts.sandbox,
     };
     write_session_metadata(session_dir, &metadata)
 }
@@ -173,6 +179,7 @@ mod tests {
 
                 activity_status: None,
                 hook_token: None,
+                sandbox: None,
             },
         )
         .unwrap();
@@ -218,6 +225,7 @@ mod tests {
 
                 activity_status: None,
                 hook_token: None,
+                sandbox: None,
             },
         )
         .unwrap();

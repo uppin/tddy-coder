@@ -37,6 +37,9 @@ members = [
     "packages/tddy-vnc",
     "packages/tddy-screenshare",
     "packages/tddy-rdp",
+    "packages/tddy-sandbox",
+    "packages/tddy-sandbox-darwin",
+    "packages/tddy-sandbox-app",
 ]
 exclude = [
     # Real cargo workspace used as a tddy-build example fixture; built by the

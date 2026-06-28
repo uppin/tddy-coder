@@ -1,6 +1,6 @@
 ---
 name: tdd-implementer
-model: composer-1
+model: composer-2.5
 description: TDD implementation specialist for green phase. Uses failing tests to guide development of working production code. Use after test-writer to make tests pass.
 ---
 
