@@ -50,6 +50,7 @@ chacha20poly1305 = "0.10"
 rand = "0.8"
 tddy-connectrpc = { path = "../tddy-connectrpc" }
 tddy-sandbox = { path = "../tddy-sandbox" }
+tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }
@@ -59,6 +60,9 @@ portable-pty = "0.9"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tddy-sandbox-cgroups = { path = "../tddy-sandbox-cgroups" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -74,6 +74,7 @@ fn runner_args(tmp: &Path, claude_binary: &Path) -> (SandboxRunnerArgs, PathBuf)
         permission_mode: "auto".to_string(),
         grpc_listen_port: None,
         egress_shim_port: None,
+        grpc_uds: None,
     };
     (args, egress)
 }

@@ -5,19 +5,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use tddy_rpc::Status;
 use tokio::sync::{broadcast, mpsc, Mutex};
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
 use tddy_sandbox::{SandboxContextDir, SandboxError, SandboxSpec};
 use tddy_service::proto::connection::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
-use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
-use tddy_service::tonic_sandbox::{
-    EgressRequest, EgressResponse, HostPoll, SandboxInput, SessionFrame, SubscribeTerminal,
-    TunnelClose, TunnelData, TunnelOpen, TunnelOpenAck,
-};
 
 use crate::tool_engine;
 
@@ -143,6 +138,8 @@ pub async fn wait_for_sandbox_ready(
     }
 }
 
+/// TCP dialer for the in-jail gRPC server (macOS Seatbelt path; Linux uses AF_UNIX).
+#[cfg(not(target_os = "linux"))]
 async fn connect_sandbox_client(
     ready_marker: &Path,
 ) -> Result<SandboxServiceClient<tonic::transport::Channel>, String> {
@@ -157,281 +154,104 @@ async fn connect_sandbox_client(
         .map_err(|e| format!("connect sandbox grpc: {e}"))
 }
 
-/// Dial the sandbox gRPC server and start the host-driven session channel loop.
+/// Tool handler that runs MCP tool calls in the session worktree via [`tool_engine`].
+struct DaemonToolHandler {
+    worktree: PathBuf,
+    task_registry: tddy_task::TaskRegistry,
+}
+
+#[async_trait]
+impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
+    async fn execute(
+        &self,
+        session_id: &str,
+        tool_name: &str,
+        args_json: &str,
+    ) -> ExecuteToolResponse {
+        let outcome = tool_engine::execute_tool(
+            &self.worktree,
+            tool_name,
+            args_json,
+            &self.task_registry,
+            session_id,
+        )
+        .await;
+        ExecuteToolResponse {
+            result_json: outcome.result_json,
+            is_error: outcome.is_error,
+            error_message: outcome.error_message,
+            job_id: outcome.job_id,
+            job_running: outcome.job_running,
+        }
+    }
+}
+
+/// Dial the in-jail gRPC server over the platform's transport: loopback TCP on macOS (port from
+/// the ready marker), AF_UNIX on Linux (a netns-isolated cgroups jail can't be reached over
+/// loopback TCP — a UDS on the shared filesystem can).
+#[cfg(target_os = "linux")]
+async fn connect_session_client(
+    _ready_marker: &Path,
+    grpc_socket: &Path,
+) -> Result<SandboxServiceClient<tonic::transport::Channel>, String> {
+    tddy_sandbox_runner::connect_sandbox_client_uds(grpc_socket)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn connect_session_client(
+    ready_marker: &Path,
+    _grpc_socket: &Path,
+) -> Result<SandboxServiceClient<tonic::transport::Channel>, String> {
+    connect_sandbox_client(ready_marker).await
+}
+
+/// Dial the sandbox gRPC server and drive the host side via the shared relay. PTY output fans into
+/// the broadcast channel (live subscribers) and the rolling capture buffer (late subscribers);
+/// tool calls run in `worktree_path`.
+#[allow(clippy::too_many_arguments)]
 pub async fn dial_and_bridge(
     session_id: &str,
     worktree_path: PathBuf,
     ready_marker: PathBuf,
+    grpc_socket: PathBuf,
     task_registry: tddy_task::TaskRegistry,
     stdout_tx: broadcast::Sender<Bytes>,
     capture: Arc<StdMutex<Vec<u8>>>,
-    mut stdin_rx: mpsc::UnboundedReceiver<Bytes>,
+    stdin_rx: mpsc::UnboundedReceiver<Bytes>,
 ) -> Result<(), String> {
-    let mut client = connect_sandbox_client(&ready_marker).await?;
+    let client = connect_session_client(&ready_marker, &grpc_socket).await?;
 
     log::info!(
         target: "tddy_daemon::sandbox_session",
-        "opening sandbox SessionChannel for session {session_id} (ready_marker={})",
-        ready_marker.display()
+        "opening sandbox SessionChannel for session {session_id}"
     );
 
-    let (host_tx, host_rx) = mpsc::channel(64);
-    let host_stream = ReceiverStream::new(host_rx);
-    let mut session = client
-        .session_channel(host_stream)
-        .await
-        .map_err(|e| format!("open session channel: {e}"))?
-        .into_inner();
-
-    host_tx
-        .send(SessionFrame {
-            payload: Some(SessionPayload::SubscribeTerminal(SubscribeTerminal {
-                session_id: session_id.to_string(),
-                terminal_id: "main".to_string(),
-                initial_cols: 80,
-                initial_rows: 24,
-            })),
-        })
-        .await
-        .map_err(|_| "session channel closed before subscribe".to_string())?;
-
-    let session_id_out = session_id.to_string();
-    let worktree_out = worktree_path.clone();
-    let registry_out = task_registry.clone();
+    let (term_tx, mut term_rx) = mpsc::unbounded_channel::<Bytes>();
     let stdout_out = stdout_tx.clone();
     let capture_out = Arc::clone(&capture);
-    let host_tx_out = host_tx.clone();
-
     tokio::spawn(async move {
-        // CONNECT tunnels: tunnel_id → sender feeding agent→host bytes into the outbound TCP socket.
-        let mut tunnels: HashMap<String, mpsc::UnboundedSender<Bytes>> = HashMap::new();
-        while let Some(Ok(frame)) = session.next().await {
-            match frame.payload {
-                Some(SessionPayload::ToolRequest(req)) => {
-                    log::debug!(
-                        target: "tddy_daemon::sandbox_session",
-                        "sandbox tool request session={session_id_out} tool={}",
-                        req.tool_name
-                    );
-                    let outcome = tool_engine::execute_tool(
-                        &worktree_out,
-                        &req.tool_name,
-                        &req.args_json,
-                        &registry_out,
-                        &session_id_out,
-                    )
-                    .await;
-                    let resp = ExecuteToolResponse {
-                        result_json: outcome.result_json,
-                        is_error: outcome.is_error,
-                        error_message: outcome.error_message,
-                        job_id: outcome.job_id,
-                        job_running: outcome.job_running,
-                    };
-                    let _ = host_tx_out
-                        .send(SessionFrame {
-                            payload: Some(SessionPayload::ToolResponse(resp)),
-                        })
-                        .await;
-                }
-                Some(SessionPayload::EgressRequest(req)) => {
-                    log::debug!(
-                        target: "tddy_daemon::sandbox_session",
-                        "sandbox egress request session={session_id_out} url={}",
-                        req.url
-                    );
-                    let resp = relay_egress_request(req).await;
-                    let _ = host_tx_out
-                        .send(SessionFrame {
-                            payload: Some(SessionPayload::EgressResponse(resp)),
-                        })
-                        .await;
-                }
-                Some(SessionPayload::TunnelOpen(open)) => {
-                    // Agent issued CONNECT host:port — the host owns the real outbound socket.
-                    let (tcp_in_tx, tcp_in_rx) = mpsc::unbounded_channel::<Bytes>();
-                    tunnels.insert(open.tunnel_id.clone(), tcp_in_tx);
-                    spawn_tunnel(open, tcp_in_rx, host_tx_out.clone());
-                }
-                Some(SessionPayload::TunnelData(data)) => {
-                    // Agent→host bytes: feed into the outbound socket for this tunnel.
-                    if let Some(tx) = tunnels.get(&data.tunnel_id) {
-                        if tx.send(Bytes::from(data.data)).is_err() {
-                            tunnels.remove(&data.tunnel_id);
-                        }
-                    }
-                }
-                Some(SessionPayload::TunnelClose(close)) => {
-                    // Agent closed its end: drop the sender so the socket writer shuts down.
-                    tunnels.remove(&close.tunnel_id);
-                }
-                Some(SessionPayload::TerminalOutput(out)) => {
-                    if !out.data.is_empty() {
-                        if let Ok(mut cap) = capture_out.lock() {
-                            cap.extend_from_slice(&out.data);
-                        }
-                        let _ = stdout_out.send(Bytes::from(out.data));
-                    }
-                }
-                _ => {}
+        while let Some(chunk) = term_rx.recv().await {
+            if let Ok(mut cap) = capture_out.lock() {
+                cap.extend_from_slice(&chunk);
             }
+            let _ = stdout_out.send(chunk);
         }
     });
 
-    let session_id_in = session_id.to_string();
-    tokio::spawn(async move {
-        let mut poll = tokio::time::interval(Duration::from_millis(25));
-        loop {
-            tokio::select! {
-                chunk = stdin_rx.recv() => {
-                    let Some(chunk) = chunk else { break };
-                    let _ = host_tx.send(SessionFrame {
-                        payload: Some(SessionPayload::TerminalInput(SandboxInput {
-                            session_id: session_id_in.clone(),
-                            terminal_id: "main".to_string(),
-                            data: chunk.to_vec(),
-                        })),
-                    }).await;
-                }
-                _ = poll.tick() => {
-                    let _ = host_tx.send(SessionFrame {
-                        payload: Some(SessionPayload::HostPoll(HostPoll {})),
-                    }).await;
-                }
-            }
-        }
-    });
-
-    Ok(())
-}
-
-/// Open the real outbound TCP connection for a relayed `CONNECT` tunnel and pump bytes both
-/// ways over the `SessionChannel`. The host is a dumb byte relay — TLS stays end-to-end between
-/// the in-jail agent and the target, so credentials never appear in plaintext here.
-fn spawn_tunnel(
-    open: TunnelOpen,
-    mut tcp_in_rx: mpsc::UnboundedReceiver<Bytes>,
-    host_tx: mpsc::Sender<SessionFrame>,
-) {
-    tokio::spawn(async move {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-        let tunnel_id = open.tunnel_id.clone();
-        let addr = format!("{}:{}", open.host, open.port);
-        let stream = match tokio::net::TcpStream::connect(&addr).await {
-            Ok(s) => s,
-            Err(e) => {
-                let _ = host_tx
-                    .send(SessionFrame {
-                        payload: Some(SessionPayload::TunnelOpenAck(TunnelOpenAck {
-                            tunnel_id,
-                            ok: false,
-                            error: format!("connect {addr}: {e}"),
-                        })),
-                    })
-                    .await;
-                return;
-            }
-        };
-        let _ = host_tx
-            .send(SessionFrame {
-                payload: Some(SessionPayload::TunnelOpenAck(TunnelOpenAck {
-                    tunnel_id: tunnel_id.clone(),
-                    ok: true,
-                    error: String::new(),
-                })),
-            })
-            .await;
-
-        let (mut read_half, mut write_half) = stream.into_split();
-
-        // host → agent: forward outbound-socket bytes as TunnelData; signal close on EOF/error.
-        let up_tx = host_tx.clone();
-        let up_id = tunnel_id.clone();
-        let up = tokio::spawn(async move {
-            let mut buf = [0u8; 16384];
-            loop {
-                match read_half.read(&mut buf).await {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        if up_tx
-                            .send(SessionFrame {
-                                payload: Some(SessionPayload::TunnelData(TunnelData {
-                                    tunnel_id: up_id.clone(),
-                                    data: buf[..n].to_vec(),
-                                })),
-                            })
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-            let _ = up_tx
-                .send(SessionFrame {
-                    payload: Some(SessionPayload::TunnelClose(TunnelClose {
-                        tunnel_id: up_id,
-                        error: String::new(),
-                    })),
-                })
-                .await;
-        });
-
-        // agent → host: drain inbound bytes into the outbound socket until the agent closes.
-        while let Some(bytes) = tcp_in_rx.recv().await {
-            if write_half.write_all(&bytes).await.is_err() {
-                break;
-            }
-        }
-        let _ = write_half.shutdown().await;
-        up.abort();
-    });
-}
-
-pub async fn relay_egress_request(req: EgressRequest) -> EgressResponse {
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            return EgressResponse {
-                request_id: req.request_id,
-                error_message: format!("build http client: {e}"),
-                ..Default::default()
-            };
-        }
+    let handler = DaemonToolHandler {
+        worktree: worktree_path,
+        task_registry,
     };
-
-    let method = reqwest::Method::from_bytes(req.method.as_bytes()).unwrap_or(reqwest::Method::GET);
-    let mut builder = client.request(method, &req.url);
-    for header in &req.headers {
-        builder = builder.header(&header.name, &header.value);
-    }
-    if !req.body.is_empty() {
-        builder = builder.body(req.body.clone());
-    }
-
-    match builder.send().await {
-        Ok(resp) => {
-            let status_code = resp.status().as_u16() as u32;
-            let body = resp.bytes().await.unwrap_or_default();
-            EgressResponse {
-                request_id: req.request_id,
-                status_code,
-                body: body.to_vec(),
-                ..Default::default()
-            }
-        }
-        Err(e) => EgressResponse {
-            request_id: req.request_id,
-            error_message: format!("outbound fetch failed: {e}"),
-            ..Default::default()
-        },
-    }
+    tddy_sandbox_runner::run_host_relay(
+        client,
+        handler,
+        tddy_sandbox_runner::HostRelayConfig::new(session_id, term_tx),
+        stdin_rx,
+    )
+    .await?;
+    Ok(())
 }
 
 /// Map [`SandboxError`] to gRPC status for StartSession failures.
@@ -729,12 +549,31 @@ pub fn spawn_sandbox_runner(
     tddy_sandbox_darwin::spawn(spec)
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Spawn sandbox-runner inside a rootless cgroups + namespaces jail (Linux).
+#[cfg(target_os = "linux")]
+pub fn spawn_sandbox_runner(
+    params: SandboxRunnerSpawn,
+) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
+    let spec = SandboxSpec {
+        project_root: params.project_root,
+        scratch_dir: params.scratch_dir,
+        egress_dir: params.egress_dir,
+        allow_read_paths: build_allow_read_paths(&params.runner_argv),
+        command: params.runner_argv,
+        env: params.env,
+        profile_path: params.profile_path,
+        loopback_allow_ports: params.loopback_allow_ports,
+        ipc_socket: params.ipc_socket,
+    };
+    tddy_sandbox_cgroups::spawn(spec)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn spawn_sandbox_runner(
     _params: SandboxRunnerSpawn,
 ) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
     Err(SandboxError::Unsupported {
         platform: std::env::consts::OS.to_string(),
-        message: "darwin Seatbelt sandboxes are not available on this OS".to_string(),
+        message: "platform sandboxes are not available on this OS".to_string(),
     })
 }

@@ -2,7 +2,7 @@
 use anyhow::Result;
 use clap::Parser;
 
-use tddy_sandbox_darwin::runner::{run_sandbox_runner, SandboxRunnerArgs};
+use tddy_sandbox_runner::{run_sandbox_runner, SandboxRunnerArgs};
 
 #[tokio::main]
 async fn main() -> Result<()> {

@@ -1,0 +1,37 @@
+[package]
+name = "tddy-sandbox-runner"
+version = "0.1.0"
+edition = "2021"
+description = "Shared in-jail sandbox runner (gRPC SessionChannel server + PTY bridge + egress shim) and host-side relay, reused by the Darwin and Linux cgroups backends, the daemon, the standalone app, and tests"
+
+[lib]
+name = "tddy_sandbox_runner"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tddy-sandbox-runner"
+path = "src/main.rs"
+
+[dependencies]
+tddy-sandbox = { path = "../tddy-sandbox" }
+tddy-service = { path = "../tddy-service" }
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+portable-pty = "0.9"
+bytes = "1"
+tonic = { version = "0.12", default-features = false, features = ["transport"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+prost = "0.13"
+libc = "0.2"
+hyper-util = "0.1"
+tower = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+
+[dev-dependencies]
+futures-util = "0.3"
+tempfile = "3"

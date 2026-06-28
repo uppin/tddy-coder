@@ -871,6 +871,15 @@ impl ConnectionServiceImpl {
             "--egress-shim-port".into(),
             egress_shim_port.to_string(),
         ];
+        // On Linux the gRPC SessionChannel is served over AF_UNIX (it survives the jail's network
+        // namespace, where loopback TCP cannot); prefer it over the TCP port.
+        #[cfg(target_os = "linux")]
+        let runner_argv = {
+            let mut argv = runner_argv;
+            argv.push("--grpc-uds".into());
+            argv.push(grpc_socket.to_string_lossy().to_string());
+            argv
+        };
 
         let env = crate::sandbox_session::build_sandbox_runner_env(
             &scratch_home,
@@ -916,6 +925,7 @@ impl ConnectionServiceImpl {
             session_id,
             worktree_path.clone(),
             ready_marker.clone(),
+            grpc_socket.clone(),
             self.task_registry.clone(),
             stdout_tx.clone(),
             Arc::clone(&capture),
@@ -1194,6 +1204,15 @@ impl ConnectionServiceImpl {
             "--egress-shim-port".into(),
             egress_shim_port.to_string(),
         ];
+        // On Linux the gRPC SessionChannel is served over AF_UNIX (it survives the jail's network
+        // namespace, where loopback TCP cannot); prefer it over the TCP port.
+        #[cfg(target_os = "linux")]
+        let runner_argv = {
+            let mut argv = runner_argv;
+            argv.push("--grpc-uds".into());
+            argv.push(grpc_socket.to_string_lossy().to_string());
+            argv
+        };
 
         let env = crate::sandbox_session::build_sandbox_runner_env(
             &scratch_home,
@@ -1242,6 +1261,7 @@ impl ConnectionServiceImpl {
             session_id,
             worktree_path.to_path_buf(),
             ready_marker.clone(),
+            grpc_socket.clone(),
             self.task_registry.clone(),
             stdout_tx.clone(),
             Arc::clone(&capture),
