@@ -31,7 +31,7 @@ As a developer, I want to start a raw Claude Code CLI session from the tddy web 
 9. The session directory `~/.tddy/sessions/<session-id>/` is created with `.session.yaml` containing:
    - `session_type: claude-cli`
    - `model: <model-id>`
-   - `sandbox: true` (optional; darwin Seatbelt spawn when set)
+   - `sandbox: true` (optional; platform jail spawn when set — macOS Seatbelt / Linux cgroups)
    - `repo_path: <worktree-absolute-path>`
    - `pid: <claude-process-pid>`
    - `status: active`
@@ -55,23 +55,29 @@ As a developer, I want to start a raw Claude Code CLI session from the tddy web 
 17. `SignalSession` sends the signal to the `claude` PTY process.
 18. `DeleteSession` sends SIGTERM, waits for exit, removes the session directory and worktree.
 
-## Darwin sandbox mode (`StartSessionRequest.sandbox = true`)
+## Sandbox mode (`StartSessionRequest.sandbox = true`)
 
-On macOS, `StartSession` with `session_type = "claude-cli"` and **`sandbox = true`** runs
-`claude` inside a **Seatbelt jail** on the same host. The daemon still creates a git worktree
-and executes tools against it via `tool_engine::execute_tool`; the sandboxed agent reaches the
-codebase only through `mcp__tddy-tools__*` tool calls relayed over a host-initiated gRPC
-**`SessionChannel`**. No LiveKit credentials are returned.
+`StartSession` with `session_type = "claude-cli"` and **`sandbox = true`** runs `claude` inside a
+**platform jail** on the same host — macOS **Seatbelt** or Linux **rootless cgroups + namespaces**.
+The daemon still creates a git worktree and executes tools against it via `tool_engine::execute_tool`;
+the sandboxed agent reaches the codebase only through `mcp__tddy-tools__*` tool calls relayed over a
+host-initiated gRPC **`SessionChannel`**. No LiveKit credentials are returned. The flag is set from the
+tddy-web new-session form or `tddy-tools pty-relay --sandbox`.
 
 | Aspect | Non-sandbox claude-cli | Sandboxed claude-cli |
 |--------|------------------------|----------------------|
-| `claude` spawn | Direct PTY in worktree | `sandbox-exec` → `tddy-tools sandbox-runner` → PTY |
+| `claude` spawn | Direct PTY in worktree | jail (`sandbox-exec` on macOS / userns+cgroups on Linux) → `tddy-sandbox-runner` → PTY |
 | Filesystem | Full host worktree | Read-only context dir in jail; writes via MCP tools on host |
-| Network from agent | Host network | `(deny network*)`; LLM HTTP relayed as `EgressRequest` frames |
+| Network from agent | Host network | No direct egress (Seatbelt `deny network*` / Linux network namespace); LLM HTTPS tunneled over `SessionChannel` to a host relay (TLS end-to-end) |
+| Control channel | — | loopback TCP (macOS) / AF_UNIX (Linux, survives the network namespace) |
 | Resume / delete | PTY respawn / SIGTERM | Stop sandbox child + relaunch runner; same worktree teardown |
-| Non-macOS | Supported | `failed_precondition` (no fallback) |
+| Unsupported host | Supported | `failed_precondition` (no userns / no writable cgroup v2 subtree / other OS) — no fallback |
 
-`.session.yaml` records `sandbox: true`. See [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md#sandboxed-claude-code-cli-sessions) and [remote-codebase-mode.md](remote-codebase-mode.md).
+`.session.yaml` records `sandbox: true`. The production daemon runs as a root systemd service, where
+Linux's unprivileged-userns restriction does not apply. See
+[connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md#sandboxed-claude-code-cli-sessions),
+[tddy-sandbox architecture](../../../packages/tddy-sandbox/docs/architecture.md), and
+[remote-codebase-mode.md](remote-codebase-mode.md).
 
 ### Sandboxed start (macOS)
 
