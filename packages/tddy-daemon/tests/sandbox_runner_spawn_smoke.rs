@@ -12,6 +12,14 @@ use tddy_sandbox::format_sandbox_diagnostics;
 use tddy_sandbox::SandboxSpec;
 use tddy_sandbox_darwin::render_profile;
 
+fn sandbox_runner_binary() -> PathBuf {
+    std::env::var_os("CARGO_BIN_EXE_tddy-sandbox-runner")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/tddy-sandbox-runner")
+        })
+}
+
 fn tools_binary() -> PathBuf {
     std::env::var_os("CARGO_BIN_EXE_tddy-tools")
         .map(PathBuf::from)
@@ -49,8 +57,10 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
     let scratch = project.join(".work");
     let context = project.join("context");
 
+    let runner = sandbox_runner_binary();
     let tools = tools_binary();
     let demo = demo_tui_binary();
+    assert!(runner.exists(), "build tddy-sandbox-runner first");
     assert!(tools.exists(), "build tddy-tools first");
     assert!(demo.exists(), "build tddy-demo-tui first");
 
@@ -59,8 +69,7 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
     let ready_marker = project.join("sandbox.ready");
 
     let runner_argv = vec![
-        tools.to_string_lossy().to_string(),
-        "sandbox-runner".into(),
+        runner.to_string_lossy().to_string(),
         "--session-id".into(),
         "spawn-smoke".into(),
         "--context-dir".into(),
@@ -72,6 +81,8 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
             .to_string(),
         "--tool-ipc-socket".into(),
         project.join("tool_ipc.sock").to_string_lossy().to_string(),
+        "--tddy-tools-path".into(),
+        tools.to_string_lossy().to_string(),
         "--ready-marker".into(),
         ready_marker.to_string_lossy().to_string(),
         "--claude-binary".into(),
@@ -132,11 +143,7 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
         ),
         (
             "runner-help",
-            vec![
-                tools.to_string_lossy().to_string(),
-                "sandbox-runner".into(),
-                "--help".into(),
-            ],
+            vec![runner.to_string_lossy().to_string(), "--help".into()],
         ),
     ] {
         let mut cmd = std::process::Command::new("/usr/bin/sandbox-exec");

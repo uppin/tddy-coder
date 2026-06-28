@@ -6,6 +6,8 @@ description = "Shared test builders, fakes, and assertion helpers for the tddy w
 
 [dependencies]
 tddy-core = { path = "../tddy-core" }
+tddy-sandbox = { path = "../tddy-sandbox" }
+tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
 tddy-service = { path = "../tddy-service" }
 tddy-tools = { path = "../tddy-tools" }
 tempfile = "3"

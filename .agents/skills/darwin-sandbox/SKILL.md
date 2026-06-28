@@ -16,10 +16,12 @@ Client → tddy-daemon (ConnectionService, sandbox=true)
          tddy-tools sandbox-runner (in jail, no outbound network)
            ├─ claude PTY → TerminalOutput frames
            ├─ MCP → ExecuteToolRequest → host tool_engine
-           └─ HTTP shim → EgressRequest → host outbound HTTP
+           └─ HTTPS_PROXY CONNECT proxy → Tunnel{Open,Data,Close} → host TCP relay
 ```
 
 **Key invariant:** the sandbox never dials out. `(deny network*)` in production SBPL. All external reachability is relayed on `SessionChannel`.
+
+**Egress (HTTPS_PROXY CONNECT tunnel):** `runner.rs` sets `HTTPS_PROXY`/`HTTP_PROXY` for the agent to the in-jail loopback egress shim. claude issues `CONNECT api.anthropic.com:443`; the shim allocates a tunnel and relays raw (still TLS-encrypted) bytes over `SessionChannel` `TunnelOpen`/`TunnelData`/`TunnelClose` frames. The **host** (`sandbox_session.rs::spawn_tunnel`) opens the real outbound socket and pumps bytes both ways — TLS stays end-to-end, so the host never sees plaintext or credentials. The legacy unary `EgressRequest`/`EgressResponse` path remains only for the `GET /probe` connectivity check. Acceptance: `sandbox_runner_tunnels_https_proxy_connect_via_session_channel`.
 
 ## Code map
 
@@ -76,7 +78,7 @@ sandbox-exec -f /path/to/rendered.sb /bin/echo hi
 ## Superseded designs (do not reintroduce)
 
 - Split RPCs: `StreamSandboxTerminalOutput` + `SandboxToolExecChannel` (replaced by `SessionChannel`)
-- Host loopback TCP proxy + `HTTPS_PROXY` + `egress_proxy.rs` (incompatible with `(deny network*)`)
+- **Host-side** loopback TCP proxy + `egress_proxy.rs` (jail dialing *out* to a host proxy — broke `(deny network*)`). NOTE: this is distinct from the current **in-jail** `HTTPS_PROXY` CONNECT proxy (proxy runs *inside* the jail on loopback; host is a TCP relay over `SessionChannel`) — that IS the chosen egress design, see Architecture above.
 
 ## Related docs
 

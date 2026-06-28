@@ -1,6 +1,6 @@
 //! Sandbox runner — in-jail gRPC server + claude PTY + MCP tool-exec bridge.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -22,11 +22,22 @@ use tddy_service::tonic_sandbox::sandbox_service_server::{SandboxService, Sandbo
 use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::tonic_sandbox::{
     EchoRequest, EchoResponse, EchoStreamFrame, EgressRequest, EgressResponse, SessionFrame,
+    TunnelClose, TunnelData, TunnelOpen, TunnelOpenAck,
 };
 
-use tddy_sandbox::{append_line, egress_log_path, SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG};
+use tddy_sandbox::{
+    append_line, append_sandbox_claude_mcp_args, egress_log_path, sandbox_claude_scratch_dir,
+    session_id_from_env, ToolIpcRequest, ToolIpcResponse, SANDBOX_RUNNER_FAILURE,
+    SANDBOX_RUNNER_LOG,
+};
 
-use crate::session_tool_client::{session_id_from_env, ToolIpcRequest, ToolIpcResponse};
+fn tool_ipc_response_from_execute(resp: &ExecuteToolResponse) -> ToolIpcResponse {
+    ToolIpcResponse {
+        result_json: resp.result_json.clone(),
+        is_error: resp.is_error,
+        error_message: resp.error_message.clone(),
+    }
+}
 
 fn egress_dir_from_env() -> Option<PathBuf> {
     std::env::var("TDDY_SANDBOX_EGRESS_DIR")
@@ -146,7 +157,7 @@ fn sandbox_log_line(level: &str, message: &str) {
     boot_log(level, message);
 }
 
-/// Args for `tddy-tools sandbox-runner` (runs inside the darwin sandbox).
+/// Args for `tddy-sandbox-runner` (runs inside the darwin sandbox).
 #[derive(Parser, Debug)]
 pub struct SandboxRunnerArgs {
     #[arg(long)]
@@ -157,6 +168,9 @@ pub struct SandboxRunnerArgs {
     pub grpc_socket: PathBuf,
     #[arg(long)]
     pub tool_ipc_socket: PathBuf,
+    /// Path to `tddy-tools` for in-jail MCP config (`--mcp` server).
+    #[arg(long)]
+    pub tddy_tools_path: PathBuf,
     #[arg(long, default_value = "claude")]
     pub claude_binary: String,
     #[arg(long)]
@@ -183,6 +197,8 @@ struct PendingEgressCall {
     request: EgressRequest,
 }
 
+type OutboundSender = tokio::sync::mpsc::UnboundedSender<Result<SessionFrame, Status>>;
+
 /// Host-poll session relay: MCP tool calls and egress requests queue until the host sends `HostPoll`.
 #[derive(Default)]
 struct SandboxSessionRelay {
@@ -194,6 +210,14 @@ struct SandboxSessionRelay {
     /// PTY bytes produced before the host sends `SubscribeTerminal` (broadcast drops them).
     terminal_backlog: Mutex<VecDeque<Bytes>>,
     egress_seq: AtomicU64,
+    /// Server-stream sender, captured when the host opens the `SessionChannel`. Tunnel frames are
+    /// pushed here directly (not poll-gated) so relayed TLS bytes don't incur the `HostPoll` cadence.
+    outbound: Mutex<Option<OutboundSender>>,
+    /// Active CONNECT tunnels: tunnel_id → sender feeding host→jail bytes into the agent socket.
+    tunnels: Mutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<Bytes>>>,
+    /// Pending `CONNECT` opens awaiting a `TunnelOpenAck` from the host.
+    tunnel_acks: Mutex<HashMap<String, oneshot::Sender<TunnelOpenAck>>>,
+    tunnel_seq: AtomicU64,
 }
 
 impl SandboxSessionRelay {
@@ -238,6 +262,65 @@ impl SandboxSessionRelay {
         if let Some(call) = self.awaiting_egress.lock().unwrap().take() {
             let _ = call.response_tx.send(resp);
         }
+    }
+
+    fn set_outbound(&self, tx: OutboundSender) {
+        *self.outbound.lock().unwrap() = Some(tx);
+    }
+
+    /// Push a frame on the server stream immediately. Returns false if the channel is gone.
+    fn push_frame(&self, payload: SessionPayload) -> bool {
+        match &*self.outbound.lock().unwrap() {
+            Some(tx) => tx
+                .send(Ok(SessionFrame {
+                    payload: Some(payload),
+                }))
+                .is_ok(),
+            None => false,
+        }
+    }
+
+    /// Register a new CONNECT tunnel: returns its id, the host→jail byte receiver, and an ack
+    /// receiver resolved when the host replies `TunnelOpenAck`.
+    fn register_tunnel(
+        &self,
+    ) -> (
+        String,
+        tokio::sync::mpsc::UnboundedReceiver<Bytes>,
+        oneshot::Receiver<TunnelOpenAck>,
+    ) {
+        let tunnel_id = format!("tun-{}", self.tunnel_seq.fetch_add(1, Ordering::Relaxed));
+        let (in_tx, in_rx) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
+        let (ack_tx, ack_rx) = oneshot::channel();
+        self.tunnels.lock().unwrap().insert(tunnel_id.clone(), in_tx);
+        self.tunnel_acks
+            .lock()
+            .unwrap()
+            .insert(tunnel_id.clone(), ack_tx);
+        (tunnel_id, in_rx, ack_rx)
+    }
+
+    fn drop_tunnel(&self, tunnel_id: &str) {
+        self.tunnels.lock().unwrap().remove(tunnel_id);
+        self.tunnel_acks.lock().unwrap().remove(tunnel_id);
+    }
+
+    fn deliver_tunnel_ack(&self, ack: TunnelOpenAck) {
+        if let Some(tx) = self.tunnel_acks.lock().unwrap().remove(&ack.tunnel_id) {
+            let _ = tx.send(ack);
+        }
+    }
+
+    /// Host→jail bytes (server reply): route to the tunnel's agent-facing socket.
+    fn deliver_tunnel_data(&self, data: TunnelData) {
+        if let Some(tx) = self.tunnels.lock().unwrap().get(&data.tunnel_id) {
+            let _ = tx.send(Bytes::from(data.data));
+        }
+    }
+
+    /// Host closed its end: drop the sender so the agent-facing writer shuts down.
+    fn deliver_tunnel_close(&self, close: TunnelClose) {
+        self.tunnels.lock().unwrap().remove(&close.tunnel_id);
     }
 
     async fn call_egress(&self, method: &str, url: &str) -> EgressResponse {
@@ -356,6 +439,8 @@ impl SandboxService for SandboxRunnerService {
         let mut inbound = request.into_inner();
         let (out_tx, out_rx) = tokio::sync::mpsc::unbounded_channel();
         let relay = Arc::clone(&self.relay);
+        // Capture the server-stream sender so the CONNECT proxy can push tunnel frames directly.
+        relay.set_outbound(out_tx.clone());
         let session_id = self.session_id.clone();
         let stdin_tx = self.stdin_tx.clone();
 
@@ -376,6 +461,9 @@ impl SandboxService for SandboxRunnerService {
                     Some(SessionPayload::EgressResponse(resp)) => {
                         relay.deliver_egress_response(resp)
                     }
+                    Some(SessionPayload::TunnelOpenAck(ack)) => relay.deliver_tunnel_ack(ack),
+                    Some(SessionPayload::TunnelData(data)) => relay.deliver_tunnel_data(data),
+                    Some(SessionPayload::TunnelClose(close)) => relay.deliver_tunnel_close(close),
                     Some(SessionPayload::HostPoll(_)) => {
                         relay.handle_host_poll(&out_tx);
                     }
@@ -451,6 +539,13 @@ fn run_claude_pty_thread(
     cmd.cwd(&context_dir);
     cmd.env("TERM", "xterm-256color");
     cmd.env("TDDY_EGRESS_SHIM", &egress_shim);
+    // Route the agent's outbound HTTPS through the in-jail CONNECT proxy (the egress shim).
+    // claude honors HTTPS_PROXY and issues `CONNECT api.anthropic.com:443`, which the shim
+    // tunnels to the host over the SessionChannel. The jail itself still has (deny network*).
+    cmd.env("HTTPS_PROXY", &egress_shim);
+    cmd.env("HTTP_PROXY", &egress_shim);
+    cmd.env("https_proxy", &egress_shim);
+    cmd.env("http_proxy", &egress_shim);
     for key in [
         "TDDY_EGRESS_PROBE_HOST",
         "TDDY_EGRESS_PROBE_PORT",
@@ -514,15 +609,28 @@ fn run_claude_pty_thread(
     Ok(())
 }
 
-fn spawn_claude_pty(
-    context_dir: &Path,
-    claude_binary: &str,
-    model: &str,
-    permission_mode: &str,
-    session_id: &str,
-    egress_shim: &str,
+struct SpawnClaudePtyParams<'a> {
+    context_dir: &'a Path,
+    claude_binary: &'a str,
+    model: &'a str,
+    permission_mode: &'a str,
+    session_id: &'a str,
+    tddy_tools_path: &'a Path,
+    egress_shim: &'a str,
     relay: Arc<SandboxSessionRelay>,
-) -> Result<PtyState> {
+}
+
+fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
+    let SpawnClaudePtyParams {
+        context_dir,
+        claude_binary,
+        model,
+        permission_mode,
+        session_id,
+        tddy_tools_path,
+        egress_shim,
+        relay,
+    } = params;
     let (stdin_tx, stdin_rx) = std::sync::mpsc::channel::<Bytes>();
 
     let mut argv = vec![claude_binary.to_string()];
@@ -535,15 +643,9 @@ fn spawn_claude_pty(
     argv.push("--permission-mode".into());
     argv.push(permission_mode.to_string());
 
-    let scratch_dir = crate::sandbox_claude_spawn::sandbox_claude_scratch_dir(context_dir);
-    let tddy_tools_path =
-        std::env::current_exe().context("resolve tddy-tools path for MCP config")?;
-    crate::sandbox_claude_spawn::append_sandbox_claude_mcp_args(
-        &mut argv,
-        &scratch_dir,
-        &tddy_tools_path,
-    )
-    .context("append sandbox claude MCP allowlist args")?;
+    let scratch_dir = sandbox_claude_scratch_dir(context_dir);
+    append_sandbox_claude_mcp_args(&mut argv, &scratch_dir, tddy_tools_path)
+        .context("append sandbox claude MCP allowlist args")?;
     boot_log(
         "INFO",
         &format!(
@@ -599,7 +701,7 @@ async fn start_tool_ipc_server(path: PathBuf, relay: Arc<SandboxSessionRelay>) -
                         Err(_) => return,
                     };
                     let resp = relay.call_tool(&req.tool_name, &req.args_json).await;
-                    let out = ToolIpcResponse::from_execute_tool(&resp);
+                    let out = tool_ipc_response_from_execute(&resp);
                     let _ = stream.write_all(out.to_json_string().as_bytes()).await;
                 }
             });
@@ -655,7 +757,20 @@ async fn handle_egress_shim_connection(
         return;
     }
     let req = String::from_utf8_lossy(&buf[..n]);
-    let first = req.lines().next().unwrap_or("");
+    let first = req.lines().next().unwrap_or("").to_string();
+
+    // HTTPS_PROXY path: `CONNECT host:port HTTP/1.1` → raw TCP tunnel relayed to the host.
+    if first.starts_with("CONNECT ") {
+        if let Some((host, port)) = parse_connect_target(&first) {
+            handle_connect_tunnel(stream, relay, host, port).await;
+        } else {
+            let _ = stream
+                .write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await;
+        }
+        return;
+    }
+
     if !first.starts_with("GET /probe") {
         let _ = stream
             .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
@@ -676,6 +791,106 @@ async fn handle_egress_shim_connection(
     };
     let response = format!("{status_line}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
     let _ = stream.write_all(response.as_bytes()).await;
+}
+
+/// Parse `CONNECT host:port HTTP/1.1` → (host, port).
+fn parse_connect_target(request_line: &str) -> Option<(String, u16)> {
+    let target = request_line.split_whitespace().nth(1)?;
+    let (host, port) = target.rsplit_once(':')?;
+    let port: u16 = port.parse().ok()?;
+    if host.is_empty() {
+        return None;
+    }
+    Some((host.to_string(), port))
+}
+
+/// Relay a `CONNECT` tunnel: ask the host to dial the target, ack with `200 Connection
+/// Established`, then pump raw bytes both ways over the `SessionChannel`. The runner never
+/// dials out — the host owns the outbound socket and TLS stays end-to-end with the agent.
+async fn handle_connect_tunnel(
+    mut stream: tokio::net::TcpStream,
+    relay: &SandboxSessionRelay,
+    host: String,
+    port: u16,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let (tunnel_id, mut in_rx, ack_rx) = relay.register_tunnel();
+    if !relay.push_frame(SessionPayload::TunnelOpen(TunnelOpen {
+        tunnel_id: tunnel_id.clone(),
+        host,
+        port: port as u32,
+    })) {
+        relay.drop_tunnel(&tunnel_id);
+        let _ = stream
+            .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .await;
+        return;
+    }
+
+    let opened = match tokio::time::timeout(Duration::from_secs(15), ack_rx).await {
+        Ok(Ok(ack)) => ack.ok,
+        _ => false,
+    };
+    if !opened {
+        relay.drop_tunnel(&tunnel_id);
+        let _ = stream
+            .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .await;
+        return;
+    }
+
+    if stream
+        .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        .await
+        .is_err()
+    {
+        relay.drop_tunnel(&tunnel_id);
+        let _ = relay.push_frame(SessionPayload::TunnelClose(TunnelClose {
+            tunnel_id,
+            error: String::new(),
+        }));
+        return;
+    }
+
+    let (mut read_half, mut write_half) = stream.into_split();
+
+    // agent → host: read agent socket, forward as TunnelData; signal close on EOF/error.
+    let id_up = tunnel_id.clone();
+    let up = async move {
+        let mut buf = [0u8; 16384];
+        loop {
+            match read_half.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    if !relay.push_frame(SessionPayload::TunnelData(TunnelData {
+                        tunnel_id: id_up.clone(),
+                        data: buf[..n].to_vec(),
+                    })) {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        relay.drop_tunnel(&id_up);
+        let _ = relay.push_frame(SessionPayload::TunnelClose(TunnelClose {
+            tunnel_id: id_up,
+            error: String::new(),
+        }));
+    };
+
+    // host → agent: drain inbound bytes into the agent socket until the host closes the tunnel.
+    let down = async move {
+        while let Some(bytes) = in_rx.recv().await {
+            if write_half.write_all(&bytes).await.is_err() {
+                break;
+            }
+        }
+        let _ = write_half.shutdown().await;
+    };
+
+    tokio::join!(up, down);
 }
 
 /// Run the sandbox gRPC server and claude PTY until shutdown.
@@ -703,7 +918,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
     boot_log("INFO", "boot: init_sandbox_egress_logging");
     init_sandbox_egress_logging();
     log::info!(
-        target: "tddy_tools::sandbox_runner",
+        target: "tddy_sandbox_darwin::runner",
         "starting sandbox-runner session_id={} context_dir={} ready_marker={}",
         args.session_id,
         args.context_dir.display(),
@@ -755,15 +970,16 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         "INFO",
         &format!("boot: spawn_claude_pty binary={}", args.claude_binary),
     );
-    let pty = spawn_claude_pty(
-        &args.context_dir,
-        &args.claude_binary,
-        &args.model,
-        &args.permission_mode,
-        &args.session_id,
-        &egress_shim,
-        Arc::clone(&relay),
-    )
+    let pty = spawn_claude_pty(SpawnClaudePtyParams {
+        context_dir: &args.context_dir,
+        claude_binary: &args.claude_binary,
+        model: &args.model,
+        permission_mode: &args.permission_mode,
+        session_id: &args.session_id,
+        tddy_tools_path: &args.tddy_tools_path,
+        egress_shim: &egress_shim,
+        relay: Arc::clone(&relay),
+    })
     .inspect_err(|e| boot_log_error("spawn_claude_pty", format!("{e:#}")))?;
     boot_log("INFO", "boot: claude pty thread spawned");
 
@@ -806,7 +1022,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         ),
     );
     log::info!(
-        target: "tddy_tools::sandbox_runner",
+        target: "tddy_sandbox_darwin::runner",
         "sandbox gRPC listening on localhost:{port} (ready_marker={})",
         args.ready_marker.display()
     );
@@ -856,13 +1072,19 @@ mod tests {
             async move { relay.call_tool("Read", r#"{"path":"README.md"}"#).await }
         });
 
-        // When — host poll flushes the queued request
-        relay.handle_host_poll(&out_tx);
-        let frame = out_rx
-            .recv()
-            .await
-            .expect("tool request frame")
-            .expect("ok frame");
+        // When — host poll flushes the queued request. Production polls every 25ms; poll in a
+        // loop here so the test doesn't race the spawned `call_tool` push (single poll could run
+        // before the request is queued, leaving nothing to flush).
+        let mut frame = None;
+        for _ in 0..400 {
+            relay.handle_host_poll(&out_tx);
+            if let Ok(f) = out_rx.try_recv() {
+                frame = Some(f.expect("ok frame"));
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let frame = frame.expect("tool request frame flushed within 2s");
         let req = match frame.payload {
             Some(SessionPayload::ToolRequest(req)) => req,
             _ => panic!("expected tool request frame"),

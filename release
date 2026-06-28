@@ -2,4 +2,4 @@
 # Build optimized production binary. Uses nix dev shell for consistent toolchain.
 # Output: target/release/tddy-coder, target/release/tddy-tools, target/release/tddy-daemon
 set -e
-exec nix develop --profile ./.nix-profile -c cargo build --release -p tddy-coder -p tddy-tools -p tddy-daemon
+exec nix develop --profile ./.nix-profile -c cargo build --release -p tddy-coder -p tddy-tools -p tddy-sandbox-darwin -p tddy-sandbox-app -p tddy-daemon

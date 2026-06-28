@@ -8,6 +8,9 @@ pub const EGRESS_PROBE_SESSION_CHANNEL_OK: &str = "EGRESS_PROBE: session_channel
 /// Terminal marker when direct outbound TCP from the jail is denied by Seatbelt.
 pub const EGRESS_PROBE_DIRECT_DENIED: &str = "EGRESS_PROBE: direct=denied";
 
+/// Terminal marker when a `CONNECT` tunnel through the in-jail HTTPS_PROXY round-trips to the host.
+pub const CONNECT_PROBE_TUNNEL_OK: &str = "CONNECT_PROBE: tunnel=ok";
+
 /// Returns whether `pid` is still running (Unix `kill(pid, 0)`).
 #[cfg(unix)]
 pub fn process_is_alive(pid: u32) -> bool {
@@ -49,6 +52,38 @@ fi
 exec cat
 "#;
     std::fs::write(&script, body).expect("write egress probe script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    script
+}
+
+/// Fake claude script that exercises the in-jail HTTPS_PROXY `CONNECT` tunnel.
+///
+/// Uses `curl --proxytunnel -x "$HTTPS_PROXY"` (the proxy env the runner sets to the egress shim)
+/// to force a `CONNECT` to `TDDY_EGRESS_PROBE_HOST:PORT`. The runner relays the tunnel to the host,
+/// which dials the real socket; a successful round-trip prints [`CONNECT_PROBE_TUNNEL_OK`].
+pub fn write_connect_proxy_claude_script(dir: &Path) -> PathBuf {
+    let script = dir.join("connect_proxy_claude.sh");
+    let body = r#"#!/bin/sh
+echo "ARGV: $@"
+HOST="${TDDY_EGRESS_PROBE_HOST:-127.0.0.1}"
+PORT="${TDDY_EGRESS_PROBE_PORT:-9}"
+PROXY="${HTTPS_PROXY:-${TDDY_EGRESS_SHIM:-}}"
+
+if [ -z "$PROXY" ]; then
+  echo "CONNECT_PROBE: tunnel=unset"
+elif curl -s --proxytunnel -x "$PROXY" --connect-timeout 5 "http://${HOST}:${PORT}/llm" 2>/dev/null | grep -q LLM_ECHO; then
+  echo "CONNECT_PROBE: tunnel=ok"
+else
+  echo "CONNECT_PROBE: tunnel=denied"
+fi
+
+exec cat
+"#;
+    std::fs::write(&script, body).expect("write connect proxy script");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

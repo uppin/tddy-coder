@@ -3,12 +3,21 @@
 //! Platform-specific spawn is provided by `tddy-sandbox-darwin` on macOS.
 //! On other platforms, [`spawn`] returns [`SandboxError::Unsupported`].
 
+pub mod claude_spawn;
 mod context_dir;
 mod error;
 mod log;
 mod spec;
+pub mod tool_ipc;
 
-pub use context_dir::{SandboxContextDir, SANDBOX_REMOTE_APPENDIX};
+pub use claude_spawn::{
+    append_sandbox_claude_mcp_args, build_sandbox_claude_allowlist, sandbox_claude_scratch_dir,
+    write_sandbox_mcp_config,
+};
+pub use context_dir::{
+    copy_context_from_repo, copy_tree, copy_tree_within_root, SandboxContextDir,
+    SANDBOX_REMOTE_APPENDIX,
+};
 pub use error::SandboxError;
 pub use log::{
     append_line, egress_log_path, format_egress_logs, format_sandbox_diagnostics,
@@ -16,6 +25,7 @@ pub use log::{
     SANDBOX_SPAWN_MANIFEST,
 };
 pub use spec::{SandboxHandle, SandboxSpec};
+pub use tool_ipc::{session_id_from_env, ToolIpcRequest, ToolIpcResponse};
 
 /// Exec tool names served by the daemon `ExecuteTool` RPC for workspace/sandbox sessions.
 ///

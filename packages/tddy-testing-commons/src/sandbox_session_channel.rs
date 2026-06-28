@@ -1,5 +1,6 @@
 //! Host-side `SessionChannel` driver for sandbox acceptance tests.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,7 +9,8 @@ use futures_util::StreamExt;
 use tddy_service::proto::connection::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::tonic_sandbox::{
-    EgressRequest, EgressResponse, HostPoll, SessionFrame, SubscribeTerminal,
+    EgressRequest, EgressResponse, HostPoll, SessionFrame, SubscribeTerminal, TunnelClose,
+    TunnelData, TunnelOpen, TunnelOpenAck,
 };
 use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
@@ -23,7 +25,7 @@ pub struct SandboxSessionChannelHost {
 impl SandboxSessionChannelHost {
     /// Dial the in-jail sandbox gRPC server and start HostPoll relay loops.
     pub async fn connect(ready_marker: &Path, session_id: &str) -> Self {
-        let mut client = tddy_tools::sandbox_runner::connect_sandbox_client(ready_marker)
+        let mut client = tddy_sandbox_darwin::connect_sandbox_client(ready_marker)
             .await
             .expect("connect sandbox grpc");
 
@@ -52,8 +54,24 @@ impl SandboxSessionChannelHost {
         let host_tx_reader = host_tx.clone();
 
         let reader = tokio::spawn(async move {
+            let mut tunnels: HashMap<String, mpsc::UnboundedSender<Vec<u8>>> = HashMap::new();
             while let Some(Ok(frame)) = session.next().await {
                 match frame.payload {
+                    Some(SessionPayload::TunnelOpen(open)) => {
+                        let (tcp_in_tx, tcp_in_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+                        tunnels.insert(open.tunnel_id.clone(), tcp_in_tx);
+                        spawn_tunnel(open, tcp_in_rx, host_tx_reader.clone());
+                    }
+                    Some(SessionPayload::TunnelData(data)) => {
+                        if let Some(tx) = tunnels.get(&data.tunnel_id) {
+                            if tx.send(data.data).is_err() {
+                                tunnels.remove(&data.tunnel_id);
+                            }
+                        }
+                    }
+                    Some(SessionPayload::TunnelClose(close)) => {
+                        tunnels.remove(&close.tunnel_id);
+                    }
                     Some(SessionPayload::TerminalOutput(out)) => {
                         if !out.data.is_empty() {
                             terminal_reader
@@ -127,6 +145,88 @@ impl SandboxSessionChannelHost {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
+}
+
+/// Mirror of the daemon's `spawn_tunnel`: open the real outbound TCP socket and pump bytes
+/// both ways over the `SessionChannel` for a relayed `CONNECT` tunnel.
+fn spawn_tunnel(
+    open: TunnelOpen,
+    mut tcp_in_rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    host_tx: mpsc::Sender<SessionFrame>,
+) {
+    tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let tunnel_id = open.tunnel_id.clone();
+        let addr = format!("{}:{}", open.host, open.port);
+        let stream = match tokio::net::TcpStream::connect(&addr).await {
+            Ok(s) => s,
+            Err(e) => {
+                let _ = host_tx
+                    .send(SessionFrame {
+                        payload: Some(SessionPayload::TunnelOpenAck(TunnelOpenAck {
+                            tunnel_id,
+                            ok: false,
+                            error: format!("connect {addr}: {e}"),
+                        })),
+                    })
+                    .await;
+                return;
+            }
+        };
+        let _ = host_tx
+            .send(SessionFrame {
+                payload: Some(SessionPayload::TunnelOpenAck(TunnelOpenAck {
+                    tunnel_id: tunnel_id.clone(),
+                    ok: true,
+                    error: String::new(),
+                })),
+            })
+            .await;
+
+        let (mut read_half, mut write_half) = stream.into_split();
+        let up_tx = host_tx.clone();
+        let up_id = tunnel_id.clone();
+        let up = tokio::spawn(async move {
+            let mut buf = [0u8; 16384];
+            loop {
+                match read_half.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if up_tx
+                            .send(SessionFrame {
+                                payload: Some(SessionPayload::TunnelData(TunnelData {
+                                    tunnel_id: up_id.clone(),
+                                    data: buf[..n].to_vec(),
+                                })),
+                            })
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            let _ = up_tx
+                .send(SessionFrame {
+                    payload: Some(SessionPayload::TunnelClose(TunnelClose {
+                        tunnel_id: up_id,
+                        error: String::new(),
+                    })),
+                })
+                .await;
+        });
+
+        while let Some(bytes) = tcp_in_rx.recv().await {
+            if write_half.write_all(&bytes).await.is_err() {
+                break;
+            }
+        }
+        let _ = write_half.shutdown().await;
+        up.abort();
+    });
 }
 
 async fn relay_egress_request(req: EgressRequest) -> EgressResponse {

@@ -129,25 +129,50 @@ fn seatbelt_denies_writes_outside_project_tree() {
     );
 }
 
-/// **seatbelt_denies_read_of_non_allowlisted_path**: reads outside the explicit allow-list fail.
+/// **seatbelt_allows_broad_reads_but_still_denies_writes**: the SBPL profile intentionally grants
+/// blanket `(allow file-read*)` — the V8/Node `claude` binary reads OS caches, timezone data, dyld
+/// state, and user config from many paths outside any explicit allow-list, and SIGTRAPs at startup
+/// without it (confirmed: `(allow file-read*)` is the rule that lets `claude --version` run).
+///
+/// Read confinement is therefore deliberately traded away for the Node agent. The security boundary
+/// is **write** confinement (covered by `seatbelt_denies_writes_outside_project_tree`): this test
+/// pins the trade-off by asserting a read outside the project tree SUCCEEDS while a write to the
+/// same location FAILS.
 #[test]
-fn seatbelt_denies_read_of_non_allowlisted_path() {
+fn seatbelt_allows_broad_reads_but_still_denies_writes() {
     // Given
     let tmp = tempfile::tempdir().unwrap();
     let project_root = tmp.path().join("project");
     let egress = tmp.path().join("egress");
     std::fs::create_dir_all(&project_root).unwrap();
     let home = std::env::var("HOME").expect("HOME");
-    let secret_file = PathBuf::from(&home).join(".tddy-sandbox-read-probe.txt");
-    std::fs::write(&secret_file, "top-secret").unwrap();
+    let probe = PathBuf::from(&home).join(".tddy-sandbox-read-probe.txt");
+    std::fs::write(&probe, "top-secret").unwrap();
 
-    // When — cat must fail for a path outside allow-list
+    // When/Then — read outside the project tree is allowed (blanket file-read*)…
+    let read_exit = run_in_sandbox(
+        &project_root,
+        &egress,
+        &format!("cat '{}'", probe.display()),
+    );
+    assert_sandbox_exit(
+        &egress,
+        read_exit,
+        true,
+        "seatbelt_allows_broad_reads_but_still_denies_writes (read)",
+    );
+
+    // …but writing to that same out-of-tree path is still denied.
     run_in_sandbox_expect_failure(
         &project_root,
         &egress,
-        &format!("cat '{}'", secret_file.display()),
-        "seatbelt_denies_read_of_non_allowlisted_path",
+        &format!("touch '{}.written'", probe.display()),
+        "seatbelt_allows_broad_reads_but_still_denies_writes (write)",
+    );
+    assert!(
+        !PathBuf::from(format!("{}.written", probe.display())).exists(),
+        "out-of-tree write must not succeed"
     );
 
-    let _ = std::fs::remove_file(&secret_file);
+    let _ = std::fs::remove_file(&probe);
 }

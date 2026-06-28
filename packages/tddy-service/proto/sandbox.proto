@@ -24,10 +24,15 @@ message SessionFrame {
     SandboxInput terminal_input = 3;
     connection.ExecuteToolResponse tool_response = 4;
     EgressResponse egress_response = 7;
+    TunnelOpenAck tunnel_open_ack = 9;
     // Sandbox → host (server stream; only after host inbound)
     connection.ExecuteToolRequest tool_request = 5;
     connection.SessionTerminalOutput terminal_output = 6;
     EgressRequest egress_request = 8;
+    TunnelOpen tunnel_open = 10;
+    // Bidirectional: TunnelData/TunnelClose flow in both directions (direction by context).
+    TunnelData tunnel_data = 11;
+    TunnelClose tunnel_close = 12;
   }
 }
 
@@ -78,4 +83,30 @@ message EgressResponse {
 message EgressHeader {
   string name = 1;
   string value = 2;
+}
+
+// Raw TCP CONNECT tunnel relayed over SessionChannel. The in-jail runner is the
+// HTTPS_PROXY endpoint: it accepts `CONNECT host:port`, the host opens the real
+// outbound TCP connection, and encrypted bytes are pumped both ways. TLS stays
+// end-to-end between the agent and the target — the host never sees plaintext.
+message TunnelOpen {
+  string tunnel_id = 1;
+  string host = 2;
+  uint32 port = 3;
+}
+
+message TunnelOpenAck {
+  string tunnel_id = 1;
+  bool ok = 2;
+  string error = 3;
+}
+
+message TunnelData {
+  string tunnel_id = 1;
+  bytes data = 2;
+}
+
+message TunnelClose {
+  string tunnel_id = 1;
+  string error = 2;
 }

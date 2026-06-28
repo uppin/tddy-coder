@@ -12,7 +12,6 @@ mod session_hook;
 use anyhow::Result;
 use clap::Parser;
 use rmcp::ServiceExt;
-use tddy_tools::sandbox_runner;
 use tddy_tools::server::PermissionServer;
 
 #[derive(Parser)]
@@ -62,15 +61,13 @@ enum Subcommand {
     Build(build_cli::BuildArgs),
 
     /// Spawn a command in a PTY and relay keyboard+output — same wiring as the daemon uses
-    /// for claude-cli sessions. Useful for verifying the PTY pipeline independently.
+    /// for claude-cli sessions. Also start/connect to daemon sessions (including sandbox):
+    /// `pty-relay --daemon-url URL --project-id ID --sandbox`
     /// Example: tddy-tools pty-relay -- claude --model claude-opus-4-8
     PtyRelay(Box<pty_relay::PtyRelayArgs>),
 
     /// Remote codebase mode helpers: list-tools, etc.
     Remote(remote_cli::RemoteArgs),
-
-    /// Run inside a darwin sandbox: gRPC server + claude PTY + tool-exec bridge.
-    SandboxRunner(sandbox_runner::SandboxRunnerArgs),
 
     /// Report granular session activity status to the daemon (invoked by Claude Code hooks).
     /// Reads hook event JSON from stdin; fails quietly — always exits 0.
@@ -101,12 +98,6 @@ async fn main() -> Result<()> {
         Some(Subcommand::Build(s)) => build_cli::run_build(s).await?,
         Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(*s).await?,
         Some(Subcommand::Remote(s)) => remote_cli::run_remote(s).await?,
-        Some(Subcommand::SandboxRunner(s)) => {
-            if let Err(err) = sandbox_runner::run_sandbox_runner(s).await {
-                eprintln!("Error: {err:#}");
-                std::process::exit(1);
-            }
-        }
         Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");

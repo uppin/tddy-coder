@@ -25,8 +25,8 @@ pub use fakes::{
 };
 pub use fs::{tddy_test_home, temp_dir_with_git_repo, temp_session_dir, write_session_yaml};
 pub use sandbox_fixtures::{
-    process_is_alive, write_egress_probe_claude_script, EGRESS_PROBE_DIRECT_DENIED,
-    EGRESS_PROBE_SESSION_CHANNEL_OK,
+    process_is_alive, write_connect_proxy_claude_script, write_egress_probe_claude_script,
+    CONNECT_PROBE_TUNNEL_OK, EGRESS_PROBE_DIRECT_DENIED, EGRESS_PROBE_SESSION_CHANNEL_OK,
 };
 pub use sandbox_session_channel::SandboxSessionChannelHost;
 

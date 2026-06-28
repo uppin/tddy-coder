@@ -16,6 +16,7 @@ use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
 use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::tonic_sandbox::{
     EgressRequest, EgressResponse, HostPoll, SandboxInput, SessionFrame, SubscribeTerminal,
+    TunnelClose, TunnelData, TunnelOpen, TunnelOpenAck,
 };
 
 use crate::tool_engine;
@@ -202,6 +203,8 @@ pub async fn dial_and_bridge(
     let host_tx_out = host_tx.clone();
 
     tokio::spawn(async move {
+        // CONNECT tunnels: tunnel_id → sender feeding agent→host bytes into the outbound TCP socket.
+        let mut tunnels: HashMap<String, mpsc::UnboundedSender<Bytes>> = HashMap::new();
         while let Some(Ok(frame)) = session.next().await {
             match frame.payload {
                 Some(SessionPayload::ToolRequest(req)) => {
@@ -244,6 +247,24 @@ pub async fn dial_and_bridge(
                         })
                         .await;
                 }
+                Some(SessionPayload::TunnelOpen(open)) => {
+                    // Agent issued CONNECT host:port — the host owns the real outbound socket.
+                    let (tcp_in_tx, tcp_in_rx) = mpsc::unbounded_channel::<Bytes>();
+                    tunnels.insert(open.tunnel_id.clone(), tcp_in_tx);
+                    spawn_tunnel(open, tcp_in_rx, host_tx_out.clone());
+                }
+                Some(SessionPayload::TunnelData(data)) => {
+                    // Agent→host bytes: feed into the outbound socket for this tunnel.
+                    if let Some(tx) = tunnels.get(&data.tunnel_id) {
+                        if tx.send(Bytes::from(data.data)).is_err() {
+                            tunnels.remove(&data.tunnel_id);
+                        }
+                    }
+                }
+                Some(SessionPayload::TunnelClose(close)) => {
+                    // Agent closed its end: drop the sender so the socket writer shuts down.
+                    tunnels.remove(&close.tunnel_id);
+                }
                 Some(SessionPayload::TerminalOutput(out)) => {
                     if !out.data.is_empty() {
                         if let Ok(mut cap) = capture_out.lock() {
@@ -284,7 +305,93 @@ pub async fn dial_and_bridge(
     Ok(())
 }
 
-async fn relay_egress_request(req: EgressRequest) -> EgressResponse {
+/// Open the real outbound TCP connection for a relayed `CONNECT` tunnel and pump bytes both
+/// ways over the `SessionChannel`. The host is a dumb byte relay — TLS stays end-to-end between
+/// the in-jail agent and the target, so credentials never appear in plaintext here.
+fn spawn_tunnel(
+    open: TunnelOpen,
+    mut tcp_in_rx: mpsc::UnboundedReceiver<Bytes>,
+    host_tx: mpsc::Sender<SessionFrame>,
+) {
+    tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let tunnel_id = open.tunnel_id.clone();
+        let addr = format!("{}:{}", open.host, open.port);
+        let stream = match tokio::net::TcpStream::connect(&addr).await {
+            Ok(s) => s,
+            Err(e) => {
+                let _ = host_tx
+                    .send(SessionFrame {
+                        payload: Some(SessionPayload::TunnelOpenAck(TunnelOpenAck {
+                            tunnel_id,
+                            ok: false,
+                            error: format!("connect {addr}: {e}"),
+                        })),
+                    })
+                    .await;
+                return;
+            }
+        };
+        let _ = host_tx
+            .send(SessionFrame {
+                payload: Some(SessionPayload::TunnelOpenAck(TunnelOpenAck {
+                    tunnel_id: tunnel_id.clone(),
+                    ok: true,
+                    error: String::new(),
+                })),
+            })
+            .await;
+
+        let (mut read_half, mut write_half) = stream.into_split();
+
+        // host → agent: forward outbound-socket bytes as TunnelData; signal close on EOF/error.
+        let up_tx = host_tx.clone();
+        let up_id = tunnel_id.clone();
+        let up = tokio::spawn(async move {
+            let mut buf = [0u8; 16384];
+            loop {
+                match read_half.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if up_tx
+                            .send(SessionFrame {
+                                payload: Some(SessionPayload::TunnelData(TunnelData {
+                                    tunnel_id: up_id.clone(),
+                                    data: buf[..n].to_vec(),
+                                })),
+                            })
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            let _ = up_tx
+                .send(SessionFrame {
+                    payload: Some(SessionPayload::TunnelClose(TunnelClose {
+                        tunnel_id: up_id,
+                        error: String::new(),
+                    })),
+                })
+                .await;
+        });
+
+        // agent → host: drain inbound bytes into the outbound socket until the agent closes.
+        while let Some(bytes) = tcp_in_rx.recv().await {
+            if write_half.write_all(&bytes).await.is_err() {
+                break;
+            }
+        }
+        let _ = write_half.shutdown().await;
+        up.abort();
+    });
+}
+
+pub async fn relay_egress_request(req: EgressRequest) -> EgressResponse {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -384,19 +491,30 @@ pub fn build_sandbox_runner_env(
     env
 }
 
-/// Recursively copy a directory tree.
-pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
-    for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let dest = dst.join(entry.file_name());
-        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
-            copy_dir_all(&entry.path(), &dest)?;
-        } else {
-            std::fs::copy(entry.path(), &dest).map_err(|e| e.to_string())?;
+/// Copy Claude auth/settings from host `~/.claude` into the jail scratch HOME.
+pub fn seed_claude_home_config(scratch_home: &Path) -> Result<(), String> {
+    let host_home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| "HOST HOME not set; cannot seed claude credentials".to_string())?;
+    let src_dir = host_home.join(".claude");
+    if !src_dir.is_dir() {
+        return Ok(());
+    }
+    let dest_dir = scratch_home.join(".claude");
+    std::fs::create_dir_all(&dest_dir).map_err(|e| format!("create scratch .claude dir: {e}"))?;
+    for name in [".credentials.json", "settings.json", "settings.local.json"] {
+        let src = src_dir.join(name);
+        if src.is_file() {
+            std::fs::copy(&src, dest_dir.join(name))
+                .map_err(|e| format!("copy claude config {}: {e}", src.display()))?;
         }
     }
     Ok(())
+}
+
+/// Recursively copy a directory tree (follows symlinks).
+pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
+    tddy_sandbox::copy_tree(src, dst).map_err(|e| e.to_string())
 }
 
 /// Prepare read-only context dir from worktree docs/skills.
@@ -404,7 +522,7 @@ pub fn prepare_context_dir(worktree_path: &Path) -> Result<SandboxContextDir, St
     SandboxContextDir::create(worktree_path).map_err(|e| e.to_string())
 }
 
-/// Resolve the `tddy-tools` binary for sandbox spawn and hook wiring.
+/// Resolve the `tddy-tools` binary for sandbox MCP and hook wiring.
 ///
 /// Priority: explicit config → `CARGO_BIN_EXE_tddy-tools` (cargo test) → sibling of
 /// `current_exe()` (handles integration tests living in `target/debug/deps/`) → `"tddy-tools"`.
@@ -435,6 +553,36 @@ pub fn resolve_tddy_tools_path(configured: Option<&str>) -> String {
         }
     }
     "tddy-tools".to_string()
+}
+
+/// Resolve the `tddy-sandbox-runner` binary for in-jail sandbox sessions.
+///
+/// Priority: `CARGO_BIN_EXE_tddy-sandbox-runner` (cargo test) → sibling of
+/// `current_exe()` → `"tddy-sandbox-runner"`.
+pub fn resolve_sandbox_runner_path() -> String {
+    if let Ok(bin) = std::env::var("CARGO_BIN_EXE_tddy-sandbox-runner") {
+        if !bin.trim().is_empty() {
+            return bin;
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(mut bin_dir) = exe.parent().map(|p| p.to_path_buf()) {
+            if bin_dir.file_name().and_then(|n| n.to_str()) == Some("deps") {
+                bin_dir.pop();
+            }
+            let candidate = bin_dir.join("tddy-sandbox-runner");
+            if candidate.is_file() {
+                return candidate.to_string_lossy().into_owned();
+            }
+        }
+        if let Some(parent) = exe.parent() {
+            let sibling = parent.join("tddy-sandbox-runner");
+            if sibling.is_file() {
+                return sibling.to_string_lossy().into_owned();
+            }
+        }
+    }
+    "tddy-sandbox-runner".to_string()
 }
 
 #[cfg(target_os = "macos")]
@@ -550,7 +698,7 @@ pub fn terminate_sandbox_process(pid: u32) {
 #[cfg(not(unix))]
 pub fn terminate_sandbox_process(_pid: u32) {}
 
-/// Parameters for spawning `tddy-tools sandbox-runner` inside Seatbelt.
+/// Parameters for spawning `tddy-sandbox-runner` inside Seatbelt.
 pub struct SandboxRunnerSpawn {
     pub project_root: PathBuf,
     pub scratch_dir: PathBuf,

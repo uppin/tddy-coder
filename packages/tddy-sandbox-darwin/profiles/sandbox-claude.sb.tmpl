@@ -60,6 +60,12 @@
   (literal "/dev/ptmx")
   (regex #"^/dev/ttys[0-9]+$"))
 
+;; Claude Code ships as a V8/Node binary: it reads OS caches, timezone data, and user
+;; config from many paths not covered by the toolchain allow-list. Writes stay confined
+;; to PROJECT_ROOT / SCRATCH / egress above; this only relaxes reads.
+(allow file-read*)
+(allow dynamic-code-generation)
+
 (allow process-exec*
   (subpath "/usr/bin")
   (subpath "/usr/libexec")

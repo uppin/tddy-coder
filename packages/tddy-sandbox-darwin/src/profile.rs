@@ -121,5 +121,6 @@ mod tests {
         assert!(profile.contains("/var/folders"));
         assert!(profile.contains("(deny network*)"));
         assert!(profile.contains("(allow file-read*"));
+        assert!(profile.contains("(allow dynamic-code-generation)"));
     }
 }

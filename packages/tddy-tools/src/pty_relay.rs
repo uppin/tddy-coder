@@ -1,9 +1,20 @@
 //! `pty-relay` subcommand: spawn a command in a PTY and relay stdin/stdout, OR connect to an
-//! existing daemon session via LiveKit, OR start a new session and connect — all via the same
-//! Rust `RpcClient` path the web UI uses.
+//! existing daemon session via gRPC or LiveKit.
 //!
 //! Local PTY mode (default):
 //!   tddy-tools pty-relay -- claude --model claude-opus-4-8
+//!
+//! Start sandboxed claude-cli and attach your terminal (gRPC, no LiveKit):
+//!   tddy-tools pty-relay \
+//!     --daemon-url http://127.0.0.1:8899 \
+//!     --project-id <project-id> \
+//!     --sandbox
+//!
+//! Connect to an existing session (including sandbox):
+//!   tddy-tools pty-relay \
+//!     --daemon-url http://127.0.0.1:8899 \
+//!     --session-id <session-id> \
+//!     --session-token <token>
 //!
 //! LiveKit connect-only mode (--server-identity, requires --features livekit):
 //!   tddy-tools pty-relay \
@@ -102,6 +113,15 @@ pub struct PtyRelayArgs {
     #[arg(long)]
     pub permission_mode: Option<String>,
 
+    /// Start claude-cli inside darwin Seatbelt (`StartSessionRequest.sandbox = true`, macOS only).
+    #[arg(long, default_value_t = false)]
+    pub sandbox: bool,
+
+    /// Connect to an existing session via gRPC (`StreamTerminalOutput` / `SendTerminalInput`).
+    /// Mutually exclusive with `--project-id` (start-and-connect).
+    #[arg(long)]
+    pub session_id: Option<String>,
+
     // -- Local PTY mode -------------------------------------------------------
     /// Command and arguments to relay in local PTY mode (after `--`).
     #[arg(last = true)]
@@ -113,20 +133,35 @@ pub struct PtyRelayArgs {
 // ---------------------------------------------------------------------------
 
 pub async fn run_pty_relay(args: PtyRelayArgs) -> Result<()> {
+    if args.session_id.is_some() && args.project_id.is_some() {
+        anyhow::bail!("use either --session-id (connect) or --project-id (start), not both");
+    }
+    if args.session_id.is_some() {
+        return run_grpc_connect_only(args).await;
+    }
+    if args.project_id.is_some() {
+        return run_grpc_start_and_connect(args).await;
+    }
     if args.daemon_identity.is_some() || args.server_identity.is_some() {
         #[cfg(feature = "livekit")]
-        return run_session(args).await;
+        return run_livekit_session(args).await;
         #[cfg(not(feature = "livekit"))]
         {
             let _ = args;
             anyhow::bail!(
-                "session mode requires the 'livekit' cargo feature.\nRebuild with: cargo build -p tddy-tools --features livekit"
+                "LiveKit session mode requires the 'livekit' cargo feature.\n\
+                 For gRPC terminal attach use --project-id or --session-id instead.\n\
+                 Rebuild with: cargo build -p tddy-tools --features livekit"
             );
         }
     }
     if args.cmd.is_empty() {
         anyhow::bail!(
-            "no command provided. Modes:\n  local PTY:     pty-relay -- <cmd> [args...]\n  daemon session: pty-relay --daemon-identity <id> --project-id <id> [--livekit-url ws://...]"
+            "no command provided. Modes:\n\
+              local PTY:              pty-relay -- <cmd> [args...]\n\
+              start sandbox + attach: pty-relay --daemon-url URL --project-id ID --sandbox\n\
+              attach existing:        pty-relay --daemon-url URL --session-id ID [--session-token TOKEN]\n\
+              LiveKit session:        pty-relay --daemon-identity ID --project-id ID [--livekit-url ws://...]"
         );
     }
     tokio::task::spawn_blocking(move || run_local_pty(args)).await?
@@ -216,20 +251,105 @@ fn run_local_pty(args: PtyRelayArgs) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// Daemon gRPC terminal (StartSession + attach, or connect-only)
+// ---------------------------------------------------------------------------
+
+fn build_start_session_request(args: &PtyRelayArgs, session_token: &str) -> tddy_service::proto::connection::StartSessionRequest {
+    use tddy_service::proto::connection::StartSessionRequest;
+
+    StartSessionRequest {
+        session_token: session_token.to_string(),
+        project_id: args.project_id.clone().unwrap_or_default(),
+        agent: args.agent.clone().unwrap_or_default(),
+        session_type: args.session_type.clone(),
+        model: args.model.clone(),
+        initial_prompt: args.initial_prompt.clone().unwrap_or_default(),
+        permission_mode: args.permission_mode.clone().unwrap_or_default(),
+        sandbox: args.sandbox,
+        ..Default::default()
+    }
+}
+
+async fn resolve_session_token(args: &PtyRelayArgs) -> Result<String> {
+    match args.session_token.as_deref().filter(|s| !s.is_empty()) {
+        Some(t) => Ok(t.to_string()),
+        None => {
+            log::info!(
+                target: "tddy_tools::pty_relay",
+                "no --session-token; exchanging via {}",
+                args.daemon_url
+            );
+            exchange_stub_session_token(&args.daemon_url)
+                .await
+                .map_err(|e| anyhow::anyhow!("auto-auth: {e}"))
+        }
+    }
+}
+
+async fn run_grpc_connect_only(args: PtyRelayArgs) -> Result<()> {
+    let session_id = args
+        .session_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("--session-id must be non-empty"))?;
+    let session_token = resolve_session_token(&args).await?;
+    log::info!(
+        target: "tddy_tools::pty_relay",
+        "connecting via gRPC to session {session_id}"
+    );
+    run_grpc_terminal(&args.daemon_url, session_id, &session_token).await
+}
+
+async fn run_grpc_start_and_connect(args: PtyRelayArgs) -> Result<()> {
+    use prost::Message as _;
+    use tddy_service::proto::connection::StartSessionResponse;
+
+    let project_id = args
+        .project_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("--project-id must be non-empty"))?;
+    let session_token = resolve_session_token(&args).await?;
+    let req = build_start_session_request(&args, &session_token);
+
+    log::info!(
+        target: "tddy_tools::pty_relay",
+        "calling StartSession via HTTP {} (project_id={project_id}, sandbox={})…",
+        args.daemon_url,
+        args.sandbox
+    );
+    let resp_bytes = connectrpc_post(
+        &reqwest::Client::new(),
+        &args.daemon_url,
+        "connection.ConnectionService",
+        "StartSession",
+        req.encode_to_vec(),
+    )
+    .await?;
+
+    let resp = StartSessionResponse::decode(resp_bytes.as_slice())
+        .map_err(|e| anyhow::anyhow!("decode StartSessionResponse: {e}"))?;
+
+    log::info!(
+        target: "tddy_tools::pty_relay",
+        "session started: id={} sandbox={}",
+        resp.session_id,
+        args.sandbox
+    );
+    eprintln!("session_id={}", resp.session_id);
+
+    run_grpc_terminal(&args.daemon_url, &resp.session_id, &session_token).await
+}
+
+// ---------------------------------------------------------------------------
 // Session mode: auth + StartSession, then route to LiveKit or gRPC terminal
 // ---------------------------------------------------------------------------
 
-/// Single entry for daemon-backed sessions.
-///
-/// Terminal connectivity is chosen by what the session returns:
-/// - `livekit_server_identity` non-empty + `--livekit-url` provided → LiveKit bidi stream
-/// - otherwise → gRPC connectrpc stream
-///
-/// `--server-identity` skips StartSession and connects directly via LiveKit.
+/// LiveKit-backed start/connect (--daemon-identity / --server-identity).
 #[cfg(feature = "livekit")]
-async fn run_session(args: PtyRelayArgs) -> Result<()> {
+async fn run_livekit_session(args: PtyRelayArgs) -> Result<()> {
     use prost::Message as _;
-    use tddy_service::proto::connection::{StartSessionRequest, StartSessionResponse};
+    use tddy_service::proto::connection::StartSessionResponse;
 
     // Connect-only path: no StartSession, just connect to the given LiveKit identity.
     if let Some(server_identity) = args.server_identity.clone() {
@@ -251,16 +371,7 @@ async fn run_session(args: PtyRelayArgs) -> Result<()> {
         }
     };
 
-    let req = StartSessionRequest {
-        session_token: session_token.clone(),
-        project_id: args.project_id.clone().unwrap_or_default(),
-        agent: args.agent.clone().unwrap_or_default(),
-        session_type: args.session_type.clone(),
-        model: args.model.clone(),
-        initial_prompt: args.initial_prompt.clone().unwrap_or_default(),
-        permission_mode: args.permission_mode.clone().unwrap_or_default(),
-        ..Default::default()
-    };
+    let req = build_start_session_request(&args, &session_token);
 
     log::info!(target: "tddy_tools::pty_relay", "calling StartSession via HTTP {}…", args.daemon_url);
     let resp_bytes = connectrpc_post(
@@ -452,7 +563,6 @@ async fn run_livekit_terminal(
 
 /// Calls GetAuthUrl (which for stub auth embeds `?code=<code>&state=<uuid>` in the URL),
 /// then ExchangeCode to get a session token without any manual browser interaction.
-#[cfg(feature = "livekit")]
 async fn exchange_stub_session_token(daemon_url: &str) -> anyhow::Result<String> {
     use prost::Message as _;
     use tddy_service::proto::auth::{
@@ -474,7 +584,11 @@ async fn exchange_stub_session_token(daemon_url: &str) -> anyhow::Result<String>
         .map_err(|e| anyhow::anyhow!("decode GetAuthUrlResponse: {}", e))?;
 
     // Stub URL: http://<host>/auth/callback?code=test-code&state=<uuid>
-    let query = url_resp.authorize_url.splitn(2, '?').nth(1).unwrap_or("");
+    let query = url_resp
+        .authorize_url
+        .split_once('?')
+        .map(|(_, q)| q)
+        .unwrap_or("");
     let mut code = String::new();
     let mut state = url_resp.state.clone();
     for pair in query.split('&') {
@@ -509,7 +623,6 @@ async fn exchange_stub_session_token(daemon_url: &str) -> anyhow::Result<String>
     Ok(exchange_resp.session_token)
 }
 
-#[cfg(feature = "livekit")]
 async fn connectrpc_post(
     client: &reqwest::Client,
     base: &str,
@@ -542,7 +655,6 @@ async fn connectrpc_post(
 /// Connect to a claude-cli session's terminal via the daemon's connectrpc HTTP endpoint.
 /// Uses `StreamTerminalOutput` (server-streaming) for output and `SendTerminalInput`
 /// (unary) for input — the same path the web UI's `GhosttyTerminalGrpc` uses.
-#[cfg(feature = "livekit")]
 async fn run_grpc_terminal(
     daemon_url: &str,
     session_id: &str,
@@ -556,13 +668,15 @@ async fn run_grpc_terminal(
 
     let http_client = reqwest::Client::new();
 
+    let (rows, cols) = terminal_size_or_default();
+
     // Output: open the streaming request and parse connect-protocol envelope frames.
     let stream_req = StreamTerminalOutputRequest {
         session_token: session_token.to_string(),
         session_id: session_id.to_string(),
         terminal_id: String::new(),
-        initial_cols: 0,
-        initial_rows: 0,
+        initial_cols: cols as u32,
+        initial_rows: rows as u32,
     };
     let mut resp = connectrpc_post_streaming(
         &http_client,
@@ -583,6 +697,23 @@ async fn run_grpc_terminal(
     let input_session_token = session_token.to_string();
     let shutdown_input = Arc::clone(&shutdown);
     tokio::spawn(async move {
+        if let Some(resize) = encode_resize_osc() {
+            let req = SessionTerminalInput {
+                session_token: input_session_token.clone(),
+                session_id: input_session_id.clone(),
+                data: resize,
+                terminal_id: String::new(),
+                control_token: String::new(),
+            };
+            let _ = connectrpc_post(
+                &input_client,
+                &input_daemon_url,
+                "connection.ConnectionService",
+                "SendTerminalInput",
+                req.encode_to_vec(),
+            )
+            .await;
+        }
         while let Some(data) = key_rx.recv().await {
             if shutdown_input.load(Ordering::Relaxed) {
                 break;
@@ -676,7 +807,6 @@ async fn run_grpc_terminal(
 }
 
 /// POST to connectrpc streaming endpoint. Returns the raw reqwest Response for streaming reads.
-#[cfg(feature = "livekit")]
 async fn connectrpc_post_streaming(
     client: &reqwest::Client,
     base: &str,
@@ -710,6 +840,10 @@ async fn connectrpc_post_streaming(
 
 #[cfg(feature = "livekit")]
 fn encode_resize() -> Option<Vec<u8>> {
+    encode_resize_osc()
+}
+
+fn encode_resize_osc() -> Option<Vec<u8>> {
     let (rows, cols) = terminal_size_or_default();
     Some(format!("\x1b]resize;{};{}\x07", cols, rows).into_bytes())
 }
@@ -761,25 +895,53 @@ impl Drop for RawMode {
     }
 }
 
-#[cfg(all(test, feature = "livekit"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Reproduces: pty-relay encodes resize as DECSLPP xterm format `\x1b[8;{rows};{cols}t`
-    /// but VirtualTUI's `parse_resize_from_buf` expects OSC format `\x1b]resize;{cols};{rows}\x07`.
-    /// With the wrong format the TUI never receives valid dimensions, stays at the 80x24 default,
-    /// and renders separator lines and the status bar at the wrong width — producing doubled
-    /// separators and a split `● high · /effort` line when viewed in a wider relay terminal.
     #[test]
-    fn encode_resize_uses_osc_format_expected_by_virtual_tui() {
-        // When
-        let bytes = encode_resize().expect("encode_resize must return Some");
+    fn build_start_session_request_sets_sandbox_flag() {
+        // Given
+        let args = PtyRelayArgs {
+            dir: ".".into(),
+            livekit_url: None,
+            livekit_api_key: "devkey".into(),
+            livekit_api_secret: "secret".into(),
+            livekit_room: None,
+            client_identity: "pty-relay-client".into(),
+            server_identity: None,
+            daemon_identity: None,
+            daemon_url: "http://127.0.0.1:8899".into(),
+            session_token: None,
+            project_id: Some("proj-1".into()),
+            agent: None,
+            model: "claude-opus-4-8".into(),
+            session_type: "claude-cli".into(),
+            initial_prompt: None,
+            permission_mode: None,
+            sandbox: true,
+            session_id: None,
+            cmd: vec![],
+        };
 
-        // Then — VirtualTUI parse_resize_from_buf expects: \x1b]resize;{cols};{rows}\x07
+        // When
+        let req = build_start_session_request(&args, "tok");
+
+        // Then
+        assert!(req.sandbox, "StartSession must set sandbox=true when --sandbox is passed");
+        assert_eq!(req.project_id, "proj-1");
+        assert_eq!(req.session_type, "claude-cli");
+    }
+
+    #[test]
+    fn encode_resize_osc_uses_format_expected_by_daemon() {
+        // When
+        let bytes = encode_resize_osc().expect("encode_resize_osc must return Some");
+
+        // Then
         assert!(
             bytes.starts_with(b"\x1b]resize;"),
-            "resize must use OSC format \\x1b]resize;… (cols;rows\\x07) \
-             but pty_relay produced: {:?}",
+            "resize must use OSC format \\x1b]resize;… but got: {:?}",
             String::from_utf8_lossy(&bytes)
         );
         assert!(
@@ -787,5 +949,16 @@ mod tests {
             "resize must terminate with BEL (\\x07) but got: {:?}",
             String::from_utf8_lossy(&bytes)
         );
+    }
+}
+
+#[cfg(all(test, feature = "livekit"))]
+mod livekit_tests {
+    use super::*;
+
+    #[test]
+    fn encode_resize_delegates_to_osc_format() {
+        // When / Then
+        assert_eq!(encode_resize(), encode_resize_osc());
     }
 }

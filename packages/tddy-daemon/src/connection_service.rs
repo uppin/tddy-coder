@@ -792,6 +792,7 @@ impl ConnectionServiceImpl {
         let ctx = crate::sandbox_session::prepare_context_dir(&worktree_path)
             .map_err(Status::internal)?;
         crate::sandbox_session::copy_dir_all(ctx.path(), &context_dir).map_err(Status::internal)?;
+        crate::sandbox_session::seed_claude_home_config(&scratch_home).map_err(Status::internal)?;
 
         let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
             self.config
@@ -820,6 +821,8 @@ impl ConnectionServiceImpl {
             }
         };
         let tddy_tools_path = canonicalize_exec(&tddy_tools_path);
+        let sandbox_runner_path =
+            canonicalize_exec(&crate::sandbox_session::resolve_sandbox_runner_path());
         let claude_binary = canonicalize_exec(claude_binary_cfg);
         let claude_binary = claude_binary.as_str();
 
@@ -844,8 +847,7 @@ impl ConnectionServiceImpl {
         let loopback_allow_ports = vec![grpc_listen_port, egress_shim_port];
 
         let runner_argv = vec![
-            tddy_tools_path,
-            "sandbox-runner".into(),
+            sandbox_runner_path,
             "--session-id".into(),
             session_id.to_string(),
             "--context-dir".into(),
@@ -854,6 +856,8 @@ impl ConnectionServiceImpl {
             grpc_socket.to_string_lossy().to_string(),
             "--tool-ipc-socket".into(),
             tool_ipc_socket.to_string_lossy().to_string(),
+            "--tddy-tools-path".into(),
+            tddy_tools_path.clone(),
             "--ready-marker".into(),
             ready_marker.to_string_lossy().to_string(),
             "--claude-binary".into(),
@@ -1117,6 +1121,8 @@ impl ConnectionServiceImpl {
             .map_err(|e| Status::internal(format!("mkdir context dir: {e}")))?;
         crate::sandbox_session::copy_dir_all(ctx.path(), &context_dir)
             .map_err(|e| Status::internal(format!("copy context dir: {e}")))?;
+        crate::sandbox_session::seed_claude_home_config(&scratch_home)
+            .map_err(|e| Status::internal(format!("seed claude home: {e}")))?;
 
         let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
             self.config
@@ -1140,6 +1146,8 @@ impl ConnectionServiceImpl {
             }
         };
         let tddy_tools_path = canonicalize_exec(&tddy_tools_path);
+        let sandbox_runner_path =
+            canonicalize_exec(&crate::sandbox_session::resolve_sandbox_runner_path());
         let claude_binary = canonicalize_exec(claude_binary_cfg);
 
         let grpc_socket = sandbox_root.join("sandbox.grpc.sock");
@@ -1162,8 +1170,7 @@ impl ConnectionServiceImpl {
         let loopback_allow_ports = vec![grpc_listen_port, egress_shim_port];
 
         let runner_argv = vec![
-            tddy_tools_path,
-            "sandbox-runner".into(),
+            sandbox_runner_path,
             "--session-id".into(),
             session_id.to_string(),
             "--context-dir".into(),
@@ -1172,6 +1179,8 @@ impl ConnectionServiceImpl {
             grpc_socket.to_string_lossy().to_string(),
             "--tool-ipc-socket".into(),
             tool_ipc_socket.to_string_lossy().to_string(),
+            "--tddy-tools-path".into(),
+            tddy_tools_path.clone(),
             "--ready-marker".into(),
             ready_marker.to_string_lossy().to_string(),
             "--claude-binary".into(),

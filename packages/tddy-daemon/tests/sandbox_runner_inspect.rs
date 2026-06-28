@@ -12,6 +12,14 @@ use tddy_daemon::sandbox_session::{
 use tddy_sandbox::{format_sandbox_diagnostics, SandboxSpec};
 use tddy_sandbox_darwin::{render_profile, spawn};
 
+fn sandbox_runner_binary() -> PathBuf {
+    std::env::var_os("CARGO_BIN_EXE_tddy-sandbox-runner")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/tddy-sandbox-runner")
+        })
+}
+
 fn tools_binary() -> PathBuf {
     std::env::var_os("CARGO_BIN_EXE_tddy-tools")
         .map(PathBuf::from)
@@ -32,14 +40,14 @@ fn sandbox_runner_inspect_seatbelt_spawn() {
     std::fs::create_dir_all(&context).unwrap();
     std::fs::create_dir_all(&egress).unwrap();
 
+    let runner = sandbox_runner_binary();
     let tools = tools_binary();
     let grpc_port = pick_free_loopback_port().expect("grpc port");
     let shim_port = pick_free_loopback_port().expect("shim port");
     let ready_marker = project.join("sandbox.ready");
 
     let runner_argv = vec![
-        tools.to_string_lossy().to_string(),
-        "sandbox-runner".into(),
+        runner.to_string_lossy().to_string(),
         "--session-id".into(),
         "inspect".into(),
         "--context-dir".into(),
@@ -51,6 +59,8 @@ fn sandbox_runner_inspect_seatbelt_spawn() {
             .to_string(),
         "--tool-ipc-socket".into(),
         project.join("tool_ipc.sock").to_string_lossy().to_string(),
+        "--tddy-tools-path".into(),
+        tools.to_string_lossy().to_string(),
         "--ready-marker".into(),
         ready_marker.to_string_lossy().to_string(),
         "--claude-binary".into(),

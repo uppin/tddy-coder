@@ -9,8 +9,6 @@
 pub mod github_pr;
 pub mod relay;
 pub mod review_persist;
-pub mod sandbox_claude_spawn;
-pub mod sandbox_runner;
 pub mod schema;
 pub mod schema_manifest;
 pub mod server;

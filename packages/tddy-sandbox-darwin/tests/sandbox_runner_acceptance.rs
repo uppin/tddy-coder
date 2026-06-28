@@ -1,17 +1,23 @@
-//! Acceptance: `tddy-tools sandbox-runner` gRPC server — SessionChannel, PTY, tool exec.
+//! Acceptance: `tddy-sandbox-runner` gRPC server — SessionChannel, PTY, tool exec.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use futures_util::StreamExt;
 use tddy_sandbox::format_egress_logs;
+use tddy_sandbox_darwin::{connect_sandbox_client, run_sandbox_runner, SandboxRunnerArgs};
 use tddy_service::proto::connection::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::tonic_sandbox::{
     EchoRequest, EchoStreamFrame, HostPoll, SandboxInput, SessionFrame, SubscribeTerminal,
 };
-use tddy_tools::sandbox_runner::{run_sandbox_runner, SandboxRunnerArgs};
 use tokio_stream::wrappers::ReceiverStream;
+
+fn tddy_tools_path() -> PathBuf {
+    std::env::var_os("CARGO_BIN_EXE_tddy-tools")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("tddy-tools"))
+}
 
 const SESSION_ID: &str = "sandbox-runner-test-session";
 const TEST_MODEL: &str = "claude-opus-4-8";
@@ -60,6 +66,7 @@ fn runner_args(tmp: &Path, stub_claude: &Path) -> (SandboxRunnerArgs, PathBuf) {
         model: TEST_MODEL.to_string(),
         grpc_socket: tmp.join("sandbox.grpc.sock"),
         tool_ipc_socket: tmp.join("tool_ipc.sock"),
+        tddy_tools_path: tddy_tools_path(),
         ready_marker: tmp.join("sandbox.ready"),
         permission_mode: "auto".to_string(),
         grpc_listen_port: None,
@@ -75,7 +82,7 @@ async fn stop_runner(runner_task: tokio::task::JoinHandle<()>) {
 
 /// Host-side SessionChannel loop (mirrors `dial_and_bridge` in the daemon).
 async fn open_host_session_channel(ready_marker: &Path) -> tokio::task::JoinHandle<()> {
-    let mut client = tddy_tools::sandbox_runner::connect_sandbox_client(ready_marker)
+    let mut client = connect_sandbox_client(ready_marker)
         .await
         .expect("connect sandbox grpc");
 
@@ -153,7 +160,7 @@ async fn sandbox_runner_echo_unary_round_trips() {
 
         wait_for_ready(&ready_marker, &egress, Duration::from_secs(15)).await;
 
-        let mut client = tddy_tools::sandbox_runner::connect_sandbox_client(&ready_marker)
+        let mut client = connect_sandbox_client(&ready_marker)
             .await
             .expect("connect sandbox grpc");
 
@@ -197,7 +204,7 @@ async fn sandbox_runner_echo_stream_bidi_round_trips() {
 
         wait_for_ready(&ready_marker, &egress, Duration::from_secs(15)).await;
 
-        let mut client = tddy_tools::sandbox_runner::connect_sandbox_client(&ready_marker)
+        let mut client = connect_sandbox_client(&ready_marker)
             .await
             .expect("connect sandbox grpc");
 
@@ -270,7 +277,7 @@ async fn sandbox_runner_session_channel_streams_pty_output_and_accepts_input() {
 
         wait_for_ready(&ready_marker, &egress, Duration::from_secs(15)).await;
 
-        let mut client = tddy_tools::sandbox_runner::connect_sandbox_client(&ready_marker)
+        let mut client = connect_sandbox_client(&ready_marker)
             .await
             .expect("connect sandbox grpc");
         let (host_tx, host_rx) = tokio::sync::mpsc::channel(64);

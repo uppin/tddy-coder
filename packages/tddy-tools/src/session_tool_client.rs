@@ -3,43 +3,7 @@
 
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
-use tddy_service::proto::connection::ExecuteToolResponse;
-
-/// Wire format for sandbox tool IPC (`TDDY_SANDBOX_TOOL_IPC` unix socket).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ToolIpcRequest {
-    pub tool_name: String,
-    pub args_json: String,
-}
-
-/// Wire format returned by the sandbox-runner tool IPC server.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ToolIpcResponse {
-    pub result_json: String,
-    pub is_error: bool,
-    pub error_message: String,
-}
-
-impl ToolIpcResponse {
-    pub fn from_execute_tool(resp: &ExecuteToolResponse) -> Self {
-        Self {
-            result_json: resp.result_json.clone(),
-            is_error: resp.is_error,
-            error_message: resp.error_message.clone(),
-        }
-    }
-
-    pub fn to_json_string(&self) -> String {
-        serde_json::to_string(self).unwrap_or_else(|_| {
-            serde_json::json!({
-                "error": "failed to encode tool ipc response",
-                "is_error": true
-            })
-            .to_string()
-        })
-    }
-}
+pub use tddy_sandbox::{session_id_from_env, ToolIpcRequest, ToolIpcResponse};
 
 /// How `tddy-tools --mcp` reaches the daemon's `ExecuteTool` handler.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,13 +17,6 @@ pub enum SessionToolTransport {
         session_token: String,
         daemon_instance_id: String,
     },
-}
-
-/// Resolve session id from sandbox or remote env (used when building ExecuteToolRequest).
-pub fn session_id_from_env() -> String {
-    std::env::var("TDDY_SANDBOX_SESSION_ID")
-        .or_else(|_| std::env::var("TDDY_REMOTE_SESSION_ID"))
-        .unwrap_or_default()
 }
 
 /// Detect which transport is configured for session tool dispatch.

@@ -45,13 +45,6 @@ tddy-service = { path = "../tddy-service" }
 prost = { version = "0.13" }
 # Relay dispatch: HTTP forwarding for dispatch_dynamic_tool.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-tonic = { version = "0.12", default-features = false, features = ["transport"] }
-hyper = "1"
-hyper-util = { version = "0.1", features = ["tokio"] }
-http = "1"
-tower = "0.5"
-futures-util = "0.3"
-tokio-stream = "0.1"
 # LiveKit connect mode (tddy-tools pty-relay --livekit-url ...)
 tddy-livekit = { path = "../tddy-livekit", optional = true }
 livekit = { version = "0.7", optional = true }
@@ -71,6 +64,5 @@ serial_test = "3"
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
-tddy-demo-tui = { path = "../tddy-demo-tui" }
 # Relay integration: `start_toolcall_listener` + CLI subprocess (`submit_relay_no_poll`).
 tddy-core = { path = "../tddy-core" }
