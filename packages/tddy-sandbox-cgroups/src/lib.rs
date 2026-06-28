@@ -11,8 +11,156 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use nix::mount::MsFlags;
 use nix::sched::{unshare, CloneFlags};
-use tddy_sandbox::{SandboxError, SandboxHandle, SandboxSpec};
+use tddy_sandbox::{SandboxError, SandboxHandle, SandboxPlan, SandboxSpec};
+
+/// Map a plan's read grants to read-only bind-mount operations applied inside the rootless jail.
+///
+/// Each [`tddy_sandbox::ReadSpec`] becomes a `(source, target, flags)` tuple: an `MS_BIND` mount
+/// remounted `MS_RDONLY` (plus `MS_NOEXEC` for non-exec reads). Pure (no syscalls) so the mapping
+/// is unit-testable without mounting — the actual `mount(2)` calls happen in `enter_rootless_jail`.
+pub fn plan_to_bind_mounts(plan: &SandboxPlan) -> Vec<(PathBuf, PathBuf, MsFlags)> {
+    use tddy_sandbox::ReadKind;
+    plan.reads
+        .iter()
+        .filter(|r| !matches!(r.kind, ReadKind::Regex(_)))
+        .map(|r| {
+            let target = r.jail.clone().unwrap_or_else(|| r.host.clone());
+            let mut flags = MsFlags::MS_BIND | MsFlags::MS_RDONLY;
+            if !r.exec {
+                flags |= MsFlags::MS_NOEXEC;
+            }
+            (r.host.clone(), target, flags)
+        })
+        .collect()
+}
+
+/// Map a plan's [`tddy_sandbox::ResourceLimits`] onto the cgroup v2 [`CgroupLimits`] applied to the
+/// jail scope. Pure so the mapping is unit-testable.
+pub fn cgroup_limits_from(limits: &tddy_sandbox::ResourceLimits) -> CgroupLimits {
+    CgroupLimits {
+        memory_max: limits.memory_max,
+        cpu_max: limits.cpu_max.clone(),
+        pids_max: limits.pids_max,
+    }
+}
+
+/// Spawn a sandboxed process from an explicit [`SandboxPlan`]: RO bind-mount the declared reads,
+/// materialize copies/symlinks/secrets, apply env + cgroup limits from the plan.
+///
+/// FIXME(fs-confinement): the declared reads become read-only bind mounts, but the jail still shares
+/// the host filesystem root — full minimal-root `pivot_root` write-confinement is a follow-up.
+pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
+    plan.spec.validate()?;
+    for dir in [
+        &plan.spec.project_root,
+        &plan.spec.scratch_dir,
+        &plan.spec.egress_dir,
+    ] {
+        std::fs::create_dir_all(dir).map_err(|e| SandboxError::Io(e.to_string()))?;
+    }
+
+    if !unprivileged_userns_available() {
+        return Err(userns_unsupported_error());
+    }
+
+    tddy_sandbox::materialize_copies(&plan.copies).map_err(SandboxError::Io)?;
+    tddy_sandbox::materialize_symlinks(&plan.symlinks).map_err(SandboxError::Io)?;
+    tddy_sandbox::materialize_secrets(&plan.env.secrets, &plan.spec.scratch_dir)
+        .map_err(SandboxError::Io)?;
+
+    let grpc_socket = arg_value(&plan.spec.command, "--grpc-uds")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| plan.spec.project_root.join("sandbox.grpc.sock"));
+    let ready_marker = arg_value(&plan.spec.command, "--ready-marker")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| plan.spec.project_root.join("sandbox.ready"));
+
+    let scope = cgroup_scope_path(&plan.spec);
+    prepare_cgroup_scope(&scope).map_err(|e| cgroup_unsupported_error(&scope, &e))?;
+
+    let uid = nix::unistd::geteuid().as_raw();
+    let gid = nix::unistd::getegid().as_raw();
+    let uid_map = format!("0 {uid} 1\n");
+    let gid_map = format!("0 {gid} 1\n");
+    let bind_mounts = plan_to_bind_mounts(&plan);
+
+    let mut cmd = Command::new(&plan.spec.command[0]);
+    cmd.args(&plan.spec.command[1..]);
+    cmd.env_clear();
+    cmd.envs(&plan.spec.env);
+
+    // SAFETY: runs in the forked child before `execve`; only namespace setup + RO bind mounts.
+    unsafe {
+        cmd.pre_exec(move || {
+            enter_rootless_jail(&uid_map, &gid_map)?;
+            apply_bind_mounts(&bind_mounts)?;
+            Ok(())
+        });
+    }
+
+    let mut child = cmd.spawn().map_err(|e| {
+        SandboxError::Io(format!(
+            "spawn sandbox runner in cgroups jail failed: {e} \
+             (the host may forbid unprivileged user namespaces)"
+        ))
+    })?;
+
+    if let Err(e) = std::fs::write(scope.join("cgroup.procs"), child.id().to_string()) {
+        let _ = child.kill();
+        return Err(cgroup_unsupported_error(&scope, &e));
+    }
+    let limits = cgroup_limits_from(&plan.limits);
+    let limits =
+        if limits.memory_max.is_none() && limits.cpu_max.is_none() && limits.pids_max.is_none() {
+            default_limits()
+        } else {
+            limits
+        };
+    if let Err(e) = write_cgroup_limits(&scope, &limits) {
+        log::warn!(
+            target: "tddy_sandbox_cgroups",
+            "some cgroup limits could not be applied in {}: {e}",
+            scope.display()
+        );
+    }
+
+    Ok(SandboxHandle::new(
+        child,
+        plan.spec.profile_path,
+        grpc_socket,
+        ready_marker,
+    ))
+}
+
+/// Apply each `(source, target, flags)` as a read-only bind mount in the child's mount namespace.
+/// Missing sources are skipped so an absent optional toolchain dir never aborts the spawn.
+fn apply_bind_mounts(mounts: &[(PathBuf, PathBuf, MsFlags)]) -> std::io::Result<()> {
+    let errno = |e: nix::Error| std::io::Error::from_raw_os_error(e as i32);
+    for (src, target, flags) in mounts {
+        if !src.exists() || !target.exists() {
+            continue;
+        }
+        nix::mount::mount(
+            Some(src.as_path()),
+            target.as_path(),
+            None::<&str>,
+            MsFlags::MS_BIND | MsFlags::MS_REC,
+            None::<&str>,
+        )
+        .map_err(errno)?;
+        nix::mount::mount(
+            None::<&str>,
+            target.as_path(),
+            None::<&str>,
+            MsFlags::MS_BIND | MsFlags::MS_REMOUNT | *flags,
+            None::<&str>,
+        )
+        .map_err(errno)?;
+    }
+    Ok(())
+}
 
 /// cgroup v2 unified hierarchy root.
 const CGROUP_ROOT: &str = "/sys/fs/cgroup";
@@ -303,5 +451,91 @@ pub fn userns_unsupported_error() -> SandboxError {
                   AppArmor `kernel.apparmor_restrict_unprivileged_userns=0`) or run the daemon in \
                   an environment that permits user namespaces."
             .to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tddy_sandbox::{
+        EnvSpec, NetworkSpec, PolicySpec, ReadReason, ReadSpec, ResourceLimits, SandboxPlan,
+        SandboxSpec,
+    };
+
+    fn a_plan(reads: Vec<ReadSpec>, limits: ResourceLimits) -> SandboxPlan {
+        let spec = SandboxSpec {
+            project_root: PathBuf::from("/tmp/tddy-cgroups-test"),
+            scratch_dir: PathBuf::from("/tmp/tddy-cgroups-test/.work"),
+            egress_dir: PathBuf::from("/tmp/tddy-cgroups-test/out"),
+            allow_read_paths: vec![],
+            command: vec!["/bin/true".into()],
+            env: Default::default(),
+            profile_path: PathBuf::from("/tmp/tddy-cgroups-test/profile.sb"),
+            loopback_allow_ports: vec![],
+            ipc_socket: None,
+        };
+        SandboxPlan {
+            spec,
+            reads,
+            copies: vec![],
+            symlinks: vec![],
+            env: EnvSpec::default(),
+            policy: PolicySpec::default(),
+            network: NetworkSpec::default(),
+            limits,
+        }
+    }
+
+    #[test]
+    fn maps_each_declared_read_to_a_readonly_bind_mount() {
+        // Given — one declared read
+        let plan = a_plan(
+            vec![ReadSpec::subpath("/usr/lib", ReadReason::SystemLibs)],
+            ResourceLimits::default(),
+        );
+
+        // When
+        let mounts = plan_to_bind_mounts(&plan);
+
+        // Then — a single read-only bind mount source==target==/usr/lib
+        assert_eq!(mounts.len(), 1);
+        let (src, dst, flags) = &mounts[0];
+        assert_eq!(src, &PathBuf::from("/usr/lib"));
+        assert_eq!(dst, &PathBuf::from("/usr/lib"));
+        assert!(flags.contains(MsFlags::MS_BIND));
+        assert!(flags.contains(MsFlags::MS_RDONLY));
+    }
+
+    #[test]
+    fn marks_non_exec_reads_with_the_noexec_flag() {
+        // Given — a non-exec read
+        let plan = a_plan(
+            vec![ReadSpec::subpath("/etc/ssl/certs", ReadReason::SystemLibs)],
+            ResourceLimits::default(),
+        );
+
+        // When
+        let mounts = plan_to_bind_mounts(&plan);
+
+        // Then
+        assert!(mounts[0].2.contains(MsFlags::MS_NOEXEC));
+    }
+
+    #[test]
+    fn maps_plan_limits_onto_cgroup_values() {
+        // Given
+        let limits = ResourceLimits {
+            memory_max: Some(123),
+            cpu_max: Some("50000 100000".to_string()),
+            pids_max: Some(7),
+        };
+
+        // When
+        let cgroup = cgroup_limits_from(&limits);
+
+        // Then
+        assert_eq!(cgroup.memory_max, Some(123));
+        assert_eq!(cgroup.cpu_max, Some("50000 100000".to_string()));
+        assert_eq!(cgroup.pids_max, Some(7));
     }
 }

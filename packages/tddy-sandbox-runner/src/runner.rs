@@ -528,6 +528,34 @@ impl SandboxService for SandboxRunnerService {
     }
 }
 
+/// Resolve out-of-band secrets passed via `TDDY_SECRET_<NAME>=<file path>` entries.
+///
+/// For each such entry, read the file at the path, yield `(<NAME>, contents)` to be set on the
+/// inner Claude PTY child only, and unlink the file so the secret does not linger in scratch. The
+/// secret value never travels through `sandbox-exec` argv or the broad env list — only the file
+/// path does.
+pub fn resolve_secret_envs(
+    vars: &std::collections::BTreeMap<String, String>,
+) -> Vec<(String, String)> {
+    const PREFIX: &str = "TDDY_SECRET_";
+    let mut resolved = Vec::new();
+    for (key, path) in vars {
+        let Some(name) = key.strip_prefix(PREFIX) else {
+            continue;
+        };
+        match std::fs::read_to_string(path) {
+            Ok(value) => {
+                resolved.push((name.to_string(), value));
+                let _ = std::fs::remove_file(path);
+            }
+            Err(e) => {
+                boot_log("ERROR", &format!("secret {name}: read {path} failed: {e}"));
+            }
+        }
+    }
+    resolved
+}
+
 struct PtyState {
     stdin_tx: std::sync::mpsc::Sender<Bytes>,
 }
@@ -581,6 +609,16 @@ fn run_claude_pty_thread(
             }
         }
     }
+    // Out-of-band secrets (e.g. CLAUDE_CODE_OAUTH_TOKEN): read from their `0600` scratch files and
+    // set on the inner claude child only, so the value never appears in the sandbox-exec argv.
+    let process_env: std::collections::BTreeMap<String, String> = std::env::vars().collect();
+    for (name, value) in resolve_secret_envs(&process_env) {
+        boot_log(
+            "INFO",
+            &format!("pty: injecting secret env {name} into claude child"),
+        );
+        cmd.env(name, value);
+    }
     let mut child = pair
         .slave
         .spawn_command(cmd)
@@ -592,35 +630,51 @@ fn run_claude_pty_thread(
     let master_reader = Arc::clone(&master);
     let relay_reader = Arc::clone(&relay);
     std::thread::spawn(move || {
-        if let Ok(mut r) = master_reader.lock().unwrap().try_clone_reader() {
-            let mut buf = [0u8; 4096];
-            loop {
-                match std::io::Read::read(&mut r, &mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        relay_reader.push_terminal(Bytes::copy_from_slice(&buf[..n]));
-                    }
-                    Err(e) => {
-                        boot_log("ERROR", &format!("pty: stdout read failed: {e}"));
-                        break;
-                    }
+        // Clone the reader under the lock, then release it: holding the `master` guard across the
+        // read loop would deadlock the stdin writer thread below (edition 2021 keeps a temporary
+        // guard in an `if let` scrutinee alive for the whole block).
+        let reader = master_reader.lock().unwrap().try_clone_reader();
+        let mut r = match reader {
+            Ok(r) => r,
+            Err(_) => {
+                boot_log("ERROR", "pty: try_clone_reader failed");
+                return;
+            }
+        };
+        let mut buf = [0u8; 4096];
+        loop {
+            match std::io::Read::read(&mut r, &mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    relay_reader.push_terminal(Bytes::copy_from_slice(&buf[..n]));
+                }
+                Err(e) => {
+                    boot_log("ERROR", &format!("pty: stdout read failed: {e}"));
+                    break;
                 }
             }
-        } else {
-            boot_log("ERROR", "pty: try_clone_reader failed");
         }
     });
 
     let master_writer = Arc::clone(&master);
     std::thread::spawn(move || {
-        while let Ok(chunk) = stdin_rx.recv() {
-            if let Ok(mut w) = master_writer.lock().unwrap().take_writer() {
-                if let Err(e) = std::io::Write::write_all(&mut w, &chunk) {
-                    boot_log("ERROR", &format!("pty: stdin write failed: {e}"));
-                    break;
-                }
-            } else {
+        // Take the writer once under the lock, then release it; the write loop must not hold
+        // `master` (the reader clone above needs it, and blocking writes would stall output).
+        let writer = master_writer.lock().unwrap().take_writer();
+        let mut w = match writer {
+            Ok(w) => w,
+            Err(_) => {
                 boot_log("ERROR", "pty: take_writer failed");
+                return;
+            }
+        };
+        while let Ok(chunk) = stdin_rx.recv() {
+            if let Err(e) = std::io::Write::write_all(&mut w, &chunk) {
+                boot_log("ERROR", &format!("pty: stdin write failed: {e}"));
+                break;
+            }
+            if let Err(e) = std::io::Write::flush(&mut w) {
+                boot_log("ERROR", &format!("pty: stdin flush failed: {e}"));
                 break;
             }
         }

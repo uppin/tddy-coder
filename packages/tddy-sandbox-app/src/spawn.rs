@@ -143,8 +143,6 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
     .context("context prep task join")??;
     spawn_trace(&session_dir, "copying context into jail tree …");
     copy_dir_all(ctx.path(), &context_dir).map_err(|e| anyhow::anyhow!(e))?;
-    tddy_daemon::sandbox_session::seed_claude_home_config(&scratch_home)
-        .map_err(|e| anyhow::anyhow!(e))?;
     spawn_trace(&session_dir, "context ready");
 
     spawn_trace(

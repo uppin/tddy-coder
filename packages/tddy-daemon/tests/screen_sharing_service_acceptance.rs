@@ -30,6 +30,9 @@ const VALID_TOKEN: &str = "valid-token";
 const SESSION_ID: &str = "ss-test-session-aabbccdd";
 const PASSPHRASE: &str = "hunter2-passphrase";
 
+type SessionsBaseFn = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
+type UserResolverFn = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -38,9 +41,8 @@ fn make_service(
     sessions_dir: &std::path::Path,
 ) -> (ScreenSharingServiceImpl, ScreenSharingKeyCache) {
     let sessions_path = sessions_dir.to_path_buf();
-    let sessions_base: Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync> =
-        Arc::new(move |_user| Some(sessions_path.clone()));
-    let user_resolver: Arc<dyn Fn(&str) -> Option<String> + Send + Sync> = Arc::new(|token| {
+    let sessions_base: SessionsBaseFn = Arc::new(move |_user| Some(sessions_path.clone()));
+    let user_resolver: UserResolverFn = Arc::new(|token| {
         if token == VALID_TOKEN {
             Some("testuser".to_string())
         } else {

@@ -10,7 +10,9 @@ use bytes::Bytes;
 use tddy_rpc::Status;
 use tokio::sync::{broadcast, mpsc, Mutex};
 
-use tddy_sandbox::{SandboxContextDir, SandboxError, SandboxSpec};
+use tddy_sandbox::{
+    NetworkSpec, SandboxBuilder, SandboxContextDir, SandboxError, SandboxPlan, SecretSource,
+};
 use tddy_service::proto::connection::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
 
@@ -266,7 +268,8 @@ pub fn sandbox_error_to_status(err: SandboxError) -> Status {
     }
 }
 
-/// Build env map for sandbox-runner inside `sandbox-exec`.
+/// Build env map for sandbox-runner inside the jail. Delegates to the shared
+/// [`tddy_sandbox::default_runner_env`] so the daemon and the standalone app share one definition.
 pub fn build_sandbox_runner_env(
     scratch_home: &Path,
     scratch_tmp: &Path,
@@ -274,62 +277,13 @@ pub fn build_sandbox_runner_env(
     tool_ipc_socket: &Path,
     egress_dir: &Path,
 ) -> std::collections::BTreeMap<String, String> {
-    let mut env = std::collections::BTreeMap::new();
-    env.insert("HOME".into(), scratch_home.to_string_lossy().to_string());
-    env.insert("TMPDIR".into(), scratch_tmp.to_string_lossy().to_string());
-    env.insert("TDDY_SANDBOX_SESSION_ID".into(), session_id.to_string());
-    env.insert(
-        "TDDY_SANDBOX_TOOL_IPC".into(),
-        tool_ipc_socket.to_string_lossy().to_string(),
-    );
-    env.insert(
-        "TDDY_SANDBOX_EGRESS_DIR".into(),
-        egress_dir.to_string_lossy().to_string(),
-    );
-    env.insert(
-        "RUST_LOG".into(),
-        std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
-    );
-    env.insert("TERM".into(), "xterm-256color".into());
-    env.insert("PATH".into(), "/usr/bin:/bin:/usr/sbin:/sbin".into());
-    for key in [
-        "TDDY_EGRESS_PROBE_HOST",
-        "TDDY_EGRESS_PROBE_PORT",
-        "TDDY_EGRESS_PROBE_URL",
-    ] {
-        if let Ok(value) = std::env::var(key) {
-            if !value.trim().is_empty() {
-                env.insert(key.into(), value);
-            }
-        }
-    }
-    if let Ok(probe_target) = std::env::var("TDDY_EGRESS_PROBE_TARGET") {
-        if !probe_target.trim().is_empty() {
-            env.insert("TDDY_EGRESS_PROBE_TARGET".into(), probe_target);
-        }
-    }
-    env
-}
-
-/// Copy Claude auth/settings from host `~/.claude` into the jail scratch HOME.
-pub fn seed_claude_home_config(scratch_home: &Path) -> Result<(), String> {
-    let host_home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| "HOST HOME not set; cannot seed claude credentials".to_string())?;
-    let src_dir = host_home.join(".claude");
-    if !src_dir.is_dir() {
-        return Ok(());
-    }
-    let dest_dir = scratch_home.join(".claude");
-    std::fs::create_dir_all(&dest_dir).map_err(|e| format!("create scratch .claude dir: {e}"))?;
-    for name in [".credentials.json", "settings.json", "settings.local.json"] {
-        let src = src_dir.join(name);
-        if src.is_file() {
-            std::fs::copy(&src, dest_dir.join(name))
-                .map_err(|e| format!("copy claude config {}: {e}", src.display()))?;
-        }
-    }
-    Ok(())
+    tddy_sandbox::default_runner_env(
+        scratch_home,
+        scratch_tmp,
+        session_id,
+        tool_ipc_socket,
+        egress_dir,
+    )
 }
 
 /// Recursively copy a directory tree (follows symlinks).
@@ -530,23 +484,73 @@ pub struct SandboxRunnerSpawn {
     pub ipc_socket: Option<PathBuf>,
 }
 
+/// Assemble the explicit [`SandboxPlan`] for a runner spawn: the Claude read recipe (plus the
+/// runner binary's own deps), credentials copy, policy, loopback network (with OAuth inbound), env,
+/// and — when a host `CLAUDE_CODE_OAUTH_TOKEN` is set — the out-of-band OAuth secret.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub fn build_sandbox_plan(params: SandboxRunnerSpawn) -> Result<SandboxPlan, SandboxError> {
+    let mut reads = Vec::new();
+    if let Some(idx) = params
+        .runner_argv
+        .iter()
+        .position(|a| a == "--claude-binary")
+    {
+        if let Some(claude) = params.runner_argv.get(idx + 1) {
+            let claude = canonical_binary_path(claude).unwrap_or_else(|| PathBuf::from(claude));
+            reads.extend(tddy_sandbox::claude_required_reads(&claude));
+        }
+    } else {
+        reads.extend(tddy_sandbox::system_baseline_reads());
+    }
+    if let Some(runner) = params.runner_argv.first() {
+        if let Some(canon) = canonical_binary_path(runner) {
+            reads.extend(tddy_sandbox::binary_exec_reads(&canon));
+        }
+    }
+
+    let scratch_home = params.scratch_dir.join("home");
+    let mut copies = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        copies.extend(tddy_sandbox::claude_required_copies(
+            &PathBuf::from(home),
+            &scratch_home,
+        ));
+    }
+
+    let mut builder = SandboxBuilder::new(
+        params.project_root,
+        params.scratch_dir,
+        params.egress_dir,
+        params.runner_argv,
+    )
+    .profile_path(params.profile_path)
+    .ipc_socket(params.ipc_socket)
+    .reads(reads)
+    .copies(copies)
+    .policy(tddy_sandbox::claude_policy())
+    .network(NetworkSpec {
+        loopback_allow_ports: params.loopback_allow_ports,
+        allow_oauth_inbound: true,
+    })
+    .env_map(params.env);
+
+    if let Some(token) = std::env::var("CLAUDE_CODE_OAUTH_TOKEN")
+        .ok()
+        .filter(|t| !t.trim().is_empty())
+    {
+        builder = builder.secret("CLAUDE_CODE_OAUTH_TOKEN", SecretSource::Value(token));
+    }
+
+    builder.build()
+}
+
 /// Spawn sandbox-runner inside Seatbelt jail.
 #[cfg(target_os = "macos")]
 pub fn spawn_sandbox_runner(
     params: SandboxRunnerSpawn,
 ) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
-    let spec = SandboxSpec {
-        project_root: params.project_root,
-        scratch_dir: params.scratch_dir,
-        egress_dir: params.egress_dir,
-        allow_read_paths: build_allow_read_paths(&params.runner_argv),
-        command: params.runner_argv,
-        env: params.env,
-        profile_path: params.profile_path,
-        loopback_allow_ports: params.loopback_allow_ports,
-        ipc_socket: params.ipc_socket,
-    };
-    tddy_sandbox_darwin::spawn(spec)
+    let plan = build_sandbox_plan(params)?;
+    tddy_sandbox_darwin::spawn_plan(plan)
 }
 
 /// Spawn sandbox-runner inside a rootless cgroups + namespaces jail (Linux).
@@ -554,18 +558,8 @@ pub fn spawn_sandbox_runner(
 pub fn spawn_sandbox_runner(
     params: SandboxRunnerSpawn,
 ) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
-    let spec = SandboxSpec {
-        project_root: params.project_root,
-        scratch_dir: params.scratch_dir,
-        egress_dir: params.egress_dir,
-        allow_read_paths: build_allow_read_paths(&params.runner_argv),
-        command: params.runner_argv,
-        env: params.env,
-        profile_path: params.profile_path,
-        loopback_allow_ports: params.loopback_allow_ports,
-        ipc_socket: params.ipc_socket,
-    };
-    tddy_sandbox_cgroups::spawn(spec)
+    let plan = build_sandbox_plan(params)?;
+    tddy_sandbox_cgroups::spawn_plan(plan)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]

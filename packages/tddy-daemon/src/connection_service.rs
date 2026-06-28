@@ -792,7 +792,6 @@ impl ConnectionServiceImpl {
         let ctx = crate::sandbox_session::prepare_context_dir(&worktree_path)
             .map_err(Status::internal)?;
         crate::sandbox_session::copy_dir_all(ctx.path(), &context_dir).map_err(Status::internal)?;
-        crate::sandbox_session::seed_claude_home_config(&scratch_home).map_err(Status::internal)?;
 
         let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
             self.config
@@ -1131,8 +1130,6 @@ impl ConnectionServiceImpl {
             .map_err(|e| Status::internal(format!("mkdir context dir: {e}")))?;
         crate::sandbox_session::copy_dir_all(ctx.path(), &context_dir)
             .map_err(|e| Status::internal(format!("copy context dir: {e}")))?;
-        crate::sandbox_session::seed_claude_home_config(&scratch_home)
-            .map_err(|e| Status::internal(format!("seed claude home: {e}")))?;
 
         let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
             self.config
