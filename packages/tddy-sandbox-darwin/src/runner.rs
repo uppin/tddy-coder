@@ -292,7 +292,10 @@ impl SandboxSessionRelay {
         let tunnel_id = format!("tun-{}", self.tunnel_seq.fetch_add(1, Ordering::Relaxed));
         let (in_tx, in_rx) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
         let (ack_tx, ack_rx) = oneshot::channel();
-        self.tunnels.lock().unwrap().insert(tunnel_id.clone(), in_tx);
+        self.tunnels
+            .lock()
+            .unwrap()
+            .insert(tunnel_id.clone(), in_tx);
         self.tunnel_acks
             .lock()
             .unwrap()
@@ -760,12 +763,17 @@ async fn handle_egress_shim_connection(
     let first = req.lines().next().unwrap_or("").to_string();
 
     // HTTPS_PROXY path: `CONNECT host:port HTTP/1.1` → raw TCP tunnel relayed to the host.
+    // Invariant: the client waits for `200 Connection Established` before sending tunnel bytes
+    // (confirmed for claude and `curl --proxytunnel`), so this first read captures only the CONNECT
+    // request — no tunnel payload is buffered here and lost before the pump in handle_connect_tunnel.
     if first.starts_with("CONNECT ") {
         if let Some((host, port)) = parse_connect_target(&first) {
             handle_connect_tunnel(stream, relay, host, port).await;
         } else {
             let _ = stream
-                .write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .write_all(
+                    b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
                 .await;
         }
         return;
@@ -823,7 +831,9 @@ async fn handle_connect_tunnel(
     })) {
         relay.drop_tunnel(&tunnel_id);
         let _ = stream
-            .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .write_all(
+                b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
             .await;
         return;
     }
@@ -835,7 +845,9 @@ async fn handle_connect_tunnel(
     if !opened {
         relay.drop_tunnel(&tunnel_id);
         let _ = stream
-            .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .write_all(
+                b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
             .await;
         return;
     }

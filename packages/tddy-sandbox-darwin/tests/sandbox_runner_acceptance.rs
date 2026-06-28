@@ -219,7 +219,7 @@ async fn sandbox_runner_echo_stream_bidi_round_trips() {
 
         let egress_for_reader = egress.clone();
         let reader = tokio::spawn(async move {
-            while let Some(Ok(frame)) = echo_stream.next().await {
+            if let Some(Ok(frame)) = echo_stream.next().await {
                 return frame.message;
             }
             panic!(

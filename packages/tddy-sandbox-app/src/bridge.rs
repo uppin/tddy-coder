@@ -12,9 +12,7 @@ use tddy_daemon::sandbox_session::relay_egress_request;
 use tddy_daemon::tool_engine;
 use tddy_service::proto::connection::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
-use tddy_service::tonic_sandbox::{
-    HostPoll, SandboxInput, SessionFrame, SubscribeTerminal,
-};
+use tddy_service::tonic_sandbox::{HostPoll, SandboxInput, SessionFrame, SubscribeTerminal};
 use tddy_task::TaskRegistry;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;

@@ -821,8 +821,7 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
     assert!(
         found,
         "stub script must write ARGV: within {}ms; session_id={}",
-        PTY_RPC_STUB_OUTPUT_TIMEOUT_MS,
-        session_id
+        PTY_RPC_STUB_OUTPUT_TIMEOUT_MS, session_id
     );
 
     let cap = handle.capture.lock().unwrap();

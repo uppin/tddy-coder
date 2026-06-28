@@ -124,6 +124,13 @@ loopback and the jail still has `(deny network*)`.
 - Empirically confirmed claude emits `CONNECT api.anthropic.com:443` under `HTTPS_PROXY`.
 - **Remaining:** run real `claude` against `~/Code/llm-tests` to confirm a live LLM round-trip; fold the daemon `start_sandboxed_claude_cli_session` path in (shared helpers already updated). Latency note: jail→host tunnel bytes are pushed immediately; host→jail go through the shared bounded(64) client channel — fine for API throughput, tune if needed.
 
+#### Validation results (pr-wrap)
+
+- **Risk:** 0 critical / 0 warning / 2 info. Build green for `tddy-service`, `tddy-sandbox-darwin`, `tddy-daemon`, `tddy-testing-commons`.
+- INFO — `runner.rs` egress shim reads the CONNECT request into a fixed buffer; relies on the client waiting for `200` before sending tunnel bytes (true for claude/`curl --proxytunnel`; documented inline). No payload loss in practice.
+- INFO — host `tunnels` map entries are cleared on `TunnelClose`; on a server-initiated close the entry clears after the agent-side close round-trips. Session-scoped, bounded by distinct target hosts.
+- `.lock().unwrap()` on the relay mutexes matches the existing relay pattern (queued_tools/egress); poisoning panics are consistent with the crate.
+
 #### Earlier-considered options (superseded by the above)
 
 | Option | How | Pros | Cons |

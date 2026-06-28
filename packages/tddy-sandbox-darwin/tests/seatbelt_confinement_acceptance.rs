@@ -4,12 +4,12 @@
 
 #![cfg(target_os = "macos")]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tddy_sandbox::format_egress_logs;
 use tddy_sandbox::SandboxSpec;
 
-fn assert_sandbox_exit(egress: &PathBuf, exit: i32, expect_success: bool, context: &str) {
+fn assert_sandbox_exit(egress: &Path, exit: i32, expect_success: bool, context: &str) {
     assert_ne!(
         exit,
         6,
@@ -33,11 +33,7 @@ fn assert_sandbox_exit(egress: &PathBuf, exit: i32, expect_success: bool, contex
     }
 }
 
-fn run_in_sandbox_with_command(
-    project_root: &PathBuf,
-    egress: &PathBuf,
-    command: Vec<String>,
-) -> i32 {
+fn run_in_sandbox_with_command(project_root: &Path, egress: &Path, command: Vec<String>) -> i32 {
     let scratch = project_root.join(".work");
     std::fs::create_dir_all(&scratch).unwrap();
     std::fs::create_dir_all(scratch.join("home")).unwrap();
@@ -57,9 +53,9 @@ fn run_in_sandbox_with_command(
     env.insert("PATH".into(), "/usr/bin:/bin".into());
 
     let spec = SandboxSpec {
-        project_root: project_root.clone(),
+        project_root: project_root.to_path_buf(),
         scratch_dir: scratch,
-        egress_dir: egress.clone(),
+        egress_dir: egress.to_path_buf(),
         allow_read_paths: tddy_sandbox_darwin::detect_allow_read_paths(),
         command,
         env,
@@ -70,13 +66,12 @@ fn run_in_sandbox_with_command(
 
     let mut handle = tddy_sandbox_darwin::spawn(spec).expect("sandbox spawn must succeed");
     let status = handle.child_mut().wait().expect("wait for sandbox child");
-    let code = status.code().unwrap_or(1);
-    code
+    status.code().unwrap_or(1)
 }
 
 fn run_in_sandbox_expect_failure(
-    project_root: &PathBuf,
-    egress: &PathBuf,
+    project_root: &Path,
+    egress: &Path,
     shell_script: &str,
     context: &str,
 ) {
@@ -84,7 +79,7 @@ fn run_in_sandbox_expect_failure(
     assert_sandbox_exit(egress, exit, false, context);
 }
 
-fn run_in_sandbox(project_root: &PathBuf, egress: &PathBuf, shell_script: &str) -> i32 {
+fn run_in_sandbox(project_root: &Path, egress: &Path, shell_script: &str) -> i32 {
     run_in_sandbox_with_command(
         project_root,
         egress,

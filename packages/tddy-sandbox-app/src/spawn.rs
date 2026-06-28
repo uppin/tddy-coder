@@ -147,10 +147,12 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         .map_err(|e| anyhow::anyhow!(e))?;
     spawn_trace(&session_dir, "context ready");
 
-    spawn_trace(&session_dir, "resolving claude / tddy-tools / sandbox-runner paths …");
-    let tddy_tools_path = canonicalize_exec_path(&resolve_tddy_tools_path(
-        params.tddy_tools_path.as_deref(),
-    ));
+    spawn_trace(
+        &session_dir,
+        "resolving claude / tddy-tools / sandbox-runner paths …",
+    );
+    let tddy_tools_path =
+        canonicalize_exec_path(&resolve_tddy_tools_path(params.tddy_tools_path.as_deref()));
     let sandbox_runner_path = params
         .sandbox_runner_path
         .clone()
@@ -159,8 +161,7 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
     let claude_binary = resolve_claude_binary(params.claude_binary.as_deref())?;
 
     let grpc_socket = sandbox_root.join("sandbox.grpc.sock");
-    let tool_ipc_socket =
-        tddy_sandbox::SandboxSpec::short_ipc_socket_path(&params.session_id);
+    let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(&params.session_id);
     let ready_marker = sandbox_root.join("sandbox.ready");
     let profile_path = sandbox_root.join("sandbox.sb");
 

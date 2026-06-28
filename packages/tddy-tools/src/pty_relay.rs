@@ -254,7 +254,10 @@ fn run_local_pty(args: PtyRelayArgs) -> Result<()> {
 // Daemon gRPC terminal (StartSession + attach, or connect-only)
 // ---------------------------------------------------------------------------
 
-fn build_start_session_request(args: &PtyRelayArgs, session_token: &str) -> tddy_service::proto::connection::StartSessionRequest {
+fn build_start_session_request(
+    args: &PtyRelayArgs,
+    session_token: &str,
+) -> tddy_service::proto::connection::StartSessionRequest {
     use tddy_service::proto::connection::StartSessionRequest;
 
     StartSessionRequest {
@@ -928,7 +931,10 @@ mod tests {
         let req = build_start_session_request(&args, "tok");
 
         // Then
-        assert!(req.sandbox, "StartSession must set sandbox=true when --sandbox is passed");
+        assert!(
+            req.sandbox,
+            "StartSession must set sandbox=true when --sandbox is passed"
+        );
         assert_eq!(req.project_id, "proj-1");
         assert_eq!(req.session_type, "claude-cli");
     }
