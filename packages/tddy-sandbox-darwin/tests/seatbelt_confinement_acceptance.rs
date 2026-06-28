@@ -136,6 +136,41 @@ fn strict_system_plan(project_root: &Path, egress: &Path, command: Vec<String>) 
         .expect("strict system plan must build")
 }
 
+/// **a_strict_profile_lets_a_shell_read_dev_null**: shells and tools open `/dev/null` (and the
+/// other standard device nodes) `O_RDWR`, so the strict read allow-list must grant them read — not
+/// just the write/ioctl allows. Without it, shell startup inside the jail fails with
+/// "operation not permitted: /dev/null".
+#[test]
+fn a_strict_profile_lets_a_shell_read_dev_null() {
+    // Given
+    let tmp = tempfile::tempdir().unwrap();
+    let project_root = tmp.path().join("project");
+    let egress = tmp.path().join("egress");
+    std::fs::create_dir_all(&project_root).unwrap();
+    let plan = strict_system_plan(
+        &project_root,
+        &egress,
+        vec!["/bin/sh".into(), "-c".into(), "cat /dev/null".into()],
+    );
+
+    // When
+    let mut handle = tddy_sandbox_darwin::spawn_plan(plan).expect("sandbox spawn must succeed");
+    let exit = handle
+        .child_mut()
+        .wait()
+        .expect("wait for sandbox child")
+        .code()
+        .unwrap_or(1);
+
+    // Then
+    assert_sandbox_exit(
+        &egress,
+        exit,
+        true,
+        "a_strict_profile_lets_a_shell_read_dev_null",
+    );
+}
+
 /// **seatbelt_denies_writes_outside_project_tree**: a confined process cannot create files
 /// in the real home directory.
 #[test]

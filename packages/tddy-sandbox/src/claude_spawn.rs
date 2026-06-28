@@ -45,8 +45,21 @@ pub fn system_baseline_reads() -> Vec<ReadSpec> {
         cache("/private/var/db/timezone"),
         // ICU locale data — the V8/Node `claude` binary SIGTRAPs at startup without it.
         subpath("/usr/share/icu"),
-        // PTY master + allocated slaves (openpty opens these O_RDWR).
+        // Standard device nodes are opened O_RDWR by shells/tools (e.g. `/bin/sh` redirects from
+        // `/dev/null`), so they need read grants in addition to the write/ioctl allows — otherwise
+        // shell init inside the jail fails ("operation not permitted" on `/dev/null`).
+        ReadSpec::literal("/dev/null", ReadReason::SystemLibs),
+        ReadSpec::literal("/dev/zero", ReadReason::SystemLibs),
+        ReadSpec::literal("/dev/random", ReadReason::SystemLibs),
+        ReadSpec::literal("/dev/urandom", ReadReason::SystemLibs),
+        ReadSpec::literal("/dev/dtracehelper", ReadReason::SystemLibs),
+        ReadSpec::literal("/dev/stdin", ReadReason::SystemLibs),
+        ReadSpec::literal("/dev/stdout", ReadReason::SystemLibs),
+        ReadSpec::literal("/dev/stderr", ReadReason::SystemLibs),
+        ReadSpec::regex("^/dev/fd/[0-9]+$", ReadReason::Pty),
+        // PTY master + allocated slaves (openpty opens these O_RDWR) and the tty devices.
         ReadSpec::literal("/dev/ptmx", ReadReason::Pty),
+        ReadSpec::regex("^/dev/tty.*", ReadReason::Pty),
         ReadSpec::regex("^/dev/ttys[0-9]+$", ReadReason::Pty),
     ]
 }
