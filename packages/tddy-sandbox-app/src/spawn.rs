@@ -26,6 +26,8 @@ pub struct SpawnParams {
     pub tddy_tools_path: Option<String>,
     pub sandbox_runner_path: Option<String>,
     pub session_dir: PathBuf,
+    /// Working directory for Claude inside the jail. Defaults to the mounted repo root.
+    pub cwd: Option<PathBuf>,
 }
 
 /// A sandboxed Claude session ready for host `SessionChannel` attach.
@@ -143,8 +145,6 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
     .context("context prep task join")??;
     spawn_trace(&session_dir, "copying context into jail tree …");
     copy_dir_all(ctx.path(), &context_dir).map_err(|e| anyhow::anyhow!(e))?;
-    tddy_daemon::sandbox_session::seed_claude_home_config(&scratch_home)
-        .map_err(|e| anyhow::anyhow!(e))?;
     spawn_trace(&session_dir, "context ready");
 
     spawn_trace(
@@ -177,12 +177,18 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         params.permission_mode.trim()
     };
 
+    // Mount the repo into the jail (read-write) and start Claude there, so the agent works on the
+    // real project tree instead of the (guidance-only) context dir.
+    let jail_cwd = params.cwd.clone().unwrap_or_else(|| repo.clone());
+
     let runner_argv = vec![
         sandbox_runner_path,
         "--session-id".into(),
         params.session_id.clone(),
         "--context-dir".into(),
         context_dir.to_string_lossy().to_string(),
+        "--cwd".into(),
+        jail_cwd.to_string_lossy().to_string(),
         "--grpc-socket".into(),
         grpc_socket.to_string_lossy().to_string(),
         "--tool-ipc-socket".into(),
@@ -225,6 +231,7 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         env,
         loopback_allow_ports,
         ipc_socket: Some(tool_ipc_socket),
+        mounts: vec![tddy_sandbox::MountSpec::read_write(repo.clone())],
     })
     .map_err(|e| {
         let logs = tddy_sandbox::format_egress_logs(&egress_dir);

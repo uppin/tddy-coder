@@ -3,15 +3,23 @@
 //! Platform-specific spawn is provided by `tddy-sandbox-darwin` on macOS.
 //! On other platforms, [`spawn`] returns [`SandboxError::Unsupported`].
 
+pub mod builder;
 pub mod claude_spawn;
 mod context_dir;
 mod error;
 mod log;
+pub mod materialize;
 mod spec;
 pub mod tool_ipc;
 
+pub use builder::{
+    CopySpec, EnvSpec, MachPolicy, MountSpec, NetworkSpec, PolicySpec, ReadKind, ReadReason,
+    ReadSpec, ResourceLimits, SandboxBuilder, SandboxPlan, SecretSource, SecretSpec, SymlinkSpec,
+};
 pub use claude_spawn::{
-    append_sandbox_claude_mcp_args, build_sandbox_claude_allowlist, sandbox_claude_scratch_dir,
+    append_sandbox_claude_mcp_args, binary_exec_reads, build_sandbox_claude_allowlist,
+    claude_policy, claude_required_copies, claude_required_reads, default_runner_env,
+    detect_toolchain_reads, sandbox_claude_scratch_dir, system_baseline_reads,
     write_sandbox_mcp_config,
 };
 pub use context_dir::{
@@ -24,6 +32,7 @@ pub use log::{
     SANDBOX_EXEC_STDERR_LOG, SANDBOX_EXEC_STDOUT_LOG, SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG,
     SANDBOX_SPAWN_MANIFEST,
 };
+pub use materialize::{materialize_copies, materialize_secrets, materialize_symlinks};
 pub use spec::{SandboxHandle, SandboxSpec};
 pub use tool_ipc::{session_id_from_env, ToolIpcRequest, ToolIpcResponse};
 

@@ -7,10 +7,11 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use tddy_daemon::sandbox_session::{
-    build_allow_read_paths, build_sandbox_runner_env, pick_free_loopback_port,
+    build_sandbox_plan, build_sandbox_runner_env, pick_free_loopback_port, spawn_sandbox_runner,
+    SandboxRunnerSpawn,
 };
-use tddy_sandbox::{format_sandbox_diagnostics, SandboxSpec};
-use tddy_sandbox_darwin::{render_profile, spawn};
+use tddy_sandbox::{format_sandbox_diagnostics, NetworkSpec, SandboxBuilder};
+use tddy_sandbox_darwin::render_plan;
 
 fn sandbox_runner_binary() -> PathBuf {
     std::env::var_os("CARGO_BIN_EXE_tddy-sandbox-runner")
@@ -45,6 +46,7 @@ fn sandbox_runner_inspect_seatbelt_spawn() {
     let grpc_port = pick_free_loopback_port().expect("grpc port");
     let shim_port = pick_free_loopback_port().expect("shim port");
     let ready_marker = project.join("sandbox.ready");
+    let profile_path = project.join("profile.sb");
 
     let runner_argv = vec![
         runner.to_string_lossy().to_string(),
@@ -82,100 +84,75 @@ fn sandbox_runner_inspect_seatbelt_spawn() {
         &project.join("tool_ipc.sock"),
         &egress,
     );
-    let allow_read_paths = build_allow_read_paths(&runner_argv);
-    let profile_text = render_profile(&SandboxSpec {
+
+    let make_params = || SandboxRunnerSpawn {
         project_root: project.clone(),
         scratch_dir: scratch.clone(),
         egress_dir: egress.clone(),
-        allow_read_paths: allow_read_paths.clone(),
-        command: runner_argv.clone(),
+        profile_path: profile_path.clone(),
+        runner_argv: runner_argv.clone(),
         env: env.clone(),
-        profile_path: project.join("profile.sb"),
         loopback_allow_ports: vec![grpc_port, shim_port],
         ipc_socket: None,
-    })
-    .expect("render profile");
-    let profile_path = project.join("profile.sb");
-    std::fs::write(&profile_path, &profile_text).expect("write profile");
+        mounts: vec![],
+    };
 
-    eprintln!("=== allow_read_paths ({}) ===", allow_read_paths.len());
-    for p in &allow_read_paths {
-        eprintln!("  {}", p.display());
+    let plan = build_sandbox_plan(make_params()).expect("build plan");
+    eprintln!("=== plan reads ({}) ===", plan.reads.len());
+    for r in &plan.reads {
+        eprintln!("  {:?} {}", r.kind, r.host.display());
     }
-
+    let profile_text = render_plan(&plan).expect("render plan");
+    std::fs::write(&profile_path, &profile_text).expect("write profile");
     eprintln!("profile bytes={}", profile_text.len());
 
-    let probes: [(&str, Vec<String>); 4] = [
+    let probes: [(&str, Vec<String>); 2] = [
         ("echo", vec!["/bin/echo".into(), "hi".into()]),
         (
-            "tools-help-direct",
-            vec![tools.to_string_lossy().to_string(), "--help".into()],
+            "runner-help",
+            vec![runner.to_string_lossy().to_string(), "--help".into()],
         ),
-        ("tools-help-via-env-i", {
-            let mut v = vec!["/usr/bin/env".into(), "-i".into()];
-            for (k, val) in &env {
-                v.push(format!("{k}={val}"));
-            }
-            v.push(tools.to_string_lossy().to_string());
-            v.push("--help".into());
-            v
-        }),
-        ("runner-via-env-i", {
-            let mut v = vec!["/usr/bin/env".into(), "-i".into()];
-            for (k, val) in &env {
-                v.push(format!("{k}={val}"));
-            }
-            v.extend(runner_argv.clone());
-            v
-        }),
     ];
 
     for (label, argv) in probes {
-        let status = Command::new("/usr/bin/sandbox-exec")
+        let out = Command::new("/usr/bin/sandbox-exec")
             .arg("-f")
             .arg(&profile_path)
             .args(&argv)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .status()
+            .output()
             .unwrap_or_else(|e| panic!("{label} sandbox-exec failed: {e}"));
         eprintln!(
             "=== probe {label} exit={:?} success={} ===",
-            status.code(),
-            status.success()
+            out.status.code(),
+            out.status.success()
         );
-        if let Ok(out) = Command::new("/usr/bin/sandbox-exec")
-            .arg("-f")
-            .arg(&profile_path)
-            .args(&argv)
-            .output()
-        {
-            if !out.stdout.is_empty() {
-                let s = String::from_utf8_lossy(&out.stdout);
-                eprintln!("  stdout: {}", &s[..200.min(s.len())]);
-            }
-            if !out.stderr.is_empty() {
-                let s = String::from_utf8_lossy(&out.stderr);
-                eprintln!("  stderr: {}", &s[..500.min(s.len())]);
-            }
+        if !out.stderr.is_empty() {
+            let s = String::from_utf8_lossy(&out.stderr);
+            eprintln!("  stderr: {}", &s[..500.min(s.len())]);
         }
     }
 
-    // Minimal profile control: only /usr/bin allow-list (known valid from unit test)
-    let minimal_profile = render_profile(&SandboxSpec {
-        project_root: project.clone(),
-        scratch_dir: project.join(".work"),
-        egress_dir: egress.clone(),
-        allow_read_paths: vec![PathBuf::from("/usr/bin")],
-        command: vec!["/bin/echo".into(), "hi".into()],
-        env: Default::default(),
-        profile_path: project.join("minimal.sb"),
-        loopback_allow_ports: vec![grpc_port, shim_port],
-        ipc_socket: None,
-    })
-    .expect("minimal profile");
+    // Minimal control profile: only the OS baseline reads + policy (known valid).
+    let minimal_plan = SandboxBuilder::new(
+        project.clone(),
+        scratch.clone(),
+        egress.clone(),
+        vec!["/bin/echo".into(), "hi".into()],
+    )
+    .profile_path(project.join("minimal.sb"))
+    .reads(tddy_sandbox::system_baseline_reads())
+    .policy(tddy_sandbox::claude_policy())
+    .network(NetworkSpec::default())
+    .build()
+    .expect("minimal plan");
     let minimal_path = project.join("minimal.sb");
-    std::fs::write(&minimal_path, &minimal_profile).unwrap();
+    std::fs::write(
+        &minimal_path,
+        render_plan(&minimal_plan).expect("minimal profile"),
+    )
+    .unwrap();
     let minimal_echo = Command::new("/usr/bin/sandbox-exec")
         .arg("-f")
         .arg(&minimal_path)
@@ -189,32 +166,8 @@ fn sandbox_runner_inspect_seatbelt_spawn() {
         minimal_echo.code()
     );
 
-    let full_echo = Command::new("/usr/bin/sandbox-exec")
-        .arg("-f")
-        .arg(&profile_path)
-        .arg("/bin/echo")
-        .arg("hi")
-        .status()
-        .unwrap();
-    eprintln!(
-        "=== full profile echo success={} exit={:?} ===",
-        full_echo.success(),
-        full_echo.code()
-    );
-
-    eprintln!("=== spawn via tddy_sandbox_darwin::spawn ===");
-    let mut handle = spawn(SandboxSpec {
-        project_root: project.clone(),
-        scratch_dir: scratch,
-        egress_dir: egress.clone(),
-        allow_read_paths,
-        command: runner_argv,
-        env,
-        profile_path: profile_path.clone(),
-        loopback_allow_ports: vec![grpc_port, shim_port],
-        ipc_socket: None,
-    })
-    .expect("spawn");
+    eprintln!("=== spawn via spawn_sandbox_runner ===");
+    let mut handle = spawn_sandbox_runner(make_params()).expect("spawn");
 
     std::thread::sleep(Duration::from_secs(2));
     let exit = handle.child_mut().try_wait().ok().flatten();

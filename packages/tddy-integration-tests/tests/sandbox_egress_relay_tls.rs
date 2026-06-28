@@ -184,6 +184,7 @@ async fn routes_https_egress_from_jail_through_the_host_relay_to_a_tls_server() 
         let args = SandboxRunnerArgs {
             session_id: SESSION_ID.to_string(),
             context_dir,
+            cwd: None,
             grpc_socket: uds_path.clone(),
             tool_ipc_socket: tmp.path().join("tool_ipc.sock"),
             tddy_tools_path: tddy_tools_path(),

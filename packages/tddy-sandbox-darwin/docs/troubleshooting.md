@@ -21,7 +21,7 @@ Read crash reports under `~/Library/Logs/DiagnosticReports/` and runner boot log
 | `openpty: Operation not permitted` | PTY devices need read | Allow `/dev/ptmx`, `/dev/ttys*` reads |
 | `spawn claude in pty: Operation not permitted` | Default deny on `process-fork` | `(allow process-fork)` |
 | `tool ipc bind: path must be shorter than SUN_LEN` | Socket path > 104 bytes | `SandboxSpec::short_ipc_socket_path` |
-| `claude` SIGTRAP / `EPERM` at startup (`Trace/BPT trap: 5`) | V8/Node `claude` reads OS caches, tz data, dyld state, user config outside the explicit allow-list | `(allow file-read*)` in `sandbox-claude.sb.tmpl` (the one rule that lets `claude --version` run; `dynamic-code-generation` alone is insufficient). Trades away read confinement — see Outbound egress below |
+| `claude` SIGTRAP at startup (`Trace/BPT trap: 5`) | A read the V8/Node `claude` binary needs is missing from the explicit allow-list (the strict profile has **no** `(allow file-read*)` wildcard) | Add the minimal enclosing dir to `claude_required_reads`/`system_baseline_reads` in `tddy-sandbox/src/claude_spawn.rs`. Known set includes `/usr/share/icu` (ICU locale data) and `/usr/share/zoneinfo`. Discover new ones by bisecting the rendered profile against `claude --version` |
 | `Failed to connect to api.anthropic.com: ECONNREFUSED` | Agent dials out directly; `(deny network*)` refuses it | Set `HTTPS_PROXY`/`HTTP_PROXY` to the in-jail egress shim so the agent routes through the CONNECT tunnel (see Outbound egress below) |
 
 ## Outbound egress (HTTPS_PROXY CONNECT tunnel)
@@ -36,8 +36,9 @@ pumps bytes both ways. TLS stays end-to-end — the host never sees plaintext or
 - This is **not** the rejected "host HTTPS proxy" design (that had the jail dial *out* to a host
   proxy, breaking `(deny network*)`). Here the proxy is in-jail on loopback; the host is a TCP relay.
 - The legacy unary `EgressRequest`/`EgressResponse` path is retained only for the `GET /probe` check.
-- **Read confinement is intentionally relaxed** (`(allow file-read*)`, required for the Node agent);
-  write confinement remains the security boundary. Narrowing reads is future tech debt.
+- **Read confinement is enforced via an explicit allow-list** (the `SandboxBuilder` plan; no
+  `(allow file-read*)` wildcard). The Claude read recipe lives in `tddy-sandbox/src/claude_spawn.rs`
+  (`claude_required_reads`); add the minimal enclosing dir there when a new read is needed.
 - Acceptance: `sandbox_runner_tunnels_https_proxy_connect_via_session_channel`. The daemon
   `StartSession` egress path reuses the same helpers but lacks a daemon-specific acceptance test yet.
 
@@ -49,6 +50,7 @@ log show --predicate 'sender == "Sandbox"' --last 5m
 
 ## See also
 
-- Profile template: `profiles/sandbox-claude.sb.tmpl`
+- Profile renderer: `src/profile.rs` (`render_plan` — explicit allow-list, no template, no `(allow file-read*)` wildcard)
+- Claude read recipe: `../tddy-sandbox/src/claude_spawn.rs` (`claude_required_reads` / `system_baseline_reads`)
 - Agent skill: [.agents/skills/darwin-sandbox/SKILL.md](../../../../.agents/skills/darwin-sandbox/SKILL.md)
 - Daemon: [connection-service.md](../../tddy-daemon/docs/connection-service.md#sandboxed-claude-code-cli-sessions)

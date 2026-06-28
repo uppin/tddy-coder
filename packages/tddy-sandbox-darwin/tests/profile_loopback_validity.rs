@@ -2,11 +2,11 @@
 
 #![cfg(target_os = "macos")]
 
-use std::path::PathBuf;
+use std::collections::BTreeMap;
 use std::process::Command;
 
-use tddy_sandbox::SandboxSpec;
-use tddy_sandbox_darwin::render_profile;
+use tddy_sandbox::{NetworkSpec, SandboxBuilder};
+use tddy_sandbox_darwin::render_plan;
 
 /// **loopback_network_profile_is_accepted_by_sandbox_exec**: pre-declared loopback ports
 /// produce a profile under which a command actually *runs to completion*.
@@ -19,19 +19,31 @@ use tddy_sandbox_darwin::render_profile;
 #[test]
 fn loopback_network_profile_is_accepted_by_sandbox_exec() {
     // Given
-    let spec = SandboxSpec {
-        project_root: PathBuf::from("/tmp/tddy-sandbox-loopback-profile"),
-        scratch_dir: PathBuf::from("/tmp/tddy-sandbox-loopback-profile/.work"),
-        egress_dir: PathBuf::from("/tmp/tddy-sandbox-loopback-profile/out"),
-        allow_read_paths: vec![PathBuf::from("/usr/bin")],
-        command: vec!["/bin/echo".into(), "hi".into()],
-        env: Default::default(),
-        profile_path: PathBuf::from("/tmp/tddy-sandbox-loopback-profile/profile.sb"),
+    let project_root = std::path::PathBuf::from("/tmp/tddy-sandbox-loopback-profile");
+    let scratch = project_root.join(".work");
+    let egress = project_root.join("out");
+    let profile_path = project_root.join("profile.sb");
+    let mut env = BTreeMap::new();
+    env.insert("PATH".into(), "/usr/bin:/bin".into());
+
+    let plan = SandboxBuilder::new(
+        &project_root,
+        &scratch,
+        &egress,
+        vec!["/bin/echo".into(), "hi".into()],
+    )
+    .profile_path(&profile_path)
+    .reads(tddy_sandbox::system_baseline_reads())
+    .policy(tddy_sandbox::claude_policy())
+    .network(NetworkSpec {
         loopback_allow_ports: vec![55900, 55901],
-        ipc_socket: None,
-    };
-    let profile = render_profile(&spec).expect("render profile");
-    let profile_path = spec.profile_path.clone();
+        allow_oauth_inbound: false,
+    })
+    .env_map(env)
+    .build()
+    .expect("plan must build");
+
+    let profile = render_plan(&plan).expect("render profile");
     std::fs::create_dir_all(profile_path.parent().expect("profile parent")).expect("mkdir");
     std::fs::write(&profile_path, profile).expect("write profile");
 

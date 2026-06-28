@@ -21,7 +21,7 @@ use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ListEligibleDaemonsRequest,
     ListSessionsRequest, StartSessionRequest,
 };
-use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
+use tddy_testing_commons::a_session_metadata;
 
 const REMOTE_ACCEPTANCE_ROOM: &str = "acceptance-common-room";
 const REMOTE_PEER_INSTANCE_ID: &str = "acceptance-daemon-b";

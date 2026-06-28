@@ -6,11 +6,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use tddy_daemon::sandbox_session::{
-    build_allow_read_paths, pick_free_loopback_port, spawn_sandbox_runner, SandboxRunnerSpawn,
+    pick_free_loopback_port, spawn_sandbox_runner, SandboxRunnerSpawn,
 };
 use tddy_sandbox::format_sandbox_diagnostics;
-use tddy_sandbox::SandboxSpec;
-use tddy_sandbox_darwin::render_profile;
 
 fn sandbox_runner_binary() -> PathBuf {
     std::env::var_os("CARGO_BIN_EXE_tddy-sandbox-runner")
@@ -25,14 +23,6 @@ fn tools_binary() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/tddy-tools")
-        })
-}
-
-fn demo_tui_binary() -> PathBuf {
-    std::env::var_os("CARGO_BIN_EXE_tddy-demo-tui")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/tddy-demo-tui")
         })
 }
 
@@ -59,10 +49,8 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
 
     let runner = sandbox_runner_binary();
     let tools = tools_binary();
-    let demo = demo_tui_binary();
     assert!(runner.exists(), "build tddy-sandbox-runner first");
     assert!(tools.exists(), "build tddy-tools first");
-    assert!(demo.exists(), "build tddy-demo-tui first");
 
     let grpc_port = pick_free_loopback_port().expect("grpc port");
     let shim_port = pick_free_loopback_port().expect("shim port");
@@ -110,51 +98,7 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
     );
 
     let loopback_allow_ports = vec![grpc_port, shim_port];
-    let allow_read_paths = build_allow_read_paths(&runner_argv);
-    let profile_text = render_profile(&SandboxSpec {
-        project_root: project.clone(),
-        scratch_dir: scratch.clone(),
-        egress_dir: egress.clone(),
-        allow_read_paths: allow_read_paths.clone(),
-        command: runner_argv.clone(),
-        env: env.clone(),
-        profile_path: project.join("profile.sb"),
-        loopback_allow_ports: loopback_allow_ports.clone(),
-        ipc_socket: None,
-    })
-    .expect("render profile");
     let profile_path = project.join("profile.sb");
-    std::fs::write(&profile_path, &profile_text).expect("write profile");
-    let echo_check = std::process::Command::new("/usr/bin/sandbox-exec")
-        .arg("-f")
-        .arg(&profile_path)
-        .arg("/bin/echo")
-        .arg("hi")
-        .status()
-        .expect("sandbox-exec echo");
-    assert!(
-        echo_check.code() != Some(6),
-        "profile must be valid before spawn\nallow_read_paths={allow_read_paths:#?}\n--- profile ---\n{profile_text}"
-    );
-    for (label, args) in [
-        (
-            "tools-help",
-            vec![tools.to_string_lossy().to_string(), "--help".into()],
-        ),
-        (
-            "runner-help",
-            vec![runner.to_string_lossy().to_string(), "--help".into()],
-        ),
-    ] {
-        let mut cmd = std::process::Command::new("/usr/bin/sandbox-exec");
-        cmd.arg("-f").arg(&profile_path).arg(&args[0]);
-        cmd.args(&args[1..]);
-        let status = cmd.status().expect("sandbox-exec subcommand");
-        assert!(
-            status.code() != Some(6),
-            "{label} must not abort inside sandbox (status={status:?})"
-        );
-    }
 
     // When
     let mut handle = spawn_sandbox_runner(SandboxRunnerSpawn {
@@ -166,6 +110,7 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
         env,
         loopback_allow_ports,
         ipc_socket: None,
+        mounts: vec![],
     })
     .expect("spawn sandbox-runner");
 

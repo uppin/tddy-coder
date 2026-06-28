@@ -11,7 +11,8 @@ pub mod runner;
 
 pub use host_relay::{relay_egress_request, run_host_relay, HostRelayConfig, HostToolHandler};
 pub use runner::{
-    connect_sandbox_client, connect_sandbox_client_uds, run_sandbox_runner, SandboxRunnerArgs,
+    connect_sandbox_client, connect_sandbox_client_uds, resolve_secret_envs, run_sandbox_runner,
+    SandboxRunnerArgs,
 };
 
 /// Re-exported so host-relay callers can implement [`HostToolHandler`] without depending on

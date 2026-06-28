@@ -745,7 +745,7 @@ async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
         .find(|l| l.trim_start().starts_with("ARGV:"))
         .unwrap_or("");
 
-    let parts: Vec<&str> = argv_line.trim().split_whitespace().collect();
+    let parts: Vec<&str> = argv_line.split_whitespace().collect();
     assert!(
         !parts.is_empty(),
         "ARGV line must not be empty; full output: {:?}",
