@@ -110,6 +110,7 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
         env,
         loopback_allow_ports,
         ipc_socket: None,
+        mounts: vec![],
     })
     .expect("spawn sandbox-runner");
 

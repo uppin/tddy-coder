@@ -898,6 +898,7 @@ impl ConnectionServiceImpl {
                 env,
                 loopback_allow_ports,
                 ipc_socket: Some(tool_ipc_socket.clone()),
+                mounts: vec![],
             },
         )
         .map_err(|e| {
@@ -1229,6 +1230,7 @@ impl ConnectionServiceImpl {
                 env,
                 loopback_allow_ports,
                 ipc_socket: Some(tool_ipc_socket.clone()),
+                mounts: vec![],
             },
         )
         .map_err(|e| {

@@ -62,6 +62,7 @@ fn runner_args(tmp: &Path, stub_claude: &Path) -> (SandboxRunnerArgs, PathBuf) {
     let args = SandboxRunnerArgs {
         session_id: SESSION_ID.to_string(),
         context_dir,
+        cwd: None,
         claude_binary: stub_claude.to_string_lossy().to_string(),
         model: TEST_MODEL.to_string(),
         grpc_socket: tmp.join("sandbox.grpc.sock"),

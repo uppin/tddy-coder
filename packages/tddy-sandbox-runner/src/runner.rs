@@ -164,6 +164,10 @@ pub struct SandboxRunnerArgs {
     pub session_id: String,
     #[arg(long)]
     pub context_dir: PathBuf,
+    /// Working directory for the Claude process. Defaults to `context_dir`; set to a mounted
+    /// project dir so the agent starts inside the repo.
+    #[arg(long)]
+    pub cwd: Option<PathBuf>,
     #[arg(long)]
     pub grpc_socket: PathBuf,
     #[arg(long)]
@@ -562,7 +566,7 @@ struct PtyState {
 
 fn run_claude_pty_thread(
     argv: Vec<String>,
-    context_dir: PathBuf,
+    cwd: PathBuf,
     egress_shim: String,
     relay: Arc<SandboxSessionRelay>,
     stdin_rx: std::sync::mpsc::Receiver<Bytes>,
@@ -572,7 +576,7 @@ fn run_claude_pty_thread(
         &format!(
             "pty: openpty claude={} cwd={} argv={argv:?}",
             argv.first().map(String::as_str).unwrap_or("<missing>"),
-            context_dir.display(),
+            cwd.display(),
         ),
     );
     let pty_system = native_pty_system();
@@ -588,7 +592,7 @@ fn run_claude_pty_thread(
     for arg in &argv[1..] {
         cmd.arg(arg);
     }
-    cmd.cwd(&context_dir);
+    cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("TDDY_EGRESS_SHIM", &egress_shim);
     // Route the agent's outbound HTTPS through the in-jail CONNECT proxy (the egress shim).
@@ -689,6 +693,9 @@ fn run_claude_pty_thread(
 
 struct SpawnClaudePtyParams<'a> {
     context_dir: &'a Path,
+    /// Working directory for the Claude process (defaults to `context_dir` when no project dir is
+    /// mounted into the jail).
+    cwd: &'a Path,
     claude_binary: &'a str,
     model: &'a str,
     permission_mode: &'a str,
@@ -701,6 +708,7 @@ struct SpawnClaudePtyParams<'a> {
 fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
     let SpawnClaudePtyParams {
         context_dir,
+        cwd,
         claude_binary,
         model,
         permission_mode,
@@ -733,14 +741,12 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
         ),
     );
 
-    let context_dir = context_dir.to_path_buf();
+    let cwd = cwd.to_path_buf();
     let relay_thread = Arc::clone(&relay);
     let egress_shim = egress_shim.to_string();
 
     std::thread::spawn(move || {
-        if let Err(e) =
-            run_claude_pty_thread(argv, context_dir, egress_shim, relay_thread, stdin_rx)
-        {
+        if let Err(e) = run_claude_pty_thread(argv, cwd, egress_shim, relay_thread, stdin_rx) {
             boot_log_error("spawn_claude_pty", format!("{e:#}"));
             write_failure_marker(&format!("spawn_claude_pty failed: {e:#}"));
         }
@@ -1068,8 +1074,10 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         "INFO",
         &format!("boot: spawn_claude_pty binary={}", args.claude_binary),
     );
+    let cwd = args.cwd.clone().unwrap_or_else(|| args.context_dir.clone());
     let pty = spawn_claude_pty(SpawnClaudePtyParams {
         context_dir: &args.context_dir,
+        cwd: &cwd,
         claude_binary: &args.claude_binary,
         model: &args.model,
         permission_mode: &args.permission_mode,

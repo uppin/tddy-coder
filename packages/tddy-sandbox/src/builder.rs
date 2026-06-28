@@ -120,6 +120,37 @@ pub struct SymlinkSpec {
     pub target: PathBuf,
 }
 
+/// A host directory made available inside the jail (e.g. the project repo). On macOS the path is
+/// granted read — and write when `writable` — at its real location (Seatbelt has no path remap, so
+/// `jail` is ignored there). On Linux it is bind-mounted read-only (or read-write when `writable`),
+/// optionally remapped to `jail`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MountSpec {
+    pub host: PathBuf,
+    pub jail: Option<PathBuf>,
+    pub writable: bool,
+}
+
+impl MountSpec {
+    /// A read-only mount of `host` at its real path.
+    pub fn read_only(host: impl Into<PathBuf>) -> Self {
+        Self {
+            host: host.into(),
+            jail: None,
+            writable: false,
+        }
+    }
+
+    /// A read-write mount of `host` at its real path.
+    pub fn read_write(host: impl Into<PathBuf>) -> Self {
+        Self {
+            host: host.into(),
+            jail: None,
+            writable: true,
+        }
+    }
+}
+
 /// A secret delivered out-of-band: written to a `0600` file under scratch and set on the inner
 /// child only — never placed in the broad env list or `sandbox-exec` argv.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,6 +230,7 @@ pub struct ResourceLimits {
 pub struct SandboxPlan {
     pub spec: SandboxSpec,
     pub reads: Vec<ReadSpec>,
+    pub mounts: Vec<MountSpec>,
     pub copies: Vec<CopySpec>,
     pub symlinks: Vec<SymlinkSpec>,
     pub env: EnvSpec,
@@ -217,6 +249,7 @@ pub struct SandboxBuilder {
     profile_path: Option<PathBuf>,
     ipc_socket: Option<PathBuf>,
     reads: Vec<ReadSpec>,
+    mounts: Vec<MountSpec>,
     copies: Vec<CopySpec>,
     symlinks: Vec<SymlinkSpec>,
     env: BTreeMap<String, String>,
@@ -242,6 +275,7 @@ impl SandboxBuilder {
             profile_path: None,
             ipc_socket: None,
             reads: vec![],
+            mounts: vec![],
             copies: vec![],
             symlinks: vec![],
             env: BTreeMap::new(),
@@ -269,6 +303,16 @@ impl SandboxBuilder {
 
     pub fn reads(mut self, r: Vec<ReadSpec>) -> Self {
         self.reads.extend(r);
+        self
+    }
+
+    pub fn mount(mut self, m: MountSpec) -> Self {
+        self.mounts.push(m);
+        self
+    }
+
+    pub fn mounts(mut self, m: Vec<MountSpec>) -> Self {
+        self.mounts.extend(m);
         self
     }
 
@@ -328,6 +372,7 @@ impl SandboxBuilder {
             profile_path,
             ipc_socket,
             reads,
+            mounts,
             copies,
             symlinks,
             env,
@@ -384,6 +429,17 @@ impl SandboxBuilder {
             }
         }
 
+        // Mounted host directories are granted at absolute paths (Seatbelt and bind mounts both
+        // require them).
+        for m in &mounts {
+            if !m.host.is_absolute() {
+                return Err(SandboxError::InvalidSpec(format!(
+                    "mount host {} must be absolute",
+                    m.host.display()
+                )));
+            }
+        }
+
         // Each secret is delivered via a `0600` scratch file referenced by `TDDY_SECRET_<NAME>`; the
         // value itself never enters the env var map (only the file path does).
         let mut vars = env;
@@ -419,6 +475,7 @@ impl SandboxBuilder {
         Ok(SandboxPlan {
             spec,
             reads,
+            mounts,
             copies,
             symlinks,
             env: EnvSpec { vars, secrets },
@@ -451,6 +508,35 @@ mod tests {
             vec!["/bin/echo".into(), "hi".into()],
         )
         .profile_path("/tmp/tddy-builder-test/profile.sb")
+    }
+
+    #[test]
+    fn carries_a_declared_writable_mount_into_the_plan() {
+        // Given
+        let builder = a_builder().mount(MountSpec::read_write("/Users/me/proj"));
+
+        // When
+        let plan = builder.build().expect("plan must build");
+
+        // Then
+        assert_eq!(plan.mounts, vec![MountSpec::read_write("/Users/me/proj")]);
+    }
+
+    #[test]
+    fn rejects_a_mount_with_a_relative_host_path() {
+        // Given
+        let builder = a_builder().mount(MountSpec::read_only("relative/proj"));
+
+        // When
+        let err = builder
+            .build()
+            .expect_err("relative mount host must be rejected");
+
+        // Then
+        assert!(
+            err.to_string().contains("must be absolute"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

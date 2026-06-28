@@ -55,6 +55,10 @@ struct Args {
     #[arg(long)]
     sandbox_runner_path: Option<String>,
 
+    /// Working directory for Claude inside the jail (default: the mounted repo root).
+    #[arg(long)]
+    cwd: Option<PathBuf>,
+
     /// Enable debug logging for tddy sandbox components (HTTP/gRPC frame traces stay quiet).
     #[arg(short, long)]
     verbose: bool,
@@ -111,6 +115,7 @@ async fn main() -> Result<()> {
             tddy_tools_path: args.tddy_tools_path,
             sandbox_runner_path: args.sandbox_runner_path,
             session_dir: session_dir.clone(),
+            cwd: args.cwd,
         }) => res?,
         _ = tokio::signal::ctrl_c() => {
             eprintln!("interrupted");

@@ -22,7 +22,8 @@ use tddy_sandbox::{SandboxError, SandboxHandle, SandboxPlan, SandboxSpec};
 /// is unit-testable without mounting — the actual `mount(2)` calls happen in `enter_rootless_jail`.
 pub fn plan_to_bind_mounts(plan: &SandboxPlan) -> Vec<(PathBuf, PathBuf, MsFlags)> {
     use tddy_sandbox::ReadKind;
-    plan.reads
+    let mut mounts: Vec<(PathBuf, PathBuf, MsFlags)> = plan
+        .reads
         .iter()
         .filter(|r| !matches!(r.kind, ReadKind::Regex(_)))
         .map(|r| {
@@ -33,7 +34,17 @@ pub fn plan_to_bind_mounts(plan: &SandboxPlan) -> Vec<(PathBuf, PathBuf, MsFlags
             }
             (r.host.clone(), target, flags)
         })
-        .collect()
+        .collect();
+    // Mounted directories (e.g. the project repo): read-write when requested, exec allowed.
+    for m in &plan.mounts {
+        let target = m.jail.clone().unwrap_or_else(|| m.host.clone());
+        let mut flags = MsFlags::MS_BIND;
+        if !m.writable {
+            flags |= MsFlags::MS_RDONLY;
+        }
+        mounts.push((m.host.clone(), target, flags));
+    }
+    mounts
 }
 
 /// Map a plan's [`tddy_sandbox::ResourceLimits`] onto the cgroup v2 [`CgroupLimits`] applied to the
@@ -477,6 +488,7 @@ mod tests {
         SandboxPlan {
             spec,
             reads,
+            mounts: vec![],
             copies: vec![],
             symlinks: vec![],
             env: EnvSpec::default(),
@@ -484,6 +496,28 @@ mod tests {
             network: NetworkSpec::default(),
             limits,
         }
+    }
+
+    #[test]
+    fn maps_a_writable_mount_to_a_read_write_bind_mount() {
+        // Given — a writable mount
+        let mut plan = a_plan(vec![], ResourceLimits::default());
+        plan.mounts = vec![tddy_sandbox::MountSpec::read_write("/work/proj")];
+
+        // When
+        let mounts = plan_to_bind_mounts(&plan);
+
+        // Then — bound read-write (no MS_RDONLY) at its own path
+        let (_, target, flags) = mounts
+            .iter()
+            .find(|(src, _, _)| src == &PathBuf::from("/work/proj"))
+            .expect("mount must be present");
+        assert_eq!(target, &PathBuf::from("/work/proj"));
+        assert!(flags.contains(MsFlags::MS_BIND));
+        assert!(
+            !flags.contains(MsFlags::MS_RDONLY),
+            "writable mount must not be read-only"
+        );
     }
 
     #[test]

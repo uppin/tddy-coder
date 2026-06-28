@@ -94,8 +94,28 @@
 **Modified files:**
 - `src/spawn.rs` — build the plan via `SandboxBuilder` + Claude recipe; declare the OAuth secret.
 
+## Addendum — interactive hardening + repo mount (post-strict e2e)
+
+Surfaced by running the real interactive session under the strict jail:
+
+- **`/dev/*` device nodes need read grants** — shells/tools open `/dev/null` (and `/dev/zero`,
+  `/dev/random`, `/dev/urandom`, `/dev/tty*`, `/dev/fd/*`, std{in,out,err}) `O_RDWR`; the strict
+  read list only had the write/ioctl allows, so shell init failed. Added to `system_baseline_reads`
+  + regression test `a_strict_profile_lets_a_shell_read_dev_null`.
+- **Claude runtime tmpdir** — Claude keeps `/tmp/claude-$UID` regardless of `TMPDIR`, which is
+  outside the write allow-list. `default_runner_env` now sets `CLAUDE_CODE_TMPDIR`/`CLAUDE_TMPDIR`
+  to the scratch tmp (verified the override relocates the dir).
+- **Writable repo mount + `--cwd`** (new capability): `MountSpec { host, jail, writable }` on the
+  builder makes a host dir available in the jail — macOS grants read/write(+exec) at the real path;
+  Linux bind-mounts it (rw when writable). The runner takes `--cwd` for Claude's start dir. The app
+  mounts `--repo` read-write and starts Claude there (default cwd = repo), with a `--cwd` override.
+  Daemon remote-codebase sessions pass no mounts (unchanged). Tests: builder mount/validation,
+  render read+write rules, cgroups rw bind-mount mapping.
+
 ## Follow-ups
 
 - Full minimal RO-root `pivot_root` filesystem confinement on Linux (this changeset lands RO
   bind-mounts of the declared reads only).
 - Config-driven cgroup limits surface.
+- Tool routing: the sandboxed Claude can use native tools (which see the in-jail tree) vs the
+  `tddy-tools` MCP tools (host worktree); revisit the recipe's allow/deny so the intent is explicit.

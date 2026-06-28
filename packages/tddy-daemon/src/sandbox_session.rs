@@ -11,7 +11,8 @@ use tddy_rpc::Status;
 use tokio::sync::{broadcast, mpsc, Mutex};
 
 use tddy_sandbox::{
-    NetworkSpec, SandboxBuilder, SandboxContextDir, SandboxError, SandboxPlan, SecretSource,
+    MountSpec, NetworkSpec, SandboxBuilder, SandboxContextDir, SandboxError, SandboxPlan,
+    SecretSource,
 };
 use tddy_service::proto::connection::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
@@ -482,6 +483,9 @@ pub struct SandboxRunnerSpawn {
     pub env: std::collections::BTreeMap<String, String>,
     pub loopback_allow_ports: Vec<u16>,
     pub ipc_socket: Option<PathBuf>,
+    /// Host directories made available inside the jail (e.g. the project repo). Empty for the
+    /// daemon's remote-codebase sessions.
+    pub mounts: Vec<MountSpec>,
 }
 
 /// Assemble the explicit [`SandboxPlan`] for a runner spawn: the Claude read recipe (plus the
@@ -526,6 +530,7 @@ pub fn build_sandbox_plan(params: SandboxRunnerSpawn) -> Result<SandboxPlan, San
     .profile_path(params.profile_path)
     .ipc_socket(params.ipc_socket)
     .reads(reads)
+    .mounts(params.mounts)
     .copies(copies)
     .policy(tddy_sandbox::claude_policy())
     .network(NetworkSpec {

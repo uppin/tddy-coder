@@ -94,6 +94,7 @@ fn sandbox_runner_inspect_seatbelt_spawn() {
         env: env.clone(),
         loopback_allow_ports: vec![grpc_port, shim_port],
         ipc_socket: None,
+        mounts: vec![],
     };
 
     let plan = build_sandbox_plan(make_params()).expect("build plan");

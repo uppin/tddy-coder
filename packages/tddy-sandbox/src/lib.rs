@@ -13,8 +13,8 @@ mod spec;
 pub mod tool_ipc;
 
 pub use builder::{
-    CopySpec, EnvSpec, MachPolicy, NetworkSpec, PolicySpec, ReadKind, ReadReason, ReadSpec,
-    ResourceLimits, SandboxBuilder, SandboxPlan, SecretSource, SecretSpec, SymlinkSpec,
+    CopySpec, EnvSpec, MachPolicy, MountSpec, NetworkSpec, PolicySpec, ReadKind, ReadReason,
+    ReadSpec, ResourceLimits, SandboxBuilder, SandboxPlan, SecretSource, SecretSpec, SymlinkSpec,
 };
 pub use claude_spawn::{
     append_sandbox_claude_mcp_args, binary_exec_reads, build_sandbox_claude_allowlist,

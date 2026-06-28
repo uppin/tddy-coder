@@ -32,6 +32,14 @@ pub fn render_plan(plan: &SandboxPlan) -> Result<String, SandboxError> {
     for p in &writable_tree {
         out.push_str(&format!("  (subpath \"{p}\")\n"));
     }
+    for m in &plan.mounts {
+        if m.writable {
+            out.push_str(&format!(
+                "  (subpath \"{}\")\n",
+                canonical_rule_path(&m.host)
+            ));
+        }
+    }
     out.push_str("  (subpath \"/var/folders\"))\n\n");
 
     out.push_str(
@@ -54,6 +62,12 @@ pub fn render_plan(plan: &SandboxPlan) -> Result<String, SandboxError> {
     for sec in &plan.env.secrets {
         let path = spec.scratch_dir.join(".secrets").join(&sec.env_name);
         out.push_str(&format!("  (literal \"{}\")\n", canonical_rule_path(&path)));
+    }
+    for m in &plan.mounts {
+        out.push_str(&format!(
+            "  (subpath \"{}\")\n",
+            canonical_rule_path(&m.host)
+        ));
     }
     out.push_str(")\n\n");
 
@@ -95,6 +109,13 @@ pub fn render_plan(plan: &SandboxPlan) -> Result<String, SandboxError> {
                 canonical_rule_path(&r.host)
             ));
         }
+    }
+    // Mounted working dirs may hold scripts/binaries the agent runs.
+    for m in &plan.mounts {
+        out.push_str(&format!(
+            "  (subpath \"{}\")\n",
+            canonical_rule_path(&m.host)
+        ));
     }
     out.push_str(")\n");
 
@@ -214,6 +235,7 @@ mod tests {
         SandboxPlan {
             spec,
             reads,
+            mounts: vec![],
             copies: vec![],
             symlinks: vec![],
             env: EnvSpec::default(),
@@ -221,6 +243,51 @@ mod tests {
             network,
             limits: ResourceLimits::default(),
         }
+    }
+
+    #[test]
+    fn rendered_profile_grants_write_and_read_for_a_writable_mount() {
+        // Given
+        let mut plan = a_plan(
+            vec![ReadSpec::literal("/", ReadReason::DyldRoot)],
+            NetworkSpec::default(),
+        );
+        plan.mounts = vec![tddy_sandbox::MountSpec::read_write("/Users/me/proj")];
+
+        // When
+        let profile = render_plan(&plan).expect("render must succeed");
+
+        // Then — the mount is writable (appears before the file-read* block) and readable
+        let write_section = profile.split("(allow file-read*").next().unwrap();
+        assert!(
+            write_section.contains("(subpath \"/Users/me/proj\")"),
+            "writable mount must be in the write block:\n{profile}"
+        );
+        assert!(profile.contains("(subpath \"/Users/me/proj\")"));
+    }
+
+    #[test]
+    fn rendered_profile_does_not_grant_write_for_a_read_only_mount() {
+        // Given
+        let mut plan = a_plan(
+            vec![ReadSpec::literal("/", ReadReason::DyldRoot)],
+            NetworkSpec::default(),
+        );
+        plan.mounts = vec![tddy_sandbox::MountSpec::read_only("/Users/me/ro-proj")];
+
+        // When
+        let profile = render_plan(&plan).expect("render must succeed");
+
+        // Then — readable but not in the write block
+        let write_section = profile.split("(allow file-read*").next().unwrap();
+        assert!(
+            !write_section.contains("/Users/me/ro-proj"),
+            "read-only mount must not be writable:\n{profile}"
+        );
+        assert!(
+            profile.contains("(subpath \"/Users/me/ro-proj\")"),
+            "read-only mount must still be readable:\n{profile}"
+        );
     }
 
     #[test]
