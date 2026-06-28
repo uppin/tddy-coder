@@ -104,9 +104,13 @@ When `StartSessionRequest.session_type == "claude-cli"` **and** `sandbox == true
 
 | Host → sandbox | Sandbox → host |
 |----------------|----------------|
-| `SubscribeTerminal`, `HostPoll`, `SandboxInput`, `ExecuteToolResponse`, `EgressResponse` | `SessionTerminalOutput`, `ExecuteToolRequest`, `EgressRequest` |
+| `SubscribeTerminal`, `HostPoll`, `SandboxInput`, `ExecuteToolResponse`, `EgressResponse`, `TunnelOpenAck`, `TunnelData`, `TunnelClose` | `SessionTerminalOutput`, `ExecuteToolRequest`, `EgressRequest`, `TunnelOpen`, `TunnelData`, `TunnelClose` |
 
-Outbound network from the jail is **`(deny network*)`**. The sandbox never dials the daemon; the host performs outbound HTTP when it receives `EgressRequest` frames.
+Outbound network from the jail is **`(deny network*)`** — the sandbox never dials out. The agent reaches the network through an **in-jail HTTPS_PROXY CONNECT tunnel**: the runner exports `HTTPS_PROXY`/`HTTP_PROXY` to the `claude` PTY pointing at the loopback egress shim; `claude` issues `CONNECT api.anthropic.com:443`; the shim relays the raw (still TLS-encrypted) bytes over `SessionChannel` `TunnelOpen`/`TunnelData`/`TunnelClose` frames; the **host** (`sandbox_session.rs::spawn_tunnel`) opens the real outbound socket and pumps bytes both ways. TLS stays end-to-end, so the host never sees plaintext or credentials. The legacy unary `EgressRequest`/`EgressResponse` path (host `reqwest` fetch) is retained only for the `GET /probe` connectivity check.
+
+> **Read confinement trade-off (tech debt):** the SBPL profile grants blanket `(allow file-read*)` because the V8/Node `claude` binary SIGTRAPs at startup without it. Reads are therefore unconfined; **write** confinement (project/scratch/egress tree) remains the security boundary. Narrowing the read allow-list is future work.
+
+> **Status:** the egress tunnel is wired in the shared `runner.rs` + `sandbox_session.rs` helpers and validated for the `tddy-sandbox-app` host path (acceptance: `sandbox_runner_tunnels_https_proxy_connect_via_session_channel`). End-to-end validation through the daemon `StartSession` (`sandbox=true`) flow is **pending** (the runtime code is shared, but no daemon-specific egress acceptance test yet).
 
 **In-jail runner** (`tddy-tools sandbox-runner`): binds loopback gRPC, spawns `claude` in a PTY with `mcp__tddy-tools__*` allowlist (`sandbox_claude_spawn.rs`), routes MCP `call_tool` through tool IPC → relay queue → `ExecuteToolRequest` on `HostPoll`.
 
