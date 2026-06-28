@@ -55,9 +55,39 @@ network-namespace egress guarantee and cgroup limits are in place.)*
 | `loopback_allow_ports` | Loopback TCP ports allowed in SBPL (gRPC + egress shim) |
 | `ipc_socket` | Short out-of-tree AF_UNIX path for tool IPC |
 
+## Sandbox builder (explicit plan)
+
+`SandboxBuilder` assembles a `SandboxPlan` — an explicit, auditable description of everything a jail
+may touch. **Nothing is read, copied, symlinked, mounted, or exposed unless a caller names it**:
+`build()` is pure (no filesystem access, no subprocess detection) and carries no implicit defaults.
+`SandboxPlan` composes the legacy `SandboxSpec` (so spec-only code keeps working) plus typed
+allow-lists:
+
+| Sub-spec | Meaning |
+|----------|---------|
+| `ReadSpec { host, jail, kind, exec, reason }` | A read grant. `kind` is `Subpath`/`Literal`/`Regex` (SBPL needs a regex rule for `/dev/ttys[0-9]+`). macOS → SBPL `file-read*` rule; Linux → read-only bind mount. |
+| `MountSpec { host, jail, writable }` | A host directory made available in the jail. macOS grants read (+write+exec when `writable`) at the real path (no remap); Linux bind-mounts it (rw when `writable`). |
+| `CopySpec { src, dest, optional, mode }` | A file copied into the writable jail tree before spawn. |
+| `SymlinkSpec { link, target }` | A symlink created inside the jail tree. |
+| `SecretSpec { env_name, source }` | Out-of-band secret: written to a `0600` `scratch/.secrets/<NAME>` file referenced by `TDDY_SECRET_<NAME>`; the value never enters the broad env or `sandbox-exec` argv. The runner reads it and sets it on the inner `claude` child only, then unlinks. |
+| `PolicySpec` | dynamic-code-generation, process-fork, mach-lookup, sysctl-read, pseudo-tty, `process-exec*` paths. |
+| `NetworkSpec { loopback_allow_ports, allow_oauth_inbound }` | Loopback TCP allows; `allow_oauth_inbound` permits the ephemeral OAuth callback listener. |
+| `ResourceLimits` | cgroup v2 memory/cpu/pids (Linux). |
+
+**Strict reads (macOS):** `render_plan(&SandboxPlan)` emits an explicit read allow-list (always
+including the `(literal "/")` dyld-cache root) and **no blanket `(allow file-read*)`**. The audited
+read set lives in one place — `claude_spawn::system_baseline_reads` / `claude_required_reads` (which
+also folds in toolchain dirs and the `claude` binary's `otool -L` deps). Materialization of copies,
+symlinks, and secrets is shared (`materialize.rs`). Backends consume the plan via
+`tddy_sandbox_darwin::{render_plan, spawn_plan}` and `tddy_sandbox_cgroups::{plan_to_bind_mounts,
+spawn_plan}`; the daemon's `build_sandbox_plan` builds it from the Claude recipe + per-spawn `mounts`.
+
+**Env:** `default_runner_env` (shared) produces the clean runner env (`HOME`/`TMPDIR`/`PATH`/… plus
+`CLAUDE_CODE_TMPDIR` so Claude's `/tmp/claude-$UID` runtime dir lands in writable scratch).
+
 ## Context dir
 
-`SandboxContextDir` copies project guidance files (`CLAUDE.md`, `AGENTS.md`, skills) into a read-only tree and appends `REMOTE_APPENDIX` (same notice as remote-codebase mode). The in-jail `claude` working directory is this tree; the host worktree is reached only via MCP tools.
+`SandboxContextDir` copies project guidance files (`CLAUDE.md`, `AGENTS.md`, skills) into a read-only tree and appends `REMOTE_APPENDIX` (same notice as remote-codebase mode). In remote-codebase mode the host worktree is reached only via MCP tools. Alternatively a caller may mount the repo into the jail (`MountSpec`, e.g. `tddy-sandbox-app --repo`, read-write) and set the runner's `--cwd` so `claude` starts in the real project tree.
 
 ## Unsupported platforms
 
