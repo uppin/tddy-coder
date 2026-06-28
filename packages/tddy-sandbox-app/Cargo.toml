@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"
@@ -22,6 +23,7 @@ tddy-core = { path = "../tddy-core" }
 tddy-daemon = { path = "../tddy-daemon" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
+tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-service = { path = "../tddy-service" }
 tddy-task = { path = "../tddy-task" }
 tonic = { version = "0.12", default-features = false, features = ["transport"] }

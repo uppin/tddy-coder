@@ -8,12 +8,9 @@ description = "macOS Seatbelt sandbox implementation for tddy-sandbox"
 name = "tddy_sandbox_darwin"
 path = "src/lib.rs"
 
-[[bin]]
-name = "tddy-sandbox-runner"
-path = "src/main.rs"
-
 [dependencies]
 tddy-sandbox = { path = "../tddy-sandbox" }
+tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-service = { path = "../tddy-service" }
 log = "0.4"
 env_logger = "0.11"

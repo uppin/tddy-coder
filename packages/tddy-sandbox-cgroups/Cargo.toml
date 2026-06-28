@@ -1,0 +1,21 @@
+[package]
+name = "tddy-sandbox-cgroups"
+version = "0.1.0"
+edition = "2021"
+description = "Linux rootless cgroup v2 + namespaces sandbox implementation for tddy-sandbox"
+
+[lib]
+name = "tddy_sandbox_cgroups"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-sandbox = { path = "../tddy-sandbox" }
+anyhow = "1"
+log = "0.4"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { version = "0.30", features = ["sched", "mount", "fs", "process", "user"] }
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

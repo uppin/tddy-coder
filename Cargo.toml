@@ -38,6 +38,8 @@ members = [
     "packages/tddy-screenshare",
     "packages/tddy-rdp",
     "packages/tddy-sandbox",
+    "packages/tddy-sandbox-runner",
+    "packages/tddy-sandbox-cgroups",
     "packages/tddy-sandbox-darwin",
     "packages/tddy-sandbox-app",
 ]

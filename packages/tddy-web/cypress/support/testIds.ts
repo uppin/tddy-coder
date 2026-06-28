@@ -145,6 +145,7 @@ export const TEST_IDS = {
   createSessionStackParentSelect: "create-session-stack-parent-select",
   createSessionModelSelect: "create-session-model-select",
   createSessionPermissionModeSelect: "create-session-permission-mode-select",
+  createSessionSandboxToggle: "create-session-sandbox-toggle",
   createSessionInitialPromptInput: "create-session-initial-prompt-input",
   createSessionBranchIntentSelect: "create-session-branch-intent-select",
   createSessionNewBranchNameInput: "create-session-new-branch-name-input",

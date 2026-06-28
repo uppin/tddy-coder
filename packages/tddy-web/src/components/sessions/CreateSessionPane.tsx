@@ -60,6 +60,7 @@ export function CreateSessionPane({
   const [toolPath, setToolPath] = useState("");
   const [model, setModel] = useState(CLAUDE_CLI_MODELS[0]?.id ?? "");
   const [permissionMode, setPermissionMode] = useState("auto");
+  const [sandbox, setSandbox] = useState(false);
   const [initialPrompt, setInitialPrompt] = useState("");
   const [branchIntent, setBranchIntent] = useState<BranchIntent>("new_branch_from_base");
   const [newBranchName, setNewBranchName] = useState("");
@@ -191,6 +192,7 @@ export function CreateSessionPane({
           model: "",
           permissionMode: "",
           initialPrompt: "",
+          sandbox: false,
         });
       } else {
         res = await client.startSession({
@@ -202,6 +204,7 @@ export function CreateSessionPane({
           model,
           permissionMode,
           initialPrompt,
+          sandbox,
         });
       }
       onCreated(res.sessionId);
@@ -377,6 +380,19 @@ export function CreateSessionPane({
               <option value="plan">plan</option>
               <option value="bypassPermissions">bypassPermissions</option>
             </select>
+          </div>
+
+          <div>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                data-testid="create-session-sandbox-toggle"
+                type="checkbox"
+                className="h-4 w-4 rounded border-input"
+                checked={sandbox}
+                onChange={(e) => setSandbox(e.target.checked)}
+              />
+              Sandbox
+            </label>
           </div>
 
           <div>

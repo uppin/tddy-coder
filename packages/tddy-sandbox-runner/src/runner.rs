@@ -157,7 +157,7 @@ fn sandbox_log_line(level: &str, message: &str) {
     boot_log(level, message);
 }
 
-/// Args for `tddy-sandbox-runner` (runs inside the darwin sandbox).
+/// Args for `tddy-sandbox-runner` (runs inside the platform jail — darwin Seatbelt or Linux cgroups).
 #[derive(Parser, Debug)]
 pub struct SandboxRunnerArgs {
     #[arg(long)]
@@ -185,6 +185,11 @@ pub struct SandboxRunnerArgs {
     /// When set, bind the in-jail egress HTTP shim on this loopback port.
     #[arg(long)]
     pub egress_shim_port: Option<u16>,
+    /// AF_UNIX socket path for the gRPC `SessionChannel` (Linux cgroups path). A UDS bound on a
+    /// bind-mounted path crosses the jail's network namespace, where loopback TCP cannot. When set,
+    /// it takes precedence over [`grpc_listen_port`](Self::grpc_listen_port).
+    #[arg(long)]
+    pub grpc_uds: Option<PathBuf>,
 }
 
 struct PendingToolCall {
@@ -266,6 +271,22 @@ impl SandboxSessionRelay {
 
     fn set_outbound(&self, tx: OutboundSender) {
         *self.outbound.lock().unwrap() = Some(tx);
+    }
+
+    /// Wait until the host attaches its `SessionChannel` (the outbound sender is set). A CONNECT
+    /// tunnel opened before the host attaches must wait rather than hard-fail — the agent's PTY
+    /// starts before the host dials in. Returns false if the host never attaches within `timeout`.
+    async fn wait_for_outbound(&self, timeout: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if self.outbound.lock().unwrap().is_some() {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     /// Push a frame on the server stream immediately. Returns false if the channel is gone.
@@ -823,6 +844,17 @@ async fn handle_connect_tunnel(
 ) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    // The agent's PTY starts before the host dials in; wait for the SessionChannel to attach so an
+    // early CONNECT is relayed rather than hard-failed with 502.
+    if !relay.wait_for_outbound(Duration::from_secs(10)).await {
+        let _ = stream
+            .write_all(
+                b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .await;
+        return;
+    }
+
     let (tunnel_id, mut in_rx, ack_rx) = relay.register_tunnel();
     if !relay.push_frame(SessionPayload::TunnelOpen(TunnelOpen {
         tunnel_id: tunnel_id.clone(),
@@ -930,7 +962,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
     boot_log("INFO", "boot: init_sandbox_egress_logging");
     init_sandbox_egress_logging();
     log::info!(
-        target: "tddy_sandbox_darwin::runner",
+        target: "tddy_sandbox_runner::runner",
         "starting sandbox-runner session_id={} context_dir={} ready_marker={}",
         args.session_id,
         args.context_dir.display(),
@@ -1001,6 +1033,47 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         relay,
     };
 
+    // AF_UNIX control channel (Linux cgroups path): a UDS on a bind-mounted path crosses the jail's
+    // network namespace, where loopback TCP cannot. The ready marker becomes a bind sentinel.
+    if let Some(uds_path) = args.grpc_uds.clone() {
+        boot_log(
+            "INFO",
+            &format!("boot: bind sandbox grpc uds={}", uds_path.display()),
+        );
+        let _ = std::fs::remove_file(&uds_path);
+        let listener = tokio::net::UnixListener::bind(&uds_path)
+            .context("bind sandbox grpc uds")
+            .inspect_err(|e| boot_log_error("bind_sandbox_grpc_uds", format!("{e:#}")))?;
+        std::fs::write(&args.ready_marker, "uds")
+            .context("write ready marker")
+            .inspect_err(|e| boot_log_error("write_ready_marker", format!("{e:#}")))?;
+        boot_log(
+            "INFO",
+            &format!(
+                "boot: ready marker written path={} (uds)",
+                args.ready_marker.display()
+            ),
+        );
+        log::info!(
+            target: "tddy_sandbox_runner::runner",
+            "sandbox gRPC listening on uds {} (ready_marker={})",
+            uds_path.display(),
+            args.ready_marker.display()
+        );
+        sandbox_log_line(
+            "INFO",
+            &format!("gRPC listening on uds {}", uds_path.display()),
+        );
+        boot_log("INFO", "boot: serve sandbox gRPC (uds)");
+        Server::builder()
+            .add_service(SandboxServiceServer::new(service))
+            .serve_with_incoming(tokio_stream::wrappers::UnixListenerStream::new(listener))
+            .await
+            .context("serve sandbox grpc uds")
+            .inspect_err(|e| boot_log_error("serve_sandbox_grpc", format!("{e:#}")))?;
+        return Ok(());
+    }
+
     boot_log(
         "INFO",
         &format!(
@@ -1034,7 +1107,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         ),
     );
     log::info!(
-        target: "tddy_sandbox_darwin::runner",
+        target: "tddy_sandbox_runner::runner",
         "sandbox gRPC listening on localhost:{port} (ready_marker={})",
         args.ready_marker.display()
     );
@@ -1048,6 +1121,32 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         .context("serve sandbox grpc")
         .inspect_err(|e| boot_log_error("serve_sandbox_grpc", format!("{e:#}")))?;
     Ok(())
+}
+
+/// gRPC client for the in-jail `SandboxService`, over either a TCP or an AF_UNIX `Channel`.
+pub type SandboxClient = tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient<
+    tonic::transport::Channel,
+>;
+
+/// Connect a tonic client to the sandbox gRPC server over an AF_UNIX socket (Linux; survives the
+/// jail's network namespace). The HTTP authority is a required-but-ignored placeholder for the UDS
+/// connector.
+pub async fn connect_sandbox_client_uds(uds_path: &Path) -> Result<SandboxClient> {
+    use hyper_util::rt::TokioIo;
+
+    let uds_path = uds_path.to_path_buf();
+    let channel = tonic::transport::Endpoint::try_from("http://127.0.0.1:50051")
+        .context("build uds endpoint")?
+        .connect_with_connector(tower::service_fn(move |_| {
+            let uds_path = uds_path.clone();
+            async move {
+                let stream = tokio::net::UnixStream::connect(&uds_path).await?;
+                Ok::<_, std::io::Error>(TokioIo::new(stream))
+            }
+        }))
+        .await
+        .context("connect sandbox grpc uds")?;
+    Ok(tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient::new(channel))
 }
 
 /// Connect a tonic client to the sandbox gRPC endpoint (port read from ready marker).

@@ -1,21 +1,52 @@
 //! Host-side `SessionChannel` driver with local terminal PTY proxy.
+//!
+//! Wraps the shared [`tddy_sandbox_runner::run_host_relay`] with an interactive front-end: real
+//! stdin/stdout in raw mode and Ctrl-C shutdown. Tool execution runs via [`tool_engine`].
 
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use futures_util::StreamExt;
-use tddy_daemon::sandbox_session::relay_egress_request;
+use bytes::Bytes;
 use tddy_daemon::tool_engine;
-use tddy_service::proto::connection::ExecuteToolResponse;
-use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
-use tddy_service::tonic_sandbox::{HostPoll, SandboxInput, SessionFrame, SubscribeTerminal};
+use tddy_sandbox_runner::{run_host_relay, ExecuteToolResponse, HostRelayConfig, HostToolHandler};
 use tddy_task::TaskRegistry;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
+
+/// Runs MCP tool calls in the host worktree via [`tool_engine`].
+struct AppToolHandler {
+    worktree: PathBuf,
+    task_registry: TaskRegistry,
+}
+
+#[async_trait::async_trait]
+impl HostToolHandler for AppToolHandler {
+    async fn execute(
+        &self,
+        session_id: &str,
+        tool_name: &str,
+        args_json: &str,
+    ) -> ExecuteToolResponse {
+        let outcome = tool_engine::execute_tool(
+            &self.worktree,
+            tool_name,
+            args_json,
+            &self.task_registry,
+            session_id,
+        )
+        .await;
+        ExecuteToolResponse {
+            result_json: outcome.result_json,
+            is_error: outcome.is_error,
+            error_message: outcome.error_message,
+            job_id: outcome.job_id,
+            job_running: outcome.job_running,
+        }
+    }
+}
 
 /// Connect to the in-jail sandbox gRPC server and relay stdin/stdout until disconnect.
 pub async fn run_terminal_bridge(
@@ -25,30 +56,37 @@ pub async fn run_terminal_bridge(
     task_registry: TaskRegistry,
 ) -> Result<()> {
     eprintln!("connecting SessionChannel on loopback…");
-    let mut client = tddy_sandbox_darwin::connect_sandbox_client(ready_marker)
+    let client = tddy_sandbox_darwin::connect_sandbox_client(ready_marker)
         .await
         .context("connect sandbox gRPC")?;
 
-    let (host_tx, host_rx) = mpsc::channel(64);
-    let host_stream = ReceiverStream::new(host_rx);
-    let mut session = client
-        .session_channel(host_stream)
-        .await
-        .context("open SessionChannel")?
-        .into_inner();
-
     let (rows, cols) = terminal_size_or_default();
-    host_tx
-        .send(SessionFrame {
-            payload: Some(SessionPayload::SubscribeTerminal(SubscribeTerminal {
-                session_id: session_id.to_string(),
-                terminal_id: "main".to_string(),
-                initial_cols: cols as u32,
-                initial_rows: rows as u32,
-            })),
-        })
-        .await
-        .context("subscribe terminal")?;
+    let (terminal_tx, mut terminal_rx) = mpsc::unbounded_channel::<Bytes>();
+    let stdout_task = tokio::spawn(async move {
+        let mut stdout = std::io::stdout();
+        while let Some(chunk) = terminal_rx.recv().await {
+            let _ = stdout.write_all(&chunk);
+            let _ = stdout.flush();
+        }
+    });
+
+    let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<Bytes>();
+    let relay = run_host_relay(
+        client,
+        AppToolHandler {
+            worktree: worktree_path.to_path_buf(),
+            task_registry,
+        },
+        HostRelayConfig {
+            session_id: session_id.to_string(),
+            terminal_sink: terminal_tx,
+            initial_cols: cols as u32,
+            initial_rows: rows as u32,
+        },
+        stdin_rx,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("run host relay: {e}"))?;
 
     log::info!(
         target: "tddy_sandbox_app::bridge",
@@ -56,101 +94,11 @@ pub async fn run_terminal_bridge(
     );
     eprintln!("terminal bridge active (Ctrl-C or Ctrl-D to disconnect)");
 
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let worktree = worktree_path.to_path_buf();
-    let session_id_out = session_id.to_string();
-    let host_tx_reader = host_tx.clone();
-    let shutdown_reader = Arc::clone(&shutdown);
-
-    tokio::spawn(async move {
-        while let Some(Ok(frame)) = session.next().await {
-            if shutdown_reader.load(Ordering::Relaxed) {
-                break;
-            }
-            match frame.payload {
-                Some(SessionPayload::ToolRequest(req)) => {
-                    log::debug!(
-                        target: "tddy_sandbox_app::bridge",
-                        "tool request session={session_id_out} tool={}",
-                        req.tool_name
-                    );
-                    let outcome = tool_engine::execute_tool(
-                        &worktree,
-                        &req.tool_name,
-                        &req.args_json,
-                        &task_registry,
-                        &session_id_out,
-                    )
-                    .await;
-                    let resp = ExecuteToolResponse {
-                        result_json: outcome.result_json,
-                        is_error: outcome.is_error,
-                        error_message: outcome.error_message,
-                        job_id: outcome.job_id,
-                        job_running: outcome.job_running,
-                    };
-                    let _ = host_tx_reader
-                        .send(SessionFrame {
-                            payload: Some(SessionPayload::ToolResponse(resp)),
-                        })
-                        .await;
-                }
-                Some(SessionPayload::EgressRequest(req)) => {
-                    log::debug!(
-                        target: "tddy_sandbox_app::bridge",
-                        "egress request session={session_id_out} url={}",
-                        req.url
-                    );
-                    let resp = relay_egress_request(req).await;
-                    let _ = host_tx_reader
-                        .send(SessionFrame {
-                            payload: Some(SessionPayload::EgressResponse(resp)),
-                        })
-                        .await;
-                }
-                Some(SessionPayload::TerminalOutput(out)) => {
-                    if !out.data.is_empty() {
-                        let mut stdout = std::io::stdout();
-                        let _ = stdout.write_all(&out.data);
-                        let _ = stdout.flush();
-                    }
-                }
-                _ => {}
-            }
-        }
-        shutdown_reader.store(true, Ordering::Relaxed);
-    });
-
     let _raw = RawMode::enable();
-    let host_tx_input = host_tx.clone();
-    let session_id_in = session_id.to_string();
-    let shutdown_input = Arc::clone(&shutdown);
+    let shutdown = Arc::new(AtomicBool::new(false));
 
-    let input_task = tokio::spawn(async move {
-        let mut poll = tokio::time::interval(Duration::from_millis(25));
-        loop {
-            tokio::select! {
-                _ = poll.tick() => {
-                    if shutdown_input.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    if host_tx_input
-                        .send(SessionFrame {
-                            payload: Some(SessionPayload::HostPoll(HostPoll {})),
-                        })
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-            }
-        }
-    });
-
+    // Real stdin → the jail PTY. A blocking read thread feeds the relay's stdin channel.
     let shutdown_stdin = Arc::clone(&shutdown);
-    let host_tx_stdin = host_tx.clone();
-    let session_id_stdin = session_id_in.clone();
     std::thread::spawn(move || {
         let mut buf = [0u8; 256];
         let mut stdin = std::io::stdin();
@@ -169,19 +117,7 @@ pub async fn run_terminal_bridge(
                         shutdown_stdin.store(true, Ordering::Relaxed);
                         break;
                     }
-                    let data = buf[..n].to_vec();
-                    let session_id = session_id_stdin.clone();
-                    let tx = host_tx_stdin.clone();
-                    if tx
-                        .blocking_send(SessionFrame {
-                            payload: Some(SessionPayload::TerminalInput(SandboxInput {
-                                session_id,
-                                terminal_id: "main".to_string(),
-                                data,
-                            })),
-                        })
-                        .is_err()
-                    {
+                    if stdin_tx.send(Bytes::from(buf[..n].to_vec())).is_err() {
                         shutdown_stdin.store(true, Ordering::Relaxed);
                         break;
                     }
@@ -190,8 +126,11 @@ pub async fn run_terminal_bridge(
         }
     });
 
-    // Block until stdin EOF, Ctrl-C, or the sandbox closes the channel.
+    // Block until stdin EOF/Ctrl-C, the relay ends, or an OS Ctrl-C arrives.
     while !shutdown.load(Ordering::Relaxed) {
+        if relay.is_finished() {
+            break;
+        }
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_millis(100)) => {}
             res = tokio::signal::ctrl_c() => {
@@ -209,7 +148,8 @@ pub async fn run_terminal_bridge(
         }
     }
     shutdown.store(true, Ordering::Relaxed);
-    input_task.abort();
+    relay.abort();
+    stdout_task.abort();
     Ok(())
 }
 

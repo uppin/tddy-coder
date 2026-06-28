@@ -12,6 +12,8 @@ use tddy_core::session_metadata::read_session_metadata;
 use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
+#[cfg(not(target_os = "macos"))]
+use tddy_rpc::Code;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectSessionRequest, ConnectionService as ConnectionServiceTrait, StartSessionRequest,
@@ -193,6 +195,45 @@ async fn sandboxed_claude_cli_start_persists_metadata_and_empty_livekit() {
         "sandboxed claude-cli must not allocate LiveKit"
     );
 
+    let session_dir = sessions_tmp.path().join("sessions").join(&inner.session_id);
+    let meta = read_session_metadata(&session_dir).expect(".session.yaml must exist");
+    assert_eq!(meta.sandbox, Some(true));
+    assert_eq!(meta.session_type.as_deref(), Some("claude-cli"));
+    assert!(meta.pid.is_some());
+    assert!(process_is_alive(meta.pid.unwrap()));
+}
+
+/// **sandboxed_claude_cli_starts_on_linux_with_the_cgroups_backend**: on Linux,
+/// `StartSession(sandbox=true)` runs the runner under the rootless cgroups backend, returns empty
+/// LiveKit fields, and persists `sandbox: true` metadata. Requires a host with unprivileged user
+/// namespaces (the Linux analogue of the macOS Seatbelt tests above).
+///
+/// NOTE for green: once Linux is supported, `start_session_sandbox_unsupported_on_non_darwin` must
+/// be re-gated to exclude linux (e.g. `cfg(not(any(target_os = "macos", target_os = "linux")))`).
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn sandboxed_claude_cli_starts_on_linux_with_the_cgroups_backend() {
+    // Given
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+    let stub = write_echo_argv_script(repo_dir.path());
+    let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
+    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+
+    // When
+    let resp = service
+        .start_session(Request::new(sandbox_start_request()))
+        .await
+        .expect("sandbox StartSession must succeed on linux with the cgroups backend");
+    let inner = resp.into_inner();
+
+    // Then
+    assert!(
+        inner.livekit_room.is_empty() && inner.livekit_url.is_empty(),
+        "sandboxed claude-cli must not allocate LiveKit"
+    );
     let session_dir = sessions_tmp.path().join("sessions").join(&inner.session_id);
     let meta = read_session_metadata(&session_dir).expect(".session.yaml must exist");
     assert_eq!(meta.sandbox, Some(true));
