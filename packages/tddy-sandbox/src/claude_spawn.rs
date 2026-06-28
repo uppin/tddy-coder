@@ -204,6 +204,17 @@ pub fn default_runner_env(
     let mut env = BTreeMap::new();
     env.insert("HOME".into(), scratch_home.to_string_lossy().to_string());
     env.insert("TMPDIR".into(), scratch_tmp.to_string_lossy().to_string());
+    // Claude Code keeps its per-user runtime dir at `/tmp/claude-$UID` regardless of `TMPDIR`;
+    // that path is outside the jail's write allow-list, so redirect it into the writable scratch
+    // tmp via the binary's own overrides (otherwise startup fails: `EPERM mkdir /tmp/claude-501`).
+    env.insert(
+        "CLAUDE_CODE_TMPDIR".into(),
+        scratch_tmp.to_string_lossy().to_string(),
+    );
+    env.insert(
+        "CLAUDE_TMPDIR".into(),
+        scratch_tmp.to_string_lossy().to_string(),
+    );
     env.insert("TDDY_SANDBOX_SESSION_ID".into(), session_id.to_string());
     env.insert(
         "TDDY_SANDBOX_TOOL_IPC".into(),
