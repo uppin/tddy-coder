@@ -7,12 +7,48 @@
 ## Unified actions (2026-06-29)
 
 All long-running tools — fast tools, PTY terminals (claude-cli/bash), tddy-coder, tddy-build actions,
-and session actions — register in the shared `TaskRegistry` via `packages/tddy-actions` runtimes
-(`ProcessRuntime`, `PtyRuntime`, `PipelineRuntime`). Optional sandbox metadata is attached via
-`SandboxRequest` on `ActionSpec`; full in-jail execution for arbitrary kinds is follow-up work.
+and session actions — register in the shared `TaskRegistry` via `packages/tddy-actions` runtimes:
 
-New RPC: `actions.ActionService` (`ListActionKinds`, `StartAction`, `GetAction`). Existing
-`tasks.TaskService` is unchanged; PTY tools now appear in `ListTasks` with `ChannelKind::Pty`.
+| Runtime | Used for |
+|---------|----------|
+| `ProcessRuntime` | Subprocess + `Combined` / `StdoutStderr` channels (fast tools, session-action jobs, `tddy-build` actions, sandboxed process actions) |
+| `PtyRuntime` | `portable-pty` terminals (`claude-cli`, `bash`); `PtyRegistry` holds resize/control handles keyed by `task_id` |
+| `PipelineRuntime` | Input-mapper → primary → output-transform chains (session actions with pipeline steps) |
+
+`ActionSpec` is the shared spawn descriptor (`command`, `cwd`, `env`, `channels`, optional `sandbox`,
+`result_kind`). Session YAML manifests and `tddy-build` `BuildAction` values convert to `ActionSpec` at
+the call site. Async session-action jobs use `job_id == task_id`.
+
+### ActionService RPC
+
+New `actions.ActionService` (`packages/tddy-service/proto/actions.proto`):
+
+| Method | Purpose |
+|--------|---------|
+| `ListActionKinds` | Built-in kinds plus session-scoped manifests |
+| `StartAction` | Spawn by kind or inline spec; returns `task_id` |
+| `GetAction` | Task status and channel manifest |
+
+Existing `tasks.TaskService` is unchanged. PTY and action tasks appear in `ListTasks` with
+`ChannelKind::Pty`, `Combined`, or separate stdout/stderr channels.
+
+### Sandbox action execution
+
+When `ActionSpec.sandbox` is set and the host supports the platform backend, `tddy-daemon`
+`sandbox_plan_builder` assembles a `SandboxPlan` from `tddy-sandbox-recipes` and runs the action
+inside the jail — no unconfined fallback on unsupported hosts (`failed_precondition`).
+
+| Channel kind | Path |
+|--------------|------|
+| `Combined` / `StdoutStderr` | `build_process_plan` → `spawn_plan` → egress-log tail → `TaskChannel` |
+| `Pty` | `build_action_runner_plan` → `spawn_plan` (`tddy-sandbox-runner` with `--pty-command`) → `wait_for_sandbox_ready` → `run_host_relay(NullToolHandler)` → `TaskChannel` PTY |
+
+`SandboxSpec.cwd` sets the in-jail working directory; `extra_read_paths` add read-only mounts (for
+example build-action artifact dirs). `tddy-coder` plan approval uses piped stdin on confined process
+actions.
+
+Acceptance: `packages/tddy-daemon/tests/action_sandbox_acceptance.rs` (tddy-coder, build-action RO
+mount, escape denial, PTY, unsupported platform).
 
 ## Summary
 
@@ -148,10 +184,20 @@ packages/tddy-service
 
 packages/tddy-daemon
 ├── src/task_service.rs    — TaskServiceImpl (auth + per-method handlers)
+├── src/action_service.rs  — ActionServiceImpl (ListActionKinds/StartAction/GetAction)
+├── src/sandbox_plan_builder.rs — ActionSpec → SandboxPlan assembly
+├── src/sandbox_action.rs  — confined process + runner-PTY action execution
+├── src/pty_runtime.rs     — PtyRuntime bridge to TaskRegistry + PtyRegistry
 ├── src/tool_engine.rs     — every execute_tool call wraps in a Task (via TaskRegistry)
 ├── src/connection_service.rs — task_registry field replaces shell_jobs
-├── src/main.rs            — TaskServiceServer registered + TaskRegistry shared with VmService
+├── src/main.rs            — TaskServiceServer + ActionServiceServer registered
 └── src/shell_job_registry.rs — DELETED
+
+packages/tddy-actions (leaf crate)
+├── src/spec.rs            — ActionSpec, SandboxRequest, channel kinds
+├── src/process_runtime.rs — subprocess + Combined/StdoutStderr TaskChannel
+├── src/pipeline.rs        — PipelineRuntime (mapper/primary/transform)
+└── src/catalog.rs         — built-in action kinds
 
 packages/tddy-vm
 ├── src/build.rs    — build_vm_image_from_spec refactored to TaskBody (cancellable)

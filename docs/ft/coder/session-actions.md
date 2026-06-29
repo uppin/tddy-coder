@@ -60,7 +60,7 @@ Operational trust boundary: manifests live beside **`changeset.yaml`** under **`
 
 ## Session action jobs (`session_action_jobs`)
 
-The **`tddy_core::session_action_jobs`** module runs the same **`actions/*.yaml`** manifests as **`invoke-action`**, with an optional **non-blocking** admission path: callers receive a **`job_id`**, filesystem paths for **stdout** and **stderr** logs, and can **`wait`** (with optional timeout) or **`stop`** a running job. Manifest resolution (**`resolve_action_manifest_path`**), **`--data`** validation, **`repo_path`** / **`output_path_arg`** checks, **`ensure_action_architecture`**, and **`result_kind: test_summary`** handling share the synchronous **`session_actions`** implementation.
+The **`tddy_core::session_action_jobs`** module runs the same **`actions/*.yaml`** manifests as **`invoke-action`**, with an optional **non-blocking** admission path: callers receive a **`job_id`** (equal to the unified **`task_id`**), filesystem paths for **stdout** and **stderr** logs, and can **`wait`** (with optional timeout) or **`stop`** a running job. Jobs register in a per-session **`TaskRegistry`** via **`tddy-actions::ProcessRuntime`** (simple manifests) or **`PipelineRuntime`** (mapper/transform pipelines). Manifest resolution (**`resolve_action_manifest_path`**), **`--data`** validation, **`repo_path`** / **`output_path_arg`** checks, **`ensure_action_architecture`**, and **`result_kind: test_summary`** handling share the synchronous **`session_actions`** implementation. The daemon exposes the same kinds through **`actions.ActionService`** (`StartAction` / `GetAction`).
 
 ### On-disk layout
 
