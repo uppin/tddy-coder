@@ -2,7 +2,12 @@
 
 **Product Area**: Coder
 **Status**: Draft
-**Updated**: 2026-06-28
+**Updated**: 2026-06-29
+
+> **2026-06-29:** `tddy-sandbox` is generic (`SandboxBuilder`, `exec_reads`, `scratch_runner_env`).
+> Product recipes (Claude CLI reads/copies/policy, MCP argv) live in **`tddy-sandbox-recipes`**.
+> `tddy-daemon` `sandbox_plan_builder` assembles plans from actions; sandbox crates do not import
+> `tddy-actions`.
 
 ## Summary
 

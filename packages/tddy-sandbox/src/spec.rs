@@ -26,6 +26,8 @@ pub struct SandboxSpec {
     /// caps `sockaddr_un.sun_path` at `SUN_LEN` (104 bytes); a socket under the canonical
     /// session dir overflows it. `None` falls back to the project tree's allows.
     pub ipc_socket: Option<PathBuf>,
+    /// Working directory for the confined process. Defaults to [`project_root`](Self::project_root).
+    pub cwd: Option<PathBuf>,
 }
 
 impl SandboxSpec {
@@ -56,6 +58,13 @@ impl SandboxSpec {
             return Err(crate::SandboxError::InvalidSpec(
                 "project_root must be absolute".to_string(),
             ));
+        }
+        if let Some(ref cwd) = self.cwd {
+            if !cwd.is_absolute() {
+                return Err(crate::SandboxError::InvalidSpec(
+                    "cwd must be absolute".to_string(),
+                ));
+            }
         }
         Ok(())
     }

@@ -26,10 +26,10 @@ use tddy_service::tonic_sandbox::{
 };
 
 use tddy_sandbox::{
-    append_line, append_sandbox_claude_mcp_args, egress_log_path, sandbox_claude_scratch_dir,
-    session_id_from_env, ToolIpcRequest, ToolIpcResponse, SANDBOX_RUNNER_FAILURE,
-    SANDBOX_RUNNER_LOG,
+    append_line, egress_log_path, session_id_from_env, ToolIpcRequest, ToolIpcResponse,
+    SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG,
 };
+use tddy_sandbox_recipes::{append_claude_mcp_args, claude_scratch_mcp_dir};
 
 fn tool_ipc_response_from_execute(resp: &ExecuteToolResponse) -> ToolIpcResponse {
     ToolIpcResponse {
@@ -172,9 +172,9 @@ pub struct SandboxRunnerArgs {
     pub grpc_socket: PathBuf,
     #[arg(long)]
     pub tool_ipc_socket: PathBuf,
-    /// Path to `tddy-tools` for in-jail MCP config (`--mcp` server).
+    /// Path to `tddy-tools` for in-jail MCP config (`--mcp` server). Required for Claude mode.
     #[arg(long)]
-    pub tddy_tools_path: PathBuf,
+    pub tddy_tools_path: Option<PathBuf>,
     #[arg(long, default_value = "claude")]
     pub claude_binary: String,
     #[arg(long)]
@@ -194,6 +194,10 @@ pub struct SandboxRunnerArgs {
     /// it takes precedence over [`grpc_listen_port`](Self::grpc_listen_port).
     #[arg(long)]
     pub grpc_uds: Option<PathBuf>,
+    /// When set, spawn this command in a PTY instead of Claude (generic confined action mode).
+    /// Repeat the flag once per argv token (`--pty-command=/bin/sh --pty-command=-c …`).
+    #[arg(long = "pty-command", allow_hyphen_values = true)]
+    pub pty_command: Vec<String>,
 }
 
 struct PendingToolCall {
@@ -564,6 +568,121 @@ struct PtyState {
     stdin_tx: std::sync::mpsc::Sender<Bytes>,
 }
 
+fn run_generic_pty_thread(
+    argv: Vec<String>,
+    cwd: PathBuf,
+    relay: Arc<SandboxSessionRelay>,
+    stdin_rx: std::sync::mpsc::Receiver<Bytes>,
+) -> Result<i32> {
+    boot_log(
+        "INFO",
+        &format!(
+            "pty: openpty generic cwd={} argv={argv:?}",
+            cwd.display(),
+        ),
+    );
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .context("openpty")?;
+    let mut cmd = CommandBuilder::new(&argv[0]);
+    for arg in &argv[1..] {
+        cmd.arg(arg);
+    }
+    cmd.cwd(&cwd);
+    cmd.env("TERM", "xterm-256color");
+    let mut child = pair
+        .slave
+        .spawn_command(cmd)
+        .context("spawn generic pty command")?;
+    boot_log("INFO", "pty: generic command spawned");
+    drop(pair.slave);
+    let master = Arc::new(Mutex::new(pair.master));
+
+    let master_reader = Arc::clone(&master);
+    let relay_reader = Arc::clone(&relay);
+    std::thread::spawn(move || {
+        let reader = master_reader.lock().unwrap().try_clone_reader();
+        let mut r = match reader {
+            Ok(r) => r,
+            Err(_) => {
+                boot_log("ERROR", "pty: try_clone_reader failed");
+                return;
+            }
+        };
+        let mut buf = [0u8; 4096];
+        loop {
+            match std::io::Read::read(&mut r, &mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    relay_reader.push_terminal(Bytes::copy_from_slice(&buf[..n]));
+                }
+                Err(e) => {
+                    boot_log("ERROR", &format!("pty: stdout read failed: {e}"));
+                    break;
+                }
+            }
+        }
+    });
+
+    let master_writer = Arc::clone(&master);
+    std::thread::spawn(move || {
+        let writer = master_writer.lock().unwrap().take_writer();
+        let mut w = match writer {
+            Ok(w) => w,
+            Err(_) => {
+                boot_log("ERROR", "pty: take_writer failed");
+                return;
+            }
+        };
+        while let Ok(chunk) = stdin_rx.recv() {
+            if std::io::Write::write_all(&mut w, &chunk).is_err() {
+                break;
+            }
+            let _ = std::io::Write::flush(&mut w);
+        }
+    });
+
+    let exit_code = match child.wait() {
+        Ok(status) => {
+            boot_log("INFO", &format!("pty: generic command exited {status}"));
+            status.exit_code() as i32
+        }
+        Err(e) => {
+            boot_log("ERROR", &format!("pty: wait failed: {e}"));
+            1
+        }
+    };
+    Ok(exit_code)
+}
+
+fn spawn_generic_pty(
+    argv: Vec<String>,
+    cwd: PathBuf,
+    relay: Arc<SandboxSessionRelay>,
+) -> Result<(PtyState, std::sync::mpsc::Receiver<i32>)> {
+    let (stdin_tx, stdin_rx) = std::sync::mpsc::channel::<Bytes>();
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<i32>();
+    let relay_thread = Arc::clone(&relay);
+    std::thread::spawn(move || {
+        let code = match run_generic_pty_thread(argv, cwd, relay_thread, stdin_rx) {
+            Ok(code) => code,
+            Err(e) => {
+                boot_log_error("spawn_generic_pty", format!("{e:#}"));
+                write_failure_marker(&format!("spawn_generic_pty failed: {e:#}"));
+                1
+            }
+        };
+        let _ = done_tx.send(code);
+    });
+    Ok((PtyState { stdin_tx }, done_rx))
+}
+
 fn run_claude_pty_thread(
     argv: Vec<String>,
     cwd: PathBuf,
@@ -729,8 +848,8 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
     argv.push("--permission-mode".into());
     argv.push(permission_mode.to_string());
 
-    let scratch_dir = sandbox_claude_scratch_dir(context_dir);
-    append_sandbox_claude_mcp_args(&mut argv, &scratch_dir, tddy_tools_path)
+    let scratch_dir = claude_scratch_mcp_dir(context_dir);
+    append_claude_mcp_args(&mut argv, &scratch_dir, tddy_tools_path)
         .context("append sandbox claude MCP allowlist args")?;
     boot_log(
         "INFO",
@@ -1041,6 +1160,8 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
     let _ = std::fs::remove_file(&args.tool_ipc_socket);
     let _ = std::fs::remove_file(&args.ready_marker);
 
+    let generic_pty = !args.pty_command.is_empty();
+
     boot_log(
         "INFO",
         &format!(
@@ -1065,29 +1186,57 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
             args.tool_ipc_socket.display()
         ),
     );
-    start_tool_ipc_server(args.tool_ipc_socket.clone(), Arc::clone(&relay))
-        .await
-        .inspect_err(|e| boot_log_error("start_tool_ipc_server", format!("{e:#}")))?;
-    boot_log("INFO", "boot: tool ipc server ready");
+    if generic_pty {
+        boot_log("INFO", "boot: skip tool ipc (generic pty mode)");
+    } else {
+        start_tool_ipc_server(args.tool_ipc_socket.clone(), Arc::clone(&relay))
+            .await
+            .inspect_err(|e| boot_log_error("start_tool_ipc_server", format!("{e:#}")))?;
+        boot_log("INFO", "boot: tool ipc server ready");
+    }
 
-    boot_log(
-        "INFO",
-        &format!("boot: spawn_claude_pty binary={}", args.claude_binary),
-    );
     let cwd = args.cwd.clone().unwrap_or_else(|| args.context_dir.clone());
-    let pty = spawn_claude_pty(SpawnClaudePtyParams {
-        context_dir: &args.context_dir,
-        cwd: &cwd,
-        claude_binary: &args.claude_binary,
-        model: &args.model,
-        permission_mode: &args.permission_mode,
-        session_id: &args.session_id,
-        tddy_tools_path: &args.tddy_tools_path,
-        egress_shim: &egress_shim,
-        relay: Arc::clone(&relay),
-    })
-    .inspect_err(|e| boot_log_error("spawn_claude_pty", format!("{e:#}")))?;
-    boot_log("INFO", "boot: claude pty thread spawned");
+    let shutdown_notify = Arc::new(tokio::sync::Notify::new());
+
+    let pty = if generic_pty {
+        boot_log(
+            "INFO",
+            &format!("boot: spawn_generic_pty argv={:?}", args.pty_command),
+        );
+        let (pty_state, done_rx) =
+            spawn_generic_pty(args.pty_command.clone(), cwd, Arc::clone(&relay))
+                .inspect_err(|e| boot_log_error("spawn_generic_pty", format!("{e:#}")))?;
+        let notify = Arc::clone(&shutdown_notify);
+        tokio::spawn(async move {
+            let _ = tokio::task::spawn_blocking(move || done_rx.recv()).await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            notify.notify_one();
+        });
+        boot_log("INFO", "boot: generic pty thread spawned");
+        pty_state
+    } else {
+        boot_log(
+            "INFO",
+            &format!("boot: spawn_claude_pty binary={}", args.claude_binary),
+        );
+        let tddy_tools_path = args.tddy_tools_path.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("tddy_tools_path is required for claude pty mode")
+        })?;
+        let pty_state = spawn_claude_pty(SpawnClaudePtyParams {
+            context_dir: &args.context_dir,
+            cwd: &cwd,
+            claude_binary: &args.claude_binary,
+            model: &args.model,
+            permission_mode: &args.permission_mode,
+            session_id: &args.session_id,
+            tddy_tools_path,
+            egress_shim: &egress_shim,
+            relay: Arc::clone(&relay),
+        })
+        .inspect_err(|e| boot_log_error("spawn_claude_pty", format!("{e:#}")))?;
+        boot_log("INFO", "boot: claude pty thread spawned");
+        pty_state
+    };
 
     let service = SandboxRunnerService {
         session_id: args.session_id.clone(),
@@ -1127,9 +1276,20 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
             &format!("gRPC listening on uds {}", uds_path.display()),
         );
         boot_log("INFO", "boot: serve sandbox gRPC (uds)");
+        let generic_pty_shutdown = generic_pty;
+        let shutdown_notify = Arc::clone(&shutdown_notify);
         Server::builder()
             .add_service(SandboxServiceServer::new(service))
-            .serve_with_incoming(tokio_stream::wrappers::UnixListenerStream::new(listener))
+            .serve_with_incoming_shutdown(
+                tokio_stream::wrappers::UnixListenerStream::new(listener),
+                async move {
+                    if generic_pty_shutdown {
+                        shutdown_notify.notified().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                },
+            )
             .await
             .context("serve sandbox grpc uds")
             .inspect_err(|e| boot_log_error("serve_sandbox_grpc", format!("{e:#}")))?;
@@ -1176,9 +1336,20 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
     sandbox_log_line("INFO", &format!("gRPC listening on localhost:{port}"));
 
     boot_log("INFO", "boot: serve sandbox gRPC");
+    let generic_pty_shutdown = generic_pty;
+    let shutdown_notify = Arc::clone(&shutdown_notify);
     Server::builder()
         .add_service(SandboxServiceServer::new(service))
-        .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+        .serve_with_incoming_shutdown(
+            tokio_stream::wrappers::TcpListenerStream::new(listener),
+            async move {
+                if generic_pty_shutdown {
+                    shutdown_notify.notified().await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            },
+        )
         .await
         .context("serve sandbox grpc")
         .inspect_err(|e| boot_log_error("serve_sandbox_grpc", format!("{e:#}")))?;
@@ -1272,5 +1443,33 @@ mod tests {
         let resp = call.await.expect("call_tool task");
         assert!(!resp.is_error, "{}", resp.error_message);
         assert_eq!(resp.result_json, r#"{"tool":"Read"}"#);
+    }
+
+    #[test]
+    fn parses_repeated_pty_command_flags_including_hyphen_args() {
+        let args = SandboxRunnerArgs::try_parse_from([
+            "tddy-sandbox-runner",
+            "--session-id",
+            "sess",
+            "--context-dir",
+            "/tmp/ctx",
+            "--grpc-socket",
+            "/tmp/grpc.sock",
+            "--tool-ipc-socket",
+            "/tmp/ipc.sock",
+            "--model",
+            "",
+            "--ready-marker",
+            "/tmp/ready",
+            "--pty-command=/bin/sh",
+            "--pty-command=-c",
+            "--pty-command=printf",
+            "--pty-command=pty_ok",
+        ])
+        .expect("argv must parse");
+        assert_eq!(
+            args.pty_command,
+            vec!["/bin/sh", "-c", "printf", "pty_ok"]
+        );
     }
 }

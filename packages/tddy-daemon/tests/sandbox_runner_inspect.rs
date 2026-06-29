@@ -143,7 +143,7 @@ fn sandbox_runner_inspect_seatbelt_spawn() {
     )
     .profile_path(project.join("minimal.sb"))
     .reads(tddy_sandbox::system_baseline_reads())
-    .policy(tddy_sandbox::claude_policy())
+    .policy(tddy_sandbox_recipes::claude_interactive_policy())
     .network(NetworkSpec::default())
     .build()
     .expect("minimal plan");

@@ -77,16 +77,33 @@ fn make_service(
     (service, cfg_dir, sessions)
 }
 
+/// Stub script path for the main `claude` terminal (ignores claude argv; blocks on PTY stdin).
+fn write_main_stub(dir: &std::path::Path) -> std::path::PathBuf {
+    let script = dir.join("stub_main.sh");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\n# ignore claude-style argv; block on PTY stdin\nexec cat\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    script
+}
+
 /// Pre-register the main `claude` terminal for `SESSION_ID` in a fresh worktree, returning the
 /// worktree temp-dir guard (must stay alive for the worktree to exist).
 async fn start_main_terminal(manager: &ClaudeCliSessionManager) -> tempfile::TempDir {
     let worktree = tempfile::tempdir().unwrap();
+    let stub = write_main_stub(worktree.path());
     manager
         .start(
             SESSION_ID,
             worktree.path().to_path_buf(),
             "claude-opus-4-8",
-            MAIN_STUB,
+            stub.to_str().unwrap(),
             None,
             None,
         )

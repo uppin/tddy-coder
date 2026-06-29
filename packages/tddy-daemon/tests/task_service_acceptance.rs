@@ -736,6 +736,185 @@ async fn watch_task_list_with_remote_daemon_instance_id_returns_failed_precondit
     }
 }
 
+#[tokio::test]
+#[cfg(unix)]
+async fn bash_pty_terminal_appears_in_list_tasks_with_pty_channel() {
+    // Given — shared TaskRegistry wired like ConnectionService (manager owns registry)
+    let manager = tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new();
+    let bridge = test_bridge(manager.task_registry());
+    let worktree = tempfile::tempdir().expect("temp dir");
+
+    // When — spawn a bash PTY tool
+    manager
+        .start_terminal(
+            "pty-list-tasks-session",
+            worktree.path().to_path_buf(),
+            "/bin/sh",
+        )
+        .await
+        .expect("start_terminal");
+
+    let list: ListTasksResponse = call(
+        &bridge,
+        "ListTasks",
+        ListTasksRequest {
+            session_token: GOOD_TOKEN.to_string(),
+            daemon_instance_id: String::new(),
+        },
+    )
+    .await;
+
+    // Then — ListTasks includes a running bash task with a PTY channel
+    let bash_task = list
+        .tasks
+        .iter()
+        .find(|t| t.kind == "bash")
+        .expect("ListTasks must include a bash PTY task");
+    assert!(
+        bash_task
+            .channels
+            .iter()
+            .any(|c| c.kind == 4 && c.accepts_input),
+        "bash task must expose a PTY channel that accepts input"
+    );
+
+    manager.kill_all().await;
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn list_tasks_includes_a_running_claude_cli_and_bash_task() {
+    // Given — main claude-cli PTY plus an auxiliary bash terminal on the same session
+    let manager = tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new();
+    let bridge = test_bridge(manager.task_registry());
+    let worktree = tempfile::tempdir().expect("worktree");
+    let stub = {
+        let script = worktree.path().join("stub_main.sh");
+        std::fs::write(&script, "#!/bin/sh\nexec cat\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        script
+    };
+
+    manager
+        .start(
+            "list-both-kinds-session",
+            worktree.path().to_path_buf(),
+            "claude-opus-4-8",
+            stub.to_str().unwrap(),
+            None,
+            None,
+        )
+        .await
+        .expect("main claude terminal");
+
+    manager
+        .start_terminal(
+            "list-both-kinds-session",
+            worktree.path().to_path_buf(),
+            "/bin/sh",
+        )
+        .await
+        .expect("bash terminal");
+
+    // When
+    let list: ListTasksResponse = call(
+        &bridge,
+        "ListTasks",
+        ListTasksRequest {
+            session_token: GOOD_TOKEN.to_string(),
+            daemon_instance_id: String::new(),
+        },
+    )
+    .await;
+
+    // Then — both PTY tool kinds are visible while running
+    assert!(
+        list.tasks.iter().any(|t| t.kind == "claude-cli"),
+        "ListTasks must include a claude-cli task"
+    );
+    assert!(
+        list.tasks.iter().any(|t| t.kind == "bash"),
+        "ListTasks must include a bash task"
+    );
+
+    manager.kill_all().await;
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn cancel_task_cancels_a_bash_pty_task() {
+    // Given — a long-lived bash PTY tool
+    let manager = tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new();
+    let registry = manager.task_registry();
+    let bridge = test_bridge(registry.clone());
+    let worktree = tempfile::tempdir().expect("worktree");
+
+    manager
+        .start(
+            "cancel-bash-session",
+            worktree.path().to_path_buf(),
+            "claude-opus-4-8",
+            "/bin/sleep",
+            None,
+            None,
+        )
+        .await
+        .expect("main claude terminal");
+
+    manager
+        .start_terminal(
+            "cancel-bash-session",
+            worktree.path().to_path_buf(),
+            "/bin/sleep",
+        )
+        .await
+        .expect("bash terminal");
+
+    let list: ListTasksResponse = call(
+        &bridge,
+        "ListTasks",
+        ListTasksRequest {
+            session_token: GOOD_TOKEN.to_string(),
+            daemon_instance_id: String::new(),
+        },
+    )
+    .await;
+    let bash_task = list
+        .tasks
+        .iter()
+        .find(|t| t.kind == "bash")
+        .expect("bash task must exist");
+    let bash_task_id = bash_task.task_id.clone();
+
+    // When — CancelTask on the bash PTY task
+    let resp: CancelTaskResponse = call(
+        &bridge,
+        "CancelTask",
+        CancelTaskRequest {
+            session_token: GOOD_TOKEN.to_string(),
+            task_id: bash_task_id.clone(),
+            daemon_instance_id: String::new(),
+        },
+    )
+    .await;
+    assert!(resp.ok, "CancelTask must return ok=true");
+
+    // Then — task reaches Cancelled
+    let handle = registry
+        .get_by_str(&bash_task_id)
+        .await
+        .expect("bash task handle");
+    wait_terminal(&handle).await;
+    assert_eq!(
+        handle.status(),
+        TaskStatus::Cancelled,
+        "bash PTY task must be Cancelled after CancelTask"
+    );
+
+    manager.kill_all().await;
+}
+
 // ─── Helper bodies ────────────────────────────────────────────────────────────
 
 struct ImmediateBody {

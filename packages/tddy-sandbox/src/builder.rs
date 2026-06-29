@@ -237,6 +237,8 @@ pub struct SandboxPlan {
     pub policy: PolicySpec,
     pub network: NetworkSpec,
     pub limits: ResourceLimits,
+    /// Optional stdin bytes fed to the confined child after spawn.
+    pub stdin: Option<Vec<u8>>,
 }
 
 /// Assembles a [`SandboxPlan`] from explicit, caller-supplied grants.
@@ -257,6 +259,8 @@ pub struct SandboxBuilder {
     policy: PolicySpec,
     network: NetworkSpec,
     limits: ResourceLimits,
+    cwd: Option<PathBuf>,
+    stdin: Option<Vec<u8>>,
 }
 
 impl SandboxBuilder {
@@ -283,7 +287,19 @@ impl SandboxBuilder {
             policy: PolicySpec::default(),
             network: NetworkSpec::default(),
             limits: ResourceLimits::default(),
+            cwd: None,
+            stdin: None,
         }
+    }
+
+    pub fn stdin(mut self, stdin: Option<Vec<u8>>) -> Self {
+        self.stdin = stdin;
+        self
+    }
+
+    pub fn cwd(mut self, cwd: Option<PathBuf>) -> Self {
+        self.cwd = cwd;
+        self
     }
 
     pub fn profile_path(mut self, p: impl Into<PathBuf>) -> Self {
@@ -380,6 +396,8 @@ impl SandboxBuilder {
             policy,
             network,
             limits,
+            cwd,
+            stdin,
         } = self;
 
         // Dedup reads by (host, kind), preserving first-seen order.
@@ -469,6 +487,7 @@ impl SandboxBuilder {
             profile_path,
             loopback_allow_ports: network.loopback_allow_ports.clone(),
             ipc_socket,
+            cwd,
         };
         spec.validate()?;
 
@@ -482,6 +501,7 @@ impl SandboxBuilder {
             policy,
             network,
             limits,
+            stdin,
         })
     }
 }

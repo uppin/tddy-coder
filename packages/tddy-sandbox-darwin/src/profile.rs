@@ -231,6 +231,7 @@ mod tests {
             profile_path: PathBuf::from("/tmp/tddy-render-test/profile.sb"),
             loopback_allow_ports: vec![],
             ipc_socket: None,
+            cwd: None,
         };
         SandboxPlan {
             spec,
@@ -242,6 +243,7 @@ mod tests {
             policy: PolicySpec::default(),
             network,
             limits: ResourceLimits::default(),
+            stdin: None,
         }
     }
 

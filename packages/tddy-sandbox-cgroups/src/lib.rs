@@ -9,7 +9,7 @@
 
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use nix::mount::MsFlags;
 use nix::sched::{unshare, CloneFlags};
@@ -101,6 +101,17 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
     cmd.args(&plan.spec.command[1..]);
     cmd.env_clear();
     cmd.envs(&plan.spec.env);
+    cmd.current_dir(
+        plan.spec
+            .cwd
+            .as_ref()
+            .unwrap_or(&plan.spec.project_root),
+    );
+    cmd.stdin(if plan.stdin.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    });
 
     // SAFETY: runs in the forked child before `execve`; only namespace setup + RO bind mounts.
     unsafe {
@@ -117,6 +128,15 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
              (the host may forbid unprivileged user namespaces)"
         ))
     })?;
+
+    if let Some(stdin_bytes) = &plan.stdin {
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin
+                .write_all(stdin_bytes)
+                .map_err(|e| SandboxError::Io(format!("write sandbox stdin: {e}")))?;
+        }
+    }
 
     if let Err(e) = std::fs::write(scope.join("cgroup.procs"), child.id().to_string()) {
         let _ = child.kill();
@@ -484,6 +504,7 @@ mod tests {
             profile_path: PathBuf::from("/tmp/tddy-cgroups-test/profile.sb"),
             loopback_allow_ports: vec![],
             ipc_socket: None,
+            cwd: None,
         };
         SandboxPlan {
             spec,
@@ -495,6 +516,7 @@ mod tests {
             policy: PolicySpec::default(),
             network: NetworkSpec::default(),
             limits,
+            stdin: None,
         }
     }
 

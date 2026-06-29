@@ -67,12 +67,13 @@ fn runner_args(tmp: &Path, stub_claude: &Path) -> (SandboxRunnerArgs, PathBuf) {
         model: TEST_MODEL.to_string(),
         grpc_socket: tmp.join("sandbox.grpc.sock"),
         tool_ipc_socket: tmp.join("tool_ipc.sock"),
-        tddy_tools_path: tddy_tools_path(),
+        tddy_tools_path: Some(tddy_tools_path()),
         ready_marker: tmp.join("sandbox.ready"),
         permission_mode: "auto".to_string(),
         grpc_listen_port: None,
         egress_shim_port: None,
         grpc_uds: None,
+        pty_command: vec![],
     };
     (args, egress)
 }

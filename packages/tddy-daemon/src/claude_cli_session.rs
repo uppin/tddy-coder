@@ -12,29 +12,18 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::PtySize;
 use prost::Message as _;
 use tddy_livekit::{LiveKitParticipant, RpcResult, RpcService, TokenGenerator};
 use tddy_rpc::{BidiStreamOutput, ResponseBody, RpcMessage};
 use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
-use tokio::sync::{broadcast, mpsc, watch, RwLock};
+use tddy_task::{TaskHandle, TaskId, TaskRegistry};
+use tokio::sync::{broadcast, mpsc, oneshot, watch, RwLock};
 
-/// Default terminal size for spawned claude sessions.
-const DEFAULT_TERM_ROWS: u16 = 24;
-const DEFAULT_TERM_COLS: u16 = 220;
-
-/// Capacity for the broadcast output channel (bytes chunks from PTY master to all subscribers).
-const OUTPUT_BROADCAST_CAPACITY: usize = 256;
-
-/// Rolling capture of PTY output for replay to late-connecting subscribers.
-///
-/// Broadcast channels only buffer for *current* subscribers — any output emitted before the first
-/// `stream_terminal_output` call is silently dropped (send returns `Err` with 0 receivers).
-/// The capture buffer accumulates all raw bytes from session start so that when a subscriber
-/// later connects it can replay the full screen state from the beginning.
-// Ratatui full-screen redraws are ~4–8 KB per frame; 64 KB only covers ~8–16 frames.
-// 512 KB gives ~64–128 frames of replay context for reconnecting clients.
-const CAPTURE_LIMIT_BYTES: usize = 524288; // 512 KB
+use crate::pty_registry::PtyRegistry;
+use crate::pty_runtime::{
+    PtyReady, PtyRuntime, PtySpawnSpec, DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS,
+};
 
 /// Reserved terminal id for the original `claude` terminal of a session.
 ///
@@ -44,6 +33,9 @@ pub const MAIN_TERMINAL_ID: &str = "main";
 
 /// Handle to a running process in a PTY (the `claude` CLI for the main terminal, or a login shell
 /// for started terminals).
+///
+/// Backed by a [`TaskHandle`] in the shared [`TaskRegistry`]; I/O is plumbed through the task's
+/// PTY channel and resize control lives in [`PtyRegistry`].
 pub struct PtyHandle {
     /// Stable identifier within the session; [`MAIN_TERMINAL_ID`] for the main `claude` terminal.
     pub terminal_id: String,
@@ -61,10 +53,12 @@ pub struct PtyHandle {
     pub pid: u32,
     /// PTY master — kept alive for the session's lifetime to avoid SIGHUP; also allows resize.
     master: Arc<std::sync::Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
-    /// Becomes true (and sender drops) when the PTY reader thread exits — signals no more output.
+    /// Becomes true (and sender drops) when the task reaches a terminal status.
     pub pty_done: watch::Receiver<bool>,
     /// Current PTY dimensions, updated by `resize()`.
     current_size: Arc<std::sync::Mutex<PtySize>>,
+    /// Owning task in the shared registry.
+    task_id: TaskId,
 }
 
 impl PtyHandle {
@@ -138,18 +132,26 @@ pub struct ControlChangeEvent {
     pub holder_screen_id: String,
 }
 
-/// Registry of active session tools: `session_id → (terminal_id → PtyHandle)`.
-///
-/// Each session may run multiple identified tools — the main `claude` terminal under
-/// [`MAIN_TERMINAL_ID`] plus additional Bash tools under fresh ids.
-type TerminalRegistry = Arc<RwLock<HashMap<String, HashMap<String, Arc<PtyHandle>>>>>;
+/// Per-terminal metadata: maps a terminal id to its backing task.
+#[derive(Debug, Clone)]
+struct TerminalEntry {
+    task_id: TaskId,
+    worktree_path: PathBuf,
+    model: String,
+}
+
+/// `session_id → (terminal_id → TerminalEntry)`.
+type TerminalIndex = Arc<RwLock<HashMap<String, HashMap<String, TerminalEntry>>>>;
 
 /// Per-session control leases: `session_id → ControlLeaseInfo`.
 type ControlRegistry = Arc<RwLock<HashMap<String, ControlLeaseInfo>>>;
 
-/// Manages the [`TerminalRegistry`] of active session tools and the per-session control leases.
+/// Manages PTY session tools via the shared [`TaskRegistry`] and per-session control leases.
 pub struct ClaudeCliSessionManager {
-    registry: TerminalRegistry,
+    task_registry: TaskRegistry,
+    pty_registry: PtyRegistry,
+    /// Maps `(session_id, terminal_id)` to the backing task.
+    terminals: TerminalIndex,
     /// Exclusive control lease per session.
     control: ControlRegistry,
     /// Fan-out channel for control-change events. Subscribers call [`Self::subscribe_control`].
@@ -165,12 +167,24 @@ impl Default for ClaudeCliSessionManager {
 impl ClaudeCliSessionManager {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
+        Self::with_task_registry(TaskRegistry::new())
+    }
+
+    /// Create a manager sharing the given [`TaskRegistry`] (used by `ConnectionServiceImpl`).
+    pub fn with_task_registry(task_registry: TaskRegistry) -> Self {
         let (control_tx, _) = broadcast::channel(64);
         Self {
-            registry: Arc::new(RwLock::new(HashMap::new())),
+            task_registry,
+            pty_registry: PtyRegistry::new(),
+            terminals: Arc::new(RwLock::new(HashMap::new())),
             control: Arc::new(RwLock::new(HashMap::new())),
             control_tx,
         }
+    }
+
+    /// Shared task registry — PTY tools and fast tools use the same instance.
+    pub fn task_registry(&self) -> TaskRegistry {
+        self.task_registry.clone()
     }
 
     /// Build the argv for the `claude` process.
@@ -264,72 +278,164 @@ impl ClaudeCliSessionManager {
         model: &str,
         argv: Vec<String>,
     ) -> anyhow::Result<Arc<PtyHandle>> {
-        let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<Bytes>();
-        let (stdout_tx, _stdout_rx) = broadcast::channel::<Bytes>(OUTPUT_BROADCAST_CAPACITY);
-        let capture = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let spec = PtySpawnSpec {
+            argv,
+            worktree_path: worktree_path.clone(),
+            session_id: session_id.to_string(),
+            terminal_id: terminal_id.to_string(),
+            kind: kind.to_string(),
+        };
 
-        let session_id_owned = session_id.to_string();
-        let terminal_id_owned = terminal_id.to_string();
-        let worktree_clone = worktree_path.clone();
-        let stdout_tx_clone = stdout_tx.clone();
-        let capture_clone = Arc::clone(&capture);
-        let reg = Arc::clone(&self.registry);
+        let task = PtyRuntime::spawn(&self.task_registry, &self.pty_registry, spec, ready_tx).await;
 
-        // portable-pty I/O is blocking; spawn everything from a dedicated OS thread.
-        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
-        std::thread::spawn(move || {
-            let res = Self::spawn_in_pty(
-                &session_id_owned,
-                &terminal_id_owned,
-                worktree_clone,
-                argv,
-                stdin_rx,
-                stdout_tx_clone,
-                capture_clone,
-                reg,
+        let ready = ready_rx
+            .await
+            .map_err(|_| anyhow::anyhow!("PTY runtime did not signal ready"))?
+            .map_err(|e| anyhow::anyhow!("PTY spawn failed: {e}"))?;
+
+        let handle = self.build_pty_handle(task, terminal_id, kind, worktree_path, model, ready)?;
+
+        self.terminals
+            .write()
+            .await
+            .entry(session_id.to_string())
+            .or_default()
+            .insert(
+                terminal_id.to_string(),
+                TerminalEntry {
+                    task_id: handle.task_id.clone(),
+                    worktree_path: handle.worktree_path.clone(),
+                    model: handle.model.clone(),
+                },
             );
-            let _ = result_tx.send(res);
+
+        self.spawn_terminal_cleanup(
+            session_id.to_string(),
+            terminal_id.to_string(),
+            handle.task_id.clone(),
+        );
+
+        log::info!(
+            target: "tddy_daemon::claude_cli_session",
+            "spawn_tool: registered session={} terminal={} kind={} pid={} task_id={}",
+            session_id,
+            terminal_id,
+            kind,
+            handle.pid,
+            handle.task_id
+        );
+
+        Ok(Arc::new(handle))
+    }
+
+    fn build_pty_handle(
+        &self,
+        task: Arc<TaskHandle>,
+        terminal_id: &str,
+        kind: &str,
+        worktree_path: PathBuf,
+        model: &str,
+        ready: PtyReady,
+    ) -> anyhow::Result<PtyHandle> {
+        let channel = task
+            .channel("0")
+            .ok_or_else(|| anyhow::anyhow!("PTY task missing channel 0"))?;
+        let stdin_tx = channel
+            .stdin_sender()
+            .ok_or_else(|| anyhow::anyhow!("PTY channel missing stdin"))?;
+
+        let (pty_done_tx, pty_done_rx) = watch::channel(false);
+        let mut status_rx = task.status_watch();
+        tokio::spawn(async move {
+            loop {
+                if status_rx.borrow().is_terminal() {
+                    let _ = pty_done_tx.send(true);
+                    break;
+                }
+                if status_rx.changed().await.is_err() {
+                    break;
+                }
+            }
         });
 
-        let (pid, master, pty_done) = result_rx
-            .await
-            .map_err(|_| anyhow::anyhow!("PTY spawn thread did not respond"))??;
-
-        let handle = Arc::new(PtyHandle {
+        Ok(PtyHandle {
             terminal_id: terminal_id.to_string(),
             kind: kind.to_string(),
             worktree_path,
             model: model.to_string(),
             stdin_tx,
-            stdout_tx,
-            capture,
-            pid,
-            master,
-            pty_done,
-            current_size: Arc::new(std::sync::Mutex::new(PtySize {
-                rows: DEFAULT_TERM_ROWS,
-                cols: DEFAULT_TERM_COLS,
-                pixel_width: 0,
-                pixel_height: 0,
-            })),
+            stdout_tx: channel.output_broadcast(),
+            capture: channel.capture_arc(),
+            pid: ready.pid,
+            master: ready.master,
+            pty_done: pty_done_rx,
+            current_size: ready.current_size,
+            task_id: task.id.clone(),
+        })
+    }
+
+    fn spawn_terminal_cleanup(&self, session_id: String, terminal_id: String, task_id: TaskId) {
+        let terminals = Arc::clone(&self.terminals);
+        let task_registry = self.task_registry.clone();
+        tokio::spawn(async move {
+            let task = match task_registry.get(&task_id).await {
+                Some(t) => t,
+                None => return,
+            };
+            let mut status_rx = task.status_watch();
+            loop {
+                if status_rx.borrow().is_terminal() {
+                    break;
+                }
+                if status_rx.changed().await.is_err() {
+                    break;
+                }
+            }
+            let mut reg = terminals.write().await;
+            if let Some(tools) = reg.get_mut(&session_id) {
+                if tools
+                    .get(&terminal_id)
+                    .is_some_and(|e| e.task_id == task_id)
+                {
+                    tools.remove(&terminal_id);
+                }
+                if tools.is_empty() {
+                    reg.remove(&session_id);
+                }
+            }
         });
+    }
 
-        // Insert into the registry BEFORE returning so that a racing streamSessionTerminalIO
-        // call (browser connects immediately after startSession returns) can find the handle.
-        self.registry
-            .write()
+    async fn resolve_pty_handle(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+    ) -> Option<Arc<PtyHandle>> {
+        let entry = self
+            .terminals
+            .read()
             .await
-            .entry(session_id.to_string())
-            .or_default()
-            .insert(terminal_id.to_string(), Arc::clone(&handle));
-
-        log::info!(
-            target: "tddy_daemon::claude_cli_session",
-            "spawn_tool: registered session={} terminal={} kind={} pid={}",
-            session_id, terminal_id, kind, handle.pid
-        );
-
-        Ok(handle)
+            .get(session_id)?
+            .get(terminal_id)?
+            .clone();
+        let task = self.task_registry.get(&entry.task_id).await?;
+        let control = self.pty_registry.get(&entry.task_id).await?;
+        let ready = PtyReady {
+            pid: task.pid_slot.lock().unwrap().first().copied().unwrap_or(0),
+            master: control.master,
+            current_size: control.current_size,
+        };
+        self.build_pty_handle(
+            task,
+            terminal_id,
+            &control.kind,
+            entry.worktree_path,
+            &entry.model,
+            ready,
+        )
+        .ok()
+        .map(Arc::new)
     }
 
     /// Resume (relaunch) an existing session by spawning a new process in the same worktree.
@@ -378,97 +484,91 @@ impl ClaudeCliSessionManager {
         session_id: &str,
         terminal_id: &str,
     ) -> Option<Arc<PtyHandle>> {
-        self.registry
-            .read()
-            .await
-            .get(session_id)
-            .and_then(|tools| tools.get(terminal_id).cloned())
+        self.resolve_pty_handle(session_id, terminal_id).await
     }
 
     /// List all running tools of a session, including the `MAIN_TERMINAL_ID` terminal.
     pub async fn list_terminals(&self, session_id: &str) -> Vec<Arc<PtyHandle>> {
-        self.registry
+        let ids: Vec<String> = self
+            .terminals
             .read()
             .await
             .get(session_id)
-            .map(|tools| tools.values().cloned().collect())
-            .unwrap_or_default()
+            .map(|tools| tools.keys().cloned().collect())
+            .unwrap_or_default();
+        let mut out = Vec::new();
+        for terminal_id in ids {
+            if let Some(handle) = self.resolve_pty_handle(session_id, &terminal_id).await {
+                out.push(handle);
+            }
+        }
+        out
     }
 
-    /// Stop a started tool: terminate its process and remove it from the registry.
+    /// Stop a started tool: cancel its task and remove it from the registry.
     /// Returns `true` if the tool existed. The reserved `MAIN_TERMINAL_ID` is not stoppable
     /// here (callers must reject it before calling).
     pub async fn stop_terminal(&self, session_id: &str, terminal_id: &str) -> bool {
-        let handle = {
-            let mut reg = self.registry.write().await;
+        let task_id = {
+            let mut reg = self.terminals.write().await;
             let removed = reg
                 .get_mut(session_id)
                 .and_then(|tools| tools.remove(terminal_id));
-            // Drop the session entry once its last tool is gone.
             if reg.get(session_id).is_some_and(|tools| tools.is_empty()) {
                 reg.remove(session_id);
             }
-            removed
+            removed.map(|e| e.task_id)
         };
 
-        match handle {
-            Some(handle) => {
-                // POSIX interactive shells ignore SIGTERM, so escalate to SIGKILL to guarantee the
-                // process exits. `signal_pid` treats an already-dead pid (ESRCH) as success.
-                #[cfg(unix)]
-                {
-                    let pid = handle.pid as i32;
-                    let _ = crate::session_deletion::signal_pid(pid, libc::SIGTERM);
-                    let _ = crate::session_deletion::signal_pid(pid, libc::SIGKILL);
-                }
+        match task_id {
+            Some(id) => {
+                self.task_registry.cancel_task(&id).await;
                 true
             }
             None => false,
         }
     }
 
-    /// Stop all PTY terminals belonging to `session_id`: SIGTERM each and remove from registry.
+    /// Stop all PTY terminals belonging to `session_id`: cancel each task and remove from registry.
     ///
     /// Called when a session ends (natural exit or explicit termination) so its processes don't
     /// outlive the session. This is the per-session counterpart to [`kill_all`].
     pub async fn stop_session(&self, session_id: &str) {
-        let handles = {
-            let mut reg = self.registry.write().await;
-            reg.remove(session_id).unwrap_or_default()
+        let task_ids: Vec<TaskId> = {
+            let mut reg = self.terminals.write().await;
+            reg.remove(session_id)
+                .map(|tools| tools.into_values().map(|e| e.task_id).collect())
+                .unwrap_or_default()
         };
 
-        if handles.is_empty() {
-            return;
-        }
-
-        #[cfg(unix)]
-        for (terminal_id, handle) in &handles {
+        for task_id in task_ids {
             log::info!(
                 target: "tddy_daemon::claude_cli_session",
-                "stop_session: session={} terminal={} pid={} — sending SIGTERM",
-                session_id, terminal_id, handle.pid
+                "stop_session: session={} task_id={} — cancelling task",
+                session_id,
+                task_id
             );
-            let _ = crate::session_deletion::signal_pid(handle.pid as i32, libc::SIGTERM);
+            self.task_registry.cancel_task(&task_id).await;
         }
     }
 
-    /// Kill all tracked PTY processes across every session: SIGTERM each, wait up to 5 s,
-    /// then SIGKILL any that remain. Clears the registry on completion.
+    /// Kill all tracked PTY processes across every session: cancel each task, wait up to 5 s,
+    /// then SIGKILL any child PIDs that remain. Clears the terminal index on completion.
     ///
     /// Called during daemon shutdown so that spawned `claude` / shell processes do not
     /// outlive the daemon as orphans.
     pub async fn kill_all(&self) {
-        let pids: Vec<u32> = {
-            let mut reg = self.registry.write().await;
-            let pids = reg
+        let task_ids: Vec<TaskId> = {
+            let mut reg = self.terminals.write().await;
+            let ids = reg
                 .values()
-                .flat_map(|tools| tools.values().map(|h| h.pid))
+                .flat_map(|tools| tools.values().map(|e| e.task_id.clone()))
                 .collect();
             reg.clear();
-            pids
+            ids
         };
 
-        if pids.is_empty() {
+        if task_ids.is_empty() {
             log::debug!(
                 target: "tddy_daemon::claude_cli_session",
                 "kill_all: no registered sessions — nothing to terminate"
@@ -476,19 +576,32 @@ impl ClaudeCliSessionManager {
             return;
         }
 
+        let pids: Vec<u32> = {
+            let mut collected = Vec::new();
+            for id in &task_ids {
+                if let Some(handle) = self.task_registry.get(id).await {
+                    collected.extend(handle.pid_slot.lock().unwrap().iter().copied());
+                    handle.cancel.cancel();
+                }
+            }
+            collected
+        };
+
         log::info!(
             target: "tddy_daemon::claude_cli_session",
-            "kill_all: sending SIGTERM to {} process(es): {:?}",
+            "kill_all: cancelling {} task(s), {} pid(s): {:?}",
+            task_ids.len(),
             pids.len(),
             pids
         );
 
+        for id in &task_ids {
+            self.task_registry.cancel_task(id).await;
+        }
+
         tokio::task::spawn_blocking(move || {
             #[cfg(unix)]
             {
-                for &pid in &pids {
-                    let _ = crate::session_deletion::signal_pid(pid as i32, libc::SIGTERM);
-                }
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
                 while std::time::Instant::now() < deadline {
                     let any_alive = pids
@@ -507,7 +620,7 @@ impl ClaudeCliSessionManager {
                 if still_alive.is_empty() {
                     log::info!(
                         target: "tddy_daemon::claude_cli_session",
-                        "kill_all: all processes exited cleanly after SIGTERM"
+                        "kill_all: all processes exited cleanly after cancel"
                     );
                 } else {
                     log::warn!(
@@ -607,223 +720,6 @@ impl ClaudeCliSessionManager {
     /// `holder_screen_id`. The displaced screen should render the "Claim terminal" CTA.
     pub fn subscribe_control(&self) -> broadcast::Receiver<ControlChangeEvent> {
         self.control_tx.subscribe()
-    }
-
-    // --- private helpers ---
-
-    /// Spawn the child in a PTY. Runs in a dedicated OS thread (portable-pty I/O is blocking).
-    ///
-    /// Returns `(pid, Arc<Mutex<MasterPty>>)` on success. Launches background threads for I/O
-    /// forwarding and exit monitoring. The registry `Arc` is used for cleanup on exit.
-    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-    fn spawn_in_pty(
-        session_id: &str,
-        terminal_id: &str,
-        worktree_path: PathBuf,
-        argv: Vec<String>,
-        stdin_rx: mpsc::UnboundedReceiver<Bytes>,
-        stdout_tx: broadcast::Sender<Bytes>,
-        capture: Arc<std::sync::Mutex<Vec<u8>>>,
-        reg: TerminalRegistry,
-    ) -> anyhow::Result<(
-        u32,
-        Arc<std::sync::Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
-        watch::Receiver<bool>,
-    )> {
-        let pty_system = native_pty_system();
-        let pair = pty_system
-            .openpty(PtySize {
-                rows: DEFAULT_TERM_ROWS,
-                cols: DEFAULT_TERM_COLS,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|e| anyhow::anyhow!("openpty failed: {}", e))?;
-
-        // `argv` is prebuilt by the caller (claude argv via `build_claude_argv`, or `[shell]` for a
-        // Bash tool) so the command is testable without a real PTY.
-        let mut cmd = CommandBuilder::new(&argv[0]);
-        for arg in &argv[1..] {
-            cmd.arg(arg);
-        }
-        cmd.cwd(&worktree_path);
-        // Ensure the child sees a proper terminal type for TUI rendering.
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
-
-        // Spawn the child on the slave side. The slave is consumed/closed after spawn so the
-        // master sees EOF when the child exits.
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| anyhow::anyhow!("failed to spawn tool {:?}: {}", argv.first(), e))?;
-        // Drop slave so master sees EOF on child exit.
-        drop(pair.slave);
-
-        let pid = child
-            .process_id()
-            .ok_or_else(|| anyhow::anyhow!("spawned child has no pid"))?;
-
-        let master = Arc::new(std::sync::Mutex::new(pair.master));
-
-        // Watch channel: reader thread holds the sender; drops it on exit so receivers know
-        // the PTY is done and no more output will arrive.
-        let (pty_done_tx, pty_done_rx) = watch::channel(false);
-
-        // Reader thread: PTY master → capture buffer + broadcast channel.
-        let master_for_reader = Arc::clone(&master);
-        let stdout_tx_reader = stdout_tx.clone();
-        std::thread::spawn(move || {
-            let reader = {
-                let m = master_for_reader.lock().unwrap();
-                m.try_clone_reader()
-            };
-            match reader {
-                Err(e) => {
-                    log::warn!(
-                        target: "tddy_daemon::claude_cli_session",
-                        "PTY reader: try_clone_reader failed: {}",
-                        e
-                    );
-                }
-                Ok(mut r) => {
-                    let mut buf = vec![0u8; 4096];
-                    loop {
-                        match std::io::Read::read(&mut r, &mut buf) {
-                            Ok(0) => break,
-                            Ok(n) => {
-                                log::trace!(
-                                    target: "tddy_daemon::claude_cli_session",
-                                    "PTY output: {} bytes: {:?}",
-                                    n,
-                                    String::from_utf8_lossy(&buf[..n])
-                                );
-                                // Append to the capture ring (trimmed to CAPTURE_LIMIT_BYTES)
-                                // so late-connecting subscribers can replay all output so far.
-                                if let Ok(mut cap) = capture.lock() {
-                                    cap.extend_from_slice(&buf[..n]);
-                                    if cap.len() > CAPTURE_LIMIT_BYTES {
-                                        let excess = cap.len() - CAPTURE_LIMIT_BYTES;
-                                        cap.drain(0..excess);
-                                        log::debug!(
-                                            target: "tddy_daemon::claude_cli_session",
-                                            "PTY capture trimmed: dropped {} bytes, buffer={} bytes",
-                                            excess,
-                                            cap.len()
-                                        );
-                                    }
-                                }
-                                let chunk = Bytes::copy_from_slice(&buf[..n]);
-                                let _ = stdout_tx_reader.send(chunk);
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                }
-            }
-            // Signal that no more output will be produced. Dropping the sender is equivalent
-            // to sending `true` — receivers see the channel closed.
-            drop(pty_done_tx);
-        });
-
-        // Writer thread: mpsc channel → PTY master.
-        let master_for_writer = Arc::clone(&master);
-        let mut stdin_rx_thread = stdin_rx;
-        std::thread::spawn(move || {
-            let writer = {
-                let m = master_for_writer.lock().unwrap();
-                m.take_writer()
-            };
-            match writer {
-                Err(e) => {
-                    log::warn!(
-                        target: "tddy_daemon::claude_cli_session",
-                        "PTY writer: take_writer failed: {}",
-                        e
-                    );
-                }
-                Ok(mut w) => {
-                    // Use a blocking recv loop (we're already on a std thread).
-                    let rt = tokio::runtime::Handle::try_current();
-                    // If inside a tokio context, use block_in_place; otherwise create a local runtime.
-                    if let Ok(handle) = rt {
-                        tokio::task::block_in_place(|| {
-                            loop {
-                                // block_on a single recv at a time
-                                let data = handle.block_on(stdin_rx_thread.recv());
-                                match data {
-                                    None => break,
-                                    Some(bytes) => {
-                                        log::trace!(
-                                            target: "tddy_daemon::claude_cli_session",
-                                            "PTY input: {} bytes: {:?}",
-                                            bytes.len(),
-                                            String::from_utf8_lossy(&bytes)
-                                        );
-                                        if std::io::Write::write_all(&mut w, &bytes).is_err() {
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                    } else {
-                        // No tokio context — use a simple busy approach
-                        while let Some(bytes) = stdin_rx_thread.blocking_recv() {
-                            log::trace!(
-                                target: "tddy_daemon::claude_cli_session",
-                                "PTY input: {} bytes: {:?}",
-                                bytes.len(),
-                                String::from_utf8_lossy(&bytes)
-                            );
-                            if std::io::Write::write_all(&mut w, &bytes).is_err() {
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        // Exit monitor thread: wait for child exit → remove this tool from the registry.
-        let sid = session_id.to_string();
-        let tid = terminal_id.to_string();
-        let mut child_monitor = child;
-        std::thread::spawn(move || {
-            if let Err(e) = child_monitor.wait() {
-                log::debug!(
-                    target: "tddy_daemon::claude_cli_session",
-                    "child wait error for session {} terminal {}: {}",
-                    sid,
-                    tid,
-                    e
-                );
-            }
-            log::info!(
-                target: "tddy_daemon::claude_cli_session",
-                "tool process exited for session {} terminal {}",
-                sid,
-                tid
-            );
-            // Remove from registry using a lightweight tokio runtime block. Dropping the session
-            // entry once its last tool is gone is idempotent with `stop_terminal`.
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                let reg_clone = Arc::clone(&reg);
-                let sid_clone = sid.clone();
-                let tid_clone = tid.clone();
-                handle.spawn(async move {
-                    let mut reg = reg_clone.write().await;
-                    if let Some(tools) = reg.get_mut(&sid_clone) {
-                        tools.remove(&tid_clone);
-                        if tools.is_empty() {
-                            reg.remove(&sid_clone);
-                        }
-                    }
-                });
-            }
-        });
-
-        Ok((pid, master, pty_done_rx))
     }
 }
 

@@ -48,6 +48,7 @@ enum ChannelKindProto {
   CHANNEL_KIND_STDOUT = 1;
   CHANNEL_KIND_STDERR = 2;
   CHANNEL_KIND_COMBINED = 3;
+  CHANNEL_KIND_PTY = 4;
 }
 
 // ──────────────────────────────────────────────────────────── messages ───────

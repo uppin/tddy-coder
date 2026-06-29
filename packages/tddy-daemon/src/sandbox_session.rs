@@ -11,8 +11,7 @@ use tddy_rpc::Status;
 use tokio::sync::{broadcast, mpsc, Mutex};
 
 use tddy_sandbox::{
-    MountSpec, NetworkSpec, SandboxBuilder, SandboxContextDir, SandboxError, SandboxPlan,
-    SecretSource,
+    MountSpec, SandboxContextDir, SandboxError, SandboxPlan,
 };
 use tddy_service::proto::connection::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
@@ -193,7 +192,7 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
 /// the ready marker), AF_UNIX on Linux (a netns-isolated cgroups jail can't be reached over
 /// loopback TCP — a UDS on the shared filesystem can).
 #[cfg(target_os = "linux")]
-async fn connect_session_client(
+pub async fn connect_sandbox_session_client(
     _ready_marker: &Path,
     grpc_socket: &Path,
 ) -> Result<SandboxServiceClient<tonic::transport::Channel>, String> {
@@ -203,11 +202,30 @@ async fn connect_session_client(
 }
 
 #[cfg(not(target_os = "linux"))]
-async fn connect_session_client(
+pub async fn connect_sandbox_session_client(
     ready_marker: &Path,
     _grpc_socket: &Path,
 ) -> Result<SandboxServiceClient<tonic::transport::Channel>, String> {
     connect_sandbox_client(ready_marker).await
+}
+
+/// Dial the in-jail gRPC server over the platform's transport: loopback TCP on macOS (port from
+/// the ready marker), AF_UNIX on Linux (a netns-isolated cgroups jail can't be reached over
+/// loopback TCP — a UDS on the shared filesystem can).
+#[cfg(target_os = "linux")]
+async fn connect_session_client(
+    ready_marker: &Path,
+    grpc_socket: &Path,
+) -> Result<SandboxServiceClient<tonic::transport::Channel>, String> {
+    connect_sandbox_session_client(ready_marker, grpc_socket).await
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn connect_session_client(
+    ready_marker: &Path,
+    grpc_socket: &Path,
+) -> Result<SandboxServiceClient<tonic::transport::Channel>, String> {
+    connect_sandbox_session_client(ready_marker, grpc_socket).await
 }
 
 /// Dial the sandbox gRPC server and drive the host side via the shared relay. PTY output fans into
@@ -269,8 +287,7 @@ pub fn sandbox_error_to_status(err: SandboxError) -> Status {
     }
 }
 
-/// Build env map for sandbox-runner inside the jail. Delegates to the shared
-/// [`tddy_sandbox::default_runner_env`] so the daemon and the standalone app share one definition.
+/// Build env map for sandbox-runner inside the jail.
 pub fn build_sandbox_runner_env(
     scratch_home: &Path,
     scratch_tmp: &Path,
@@ -278,13 +295,15 @@ pub fn build_sandbox_runner_env(
     tool_ipc_socket: &Path,
     egress_dir: &Path,
 ) -> std::collections::BTreeMap<String, String> {
-    tddy_sandbox::default_runner_env(
+    let mut env = tddy_sandbox::scratch_runner_env(
         scratch_home,
         scratch_tmp,
         session_id,
         tool_ipc_socket,
         egress_dir,
-    )
+    );
+    env.extend(tddy_sandbox_recipes::claude_runner_env_overlay(scratch_tmp));
+    env
 }
 
 /// Recursively copy a directory tree (follows symlinks).
@@ -488,65 +507,24 @@ pub struct SandboxRunnerSpawn {
     pub mounts: Vec<MountSpec>,
 }
 
-/// Assemble the explicit [`SandboxPlan`] for a runner spawn: the Claude read recipe (plus the
-/// runner binary's own deps), credentials copy, policy, loopback network (with OAuth inbound), env,
-/// and — when a host `CLAUDE_CODE_OAUTH_TOKEN` is set — the out-of-band OAuth secret.
+/// Assemble the explicit [`SandboxPlan`] for a runner spawn via `tddy-sandbox-recipes`.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub fn build_sandbox_plan(params: SandboxRunnerSpawn) -> Result<SandboxPlan, SandboxError> {
-    let mut reads = Vec::new();
-    if let Some(idx) = params
-        .runner_argv
-        .iter()
-        .position(|a| a == "--claude-binary")
-    {
-        if let Some(claude) = params.runner_argv.get(idx + 1) {
-            let claude = canonical_binary_path(claude).unwrap_or_else(|| PathBuf::from(claude));
-            reads.extend(tddy_sandbox::claude_required_reads(&claude));
-        }
-    } else {
-        reads.extend(tddy_sandbox::system_baseline_reads());
-    }
-    if let Some(runner) = params.runner_argv.first() {
-        if let Some(canon) = canonical_binary_path(runner) {
-            reads.extend(tddy_sandbox::binary_exec_reads(&canon));
-        }
-    }
+    use tddy_sandbox_recipes::{build_runner_plan, RunnerPlanRequest};
 
-    let scratch_home = params.scratch_dir.join("home");
-    let mut copies = Vec::new();
-    if let Some(home) = std::env::var_os("HOME") {
-        copies.extend(tddy_sandbox::claude_required_copies(
-            &PathBuf::from(home),
-            &scratch_home,
-        ));
-    }
-
-    let mut builder = SandboxBuilder::new(
-        params.project_root,
-        params.scratch_dir,
-        params.egress_dir,
-        params.runner_argv,
-    )
-    .profile_path(params.profile_path)
-    .ipc_socket(params.ipc_socket)
-    .reads(reads)
-    .mounts(params.mounts)
-    .copies(copies)
-    .policy(tddy_sandbox::claude_policy())
-    .network(NetworkSpec {
+    build_runner_plan(RunnerPlanRequest {
+        project_root: params.project_root,
+        scratch_dir: params.scratch_dir,
+        egress_dir: params.egress_dir,
+        profile_path: params.profile_path,
+        runner_argv: params.runner_argv,
+        env: params.env,
         loopback_allow_ports: params.loopback_allow_ports,
-        allow_oauth_inbound: true,
+        ipc_socket: params.ipc_socket,
+        mounts: params.mounts,
+        recipe: None,
+        host_home: std::env::var_os("HOME").map(PathBuf::from),
     })
-    .env_map(params.env);
-
-    if let Some(token) = std::env::var("CLAUDE_CODE_OAUTH_TOKEN")
-        .ok()
-        .filter(|t| !t.trim().is_empty())
-    {
-        builder = builder.secret("CLAUDE_CODE_OAUTH_TOKEN", SecretSource::Value(token));
-    }
-
-    builder.build()
 }
 
 /// Spawn sandbox-runner inside Seatbelt jail.

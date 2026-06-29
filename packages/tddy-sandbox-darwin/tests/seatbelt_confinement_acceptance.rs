@@ -8,9 +8,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use tddy_sandbox::format_egress_logs;
-use tddy_sandbox::{
-    claude_policy, claude_required_copies, claude_required_reads, NetworkSpec, SandboxBuilder,
-    SandboxPlan,
+use tddy_sandbox::{NetworkSpec, SandboxBuilder, SandboxPlan};
+use tddy_sandbox_recipes::{
+    claude_credentials_copies, claude_interactive_policy, process_claude_exec_reads,
 };
 
 /// Locate the real `claude` binary, canonicalized. Prefers the newest versioned binary under
@@ -71,9 +71,9 @@ fn strict_claude_plan(
 
     SandboxBuilder::new(project_root, scratch, egress, command)
         .profile_path(project_root.join("profile.sb"))
-        .reads(claude_required_reads(claude_bin))
-        .copies(claude_required_copies(&host_home, &scratch_home))
-        .policy(claude_policy())
+        .reads(process_claude_exec_reads(claude_bin))
+        .copies(claude_credentials_copies(&host_home, &scratch_home))
+        .policy(claude_interactive_policy())
         .network(NetworkSpec {
             loopback_allow_ports: vec![],
             allow_oauth_inbound: true,
@@ -129,7 +129,7 @@ fn strict_system_plan(project_root: &Path, egress: &Path, command: Vec<String>) 
     SandboxBuilder::new(project_root, scratch, egress, command)
         .profile_path(project_root.join("profile.sb"))
         .reads(tddy_sandbox::system_baseline_reads())
-        .policy(tddy_sandbox::claude_policy())
+        .policy(tddy_sandbox_recipes::shell_interactive_policy())
         .network(NetworkSpec::default())
         .env_map(env)
         .build()

@@ -310,3 +310,22 @@ pub async fn relay_egress_request(req: EgressRequest) -> EgressResponse {
         },
     }
 }
+
+/// Tool handler that rejects all in-jail tool requests (generic confined actions).
+pub struct NullToolHandler;
+
+#[async_trait]
+impl HostToolHandler for NullToolHandler {
+    async fn execute(
+        &self,
+        _session_id: &str,
+        tool_name: &str,
+        _args_json: &str,
+    ) -> ExecuteToolResponse {
+        ExecuteToolResponse {
+            is_error: true,
+            error_message: format!("tools unsupported in generic pty action: {tool_name}"),
+            ..Default::default()
+        }
+    }
+}

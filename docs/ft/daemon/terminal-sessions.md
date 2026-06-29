@@ -1,5 +1,9 @@
 # Multiple Tools per Session (Bash tool)
 
+> **Updated: 2026-06-29** — PTY tools (claude-cli, bash) are spawned via `PtyRuntime` into the shared
+> `TaskRegistry` and appear in `tasks.TaskService.ListTasks`. `PtyRegistry` holds resize/control
+> handles keyed by `task_id`. Terminal RPCs remain the external contract (compat layer).
+>
 > **Updated: 2026-06-26** — `StreamTerminalOutputRequest` gains `initial_cols`/`initial_rows`: daemon resizes PTY before replay, drains stale broadcast, triggers SIGWINCH — eliminates 220-col garbling on browser reconnect. `PtyHandle::send_input` strips OSC resize escapes. `kill_all()` added for clean daemon shutdown. Capture limit raised 64 KB → 512 KB.
 >
 > **Updated: 2026-06-25** — Reframed from "attachable terminal sessions" to **running multiple

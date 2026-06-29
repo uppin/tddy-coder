@@ -421,6 +421,18 @@ fn main() -> anyhow::Result<()> {
                 service: Arc::new(task_server) as Arc<dyn tddy_rpc::RpcService>,
             });
 
+            // ActionService — start tools by kind via tddy-actions runtimes.
+            let action_service_impl = tddy_daemon::action_service::ActionServiceImpl::new(
+                task_registry.clone(),
+                tddy_actions::ActionCatalog::new(),
+                vm_user_resolver.clone(),
+            );
+            let action_server = tddy_service::ActionServiceServer::new(action_service_impl);
+            rpc_entries.push(tddy_rpc::ServiceEntry {
+                name: "actions.ActionService",
+                service: Arc::new(action_server) as Arc<dyn tddy_rpc::RpcService>,
+            });
+
             // VM lifecycle service — gated on auth being configured (same as ConnectionService).
             let vm_state_file = {
                 let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());

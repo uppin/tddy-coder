@@ -1,8 +1,18 @@
 # Long-running background Tasks
 
 **Product area:** Daemon
-**Updated:** 2026-06-24
-**Status:** In development — red phase
+**Updated:** 2026-06-29
+**Status:** State B — unified actions runtime (backend)
+
+## Unified actions (2026-06-29)
+
+All long-running tools — fast tools, PTY terminals (claude-cli/bash), tddy-coder, tddy-build actions,
+and session actions — register in the shared `TaskRegistry` via `packages/tddy-actions` runtimes
+(`ProcessRuntime`, `PtyRuntime`, `PipelineRuntime`). Optional sandbox metadata is attached via
+`SandboxRequest` on `ActionSpec`; full in-jail execution for arbitrary kinds is follow-up work.
+
+New RPC: `actions.ActionService` (`ListActionKinds`, `StartAction`, `GetAction`). Existing
+`tasks.TaskService` is unchanged; PTY tools now appear in `ListTasks` with `ChannelKind::Pty`.
 
 ## Summary
 

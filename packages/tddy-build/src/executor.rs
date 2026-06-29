@@ -1,9 +1,12 @@
 //! Execute a build target: lower → cache check → wave-based parallel run.
 
 use std::path::Path;
-use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use tddy_actions::ProcessRuntime;
+use tddy_task::{TaskHandle, TaskRegistry, TaskStatus};
+
+use crate::action_convert::build_action_to_spec;
 use crate::builtin::{self, TOOL};
 use crate::cache::{compute_cache_key, lookup_cache, persist_cache, CacheMode};
 use crate::error::BuildError;
@@ -189,38 +192,55 @@ async fn run_action(
         }
     }
 
-    let cwd = if action.working_dir.is_empty() {
-        repo_root.to_path_buf()
-    } else {
-        repo_root.join(&action.working_dir)
-    };
-
-    let mut command = tokio::process::Command::new(&argv[0]);
-    command
-        .args(&argv[1..])
-        .current_dir(&cwd)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    for (key, value) in &action.env {
-        command.env(key, value);
+    let mut spec = build_action_to_spec(repo_root, action);
+    if spec.working_dir.is_none() {
+        spec.working_dir = Some(repo_root.to_path_buf());
     }
     if let Some(path) = tool_path(repo_root, graph, action)? {
-        command.env("PATH", path);
+        spec.env.insert("PATH".to_string(), path);
     }
 
-    let output = command
-        .output()
+    let registry = TaskRegistry::new();
+    let handle = ProcessRuntime::spawn(&registry, spec, "tddy-build")
         .await
-        .map_err(|e| BuildError::Exec(format!("{}: {}", argv[0], e)))?;
+        .map_err(|e| BuildError::Exec(e.to_string()))?;
+    wait_task_terminal(&handle).await;
+
+    let exit_code = match handle.status() {
+        TaskStatus::Completed { exit_code } => exit_code.unwrap_or(-1),
+        TaskStatus::Cancelled => -1,
+        TaskStatus::Failed { .. } => -1,
+        _ => -1,
+    };
+    let stdout = handle
+        .channel("stdout")
+        .map(|ch| String::from_utf8_lossy(&ch.replay_capture()).into_owned())
+        .unwrap_or_default();
+    let stderr = handle
+        .channel("stderr")
+        .map(|ch| String::from_utf8_lossy(&ch.replay_capture()).into_owned())
+        .unwrap_or_default();
 
     Ok(ActionOutcome {
         action_id: action.id.clone(),
         cached: false,
-        exit_code: output.status.code().unwrap_or(-1),
+        exit_code,
         argv,
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        stdout,
+        stderr,
     })
+}
+
+async fn wait_task_terminal(handle: &TaskHandle) {
+    let mut rx = handle.status_watch();
+    loop {
+        if rx.borrow().is_terminal() {
+            return;
+        }
+        if rx.changed().await.is_err() {
+            return;
+        }
+    }
 }
 
 /// Build a `PATH` value with each tool dep's `bin_dir` prepended, or `None` when

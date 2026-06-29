@@ -44,6 +44,7 @@ fn runs_as_root_in_an_isolated_user_and_network_namespace() {
         profile_path: tmp.path().join("profile"),
         loopback_allow_ports: vec![],
         ipc_socket: None,
+        cwd: None,
     };
 
     // When

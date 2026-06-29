@@ -60,8 +60,17 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
     let mut cmd = Command::new(&argv[0]);
     cmd.args(&argv[1..]);
 
-    cmd.current_dir(&plan.spec.project_root);
-    cmd.stdin(Stdio::null());
+    cmd.current_dir(
+        plan.spec
+            .cwd
+            .as_ref()
+            .unwrap_or(&plan.spec.project_root),
+    );
+    cmd.stdin(if plan.stdin.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    });
     cmd.stdout(Stdio::from(stdout_log));
     cmd.stderr(Stdio::from(stderr_log));
 
@@ -81,9 +90,18 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
         plan.spec.command,
     );
 
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .map_err(|e| SandboxError::Io(format!("sandbox-exec spawn failed: {e}")))?;
+
+    if let Some(stdin_bytes) = &plan.stdin {
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin
+                .write_all(stdin_bytes)
+                .map_err(|e| SandboxError::Io(format!("write sandbox stdin: {e}")))?;
+        }
+    }
 
     let pid = child.id();
     write_spawn_manifest(&plan.spec, pid, &plan.spec.profile_path)?;

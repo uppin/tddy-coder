@@ -16,6 +16,7 @@ fn minimal_spec() -> SandboxSpec {
         profile_path: PathBuf::from("/tmp/tddy-sandbox-facade-test/profile.sb"),
         loopback_allow_ports: vec![],
         ipc_socket: None,
+        cwd: None,
     }
 }
 

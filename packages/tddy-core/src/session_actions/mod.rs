@@ -8,6 +8,7 @@ mod invoke;
 mod list;
 mod manifest;
 mod paths;
+pub(crate) mod runtime;
 mod summary;
 mod validate;
 
@@ -19,6 +20,8 @@ pub use manifest::{parse_action_manifest_file, parse_action_manifest_yaml, Actio
 pub use paths::{
     derive_repo_key, repo_actions_root, resolve_action_manifest_path, resolve_allowlisted_path,
 };
+pub use runtime::action_manifest_to_spec;
+pub use runtime::run_manifest_blocking;
 pub use summary::{
     invocation_record_summary_value, parse_test_summary_from_process_output, TestSummary,
 };

@@ -3,20 +3,23 @@
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use uuid::Uuid;
+use tddy_task::TaskStatus;
 
 use crate::error::WorkflowError;
 use crate::read_changeset;
+use crate::session_actions::runtime::{
+    cancel_task_in_registry, schedule_async_log_mirror, session_task_registry,
+    start_manifest_async, task_status_for_job, write_channel_logs,
+};
 use crate::session_actions::{
     ensure_action_architecture, finalize_invocation_record, parse_action_manifest_file,
-    resolve_action_manifest_path, resolve_allowlisted_path, run_manifest_command,
+    resolve_action_manifest_path, resolve_allowlisted_path, run_manifest_blocking,
     validate_action_arguments_json, ActionManifest, SessionActionsError,
 };
 
@@ -115,7 +118,7 @@ struct PersistedJob {
     job_id: String,
     action_id: String,
     phase: JobPhase,
-    pid: Option<u32>,
+    task_id: String,
     exit_code: Option<i32>,
 }
 
@@ -149,153 +152,38 @@ fn write_job_atomic(job_dir: &Path, job: &PersistedJob) -> Result<(), SessionAct
     Ok(())
 }
 
-#[cfg(unix)]
-fn reap_pid_nonblocking(pid: u32) -> Result<Option<i32>, SessionActionJobsError> {
-    let mut status: i32 = 0;
-    let r = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WNOHANG) };
-    if r == 0 {
-        return Ok(None);
-    }
-    if r < 0 {
-        let err = std::io::Error::last_os_error();
-        if err.raw_os_error() == Some(libc::ECHILD) {
-            return Ok(None);
-        }
-        return Err(SessionActionJobsError::Io(err));
-    }
-    if libc::WIFEXITED(status) {
-        return Ok(Some(libc::WEXITSTATUS(status) as i32));
-    }
-    if libc::WIFSIGNALED(status) {
-        return Ok(Some(128 + libc::WTERMSIG(status) as i32));
-    }
-    Ok(Some(-1))
-}
-
-#[cfg(unix)]
-fn kill_process_group(pid: u32) -> Result<(), SessionActionJobsError> {
-    let r = unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL) };
-    if r < 0 {
-        let err = std::io::Error::last_os_error();
-        if err.raw_os_error() == Some(libc::ESRCH) {
-            debug!(
-                target: "tddy_core::session_action_jobs",
-                "kill_process_group pid={} already ESRCH",
-                pid
-            );
-            return Ok(());
-        }
-        return Err(SessionActionJobsError::Io(err));
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn reap_pid_nonblocking(_pid: u32) -> Result<Option<i32>, SessionActionJobsError> {
-    Err(SessionActionJobsError::JobState(
-        "job wait/stop requires unix".into(),
-    ))
-}
-
-#[cfg(not(unix))]
-fn kill_process_group(_pid: u32) -> Result<(), SessionActionJobsError> {
-    Err(SessionActionJobsError::JobState(
-        "job stop requires unix".into(),
-    ))
-}
-
-fn spawn_manifest_background(
-    session_dir: &Path,
-    repo_root: Option<&Path>,
-    manifest: &ActionManifest,
-    _args: &Value,
-    stdout_path: &Path,
-    stderr_path: &Path,
-) -> Result<u32, SessionActionJobsError> {
-    let cwd = repo_root
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| session_dir.to_path_buf());
-
-    let program = manifest
-        .command
-        .first()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .ok_or(SessionActionsError::EmptyCommand)?;
-
-    let stdout = File::create(stdout_path)?;
-    let stderr = File::create(stderr_path)?;
-
-    let mut cmd = Command::new(program);
-    if manifest.command.len() > 1 {
-        cmd.args(&manifest.command[1..]);
-    }
-    cmd.current_dir(&cwd);
-    cmd.stdin(Stdio::null());
-    cmd.stdout(Stdio::from(stdout));
-    cmd.stderr(Stdio::from(stderr));
-
-    #[cfg(unix)]
-    unsafe {
-        use std::os::unix::process::CommandExt;
-        cmd.pre_exec(|| {
-            if libc::setpgid(0, 0) != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-
-    info!(
-        target: "tddy_core::session_action_jobs",
-        "spawn_manifest_background id={} program={} cwd={}",
-        manifest.id,
-        program,
-        cwd.display()
-    );
-
-    let child = cmd.spawn().map_err(|e| SessionActionsError::CommandSpawn {
-        program: program.to_string(),
-        detail: e.to_string(),
-    })?;
-    let pid = child.id();
-    std::mem::forget(child);
-    Ok(pid)
-}
-
 fn start_async_job(
     session_dir: &Path,
     manifest: &ActionManifest,
     args: &Value,
     repo: Option<&Path>,
-    job_id: &str,
-) -> Result<(PathBuf, PathBuf), SessionActionJobsError> {
+) -> Result<(String, PathBuf, PathBuf), SessionActionJobsError> {
     ensure_jobs_layout(session_dir)?;
-    let job_dir = job_workspace(session_dir, job_id);
+    let cwd = repo
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| session_dir.to_path_buf());
+
+    let (handle, _registry) = start_manifest_async(session_dir, manifest, cwd)?;
+    let job_id = handle.id.0.clone();
+    let job_dir = job_workspace(session_dir, &job_id);
     fs::create_dir_all(&job_dir)?;
     let stdout_path = job_dir.join("stdout.log");
     let stderr_path = job_dir.join("stderr.log");
     File::create(&stdout_path)?;
     File::create(&stderr_path)?;
 
-    let pid = spawn_manifest_background(
-        session_dir,
-        repo,
-        manifest,
-        args,
-        &stdout_path,
-        &stderr_path,
-    )?;
+    schedule_async_log_mirror(handle, stdout_path.clone(), stderr_path.clone());
 
     let job = PersistedJob {
-        job_id: job_id.to_string(),
+        job_id: job_id.clone(),
         action_id: manifest.id.clone(),
         phase: JobPhase::Running,
-        pid: Some(pid),
+        task_id: job_id.clone(),
         exit_code: None,
     };
     write_job_atomic(&job_dir, &job)?;
-    Ok((stdout_path, stderr_path))
+    let _ = args;
+    Ok((job_id, stdout_path, stderr_path))
 }
 
 fn disposition(job: &PersistedJob) -> SessionActionWaitOutcome {
@@ -311,31 +199,54 @@ fn disposition(job: &PersistedJob) -> SessionActionWaitOutcome {
     }
 }
 
+fn terminal_exit_code(status: &TaskStatus) -> Option<i32> {
+    match status {
+        TaskStatus::Completed { exit_code } => Some(exit_code.unwrap_or(-1)),
+        TaskStatus::Failed { .. } => Some(-1),
+        TaskStatus::Cancelled => None,
+        _ => None,
+    }
+}
+
 fn try_advance_running_job(
+    session_dir: &Path,
     job_dir: &Path,
     job: &mut PersistedJob,
 ) -> Result<bool, SessionActionJobsError> {
     if job.phase != JobPhase::Running {
         return Ok(true);
     }
-    let Some(pid) = job.pid else {
-        return Err(SessionActionJobsError::JobState(
-            "running job missing pid".into(),
-        ));
+    let registry = session_task_registry(session_dir);
+    let Some(status) = task_status_for_job(registry.as_ref(), &job.task_id)? else {
+        return Err(SessionActionJobsError::JobState(format!(
+            "task {} not found in registry",
+            job.task_id
+        )));
     };
-    if let Some(code) = reap_pid_nonblocking(pid)? {
-        job.phase = JobPhase::Completed;
-        job.exit_code = Some(code);
-        write_job_atomic(job_dir, job)?;
-        debug!(
-            target: "tddy_core::session_action_jobs",
-            "reaped pid={} exit_code={:?}",
-            pid,
-            job.exit_code
-        );
-        return Ok(true);
+    if !status.is_terminal() {
+        return Ok(false);
     }
-    Ok(false)
+    let stdout_path = job_dir.join("stdout.log");
+    let stderr_path = job_dir.join("stderr.log");
+    if let Some(handle) =
+        crate::session_actions::runtime::block_on(async { registry.get_by_str(&job.task_id).await })
+    {
+        let _ = write_channel_logs(&handle, &stdout_path, &stderr_path);
+    }
+    job.phase = match &status {
+        TaskStatus::Cancelled => JobPhase::Cancelled,
+        _ => JobPhase::Completed,
+    };
+    job.exit_code = terminal_exit_code(&status);
+    write_job_atomic(job_dir, job)?;
+    debug!(
+        target: "tddy_core::session_action_jobs",
+        "advanced task_id={} phase={:?} exit_code={:?}",
+        job.task_id,
+        job.phase,
+        job.exit_code
+    );
+    Ok(true)
 }
 
 pub(crate) fn invoke_session_action(
@@ -355,9 +266,8 @@ pub(crate) fn invoke_session_action(
     let repo_ref = repo.as_deref();
 
     if options.async_start {
-        let job_id = Uuid::now_v7().to_string();
-        let (stdout_path, stderr_path) =
-            start_async_job(session_dir, &manifest, args, repo_ref, &job_id)?;
+        let (job_id, stdout_path, stderr_path) =
+            start_async_job(session_dir, &manifest, args, repo_ref)?;
         return Ok(SessionActionInvokeOutcome::AsyncStarted(AsyncStartBody {
             job_id,
             status: "running".into(),
@@ -378,8 +288,12 @@ fn finish_blocking_record(
     manifest: &ActionManifest,
     args: &Value,
 ) -> Result<Value, SessionActionJobsError> {
-    let mut record = run_manifest_command(session_dir, repo, manifest, args)?;
+    let cwd = repo
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| session_dir.to_path_buf());
+    let mut record = run_manifest_blocking(manifest, cwd).map_err(SessionActionJobsError::from)?;
     finalize_invocation_record(manifest, &mut record)?;
+    let _ = args;
     Ok(record)
 }
 
@@ -411,7 +325,7 @@ pub(crate) fn wait_session_action_job(
         if job.phase != JobPhase::Running {
             return Ok(disposition(&job));
         }
-        if try_advance_running_job(&job_dir, &mut job)? {
+        if try_advance_running_job(session_dir, &job_dir, &mut job)? {
             let job = read_job(&job_dir)?.ok_or_else(|| {
                 SessionActionJobsError::JobState("job vanished after advance".into())
             })?;
@@ -455,16 +369,14 @@ pub(crate) fn stop_session_action_job(
     match job.phase {
         JobPhase::Completed | JobPhase::Cancelled => Ok(SessionActionStopOutcome::AlreadyFinished),
         JobPhase::Running => {
-            let pid = job.pid.ok_or_else(|| {
-                SessionActionJobsError::JobState("running job missing pid".into())
-            })?;
-            if try_advance_running_job(&job_dir, &mut job)? {
+            if try_advance_running_job(session_dir, &job_dir, &mut job)? {
                 return Ok(SessionActionStopOutcome::AlreadyFinished);
             }
-            kill_process_group(pid)?;
+            let registry = session_task_registry(session_dir);
+            cancel_task_in_registry(registry.as_ref(), &job.task_id);
             for _ in 0..500 {
-                if reap_pid_nonblocking(pid)?.is_some() {
-                    break;
+                if try_advance_running_job(session_dir, &job_dir, &mut job)? {
+                    return Ok(SessionActionStopOutcome::Stopped);
                 }
                 thread::sleep(Duration::from_millis(5));
             }

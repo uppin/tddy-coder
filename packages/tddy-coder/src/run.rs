@@ -214,6 +214,28 @@ fn resolve_tddy_data_dir(args: &Args) -> PathBuf {
         })
 }
 
+/// CLI `--output-dir` when set, else `"."` (derive repo root from cwd / default sessions base).
+fn cli_output_dir_param(args: &Args) -> PathBuf {
+    args.output_dir
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Parent directory for `{base}/sessions/<session_id>/` when allocating a new session.
+fn resolve_sessions_base(args: &Args) -> PathBuf {
+    args.output_dir
+        .clone()
+        .unwrap_or_else(|| resolve_tddy_data_dir(args))
+}
+
+/// Agent repository root stored in changeset `repo_path` / workflow `output_dir` context.
+fn resolve_agent_repo_root(args: &Args) -> std::io::Result<PathBuf> {
+    match &args.output_dir {
+        Some(p) => Ok(p.clone()),
+        None => std::env::current_dir(),
+    }
+}
+
 /// Shared main entry: panic hook, Ctrl+C handler, run_with_args, exit logic.
 /// Use from both tddy-coder and tddy-demo binaries.
 pub fn run_main(mut args: Args) {
@@ -361,6 +383,8 @@ pub struct Args {
     pub session_dir: Option<PathBuf>,
     /// Tddy data root (`{this}/sessions/<session_id>/`) from `--tddy-data-dir`, `-c` / session `coder-config.yaml`. Applied in [`run_main`] before path resolution.
     pub tddy_data_dir: Option<PathBuf>,
+    /// Repository root for the agent and, when set, parent for `{output_dir}/sessions/<id>/` session artifacts.
+    pub output_dir: Option<PathBuf>,
     pub conversation_output: Option<PathBuf>,
     pub model: Option<String>,
     pub allowed_tools: Option<Vec<String>>,
@@ -477,6 +501,10 @@ pub struct CoderArgs {
     /// Tddy data directory root (default: `$HOME/.tddy` unless `TDDY_SESSIONS_DIR` is set). Also `tddy_data_dir` in YAML.
     #[arg(long = "tddy-data-dir", value_name = "DIR")]
     pub tddy_data_dir: Option<PathBuf>,
+
+    /// Repository root for the coding agent. When set, new sessions are created under `{output_dir}/sessions/<id>/`.
+    #[arg(long = "output-dir", value_name = "PATH")]
+    pub output_dir: Option<PathBuf>,
 
     /// Write entire agent conversation (raw bytes) to file
     #[arg(long)]
@@ -834,6 +862,7 @@ impl From<CoderArgs> for Args {
             goal: a.goal,
             session_dir: a.session_dir,
             tddy_data_dir: a.tddy_data_dir,
+            output_dir: a.output_dir,
             conversation_output: a.conversation_output,
             model: a.model,
             allowed_tools: a.allowed_tools,
@@ -886,6 +915,7 @@ impl From<DemoArgs> for Args {
             goal: a.goal,
             session_dir: a.session_dir,
             tddy_data_dir: a.tddy_data_dir,
+            output_dir: None,
             conversation_output: a.conversation_output,
             model: a.model,
             allowed_tools: a.allowed_tools,
@@ -1212,15 +1242,14 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         anyhow::bail!("empty feature description");
     }
 
-    let base = resolve_tddy_data_dir(args);
+    let base = resolve_sessions_base(args);
     let session_dir = if let Some(ref sid) = args.session_id {
         tddy_core::output::create_session_dir_with_id(&base, sid)
     } else {
         tddy_core::output::create_session_dir_in(&base)
     }
     .context("create session dir")?;
-    let output_dir_for_ctx =
-        std::env::current_dir().context("current dir for agent working_dir")?;
+    let output_dir_for_ctx = resolve_agent_repo_root(args).context("resolve agent repo root")?;
 
     let init_cs = tddy_core::changeset::Changeset {
         initial_prompt: Some(input.clone()),
@@ -2335,7 +2364,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 ))
             }),
             PendingWorkflowStart {
-                output_dir: PathBuf::from("."),
+                output_dir: cli_output_dir_param(args),
                 session_dir: args.session_dir.clone(),
                 initial_prompt: args.prompt.clone(),
                 conversation_output_path: args.conversation_output.clone(),
@@ -2362,7 +2391,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         );
         presenter.lock().unwrap().start_workflow(
             backend,
-            PathBuf::from("."),
+            cli_output_dir_param(args),
             args.session_dir.clone(),
             args.prompt.clone(),
             args.conversation_output.clone(),
@@ -2906,8 +2935,7 @@ fn run_plan_bootstrap_in_session_dir(
     if input.is_empty() {
         anyhow::bail!("empty feature description");
     }
-    let output_dir_for_ctx =
-        std::env::current_dir().context("current dir for agent working_dir")?;
+    let output_dir_for_ctx = resolve_agent_repo_root(args).context("resolve agent repo root")?;
     let recipe = recipe_arc_for_args(args)?;
     let start_goal_id = recipe.start_goal();
     let start_g = start_goal_id.as_str();
@@ -3198,6 +3226,7 @@ mod resume_session_config_tests {
             goal: None,
             session_dir: None,
             tddy_data_dir: None,
+            output_dir: None,
             conversation_output: None,
             model: None,
             allowed_tools: None,
@@ -3266,6 +3295,7 @@ mod resume_session_identity_tests {
             goal: None,
             session_dir: None,
             tddy_data_dir: None,
+            output_dir: None,
             conversation_output: None,
             model: None,
             allowed_tools: None,
@@ -3335,6 +3365,7 @@ mod session_dir_sync_tests {
             goal: None,
             session_dir: None,
             tddy_data_dir: None,
+            output_dir: None,
             conversation_output: None,
             model: None,
             allowed_tools: None,
@@ -3420,6 +3451,7 @@ mod changeset_agent_resume_tests {
             goal: None,
             session_dir: Some(session_dir.clone()),
             tddy_data_dir: None,
+            output_dir: None,
             conversation_output: None,
             model: None,
             allowed_tools: None,
@@ -3522,6 +3554,7 @@ mod post_tui_workflow_exit_tests {
             goal: None,
             session_dir: None,
             tddy_data_dir: None,
+            output_dir: None,
             conversation_output: None,
             model: None,
             allowed_tools: None,

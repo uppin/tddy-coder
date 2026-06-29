@@ -187,7 +187,7 @@ async fn routes_https_egress_from_jail_through_the_host_relay_to_a_tls_server() 
             cwd: None,
             grpc_socket: uds_path.clone(),
             tool_ipc_socket: tmp.path().join("tool_ipc.sock"),
-            tddy_tools_path: tddy_tools_path(),
+            tddy_tools_path: Some(tddy_tools_path()),
             claude_binary: claude.to_string_lossy().to_string(),
             model: TEST_MODEL.to_string(),
             ready_marker: ready_marker.clone(),
@@ -195,6 +195,7 @@ async fn routes_https_egress_from_jail_through_the_host_relay_to_a_tls_server() 
             grpc_listen_port: None,
             egress_shim_port: None,
             grpc_uds: Some(uds_path.clone()),
+            pty_command: vec![],
         };
 
         let runner_task = tokio::spawn(async move {

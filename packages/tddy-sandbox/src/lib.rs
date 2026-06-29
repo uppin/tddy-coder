@@ -1,38 +1,37 @@
-//! Cross-platform sandbox abstraction for running confined agent processes.
+//! Cross-platform sandbox abstraction for running confined processes.
 //!
 //! Platform-specific spawn is provided by `tddy-sandbox-darwin` on macOS.
-//! On other platforms, [`spawn`] returns [`SandboxError::Unsupported`].
+//! Product-specific read/copy/policy recipes live in `tddy-sandbox-recipes`.
 
 pub mod builder;
-pub mod claude_spawn;
 mod context_dir;
 mod error;
+pub mod exec_reads;
 mod log;
 pub mod materialize;
 mod spec;
+pub mod runner_env;
 pub mod tool_ipc;
 
 pub use builder::{
     CopySpec, EnvSpec, MachPolicy, MountSpec, NetworkSpec, PolicySpec, ReadKind, ReadReason,
     ReadSpec, ResourceLimits, SandboxBuilder, SandboxPlan, SecretSource, SecretSpec, SymlinkSpec,
 };
-pub use claude_spawn::{
-    append_sandbox_claude_mcp_args, binary_exec_reads, build_sandbox_claude_allowlist,
-    claude_policy, claude_required_copies, claude_required_reads, default_runner_env,
-    detect_toolchain_reads, sandbox_claude_scratch_dir, system_baseline_reads,
-    write_sandbox_mcp_config,
-};
 pub use context_dir::{
     copy_context_from_repo, copy_tree, copy_tree_within_root, SandboxContextDir,
     SANDBOX_REMOTE_APPENDIX,
 };
 pub use error::SandboxError;
+pub use exec_reads::{
+    binary_exec_reads, detect_toolchain_reads, process_exec_reads, system_baseline_reads,
+};
 pub use log::{
     append_line, egress_log_path, format_egress_logs, format_sandbox_diagnostics,
     SANDBOX_EXEC_STDERR_LOG, SANDBOX_EXEC_STDOUT_LOG, SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG,
     SANDBOX_SPAWN_MANIFEST,
 };
 pub use materialize::{materialize_copies, materialize_secrets, materialize_symlinks};
+pub use runner_env::{process_jail_env, scratch_runner_env};
 pub use spec::{SandboxHandle, SandboxSpec};
 pub use tool_ipc::{session_id_from_env, ToolIpcRequest, ToolIpcResponse};
 

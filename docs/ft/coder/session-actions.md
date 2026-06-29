@@ -1,5 +1,10 @@
 # Session actions (`tddy-tools`)
 
+> **Updated: 2026-06-29** — Async jobs (`invoke-action --async-start`) register in a per-session
+> `TaskRegistry` via `tddy-actions::ProcessRuntime`. `job_id == task_id`. `wait`/`stop` use task
+> status and cancellation; `stdout.log`/`stderr.log` paths under `session_action_jobs/jobs/<id>/`
+> are preserved. `ActionManifest` maps to `ActionSpec` + `SessionActionExtras`.
+
 ## Purpose
 
 Session **actions** are declarative manifests under a canonical session directory. Each manifest describes how to invoke a bounded shell command (`command` argv), optional constraints (CPU **`architecture`**), validated JSON inputs (`input_schema`), optional output-shape hints (`output_schema`), and optional **`result_kind`** processors (for example **`test_summary`** for cargo-style totals). **Automation and agents** consume the same abstraction through **`tddy-tools`** rather than raw ad hoc shells.

@@ -1,0 +1,27 @@
+[package]
+name = "tddy-actions"
+version = "0.1.0"
+edition = "2021"
+description = "Unified action spec and runtime — tools become tddy-tasks with optional sandbox execution"
+
+[lib]
+name = "tddy_actions"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = "0.1"
+bytes = "1"
+log = "0.4"
+jsonschema = "0.26"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tddy-task = { path = "../tddy-task" }
+tokio = { version = "1", features = ["rt", "sync", "time", "process", "macros", "io-util"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+serial_test = "3"
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "process"] }

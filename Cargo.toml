@@ -29,6 +29,7 @@ members = [
     "packages/tddy-github",
     "packages/tddy-daemon",
     "packages/tddy-workflow-recipes",
+    "packages/tddy-actions",
     "packages/tddy-task",
     "packages/tddy-testing-commons",
     "packages/tddy-workflow",
@@ -41,6 +42,7 @@ members = [
     "packages/tddy-sandbox-runner",
     "packages/tddy-sandbox-cgroups",
     "packages/tddy-sandbox-darwin",
+    "packages/tddy-sandbox-recipes",
     "packages/tddy-sandbox-app",
 ]
 exclude = [
