@@ -1,5 +1,9 @@
 # Claude Code CLI Session
 
+> **Updated: 2026-06-29** — Main `claude-cli` and auxiliary `bash` PTY tools spawn via `PtyRuntime`
+> into the shared `TaskRegistry` (`kind` = `claude-cli` / `bash`). `ClaudeCliSessionManager` maps
+> `terminal_id` → `task_id` and delegates control to `PtyRegistry`. Terminal RPCs unchanged.
+
 ## Summary
 
 A new session type that spawns an interactive `claude` CLI process in a PTY within a git worktree, managed entirely by `tddy-daemon`. Users select **Claude Code CLI** as the session type from the web UI, choose a Claude model, and get direct terminal access — without any TDD workflow overhead. The daemon handles worktree creation, PTY lifecycle, session persistence, and resume if the process exits.

@@ -302,7 +302,7 @@ impl ConnectionServiceImpl {
         let worktree_stats_cache = Arc::new(WorktreeStatsCache::new(
             worktrees::projects_stats_cache_root(&tddy_data_dir),
         ));
-        let task_registry = TaskRegistry::new();
+        let task_registry = claude_cli_manager.task_registry();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         Self {
             config,

@@ -84,7 +84,12 @@ fn session_action_input_mapper_failure_surfaces_structured_error() {
     let input = json!({});
 
     // When
-    let err = run_input_mapper_for_envelope(&["/bin/false".into()], &input, &channels).unwrap_err();
+    let err = run_input_mapper_for_envelope(
+        &["/bin/sh".into(), "-c".into(), "exit 1".into()],
+        &input,
+        &channels,
+    )
+    .unwrap_err();
 
     // Then
     assert!(
@@ -144,7 +149,7 @@ fn session_action_stdout_stderr_paths_default_and_override_round_trip() {
     run_primary_action_with_capture_paths(
         &session,
         Path::new("/bin/sh"),
-        &["-c".into(), "echo -n hello".into()],
+        &["-c".into(), "printf 'hello'".into()],
         &HashMap::new(),
         Some(custom_out.as_path()),
         None,
@@ -163,7 +168,7 @@ fn session_action_stdout_stderr_paths_default_and_override_round_trip() {
     run_primary_action_with_capture_paths(
         &session,
         Path::new("/bin/sh"),
-        &["-c".into(), "echo -n err1 >&2; echo -n err2 >&2".into()],
+        &["-c".into(), "printf 'err1err2' >&2".into()],
         &HashMap::new(),
         None,
         Some(def_stderr.as_path()),

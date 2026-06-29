@@ -1,8 +1,13 @@
 # Sandbox Builder — explicit, cross-platform jail configuration
 
 **Product Area**: Coder
-**Status**: Draft
-**Updated**: 2026-06-28
+**Status**: Implemented
+**Updated**: 2026-06-29
+
+> **`tddy-sandbox`** is generic (`SandboxBuilder`, `exec_reads`, `scratch_runner_env`, `cwd`,
+> `extra_read_paths`). Product recipes (Claude CLI reads/copies/policy, generic exec, MCP argv) live
+> in **`tddy-sandbox-recipes`**. **`tddy-daemon`** `sandbox_plan_builder` assembles plans from
+> `ActionSpec` sandbox metadata; sandbox crates do not import `tddy-actions`.
 
 ## Summary
 
@@ -59,8 +64,12 @@ needs" set lives in one reviewable recipe; and a non-leaking secret channel deli
 7. **Explicit symlinks.** Symlinks created inside the jail are declared as `SymlinkSpec` and
    materialized by each backend.
 8. **Single Claude recipe.** `claude_required_reads()`, `claude_required_copies(host_home)`, and
-   `claude_policy()` in `tddy-sandbox/src/claude_spawn.rs` are the one reviewable source of what a
-   Claude jail needs; both the app and daemon call them.
+   `claude_policy()` in `tddy-sandbox-recipes` are the one reviewable source of what a Claude jail
+   needs; both the app and daemon call them via `tddy-sandbox-recipes::claude_cli`.
+9. **Action sandbox plans.** `tddy-daemon` `sandbox_plan_builder` maps `ActionSpec` + `SandboxRequest`
+   to process or runner-PTY plans: `SandboxRecipe::RunnerPty` for in-jail PTY (`--pty-command` on
+   `tddy-sandbox-runner`); `generic_exec_policy` for confined Rust binaries; `cwd` and
+   `extra_read_paths` for working directory and read-only artifact mounts.
 
 ### Non-functional
 
@@ -98,8 +107,9 @@ needs" set lives in one reviewable recipe; and a non-leaking secret channel deli
 | `rejects_a_copy_whose_destination_is_outside_the_writable_jail_tree` | same | Validation error. |
 | `rejects_a_symlink_whose_link_is_outside_the_jail_tree` | same | Validation error. |
 | `records_a_declared_secret_without_placing_its_value_in_the_env_map` | same | Secret value absent from `env.vars`. |
-| `claude_required_reads_include_the_dyld_root_literal` | `packages/tddy-sandbox/src/claude_spawn.rs` | Recipe contains the `(literal "/")` DyldRoot read. |
+| `claude_required_reads_include_the_dyld_root_literal` | `packages/tddy-sandbox-recipes` | Recipe contains the `(literal "/")` DyldRoot read. |
 | `claude_required_copies_seed_only_the_credentials_file` | same | Only `.credentials.json`; no `settings.json`. |
+| Action sandbox (tddy-coder, build RO mount, escape denial, PTY) | `packages/tddy-daemon/tests/action_sandbox_acceptance.rs` | Confined process and runner-PTY actions; unsupported platform returns `failed_precondition`. |
 | `rendered_profile_omits_the_blanket_file_read_wildcard` | `packages/tddy-sandbox-darwin/src/profile.rs` | `(allow file-read*)\n` blanket absent. |
 | `rendered_profile_emits_each_declared_read_as_an_explicit_rule` | same | Each declared read present as literal/subpath/regex. |
 | `rendered_profile_emits_the_dyld_root_literal` | same | `(literal "/")` present. |

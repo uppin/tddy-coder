@@ -1,0 +1,66 @@
+syntax = "proto3";
+package actions;
+
+// Action management service — start tools by kind and inspect action metadata.
+service ActionService {
+  // Enumerate known action kinds and their metadata.
+  rpc ListActionKinds (ListActionKindsRequest) returns (ListActionKindsResponse);
+
+  // Start an action by kind + JSON params; returns the spawned task_id.
+  rpc StartAction (StartActionRequest) returns (StartActionResponse);
+
+  // Fetch action metadata for a running or terminal task.
+  rpc GetAction (GetActionRequest) returns (GetActionResponse);
+}
+
+// ──────────────────────────────────────────────────────────── messages ───────
+
+message ActionKindInfo {
+  string kind = 1;
+  string summary = 2;
+  bool has_input_schema = 3;
+}
+
+message ListActionKindsRequest {
+  string session_token = 1;
+}
+
+message ListActionKindsResponse {
+  repeated ActionKindInfo kinds = 1;
+}
+
+message StartActionRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string kind = 3;
+  // JSON object with kind-specific parameters (command, manifest fields, etc.).
+  string params_json = 4;
+  bool sandbox = 5;
+}
+
+message StartActionResponse {
+  string task_id = 1;
+  bool ok = 2;
+  string message = 3;
+}
+
+message GetActionRequest {
+  string session_token = 1;
+  string task_id = 2;
+}
+
+message ActionTaskInfo {
+  string task_id = 1;
+  string kind = 2;
+  string session_id = 3;
+  // TaskStatusProto-compatible values from tasks.proto (1=pending … 5=cancelled).
+  int32 status = 4;
+  int32 exit_code = 5;
+  string error_message = 6;
+  uint64 created_unix_ms = 7;
+  string result_json = 8;
+}
+
+message GetActionResponse {
+  ActionTaskInfo action = 1;
+}

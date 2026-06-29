@@ -1,0 +1,18 @@
+[package]
+name = "tddy-sandbox-recipes"
+version = "0.1.0"
+edition = "2021"
+description = "Product-specific sandbox recipes composed on tddy-sandbox generic builders"
+
+[lib]
+name = "tddy_sandbox_recipes"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+serde_json = "1"
+tddy-sandbox = { path = "../tddy-sandbox" }
+tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
+
+[dev-dependencies]
+tempfile = "3"

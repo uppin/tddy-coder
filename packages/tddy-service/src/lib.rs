@@ -26,6 +26,7 @@ pub use echo_service::{create_echo_bridge, EchoServiceImpl};
 pub use loopback_tunnel_service::LoopbackTunnelServiceImpl;
 pub use observer_service::PresenterObserverService;
 pub use presenter_intent_service::PresenterIntentService;
+pub use proto::actions::ActionServiceServer;
 pub use proto::auth::AuthServiceServer;
 pub use proto::connection::ConnectionServiceServer;
 pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
@@ -77,6 +78,10 @@ pub mod proto {
     #[allow(unused_imports, unused_variables)]
     pub mod tasks {
         include!(concat!(env!("OUT_DIR"), "/tasks.rs"));
+    }
+    #[allow(unused_imports, unused_variables)]
+    pub mod actions {
+        include!(concat!(env!("OUT_DIR"), "/actions.rs"));
     }
     #[allow(unused_imports, unused_variables)]
     pub mod vnc {

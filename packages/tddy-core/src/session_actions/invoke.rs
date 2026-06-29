@@ -1,14 +1,14 @@
 //! Run manifest command templates with sandboxed cwd / argv.
 
 use std::path::Path;
-use std::process::Command;
 
 use log::{debug, info};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::error::SessionActionsError;
 use super::manifest::{parse_action_manifest_file, ActionManifest};
 use super::paths::resolve_action_manifest_path;
+use super::runtime::run_manifest_blocking;
 use super::summary::{invocation_record_summary_value, parse_test_summary_from_process_output};
 use super::validate::validate_action_arguments_json;
 use crate::session_actions::arch::ensure_action_architecture;
@@ -100,44 +100,24 @@ pub fn run_manifest_command(
         cwd.display()
     );
 
-    let program = manifest
-        .command
-        .first()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .ok_or(SessionActionsError::EmptyCommand)?;
-
-    let mut cmd = Command::new(program);
-    if manifest.command.len() > 1 {
-        cmd.args(&manifest.command[1..]);
-    }
-    cmd.current_dir(&cwd);
-
-    let output = cmd
-        .output()
-        .map_err(|e| SessionActionsError::CommandSpawn {
-            program: program.to_string(),
-            detail: e.to_string(),
-        })?;
-
-    let code = output.status.code().unwrap_or(-1);
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let record = run_manifest_blocking(manifest, cwd)?;
 
     info!(
         target: "tddy_core::session_actions::invoke",
         "run_manifest_command finished: id={} exit_code={} stdout_len={} stderr_len={}",
         manifest.id,
-        code,
-        stdout.len(),
-        stderr.len()
+        record.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(-1),
+        record
+            .get("stdout")
+            .and_then(|v| v.as_str())
+            .map(str::len)
+            .unwrap_or(0),
+        record
+            .get("stderr")
+            .and_then(|v| v.as_str())
+            .map(str::len)
+            .unwrap_or(0),
     );
 
-    let mut record = json!({
-        "exit_code": code,
-        "stdout": stdout,
-        "stderr": stderr,
-    });
-    finalize_invocation_record(manifest, &mut record)?;
     Ok(record)
 }

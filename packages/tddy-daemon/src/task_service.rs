@@ -67,6 +67,7 @@ fn handle_to_proto(handle: &tddy_task::TaskHandle) -> TaskInfo {
                 tddy_task::ChannelKind::Stdout => 1,
                 tddy_task::ChannelKind::Stderr => 2,
                 tddy_task::ChannelKind::Combined => 3,
+                tddy_task::ChannelKind::Pty => 4,
             },
             accepts_input: ch.accepts_input(),
         })

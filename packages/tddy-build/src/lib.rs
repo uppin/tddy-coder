@@ -16,6 +16,7 @@ pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/tddy.build.v1.rs"));
 }
 
+pub mod action_convert;
 pub mod builtin;
 pub mod cache;
 pub mod discovery;

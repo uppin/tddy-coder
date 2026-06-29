@@ -1,8 +1,16 @@
 # tddy-build: content-addressed build system
 
 **Product area:** Build
-**Updated:** 2026-06-20
-**Status:** Implemented
+**Updated:** 2026-06-29
+**Status:** Implemented — executor delegates to `tddy-actions`
+
+## Unified action execution (2026-06-29)
+
+Single-action execution in `executor.rs::run_action` delegates to `tddy-actions::ProcessRuntime`.
+Each `BuildAction` is converted to `ActionSpec` via `action_convert.rs` and spawns a task in a
+per-build `TaskRegistry` (observable stdout/stderr, cancellable). DAG wave scheduling, content-addressed
+cache, and plugin lowering are unchanged. **Note:** `tddy-build` now depends on `tddy-actions` /
+`tddy-task` (standalone-by-default property relaxed per approved plan).
 
 ## Summary
 

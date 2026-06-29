@@ -1,5 +1,10 @@
 # Session actions (`tddy-tools`)
 
+> **Updated: 2026-06-29** — Async jobs (`invoke-action --async-start`) register in a per-session
+> `TaskRegistry` via `tddy-actions::ProcessRuntime`. `job_id == task_id`. `wait`/`stop` use task
+> status and cancellation; `stdout.log`/`stderr.log` paths under `session_action_jobs/jobs/<id>/`
+> are preserved. `ActionManifest` maps to `ActionSpec` + `SessionActionExtras`.
+
 ## Purpose
 
 Session **actions** are declarative manifests under a canonical session directory. Each manifest describes how to invoke a bounded shell command (`command` argv), optional constraints (CPU **`architecture`**), validated JSON inputs (`input_schema`), optional output-shape hints (`output_schema`), and optional **`result_kind`** processors (for example **`test_summary`** for cargo-style totals). **Automation and agents** consume the same abstraction through **`tddy-tools`** rather than raw ad hoc shells.
@@ -55,7 +60,7 @@ Operational trust boundary: manifests live beside **`changeset.yaml`** under **`
 
 ## Session action jobs (`session_action_jobs`)
 
-The **`tddy_core::session_action_jobs`** module runs the same **`actions/*.yaml`** manifests as **`invoke-action`**, with an optional **non-blocking** admission path: callers receive a **`job_id`**, filesystem paths for **stdout** and **stderr** logs, and can **`wait`** (with optional timeout) or **`stop`** a running job. Manifest resolution (**`resolve_action_manifest_path`**), **`--data`** validation, **`repo_path`** / **`output_path_arg`** checks, **`ensure_action_architecture`**, and **`result_kind: test_summary`** handling share the synchronous **`session_actions`** implementation.
+The **`tddy_core::session_action_jobs`** module runs the same **`actions/*.yaml`** manifests as **`invoke-action`**, with an optional **non-blocking** admission path: callers receive a **`job_id`** (equal to the unified **`task_id`**), filesystem paths for **stdout** and **stderr** logs, and can **`wait`** (with optional timeout) or **`stop`** a running job. Jobs register in a per-session **`TaskRegistry`** via **`tddy-actions::ProcessRuntime`** (simple manifests) or **`PipelineRuntime`** (mapper/transform pipelines). Manifest resolution (**`resolve_action_manifest_path`**), **`--data`** validation, **`repo_path`** / **`output_path_arg`** checks, **`ensure_action_architecture`**, and **`result_kind: test_summary`** handling share the synchronous **`session_actions`** implementation. The daemon exposes the same kinds through **`actions.ActionService`** (`StartAction` / `GetAction`).
 
 ### On-disk layout
 

@@ -22,6 +22,8 @@ tempfile = "3"
 uuid = { version = "1", features = ["v7"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "fs", "sync", "time", "io-util"] }
 futures = "0.3"
+tddy-actions = { path = "../tddy-actions" }
+tddy-task = { path = "../tddy-task" }
 
 [dev-dependencies]
 rstest = { workspace = true }

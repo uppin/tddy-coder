@@ -358,6 +358,7 @@ github:
         let mut args = Args {
             goal: None,
             session_dir: None,
+            output_dir: None,
             conversation_output: None,
             model: None,
             allowed_tools: None,
@@ -415,6 +416,7 @@ github:
         let mut args = Args {
             goal: None,
             session_dir: None,
+            output_dir: None,
             conversation_output: None,
             model: None,
             allowed_tools: None,
@@ -475,6 +477,7 @@ github:
         let mut args = Args {
             goal: None,
             session_dir: None,
+            output_dir: None,
             conversation_output: None,
             model: None,
             allowed_tools: None,
@@ -532,6 +535,7 @@ github:
         let mut args = Args {
             goal: None,
             session_dir: None,
+            output_dir: None,
             conversation_output: None,
             model: None,
             allowed_tools: None,
@@ -656,6 +660,7 @@ log:
         let mut args = Args {
             goal: None,
             session_dir: None,
+            output_dir: None,
             conversation_output: None,
             model: Some("opus".to_string()),
             allowed_tools: None,

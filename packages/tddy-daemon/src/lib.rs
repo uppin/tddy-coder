@@ -1,5 +1,6 @@
 //! tddy-daemon library — shared by binary and tests.
 
+pub mod action_service;
 pub mod active_elicitation;
 pub mod agent_list_mapping;
 pub mod auth;
@@ -14,6 +15,8 @@ pub mod multi_host;
 mod oauth_loopback_tunnel;
 pub mod presenter_intent_client;
 pub mod project_storage;
+pub mod pty_registry;
+pub mod pty_runtime;
 pub mod relay_idle;
 pub mod server;
 pub mod session_deletion;
@@ -40,6 +43,9 @@ pub mod user_sessions_path;
 pub mod workspace_session;
 pub mod worktrees;
 
+pub mod sandbox_action;
+pub mod sandbox_plan_builder;
+pub mod sandbox_runtime;
 pub mod sandbox_session;
 pub mod screen_sharing_service;
 pub mod screen_sharing_vault;

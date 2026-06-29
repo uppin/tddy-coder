@@ -62,6 +62,8 @@ pub enum ChannelKind {
     Stderr,
     /// Combined stdout+stderr on a single channel (e.g. background-Shell tool).
     Combined,
+    /// PTY byte stream label (actual PTY control lives in daemon PtyRegistry).
+    Pty,
 }
 
 /// Bounded broadcast capacity for task channel output.
@@ -123,6 +125,14 @@ impl TaskChannel {
         })
     }
 
+    /// PTY channel with stdin + broadcast output (label only; master handle in daemon).
+    pub fn pty(
+        channel_id: impl Into<String>,
+        name: impl Into<String>,
+    ) -> (Arc<Self>, Option<mpsc::UnboundedReceiver<Bytes>>) {
+        Self::new(channel_id, name, ChannelKind::Pty)
+    }
+
     /// Whether this channel accepts stdin input.
     pub fn accepts_input(&self) -> bool {
         self.stdin_tx.is_some()
@@ -161,6 +171,21 @@ impl TaskChannel {
             Some(tx) => tx.send(data).is_ok(),
             None => false,
         }
+    }
+
+    /// Clone of the stdin sender (for bridging external writers to the PTY body).
+    pub fn stdin_sender(&self) -> Option<mpsc::UnboundedSender<Bytes>> {
+        self.stdin_tx.clone()
+    }
+
+    /// Clone of the broadcast sender (for legacy PTY subscribers).
+    pub fn output_broadcast(&self) -> broadcast::Sender<Bytes> {
+        self.output_tx.clone()
+    }
+
+    /// Shared capture buffer (for replay to late subscribers).
+    pub fn capture_arc(&self) -> Arc<Mutex<Vec<u8>>> {
+        Arc::clone(&self.capture)
     }
 }
 
@@ -289,6 +314,11 @@ impl TaskContext {
         self.handle.pid_slot.lock().unwrap().retain(|&p| p != pid);
     }
 
+    /// Shared PID list for cancel escalation (clone before `spawn_blocking`).
+    pub fn pid_slot(&self) -> Arc<Mutex<Vec<u32>>> {
+        Arc::clone(&self.handle.pid_slot)
+    }
+
     /// Look up a channel writer by `channel_id`.
     pub fn channel(&self, channel_id: &str) -> Option<Arc<TaskChannel>> {
         self.handle.channel(channel_id)
@@ -297,6 +327,11 @@ impl TaskContext {
     /// Store the terminal result payload (e.g. JSON-encoded tool output).
     pub fn set_result(&self, json: String) {
         *self.handle.result_json.lock().unwrap() = Some(json);
+    }
+
+    /// Task identifier for this execution context.
+    pub fn task_id(&self) -> TaskId {
+        self.handle.id.clone()
     }
 }
 

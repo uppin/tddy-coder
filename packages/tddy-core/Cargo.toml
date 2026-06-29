@@ -24,6 +24,8 @@ tokio-util = { version = "0.7", features = ["compat"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 tddy-workflow = { path = "../tddy-workflow" }
 tddy-graph = { path = "../tddy-graph" }
+tddy-actions = { path = "../tddy-actions" }
+tddy-task = { path = "../tddy-task" }
 
 [dev-dependencies]
 async-trait = "0.1"

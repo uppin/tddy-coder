@@ -268,6 +268,7 @@ mod tests {
             profile_path: "/tmp/project/profile.sb".into(),
             loopback_allow_ports: vec![],
             ipc_socket: None,
+            cwd: None,
         };
 
         // When / Then

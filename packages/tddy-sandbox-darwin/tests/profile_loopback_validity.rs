@@ -34,7 +34,7 @@ fn loopback_network_profile_is_accepted_by_sandbox_exec() {
     )
     .profile_path(&profile_path)
     .reads(tddy_sandbox::system_baseline_reads())
-    .policy(tddy_sandbox::claude_policy())
+    .policy(tddy_sandbox_recipes::shell_interactive_policy())
     .network(NetworkSpec {
         loopback_allow_ports: vec![55900, 55901],
         allow_oauth_inbound: false,
