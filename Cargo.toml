@@ -20,6 +20,7 @@ members = [
     "packages/tddy-demo-tui",
     "packages/tddy-tools",
     "packages/tddy-vm",
+    "packages/tddy-vm-build",
     "packages/tddy-service",
     "packages/tddy-tui-testkit",
     "packages/tddy-e2e",
@@ -45,6 +46,7 @@ members = [
     "packages/tddy-sandbox-darwin",
     "packages/tddy-sandbox-recipes",
     "packages/tddy-sandbox-app",
+    "packages/tddy-sandbox-qemu",
 ]
 exclude = [
     # Real cargo workspace used as a tddy-build example fixture; built by the

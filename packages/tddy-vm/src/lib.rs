@@ -5,7 +5,7 @@ pub mod registry;
 pub mod service;
 pub mod vm;
 
-pub use build::VmImageRecord;
+pub use build::{build_image, ImageFormat, VmImageRecord};
 pub use mock::MockVm;
 pub use qemu::{send_monitor_command, wait_for_ssh_port, QemuVm, QemuVmArgs};
 pub use registry::{VmManager, VmSpec, VmState};

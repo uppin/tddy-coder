@@ -1,0 +1,12 @@
+# Linux kernel config fragment enabling virtio-9p guest support, required for
+# tddy-sandbox-qemu's host<->guest mounts and the plan/runner delivery shares.
+# Wire this in via the Buildroot spec: BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES
+# pointing at this file's absolute path — see ../docs/guest-image-9p-init.md.
+CONFIG_NET_9P=y
+CONFIG_NET_9P_VIRTIO=y
+CONFIG_9P_FS=y
+CONFIG_9P_FS_POSIX_ACL=y
+CONFIG_9P_FS_SECURITY=y
+CONFIG_VIRTIO=y
+CONFIG_VIRTIO_PCI=y
+CONFIG_VIRTIO_MMIO=y

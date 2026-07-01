@@ -424,11 +424,17 @@ fn pump_log_tail(
 
 #[cfg(target_os = "macos")]
 fn spawn_confined_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
+    if crate::sandbox_session::qemu_backend_requested() {
+        return tddy_sandbox_qemu::spawn_plan(plan);
+    }
     tddy_sandbox_darwin::spawn_plan(plan)
 }
 
 #[cfg(target_os = "linux")]
 fn spawn_confined_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
+    if crate::sandbox_session::qemu_backend_requested() {
+        return tddy_sandbox_qemu::spawn_plan(plan);
+    }
     tddy_sandbox_cgroups::spawn_plan(plan)
 }
 

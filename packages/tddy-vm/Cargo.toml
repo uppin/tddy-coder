@@ -15,6 +15,7 @@ thiserror = "1"
 log = "0.4"
 tokio = { version = "1", features = ["rt", "process", "io-util", "net", "sync", "time"] }
 tokio-stream = "0.1"
+tempfile = "3"
 tddy-build = { path = "../tddy-build" }
 tddy-build-qemu = { path = "../tddy-build-qemu" }
 tddy-service = { path = "../tddy-service" }
@@ -22,5 +23,4 @@ tddy-rpc = { path = "../tddy-rpc" }
 tddy-task = { path = "../tddy-task" }
 
 [dev-dependencies]
-tempfile = "3"
 tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }

@@ -8703,6 +8703,7 @@ dependencies = [
  "tddy-sandbox",
  "tddy-sandbox-cgroups",
  "tddy-sandbox-darwin",
+ "tddy-sandbox-qemu",
  "tddy-sandbox-recipes",
  "tddy-sandbox-runner",
  "tddy-service",
@@ -9060,6 +9061,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-sandbox-qemu"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "bytes",
+ "clap",
+ "env_logger",
+ "log",
+ "predicates",
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "serde_json",
+ "tddy-sandbox",
+ "tddy-sandbox-runner",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-sandbox-recipes"
 version = "0.1.0"
 dependencies = [
@@ -9304,6 +9325,24 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+]
+
+[[package]]
+name = "tddy-vm-build"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap",
+ "env_logger",
+ "log",
+ "predicates",
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "serial_test",
+ "tddy-vm",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
