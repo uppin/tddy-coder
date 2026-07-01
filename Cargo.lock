@@ -9057,6 +9057,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-sandbox-qemu"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap",
+ "env_logger",
+ "log",
+ "predicates",
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "serde_json",
+ "tddy-sandbox",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-sandbox-recipes"
 version = "0.1.0"
 dependencies = [
@@ -9292,6 +9310,23 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+]
+
+[[package]]
+name = "tddy-vm-build"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap",
+ "env_logger",
+ "log",
+ "predicates",
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "tddy-vm",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

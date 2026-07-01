@@ -107,6 +107,67 @@ tddy-web
 6. `VmManager` persists specs to JSON; serde round-trip is correct.
 7. `build_vm_image` invokes the tddy-build system (QemuPlugin + BuildrootPlugin registry). [SUPERSEDED — see below]
 
+## Image builder CLI (`tddy-vm-build`) (Added: 2026-07-01)
+
+**Product area:** VM
+**Feature PRD:** this section
+**Status:** Planned — PRD + failing tests only (see [changeset](../../dev/1-WIP/qemu-sandbox-cli.md))
+
+A standalone binary that builds a VM image from a Buildroot `.config` spec and writes it
+to an explicit output file, independent of the daemon/RPC path:
+
+```
+tddy-vm-build --spec <path-to-.config> --output <path> --format qcow2|raw
+```
+
+- **Spec format:** same Buildroot `.config` (`BR2_*`) syntax as the existing
+  `BuildVmImage` RPC (§ RPC surface above).
+- **Output:** `--format qcow2` (default) runs `qemu-img convert` as today; `--format raw`
+  writes the Buildroot rootfs image unconverted.
+- **Core logic is shared, not duplicated:** the CLI calls a new pure
+  `tddy_vm::build::build_image(spec, output, format, progress)` function. The existing
+  `build_vm_image_from_spec` (used by the `BuildVmImage` RPC) is refactored to call the
+  same core with its gRPC progress channel as the `progress` sink — no behavior change to
+  the RPC path.
+- **Requires `BUILDROOT_DIR`** in the environment, exactly as the RPC path does today.
+
+## QEMU sandbox backend (`tddy-sandbox-qemu`) (Added: 2026-07-01)
+
+**Product area:** VM / Sandbox
+**Feature PRD:** this section (backend contract defined in `tddy-sandbox`, see
+`packages/tddy-sandbox/src/builder.rs`)
+**Status:** Planned — PRD + failing tests only (see [changeset](../../dev/1-WIP/qemu-sandbox-cli.md))
+
+A CLI binary and library backend that boots a qcow2 image built above and runs it as a
+full `tddy-sandbox` confinement backend — the same `SandboxPlan` contract implemented by
+`tddy-sandbox-darwin` (Seatbelt) and `tddy-sandbox-cgroups` (Linux namespaces), except the
+confinement boundary is a QEMU VM instead of a host-level jail:
+
+```
+tddy-sandbox-qemu --image <qcow2> \
+  --mount <host-dir>:<jail-path>[:rw] \
+  --env KEY=VALUE \
+  --cwd <guest-path> \
+  -- <command...>
+```
+
+- **Host directory mounts** are the headline capability requested for this backend:
+  each `SandboxPlan` `MountSpec` becomes a virtio-9p share (`-fsdev local` +
+  `-device virtio-9p-pci`), read-only unless `writable`. This requires the guest image to
+  enable 9p in its Buildroot config (documented fragment, see changeset).
+- **Everything the sandbox builder supports** (reads, copies, symlinks, env, secrets,
+  network policy, resource limits, PTY) flows through the same `SandboxPlan` the darwin
+  and cgroups backends consume — see `packages/tddy-sandbox/src/builder.rs` for the full
+  model. The in-guest counterpart to the darwin/cgroups jail is
+  `tddy-sandbox-runner` (already platform-agnostic), injected into the guest via a
+  reserved 9p share plus a small init hook.
+- **Image selection is out-of-band:** `SandboxPlan` itself carries no VM-image field
+  (that model is shared with the non-VM backends); the image path is a CLI flag /
+  backend option (`QemuBackendOptions`), not a plan field.
+- **Daemon integration:** `tddy-daemon` gains a backend selector (env or config, since
+  QEMU is not `target_os`-gated like darwin/cgroups) to route `spawn_sandbox_runner` to
+  `tddy_sandbox_qemu::spawn_plan` — additive, opt-in, existing backends remain default.
+
 ## Out of scope for this changeset
 
 - ScreenShare VM mode.
@@ -116,3 +177,9 @@ tddy-web
 
 - **`BuildVmImage` backend is wrong for spec-based builds.** The current implementation passes the UI textarea content as a tddy-build target ID. The correct implementation must accept a Buildroot config spec as text and invoke Buildroot directly — completely independent of the tddy-build graph. Requires: (a) agree on spec format (defconfig name / full `.config` / fragment); (b) establish Buildroot install path on the daemon host; (c) new RPC field or new RPC method; (d) new `build_vm_image_from_spec` Rust function.
 - **`ListVmImages` RPC does not exist.** Dropdown images currently only accumulate within a single browser session. A persistent image registry (list of previously built qcow2 paths) needs its own storage and RPC.
+
+## Known gaps / pending design — QEMU sandbox backend (Added: 2026-07-01)
+
+- **gRPC transport mismatch.** `SandboxHandle.grpc_socket_path` is a Unix domain socket, but a QEMU guest can only be reached over the slirp `hostfwd` TCP forward — needs a host-side UDS↔TCP bridge, or `tddy-sandbox-runner`'s client (`connect_sandbox_client`) needs a TCP-connecting variant.
+- **No uid/user field in `SandboxPlan`.** The guest runs as root, matching the existing `QemuVm` SSH-as-root behavior. Per-mount uid mapping (9p `security_model`) is future work if a non-root guest identity is needed.
+- **Guest image must opt in to 9p.** Existing Buildroot specs built via `BuildVmImage` do not enable `CONFIG_NET_9P`/`CONFIG_9P_FS`; images need to be rebuilt with the documented fragment (and the `tddy-sandbox-runner` init hook) before this backend can boot them successfully.
