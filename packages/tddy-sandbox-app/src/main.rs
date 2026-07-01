@@ -59,6 +59,23 @@ struct Args {
     #[arg(long)]
     cwd: Option<PathBuf>,
 
+    /// Persistent jail `$HOME`, mounted read-write and reused across sandbox restarts (settings,
+    /// session history, credentials). Kept separate from the real `~/.claude`.
+    /// Default: `$HOME/.tddy/sandbox-claude-home`.
+    ///
+    /// Deliberately shared across all `tddy-sandbox-app` invocations on this host, not
+    /// per-session — mirrors how a real user's `~/.claude` is shared across concurrent `claude`
+    /// CLI sessions today; this is intentional, not an oversight.
+    #[arg(long, env = "TDDY_SANDBOX_CLAUDE_HOME")]
+    claude_home_dir: Option<PathBuf>,
+
+    /// Remote-codebase mode: don't mount `--repo` into the jail. Claude sees only the
+    /// (read-only) context dir and the persistent home; the real repo is reachable only via
+    /// `mcp__tddy-tools__*` calls, which the host relays against the real `--repo` path. Matches
+    /// the daemon's sandboxed-session isolation model (see docs/ft/daemon/remote-codebase-mode.md).
+    #[arg(long)]
+    remote_codebase: bool,
+
     /// Enable debug logging for tddy sandbox components (HTTP/gRPC frame traces stay quiet).
     #[arg(short, long)]
     verbose: bool,
@@ -83,6 +100,10 @@ fn default_session_base() -> PathBuf {
         .join(".tddy")
 }
 
+fn default_claude_home_dir() -> PathBuf {
+    default_session_base().join("sandbox-claude-home")
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -105,6 +126,17 @@ async fn main() -> Result<()> {
         eprintln!("verbose logging enabled (RUST_LOG)");
     }
 
+    let claude_home_dir = args.claude_home_dir.unwrap_or_else(default_claude_home_dir);
+    eprintln!(
+        "claude_home_dir={} (persistent across restarts)",
+        claude_home_dir.display()
+    );
+    if args.remote_codebase {
+        eprintln!(
+            "remote_codebase=true: repo not mounted; Claude reaches it only via mcp__tddy-tools__* calls"
+        );
+    }
+
     let spawned = tokio::select! {
         res = spawn_claude_sandbox(SpawnParams {
             repo: args.repo,
@@ -116,6 +148,8 @@ async fn main() -> Result<()> {
             sandbox_runner_path: args.sandbox_runner_path,
             session_dir: session_dir.clone(),
             cwd: args.cwd,
+            claude_home_dir,
+            remote_codebase: args.remote_codebase,
         }) => res?,
         _ = tokio::signal::ctrl_c() => {
             eprintln!("interrupted");

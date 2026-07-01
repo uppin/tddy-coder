@@ -33,6 +33,10 @@ message SessionFrame {
     // Bidirectional: TunnelData/TunnelClose flow in both directions (direction by context).
     TunnelData tunnel_data = 11;
     TunnelClose tunnel_close = 12;
+    // Sandbox → host: the pty command has exited. The host stops polling and lets its ends of the
+    // stream drop, so the in-jail gRPC server can finish its graceful shutdown and the sandboxed
+    // process can exit (see run_generic_pty_thread / run_host_relay).
+    SessionEnded session_ended = 13;
   }
 }
 
@@ -109,4 +113,8 @@ message TunnelData {
 message TunnelClose {
   string tunnel_id = 1;
   string error = 2;
+}
+
+message SessionEnded {
+  int32 exit_code = 1;
 }
