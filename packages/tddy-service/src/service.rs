@@ -94,3 +94,74 @@ impl TddyRemote for TddyRemoteService {
         ))
     }
 }
+
+/// Same business logic as the tonic `TddyRemote` impl above, against `tddy_rpc`'s
+/// transport-agnostic types instead — lets `--stdio` serve the same remote-control surface as
+/// `--grpc` (see `crate::proto::remote::TddyRemote`, generated with `extern_path` back onto the
+/// same `crate::gen::{ClientMessage, ServerMessage, ...}` structs used above, so both impls speak
+/// the identical wire format).
+#[async_trait::async_trait]
+impl crate::proto::remote::TddyRemote for TddyRemoteService {
+    type StreamStream = ReceiverStream<Result<ServerMessage, tddy_rpc::Status>>;
+
+    async fn stream(
+        &self,
+        request: tddy_rpc::Request<tddy_rpc::Streaming<ClientMessage>>,
+    ) -> Result<tddy_rpc::Response<Self::StreamStream>, tddy_rpc::Status> {
+        let mut event_rx = self.event_tx.subscribe();
+        let intent_tx = self.intent_tx.clone();
+        let mut client_stream = request.into_inner();
+
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+
+        let event_tx_clone = tx.clone();
+        tokio::spawn(async move {
+            loop {
+                match event_rx.recv().await {
+                    Ok(event) => {
+                        let msg = event_to_server_message(event);
+                        if event_tx_clone.send(Ok(msg)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        log::warn!(
+                            "TddyRemote stdio stream: broadcast receiver lagged; skipped {} presenter event(s)",
+                            skipped
+                        );
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+
+        tokio::spawn(async move {
+            use futures_util::StreamExt;
+            while let Some(Ok(msg)) = client_stream.next().await {
+                if let Some(intent) = client_message_to_intent(msg) {
+                    let _ = intent_tx.send(intent);
+                }
+            }
+        });
+
+        Ok(tddy_rpc::Response::new(ReceiverStream::new(rx)))
+    }
+
+    async fn get_session(
+        &self,
+        _request: tddy_rpc::Request<GetSessionRequest>,
+    ) -> Result<tddy_rpc::Response<GetSessionResponse>, tddy_rpc::Status> {
+        Err(tddy_rpc::Status::unimplemented(
+            "GetSession is only available in daemon mode",
+        ))
+    }
+
+    async fn list_sessions(
+        &self,
+        _request: tddy_rpc::Request<ListSessionsRequest>,
+    ) -> Result<tddy_rpc::Response<ListSessionsResponse>, tddy_rpc::Status> {
+        Err(tddy_rpc::Status::unimplemented(
+            "ListSessions is only available in daemon mode",
+        ))
+    }
+}

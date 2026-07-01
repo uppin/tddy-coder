@@ -36,6 +36,8 @@ yet, could stall the sandboxed process waiting on a stream that never closes.
 | macOS | loopback **TCP** (port written to the ready marker; Seatbelt allows loopback) |
 | Linux | **AF_UNIX** (`--grpc-uds`, `connect_sandbox_client_uds`) on a shared-filesystem path — survives the jail's network namespace, where loopback TCP cannot |
 
+**stdio, as a third transport (macOS only so far)**: `--stdio` serves `SandboxService` (`Echo`/`EchoStream`/`SessionChannel`) over the jailed process's own piped stdin/stdout instead of a gRPC socket, via `tddy-rpc`/`tddy-stdio`. `tddy_sandbox_darwin::spawn_plan` pipes stdin/stdout (instead of redirecting stdout to an egress log) when `--stdio` is present in the command; `SandboxHandle::take_stdio()` exposes the piped (blocking) `std::process::ChildStdin`/`ChildStdout`; `tddy_daemon::sandbox_session::bridge_sandbox_stdio` converts them to async via `tokio::net::unix::pipe` and hosts an `RpcService` endpoint over them. `run_host_relay` is transport-agnostic via the `SessionChannelClient` trait (implemented for both the tonic `SandboxClient` and a new `StdioSandboxClient`) — its actual relay logic (PTY/tool/tunnel/egress) needed no changes, since it only ever touches plain `SessionFrame` structs, the same Rust type on both transports (`sandbox.proto`'s message types are `extern_path`-unified across the tonic and RpcService codegen passes). Proven end-to-end through a real Seatbelt jail, including a full tool-call round trip; not yet wired into the daemon's actual spawn/dial call sites (`connection_service.rs`) or ported to `tddy-sandbox-cgroups` (Linux) — see `docs/dev/TODO.md`.
+
 ### Linux cgroups jail
 
 `tddy-sandbox-cgroups::spawn` confines the runner via `Command::pre_exec`: `unshare(CLONE_NEWUSER)`

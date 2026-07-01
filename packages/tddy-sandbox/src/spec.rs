@@ -105,6 +105,16 @@ impl SandboxHandle {
         self.child
     }
 
+    /// Take ownership of the child's piped stdin/stdout. Only `Some` when the spawning platform
+    /// crate piped them (i.e. the command included `--stdio`) instead of routing stdout to an
+    /// egress log — see `tddy-sandbox-darwin::spawn_plan`.
+    pub fn take_stdio(&mut self) -> Option<(std::process::ChildStdin, std::process::ChildStdout)> {
+        match (self.child.stdin.take(), self.child.stdout.take()) {
+            (Some(stdin), Some(stdout)) => Some((stdin, stdout)),
+            _ => None,
+        }
+    }
+
     /// If the sandboxed child has already exited, return a human-readable reason.
     ///
     /// Returns `None` while the child is still running. This is the key signal that was

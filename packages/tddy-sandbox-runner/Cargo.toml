@@ -13,9 +13,12 @@ name = "tddy-sandbox-runner"
 path = "src/main.rs"
 
 [dependencies]
+tddy-core = { path = "../tddy-core" }
+tddy-rpc = { path = "../tddy-rpc" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-service = { path = "../tddy-service" }
+tddy-stdio = { path = "../tddy-stdio" }
 log = "0.4"
 env_logger = "0.11"
 anyhow = "1"
@@ -32,7 +35,7 @@ libc = "0.2"
 hyper-util = "0.1"
 tower = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+futures-util = "0.3"
 
 [dev-dependencies]
-futures-util = "0.3"
 tempfile = "3"

@@ -8,10 +8,14 @@
 //! static tools while `tddy-sandbox-app --remote-codebase` was running, because
 //! `run_mcp_server()` never consulted the dynamic catalog.
 
+use async_trait::async_trait;
+use prost::Message;
 use serde_json::{json, Value};
 use std::process::Stdio;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tddy_rpc::{RpcMessage, RpcResult, RpcService};
+use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -114,24 +118,20 @@ async fn mcp_tools_list_over_stdio_includes_dynamic_tools_when_sandbox_ipc_confi
     );
 }
 
-/// AC18: a `tools/call` for a dynamically-discovered tool name must actually be forwarded over
-/// the configured `TDDY_SANDBOX_TOOL_IPC` socket and return the relay's result — not the
-/// "tool not found" error the unwired server returns today.
-#[tokio::test]
-async fn mcp_tools_call_over_stdio_forwards_dynamic_tool_through_sandbox_ipc() {
-    // Given — a fake in-jail tool-IPC listener standing in for tddy-sandbox-runner.
-    let socket_path = tddy_sandbox::SandboxSpec::short_ipc_socket_path("mcpcallred");
-    let listener = tokio::net::UnixListener::bind(&socket_path).expect("bind fake tool ipc socket");
-    let fake_ipc = tokio::spawn(async move {
-        let (mut stream, _addr) = listener.accept().await.expect("accept fake ipc connection");
-        let mut buf = Vec::new();
-        stream
-            .read_to_end(&mut buf)
-            .await
-            .expect("read ToolIpcRequest from fake ipc client");
-        let request: tddy_sandbox::ToolIpcRequest =
-            serde_json::from_slice(&buf).expect("fake ipc request must be valid ToolIpcRequest");
-        let response = tddy_sandbox::ToolIpcResponse {
+/// Fake `connection.ConnectionService/ExecuteTool` handler, standing in for the real
+/// `ToolExecService` `tddy-sandbox-runner` hosts on the tool-IPC socket. Echoes back a fixed
+/// marker plus the requested tool name — enough to prove the call actually reached this fake
+/// listener over the RPC-framed wire, not the old raw-JSON protocol.
+struct FakeToolExecService;
+
+#[async_trait]
+impl RpcService for FakeToolExecService {
+    async fn handle_rpc(&self, service: &str, method: &str, message: &RpcMessage) -> RpcResult {
+        assert_eq!(service, "connection.ConnectionService");
+        assert_eq!(method, "ExecuteTool");
+        let request = ExecuteToolRequest::decode(message.payload.as_ref())
+            .expect("decode ExecuteToolRequest");
+        let response = ExecuteToolResponse {
             result_json: json!({
                 "marker": "dynamic-tool-round-trip-ok",
                 "tool": request.tool_name
@@ -139,11 +139,28 @@ async fn mcp_tools_call_over_stdio_forwards_dynamic_tool_through_sandbox_ipc() {
             .to_string(),
             is_error: false,
             error_message: String::new(),
+            job_id: String::new(),
+            job_running: false,
         };
-        stream
-            .write_all(response.to_json_string().as_bytes())
-            .await
-            .expect("write ToolIpcResponse to fake ipc client");
+        RpcResult::Unary(Ok(response.encode_to_vec()))
+    }
+}
+
+/// AC18: a `tools/call` for a dynamically-discovered tool name must actually be forwarded over
+/// the configured `TDDY_SANDBOX_TOOL_IPC` socket and return the relay's result — not the
+/// "tool not found" error the unwired server returns today.
+#[tokio::test]
+async fn mcp_tools_call_over_stdio_forwards_dynamic_tool_through_sandbox_ipc() {
+    // Given — a fake in-jail tool-IPC listener standing in for tddy-sandbox-runner, speaking the
+    // same tddy-rpc-framed protocol the real ToolExecService hosts.
+    let socket_path = tddy_sandbox::SandboxSpec::short_ipc_socket_path("mcpcallred");
+    let listener = tokio::net::UnixListener::bind(&socket_path).expect("bind fake tool ipc socket");
+    let fake_ipc = tokio::spawn(async move {
+        let (stream, _addr) = listener.accept().await.expect("accept fake ipc connection");
+        let (read_half, write_half) = tokio::io::split(stream);
+        let (_client, endpoint) =
+            tddy_stdio::StdioEndpoint::from_duplex(read_half, write_half, FakeToolExecService);
+        endpoint.run().await;
     });
 
     let mut child = spawn_mcp_server(&[(

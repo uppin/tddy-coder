@@ -16,7 +16,19 @@ tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 name = "tddy-tools"
 path = "src/main.rs"
 
+# Test fixture: hosts a fake connection.ConnectionService/ExecuteTool handler over its own
+# stdin/stdout. Exercised by tests/session_tool_stdio_rpc_dispatch.rs. Its dependencies
+# (tddy-rpc, tddy-stdio, async-trait) must live in [dependencies], not [dev-dependencies]: this
+# is a real [[bin]] target built under plain `cargo build`/`cargo clippy`, which don't pull in
+# dev-dependencies the way `cargo test` does (see the same note in tddy-stdio/Cargo.toml).
+[[bin]]
+name = "execute-tool-stdio-fixture"
+path = "tests/fixtures/execute_tool_fixture.rs"
+
 [dependencies]
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-stdio = { path = "../tddy-stdio" }
+async-trait = "0.1"
 tddy-core = { path = "../tddy-core" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-build = { path = "../tddy-build" }

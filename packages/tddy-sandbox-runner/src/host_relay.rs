@@ -7,24 +7,130 @@
 //! tools; tests stub them).
 
 use std::collections::HashMap;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures_util::Stream;
+use prost::Message;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
 use tddy_service::proto::connection::ExecuteToolResponse;
-use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
-use tddy_service::tonic_sandbox::{
+use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
+use tddy_service::proto::sandbox::{
     EgressRequest, EgressResponse, HostPoll, SandboxInput, SessionFrame, SubscribeTerminal,
     TunnelClose, TunnelData, TunnelOpen, TunnelOpenAck,
 };
 
 use crate::runner::SandboxClient;
+
+/// A decoded `SessionFrame` stream, transport-erased — either a tonic `Streaming<SessionFrame>`
+/// or a decoded `tddy-stdio` bidi stream (see [`SessionChannelClient`]).
+type SessionFrameStream = Pin<Box<dyn Stream<Item = Result<SessionFrame, String>> + Send>>;
+
+/// Opens the in-jail `SessionChannel` bidi call, transport-agnostically. [`run_host_relay`] is
+/// otherwise entirely transport-agnostic already (it only ever touches plain `SessionFrame`
+/// structs, shared by both the tonic and stdio/`tddy-rpc` transports since `sandbox.proto`'s
+/// message types are `extern_path`-unified across both codegen passes) — this is the one seam
+/// where the transports genuinely differ (a typed tonic bidi call vs. `tddy-rpc`'s untyped
+/// `call_unary`/`start_bidi_stream` interface, which has no generated client stub).
+#[async_trait]
+pub trait SessionChannelClient: Send {
+    async fn open_session_channel(
+        &mut self,
+        outbound: ReceiverStream<SessionFrame>,
+    ) -> Result<SessionFrameStream, String>;
+}
+
+#[async_trait]
+impl SessionChannelClient for SandboxClient {
+    async fn open_session_channel(
+        &mut self,
+        outbound: ReceiverStream<SessionFrame>,
+    ) -> Result<SessionFrameStream, String> {
+        let stream = self
+            .session_channel(outbound)
+            .await
+            .map_err(|e| format!("open session channel: {e}"))?
+            .into_inner();
+        Ok(Box::pin(stream.map(|r| r.map_err(|e| e.to_string()))))
+    }
+}
+
+/// [`SessionChannelClient`] over `tddy-stdio`'s untyped bidi interface. `start_bidi_stream`
+/// returns a `StdioBidiSender` borrowing from the client it's called on, so the send/receive loop
+/// runs entirely inside one spawned task that owns its own `Arc` clone — the borrow never needs
+/// to outlive that task's stack frame, sidestepping the `'static` requirement `tokio::spawn` would
+/// otherwise conflict with.
+pub struct StdioSandboxClient {
+    client: Arc<tddy_stdio::StdioRpcClient>,
+}
+
+impl StdioSandboxClient {
+    pub fn new(client: Arc<tddy_stdio::StdioRpcClient>) -> Self {
+        Self { client }
+    }
+}
+
+#[async_trait]
+impl SessionChannelClient for StdioSandboxClient {
+    async fn open_session_channel(
+        &mut self,
+        mut outbound: ReceiverStream<SessionFrame>,
+    ) -> Result<SessionFrameStream, String> {
+        let client = Arc::clone(&self.client);
+        let (result_tx, result_rx) = mpsc::channel::<Result<SessionFrame, String>>(64);
+
+        tokio::spawn(async move {
+            let (mut sender, mut receiver) =
+                match client.start_bidi_stream("sandbox.SandboxService", "SessionChannel") {
+                    Ok(pair) => pair,
+                    Err(e) => {
+                        let _ = result_tx
+                            .send(Err(format!("start SessionChannel bidi call: {e}")))
+                            .await;
+                        return;
+                    }
+                };
+            loop {
+                tokio::select! {
+                    frame = outbound.next() => {
+                        match frame {
+                            Some(frame) => {
+                                if sender.send(frame.encode_to_vec(), false).await.is_err() {
+                                    break;
+                                }
+                            }
+                            None => break,
+                        }
+                    }
+                    item = receiver.recv() => {
+                        match item {
+                            Some(Ok(bytes)) => {
+                                let decoded = SessionFrame::decode(bytes.as_slice())
+                                    .map_err(|e| e.to_string());
+                                if result_tx.send(decoded).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Some(Err(e)) => {
+                                let _ = result_tx.send(Err(e.to_string())).await;
+                            }
+                            None => break,
+                        }
+                    }
+                }
+            }
+        });
+
+        Ok(Box::pin(ReceiverStream::new(result_rx)))
+    }
+}
 
 /// One-shot "the pty session ended" flag, race-free regardless of whether `signal()` or `wait()`
 /// runs first (the classic check-notify-check-await pattern for `tokio::sync::Notify`).
@@ -96,23 +202,20 @@ impl HostRelayConfig {
     }
 }
 
-/// Open the in-jail `SessionChannel` over `client`, subscribe to the main terminal, and drive the
-/// host side: poll, relay CONNECT tunnels and egress, forward terminal output to
-/// [`HostRelayConfig::terminal_sink`], and dispatch tool requests to `tool_handler`. Returns the
-/// background task driving inbound frames; `stdin_rx` bytes are written to the jail PTY.
-pub async fn run_host_relay<H: HostToolHandler>(
-    mut client: SandboxClient,
+/// Open the in-jail `SessionChannel` over `client` (tonic or stdio — see [`SessionChannelClient`]),
+/// subscribe to the main terminal, and drive the host side: poll, relay CONNECT tunnels and
+/// egress, forward terminal output to [`HostRelayConfig::terminal_sink`], and dispatch tool
+/// requests to `tool_handler`. Returns the background task driving inbound frames; `stdin_rx`
+/// bytes are written to the jail PTY.
+pub async fn run_host_relay<H: HostToolHandler, C: SessionChannelClient>(
+    mut client: C,
     tool_handler: H,
     config: HostRelayConfig,
     mut stdin_rx: mpsc::UnboundedReceiver<Bytes>,
 ) -> Result<JoinHandle<()>, String> {
     let (host_tx, host_rx) = mpsc::channel(64);
     let host_stream = ReceiverStream::new(host_rx);
-    let mut session = client
-        .session_channel(host_stream)
-        .await
-        .map_err(|e| format!("open session channel: {e}"))?
-        .into_inner();
+    let mut session = client.open_session_channel(host_stream).await?;
 
     host_tx
         .send(SessionFrame {

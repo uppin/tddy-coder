@@ -18,11 +18,13 @@ tddy-core = { path = "../tddy-core" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-livekit = { path = "../tddy-livekit", optional = true }
 tddy-rpc = { path = "../tddy-rpc" }
+tddy-stdio = { path = "../tddy-stdio" }
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit", optional = true }
 tddy-service = { path = "../tddy-service" }
 tddy-tui = { path = "../tddy-tui" }
 tddy-tui-testkit = { path = "../tddy-tui-testkit" }
 anyhow = "1"
+async-trait = "0.1"
 env_logger = "0.11"
 log = "0.4"
 livekit = { version = "0.7", optional = true }

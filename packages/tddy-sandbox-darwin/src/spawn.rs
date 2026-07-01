@@ -54,19 +54,28 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
     let _ = std::fs::remove_file(&ready_marker_path);
 
     let stderr_log = open_egress_log(&plan.spec.egress_dir, SANDBOX_EXEC_STDERR_LOG)?;
-    let stdout_log = open_egress_log(&plan.spec.egress_dir, SANDBOX_EXEC_STDOUT_LOG)?;
+
+    // `--stdio` dedicates the sandboxed process's stdin/stdout to RPC framing (see
+    // `tddy_core::stdio_safety`, `tddy-stdio`) instead of the --grpc-uds/--grpc-listen-port
+    // transport — pipe both back to the caller instead of routing stdout to an egress log.
+    let stdio_mode = plan.spec.command.iter().any(|arg| arg == "--stdio");
 
     let argv = sandbox_exec_argv(&plan);
     let mut cmd = Command::new(&argv[0]);
     cmd.args(&argv[1..]);
 
     cmd.current_dir(plan.spec.cwd.as_ref().unwrap_or(&plan.spec.project_root));
-    cmd.stdin(if plan.stdin.is_some() {
+    cmd.stdin(if stdio_mode || plan.stdin.is_some() {
         Stdio::piped()
     } else {
         Stdio::null()
     });
-    cmd.stdout(Stdio::from(stdout_log));
+    if stdio_mode {
+        cmd.stdout(Stdio::piped());
+    } else {
+        let stdout_log = open_egress_log(&plan.spec.egress_dir, SANDBOX_EXEC_STDOUT_LOG)?;
+        cmd.stdout(Stdio::from(stdout_log));
+    }
     cmd.stderr(Stdio::from(stderr_log));
 
     #[cfg(unix)]

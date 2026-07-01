@@ -6,8 +6,6 @@
 use anyhow::Context;
 use clap::Parser;
 use std::io::{self, IsTerminal, Read, Write};
-#[cfg(unix)]
-use std::os::fd::IntoRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -301,7 +299,12 @@ pub fn run_main(mut args: Args) {
         std::process::exit(1);
     }
 
-    let log_config = effective_log_config(&args);
+    let mut log_config = effective_log_config(&args);
+    if args.stdio {
+        // --stdio dedicates fd 1 to RPC framing; a misconfigured `output: stdout` logger would
+        // corrupt it. Must run before init_tddy_logger — log::set_logger only succeeds once.
+        tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut log_config);
+    }
     let has_file_output = tddy_core::config_has_file_output(&log_config);
     tddy_core::init_tddy_logger(log_config);
     if let Some(session_dir) = session_artifact_dir_for_args(&args) {
@@ -315,11 +318,19 @@ pub fn run_main(mut args: Args) {
         // so crossterm/terminal APIs that may probe stderr work correctly (e.g. VirtualTui).
         #[cfg(unix)]
         if args.daemon {
-            if let Ok(file) = std::fs::File::create(logs.join("daemon_stderr.log")) {
-                let fd = file.into_raw_fd();
-                let _ = unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
-                let _ = unsafe { libc::close(fd) };
-            }
+            let _ = tddy_core::stdio_safety::redirect_fd_to_file(
+                libc::STDERR_FILENO,
+                &logs.join("daemon_stderr.log"),
+            );
+        }
+        // --stdio keeps stdin/stdout live (unlike --daemon) — only stderr needs to leave the
+        // terminal, so crossterm/terminal APIs still work without landing on fd 1's RPC channel.
+        #[cfg(unix)]
+        if args.stdio {
+            let _ = tddy_core::stdio_safety::redirect_fd_to_file(
+                libc::STDERR_FILENO,
+                &logs.join("stdio_stderr.log"),
+            );
         }
     }
 
@@ -403,6 +414,10 @@ pub struct Args {
     pub resume_from: Option<String>,
     /// When true, run as headless gRPC daemon (no TUI).
     pub daemon: bool,
+    /// When true, serve the remote-control surface over stdin/stdout (RPC over stdio, see
+    /// `tddy-stdio`) instead of `--grpc`'s TCP socket. No local TUI is rendered — physical fd 1
+    /// is dedicated to RPC framing.
+    pub stdio: bool,
     /// LiveKit server WebSocket URL (e.g. ws://localhost:7880)
     pub livekit_url: Option<String>,
     /// LiveKit access token for room join
@@ -544,6 +559,11 @@ pub struct CoderArgs {
     /// Run as headless gRPC daemon (systemd-friendly)
     #[arg(long)]
     pub daemon: bool,
+
+    /// Serve the remote-control surface over stdin/stdout (RPC over stdio) instead of --grpc's
+    /// TCP socket. No local TUI is rendered.
+    #[arg(long)]
+    pub stdio: bool,
 
     /// LiveKit server WebSocket URL (e.g. ws://localhost:7880). Requires --livekit-token, --livekit-room, --livekit-identity.
     #[arg(long)]
@@ -743,6 +763,11 @@ pub struct DemoArgs {
     #[arg(long)]
     pub daemon: bool,
 
+    /// Serve the remote-control surface over stdin/stdout (RPC over stdio) instead of --grpc's
+    /// TCP socket. No local TUI is rendered.
+    #[arg(long)]
+    pub stdio: bool,
+
     /// LiveKit WebSocket URL for terminal streaming (e.g. ws://127.0.0.1:7880)
     #[arg(long)]
     pub livekit_url: Option<String>,
@@ -883,6 +908,7 @@ impl From<CoderArgs> for Args {
             session_id: a.session_id,
             resume_from: a.resume_from,
             daemon: a.daemon,
+            stdio: a.stdio,
             livekit_url: a.livekit_url,
             livekit_token: a.livekit_token,
             livekit_room: a.livekit_room,
@@ -937,6 +963,7 @@ impl From<DemoArgs> for Args {
             session_id: a.session_id,
             resume_from: a.resume_from,
             daemon: a.daemon,
+            stdio: a.stdio,
             livekit_url: a.livekit_url,
             livekit_token: a.livekit_token,
             livekit_room: a.livekit_room,
@@ -1139,7 +1166,11 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         return run_daemon(args, shutdown);
     }
     if args.goal.is_none() {
-        let use_tui = should_run_tui(io::stdin().is_terminal(), io::stderr().is_terminal());
+        // --stdio dedicates real stdin/stdout to RPC framing — never a TTY in practice, but must
+        // still route to run_full_workflow_tui (which serves stdio RPC instead of rendering a
+        // TUI when args.stdio is set), not the plain-mode fallback that reads stdin directly.
+        let use_tui =
+            args.stdio || should_run_tui(io::stdin().is_terminal(), io::stderr().is_terminal());
         if use_tui {
             return run_full_workflow_tui(args, shutdown);
         }
@@ -2707,13 +2738,35 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         std::thread::sleep(std::time::Duration::from_millis(10));
     });
 
-    tddy_tui::run_event_loop(
-        conn,
-        shutdown.as_ref(),
-        None,
-        is_debug_mode(args),
-        args.mouse,
-    )?;
+    if args.stdio {
+        // `--stdio` dedicates this process's real stdin/stdout to RPC framing (see
+        // `tddy_core::stdio_safety`) — serve the same remote-control surface as `--grpc`, but
+        // never touch physical fd 1 for TUI rendering (no `run_event_loop`/crossterm here).
+        let handle = tddy_core::PresenterHandle {
+            event_tx: event_tx.clone(),
+            intent_tx: intent_tx.clone(),
+        };
+        let service = tddy_service::proto::remote::TddyRemoteServer::new(
+            tddy_service::TddyRemoteService::new(handle),
+        );
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        rt.block_on(async move {
+            let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_process_stdio(service);
+            endpoint.run().await;
+        });
+        shutdown.store(true, Ordering::Relaxed);
+    } else {
+        tddy_tui::run_event_loop(
+            conn,
+            shutdown.as_ref(),
+            None,
+            is_debug_mode(args),
+            args.mouse,
+        )?;
+    }
 
     presenter_handle.join().expect("presenter thread panicked");
 
@@ -3305,6 +3358,7 @@ mod resume_session_config_tests {
             session_id: None,
             resume_from: Some(sid.to_string()),
             daemon: false,
+            stdio: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3375,6 +3429,7 @@ mod resume_session_identity_tests {
             session_id: None,
             resume_from: Some(sid.to_string()),
             daemon: false,
+            stdio: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3446,6 +3501,7 @@ mod session_dir_sync_tests {
             session_id: Some(sid.to_string()),
             resume_from: Some(sid.to_string()),
             daemon: false,
+            stdio: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3533,6 +3589,7 @@ mod changeset_agent_resume_tests {
             session_id: Some(sid.to_string()),
             resume_from: Some(sid.to_string()),
             daemon: false,
+            stdio: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3637,6 +3694,7 @@ mod post_tui_workflow_exit_tests {
             session_id: Some(session_id.to_string()),
             resume_from: None,
             daemon: false,
+            stdio: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
