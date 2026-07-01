@@ -111,7 +111,7 @@ tddy-web
 
 **Product area:** VM
 **Feature PRD:** this section
-**Status:** Planned — PRD + failing tests only (see [changeset](../../dev/1-WIP/qemu-sandbox-cli.md))
+**Status:** Implemented — verified against two real (non-mocked) Buildroot builds on macOS via the Docker toolchain below (`#[ignore]`+`#[serial]`, ~62 min total); see [packages/tddy-vm/docs/changesets.md](../../../packages/tddy-vm/docs/changesets.md) and [packages/tddy-vm-build/docs/changesets.md](../../../packages/tddy-vm-build/docs/changesets.md)
 
 A standalone binary that builds a VM image from a Buildroot `.config` spec and writes it
 to an explicit output file, independent of the daemon/RPC path:
@@ -147,7 +147,12 @@ tddy-vm-build --spec <path-to-.config> --output <path> --format qcow2|raw
 **Product area:** VM / Sandbox
 **Feature PRD:** this section (backend contract defined in `tddy-sandbox`, see
 `packages/tddy-sandbox/src/builder.rs`)
-**Status:** Planned — PRD + failing tests only (see [changeset](../../dev/1-WIP/qemu-sandbox-cli.md))
+**Status:** Implemented — real overlay creation, QEMU boot, and in-guest `tddy-sandbox-runner`
+handshake over a forwarded TCP control port (reusing the existing `run_host_relay`, no
+changes needed to shared darwin/cgroups infrastructure); `tddy-daemon` backend selector
+wired. Guest-side 9p mount + init hook documented with real artifacts (see
+[packages/tddy-sandbox-qemu/docs/guest-image-9p-init.md](../../../packages/tddy-sandbox-qemu/docs/guest-image-9p-init.md))
+but not yet exercised inside an actual booted guest — see "Known gaps" below.
 
 A CLI binary and library backend that boots a qcow2 image built above and runs it as a
 full `tddy-sandbox` confinement backend — the same `SandboxPlan` contract implemented by
@@ -165,7 +170,9 @@ tddy-sandbox-qemu --image <qcow2> \
 - **Host directory mounts** are the headline capability requested for this backend:
   each `SandboxPlan` `MountSpec` becomes a virtio-9p share (`-fsdev local` +
   `-device virtio-9p-pci`), read-only unless `writable`. This requires the guest image to
-  enable 9p in its Buildroot config (documented fragment, see changeset).
+  enable 9p in its Buildroot config — see
+  [packages/tddy-sandbox-qemu/docs/guest-image-9p-init.md](../../../packages/tddy-sandbox-qemu/docs/guest-image-9p-init.md)
+  for the kernel fragment + init hook.
 - **Everything the sandbox builder supports** (reads, copies, symlinks, env, secrets,
   network policy, resource limits, PTY) flows through the same `SandboxPlan` the darwin
   and cgroups backends consume — see `packages/tddy-sandbox/src/builder.rs` for the full
@@ -189,8 +196,8 @@ tddy-sandbox-qemu --image <qcow2> \
 - **`BuildVmImage` backend is wrong for spec-based builds.** The current implementation passes the UI textarea content as a tddy-build target ID. The correct implementation must accept a Buildroot config spec as text and invoke Buildroot directly — completely independent of the tddy-build graph. Requires: (a) agree on spec format (defconfig name / full `.config` / fragment); (b) establish Buildroot install path on the daemon host; (c) new RPC field or new RPC method; (d) new `build_vm_image_from_spec` Rust function.
 - **`ListVmImages` RPC does not exist.** Dropdown images currently only accumulate within a single browser session. A persistent image registry (list of previously built qcow2 paths) needs its own storage and RPC.
 
-## Known gaps / pending design — QEMU sandbox backend (Added: 2026-07-01)
+## Known gaps / pending design — QEMU sandbox backend (Added: 2026-07-01, updated 2026-07-02)
 
-- **gRPC transport mismatch.** `SandboxHandle.grpc_socket_path` is a Unix domain socket, but a QEMU guest can only be reached over the slirp `hostfwd` TCP forward — needs a host-side UDS↔TCP bridge, or `tddy-sandbox-runner`'s client (`connect_sandbox_client`) needs a TCP-connecting variant.
 - **No uid/user field in `SandboxPlan`.** The guest runs as root, matching the existing `QemuVm` SSH-as-root behavior. Per-mount uid mapping (9p `security_model`) is future work if a non-root guest identity is needed.
-- **Guest image must opt in to 9p.** Existing Buildroot specs built via `BuildVmImage` do not enable `CONFIG_NET_9P`/`CONFIG_9P_FS`; images need to be rebuilt with the documented fragment (and the `tddy-sandbox-runner` init hook) before this backend can boot them successfully.
+- **Guest image must opt in to 9p, and the fragment is unverified in a real boot.** Existing Buildroot specs built via `BuildVmImage` do not enable `CONFIG_NET_9P`/`CONFIG_9P_FS`; a kernel Kconfig fragment and BusyBox init hook now exist (`packages/tddy-sandbox-qemu/guest/`, documented in [guest-image-9p-init.md](../../../packages/tddy-sandbox-qemu/docs/guest-image-9p-init.md)) and their shell logic was verified against simulated inputs on the host, but no image has actually been built with this fragment and booted yet — that's the next real-world validation step before this backend can run end-to-end.
+- **Guest command exit code is an approximation.** The `SessionChannel` protocol carries a real exit code in `SessionEnded`, but `run_host_relay` (shared by 7 call sites across darwin/cgroups/the daemon/tests) doesn't currently surface it to callers — plumbing it through touches that shared, already-working infrastructure. `tddy-sandbox-qemu` reports `0` on a clean session end and `1` on any connect/boot/relay failure, not the guest command's real exit code.
