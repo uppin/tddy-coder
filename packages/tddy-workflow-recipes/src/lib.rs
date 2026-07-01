@@ -11,6 +11,7 @@ pub mod orchestrate_pr_stack;
 pub mod parser;
 pub mod permissions;
 pub mod plan_pr_stack;
+pub mod pr_stack;
 pub mod recipe_resolve;
 pub mod review;
 pub mod schema_pipeline;
@@ -57,6 +58,7 @@ pub use plan_pr_stack::{
     planned_prs_into_stack_nodes, validate_stack_plan, PlanPrStackRecipe, PlannedPr,
     StackPlanOutput,
 };
+pub use pr_stack::{reseed_stack_from_plan_if_unspawned, PrStackRecipe};
 pub use recipe_resolve::{
     resolve_workflow_recipe_from_cli_name, unknown_workflow_recipe_error,
     workflow_recipe_and_manifest_from_cli_name, WorkflowRecipeAndManifest,

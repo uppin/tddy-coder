@@ -230,6 +230,14 @@ export const TEST_IDS = {
   screenSharingOverlay: "screen-sharing-overlay",
   screenSharingOverlayVideo: "screen-sharing-overlay-video",
   screenSharingOverlayClose: "screen-sharing-overlay-close",
+
+  // PR-Stack Chat Screen (per-workflow session view for the "pr-stack" recipe)
+  prStackScreen: "pr-stack-screen",
+  prStackPlannedPrList: "pr-stack-planned-pr-list",
+  prStackChat: "pr-stack-chat",
+  prStackChatMessages: "pr-stack-chat-messages",
+  prStackChatInput: "pr-stack-chat-input",
+  prStackChatSendBtn: "pr-stack-chat-send-btn",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -420,3 +428,19 @@ export const sessionsScreenSharingStopBtn = (targetId: string) =>
 /** `[data-testid="sessions-screen-sharing-remove-<targetId>"]` — Remove target button */
 export const sessionsScreenSharingRemoveBtn = (targetId: string) =>
   `sessions-screen-sharing-remove-${targetId}`;
+
+// ---------------------------------------------------------------------------
+// PR-Stack Chat Screen dynamic helpers
+// ---------------------------------------------------------------------------
+
+/** `[data-testid="pr-stack-planned-pr-row-<nodeId>"]` — a single planned-PR row */
+export const prStackPlannedPrRow = (nodeId: string) => `pr-stack-planned-pr-row-${nodeId}`;
+
+/** `[data-testid="pr-stack-start-session-<nodeId>"]` — "Start session" CTA for an unspawned node */
+export const prStackStartSessionBtn = (nodeId: string) => `pr-stack-start-session-${nodeId}`;
+
+/** `[data-testid="pr-stack-status-chip-<nodeId>"]` — status chip for an already-spawned node */
+export const prStackStatusChip = (nodeId: string) => `pr-stack-status-chip-${nodeId}`;
+
+/** `[data-testid="pr-stack-chat-message-<index>"]` — a single rendered chat bubble */
+export const prStackChatMessage = (index: number) => `pr-stack-chat-message-${index}`;

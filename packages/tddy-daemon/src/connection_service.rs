@@ -1440,6 +1440,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         previous_session_id: s.previous_session_id,
                         orchestrator_session_id: String::new(),
                         recipe: String::new(),
+                        stack_plan_json: String::new(),
                     };
                     if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
                         &session_dir,

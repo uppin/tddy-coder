@@ -13,12 +13,12 @@ The shipped recipes are **`TddRecipe`**, **`TddSmallRecipe`**, **`BugfixRecipe`*
 
 | Surface | Mechanism |
 |---------|-----------|
-| **tddy-coder** | `--recipe tdd`, `--recipe tdd-small`, `--recipe bugfix`, `--recipe free-prompting`, `--recipe grill-me`, `--recipe review`, `--recipe merge-pr`, `--recipe plan-pr-stack`, or `--recipe orchestrate-pr-stack`; optional YAML `recipe:` (CLI overrides). |
+| **tddy-coder** | `--recipe tdd`, `--recipe tdd-small`, `--recipe bugfix`, `--recipe free-prompting`, `--recipe grill-me`, `--recipe review`, `--recipe merge-pr`, or `--recipe pr-stack`; optional YAML `recipe:` (CLI overrides). `--recipe plan-pr-stack` and `--recipe orchestrate-pr-stack` remain accepted as legacy aliases for `pr-stack` — see [PR stacking § Legacy aliases](pr-stacking.md#legacy-aliases). |
 | **changeset.yaml** | Optional `recipe:` records the workflow for resume and session lists; empty or absent values on **new** sessions resolve to **`free-prompting`** (same as omitting **`--recipe`**). Legacy changesets without `recipe:` may still resume with resolver defaults. Initial session creation persists **`recipe`** on the written **`changeset.yaml`** so resume and tooling read the same recipe name as **`StartSession`**. |
 | **tddy-daemon** | Spawns **`tddy-coder`** with `--recipe` when set; **`ConnectionService` `StartSessionRequest`** and **`TddyRemote` `StartSession`** carry a **`recipe`** string. |
 | **tddy-web** | **ConnectionScreen** exposes a **Workflow recipe** control per **Start New Session**; the value is sent on **`StartSession`**. |
 
-Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, **`grill-me`**, **`review`**, **`merge-pr`**, **`plan-pr-stack`**, and **`orchestrate-pr-stack`** (aligned with **`WorkflowRecipe::name()`**). Invalid names fail on the CLI with a clear error; daemon streams report failure via **`WorkflowComplete`** with a descriptive message that lists supported names.
+Allowed names are **`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, **`grill-me`**, **`review`**, **`merge-pr`**, and **`pr-stack`** (aligned with **`WorkflowRecipe::name()`**), plus the legacy aliases **`plan-pr-stack`** and **`orchestrate-pr-stack`** which both resolve to the same **`pr-stack`** recipe. Invalid names fail on the CLI with a clear error; daemon streams report failure via **`WorkflowComplete`** with a descriptive message that lists supported names.
 
 ## Feature prompt: `/start-<recipe>`
 

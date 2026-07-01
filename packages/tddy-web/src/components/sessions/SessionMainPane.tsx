@@ -10,6 +10,7 @@ import { Button } from "../ui/button";
 import { CreateSessionPane } from "./CreateSessionPane";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
 import { SessionLiveKitTerminal } from "./SessionLiveKitTerminal";
+import { resolveWorkflowView } from "./workflowViews";
 import type { TerminalControlState } from "./terminalControlState";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 
@@ -45,6 +46,13 @@ interface SessionMainPaneProps {
   onDisconnect?: () => void;
   /** Shortcut presets for the connected session — shown as the mobile shortcut overlay. */
   mobileShortcuts?: ToolShortcutDef[];
+  /** Fired when a custom workflow view (e.g. PrStackScreen) spawns a child session. */
+  onChildSessionStarted?: (entry: {
+    sessionId: string;
+    recipe: string;
+    orchestratorSessionId: string;
+    projectId: string;
+  }) => void;
 }
 
 export function SessionMainPane({
@@ -69,9 +77,21 @@ export function SessionMainPane({
   room = null,
   onDisconnect,
   mobileShortcuts,
+  onChildSessionStarted,
 }: SessionMainPaneProps) {
   const isConnected =
     attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
+
+  const customView = !isCreating
+    ? resolveWorkflowView(selectedSession, {
+        client,
+        sessionToken,
+        room,
+        livekitServerIdentity:
+          attachment.status === "connected-livekit" ? attachment.livekitServerIdentity : undefined,
+        onChildSessionStarted,
+      })
+    : null;
 
   return (
     <div
@@ -110,6 +130,10 @@ export function SessionMainPane({
             <div className="flex items-center justify-center flex-1 text-muted-foreground text-sm">
               Select a session
             </div>
+          ) : customView ? (
+            // Custom per-workflow view (e.g. PR-Stack Chat Screen) — renders in place of the
+            // terminal regardless of attachment status; the workflow owns its own chrome.
+            customView
           ) : isConnected ? (
             // Connected — show terminal container (with inspector overlay)
             <div

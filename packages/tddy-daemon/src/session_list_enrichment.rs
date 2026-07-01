@@ -37,6 +37,9 @@ pub struct SessionListStatusDisplay {
     pub orchestrator_session_id: String,
     /// Active workflow recipe name (from `Changeset.recipe`). Empty string when absent.
     pub recipe: String,
+    /// JSON-serialized `Changeset.stack` (the PR DAG), present only on orchestrator sessions.
+    /// Empty string when `Changeset.stack` is `None`.
+    pub stack_plan_json: String,
 }
 
 impl SessionListStatusDisplay {
@@ -51,8 +54,25 @@ impl SessionListStatusDisplay {
             activity_status: String::new(),
             orchestrator_session_id: String::new(),
             recipe: String::new(),
+            stack_plan_json: String::new(),
         }
     }
+}
+
+/// Serialize `Changeset.stack` to JSON for the `stack_plan_json` proto field; empty string when
+/// `None` or on serialization failure (logged, never propagated as an error — enrichment is
+/// best-effort display data).
+fn stack_plan_json_for_changeset(changeset: &Changeset) -> String {
+    let Some(ref stack) = changeset.stack else {
+        return String::new();
+    };
+    serde_json::to_string(stack).unwrap_or_else(|e| {
+        log::warn!(
+            target: "tddy_daemon::session_list_enrichment",
+            "stack_plan_json_for_changeset: failed to serialize stack: {e}"
+        );
+        String::new()
+    })
 }
 
 fn parse_rfc3339_utc(s: &str) -> Option<DateTime<Utc>> {
@@ -137,6 +157,7 @@ pub fn session_list_status_from_session_dir(
             activity_status: meta.activity_status.clone().unwrap_or_default(),
             orchestrator_session_id: String::new(),
             recipe: String::new(),
+            stack_plan_json: String::new(),
         });
     }
 
@@ -170,6 +191,7 @@ pub fn session_list_status_from_session_dir(
             activity_status: String::new(),
             orchestrator_session_id: String::new(),
             recipe: String::new(),
+            stack_plan_json: stack_plan_json_for_changeset(&changeset),
         });
     };
 
@@ -201,6 +223,7 @@ pub fn session_list_status_from_session_dir(
             .clone()
             .unwrap_or_default(),
         recipe: changeset.recipe.clone().unwrap_or_default(),
+        stack_plan_json: stack_plan_json_for_changeset(&changeset),
     })
 }
 
@@ -233,6 +256,7 @@ pub fn apply_session_list_status_to_proto(
     entry.activity_status = status.activity_status;
     entry.orchestrator_session_id = status.orchestrator_session_id;
     entry.recipe = status.recipe;
+    entry.stack_plan_json = status.stack_plan_json;
     entry.pending_elicitation =
         crate::elicitation::pending_elicitation_for_session_dir(session_dir);
     Ok(())
@@ -423,6 +447,7 @@ state:
             previous_session_id: String::new(),
             orchestrator_session_id: String::new(),
             recipe: String::new(),
+            stack_plan_json: String::new(),
         };
         apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
         assert_eq!(proto.workflow_goal, "acceptance-tests");
@@ -678,6 +703,7 @@ sessions:
             previous_session_id: String::new(),
             orchestrator_session_id: String::new(),
             recipe: String::new(),
+            stack_plan_json: String::new(),
         };
         apply_session_list_status_to_proto(&session_dir, &mut proto).unwrap();
         assert_eq!(
@@ -1061,5 +1087,191 @@ recipe: plan-pr-stack
             proto.recipe, "plan-pr-stack",
             "recipe from changeset must be copied into proto SessionEntry field 22"
         );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Acceptance tests: stack_plan_json enrichment
+    // ---------------------------------------------------------------------------
+
+    /// `enrichment_surfaces_stack_plan_json_from_changeset` — when an orchestrator session's
+    /// `changeset.yaml` contains a `stack` field, `session_list_status_from_session_dir` must
+    /// return its JSON serialization in `SessionListStatusDisplay.stack_plan_json`.
+    #[test]
+    fn enrichment_surfaces_stack_plan_json_from_changeset() {
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path();
+
+        fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            r"session_id: orch-sess-stack-1
+project_id: proj-stack-json
+created_at: '2026-07-01T10:00:00Z'
+updated_at: '2026-07-01T10:05:00Z'
+status: active
+repo_path: /tmp/repo
+pid: 42
+",
+        )
+        .unwrap();
+
+        fs::write(
+            session_dir.join("changeset.yaml"),
+            r"version: 1
+models:
+  tdd: opus
+sessions:
+  - id: orch-sess-stack-1
+    agent: claude
+    tag: tdd
+    created_at: '2026-07-01T10:00:00Z'
+state:
+  current: Green
+  session_id: orch-sess-stack-1
+  updated_at: '2026-07-01T10:05:00Z'
+  history:
+    - state: Green
+      at: '2026-07-01T10:05:00Z'
+recipe: pr-stack
+stack:
+  version: 1
+  nodes:
+    - node_id: n1
+      title: Add token store
+      description: ''
+      parents: []
+",
+        )
+        .unwrap();
+
+        // When
+        let got = session_list_status_from_session_dir(session_dir)
+            .expect("enrichment must not error for orchestrator session with stack");
+
+        // Then — stack_plan_json is a JSON serialization of the Stack, not the raw YAML
+        assert!(
+            !got.stack_plan_json.is_empty(),
+            "stack_plan_json must not be empty"
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_str(&got.stack_plan_json).expect("stack_plan_json must be valid JSON");
+        assert_eq!(parsed["nodes"][0]["node_id"], "n1");
+        assert_eq!(parsed["nodes"][0]["title"], "Add token store");
+    }
+
+    /// `enrichment_stack_plan_json_empty_when_stack_absent` — when `Changeset.stack` is `None`,
+    /// `stack_plan_json` must be an empty string (not `"null"` or an error).
+    #[test]
+    fn enrichment_stack_plan_json_empty_when_stack_absent() {
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path();
+
+        fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            r"session_id: child-sess-no-stack
+project_id: proj-no-stack
+created_at: '2026-07-01T10:00:00Z'
+updated_at: '2026-07-01T10:05:00Z'
+status: active
+repo_path: /tmp/repo
+pid: 99
+",
+        )
+        .unwrap();
+
+        fs::write(
+            session_dir.join("changeset.yaml"),
+            r"version: 1
+models:
+  tdd: opus
+sessions:
+  - id: child-sess-no-stack
+    agent: claude
+    tag: tdd
+    created_at: '2026-07-01T10:00:00Z'
+state:
+  current: Red
+  session_id: child-sess-no-stack
+  updated_at: '2026-07-01T10:05:00Z'
+  history:
+    - state: Red
+      at: '2026-07-01T10:05:00Z'
+",
+        )
+        .unwrap();
+
+        // When
+        let got = session_list_status_from_session_dir(session_dir)
+            .expect("enrichment must not error for session without stack");
+
+        // Then
+        assert_eq!(
+            got.stack_plan_json, "",
+            "stack_plan_json must be empty string when Changeset.stack is None"
+        );
+    }
+
+    /// `apply_stack_plan_json_to_proto_sets_field` — `apply_session_list_status_to_proto` must
+    /// copy `stack_plan_json` into proto `SessionEntry` field 23.
+    #[test]
+    fn apply_stack_plan_json_to_proto_sets_field() {
+        use tddy_service::proto::connection::SessionEntry as ProtoSessionEntry;
+
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path();
+
+        fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            r"session_id: orch-proto-stack-sess
+project_id: proj-proto-stack
+created_at: '2026-07-01T10:00:00Z'
+updated_at: '2026-07-01T10:05:00Z'
+status: active
+repo_path: /tmp/repo
+pid: 77
+",
+        )
+        .unwrap();
+
+        fs::write(
+            session_dir.join("changeset.yaml"),
+            r"version: 1
+models:
+  tdd: opus
+sessions:
+  - id: orch-proto-stack-sess
+    agent: claude
+    tag: tdd
+    created_at: '2026-07-01T10:00:00Z'
+state:
+  current: Green
+  session_id: orch-proto-stack-sess
+  updated_at: '2026-07-01T10:05:00Z'
+  history:
+    - state: Green
+      at: '2026-07-01T10:05:00Z'
+recipe: pr-stack
+stack:
+  version: 1
+  nodes:
+    - node_id: n1
+      title: Root PR
+      description: ''
+      parents: []
+",
+        )
+        .unwrap();
+
+        let mut proto = ProtoSessionEntry {
+            session_id: "orch-proto-stack-sess".to_string(),
+            ..Default::default()
+        };
+        apply_session_list_status_to_proto(session_dir, &mut proto).expect("apply must not error");
+
+        assert!(
+            !proto.stack_plan_json.is_empty(),
+            "stack_plan_json must be copied into proto SessionEntry field 23"
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&proto.stack_plan_json).unwrap();
+        assert_eq!(parsed["nodes"][0]["node_id"], "n1");
     }
 }

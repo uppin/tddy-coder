@@ -8,7 +8,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 pub use hooks::PlanPrStackHooks;
-pub use prompt::{PR_STACK_PLAN_MD_BASENAME, STACK_PLAN_BASENAME};
+pub use prompt::{
+    analyze_stack_user_prompt, write_stack_plan_user_prompt, PR_STACK_PLAN_MD_BASENAME,
+    STACK_PLAN_BASENAME,
+};
 
 use tddy_core::backend::{CodingBackend, GoalHints, GoalId, PermissionHint};
 use tddy_core::workflow::graph::{Graph, GraphBuilder};
