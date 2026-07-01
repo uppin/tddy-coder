@@ -2,14 +2,22 @@
 //!
 //! The backend:
 //! - Selects `ToolExecutor::Local` or `::Remote` from `InvokeRequest.remote`.
-//! - Calls `OpenAiClient::complete` with the system prompt + user query + tool definitions.
-//! - Parses the response: if `tool_calls`, dispatches to the executor and appends tool messages.
+//! - Calls `OpenAiClient::complete` with the system prompt + user query + tool definitions, then
+//!   emits `ProgressEvent::TaskProgress` on `InvokeRequest.progress_sink` marking that turn's
+//!   request/response round-trip as complete, with elapsed time — without this, a slow or hung
+//!   model request and a finished turn look identical in the activity log (both silent).
+//! - Parses the response: if `tool_calls`, emits `ProgressEvent::ToolUse` on
+//!   `InvokeRequest.progress_sink` (same mechanism `ClaudeCodeBackend`/`CursorBackend` use to
+//!   drive the TUI activity log), then dispatches to the executor and appends tool messages. If
+//!   the model instead produced plain text with no tool call and no `<final_answer>` (e.g.
+//!   "thinking" prose from a reasoning model), that text streams to
+//!   `InvokeRequest.agent_output_sink` — otherwise those turns are silent end-to-end.
 //! - Repeats until the response content contains `<final_answer>` or `max_turns` is reached.
 //! - Returns `InvokeResponse { output: <citations text> }`.
 
 use async_trait::async_trait;
 use tddy_core::backend::{CodingBackend, InvokeRequest, InvokeResponse};
-use tddy_core::BackendError;
+use tddy_core::{BackendError, ProgressEvent};
 
 use crate::discovery::extract_final_answer;
 use crate::openai::{
@@ -97,6 +105,21 @@ fn build_system_message(request: &InvokeRequest) -> Option<ChatMessage> {
     sp.map(ChatMessage::system)
 }
 
+/// Streams a turn's plain-text assistant content (no tool call) to `InvokeRequest.agent_output_sink`
+/// — the same mechanism `ClaudeCodeBackend`/`CursorBackend` use for raw text — gated by
+/// `InvokeRequest.agent_output`, same as those backends. A no-op for `None`/empty content.
+fn emit_agent_output(request: &InvokeRequest, content: Option<&str>) {
+    let Some(text) = content.filter(|s| !s.is_empty()) else {
+        return;
+    };
+    if !request.agent_output {
+        return;
+    }
+    if let Some(ref sink) = request.agent_output_sink {
+        sink.emit(text);
+    }
+}
+
 async fn dispatch_tool(executor: &ToolExecutor, tc: &crate::openai::ToolCall) -> String {
     let args: serde_json::Value =
         serde_json::from_str(&tc.function.arguments).unwrap_or(serde_json::Value::Null);
@@ -143,7 +166,7 @@ impl CodingBackend for FastContextBackend {
         let tools = discovery_tools();
         let mut last_content = String::new();
 
-        for _ in 0..self.max_turns {
+        for turn in 0..self.max_turns {
             let req = ChatCompletionRequest {
                 model: self.model.clone(),
                 messages: messages.clone(),
@@ -152,10 +175,24 @@ impl CodingBackend for FastContextBackend {
                 temperature: 0.0,
             };
 
+            let request_started = std::time::Instant::now();
             let response = client
                 .complete(req)
                 .await
                 .map_err(|e| BackendError::InvocationFailed(format!("FastContextBackend: {e}")))?;
+            let request_elapsed = request_started.elapsed();
+
+            if let Some(ref sink) = request.progress_sink {
+                sink.emit(&ProgressEvent::TaskProgress {
+                    description: format!(
+                        "turn {}/{}: model request complete ({:.1}s)",
+                        turn + 1,
+                        self.max_turns,
+                        request_elapsed.as_secs_f64()
+                    ),
+                    last_tool: None,
+                });
+            }
 
             let choice = response.choices.into_iter().next().ok_or_else(|| {
                 BackendError::InvocationFailed("no choices in response".to_string())
@@ -185,6 +222,7 @@ impl CodingBackend for FastContextBackend {
             // If there are tool calls, dispatch them.
             if let Some(ref tool_calls) = msg.tool_calls {
                 if tool_calls.is_empty() {
+                    emit_agent_output(&request, msg.content.as_deref());
                     messages.push(ChatMessage::assistant(msg.content.clone(), None));
                     continue;
                 }
@@ -195,6 +233,12 @@ impl CodingBackend for FastContextBackend {
                 ));
 
                 for tc in tool_calls {
+                    if let Some(ref sink) = request.progress_sink {
+                        sink.emit(&ProgressEvent::ToolUse {
+                            name: tc.function.name.clone(),
+                            detail: Some(tc.function.arguments.clone()),
+                        });
+                    }
                     let result_str = dispatch_tool(&executor, tc).await;
                     messages.push(ChatMessage::tool_result(
                         result_str,
@@ -203,6 +247,11 @@ impl CodingBackend for FastContextBackend {
                     ));
                 }
             } else {
+                // No tool call and no <final_answer> — the model produced plain text (often
+                // "thinking" prose). Without this, these turns are indistinguishable from a
+                // hang: a `TaskProgress` line appears, then nothing, for as long as this turn
+                // took.
+                emit_agent_output(&request, msg.content.as_deref());
                 messages.push(ChatMessage::assistant(msg.content.clone(), None));
             }
         }
@@ -225,6 +274,8 @@ mod tests {
     //!
     //! Feature: docs/ft/coder/discovery-agent.md (Phase B criteria 7–8)
     //! Changeset: docs/dev/1-WIP/2026-06-24-changeset-fastcontext-discovery.md
+
+    use std::sync::{Arc, Mutex};
 
     use tddy_core::backend::{CodingBackend, InvokeRequest};
     use wiremock::matchers::{method, path};
@@ -258,6 +309,19 @@ mod tests {
                 "message": {
                     "role": "assistant",
                     "content": format!("Looked at the code.\n<final_answer>\n{answer}\n</final_answer>")
+                },
+                "finish_reason": "stop"
+            }]
+        })
+    }
+
+    /// A turn with plain assistant text: no `tool_calls`, and no `<final_answer>` block.
+    fn plain_text_response(text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": text
                 },
                 "finish_reason": "stop"
             }]
@@ -320,6 +384,188 @@ mod tests {
             body["model"].as_str(),
             Some(custom_model),
             "request body must carry the configured model id, not the microsoft default"
+        );
+    }
+
+    /// Each dispatched tool call must emit a `ProgressEvent::ToolUse` on `InvokeRequest.progress_sink`
+    /// — the same mechanism `ClaudeCodeBackend`/`CursorBackend` use to drive the TUI activity log —
+    /// so a user running `--agent fastcontext` interactively sees tool activity as it happens,
+    /// instead of the CLI going silent for the whole multi-turn loop.
+    #[tokio::test]
+    async fn invoke_emits_a_tool_use_progress_event_for_each_dispatched_tool_call() {
+        // Given — a mock server that issues one GLOB tool call, then a final answer
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(tool_call_response(
+                "GLOB",
+                serde_json::json!({"pattern": "src/**/*.rs"}),
+            )))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(final_answer_response("src/lib.rs:1-1")),
+            )
+            .mount(&server)
+            .await;
+
+        let backend = FastContextBackend::new(server.uri(), "microsoft/FastContext-1.0-4B-RL", 6);
+        let recorded: Arc<Mutex<Vec<tddy_core::ProgressEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let recorded_for_sink = recorded.clone();
+        let progress_sink = tddy_core::backend::ProgressSink::new(move |ev| {
+            recorded_for_sink.lock().unwrap().push(ev.clone());
+        });
+        let request = InvokeRequest {
+            prompt: "Where is the authentication logic?".to_string(),
+            progress_sink: Some(progress_sink),
+            ..InvokeRequest::default()
+        };
+
+        // When
+        backend
+            .invoke(request)
+            .await
+            .expect("invoke must succeed when the model produces a final answer");
+
+        // Then — exactly one ToolUse event, naming GLOB with the model's arguments as detail
+        // (TaskProgress events also fire per completed request; this test only cares about ToolUse)
+        let events = recorded.lock().unwrap();
+        let tool_use_events: Vec<_> = events
+            .iter()
+            .filter(|ev| matches!(ev, tddy_core::ProgressEvent::ToolUse { .. }))
+            .collect();
+        assert_eq!(
+            tool_use_events.len(),
+            1,
+            "exactly one ToolUse progress event must be emitted; got {events:?}"
+        );
+        match tool_use_events[0] {
+            tddy_core::ProgressEvent::ToolUse { name, detail } => {
+                assert_eq!(name, "GLOB", "ToolUse event must name the dispatched tool");
+                assert_eq!(
+                    detail.as_deref(),
+                    Some(r#"{"pattern":"src/**/*.rs"}"#),
+                    "ToolUse detail must carry the model's raw tool-call arguments"
+                );
+            }
+            other => panic!("expected ProgressEvent::ToolUse, got {other:?}"),
+        }
+    }
+
+    /// Each completed model request must emit a `ProgressEvent::TaskProgress` naming the turn
+    /// number and the elapsed wall-clock time for that round-trip — without this, a slow/hung
+    /// model request and an already-finished turn are indistinguishable in the activity log
+    /// (both silent).
+    #[tokio::test]
+    async fn invoke_emits_a_task_progress_event_with_elapsed_time_after_each_request() {
+        // Given — a mock server that delays its final-answer response by 150ms
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(final_answer_response("src/lib.rs:1-1"))
+                    .set_delay(std::time::Duration::from_millis(150)),
+            )
+            .mount(&server)
+            .await;
+
+        let backend = FastContextBackend::new(server.uri(), "microsoft/FastContext-1.0-4B-RL", 6);
+        let recorded: Arc<Mutex<Vec<tddy_core::ProgressEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let recorded_for_sink = recorded.clone();
+        let progress_sink = tddy_core::backend::ProgressSink::new(move |ev| {
+            recorded_for_sink.lock().unwrap().push(ev.clone());
+        });
+        let request = InvokeRequest {
+            prompt: "Where is the entry point?".to_string(),
+            progress_sink: Some(progress_sink),
+            ..InvokeRequest::default()
+        };
+
+        // When
+        backend
+            .invoke(request)
+            .await
+            .expect("invoke must succeed when the model produces a final answer");
+
+        // Then — exactly one TaskProgress event, naming turn 1/6 with a plausible elapsed time
+        let events = recorded.lock().unwrap();
+        assert_eq!(
+            events.len(),
+            1,
+            "exactly one TaskProgress progress event must be emitted; got {events:?}"
+        );
+        match &events[0] {
+            tddy_core::ProgressEvent::TaskProgress { description, .. } => {
+                assert!(
+                    description.starts_with("turn 1/6: model request complete ("),
+                    "description must name the turn and total; got {description:?}"
+                );
+                // The mock delayed its response by 150ms; the reported elapsed time must reflect
+                // real wall-clock time, not a hardcoded placeholder.
+                assert!(
+                    description.contains("0.1") || description.contains("0.2"),
+                    "elapsed time must reflect the mock's ~150ms delay; got {description:?}"
+                );
+            }
+            other => panic!("expected ProgressEvent::TaskProgress, got {other:?}"),
+        }
+    }
+
+    /// A turn where the model produces plain text — no tool call, no `<final_answer>` (e.g.
+    /// "thinking" prose from a reasoning model) — must stream that text to
+    /// `InvokeRequest.agent_output_sink`, the same mechanism Claude/Cursor use for raw assistant
+    /// text. Without this, such turns are completely silent in the activity log.
+    #[tokio::test]
+    async fn invoke_streams_plain_text_turns_to_agent_output_sink() {
+        // Given — turn 1 is plain text (no tool call, no final answer), turn 2 is the final answer
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(plain_text_response(
+                    "Let me think about where docker support might live in this repo.",
+                )),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(final_answer_response("src/lib.rs:1-1")),
+            )
+            .mount(&server)
+            .await;
+
+        let backend = FastContextBackend::new(server.uri(), "microsoft/FastContext-1.0-4B-RL", 6);
+        let recorded: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let recorded_for_sink = recorded.clone();
+        let agent_output_sink = tddy_core::backend::AgentOutputSink::new(move |s: &str| {
+            recorded_for_sink.lock().unwrap().push(s.to_string());
+        });
+        let request = InvokeRequest {
+            prompt: "Where is the entry point?".to_string(),
+            agent_output: true,
+            agent_output_sink: Some(agent_output_sink),
+            ..InvokeRequest::default()
+        };
+
+        // When
+        backend
+            .invoke(request)
+            .await
+            .expect("invoke must succeed when the model produces a final answer");
+
+        // Then — the plain-text turn's content was streamed verbatim
+        let streamed = recorded.lock().unwrap();
+        assert_eq!(
+            streamed.as_slice(),
+            &["Let me think about where docker support might live in this repo.".to_string()],
+            "plain-text turn content must stream to agent_output_sink"
         );
     }
 

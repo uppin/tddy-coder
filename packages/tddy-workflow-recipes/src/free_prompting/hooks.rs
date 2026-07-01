@@ -3,12 +3,13 @@
 use std::error::Error;
 use std::sync::mpsc;
 
-use tddy_core::backend::AgentOutputSink;
+use tddy_core::backend::{AgentOutputSink, ProgressSink};
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::task::TaskResult;
 use tddy_core::workflow::{clear_sinks, set_sinks};
+use tddy_core::ProgressEvent;
 
 /// Hooks for the free-prompting loop.
 #[derive(Debug)]
@@ -40,11 +41,25 @@ impl FreePromptingWorkflowHooks {
     pub fn agent_output_sink(&self) -> Option<AgentOutputSink> {
         self.agent_output_sink_impl()
     }
+
+    fn progress_sink_impl(&self) -> Option<ProgressSink> {
+        let tx = self.event_tx.clone()?;
+        Some(ProgressSink::new(move |ev: &ProgressEvent| {
+            let _ = tx.send(WorkflowEvent::Progress(ev.clone()));
+        }))
+    }
+
+    /// Returns the progress sink for this hooks instance.
+    ///
+    /// Public accessor used by integration tests that verify the sink is wired correctly.
+    pub fn progress_sink(&self) -> Option<ProgressSink> {
+        self.progress_sink_impl()
+    }
 }
 
 impl RunnerHooks for FreePromptingWorkflowHooks {
     fn on_enter_task(&self, _task_id: &str, _context: &Context) {
-        set_sinks(self.agent_output_sink_impl(), None);
+        set_sinks(self.agent_output_sink_impl(), self.progress_sink_impl());
     }
 
     fn on_exit_task(&self, _task_id: &str, _context: &Context) {
