@@ -28,7 +28,7 @@ export function stackParentCandidates(sessions: SessionEntry[]): SessionEntry[] 
   return result;
 }
 
-export const PR_STACK_RECIPES = ["orchestrate-pr-stack", "plan-pr-stack"] as const;
+export const PR_STACK_RECIPES = ["pr-stack", "orchestrate-pr-stack", "plan-pr-stack"] as const;
 
 /**
  * Returns sessions eligible to be selected as a PR-stack parent: those with a PR-stack

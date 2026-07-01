@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ConnectionService, type SessionEntry } from "../../gen/connection_pb";
+import { create } from "@bufbuild/protobuf";
+import { ConnectionService, SessionEntrySchema, type SessionEntry } from "../../gen/connection_pb";
 import { TokenService } from "../../gen/token_pb";
 import { sortSessionsByCreation } from "../../utils/sessionSort";
 import { useHttpClient } from "../../rpc/transportProvider";
@@ -192,6 +193,38 @@ export function SessionsDrawerScreen() {
       });
   };
 
+  // A pr-stack orchestrator's "Start session" CTA spawns a child immediately in the
+  // background (no navigation, no auto-connect — the operator stays on the orchestrator's
+  // chat screen). Append a minimal entry so the drawer reflects it right away. Unlike
+  // handleTerminate's refreshSessions() (which needs an authoritative isActive from the
+  // daemon), a full refetch here isn't safe to chain: the daemon's session-list enrichment
+  // may not have indexed the brand-new session yet, so an immediate refetch could overwrite
+  // this optimistic entry with a response that doesn't include it yet. The optimistic entry's
+  // remaining fields (workflowGoal, status, etc.) fill in on the next refresh this screen
+  // already performs for an unrelated reason (e.g. selecting another session, terminating a
+  // session) — there is no background polling anywhere in this screen today, for any session.
+  const handleChildSessionStarted = (entry: {
+    sessionId: string;
+    recipe: string;
+    orchestratorSessionId: string;
+    projectId: string;
+  }) => {
+    setSessions((prev) => {
+      if (prev.some((s) => s.sessionId === entry.sessionId)) return prev;
+      return [
+        ...prev,
+        create(SessionEntrySchema, {
+          sessionId: entry.sessionId,
+          recipe: entry.recipe,
+          orchestratorSessionId: entry.orchestratorSessionId,
+          projectId: entry.projectId,
+          isActive: true,
+          createdAt: new Date().toISOString(),
+        }),
+      ];
+    });
+  };
+
   const handleTerminate = (sessionId: string) => {
     signalSession(sessionId, Signal.SIGTERM, sessionToken, client)
       .catch((err) => {
@@ -294,6 +327,7 @@ export function SessionsDrawerScreen() {
             controlTokenRef={connectedSessionId ? controlTokenRef : undefined}
             onDisconnect={resetAttachment}
             mobileShortcuts={mobileShortcuts}
+            onChildSessionStarted={handleChildSessionStarted}
           />
         </div>
       </div>

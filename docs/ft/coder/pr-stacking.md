@@ -1,11 +1,13 @@
 # PR stacking
 
 **Product area:** Coder  
-**Updated:** 2026-06-26
+**Updated:** 2026-07-01
 
 ## Summary
 
-PR stacking support adds a **parent orchestrating session** — with its own worktree and branch (usually the final PR in the stack) — that coordinates a stack of child PR sessions. When concurrent PRs exist the stack is a **DAG (directed acyclic graph)** rather than a simple chain. Two new workflow recipes handle the two phases: `plan-pr-stack` produces the machine- and human-readable stack plan, and `orchestrate-pr-stack` drives the resumable merge-and-repoint loop until all PRs land on the main branch.
+PR stacking support adds a **single orchestrating session** — with its own worktree and branch (usually the final PR in the stack) — that both plans and drives a stack of child PR sessions to master. When concurrent PRs exist the stack is a **DAG (directed acyclic graph)** rather than a simple chain.
+
+> **Updated 2026-07-01 — unified `pr-stack` recipe.** The plan phase and the orchestrate phase used to be two separate recipes and two separate sessions (`plan-pr-stack` then a follow-on `orchestrate-pr-stack` session seeded from the first). They are now **one recipe, one session**: `pr-stack` (see [pr-stack recipe](#pr-stack-recipe) below). The legacy CLI names `plan-pr-stack` and `orchestrate-pr-stack` remain accepted as **aliases** that resolve to the same unified recipe — existing scripts, YAML, and `--recipe` invocations keep working. This consolidation is what makes the web UI's [PR-Stack Chat Screen](../web/session-drawer.md#per-workflow-session-views) possible: a single session can show the planned-PR list and let the operator keep refining the plan via chat, without switching sessions to start orchestration.
 
 The design extends the existing single-level session chaining mechanism (see [Git integration base ref — Session chaining](git-integration-base-ref.md)) to a full ordered graph, closes the Telegram-only gap by exposing transport-agnostic spawn helpers and CLI flags, and adds a uniform progress-tracking contract that all child sessions satisfy via host-level hooks rather than agent promises.
 
@@ -68,25 +70,23 @@ Every child session carries:
 1. `SessionMetadata.previous_session_id` (+ `Changeset.worktree_integration_base_ref`) — the **base-branch source**; in a DAG this is the sibling node whose branch the child builds on.
 2. `Changeset.orchestrator_session_id` — the **coordinating orchestrator**; always the orchestrator session regardless of which sibling supplied the branch base.
 
-## plan-pr-stack recipe
+## pr-stack recipe
 
-- **CLI name:** `plan-pr-stack`
+- **CLI name:** `pr-stack` (canonical). Legacy aliases `plan-pr-stack` and `orchestrate-pr-stack` still resolve to the same recipe (`recipe_resolve.rs`) — see [Legacy aliases](#legacy-aliases) below.
 - **`uses_primary_session_document`:** `false` (no PRD-style document approval gate).
-- **Pipeline:** `analyze-stack` → `write-stack-plan` → `end`
+- **One session, whole lifecycle:** the same session that analyzes the feature and writes the plan also drives it to master — there is no second "orchestrate" session seeded from the first.
+- **Pipeline:** `analyze-stack` → `write-stack-plan` → `begin-orchestrate` → `assess` loop
   - `analyze-stack` — read-only, `PermissionHint::ReadOnly`, no structured submit. The agent studies the feature description and plans how to split it into a PR stack or DAG.
-  - `write-stack-plan` — the agent emits both artifacts via `tddy-tools submit`. No structured JSON goal schema is shared with TDD; the submit carries the YAML plan payload.
-- **Artifacts (manifest):** `stack_plan → stack-plan.yaml` (machine-readable DAG), `stack_plan_md → pr-stack-plan.md` (human narrative). Both are injected into the agent context header on each turn.
-- **`stack-plan.yaml` contract:** a versioned list of PR nodes, each with `node_id`, `title`, `description`, `branch_suggestion`, `parents` (list of `node_id` strings; empty for roots), and optional `child_recipe` (defaults to `tdd`). Multiple entries in `parents` express a genuine DAG dependency.
-- **Parser types** in `plan_pr_stack/mod.rs`: `StackPlanOutput { version, prs: Vec<PlannedPr> }`, `PlannedPr { node_id, title, description, branch_suggestion, parents, child_recipe }`, and `planned_prs_into_stack_nodes(prs) -> Vec<StackNode>`. Validation: unique `node_id`s, all referenced `parents` resolve, no cycle detected via `Stack::topo_order`.
-- **State table:** `Init | AnalyzeStack → analyze-stack`; `WriteStackPlan → write-stack-plan`; `StackPlanned → Done`; `Failed → None`; fallback → `analyze-stack`. `status_for_state`: `StackPlanned → "Completed"`, `Failed → "Failed"`, else `"Active"`.
-- **Separation of concerns:** the planner emits `stack-plan.yaml` only. The **orchestrator** materialises sessions from the plan when it starts. This keeps the planning recipe pure (plan-in/plan-out) and independently testable with fixtures.
+  - `write-stack-plan` — the agent emits both plan artifacts via `tddy-tools submit`. No structured JSON goal schema is shared with TDD; the submit carries the YAML plan payload.
+  - `begin-orchestrate` — new host-only bridge task (no agent invocation). Seeds `Changeset.stack` from the just-written `stack-plan.yaml` if not already populated (idempotent — same guard as the old `seed_orchestrator_stack_from_plan`, now running in-session instead of across sessions), replays any in-flight `StackOpJournal` (crash recovery), then proceeds to `assess`.
+  - `assess` / `spawn` / `merge` / `repoint` — the same resumable merge-and-repoint loop described in [Loop shape](#loop-shape) below, unchanged.
+- **Artifacts (manifest):** union of the plan and orchestrate artifacts — `stack_plan → stack-plan.yaml`, `stack_plan_md → pr-stack-plan.md`, `stack_status_md → stack-status.md`, `stack_status_json → stack-status.json`.
+- **`stack-plan.yaml` contract:** unchanged — a versioned list of PR nodes, each with `node_id`, `title`, `description`, `branch_suggestion`, `parents` (list of `node_id` strings; empty for roots), and optional `child_recipe` (defaults to `tdd`). Multiple entries in `parents` express a genuine DAG dependency.
+- **Parser types** in `plan_pr_stack/mod.rs` (reused as-is by the unified recipe): `StackPlanOutput { version, prs: Vec<PlannedPr> }`, `PlannedPr { node_id, title, description, branch_suggestion, parents, child_recipe }`, and `planned_prs_into_stack_nodes(prs) -> Vec<StackNode>`. Validation: unique `node_id`s, all referenced `parents` resolve, no cycle detected via `Stack::topo_order`.
+- **State table:** `Init | AnalyzeStack → analyze-stack`; `WriteStackPlan → write-stack-plan`; `StackPlanned → assess` (continues into orchestration — **not** a terminal state); loop states (`assess | spawn | merge | repoint | wait`) → `assess`; `done | failed → None`. `status_for_state`: `StackPlanned → "Active"` (changed from the old plan-only recipe's `"Completed"` — the session is not done, it goes on to orchestrate the same stack), `done → "Completed"`, `failed → "Failed"`, else `"Active"`.
+- **Refining the plan via chat:** `plan_refinement_goal()` returns `write-stack-plan` — the same goal used to author the plan. After the plan exists (state `StackPlanned`), the operator can keep chatting; each refinement turn re-runs `write-stack-plan` on the **same session**, the agent re-emits `stack-plan.yaml`, and the host re-validates and re-seeds `Changeset.stack` (`reseed_stack_from_plan_if_unspawned`) — overwriting `version` + `nodes` wholesale as long as no node has been materialised into a child session yet. Once a node has a `session_id`, further refinement of that node is refused so an in-progress child session is never orphaned. An invalid refinement (cycle, dangling parent) is rejected and the previously-persisted stack is left untouched. On resume/continue, `StackPlanned` moves on into `assess` — refinement is an operator-initiated side path, not the default resume target.
 
-## orchestrate-pr-stack recipe
-
-- **CLI name:** `orchestrate-pr-stack`
-- **Pipeline:** a single recurring goal `assess` that routes to task nodes without agent invocation.
-- **Custom tasks:** working nodes (`spawn`, `merge`, `repoint`) are custom `Task` implementations, not backend invocations. No `tddy-tools submit` is used by this recipe.
-- **Loop shape (engine-native):**
+### Loop shape (engine-native)
 
 ```
 assess --GoTo--> spawn        --GoTo("assess")-->
@@ -95,11 +95,11 @@ assess --GoTo--> end (EndTask)
 assess (Wait)  --> WaitForInput
 ```
 
-`FlowRunner` executes one task, persists, and returns — that boundary is also the resumability boundary. The loop is idempotent because `assess` recomputes the full world state from durable inputs on every entry.
+`FlowRunner` executes one task, persists, and returns — that boundary is also the resumability boundary. The loop is idempotent because `assess` recomputes the full world state from durable inputs on every entry. Working nodes (`spawn`, `merge`, `repoint`) are custom `Task` implementations, not backend invocations — no `tddy-tools submit` is used for this part of the pipeline.
 
-### State table
+### Legacy aliases
 
-`Init, Planning, Spawning, Building, ReadyToMerge, Merging, Repointing, Done, Failed`. Every non-terminal state maps to the single goal `assess` via `next_goal_for_state`. `status_for_state`: `Done → "Completed"`, `Failed → "Failed"`, else `"Active"`.
+`plan-pr-stack` and `orchestrate-pr-stack` remain in `approval_policy::supported_workflow_recipe_cli_names()` and both resolve, via `recipe_resolve.rs`, to the same `PrStackRecipe` (i.e. `recipe.name() == "pr-stack"` regardless of which of the three CLI names was used to start the session). A legacy on-disk session created before the consolidation (recipe field still `"plan-pr-stack"` or `"orchestrate-pr-stack"`, state possibly the old orchestrate-only `"Init"` — which never advanced during that recipe's healthy operation) resumes correctly because `PrStackRecipe` overrides a new `WorkflowRecipe::next_goal_for_state_with_changeset` trait method (default: delegates to `next_goal_for_state`, ignoring the changeset) to disambiguate `"Init"` using `Changeset.stack`: a populated stack means orchestration is already under way, so resume goes to `assess`; an empty/absent stack means a genuinely fresh session, so resume goes to `analyze-stack`. `start_goal_for_session_continue` (`tddy-core/src/changeset.rs`) calls the changeset-aware method — the bare `next_goal_for_state` alone cannot make this distinction, since it never sees the changeset.
 
 ### `assess` decision algorithm (priority order)
 
@@ -182,8 +182,12 @@ A recovery guard at the top of every `assess` entry (`recover_in_flight_stack_op
 
 `CreateSessionPane` (`packages/tddy-web/src/components/sessions/`) gains two changes for tool sessions:
 
-- **Recipe dropdown** — the free-text recipe input is replaced with a `<select>` listing the canonical recipe set (`tdd`, `tdd-small`, `bugfix`, `free-prompting`, `grill-me`, `plan-pr-stack`, `orchestrate-pr-stack`). The canonical list lives in `packages/tddy-web/src/utils/recipeOptions.ts`. Both PR-stack recipes also need to be added to the `--recipe` `value_parser` in `packages/tddy-coder/src/run.rs` (they were previously omitted).
-- **Parent stack picker** — a new optional "Parent orchestrator" `<select>` (tool type only) that lists existing sessions identified as PR-stack orchestrators (sessions that have at least one child referencing them via `orchestratorSessionId`). A helper `stackParentCandidates(sessions)` in `packages/tddy-web/src/utils/stackParents.ts` computes the candidate set. Selecting a parent passes `stack_parent` (proto `StartSessionRequest` field 15) to the daemon, which threads it through `SpawnOptions` → `--stack-parent <id>` CLI arg.
+- **Recipe dropdown** — the free-text recipe input is replaced with a `<select>` listing the canonical recipe set, including the unified **`pr-stack`** (the legacy `plan-pr-stack` / `orchestrate-pr-stack` entries are no longer offered in the dropdown — new sessions always start as `pr-stack` — though both CLI names still resolve if typed directly). `pr-stack` is included in the `--recipe` `value_parser` in `packages/tddy-coder/src/run.rs` alongside the two legacy aliases.
+- **Parent stack picker** — a new optional "Parent orchestrator" `<select>` (tool type only) that lists existing sessions identified as PR-stack orchestrators (sessions whose `recipe` is `pr-stack` — or a legacy alias — and that are not themselves children of another orchestrator; see `prStackOrchestrators()` in `packages/tddy-web/src/utils/stackParents.ts`). Selecting a parent passes `stack_parent` (proto `StartSessionRequest` field 15) to the daemon, which threads it through `SpawnOptions` → `--stack-parent <id>` CLI arg.
+
+### Per-workflow session views: the PR-Stack Chat Screen
+
+Once a `pr-stack` session is selected in the session drawer, the main pane opens a dedicated **PR-Stack Chat Screen** instead of the terminal — a chat window backed by a remote Presenter (over the existing `TddyRemote.Stream` RPC) alongside a live list of the planned PRs with a **"Start session"** CTA per unspawned node. Full UI spec: [Session drawer § Per-Workflow Session Views](../web/session-drawer.md#per-workflow-session-views).
 
 ### Session drawer: children collapsed under the main stack session
 
@@ -210,7 +214,7 @@ Only one nesting level is rendered for v1; the grouping utility is written to su
 
 ## Related
 
-- [Session drawer](../web/session-drawer.md) — session drawer screen layout, create session, recipe field, grouping.
+- [Session drawer](../web/session-drawer.md) — session drawer screen layout, create session, recipe field, grouping, and the [Per-Workflow Session Views](../web/session-drawer.md#per-workflow-session-views) / [PR-Stack Chat Screen](../web/session-drawer.md#pr-stack-chat-screen) sections.
 - [Git integration base ref (worktrees)](git-integration-base-ref.md) — session chaining, `spawn_chain_child_worktree`, worktree base-ref validation.
 - [Session layout](session-layout.md) — session directory structure, `changeset.yaml`, artifact paths.
 - [Workflow recipes](workflow-recipes.md) — `WorkflowRecipe` trait, recipe resolution, `approval_policy`, shipped recipes.

@@ -105,6 +105,11 @@ message SessionEntry {
   // Workflow recipe used when spawning this session (e.g. "tdd", "orchestrate-pr-stack",
   // "plan-pr-stack"). Empty string for claude-cli and workspace sessions.
   string recipe = 22;
+  // JSON-serialized `Stack` (see tddy_core::changeset::Stack) for "pr-stack" orchestrator
+  // sessions that have a plan. Empty string when this session is not a pr-stack orchestrator,
+  // or the plan has not been written yet. Powers the PR-Stack Chat Screen's planned-PR list
+  // (docs/ft/web/session-drawer.md § Per-Workflow Session Views).
+  string stack_plan_json = 23;
 }
 
 message ProjectEntry {

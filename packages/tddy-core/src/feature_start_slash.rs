@@ -16,6 +16,7 @@ pub const SHIPPED_WORKFLOW_RECIPE_CLI_NAMES: &[&str] = &[
     "tdd-small",
     "review",
     "merge-pr",
+    "pr-stack",
     "plan-pr-stack",
     "orchestrate-pr-stack",
 ];

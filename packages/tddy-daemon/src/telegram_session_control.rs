@@ -620,6 +620,7 @@ fn session_list_status_or_placeholders(session_dir: &Path) -> SessionListStatusD
             activity_status: String::new(),
             orchestrator_session_id: String::new(),
             recipe: String::new(),
+            stack_plan_json: String::new(),
         },
     }
 }

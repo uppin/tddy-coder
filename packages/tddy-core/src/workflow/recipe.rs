@@ -1,6 +1,7 @@
 //! Pluggable workflow definitions (`WorkflowRecipe`).
 
 use crate::backend::{ClarificationQuestion, CodingBackend};
+use crate::changeset::Changeset;
 use crate::presenter::WorkflowEvent;
 use crate::workflow::context::Context;
 use crate::workflow::graph::Graph;
@@ -52,6 +53,23 @@ pub trait WorkflowRecipe: Send + Sync {
     fn submit_key(&self, goal_id: &GoalId) -> GoalId;
 
     fn next_goal_for_state(&self, state: &WorkflowState) -> Option<GoalId>;
+
+    /// Like [`next_goal_for_state`](Self::next_goal_for_state) but with full changeset access,
+    /// for recipes whose resume target depends on more than the bare state string alone.
+    ///
+    /// Defaults to ignoring `changeset` and delegating to `next_goal_for_state`. Override when a
+    /// persisted state string is ambiguous on its own — e.g. a recipe consolidation where an old
+    /// standalone recipe's `initial_state()` collides with a state the new unified recipe also
+    /// produces, but the two must resume differently (disambiguate using changeset fields such as
+    /// `stack`, which the bare state string can't carry).
+    fn next_goal_for_state_with_changeset(
+        &self,
+        state: &WorkflowState,
+        changeset: &Changeset,
+    ) -> Option<GoalId> {
+        let _ = changeset;
+        self.next_goal_for_state(state)
+    }
 
     /// Coarse status for sessions (e.g. `"Active"`, `"Completed"`, `"Failed"`).
     fn status_for_state(&self, state: &WorkflowState) -> &'static str;

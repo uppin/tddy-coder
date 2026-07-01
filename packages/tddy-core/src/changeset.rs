@@ -627,7 +627,7 @@ pub fn start_goal_for_session_continue(recipe: &dyn WorkflowRecipe, cs: &Changes
     let use_failed_resume_walk = cs.state.current.as_str() == "Failed" || history_ends_in_failed;
     if !use_failed_resume_walk {
         return recipe
-            .next_goal_for_state(&cs.state.current)
+            .next_goal_for_state_with_changeset(&cs.state.current, cs)
             .unwrap_or_else(|| start.clone());
     }
     let mut tdd_skipped_trailing_planning = false;
@@ -635,7 +635,7 @@ pub fn start_goal_for_session_continue(recipe: &dyn WorkflowRecipe, cs: &Changes
         if transition.state.as_str() == "Failed" {
             continue;
         }
-        match recipe.next_goal_for_state(&transition.state) {
+        match recipe.next_goal_for_state_with_changeset(&transition.state, cs) {
             None => continue,
             Some(g) if recipe.skip_failed_resume_transition(&transition.state, &g) => {
                 if recipe.name() == "tdd"

@@ -1,5 +1,9 @@
 //! PRD acceptance: plan-pr-stack recipe — resolves from CLI name, maps planned PRs to StackNodes,
 //! rejects cyclic plans.
+//!
+//! **2026-07-01 unified `pr-stack` recipe:** `plan-pr-stack` is now a legacy alias that resolves
+//! to the unified `PrStackRecipe` (`recipe.name() == "pr-stack"`), not a standalone
+//! `PlanPrStackRecipe` — see `docs/ft/coder/pr-stacking.md#legacy-aliases`.
 
 use tddy_workflow_recipes::plan_pr_stack::{
     planned_prs_into_stack_nodes, validate_stack_plan, StackPlanOutput,
@@ -7,13 +11,13 @@ use tddy_workflow_recipes::plan_pr_stack::{
 use tddy_workflow_recipes::workflow_recipe_and_manifest_from_cli_name;
 
 #[test]
-fn plan_pr_stack_recipe_resolves() {
+fn plan_pr_stack_legacy_alias_resolves_to_the_unified_pr_stack_recipe() {
     // When
     let result = workflow_recipe_and_manifest_from_cli_name("plan-pr-stack");
 
-    // Then
+    // Then — the legacy alias resolves to the unified pr-stack recipe, not a standalone one
     let (recipe, _) = result.expect("plan-pr-stack must resolve from CLI name resolver");
-    assert_eq!(recipe.name(), "plan-pr-stack");
+    assert_eq!(recipe.name(), "pr-stack");
     assert_eq!(recipe.initial_state().as_str(), "AnalyzeStack");
     assert_eq!(recipe.start_goal().as_str(), "analyze-stack");
 }

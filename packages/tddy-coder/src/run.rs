@@ -621,8 +621,8 @@ pub struct CoderArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`, `plan-pr-stack`, `orchestrate-pr-stack`. Must match [`WorkflowRecipe::name`].
-    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr", "plan-pr-stack", "orchestrate-pr-stack"])]
+    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`, `pr-stack` (legacy aliases `plan-pr-stack`, `orchestrate-pr-stack` still accepted). Must match [`WorkflowRecipe::name`].
+    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr", "pr-stack", "plan-pr-stack", "orchestrate-pr-stack"])]
     pub recipe: Option<String>,
 
     /// Path to the Cursor `agent` CLI (defaults to `agent` on `PATH`, or `TDDY_CURSOR_AGENT` if set).
@@ -814,8 +814,8 @@ pub struct DemoArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`, `plan-pr-stack`, `orchestrate-pr-stack`.
-    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr", "plan-pr-stack", "orchestrate-pr-stack"])]
+    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`, `pr-stack` (legacy aliases `plan-pr-stack`, `orchestrate-pr-stack` still accepted).
+    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr", "pr-stack", "plan-pr-stack", "orchestrate-pr-stack"])]
     pub recipe: Option<String>,
 }
 

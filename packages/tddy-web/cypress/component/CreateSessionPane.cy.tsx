@@ -429,7 +429,7 @@ describe("CreateSessionPane — recipe dropdown", () => {
     byTestId(TEST_IDS.createSessionRecipeInput).should("not.exist");
   });
 
-  it("recipe select lists all 7 workflow recipes", () => {
+  it("recipe select lists all 8 workflow recipes", () => {
     mountCreateSessionPane();
     cy.wait(["@listProjects", "@listAgents", "@listTools"]);
 
@@ -441,8 +441,7 @@ describe("CreateSessionPane — recipe dropdown", () => {
       "grill-me",
       "review",
       "merge-pr",
-      "plan-pr-stack",
-      "orchestrate-pr-stack",
+      "pr-stack",
     ];
 
     byTestId(TEST_IDS.createSessionRecipeSelect).within(() => {
