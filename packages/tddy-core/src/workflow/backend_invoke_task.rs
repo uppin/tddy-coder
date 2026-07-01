@@ -343,6 +343,7 @@ impl Task for BackendInvokeTask {
                         status_message: Some("Host clarification needed".to_string()),
                     });
                 }
+                context.set_sync("output", response.output.clone());
                 return Ok(TaskResult {
                     response: response.output,
                     next_action: NextAction::Continue,
