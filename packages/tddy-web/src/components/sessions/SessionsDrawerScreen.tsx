@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ConnectionService, type SessionEntry } from "../../gen/connection_pb";
+import { TokenService } from "../../gen/token_pb";
 import { sortSessionsByCreation } from "../../utils/sessionSort";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { TooltipProvider } from "../ui/tooltip";
@@ -27,6 +28,7 @@ export function SessionsDrawerScreen() {
       : "";
 
   const client = useHttpClient(ConnectionService);
+  const tokenClient = useHttpClient(TokenService);
 
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(() => {
@@ -179,10 +181,30 @@ export function SessionsDrawerScreen() {
     });
   };
 
+  const refreshSessions = () => {
+    client
+      .listSessions({ sessionToken })
+      .then((resp) => {
+        setSessions(resp.sessions as SessionEntry[]);
+      })
+      .catch((err) => {
+        console.debug("[SessionsDrawerScreen] listSessions refresh error", err);
+      });
+  };
+
   const handleTerminate = (sessionId: string) => {
-    signalSession(sessionId, Signal.SIGTERM, sessionToken, client).catch((err) => {
-      console.debug("[SessionsDrawerScreen] signalSession error", err);
-    });
+    signalSession(sessionId, Signal.SIGTERM, sessionToken, client)
+      .catch((err) => {
+        // Common cause: the session already ended (e.g. process exited on its own) before this
+        // click reached the daemon — refreshSessions() below still corrects the stale `isActive`
+        // that caused the "Terminate" button to be shown for an already-dead session.
+        console.debug("[SessionsDrawerScreen] signalSession error", err);
+      })
+      .finally(() => {
+        // The daemon computes `isActive` from live PID liveness, not from a push update — refetch
+        // so the row (and its "Terminate" button) reflects the session's actual current state.
+        refreshSessions();
+      });
   };
 
   const handleInspectorToggle = () => {
@@ -264,6 +286,7 @@ export function SessionsDrawerScreen() {
             onTerminate={handleTerminate}
             isCreating={mode === "creating"}
             client={client}
+            tokenClient={tokenClient}
             sessionToken={sessionToken}
             onCancelCreate={handleCancelCreate}
             onSessionCreated={handleSessionCreated}

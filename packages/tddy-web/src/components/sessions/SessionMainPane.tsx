@@ -2,16 +2,19 @@ import React, { type MutableRefObject } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
+import type { TokenService } from "../../gen/token_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { SessionInspectorDrawer } from "./SessionInspectorDrawer";
 import { Button } from "../ui/button";
 import { CreateSessionPane } from "./CreateSessionPane";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
+import { SessionLiveKitTerminal } from "./SessionLiveKitTerminal";
 import type { TerminalControlState } from "./terminalControlState";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 
 type ConnectionClient = Client<typeof ConnectionService>;
+type TokenClient = Client<typeof TokenService>;
 
 interface SessionMainPaneProps {
   selectedSession: SessionEntry | null;
@@ -27,6 +30,8 @@ interface SessionMainPaneProps {
   // Create session mode
   isCreating?: boolean;
   client?: ConnectionClient;
+  /** Client for fetching browser LiveKit tokens — required to render a terminal for `connected-livekit` sessions. */
+  tokenClient?: TokenClient;
   sessionToken?: string;
   onCancelCreate?: () => void;
   onSessionCreated?: (sessionId: string) => void;
@@ -55,6 +60,7 @@ export function SessionMainPane({
   onTerminate,
   isCreating = false,
   client,
+  tokenClient,
   sessionToken = "",
   onCancelCreate,
   onSessionCreated,
@@ -110,9 +116,21 @@ export function SessionMainPane({
               data-testid="sessions-detail-terminal-container"
               className="flex-1 min-h-0 flex flex-col relative overflow-hidden"
             >
-              {attachment.status === "connected-livekit" && (
+              {attachment.status === "connected-livekit" && tokenClient && (
+                <div className="flex-1 min-h-0" style={{ minWidth: 0 }}>
+                  <SessionLiveKitTerminal
+                    livekitUrl={attachment.livekitUrl}
+                    livekitRoom={attachment.livekitRoom}
+                    livekitServerIdentity={attachment.livekitServerIdentity}
+                    identity={attachment.identity}
+                    tokenClient={tokenClient}
+                    onDisconnect={onDisconnect}
+                    mobileShortcuts={mobileShortcuts}
+                  />
+                </div>
+              )}
+              {attachment.status === "connected-livekit" && !tokenClient && (
                 <div className="flex-1 min-h-0 text-xs text-muted-foreground p-4">
-                  {/* TODO: render GhosttyTerminalLiveKit here (needs token from TokenService) */}
                   Terminal connected to {attachment.livekitRoom}
                 </div>
               )}
