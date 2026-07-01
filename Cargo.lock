@@ -8885,7 +8885,6 @@ dependencies = [
  "log",
  "pretty_assertions",
  "prost 0.13.5",
- "prost-build 0.13.5",
  "rstest 0.24.0",
  "serde",
  "serde_json",
@@ -8972,6 +8971,8 @@ dependencies = [
  "async-trait",
  "futures-core",
  "pretty_assertions",
+ "prost 0.13.5",
+ "prost-build 0.13.5",
  "rstest 0.24.0",
  "tokio",
  "tonic 0.11.0",
@@ -9142,6 +9143,16 @@ dependencies = [
  "tonic-build",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "tddy-stdio"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "tddy-rpc",
+ "tokio",
 ]
 
 [[package]]
