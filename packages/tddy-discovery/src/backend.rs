@@ -200,22 +200,25 @@ impl CodingBackend for FastContextBackend {
 
             let msg = choice.message;
 
-            // Check for final answer in content.
+            // Check for final answer in content. Ollama returns `content: ""` (not null) on
+            // tool-call-only turns, so both checks below require non-empty content: otherwise
+            // a trailing tool-call turn silently clobbers `last_content` back to empty (wiping
+            // out real reasoning from an earlier turn), and an empty `<final_answer></final_answer>`
+            // block would short-circuit with a blank result instead of continuing the loop.
             if let Some(ref content) = msg.content {
-                last_content = content.clone();
-                if extract_final_answer(content).is_some() {
-                    // We have the final answer — return it.
-                    let output = extract_final_answer(&last_content)
-                        .unwrap_or(&last_content)
-                        .to_string();
+                if let Some(answer) = extract_final_answer(content).filter(|a| !a.is_empty()) {
+                    // We have a non-empty final answer — return it.
                     return Ok(InvokeResponse {
-                        output,
+                        output: answer.to_string(),
                         exit_code: 0,
                         session_id: None,
                         questions: Vec::new(),
                         raw_stream: None,
                         stderr: None,
                     });
+                }
+                if !content.trim().is_empty() {
+                    last_content = content.clone();
                 }
             }
 
@@ -661,6 +664,131 @@ mod tests {
         assert_eq!(
             call_count, max_turns as usize,
             "the loop must make exactly max_turns model calls; made {call_count}"
+        );
+    }
+
+    /// A tool-call turn's `content` field, matching Ollama's OpenAI-compatible response shape,
+    /// is `""` (empty string), not `null`.
+    fn tool_call_response_with_empty_content(
+        tool_name: &str,
+        args: serde_json::Value,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "arguments": args.to_string()
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        })
+    }
+
+    /// Ollama returns `content: ""` (empty string, not `null`) on tool-call-only turns. When
+    /// `max_turns` is reached, the fallback output must be the last *meaningful* plain-text turn,
+    /// not clobbered back to empty by a later tool-call turn's empty content.
+    #[tokio::test]
+    async fn invoke_preserves_last_meaningful_content_across_a_trailing_tool_call_turn() {
+        // Given — turn 1 is substantial plain text, turn 2 is a tool call with empty content
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(plain_text_response(
+                    "Docker support looks like it lives under packages/tddy-build-docker.",
+                )),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                tool_call_response_with_empty_content(
+                    "GLOB",
+                    serde_json::json!({"pattern": "**/*docker*"}),
+                ),
+            ))
+            .mount(&server)
+            .await;
+
+        let max_turns = 2u32;
+        let backend =
+            FastContextBackend::new(server.uri(), "microsoft/FastContext-1.0-4B-RL", max_turns);
+        let request = InvokeRequest {
+            prompt: "Where is docker support implemented?".to_string(),
+            ..InvokeRequest::default()
+        };
+
+        // When
+        let response = backend
+            .invoke(request)
+            .await
+            .expect("invoke must return Ok when max_turns is reached");
+
+        // Then — the fallback output is turn 1's text, not clobbered to empty by turn 2
+        assert_eq!(
+            response.output, "Docker support looks like it lives under packages/tddy-build-docker.",
+            "max-turns fallback must preserve the last non-empty content, not the trailing \
+             tool-call turn's empty content"
+        );
+    }
+
+    /// An empty `<final_answer></final_answer>` block must not be treated as a real answer —
+    /// otherwise the loop returns a blank result and discards all prior reasoning/tool work
+    /// instead of continuing toward a genuine answer.
+    #[tokio::test]
+    async fn invoke_does_not_treat_an_empty_final_answer_block_as_a_real_answer() {
+        // Given — turn 1 has an empty <final_answer> block, turn 2 has a real one
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(plain_text_response(
+                    "Let me check.\n<final_answer>\n</final_answer>",
+                )),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(final_answer_response("src/lib.rs:1-1")),
+            )
+            .mount(&server)
+            .await;
+
+        let backend = FastContextBackend::new(server.uri(), "microsoft/FastContext-1.0-4B-RL", 6);
+        let request = InvokeRequest {
+            prompt: "Where is the entry point?".to_string(),
+            ..InvokeRequest::default()
+        };
+
+        // When
+        let response = backend
+            .invoke(request)
+            .await
+            .expect("invoke must succeed once the model produces a real final answer");
+
+        // Then — the loop continued past the empty final_answer and returned the real one
+        assert_eq!(
+            response.output, "src/lib.rs:1-1",
+            "an empty <final_answer> block must not short-circuit the loop with a blank result"
+        );
+        let calls = server.received_requests().await.unwrap();
+        assert_eq!(
+            calls.len(),
+            2,
+            "the loop must continue past the empty final_answer to a second turn"
         );
     }
 }
