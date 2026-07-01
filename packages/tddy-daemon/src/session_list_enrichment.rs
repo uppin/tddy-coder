@@ -35,6 +35,8 @@ pub struct SessionListStatusDisplay {
     /// Back-reference to the orchestrating PR-stack session (from `Changeset.orchestrator_session_id`).
     /// Empty string for non-child sessions or when absent.
     pub orchestrator_session_id: String,
+    /// Active workflow recipe name (from `Changeset.recipe`). Empty string when absent.
+    pub recipe: String,
 }
 
 impl SessionListStatusDisplay {
@@ -48,6 +50,7 @@ impl SessionListStatusDisplay {
             model: p,
             activity_status: String::new(),
             orchestrator_session_id: String::new(),
+            recipe: String::new(),
         }
     }
 }
@@ -133,6 +136,7 @@ pub fn session_list_status_from_session_dir(
             model: meta.model.clone().unwrap_or_default(),
             activity_status: meta.activity_status.clone().unwrap_or_default(),
             orchestrator_session_id: String::new(),
+            recipe: String::new(),
         });
     }
 
@@ -165,6 +169,7 @@ pub fn session_list_status_from_session_dir(
             model: "—".to_string(),
             activity_status: String::new(),
             orchestrator_session_id: String::new(),
+            recipe: String::new(),
         });
     };
 
@@ -195,6 +200,7 @@ pub fn session_list_status_from_session_dir(
             .orchestrator_session_id
             .clone()
             .unwrap_or_default(),
+        recipe: changeset.recipe.clone().unwrap_or_default(),
     })
 }
 
@@ -226,6 +232,7 @@ pub fn apply_session_list_status_to_proto(
     entry.model = status.model;
     entry.activity_status = status.activity_status;
     entry.orchestrator_session_id = status.orchestrator_session_id;
+    entry.recipe = status.recipe;
     entry.pending_elicitation =
         crate::elicitation::pending_elicitation_for_session_dir(session_dir);
     Ok(())
@@ -415,6 +422,7 @@ state:
             livekit_room: String::new(),
             previous_session_id: String::new(),
             orchestrator_session_id: String::new(),
+            recipe: String::new(),
         };
         apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
         assert_eq!(proto.workflow_goal, "acceptance-tests");
@@ -669,6 +677,7 @@ sessions:
             livekit_room: String::new(),
             previous_session_id: String::new(),
             orchestrator_session_id: String::new(),
+            recipe: String::new(),
         };
         apply_session_list_status_to_proto(&session_dir, &mut proto).unwrap();
         assert_eq!(
@@ -881,6 +890,176 @@ orchestrator_session_id: orch-sess-proto-xyz
         assert_eq!(
             proto.orchestrator_session_id, "orch-sess-proto-xyz",
             "orchestrator_session_id from changeset must be copied into proto SessionEntry field 21"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Acceptance tests: recipe enrichment (Layer 2)
+    // ---------------------------------------------------------------------------
+
+    /// `enrichment_surfaces_recipe_from_changeset` — when a session's `changeset.yaml` contains
+    /// `recipe: "orchestrate-pr-stack"`, `session_list_status_from_session_dir` must return that
+    /// string in `SessionListStatusDisplay.recipe`.
+    #[test]
+    fn enrichment_surfaces_recipe_from_changeset() {
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path();
+
+        fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            r"session_id: orch-sess-recipe-1
+project_id: proj-stack-recipe
+created_at: '2026-07-01T10:00:00Z'
+updated_at: '2026-07-01T10:05:00Z'
+status: active
+repo_path: /tmp/repo
+pid: 42
+",
+        )
+        .unwrap();
+
+        // Orchestrator session changeset with recipe set
+        fs::write(
+            session_dir.join("changeset.yaml"),
+            r"version: 1
+models:
+  tdd: opus
+sessions:
+  - id: orch-sess-recipe-1
+    agent: claude
+    tag: tdd
+    created_at: '2026-07-01T10:00:00Z'
+state:
+  current: Green
+  session_id: orch-sess-recipe-1
+  updated_at: '2026-07-01T10:05:00Z'
+  history:
+    - state: Init
+      at: '2026-07-01T10:00:00Z'
+    - state: Green
+      at: '2026-07-01T10:05:00Z'
+recipe: orchestrate-pr-stack
+",
+        )
+        .unwrap();
+
+        // When
+        let got = session_list_status_from_session_dir(session_dir)
+            .expect("enrichment must not error for orchestrator session with recipe");
+
+        // Then — the recipe is surfaced in the display struct
+        assert_eq!(
+            got.recipe, "orchestrate-pr-stack",
+            "recipe must be read from changeset.yaml and surfaced in SessionListStatusDisplay"
+        );
+    }
+
+    /// `enrichment_recipe_empty_when_absent` — when a session's `changeset.yaml` has no `recipe`
+    /// field, the enrichment must return an empty string (not None or an error).
+    #[test]
+    fn enrichment_recipe_empty_when_absent() {
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path();
+
+        fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            r"session_id: plain-sess-no-recipe
+project_id: proj-plain
+created_at: '2026-07-01T10:00:00Z'
+updated_at: '2026-07-01T10:05:00Z'
+status: active
+repo_path: /tmp/repo
+pid: 99
+",
+        )
+        .unwrap();
+
+        // Changeset without recipe field
+        fs::write(
+            session_dir.join("changeset.yaml"),
+            r"version: 1
+models:
+  tdd: opus
+sessions:
+  - id: plain-sess-no-recipe
+    agent: claude
+    tag: tdd
+    created_at: '2026-07-01T10:00:00Z'
+state:
+  current: Red
+  session_id: plain-sess-no-recipe
+  updated_at: '2026-07-01T10:05:00Z'
+  history:
+    - state: Red
+      at: '2026-07-01T10:05:00Z'
+",
+        )
+        .unwrap();
+
+        // When
+        let got = session_list_status_from_session_dir(session_dir)
+            .expect("enrichment must not error for session without recipe");
+
+        // Then — recipe is empty string for sessions that don't specify one
+        assert_eq!(
+            got.recipe, "",
+            "recipe must be empty string when absent from changeset.yaml"
+        );
+    }
+
+    /// `apply_recipe_to_proto_sets_field` — when `apply_session_list_status_to_proto` enriches a
+    /// session, the `recipe` must be copied into proto `SessionEntry` field 22.
+    #[test]
+    fn apply_recipe_to_proto_sets_field() {
+        use tddy_service::proto::connection::SessionEntry as ProtoSessionEntry;
+
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path();
+
+        fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            r"session_id: orch-proto-recipe-sess
+project_id: proj-proto-recipe
+created_at: '2026-07-01T10:00:00Z'
+updated_at: '2026-07-01T10:05:00Z'
+status: active
+repo_path: /tmp/repo
+pid: 77
+",
+        )
+        .unwrap();
+
+        fs::write(
+            session_dir.join("changeset.yaml"),
+            r"version: 1
+models:
+  tdd: opus
+sessions:
+  - id: orch-proto-recipe-sess
+    agent: claude
+    tag: tdd
+    created_at: '2026-07-01T10:00:00Z'
+state:
+  current: Green
+  session_id: orch-proto-recipe-sess
+  updated_at: '2026-07-01T10:05:00Z'
+  history:
+    - state: Green
+      at: '2026-07-01T10:05:00Z'
+recipe: plan-pr-stack
+",
+        )
+        .unwrap();
+
+        let mut proto = ProtoSessionEntry {
+            session_id: "orch-proto-recipe-sess".to_string(),
+            ..Default::default()
+        };
+        apply_session_list_status_to_proto(session_dir, &mut proto).expect("apply must not error");
+
+        assert_eq!(
+            proto.recipe, "plan-pr-stack",
+            "recipe from changeset must be copied into proto SessionEntry field 22"
         );
     }
 }

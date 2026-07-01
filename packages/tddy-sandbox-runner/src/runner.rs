@@ -576,10 +576,7 @@ fn run_generic_pty_thread(
 ) -> Result<i32> {
     boot_log(
         "INFO",
-        &format!(
-            "pty: openpty generic cwd={} argv={argv:?}",
-            cwd.display(),
-        ),
+        &format!("pty: openpty generic cwd={} argv={argv:?}", cwd.display(),),
     );
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -1219,9 +1216,10 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
             "INFO",
             &format!("boot: spawn_claude_pty binary={}", args.claude_binary),
         );
-        let tddy_tools_path = args.tddy_tools_path.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("tddy_tools_path is required for claude pty mode")
-        })?;
+        let tddy_tools_path = args
+            .tddy_tools_path
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("tddy_tools_path is required for claude pty mode"))?;
         let pty_state = spawn_claude_pty(SpawnClaudePtyParams {
             context_dir: &args.context_dir,
             cwd: &cwd,
@@ -1467,9 +1465,6 @@ mod tests {
             "--pty-command=pty_ok",
         ])
         .expect("argv must parse");
-        assert_eq!(
-            args.pty_command,
-            vec!["/bin/sh", "-c", "printf", "pty_ok"]
-        );
+        assert_eq!(args.pty_command, vec!["/bin/sh", "-c", "printf", "pty_ok"]);
     }
 }

@@ -9,8 +9,8 @@ mod error;
 pub mod exec_reads;
 mod log;
 pub mod materialize;
-mod spec;
 pub mod runner_env;
+mod spec;
 pub mod tool_ipc;
 
 pub use builder::{

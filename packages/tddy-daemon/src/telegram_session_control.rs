@@ -618,7 +618,8 @@ fn session_list_status_or_placeholders(session_dir: &Path) -> SessionListStatusD
             agent: "—".to_string(),
             model: "—".to_string(),
             activity_status: String::new(),
-            orchestrator_session_id: String::new(), // TODO: populate from changeset.orchestrator_session_id
+            orchestrator_session_id: String::new(),
+            recipe: String::new(),
         },
     }
 }

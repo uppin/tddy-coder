@@ -3,6 +3,7 @@ import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
 import type { AgentInfo, ConnectionService, ProjectEntry, SessionEntry, ToolInfo } from "../../gen/connection_pb";
 import { CLAUDE_CLI_MODELS } from "../../constants/claudeCliModels";
+import { prStackOrchestrators } from "../../utils/stackParents";
 import { Button } from "../ui/button";
 
 const WORKFLOW_RECIPES = [
@@ -83,9 +84,7 @@ export function CreateSessionPane({
       .listSessions({ sessionToken })
       .then((resp) => {
         if (cancelled) return;
-        const loadedSessions = (resp.sessions as SessionEntry[]).filter(
-          (s) => !s.orchestratorSessionId,
-        );
+        const loadedSessions = prStackOrchestrators(resp.sessions as SessionEntry[]);
         setSessions(loadedSessions);
       })
       .catch(() => {
@@ -200,6 +199,7 @@ export function CreateSessionPane({
           toolPath: "",
           agent: "",
           recipe: "",
+          stackParent,
           sessionType: "claude-cli",
           model,
           permissionMode,
@@ -317,27 +317,6 @@ export function CreateSessionPane({
             </select>
           </div>
 
-          {sessions.length > 0 && (
-            <div>
-              <label className={labelClass} htmlFor="create-session-stack-parent">
-                PR stack parent
-              </label>
-              <select
-                id="create-session-stack-parent"
-                data-testid="create-session-stack-parent-select"
-                className={inputClass}
-                value={stackParent}
-                onChange={(e) => setStackParent(e.target.value)}
-              >
-                <option value="">None (standalone session)</option>
-                {sessions.map((s) => (
-                  <option key={s.sessionId} value={s.sessionId}>
-                    {s.sessionId}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
         </>
       )}
 
@@ -410,6 +389,29 @@ export function CreateSessionPane({
             />
           </div>
         </>
+      )}
+
+      {/* PR stack parent picker — shown for both session types when orchestrators are available */}
+      {sessions.length > 0 && (
+        <div>
+          <label className={labelClass} htmlFor="create-session-stack-parent">
+            PR stack parent
+          </label>
+          <select
+            id="create-session-stack-parent"
+            data-testid="create-session-stack-parent-select"
+            className={inputClass}
+            value={stackParent}
+            onChange={(e) => setStackParent(e.target.value)}
+          >
+            <option value="">None (standalone session)</option>
+            {sessions.map((s) => (
+              <option key={s.sessionId} value={s.sessionId}>
+                {s.sessionId}
+              </option>
+            ))}
+          </select>
+        </div>
       )}
 
       {/* Branch intent */}

@@ -101,12 +101,7 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
     cmd.args(&plan.spec.command[1..]);
     cmd.env_clear();
     cmd.envs(&plan.spec.env);
-    cmd.current_dir(
-        plan.spec
-            .cwd
-            .as_ref()
-            .unwrap_or(&plan.spec.project_root),
-    );
+    cmd.current_dir(plan.spec.cwd.as_ref().unwrap_or(&plan.spec.project_root));
     cmd.stdin(if plan.stdin.is_some() {
         Stdio::piped()
     } else {
