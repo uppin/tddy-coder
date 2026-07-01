@@ -2112,7 +2112,7 @@ mod tests {
         assert!(matches!(p.state().mode, AppMode::FeatureInput));
         assert!(!p.is_backend_selection_pending());
         assert_eq!(p.state().agent, "cursor");
-        assert_eq!(p.state().model, "composer-2");
+        assert_eq!(p.state().model, "composer-2.5");
     }
 
     #[test]

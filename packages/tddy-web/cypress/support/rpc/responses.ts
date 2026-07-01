@@ -271,7 +271,7 @@ export function okResponseBuffer(): ArrayBuffer {
 export const DEFAULT_AGENTS: Array<{ id: string; label: string }> = [
   { id: "claude", label: "Claude (opus)" },
   { id: "claude-acp", label: "Claude ACP (opus)" },
-  { id: "cursor", label: "Cursor (composer-2)" },
+  { id: "cursor", label: "Cursor (composer-2.5)" },
   { id: "stub", label: "Stub" },
   { id: "codex", label: "Codex" },
   { id: "codex-acp", label: "Codex ACP" },

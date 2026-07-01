@@ -489,14 +489,14 @@ mod tests {
     #[test]
     fn build_args_includes_model_when_set() {
         // Given
-        let request = minimal_request("plan", Some("composer-2"), "test", hints_tdd_plan_goal());
+        let request = minimal_request("plan", Some("composer-2.5"), "test", hints_tdd_plan_goal());
 
         // When
         let args = build_cursor_cli_args(&request, "test prompt");
 
         // Then
         assert!(args.contains(&"--model".to_string()));
-        assert!(args.contains(&"composer-2".to_string()));
+        assert!(args.contains(&"composer-2.5".to_string()));
     }
 
     #[test]

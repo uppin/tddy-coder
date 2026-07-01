@@ -39,28 +39,26 @@ fn spawn_stub_thread(response_body: &'static str) -> u16 {
     let port = listener.local_addr().unwrap().port();
 
     std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            if let Ok(mut stream) = stream {
-                let mut buf = vec![0u8; 8192];
-                let _ = stream.read(&mut buf);
-                // Only serve POST requests — all four subcommands use Connect-protocol POST.
-                // Reject GETs with 405 so tests fail until the transport is correct.
-                let is_post = buf.starts_with(b"POST ");
-                if is_post {
-                    let resp = format!(
-                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                        response_body.len(),
-                        response_body
-                    );
-                    let _ = stream.write_all(resp.as_bytes());
-                } else {
-                    let body = b"Method Not Allowed";
-                    let resp = format!(
-                        "HTTP/1.1 405 Method Not Allowed\r\ncontent-length: {}\r\nconnection: close\r\n\r\nMethod Not Allowed",
-                        body.len()
-                    );
-                    let _ = stream.write_all(resp.as_bytes());
-                }
+        for mut stream in listener.incoming().flatten() {
+            let mut buf = vec![0u8; 8192];
+            let _ = stream.read(&mut buf);
+            // Only serve POST requests — all four subcommands use Connect-protocol POST.
+            // Reject GETs with 405 so tests fail until the transport is correct.
+            let is_post = buf.starts_with(b"POST ");
+            if is_post {
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    response_body.len(),
+                    response_body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            } else {
+                let body = b"Method Not Allowed";
+                let resp = format!(
+                    "HTTP/1.1 405 Method Not Allowed\r\ncontent-length: {}\r\nconnection: close\r\n\r\nMethod Not Allowed",
+                    body.len()
+                );
+                let _ = stream.write_all(resp.as_bytes());
             }
         }
     });

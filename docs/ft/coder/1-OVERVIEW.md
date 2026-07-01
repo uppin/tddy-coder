@@ -41,7 +41,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 - **TUI**: Synthetic clarification `Select` over backend options; `AppMode::Select` includes `initial_selected` for highlight consistency.
 - **Plain**: Numbered menu on stderr; stdin line picks the backend when `--agent` is omitted.
 - **Daemon / web**: `StartSession` includes `agent`; the daemon passes `--agent` into the spawned `tddy-coder`. The web Connection Screen offers backend per **new session** only (`StartSessionRequest.agent`). The choice is **per session**, not stored on the project record.
-- **Models**: Defaults per backend (e.g. Cursor `composer-2`, Codex / Codex ACP `gpt-5`); global `--model` overrides when provided.
+- **Models**: Defaults per backend (e.g. Cursor `composer-2.5`, Codex / Codex ACP `gpt-5`); global `--model` overrides when provided.
 - **Codex binary**: `--codex-cli-path` or environment variable `TDDY_CODEX_CLI` selects the `codex` executable; otherwise the `codex` name on `PATH` is used.
 - **Codex ACP binary**: `--codex-acp-cli-path`, `TDDY_CODEX_ACP_CLI`, optional YAML `codex_acp_cli_path`, or `codex-acp` on `PATH` when using `--agent codex-acp`. See [codex-acp-backend.md](codex-acp-backend.md).
 

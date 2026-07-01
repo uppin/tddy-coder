@@ -152,6 +152,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn claude_exec_reads_include_the_dyld_root_literal() {
         let reads = process_claude_exec_reads(Path::new("/usr/bin/true"));
         assert!(

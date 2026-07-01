@@ -2,7 +2,9 @@
 //!
 //! Product-specific recipes (e.g. Claude CLI) compose these helpers in `tddy-sandbox-recipes`.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
 
 use crate::builder::{ReadReason, ReadSpec};
 
