@@ -112,6 +112,14 @@ export interface GhosttyTerminalLiveKitProps {
   mobileShortcuts?: ToolShortcutDef[];
   /** Viewport height for ShortcutDrawer snap positioning. 0 = use window.innerHeight. */
   mobileShortcutsViewportHeight?: number;
+  /**
+   * When true, the raw `livekit-status` strip ("connecting"/"connected"/"error") never occupies
+   * visible layout, even without a `connectionOverlay`. Default `false` preserves the existing
+   * fallback (visible when there is no chrome) for bare/debug usage. Callers that render their own
+   * connection UI (or intentionally show no chrome at all, e.g. embedded session panes) should set
+   * this to `true`.
+   */
+  hideStatusStrip?: boolean;
 }
 
 export function GhosttyTerminalLiveKit({
@@ -139,6 +147,7 @@ export function GhosttyTerminalLiveKit({
   fixedViewportGrid,
   onRemoteSessionEnded,
   mobileShortcuts,
+  hideStatusStrip = false,
 }: GhosttyTerminalLiveKitProps) {
   const liveKitFactory = useLiveKitTransportFactory();
   const log = debugLogging
@@ -483,7 +492,7 @@ export function GhosttyTerminalLiveKit({
         height: "100%",
       }}
     >
-      {connectionOverlay && !showLiveKitStatusStrip ? (
+      {hideStatusStrip || (connectionOverlay && !showLiveKitStatusStrip) ? (
         <div data-testid="livekit-status" hidden aria-hidden="true">
           {status}
         </div>
