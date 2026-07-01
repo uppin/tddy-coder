@@ -40,6 +40,12 @@ all existing consumers remain source-compatible via a re-export shim.
   `tool_calls` JSON objects.
 - **Default endpoint**: `http://localhost:30000` (configurable via `fastcontext_url` in config YAML
   and the `--fastcontext-url` CLI flag).
+- **Model id**: defaults to `microsoft/FastContext-1.0-4B-RL`; override via `fastcontext_model` in
+  config YAML or `--fastcontext-model` to target any other OpenAI-compatible endpoint or model tag —
+  including a locally-served model through [Ollama](https://ollama.com)'s
+  `/v1/chat/completions` API (`--fastcontext-url http://localhost:11434 --fastcontext-model
+  <your-ollama-tag>`). The model id is sent verbatim in each chat-completion request body; no other
+  backend behavior changes.
 - **Sources**:
   - <https://huggingface.co/microsoft/FastContext-1.0-4B-RL>
   - <https://github.com/microsoft/fastcontext>
@@ -116,6 +122,10 @@ from the right files without requiring a manual search.
 14. `--agent fastcontext` is accepted as a valid CLI argument in `tddy-coder`.
 15. `dev.daemon.yaml::allowed_agents` includes `fastcontext`.
 16. `fastcontext_url` is configurable in the YAML config and defaults to `http://localhost:30000`.
+17. `fastcontext_model` is configurable via CLI flag and YAML config, defaults to
+    `microsoft/FastContext-1.0-4B-RL`, and is threaded through `create_backend` to
+    `FastContextBackend::new` unchanged — enabling any OpenAI-compatible model tag, including
+    locally-served models via Ollama.
 
 ## Non-goals (out of scope for v1)
 
