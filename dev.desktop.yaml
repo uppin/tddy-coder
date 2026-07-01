@@ -80,7 +80,7 @@ allowed_agents:
   - id: claude-acp
     label: "Claude ACP (opus)"
   - id: cursor
-    label: "Cursor (composer-2)"
+    label: "Cursor (composer-2.5)"
   - id: stub
     label: "Stub"
   - id: codex

@@ -466,7 +466,7 @@ pub fn backend_selection_question() -> ClarificationQuestion {
             },
             QuestionOption {
                 label: "Cursor".to_string(),
-                description: "Cursor agent CLI (default model: composer-2)".to_string(),
+                description: "Cursor agent CLI (default model: composer-2.5)".to_string(),
             },
             QuestionOption {
                 label: "Codex".to_string(),
@@ -544,7 +544,7 @@ pub fn backend_from_label(label: &str) -> (&'static str, &'static str) {
     match label {
         "Claude" => ("claude", "opus"),
         "Claude ACP" => ("claude-acp", "opus"),
-        "Cursor" => ("cursor", "composer-2"),
+        "Cursor" => ("cursor", "composer-2.5"),
         "Codex" => ("codex", "gpt-5"),
         "Codex ACP" => ("codex-acp", "gpt-5"),
         "Stub" => ("stub", "stub"),
@@ -556,7 +556,7 @@ pub fn backend_from_label(label: &str) -> (&'static str, &'static str) {
 #[must_use]
 pub fn default_model_for_agent(agent: &str) -> &'static str {
     match agent {
-        "cursor" => "composer-2",
+        "cursor" => "composer-2.5",
         "codex" => "gpt-5",
         "codex-acp" => "gpt-5",
         "stub" => "stub",
@@ -716,7 +716,7 @@ mod tests {
 
     #[test]
     fn backend_from_label_cursor() {
-        assert_eq!(backend_from_label("Cursor"), ("cursor", "composer-2"));
+        assert_eq!(backend_from_label("Cursor"), ("cursor", "composer-2.5"));
     }
 
     #[test]
@@ -746,7 +746,7 @@ mod tests {
 
     #[test]
     fn default_model_for_agent_cursor() {
-        assert_eq!(default_model_for_agent("cursor"), "composer-2");
+        assert_eq!(default_model_for_agent("cursor"), "composer-2.5");
     }
 
     #[test]

@@ -213,6 +213,11 @@ async fn sandboxed_claude_cli_start_persists_metadata_and_empty_livekit() {
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn sandboxed_claude_cli_starts_on_linux_with_the_cgroups_backend() {
+    if !tddy_sandbox_cgroups::unprivileged_userns_available() {
+        eprintln!("SKIP: host forbids unprivileged user namespaces (cannot create the sandbox here)");
+        return;
+    }
+
     // Given
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
