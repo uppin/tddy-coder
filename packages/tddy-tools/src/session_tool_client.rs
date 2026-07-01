@@ -101,59 +101,47 @@ pub async fn dispatch_session_tool(tool_name: &str, args: serde_json::Value) -> 
     }
 }
 
-/// Forward a tool call over the sandbox unix IPC socket.
+/// `dispatch_via_sandbox_ipc`'s stdio-RPC connection never receives inbound calls from the
+/// sandbox-runner — any request here would be a bug, so it fails loudly rather than silently
+/// no-op'ing.
+struct NoCallbackToolService;
+
+#[async_trait::async_trait]
+impl tddy_rpc::RpcService for NoCallbackToolService {
+    async fn handle_rpc(
+        &self,
+        service: &str,
+        method: &str,
+        _message: &tddy_rpc::RpcMessage,
+    ) -> tddy_rpc::RpcResult {
+        tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::unimplemented(format!(
+            "tddy-tools hosts no callback service, got {service}/{method}"
+        ))))
+    }
+}
+
+/// Forward a tool call over the sandbox unix IPC socket, using `tddy-rpc`'s length-prefixed
+/// framing (`connection.ConnectionService/ExecuteTool`) rather than the socket path itself
+/// carrying any particular wire format — the socket is just a duplex byte stream `tddy-stdio`'s
+/// `StdioEndpoint` can wrap like any other (see `StdioEndpoint::from_duplex`).
 pub async fn dispatch_via_sandbox_ipc(
     socket_path: &std::path::Path,
     tool_name: &str,
     args: &serde_json::Value,
 ) -> String {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-    let mut stream = match tokio::net::UnixStream::connect(socket_path).await {
+    let stream = match tokio::net::UnixStream::connect(socket_path).await {
         Ok(s) => s,
         Err(e) => {
             return serde_json::json!({"error": format!("tool ipc connect: {e}"), "is_error": true})
                 .to_string();
         }
     };
-    let req = ToolIpcRequest {
-        tool_name: tool_name.to_string(),
-        args_json: args.to_string(),
-    };
-    let payload = match serde_json::to_string(&req) {
-        Ok(s) => s,
-        Err(e) => {
-            return serde_json::json!({
-                "error": format!("tool ipc encode request: {e}"),
-                "is_error": true
-            })
-            .to_string();
-        }
-    };
-    if stream.write_all(payload.as_bytes()).await.is_err() {
-        return serde_json::json!({"error": "tool ipc write failed", "is_error": true}).to_string();
-    }
-    let _ = stream.shutdown().await;
-    let mut buf = vec![0u8; 65536];
-    match stream.read(&mut buf).await {
-        Ok(n) if n > 0 => {
-            let raw = String::from_utf8_lossy(&buf[..n]);
-            match serde_json::from_str::<ToolIpcResponse>(&raw) {
-                Ok(resp) if resp.is_error => serde_json::json!({
-                    "error": resp.error_message,
-                    "is_error": true
-                })
-                .to_string(),
-                Ok(resp) => resp.result_json,
-                Err(_) => raw.to_string(),
-            }
-        }
-        Ok(_) => {
-            serde_json::json!({"error": "tool ipc empty response", "is_error": true}).to_string()
-        }
-        Err(e) => serde_json::json!({"error": format!("tool ipc read: {e}"), "is_error": true})
-            .to_string(),
-    }
+    let (read_half, write_half) = tokio::io::split(stream);
+    let (client, endpoint) =
+        tddy_stdio::StdioEndpoint::from_duplex(read_half, write_half, NoCallbackToolService);
+    tokio::spawn(endpoint.run());
+    let client: std::sync::Arc<dyn tddy_rpc::RpcClientTransport> = client;
+    dispatch_via_stdio_rpc(&client, tool_name, args).await
 }
 
 /// Forward a tool call via HTTP to `ConnectionService/ExecuteTool`.

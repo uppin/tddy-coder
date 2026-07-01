@@ -11,17 +11,17 @@
 - [x] Milestone 1: stdio-safe core (complete)
 - [x] Milestone 2: `--stdio` on tddy-coder / tddy-demo (complete, one deviation — see milestone notes)
 - [ ] Milestone 3: `--stdio` on tddy-sandbox-runner + daemon wiring (partial — Echo/EchoStream/SessionChannel work over stdio, proven through a real macOS Seatbelt jail via new `bridge_sandbox_stdio` primitive; Linux cgroups equivalent not attempted (unverifiable on this dev machine); daemon's actual session lifecycle (`dial_and_bridge`/`run_host_relay`) not yet switched over; old-transport removal not started)
-- [ ] Milestone 4: migrate sandbox tool-IPC (partial — `dispatch_via_stdio_rpc` exists and is tested standalone; not wired into transport selection, old tool-IPC not removed)
+- [x] Milestone 4: migrate sandbox tool-IPC (complete — real `TDDY_SANDBOX_TOOL_IPC` client/server both speak the new `tddy-rpc`-framed protocol now, proven through a real Seatbelt jail; only the now-dead `ToolIpcRequest`/`ToolIpcResponse` type definitions in `tddy-sandbox` remain unremoved)
 
 ## Affected Packages
 
-- [ ] `tddy-core` (or a new small crate) — reusable stdio-safe core: stderr redirect, `LogOutput` override, `--stdio` mode gating
-- [ ] `tddy-coder` — `--stdio` flag; remote-control `RpcService` served over `StdioEndpoint`; `CapturingWriter::headless()` wiring
-- [ ] `tddy-sandbox-runner` — `--stdio` flag; serve `SandboxService`'s existing generated `RpcService` impl over `ServerEngine`/`StdioEndpoint`; remove UDS/TCP relay + `ready_marker` handshake
-- [ ] `tddy-daemon` — spawn `tddy-sandbox-runner --stdio` via `spawn_child_endpoint`; migrate sandbox tool-IPC server-side wiring; remove port/UDS allocation code
-- [ ] `tddy-tools` — `session_tool_client.rs` gains a stdio-RPC transport variant; remove the sandbox tool-IPC variant
-- [ ] `tddy-sandbox` — remove `tool_ipc.rs`, `short_ipc_socket_path`, the `SUN_LEN` workaround. Gained `SandboxHandle::take_stdio()`.
-- [ ] `tddy-sandbox-darwin` — `spawn_plan` pipes stdio (instead of an egress-log redirect) when `--stdio` is in the command. `tddy-sandbox-cgroups` (Linux) needs the equivalent change, not attempted here.
+- [x] `tddy-core` — reusable stdio-safe core: stderr redirect, `LogOutput` override, `--stdio` mode gating
+- [x] `tddy-coder` — `--stdio` flag; remote-control `RpcService` served over `StdioEndpoint`; local TUI skipped under `--stdio` (not `CapturingWriter::headless()`, see Milestone 2 deviation note); coexists with `--grpc`
+- [ ] `tddy-sandbox-runner` — `--stdio` flag; serves `SandboxService`'s `RpcService` impl over `StdioEndpoint` for all 3 methods, proven through a real Seatbelt jail; `--grpc-uds`/`--grpc-listen-port` NOT yet removed (pending daemon-side wiring). Tool-IPC socket now speaks `tddy-rpc`-framed protocol.
+- [ ] `tddy-daemon` — gained `sandbox_session::bridge_sandbox_stdio` (jail-spawn stdio → async RPC client primitive, proven on macOS); real session lifecycle (`dial_and_bridge`/`run_host_relay`) NOT yet switched to use it
+- [x] `tddy-tools` — `dispatch_via_sandbox_ipc` now speaks the `tddy-rpc`-framed protocol over the same `TDDY_SANDBOX_TOOL_IPC` socket, via the new `dispatch_via_stdio_rpc`
+- [ ] `tddy-sandbox` — gained `SandboxHandle::take_stdio()`. `tool_ipc.rs`'s `ToolIpcRequest`/`ToolIpcResponse` types now dead code but not yet removed; `short_ipc_socket_path`/`SUN_LEN` workaround still needed regardless of wire format (still a Unix socket) — not removed, was never going to be
+- [x] `tddy-sandbox-darwin` — `spawn_plan` pipes stdio (instead of an egress-log redirect) when `--stdio` is in the command, proven end-to-end through a real jail. `tddy-sandbox-cgroups` (Linux) needs the equivalent change, not attempted here (unverifiable on this dev machine).
 - [x] `tddy-rpc` — reused as-is. `tddy-stdio` gained one new public constructor, `StdioEndpoint::from_duplex`, for wrapping already-open duplex streams (not just a `tokio::process::Command` it spawns itself) — needed for jailed/sandboxed spawns.
 
 ## State A (Current)
@@ -79,7 +79,7 @@ No binary today has a `--stdio` flag. No shared mechanism exists to guarantee a 
 - [x] Wire `--stdio` to serve the existing remote-control surface over `StdioEndpoint` — required dual-codegen'ing `TddyRemote` as an `RpcService` in `tddy-service` (new `build.rs` pass + `crate::proto::remote` module + second trait impl on `TddyRemoteService`, reusing `crate::gen::*` message types via `extern_path`; this wasn't pre-existing like `SandboxService`'s dual codegen, unlike originally assumed for the other binaries)
 - [x] **Deviation**: skipped local TUI entirely under `--stdio` instead of wiring `CapturingWriter::headless()` — simpler, matches `--daemon`'s existing "headless, no local view" precedent, and no test requires a live local view under `--stdio`. `CapturingWriter::headless()` remains unused for this purpose; revisit if a future requirement needs a local view alongside `--stdio`.
 - [x] Acceptance test: drive `tddy-coder --stdio` end-to-end via a `tddy-stdio` client (`SubmitFeatureInput` → `PresenterView` events) (`packages/tddy-e2e/tests/stdio_remote_control_acceptance.rs`)
-- [ ] Not done: `--stdio`/`--grpc` mutual-exclusivity validation (PRD mentions it; no test exercises it yet — needs a follow-up red test before implementing, to avoid unrequested scope)
+- [x] **Correction**: `--stdio` and `--grpc` are NOT mutually exclusive — they run concurrently (the gRPC server spawns on its own independent background thread, unconditionally, before the later TUI/`--stdio` dispatch branch; both are just different transports onto the same `PresenterHandle`). No code change was needed — this was a documentation error in the original PRD requirement, corrected there and proven with a new test, `serves_grpc_and_stdio_concurrently_from_the_same_process`, which connects both channels before submitting a feature input and confirms both independently observe the same `GoalStarted` event.
 
 ### Milestone 3: `--stdio` on tddy-sandbox-runner + daemon wiring — ⚠️ partial
 
@@ -93,22 +93,22 @@ No binary today has a `--stdio` flag. No shared mechanism exists to guarantee a 
 - [x] Acceptance tests: `SandboxService/Echo` round-trips over `--stdio` both directly-spawned and through a real Seatbelt jail; real PTY output flows over a stdio-served `SessionChannel` (subscribe + poll → `TerminalOutput`) (`packages/tddy-daemon/tests/sandbox_runner_stdio_acceptance.rs`, `sandbox_stdio_seatbelt_acceptance.rs`) — narrower than the original "daemon drives a sandboxed session... over stdio only" criterion only in that the daemon's *session lifecycle* isn't wired to use this path yet; the actual jail-spawn and PTY/relay machinery is now proven, not just Echo
 - Note: confirmed `run_claude_pty_thread` (the code path for `--claude-binary`, as opposed to `--pty-command`'s `run_generic_pty_thread`) never calls `relay.signal_session_ended()` — a pre-existing gap (not introduced here, not fixed here) that means `SessionEnded` frames are never emitted for real claude sessions, only for the generic-PTY-command path. Worth a follow-up issue independent of this changeset.
 
-### Milestone 4: Migrate sandbox tool-IPC — ⚠️ partial
+### Milestone 4: Migrate sandbox tool-IPC — ✅ complete (within its own scope)
 
-- [x] `dispatch_via_stdio_rpc(client, tool_name, args)` added to `session_tool_client.rs`, calling `connection.ConnectionService/ExecuteTool` over an injected `RpcClientTransport` — tested standalone against a fixture, not yet reachable from a real code path
-- [ ] NOT wired into `detect_session_tool_transport()`'s selection logic — no env var or config chooses this transport yet; a real caller still can't reach it
-- [ ] `--tool-ipc-socket`/`TDDY_SANDBOX_TOOL_IPC` and the old listener/client code NOT removed (by design — removal needs the new path to be actually selectable first)
+- [x] `dispatch_via_stdio_rpc(client, tool_name, args)` added to `session_tool_client.rs`, calling `connection.ConnectionService/ExecuteTool` over an injected `RpcClientTransport`
+- [x] **Wired into the real path**: `dispatch_via_sandbox_ipc` (the function `detect_session_tool_transport`'s `SandboxIpc` variant already dispatches to — no new transport variant or env var needed) now connects the `TDDY_SANDBOX_TOOL_IPC` `UnixStream`, wraps it via the new `StdioEndpoint::from_duplex`, and delegates to `dispatch_via_stdio_rpc` — replacing the old unframed single-`read()`/`write_all()` JSON protocol on the *same* socket path. `tddy-sandbox-runner`'s `start_tool_ipc_server` was updated symmetrically: each accepted connection is now wrapped the same way and hosts a new `ToolExecService` (`RpcService` impl calling the same `relay.call_tool()` the old handler called), instead of hand-rolled JSON parsing. `tddy-rpc`'s length-prefixed framing means both ends just needed the *wire format* replaced — no topology change, since `StdioEndpoint::from_duplex` wraps any duplex stream, not only process stdio.
+- [x] Old `ToolIpcRequest`/`ToolIpcResponse`-based dispatch code removed from `tddy-sandbox-runner`'s `start_tool_ipc_server` and its `tool_ipc_response_from_execute` helper. The `ToolIpcRequest`/`ToolIpcResponse` *type definitions* in `tddy-sandbox` are left in place (still have a unit test covering their own serde round-trip) — not yet removed, since that's a separate, still-deferred item (see Technical Debt).
 - [x] Regression test: a 256KB payload round-trips correctly through `dispatch_via_stdio_rpc` (the bug the old framing had) (`packages/tddy-tools/tests/session_tool_stdio_rpc_dispatch.rs`)
-- [ ] Acceptance test is narrower than planned: exercises `dispatch_via_stdio_rpc` against a standalone fixture process, not a real MCP tool call from sandboxed `tddy-tools` reaching a real daemon over stdio only — that requires Milestone 3's daemon wiring and this milestone's transport-selection wiring first
+- [x] **Proven end-to-end through a real Seatbelt jail**: `tddy-sandbox-darwin`'s pre-existing `sandbox_runner_session_channel_tool_exec_round_trips` test (calls the real `tddy_tools::session_tool_client::dispatch_session_tool` from inside a real jail, relayed through `SandboxSessionRelay`/`SessionChannel` to a fake host) passed unchanged — proving the new wire format works through the actual production code path, not just a standalone fixture. `mcp_stdio_dynamic_tools_acceptance.rs`'s fake in-jail listener was updated to speak the new protocol to keep matching the real server's behavior.
 
 ## Testing Strategy
 
 ### Acceptance Tests
 
-- [ ] `tddy-coder --stdio` end-to-end remote-control round trip, zero stray stdout bytes
-- [ ] `tddy-sandbox-runner --stdio` end-to-end PTY/session-control round trip via the daemon
-- [ ] Sandboxed MCP tool call round trip over stdio-RPC
-- [ ] Large-payload round trip (regression for the old tool-IPC truncation risk)
+- [x] `tddy-coder --stdio` end-to-end remote-control round trip, zero stray stdout bytes; also proven concurrent with `--grpc`
+- [x] `tddy-sandbox-runner --stdio` end-to-end PTY/session-control round trip through a real Seatbelt jail — narrower than "via the daemon" (daemon session lifecycle not yet switched over, see Technical Debt), but the actual jail-spawn and PTY/relay machinery is proven
+- [x] Sandboxed MCP tool call round trip over stdio-RPC, through a real Seatbelt jail (`sandbox_runner_session_channel_tool_exec_round_trips`)
+- [x] Large-payload round trip (regression for the old tool-IPC truncation risk)
 
 ### Test Level Decisions
 
@@ -123,10 +123,9 @@ No binary today has a `--stdio` flag. No shared mechanism exists to guarantee a 
 ## Technical Debt
 
 - Toolcall listener (`tddy-core/src/toolcall/listener.rs`) remains on its own bespoke newline-JSON protocol — tracked as a follow-up in `docs/dev/TODO.md`.
-- `--stdio`/`--grpc` mutual exclusivity is unvalidated on `tddy-coder`/`tddy-demo` (Milestone 2).
 - `tddy-daemon`'s real session lifecycle (`dial_and_bridge`/`connect_session_client`/`run_host_relay`) has not been switched to the new `bridge_sandbox_stdio` primitive — still dials the tonic `SandboxServiceClient` over UDS/TCP for every real session. The primitive itself (jail spawn with piped stdio → async bridge → RPC client) is built and proven end-to-end on macOS (Milestone 3); wiring the daemon's actual session lifecycle onto it requires rewriting `run_host_relay` against `tddy_rpc::RpcClientTransport`'s untyped interface (no generated client stub exists for RpcService-flavored services) — a similarly large body of work, recommended as its own follow-up changeset.
 - The Linux jail-spawn path (`tddy-sandbox-cgroups`) has not been given the equivalent stdio-piping change `tddy-sandbox-darwin` received — this dev environment is macOS-only, so Linux-specific sandboxing code can't even be compile-checked here, let alone verified. `--stdio` is only proven end-to-end through a real jail on macOS.
-- `dispatch_via_stdio_rpc` (Milestone 4) is not reachable from any real code path yet — not wired into `detect_session_tool_transport()`, so the old sandbox tool-IPC protocol is still the only one actually in use.
-- The legacy `--grpc-socket`/`--grpc-uds`/`--grpc-listen-port` (sandbox relay) and `--tool-ipc-socket`/`TDDY_SANDBOX_TOOL_IPC` (tool-IPC) transports have not been removed — both remain live and in use pending the above.
+- The legacy `--grpc-socket`/`--grpc-uds`/`--grpc-listen-port` (sandbox relay) transport has not been removed — remains live and in use pending the daemon session-lifecycle wiring above. (`--tool-ipc-socket`/`TDDY_SANDBOX_TOOL_IPC` itself is NOT legacy — it's still the discovery mechanism for the tool-IPC socket, just carrying the new `tddy-rpc`-framed wire protocol now instead of raw JSON; only the old JSON dispatch code was removed, in Milestone 4.)
+- `ToolIpcRequest`/`ToolIpcResponse` (`tddy-sandbox/src/tool_ipc.rs`) are now dead code (their only production consumers were removed in Milestone 4) but haven't been deleted — left in place since removing them is a separate cleanup step, not requested as part of the transport-selection wiring.
 - `run_claude_pty_thread` (real claude sessions) never calls `relay.signal_session_ended()`, unlike `run_generic_pty_thread` (the `--pty-command` path) — pre-existing gap, found while testing `SessionChannel` over `--stdio`, unrelated to this changeset's scope. Worth its own follow-up.
 - `tddy-rpc`'s optional `tonic` feature pins tonic 0.11, incompatible with the tonic 0.12 used by `tddy-coder`/`tddy-sandbox-runner`/etc. — its `Status` conversions can't be used directly by any gRPC-hosting binary on 0.12 without a version bump. Worth reconciling if more dual-transport services need tonic↔tddy_rpc `Status` conversion (currently hand-rolled per call site, e.g. `tonic_status_to_rpc` in `runner.rs`).

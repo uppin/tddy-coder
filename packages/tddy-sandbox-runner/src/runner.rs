@@ -28,16 +28,41 @@ use tddy_service::tonic_sandbox::sandbox_service_server::{
 };
 
 use tddy_sandbox::{
-    append_line, egress_log_path, session_id_from_env, ToolIpcRequest, ToolIpcResponse,
-    SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG,
+    append_line, egress_log_path, session_id_from_env, SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG,
 };
 use tddy_sandbox_recipes::{append_claude_mcp_args, claude_scratch_mcp_dir};
 
-fn tool_ipc_response_from_execute(resp: &ExecuteToolResponse) -> ToolIpcResponse {
-    ToolIpcResponse {
-        result_json: resp.result_json.clone(),
-        is_error: resp.is_error,
-        error_message: resp.error_message.clone(),
+/// Hosts `connection.ConnectionService/ExecuteTool` over the tool-IPC socket, using `tddy-rpc`'s
+/// length-prefixed framing instead of the old unframed single-`read()`/`write_all()` JSON
+/// protocol (which silently truncated payloads that didn't arrive in one syscall).
+struct ToolExecService {
+    relay: Arc<SandboxSessionRelay>,
+}
+
+#[async_trait::async_trait]
+impl tddy_rpc::RpcService for ToolExecService {
+    async fn handle_rpc(
+        &self,
+        service: &str,
+        method: &str,
+        message: &tddy_rpc::RpcMessage,
+    ) -> tddy_rpc::RpcResult {
+        use prost::Message;
+        if service != "connection.ConnectionService" || method != "ExecuteTool" {
+            return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::not_found(format!(
+                "unknown {service}/{method}"
+            ))));
+        }
+        let req = match ExecuteToolRequest::decode(message.payload.as_ref()) {
+            Ok(r) => r,
+            Err(e) => {
+                return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::invalid_argument(
+                    format!("decode ExecuteToolRequest: {e}"),
+                )))
+            }
+        };
+        let resp = self.relay.call_tool(&req.tool_name, &req.args_json).await;
+        tddy_rpc::RpcResult::Unary(Ok(resp.encode_to_vec()))
     }
 }
 
@@ -1051,25 +1076,16 @@ async fn start_tool_ipc_server(path: PathBuf, relay: Arc<SandboxSessionRelay>) -
         };
         let _ = ready_tx.send(());
         loop {
-            let Ok((mut stream, _)) = listener.accept().await else {
+            let Ok((stream, _)) = listener.accept().await else {
                 continue;
             };
             let relay = Arc::clone(&relay);
             tokio::spawn(async move {
-                use tokio::io::{AsyncReadExt, AsyncWriteExt};
-                let mut buf = vec![0u8; 65536];
-                if let Ok(n) = stream.read(&mut buf).await {
-                    if n == 0 {
-                        return;
-                    }
-                    let req: ToolIpcRequest = match serde_json::from_slice(&buf[..n]) {
-                        Ok(v) => v,
-                        Err(_) => return,
-                    };
-                    let resp = relay.call_tool(&req.tool_name, &req.args_json).await;
-                    let out = tool_ipc_response_from_execute(&resp);
-                    let _ = stream.write_all(out.to_json_string().as_bytes()).await;
-                }
+                let (read_half, write_half) = tokio::io::split(stream);
+                let service = ToolExecService { relay };
+                let (_client, endpoint) =
+                    tddy_stdio::StdioEndpoint::from_duplex(read_half, write_half, service);
+                endpoint.run().await;
             });
         }
     });
