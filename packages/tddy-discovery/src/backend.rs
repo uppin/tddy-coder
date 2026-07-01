@@ -282,6 +282,47 @@ mod tests {
         );
     }
 
+    /// A custom (non-default) model id passed to `FastContextBackend::new` must be sent verbatim
+    /// as the `model` field of the outgoing `/v1/chat/completions` request body — this is what
+    /// lets the backend target a locally-served model tag (e.g. an Ollama model) instead of the
+    /// hardcoded `microsoft/FastContext-1.0-4B-RL` default.
+    #[tokio::test]
+    async fn invoke_sends_the_configured_model_name_in_the_request_body() {
+        // Given — a mock server that immediately returns a final answer
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(final_answer_response("src/lib.rs:1-1")),
+            )
+            .mount(&server)
+            .await;
+
+        let custom_model = "hf.co/mitkox/FastContext-1.0-4B-SFT-Q4_K_M-GGUF:Q4_K_M";
+        let backend = FastContextBackend::new(server.uri(), custom_model, 2);
+        let request = InvokeRequest {
+            prompt: "Where is the entry point?".to_string(),
+            ..InvokeRequest::default()
+        };
+
+        // When
+        backend
+            .invoke(request)
+            .await
+            .expect("invoke must succeed when the model produces a final answer");
+
+        // Then — the request body's `model` field is the custom tag, not the microsoft default
+        let calls = server.received_requests().await.unwrap();
+        assert_eq!(calls.len(), 1, "exactly one model call must be made");
+        let body: serde_json::Value =
+            serde_json::from_slice(&calls[0].body).expect("request body must be valid JSON");
+        assert_eq!(
+            body["model"].as_str(),
+            Some(custom_model),
+            "request body must carry the configured model id, not the microsoft default"
+        );
+    }
+
     /// The multi-turn loop: mock returns a tool_call on turn 1 and `<final_answer>` on turn 2.
     /// Assert: exactly two model calls were made, the tool was executed between them, and the
     /// output contains the citations from the final answer.
