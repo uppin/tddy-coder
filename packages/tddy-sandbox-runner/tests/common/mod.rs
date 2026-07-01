@@ -13,11 +13,11 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
 use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
-use tddy_service::tonic_sandbox::sandbox_service_server::{SandboxService, SandboxServiceServer};
-use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
-use tddy_service::tonic_sandbox::{
+use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
+use tddy_service::proto::sandbox::{
     EchoRequest, EchoResponse, EchoStreamFrame, SessionFrame, TunnelOpen, TunnelOpenAck,
 };
+use tddy_service::tonic_sandbox::sandbox_service_server::{SandboxService, SandboxServiceServer};
 use tokio::net::{TcpListener, UnixListener};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream, UnixListenerStream};

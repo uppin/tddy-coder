@@ -196,6 +196,7 @@ async fn routes_https_egress_from_jail_through_the_host_relay_to_a_tls_server() 
             egress_shim_port: None,
             grpc_uds: Some(uds_path.clone()),
             pty_command: vec![],
+            stdio: false,
         };
 
         let runner_task = tokio::spawn(async move {

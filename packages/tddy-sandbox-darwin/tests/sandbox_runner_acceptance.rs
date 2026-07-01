@@ -7,8 +7,8 @@ use futures_util::StreamExt;
 use tddy_sandbox::format_egress_logs;
 use tddy_sandbox_darwin::{connect_sandbox_client, run_sandbox_runner, SandboxRunnerArgs};
 use tddy_service::proto::connection::ExecuteToolResponse;
-use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
-use tddy_service::tonic_sandbox::{
+use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
+use tddy_service::proto::sandbox::{
     EchoRequest, EchoStreamFrame, HostPoll, SandboxInput, SessionFrame, SubscribeTerminal,
 };
 use tokio_stream::wrappers::ReceiverStream;
@@ -74,6 +74,7 @@ fn runner_args(tmp: &Path, stub_claude: &Path) -> (SandboxRunnerArgs, PathBuf) {
         egress_shim_port: None,
         grpc_uds: None,
         pty_command: vec![],
+        stdio: false,
     };
     (args, egress)
 }

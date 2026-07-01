@@ -18,11 +18,13 @@ use tonic::{Request, Response, Status, Streaming};
 use tddy_service::proto::connection::{
     ExecuteToolRequest, ExecuteToolResponse, SessionTerminalOutput,
 };
-use tddy_service::tonic_sandbox::sandbox_service_server::{SandboxService, SandboxServiceServer};
-use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
-use tddy_service::tonic_sandbox::{
+use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
+use tddy_service::proto::sandbox::{
     EchoRequest, EchoResponse, EchoStreamFrame, EgressRequest, EgressResponse, SessionEnded,
     SessionFrame, TunnelClose, TunnelData, TunnelOpen, TunnelOpenAck,
+};
+use tddy_service::tonic_sandbox::sandbox_service_server::{
+    SandboxService as TonicSandboxService, SandboxServiceServer as TonicSandboxServiceServer,
 };
 
 use tddy_sandbox::{
@@ -198,6 +200,10 @@ pub struct SandboxRunnerArgs {
     /// Repeat the flag once per argv token (`--pty-command=/bin/sh --pty-command=-c …`).
     #[arg(long = "pty-command", allow_hyphen_values = true)]
     pub pty_command: Vec<String>,
+    /// Serve `SandboxService` over stdin/stdout (RPC over stdio, see `tddy-stdio`) instead of
+    /// `--grpc-uds`/`--grpc-listen-port`/`--grpc-socket`'s UDS/TCP transport.
+    #[arg(long)]
+    pub stdio: bool,
 }
 
 struct PendingToolCall {
@@ -479,7 +485,7 @@ struct SandboxRunnerService {
 }
 
 #[tonic::async_trait]
-impl SandboxService for SandboxRunnerService {
+impl TonicSandboxService for SandboxRunnerService {
     type SessionChannelStream =
         tokio_stream::wrappers::UnboundedReceiverStream<Result<SessionFrame, Status>>;
 
@@ -550,6 +556,141 @@ impl SandboxService for SandboxRunnerService {
             }
         });
         Ok(Response::new(
+            tokio_stream::wrappers::UnboundedReceiverStream::new(out_rx),
+        ))
+    }
+}
+
+/// Converts a `tonic::Status` (this crate's tonic version, 0.12) into `tddy_rpc::Status`, by
+/// hand: `tddy-rpc`'s own optional `tonic` feature pins tonic 0.11, an incompatible major version
+/// with this crate's tonic 0.12, so its blanket `From<tonic::Status>` impl doesn't apply here.
+fn tonic_status_to_rpc(status: Status) -> tddy_rpc::Status {
+    use tddy_rpc::Code;
+    let code = match status.code() {
+        tonic::Code::Ok => Code::Ok,
+        tonic::Code::Cancelled => Code::Cancelled,
+        tonic::Code::Unknown => Code::Unknown,
+        tonic::Code::InvalidArgument => Code::InvalidArgument,
+        tonic::Code::DeadlineExceeded => Code::DeadlineExceeded,
+        tonic::Code::NotFound => Code::NotFound,
+        tonic::Code::AlreadyExists => Code::AlreadyExists,
+        tonic::Code::PermissionDenied => Code::PermissionDenied,
+        tonic::Code::ResourceExhausted => Code::ResourceExhausted,
+        tonic::Code::FailedPrecondition => Code::FailedPrecondition,
+        tonic::Code::Aborted => Code::Aborted,
+        tonic::Code::OutOfRange => Code::OutOfRange,
+        tonic::Code::Unimplemented => Code::Unimplemented,
+        tonic::Code::Internal => Code::Internal,
+        tonic::Code::Unavailable => Code::Unavailable,
+        tonic::Code::DataLoss => Code::DataLoss,
+        tonic::Code::Unauthenticated => Code::Unauthenticated,
+    };
+    tddy_rpc::Status {
+        code,
+        message: status.message().to_string(),
+    }
+}
+
+/// Same `SandboxRunnerService`, served over `tddy-stdio` instead of tonic gRPC (`--stdio`).
+/// `sandbox.proto`'s own message types are `extern_path`-linked back to this canonical
+/// `proto::sandbox` module from both the tonic pass (`tonic_sandbox`) and this one (see
+/// `tddy-service/build.rs`), so `SessionFrame`/`EchoRequest`/etc. are the identical Rust types
+/// used by the tonic impl above — this impl mirrors that one's relay logic exactly, just wrapped
+/// in `tddy_rpc::{Request, Response, Streaming, Status}` instead of `tonic::{Request, Response,
+/// Status}` (duplicated, not delegated — same dual-transport pattern as every other service here).
+#[async_trait::async_trait]
+impl tddy_service::proto::sandbox::SandboxService for SandboxRunnerService {
+    type SessionChannelStream =
+        tokio_stream::wrappers::UnboundedReceiverStream<Result<SessionFrame, tddy_rpc::Status>>;
+
+    async fn session_channel(
+        &self,
+        request: tddy_rpc::Request<tddy_rpc::Streaming<SessionFrame>>,
+    ) -> Result<tddy_rpc::Response<Self::SessionChannelStream>, tddy_rpc::Status> {
+        let mut inbound = request.into_inner();
+        // `SandboxSessionRelay`'s outbound channel is typed against `tonic::Status` (shared with
+        // the tonic transport above) — convert to `tddy_rpc::Status` only at this trait's
+        // boundary (`tddy-rpc`'s `tonic` feature provides the `From` impl) rather than making the
+        // relay generic over the status type.
+        let (out_tx, out_rx): (OutboundSender, _) = tokio::sync::mpsc::unbounded_channel();
+        let relay = Arc::clone(&self.relay);
+        // Capture the server-stream sender so the CONNECT proxy can push tunnel frames directly.
+        relay.set_outbound(out_tx.clone());
+        let session_id = self.session_id.clone();
+        let stdin_tx = self.stdin_tx.clone();
+
+        tokio::spawn(async move {
+            while let Some(Ok(frame)) = inbound.next().await {
+                match frame.payload {
+                    Some(SessionPayload::SubscribeTerminal(sub)) => {
+                        if sub.session_id == session_id {
+                            *relay.terminal_subscribed.lock().unwrap() = true;
+                        }
+                    }
+                    Some(SessionPayload::TerminalInput(input)) => {
+                        if !input.data.is_empty() {
+                            let _ = stdin_tx.send(Bytes::from(input.data));
+                        }
+                    }
+                    Some(SessionPayload::ToolResponse(resp)) => relay.deliver_tool_response(resp),
+                    Some(SessionPayload::EgressResponse(resp)) => {
+                        relay.deliver_egress_response(resp)
+                    }
+                    Some(SessionPayload::TunnelOpenAck(ack)) => relay.deliver_tunnel_ack(ack),
+                    Some(SessionPayload::TunnelData(data)) => relay.deliver_tunnel_data(data),
+                    Some(SessionPayload::TunnelClose(close)) => relay.deliver_tunnel_close(close),
+                    Some(SessionPayload::HostPoll(_)) => {
+                        relay.handle_host_poll(&out_tx);
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        // Bridge the relay's tonic::Status-typed channel to this trait's tddy_rpc::Status return
+        // type — a plain forwarding task, same pattern as echo_stream's below. Converts by hand
+        // rather than via tddy-rpc's optional `tonic` feature: that feature pins tonic 0.11,
+        // incompatible with this crate's tonic 0.12.
+        let (final_tx, final_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            let mut out_rx = out_rx;
+            while let Some(item) = out_rx.recv().await {
+                if final_tx.send(item.map_err(tonic_status_to_rpc)).is_err() {
+                    break;
+                }
+            }
+        });
+
+        Ok(tddy_rpc::Response::new(
+            tokio_stream::wrappers::UnboundedReceiverStream::new(final_rx),
+        ))
+    }
+
+    async fn echo(
+        &self,
+        request: tddy_rpc::Request<EchoRequest>,
+    ) -> Result<tddy_rpc::Response<EchoResponse>, tddy_rpc::Status> {
+        let req = request.into_inner();
+        Ok(tddy_rpc::Response::new(EchoResponse {
+            message: req.message,
+        }))
+    }
+
+    type EchoStreamStream =
+        tokio_stream::wrappers::UnboundedReceiverStream<Result<EchoStreamFrame, tddy_rpc::Status>>;
+
+    async fn echo_stream(
+        &self,
+        request: tddy_rpc::Request<tddy_rpc::Streaming<EchoStreamFrame>>,
+    ) -> Result<tddy_rpc::Response<Self::EchoStreamStream>, tddy_rpc::Status> {
+        let mut inbound = request.into_inner();
+        let (out_tx, out_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Some(Ok(frame)) = inbound.next().await {
+                let _ = out_tx.send(Ok(frame));
+            }
+        });
+        Ok(tddy_rpc::Response::new(
             tokio_stream::wrappers::UnboundedReceiverStream::new(out_rx),
         ))
     }
@@ -1267,6 +1408,29 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         relay,
     };
 
+    if args.stdio {
+        // --stdio dedicates this process's real stdin/stdout to RPC framing (see
+        // `tddy_core::stdio_safety`) — keep stderr off the terminal but stdin/stdout live, same
+        // discipline as `--stdio` on `tddy-coder`. Best-effort: no fallback dir means no terminal
+        // to redirect away from in the first place.
+        if let Some(fallback_dir) = BOOT_LOG_FALLBACK.get() {
+            let _ = tddy_core::stdio_safety::redirect_fd_to_file(
+                libc::STDERR_FILENO,
+                &fallback_dir.join("sandbox-runner.stdio_stderr.log"),
+            );
+        }
+        boot_log("INFO", "boot: serve sandbox SandboxService over stdio");
+        std::fs::write(&args.ready_marker, "stdio")
+            .context("write ready marker")
+            .inspect_err(|e| boot_log_error("write_ready_marker", format!("{e:#}")))?;
+        sandbox_log_line("INFO", "SandboxService serving over stdio");
+        let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_process_stdio(
+            tddy_service::proto::sandbox::SandboxServiceServer::new(service),
+        );
+        endpoint.run().await;
+        return Ok(());
+    }
+
     // AF_UNIX control channel (Linux cgroups path): a UDS on a bind-mounted path crosses the jail's
     // network namespace, where loopback TCP cannot. The ready marker becomes a bind sentinel.
     if let Some(uds_path) = args.grpc_uds.clone() {
@@ -1302,7 +1466,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         let generic_pty_shutdown = generic_pty;
         let shutdown_notify = Arc::clone(&shutdown_notify);
         Server::builder()
-            .add_service(SandboxServiceServer::new(service))
+            .add_service(TonicSandboxServiceServer::new(service))
             .serve_with_incoming_shutdown(
                 tokio_stream::wrappers::UnixListenerStream::new(listener),
                 async move {
@@ -1362,7 +1526,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
     let generic_pty_shutdown = generic_pty;
     let shutdown_notify = Arc::clone(&shutdown_notify);
     Server::builder()
-        .add_service(SandboxServiceServer::new(service))
+        .add_service(TonicSandboxServiceServer::new(service))
         .serve_with_incoming_shutdown(
             tokio_stream::wrappers::TcpListenerStream::new(listener),
             async move {

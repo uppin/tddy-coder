@@ -41,6 +41,7 @@ tddy-github = { path = "../tddy-github" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-rpc = { path = "../tddy-rpc" }
+tddy-stdio = { path = "../tddy-stdio" }
 tddy-service = { path = "../tddy-service" }
 tddy-actions = { path = "../tddy-actions" }
 tddy-task = { path = "../tddy-task" }

@@ -200,6 +200,54 @@ pub async fn dispatch_via_daemon_http(
     }
 }
 
+/// Forward a tool call over an already-connected RPC transport (e.g. `tddy-stdio`'s
+/// `StdioRpcClient`), calling `connection.ConnectionService/ExecuteTool`.
+pub async fn dispatch_via_stdio_rpc(
+    client: &std::sync::Arc<dyn tddy_rpc::RpcClientTransport>,
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> String {
+    use prost::Message;
+    use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
+
+    let request = ExecuteToolRequest {
+        session_token: String::new(),
+        session_id: String::new(),
+        tool_name: tool_name.to_string(),
+        args_json: args.to_string(),
+        daemon_instance_id: String::new(),
+    };
+    let response_bytes = match client
+        .call_unary(
+            "connection.ConnectionService",
+            "ExecuteTool",
+            request.encode_to_vec(),
+        )
+        .await
+    {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            return serde_json::json!({"error": format!("stdio rpc call: {e}"), "is_error": true})
+                .to_string();
+        }
+    };
+    let response = match ExecuteToolResponse::decode(response_bytes.as_slice()) {
+        Ok(resp) => resp,
+        Err(e) => {
+            return serde_json::json!({
+                "error": format!("stdio rpc decode response: {e}"),
+                "is_error": true
+            })
+            .to_string();
+        }
+    };
+    if response.is_error {
+        serde_json::json!({"error": response.error_message, "is_error": true}).to_string()
+    } else {
+        response.result_json
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

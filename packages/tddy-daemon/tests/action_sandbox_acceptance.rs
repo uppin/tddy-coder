@@ -205,7 +205,9 @@ async fn call_streaming<Req: Message, Resp: Message + Default>(
 #[tokio::test]
 async fn sandboxed_bash_action_writes_to_output_dir() {
     if !sandbox_userns_available() {
-        eprintln!("SKIP: host forbids unprivileged user namespaces (cannot create the sandbox here)");
+        eprintln!(
+            "SKIP: host forbids unprivileged user namespaces (cannot create the sandbox here)"
+        );
         return;
     }
 
