@@ -46,7 +46,12 @@ pub async fn spawn_sandbox_action(
     Ok(registry.spawn(body, kind, session_id, channels).await)
 }
 
-fn build_channels(spec: &ActionSpec) -> (Vec<Arc<TaskChannel>>, Option<mpsc::UnboundedReceiver<Bytes>>) {
+fn build_channels(
+    spec: &ActionSpec,
+) -> (
+    Vec<Arc<TaskChannel>>,
+    Option<mpsc::UnboundedReceiver<Bytes>>,
+) {
     match spec.channel_mode {
         ChannelMode::None => (vec![], None),
         ChannelMode::Combined => (
@@ -66,7 +71,10 @@ fn build_channels(spec: &ActionSpec) -> (Vec<Arc<TaskChannel>>, Option<mpsc::Unb
         ),
         ChannelMode::Pty => {
             let (ch, stdin_rx) = TaskChannel::pty("0", "pty");
-            (vec![ch], Some(stdin_rx.expect("pty channel must have stdin")))
+            (
+                vec![ch],
+                Some(stdin_rx.expect("pty channel must have stdin")),
+            )
         }
     }
 }
@@ -143,9 +151,7 @@ impl TaskBody for SandboxActionBody {
 
         match result {
             Ok(Ok(outcome)) => outcome.into_task_status(&self.spec, &ctx),
-            Ok(Err(e)) => TaskStatus::Failed {
-                message: e,
-            },
+            Ok(Err(e)) => TaskStatus::Failed { message: e },
             Err(e) => TaskStatus::Failed {
                 message: format!("sandbox task join: {e}"),
             },
@@ -196,9 +202,7 @@ async fn run_pty_confined_action(
     {
         terminate_sandbox_process(pid);
         ctx.deregister_child_pid(pid);
-        return TaskStatus::Failed {
-            message: e,
-        };
+        return TaskStatus::Failed { message: e };
     }
 
     let client = match connect_sandbox_session_client(&ready_marker, &grpc_socket).await {
@@ -206,9 +210,7 @@ async fn run_pty_confined_action(
         Err(e) => {
             terminate_sandbox_process(pid);
             ctx.deregister_child_pid(pid);
-            return TaskStatus::Failed {
-                message: e,
-            };
+            return TaskStatus::Failed { message: e };
         }
     };
 
@@ -248,9 +250,7 @@ async fn run_pty_confined_action(
         Err(e) => {
             terminate_sandbox_process(pid);
             ctx.deregister_child_pid(pid);
-            return TaskStatus::Failed {
-                message: e,
-            };
+            return TaskStatus::Failed { message: e };
         }
     };
 

@@ -3,12 +3,14 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use tddy_sandbox::builder::{MachPolicy, MountSpec, NetworkSpec, PolicySpec, ReadSpec, SandboxBuilder, SandboxPlan};
-use tddy_sandbox::{
-    binary_exec_reads, system_baseline_reads, SandboxError, SecretSource,
+use tddy_sandbox::builder::{
+    MachPolicy, MountSpec, NetworkSpec, PolicySpec, ReadSpec, SandboxBuilder, SandboxPlan,
 };
+use tddy_sandbox::{binary_exec_reads, system_baseline_reads, SandboxError, SecretSource};
 
-use crate::claude_cli::{claude_credentials_copies, claude_interactive_policy, process_claude_exec_reads};
+use crate::claude_cli::{
+    claude_credentials_copies, claude_interactive_policy, process_claude_exec_reads,
+};
 
 /// Named sandbox recipe overlay applied on top of generic exec/read detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,7 +168,12 @@ pub fn shell_interactive_policy() -> PolicySpec {
         sysctl_read: false,
         pseudo_tty: true,
         exec_paths: [
-            "/usr/bin", "/bin", "/sbin", "/usr/libexec", "/System", "/Library",
+            "/usr/bin",
+            "/bin",
+            "/sbin",
+            "/usr/libexec",
+            "/System",
+            "/Library",
         ]
         .into_iter()
         .map(PathBuf::from)
@@ -194,11 +201,7 @@ fn finish_builder(
     scratch_dir: &Path,
 ) -> Result<SandboxPlan, SandboxError> {
     let scratch_home = scratch_dir.join("home");
-    let copies = copies_for_recipe(
-        recipe,
-        host_home.as_deref(),
-        &scratch_home,
-    );
+    let copies = copies_for_recipe(recipe, host_home.as_deref(), &scratch_home);
     builder = builder.copies(copies).policy(policy_for_recipe(recipe));
 
     if recipe == SandboxRecipe::ClaudeCli {
@@ -220,11 +223,7 @@ pub fn build_runner_plan(params: RunnerPlanRequest) -> Result<SandboxPlan, Sandb
         .unwrap_or_else(|| detect_recipe_from_argv(&params.runner_argv));
     let claude_bin = claude_binary_from_runner_argv(&params.runner_argv);
     let runner = params.runner_argv.first().map(Path::new);
-    let reads = collect_reads(
-        recipe,
-        runner,
-        claude_bin.as_deref(),
-    );
+    let reads = collect_reads(recipe, runner, claude_bin.as_deref());
     let scratch_dir = params.scratch_dir.clone();
 
     let builder = SandboxBuilder::new(
@@ -271,7 +270,8 @@ pub fn build_process_plan(params: ProcessPlanRequest) -> Result<SandboxPlan, San
 
 /// Parse an optional recipe name string (from action params).
 pub fn recipe_from_name(name: Option<&str>) -> SandboxRecipe {
-    name.map(parse_recipe_name).unwrap_or(SandboxRecipe::Generic)
+    name.map(parse_recipe_name)
+        .unwrap_or(SandboxRecipe::Generic)
 }
 
 #[cfg(test)]

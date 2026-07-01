@@ -192,7 +192,8 @@ fn spec_for_bash(params: &Value) -> Result<ActionSpec, Status> {
 fn spec_for_tddy_coder(params: &Value) -> Result<ActionSpec, Status> {
     let id = optional_string(params, "id").unwrap_or_else(|| "tddy-coder-action".to_string());
     let goal = string_field(params, "goal")?;
-    let binary = optional_string(params, "coder_binary").unwrap_or_else(|| "tddy-coder".to_string());
+    let binary =
+        optional_string(params, "coder_binary").unwrap_or_else(|| "tddy-coder".to_string());
     let mut command = vec![binary, "--goal".to_string(), goal];
     if let Some(agent) = optional_string(params, "agent") {
         command.push("--agent".to_string());

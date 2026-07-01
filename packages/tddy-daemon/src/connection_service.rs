@@ -352,6 +352,25 @@ impl ConnectionServiceImpl {
         }
     }
 
+    fn resolve_chain_base_ref(
+        sessions_base: &std::path::Path,
+        stack_parent: Option<&str>,
+        repo_root: &std::path::Path,
+    ) -> Result<Option<String>, Status> {
+        let Some(sp) = stack_parent else {
+            return Ok(None);
+        };
+        tddy_core::resolve_chain_integration_base_ref_from_parent_session(
+            sessions_base,
+            sp,
+            repo_root,
+        )
+        .map(Some)
+        .map_err(|e| {
+            Status::failed_precondition(format!("could not resolve stack parent branch: {e}"))
+        })
+    }
+
     /// Handle `StartSession` for `session_type = "claude-cli"` sessions.
     ///
     /// Requires a valid, registered project. Creates a real git worktree under the project's
@@ -374,6 +393,7 @@ impl ConnectionServiceImpl {
         selected_branch_to_work_on: &str,
         initial_prompt: &str,
         permission_mode: &str,
+        stack_parent: Option<&str>,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -457,10 +477,14 @@ impl ConnectionServiceImpl {
         };
         let cs = Changeset {
             workflow: Some(cs_workflow),
+            orchestrator_session_id: stack_parent.map(str::to_string),
             ..Changeset::default()
         };
         tddy_core::write_changeset(&session_dir, &cs)
             .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
+
+        let chain_base_ref =
+            Self::resolve_chain_base_ref(&sessions_base, stack_parent, &repo_root)?;
 
         // Create the real git worktree (blocking: involves git fetch + git worktree add).
         let repo_root_clone = repo_root.clone();
@@ -473,7 +497,7 @@ impl ConnectionServiceImpl {
                 tddy_core::setup_worktree_for_session_with_optional_chain_base(
                     &repo_root_clone,
                     &session_dir_clone,
-                    None,
+                    chain_base_ref.as_deref(),
                 )
                 .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
             },
@@ -666,6 +690,7 @@ impl ConnectionServiceImpl {
         selected_integration_base_ref: &str,
         selected_branch_to_work_on: &str,
         permission_mode: &str,
+        stack_parent: Option<&str>,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -743,10 +768,14 @@ impl ConnectionServiceImpl {
         };
         let cs = Changeset {
             workflow: Some(cs_workflow),
+            orchestrator_session_id: stack_parent.map(str::to_string),
             ..Changeset::default()
         };
         tddy_core::write_changeset(&session_dir, &cs)
             .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
+
+        let chain_base_ref =
+            Self::resolve_chain_base_ref(&sessions_base, stack_parent, &repo_root)?;
 
         let repo_root_clone = repo_root.clone();
         let session_dir_clone = session_dir.clone();
@@ -758,7 +787,7 @@ impl ConnectionServiceImpl {
                 tddy_core::setup_worktree_for_session_with_optional_chain_base(
                     &repo_root_clone,
                     &session_dir_clone,
-                    None,
+                    chain_base_ref.as_deref(),
                 )
                 .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
             },
@@ -1410,6 +1439,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         livekit_room: s.livekit_room,
                         previous_session_id: s.previous_session_id,
                         orchestrator_session_id: String::new(),
+                        recipe: String::new(),
                     };
                     if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
                         &session_dir,
@@ -1651,6 +1681,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             )
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
             let session_id = Uuid::now_v7().to_string();
+            let stack_parent_for_claude_cli: Option<String> = {
+                let t = req.stack_parent.trim();
+                if t.is_empty() {
+                    None
+                } else {
+                    Some(t.to_string())
+                }
+            };
             if req.sandbox {
                 return self
                     .start_sandboxed_claude_cli_session(
@@ -1664,6 +1702,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         req.selected_integration_base_ref.trim(),
                         req.selected_branch_to_work_on.trim(),
                         req.permission_mode.trim(),
+                        stack_parent_for_claude_cli.as_deref(),
                     )
                     .await;
             }
@@ -1680,6 +1719,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     req.selected_branch_to_work_on.trim(),
                     req.initial_prompt.trim(),
                     req.permission_mode.trim(),
+                    stack_parent_for_claude_cli.as_deref(),
                 )
                 .await;
         }

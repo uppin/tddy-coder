@@ -327,7 +327,11 @@ async fn sandboxed_tddy_coder_writes_under_output_dir() {
     // Then
     let terminal = wait_for_terminal_task(&harness.task_bridge, &start.task_id).await;
     let task = terminal.task.expect("task");
-    assert_eq!(task.exit_code, 0, "tddy-coder must exit 0: {}", task.result_json);
+    assert_eq!(
+        task.exit_code, 0,
+        "tddy-coder must exit 0: {}",
+        task.result_json
+    );
     let sessions_dir = output_path.join("sessions");
     assert!(
         sessions_dir.is_dir(),
@@ -361,7 +365,13 @@ async fn sandboxed_build_action_with_ro_mount() {
             working_dir: None,
         },
     );
-    spec = attach_sandbox_request(spec, output_path.clone(), Some("generic".into()), vec![], None);
+    spec = attach_sandbox_request(
+        spec,
+        output_path.clone(),
+        Some("generic".into()),
+        vec![],
+        None,
+    );
 
     // When
     let handle = SandboxRuntime::spawn(&registry, spec, "sandbox-build")
@@ -474,7 +484,11 @@ async fn sandboxed_bash_pty_action_streams_output() {
 
     // Then
     let task = terminal.task.expect("task");
-    assert_eq!(task.exit_code, 0, "pty bash must exit 0: {}", task.result_json);
+    assert_eq!(
+        task.exit_code, 0,
+        "pty bash must exit 0: {}",
+        task.result_json
+    );
     let output = String::from_utf8_lossy(&replay);
     assert!(
         output.contains("pty_ok"),

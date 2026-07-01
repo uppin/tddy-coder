@@ -74,7 +74,9 @@ fn is_allowed_cwd(cwd: &Path, layout: &ActionSandboxLayout, mounts: &[MountSpec]
     if under(&layout.project_root) || under(&layout.scratch_dir) || under(&layout.egress_dir) {
         return true;
     }
-    mounts.iter().any(|m| cwd.starts_with(canonicalize_path(&m.host)))
+    mounts
+        .iter()
+        .any(|m| cwd.starts_with(canonicalize_path(&m.host)))
 }
 
 fn resolve_action_cwd(
@@ -114,12 +116,7 @@ pub fn build_action_sandbox_plan(
         .as_ref()
         .ok_or_else(|| SandboxError::InvalidSpec("missing sandbox request".into()))?;
 
-    let recipe = recipe_from_name(
-        sandbox
-            .recipe
-            .as_deref()
-            .or(Some(spec.kind.as_str())),
-    );
+    let recipe = recipe_from_name(sandbox.recipe.as_deref().or(Some(spec.kind.as_str())));
 
     let (scratch_home, scratch_tmp) = ensure_layout_dirs(layout)?;
     let ipc_stub = layout.project_root.join("tool_ipc.sock");
@@ -134,7 +131,9 @@ pub fn build_action_sandbox_plan(
         &sandbox.output_dir,
     );
     if recipe == SandboxRecipe::ClaudeCli {
-        env.extend(tddy_sandbox_recipes::claude_runner_env_overlay(&scratch_tmp));
+        env.extend(tddy_sandbox_recipes::claude_runner_env_overlay(
+            &scratch_tmp,
+        ));
     }
     env.extend(extra_env);
 

@@ -27,3 +27,19 @@ export function stackParentCandidates(sessions: SessionEntry[]): SessionEntry[] 
   }
   return result;
 }
+
+export const PR_STACK_RECIPES = ["orchestrate-pr-stack", "plan-pr-stack"] as const;
+
+/**
+ * Returns sessions eligible to be selected as a PR-stack parent: those with a PR-stack
+ * recipe that are not themselves children of another orchestrator.
+ *
+ * Useful for populating the parent-picker <select> in the new-session screen.
+ */
+export function prStackOrchestrators(sessions: SessionEntry[]): SessionEntry[] {
+  return sessions.filter(
+    (s) =>
+      (PR_STACK_RECIPES as readonly string[]).includes(s.recipe) &&
+      s.orchestratorSessionId.length === 0,
+  );
+}

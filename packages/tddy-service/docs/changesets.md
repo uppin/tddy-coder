@@ -4,6 +4,7 @@ Wrapped changeset history for tddy-service.
 
 **Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
 
+- **2026-07-01** [Feature] **connection.proto — `recipe` field on `SessionEntry`** — `string recipe = 22` on `SessionEntry`; surfaces the workflow recipe that created a session (e.g. `orchestrate-pr-stack`) to clients for orchestrator-only filtering in the new-session picker. (tddy-service)
 - **2026-06-29** [Feature] **actions.proto — ActionService RPC** — `actions.proto`: `ActionService` with `ListActionKinds`, `StartAction`, `GetAction`; `ActionKind`, `ActionSpec`, `SandboxRequest` messages; tonic + TypeScript codegen. Feature [background-tasks.md](../../../docs/ft/daemon/background-tasks.md). (tddy-service, tddy-daemon, tddy-actions)
 - **2026-06-27** [Feature] **Darwin sandbox protos** — `sandbox.proto`: `SandboxService` with bidi `SessionChannel` (PTY, `ExecuteToolRequest`/`Response`, `EgressRequest`/`Response`); `connection.proto`: `StartSessionRequest.sandbox` (bool); TypeScript + tonic codegen. Feature [claude-cli-session.md](../../../docs/ft/daemon/claude-cli-session.md). (tddy-service, tddy-daemon, tddy-tools)
 
