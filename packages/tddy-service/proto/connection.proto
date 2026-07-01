@@ -102,6 +102,9 @@ message SessionEntry {
   // Back-reference to the orchestrating PR-stack session that spawned this child session.
   // Empty string for non-child sessions.
   string orchestrator_session_id = 21;
+  // Workflow recipe used when spawning this session (e.g. "tdd", "orchestrate-pr-stack",
+  // "plan-pr-stack"). Empty string for claude-cli and workspace sessions.
+  string recipe = 22;
 }
 
 message ProjectEntry {

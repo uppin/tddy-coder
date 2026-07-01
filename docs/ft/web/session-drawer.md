@@ -177,7 +177,7 @@ A toggle at the top of the form switches between:
 | Project | both | yes — dropdown from `ListProjects` |
 | Agent/coder | tool | yes — dropdown from `ListAgents` |
 | Recipe | tool | no — `<select>` with all 9 workflow recipes (default: `tdd`) |
-| PR stack parent | tool | conditional — `<select>` listing orchestrator sessions; hidden when none exist |
+| PR stack parent | both | conditional — `<select>` listing PR-stack orchestrator sessions; hidden when none exist |
 | Model | claude-cli | yes — dropdown of `CLAUDE_CLI_MODELS` |
 | Permission mode | claude-cli | no — auto/default/acceptEdits/plan/bypassPermissions |
 | Initial prompt | claude-cli | no — textarea |
@@ -194,12 +194,25 @@ The recipe `<select>` lists all 9 workflow recipes (constant `WORKFLOW_RECIPES` 
 
 ### PR Stack Parent Picker
 
-When creating a **tool** session, the form also calls `ListSessions` and filters to sessions
-that are not themselves children of an orchestrator (`orchestratorSessionId === ""`). If any
-candidates exist, a **PR stack parent** `<select>` appears. Selecting a session causes
-`StartSession` to include `stackParent = <session_id>` (proto field 15), which the daemon
-threads as `--stack-parent <id>` to the spawned `tddy-coder` process. This sets
-`Changeset.orchestrator_session_id` on the child, which the drawer uses for grouping.
+When creating a **tool** or **claude-cli** session, the form also calls `ListSessions` and
+filters to PR-stack orchestrator sessions — sessions with `recipe ∈ {"orchestrate-pr-stack",
+"plan-pr-stack"}` that are not themselves children of another orchestrator. This filtering
+is performed by the `prStackOrchestrators()` helper in `src/utils/stackParents.ts`.
+
+The `recipe` field is populated on `SessionEntry` (proto field 22) by the daemon's enrichment
+layer from `Changeset.recipe`; the TS filter reads it directly without reverse-deriving from
+child back-references (the old `stackParentCandidates` approach).
+
+If any candidates exist, a **PR stack parent** `<select>` appears. Selecting a session causes
+`StartSession` to include `stackParent = <session_id>` (proto field 15).
+
+For **tool** sessions: the daemon threads `stackParent` as `--stack-parent <id>` to the
+spawned `tddy-coder` process, setting `Changeset.orchestrator_session_id` on the child.
+
+For **claude-cli** sessions: the daemon writes `orchestrator_session_id` into the child's
+`changeset.yaml` directly, and resolves the parent's branch via
+`resolve_chain_integration_base_ref_from_parent_session` so the child worktree is based off
+`origin/<parent-branch>` (git PR-stack chaining).
 
 ### Post-Create
 

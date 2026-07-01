@@ -809,6 +809,13 @@ pub fn run_workflow(
     };
     let start_is_full = start_goal == recipe.start_goal();
 
+    // Record the recipe now that the resume-vs-fresh-start decisions above have already read
+    // `cs` — done here (not earlier) so an eagerly-created changeset.yaml never masquerades as
+    // pre-existing session state to the `start_goal`/`feature_input_for_workflow` resolution above.
+    if let Err(e) = crate::changeset::ensure_changeset_recipe(&session_dir, recipe.name()) {
+        log::warn!("ensure_changeset_recipe (run_workflow): {}", e);
+    }
+
     // Same as the no-session_dir path: allow TUI FeatureInput when plan requires a description.
     if start_goal == recipe.start_goal() && feature_input_for_workflow.is_none() {
         let _ = event_tx.send(WorkflowEvent::AwaitingFeatureInput);

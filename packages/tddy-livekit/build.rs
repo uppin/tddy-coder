@@ -1,4 +1,5 @@
-//! Compile envelope proto for LiveKit RPC framing.
+//! Link configuration for the LiveKit WebRTC FFI. The RPC envelope proto is compiled once, in
+//! `tddy-rpc` (`tddy_rpc::envelope`), and re-exported here — see `src/lib.rs`'s `proto` module.
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // WebRTC (via livekit-ffi) bundles Objective-C categories on NSString.
@@ -7,12 +8,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if target_os == "macos" || target_os == "ios" {
         println!("cargo:rustc-link-arg=-ObjC");
     }
-    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR")?);
-
-    // Envelope proto (messages only) — LiveKit framing for RpcRequest/RpcResponse
-    prost_build::Config::new()
-        .out_dir(&out_dir)
-        .compile_protos(&["proto/rpc_envelope.proto"], &["proto"])?;
-
     Ok(())
 }

@@ -15,6 +15,8 @@ export type SessionAttachmentState =
       livekitRoom: string;
       livekitUrl: string;
       livekitServerIdentity: string;
+      /** This browser tab's own LiveKit identity for joining the room (distinct from `livekitServerIdentity`). */
+      identity: string;
     }
   | { status: "connected-grpc"; sessionId: string }
   | { status: "error"; error: string };
@@ -61,6 +63,7 @@ function attachmentStateFromResponse(resp: AttachResponse, sessionId: string): S
       livekitRoom: resp.livekitRoom,
       livekitUrl: resp.livekitUrl,
       livekitServerIdentity: resp.livekitServerIdentity,
+      identity: `browser-${sessionId}-${Date.now()}`,
     };
   }
   return { status: "connected-grpc", sessionId };

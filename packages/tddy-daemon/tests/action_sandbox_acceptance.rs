@@ -23,6 +23,18 @@ use tddy_daemon::task_service::{SessionUserResolver, TaskServiceImpl};
 
 const GOOD_TOKEN: &str = "valid-token";
 
+/// Linux cgroups sandbox requires unprivileged user namespaces; macOS sandboxing does not.
+/// Mirrors the self-skip contract in `tddy-sandbox-cgroups/tests/jail_smoke.rs`.
+#[cfg(target_os = "linux")]
+fn sandbox_userns_available() -> bool {
+    tddy_sandbox_cgroups::unprivileged_userns_available()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn sandbox_userns_available() -> bool {
+    true
+}
+
 fn test_resolver() -> SessionUserResolver {
     Arc::new(|token: &str| {
         if token == GOOD_TOKEN {
@@ -192,6 +204,11 @@ async fn call_streaming<Req: Message, Resp: Message + Default>(
 
 #[tokio::test]
 async fn sandboxed_bash_action_writes_to_output_dir() {
+    if !sandbox_userns_available() {
+        eprintln!("SKIP: host forbids unprivileged user namespaces (cannot create the sandbox here)");
+        return;
+    }
+
     // Given
     let harness = SandboxHarness::new();
     let output_dir = tempfile::tempdir().expect("output dir");

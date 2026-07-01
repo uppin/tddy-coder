@@ -1,60 +1,14 @@
-//! Envelope encode/decode helpers.
+//! Envelope encode/decode helpers — thin re-exports of `tddy_rpc::envelope`, which owns the
+//! actual `RpcRequest`/`RpcResponse` proto and encode/decode logic shared by every transport.
 
-use tddy_rpc::Status;
-
-use crate::proto::{RpcError, RpcRequest, RpcResponse};
-use prost::Message;
-
-/// Decode RpcRequest from bytes.
-pub fn decode_request(bytes: &[u8]) -> Result<RpcRequest, String> {
-    RpcRequest::decode(bytes).map_err(|e| e.to_string())
-}
-
-/// Encode RpcResponse to bytes.
-pub fn encode_response(response: RpcResponse) -> Result<Vec<u8>, String> {
-    let mut buf = Vec::new();
-    response.encode(&mut buf).map_err(|e| e.to_string())?;
-    Ok(buf)
-}
-
-/// Build RpcResponse from a result. Success: response_message + end_of_stream.
-/// Error: RpcError with code and message from Status.
-pub fn response_from_result(request_id: i32, result: Result<Vec<u8>, Status>) -> RpcResponse {
-    match result {
-        Ok(bytes) => RpcResponse {
-            request_id,
-            response_message: bytes,
-            metadata: None,
-            end_of_stream: true,
-            error: None,
-            trailers: None,
-        },
-        Err(status) => RpcResponse {
-            request_id,
-            response_message: vec![],
-            metadata: None,
-            end_of_stream: true,
-            error: Some(RpcError {
-                code: status.code.as_str().to_string(),
-                message: status.message,
-                details: std::collections::HashMap::new(),
-            }),
-            trailers: None,
-        },
-    }
-}
-
-/// Encode RpcRequest to bytes.
-pub fn encode_request(request: RpcRequest) -> Result<Vec<u8>, String> {
-    let mut buf = Vec::new();
-    request.encode(&mut buf).map_err(|e| e.to_string())?;
-    Ok(buf)
-}
+pub use tddy_rpc::envelope::{
+    decode_request, decode_response, encode_request, encode_response, response_from_result,
+};
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::proto::CallMetadata;
+    use tddy_rpc::envelope::{decode_request, encode_request, RpcRequest};
 
     #[test]
     fn envelope_encode_decode_roundtrip() {

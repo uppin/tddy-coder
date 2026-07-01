@@ -1,0 +1,27 @@
+[package]
+name = "tddy-stdio"
+version = "0.1.0"
+edition = "2021"
+description = "stdio/IPC RPC transport for tddy-rpc — parent/child process RPC over stdin/stdout"
+
+[lib]
+name = "tddy_stdio"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-rpc = { path = "../tddy-rpc" }
+async-trait = "0.1"
+# "macros" is needed here, not just in dev-dependencies: the stdio-echo-fixture [[bin]] target
+# below (test support, but a real bin target) uses #[tokio::main] and is built under `cargo
+# build`/`cargo clippy` too, which don't pull in dev-dependencies the way `cargo test` does.
+tokio = { version = "1", features = ["io-util", "io-std", "process", "sync", "rt", "macros"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+futures = "0.3"
+
+# Test fixture: a child process that hosts test.EchoService (and calls back into the parent's
+# PingService on startup) over its own stdin/stdout. Exercised by tests/rpc_over_stdio.rs.
+[[bin]]
+name = "stdio-echo-fixture"
+path = "tests/fixtures/echo_child.rs"

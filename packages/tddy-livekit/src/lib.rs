@@ -13,8 +13,10 @@ pub mod rpc_log;
 pub mod test_util;
 pub mod token;
 
+/// The RPC envelope (`RpcRequest`/`RpcResponse`/...) is compiled once in `tddy-rpc` and shared by
+/// every transport — re-exported here so existing `crate::proto::*` paths keep resolving.
 pub mod proto {
-    include!(concat!(env!("OUT_DIR"), "/rpc.rs"));
+    pub use tddy_rpc::envelope::*;
 }
 
 pub use bridge::{RpcBridge, RpcResult, RpcService};
