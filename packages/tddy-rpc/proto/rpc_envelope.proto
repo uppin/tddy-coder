@@ -2,7 +2,8 @@ syntax = "proto3";
 
 package rpc;
 
-// RPC request envelope for multiplexing over LiveKit data channel
+// RPC request envelope for multiplexing over a byte-oriented transport (LiveKit data channel,
+// stdio pipes, ...).
 message RpcRequest {
   int32 request_id = 1;
   bytes request_message = 2;
@@ -10,11 +11,12 @@ message RpcRequest {
   Metadata metadata = 4;
   bool end_of_stream = 5;
   bool abort = 6;
-  // Sender's LiveKit participant identity. Server sends responses to this identity.
+  // Sender's transport-level identity (e.g. LiveKit participant identity). The server sends
+  // responses to this identity where the transport needs explicit addressing.
   optional string sender_identity = 7;
 }
 
-// RPC response envelope (one message per LiveKit data packet)
+// RPC response envelope (one message per transport data packet/frame)
 message RpcResponse {
   int32 request_id = 1;
   bytes response_message = 2;

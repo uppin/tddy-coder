@@ -1,20 +1,25 @@
 //! LiveKit room participant that serves RPC over the data channel.
+//!
+//! Dispatch/multiplexing (bidi sessions, client-streaming message accumulation, per-request-id
+//! correlation) is delegated to [`tddy_rpc::server_engine::ServerEngine`] — the same engine
+//! `tddy-stdio` uses. What's left here is genuinely LiveKit-specific: resolving which participant
+//! identity a response should go to (multiple remotes may share a room), buffering incoming bytes
+//! until a remote has connected, and publishing responses in a way that survives reconnection.
 
 use livekit::prelude::*;
 use serde_json::Value;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, watch, Mutex};
 
-use tddy_rpc::{RequestMetadata, RpcMessage};
+use tddy_rpc::server_engine::ServerEngine;
 
-use crate::bridge::{ResponseBody, RpcBridge};
-use crate::envelope::{decode_request, encode_response, response_from_result};
+use crate::envelope::{decode_request, encode_response};
 use crate::projects_registry;
-use crate::proto::{CallMetadata, RpcRequest};
+use crate::proto::{RpcRequest, RpcResponse};
 use crate::rpc_trace;
 use crate::token::TokenGenerator;
 
@@ -130,26 +135,6 @@ pub fn spawn_local_participant_metadata_watcher(
     })
 }
 
-/// Composite key for multiplexing RPC streams per remote client (request_id alone is not unique across tabs).
-type SessionKey = (String, i32);
-
-/// Accumulated stream state: sender identity and messages.
-struct ActiveStream {
-    sender_identity: ParticipantIdentity,
-    messages: Vec<RpcRequest>,
-}
-
-/// Bidi stream metadata: service and method for continuation messages that omit call_metadata.
-struct BidiStreamMeta {
-    service: String,
-    method: String,
-}
-
-/// Live bidi session: the input channel to an already-running handler (from `start_bidi_stream`).
-struct BidiSession {
-    input_tx: mpsc::Sender<RpcMessage>,
-}
-
 /// Shared publisher that survives room reconnection cycles.
 /// Output tasks hold a clone and retry publishing through the latest `LocalParticipant`
 /// when the room reconnects during token refresh.
@@ -203,21 +188,99 @@ impl SharedPublisher {
     }
 }
 
-/// A LiveKit room participant that routes RPC traffic to an RpcBridge.
+/// Spawn the response-drain task for a one-shot (non-reconnecting) connection ([`LiveKitParticipant::connect`]):
+/// publishes directly through the given `LocalParticipant` snapshot.
+fn spawn_response_drain(
+    mut outgoing_rx: mpsc::Receiver<(String, RpcResponse)>,
+    local: LocalParticipant,
+) {
+    tokio::spawn(async move {
+        while let Some((peer, response)) = outgoing_rx.recv().await {
+            let request_id = response.request_id;
+            match encode_response(response) {
+                Ok(encoded) => {
+                    let packet = DataPacket {
+                        payload: encoded,
+                        topic: Some(RPC_TOPIC.to_string()),
+                        reliable: true,
+                        destination_identities: vec![ParticipantIdentity::from(peer)],
+                    };
+                    if let Err(e) = local.publish_data(packet).await {
+                        log::error!(
+                            "[echo_server] RPC request_id={} publish failed: {}",
+                            request_id,
+                            e
+                        );
+                    } else {
+                        rpc_trace!(
+                            "LiveKitParticipant: published response request_id={}",
+                            request_id
+                        );
+                    }
+                }
+                Err(e) => {
+                    log::error!(
+                        "[echo_server] RPC request_id={} response encode failed: {}",
+                        request_id,
+                        e
+                    );
+                }
+            }
+        }
+        log::debug!("LiveKitParticipant: response drain task ended");
+    });
+}
+
+/// Spawn the response-drain task for a reconnect-resilient connection ([`LiveKitParticipant::run_with_reconnect_metadata`]):
+/// publishes through `shared_publisher`, which retries against whatever `LocalParticipant` is
+/// current across reconnection cycles.
+fn spawn_response_drain_reconnectable(
+    mut outgoing_rx: mpsc::Receiver<(String, RpcResponse)>,
+    shared_publisher: SharedPublisher,
+) {
+    tokio::spawn(async move {
+        while let Some((peer, response)) = outgoing_rx.recv().await {
+            let request_id = response.request_id;
+            match encode_response(response) {
+                Ok(encoded) => {
+                    let dest = [ParticipantIdentity::from(peer)];
+                    if let Err(e) = shared_publisher.publish_data(encoded, &dest).await {
+                        log::error!(
+                            "[echo_server] RPC request_id={} reconnectable publish failed: {}",
+                            request_id,
+                            e
+                        );
+                    } else {
+                        rpc_trace!(
+                            "LiveKitParticipant: published response (reconnectable) request_id={}",
+                            request_id
+                        );
+                    }
+                }
+                Err(e) => {
+                    log::error!(
+                        "[echo_server] RPC request_id={} response encode failed: {}",
+                        request_id,
+                        e
+                    );
+                }
+            }
+        }
+        log::debug!("LiveKitParticipant: response drain task ended");
+    });
+}
+
+/// A LiveKit room participant that routes RPC traffic to a [`ServerEngine`].
 pub struct LiveKitParticipant<S: crate::bridge::RpcService> {
     room: Room,
-    bridge: Arc<RpcBridge<S>>,
+    server: Arc<ServerEngine<S>>,
     events: mpsc::UnboundedReceiver<RoomEvent>,
-    active_streams: Arc<Mutex<HashMap<SessionKey, ActiveStream>>>,
-    /// Bidi stream request_ids and their service/method (continuation messages omit call_metadata).
-    active_bidi: Arc<Mutex<HashMap<SessionKey, BidiStreamMeta>>>,
-    /// Live bidi sessions: (sender_identity, request_id) → input channel for an already-started handler.
-    active_bidi_sessions: Arc<Mutex<HashMap<SessionKey, BidiSession>>>,
+    /// Sender half of the channel drained by the response-drain task (see [`spawn_response_drain`]
+    /// / [`spawn_response_drain_reconnectable`]); cloned into every [`ServerEngine::on_request`]
+    /// call so handler tasks can publish responses without touching the transport directly.
+    outgoing_tx: mpsc::Sender<(String, RpcResponse)>,
     /// Payloads received with participant=None before any remote joined (race with ParticipantConnected).
     pending_data: Arc<Mutex<VecDeque<Vec<u8>>>>,
-    /// When set, bidi output tasks publish through this instead of a direct LocalParticipant,
-    /// allowing them to survive room reconnection during token refresh.
-    shared_publisher: Option<SharedPublisher>,
     /// Poll this path for an `https://` authorize URL (Codex `BROWSER` hook) and publish **metadata
     /// only** for UIs. Includes `callback_port` / `state` when
     /// derivable from the URL so the desktop relay matches the terminal-driven metadata shape.
@@ -227,6 +290,10 @@ pub struct LiveKitParticipant<S: crate::bridge::RpcService> {
     /// Coordinates read–merge–write so OAuth, project count, and watch-channel updates do not clobber each other.
     metadata_publish_lock: Arc<Mutex<()>>,
 }
+
+/// Outgoing-response channel capacity. Bounded so a stalled publish path applies backpressure to
+/// handler tasks rather than letting memory grow unbounded.
+const OUTGOING_QUEUE_CAPACITY: usize = 256;
 
 impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
     /// Connect to a LiveKit room and create a participant that will serve RPC.
@@ -239,38 +306,36 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         projects_registry_dir: Option<PathBuf>,
     ) -> Result<Self, livekit::RoomError> {
         log::debug!("LiveKitParticipant::connect url={}", url);
-        let bridge = RpcBridge::new(service);
+        let server = Arc::new(ServerEngine::new(service));
         let (room, events) = Room::connect(url, token, room_options).await?;
         log::info!(
             "[echo_server] LiveKitParticipant connected, identity={:?}",
             room.local_participant().identity()
         );
+        let (outgoing_tx, outgoing_rx) = mpsc::channel(OUTGOING_QUEUE_CAPACITY);
+        spawn_response_drain(outgoing_rx, room.local_participant().clone());
         Ok(Self {
             room,
-            bridge: Arc::new(bridge),
+            server,
             events,
-            active_streams: Arc::new(Mutex::new(HashMap::new())),
-            active_bidi: Arc::new(Mutex::new(HashMap::new())),
-            active_bidi_sessions: Arc::new(Mutex::new(HashMap::new())),
+            outgoing_tx,
             pending_data: Arc::new(Mutex::new(VecDeque::new())),
-            shared_publisher: None,
             codex_oauth_watch,
             projects_registry_dir,
             metadata_publish_lock: Arc::new(Mutex::new(())),
         })
     }
 
-    /// Connect to a LiveKit room, sharing bidi session state and publisher across
-    /// reconnection cycles. The SharedPublisher is updated with the new LocalParticipant
-    /// so that output tasks from previous cycles can publish through the new room.
-    #[allow(clippy::too_many_arguments)] // Reconnect path threads many handles; struct refactor is churn.
+    /// Connect to a LiveKit room, sharing the [`ServerEngine`] and outgoing channel across
+    /// reconnection cycles. The `SharedPublisher` is updated with the new `LocalParticipant` so
+    /// that the (separately, long-lived) response-drain task publishes through the new room.
+    #[allow(clippy::too_many_arguments)]
     async fn connect_for_reconnect(
         url: &str,
         token: &str,
-        bridge: Arc<RpcBridge<S>>,
+        server: Arc<ServerEngine<S>>,
         room_options: RoomOptions,
-        active_bidi: Arc<Mutex<HashMap<SessionKey, BidiStreamMeta>>>,
-        active_bidi_sessions: Arc<Mutex<HashMap<SessionKey, BidiSession>>>,
+        outgoing_tx: mpsc::Sender<(String, RpcResponse)>,
         shared_publisher: SharedPublisher,
         codex_oauth_watch: Option<PathBuf>,
         projects_registry_dir: Option<PathBuf>,
@@ -286,13 +351,10 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
             .await;
         Ok(Self {
             room,
-            bridge,
+            server,
             events,
-            active_streams: Arc::new(Mutex::new(HashMap::new())),
-            active_bidi,
-            active_bidi_sessions,
+            outgoing_tx,
             pending_data: Arc::new(Mutex::new(VecDeque::new())),
-            shared_publisher: Some(shared_publisher),
             codex_oauth_watch,
             projects_registry_dir,
             metadata_publish_lock: Arc::new(Mutex::new(())),
@@ -367,12 +429,12 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         codex_oauth_watch: Option<PathBuf>,
         projects_registry_dir: Option<PathBuf>,
     ) {
-        let bridge = Arc::new(RpcBridge::new(service));
+        let server = Arc::new(ServerEngine::new(service));
         let shared_publisher = SharedPublisher::new();
-        let active_bidi: Arc<Mutex<HashMap<SessionKey, BidiStreamMeta>>> =
-            Arc::new(Mutex::new(HashMap::new()));
-        let active_bidi_sessions: Arc<Mutex<HashMap<SessionKey, BidiSession>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let (outgoing_tx, outgoing_rx) = mpsc::channel(OUTGOING_QUEUE_CAPACITY);
+        // Long-lived: survives every reconnect below, since `shared_publisher` (not a
+        // `LocalParticipant` snapshot) retries against whatever room is current.
+        spawn_response_drain_reconnectable(outgoing_rx, shared_publisher.clone());
 
         let token = match token_generator.generate() {
             Ok(t) => t,
@@ -384,10 +446,9 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         let participant = match Self::connect_for_reconnect(
             url,
             &token,
-            bridge.clone(),
+            server.clone(),
             room_options.clone(),
-            active_bidi.clone(),
-            active_bidi_sessions.clone(),
+            outgoing_tx.clone(),
             shared_publisher.clone(),
             codex_oauth_watch.clone(),
             projects_registry_dir.clone(),
@@ -437,7 +498,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
     }
 
     /// Run the participant event loop. Processes DataReceived events for topic "tddy-rpc"
-    /// and dispatches to the RpcBridge. Returns when the room disconnects.
+    /// and dispatches to the [`ServerEngine`]. Returns when the room disconnects.
     pub async fn run(mut self) {
         log::info!("[echo_server] LiveKitParticipant event loop started");
         if let Some(ref path) = self.codex_oauth_watch {
@@ -524,12 +585,8 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                                 &payload,
                                 Some(identity.clone()),
                                 &remote_identities,
-                                &self.bridge,
-                                &self.room.local_participant(),
-                                &self.active_streams,
-                                &self.active_bidi,
-                                &self.active_bidi_sessions,
-                                &self.shared_publisher,
+                                &self.server,
+                                &self.outgoing_tx,
                             )
                             .await
                             {
@@ -595,19 +652,16 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                     );
                     let payload = Arc::try_unwrap(payload).unwrap_or_else(|a| (*a).clone());
 
-                    // Must not `spawn` per packet: bidi input is forwarded with `input_tx.send` inside
-                    // `handle_incoming`. Concurrent tasks can complete sends out of arrival order,
-                    // reordering keystrokes on `StreamTerminalIO` (and any other bidi stream).
+                    // Must not `spawn` per packet: `ServerEngine::on_request` may itself spawn
+                    // the actual dispatch, but decoding + routing to an existing bidi/multi-message
+                    // session must stay in arrival order (concurrent tasks could complete out of
+                    // order, reordering keystrokes on `StreamTerminalIO` and any other bidi stream).
                     if let Err(e) = Self::handle_incoming(
                         &payload,
                         event_participant,
                         &remote_identities,
-                        &self.bridge,
-                        &self.room.local_participant(),
-                        &self.active_streams,
-                        &self.active_bidi,
-                        &self.active_bidi_sessions,
-                        &self.shared_publisher,
+                        &self.server,
+                        &self.outgoing_tx,
                     )
                     .await
                     {
@@ -620,13 +674,7 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                 _ => {}
             }
         }
-        let bidi_count = self.active_bidi_sessions.lock().await.len();
-        let stream_count = self.active_streams.lock().await.len();
-        log::debug!(
-            "LiveKitParticipant::run event loop ended (active_bidi_sessions={}, active_streams={})",
-            bidi_count,
-            stream_count,
-        );
+        log::debug!("LiveKitParticipant::run event loop ended");
     }
 
     async fn try_publish_codex_oauth_metadata(
@@ -690,525 +738,34 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// Decode one incoming RPC frame and route it to [`ServerEngine::on_request`], addressed to
+    /// the resolved response identity. Multiplexing (bidi sessions, client-streaming message
+    /// accumulation, dispatch) all happen inside `ServerEngine`; this function's only job is
+    /// LiveKit-specific: figuring out *who* to reply to.
     async fn handle_incoming(
         payload: &[u8],
         event_participant: Option<ParticipantIdentity>,
         remote_identities: &[ParticipantIdentity],
-        bridge: &Arc<RpcBridge<S>>,
-        local: &LocalParticipant,
-        active_streams: &Mutex<HashMap<SessionKey, ActiveStream>>,
-        active_bidi: &Mutex<HashMap<SessionKey, BidiStreamMeta>>,
-        active_bidi_sessions: &Mutex<HashMap<SessionKey, BidiSession>>,
-        shared_publisher: &Option<SharedPublisher>,
+        server: &Arc<ServerEngine<S>>,
+        outgoing: &mpsc::Sender<(String, RpcResponse)>,
     ) -> Result<(), String> {
         let request = decode_request(payload)?;
-        let request_id = request.request_id;
-        let sender_id = request.sender_identity.clone().unwrap_or_default();
-        let session_key = (sender_id, request_id);
-        let meta = request.call_metadata.as_ref();
-        let end_of_stream = request.end_of_stream;
+        let response_identity =
+            resolve_response_identity(&request, event_participant.clone(), remote_identities)
+                .ok_or_else(|| {
+                    "no response destination (sender_identity absent, multiple remotes)".to_string()
+                })?;
         rpc_trace!(
-            "LiveKitParticipant::handle_incoming request_id={} {}/{} end_of_stream={} event_participant={:?}",
-            request_id,
-            meta.map(|m| m.service.as_str()).unwrap_or("?"),
-            meta.map(|m| m.method.as_str()).unwrap_or("?"),
-            end_of_stream,
-            event_participant
+            "LiveKitParticipant::handle_incoming request_id={} end_of_stream={} event_participant={:?} response_identity={:?}",
+            request.request_id,
+            request.end_of_stream,
+            event_participant,
+            response_identity
         );
-
-        // Check if this message belongs to an existing bidi session.
-        {
-            let mut sessions = active_bidi_sessions.lock().await;
-            if let Some(session) = sessions.get(&session_key) {
-                let payload_len = request.request_message.len();
-                let rpc_msg = RpcMessage {
-                    payload: request.request_message.clone(),
-                    metadata: RequestMetadata {
-                        sender_identity: request.sender_identity.clone(),
-                    },
-                };
-                log::trace!(
-                    "[BIDI_TRACE] participant: routing request_id={} to existing bidi session (payload_len={}, end_of_stream={})",
-                    request_id, payload_len, end_of_stream
-                );
-                match session.input_tx.send(rpc_msg).await {
-                    Ok(_) => log::trace!(
-                        "[BIDI_TRACE] participant: input_tx.send OK request_id={}",
-                        request_id
-                    ),
-                    Err(e) => log::error!(
-                        "[BIDI_TRACE] participant: input_tx.send FAILED request_id={}: {}",
-                        request_id,
-                        e
-                    ),
-                }
-                if end_of_stream {
-                    log::trace!(
-                        "[BIDI_TRACE] participant: removing bidi session request_id={} (end_of_stream)", request_id
-                    );
-                    sessions.remove(&session_key);
-                    let mut bidi = active_bidi.lock().await;
-                    bidi.remove(&session_key);
-                }
-                return Ok(());
-            }
-        }
-
-        let to_process: Option<(Vec<RpcRequest>, ParticipantIdentity)> = {
-            let mut streams = active_streams.lock().await;
-            let mut bidi = active_bidi.lock().await;
-            if end_of_stream {
-                if let Some(mut stream) = streams.remove(&session_key) {
-                    stream.messages.push(request);
-                    Some((stream.messages, stream.sender_identity))
-                } else {
-                    let response_identity = resolve_response_identity(
-                        &request,
-                        event_participant.clone(),
-                        remote_identities,
-                    )
-                    .ok_or_else(|| {
-                        "no response destination (sender_identity absent, multiple remotes)"
-                            .to_string()
-                    })?;
-                    let request_for_bridge = if request.call_metadata.is_none() {
-                        if let Some(meta) = bidi.remove(&session_key) {
-                            let mut req = request.clone();
-                            req.call_metadata = Some(CallMetadata {
-                                service: meta.service,
-                                method: meta.method,
-                            });
-                            req
-                        } else {
-                            request
-                        }
-                    } else {
-                        request
-                    };
-                    Some((vec![request_for_bridge], response_identity))
-                }
-            } else {
-                let service = request
-                    .call_metadata
-                    .as_ref()
-                    .map(|m| m.service.as_str())
-                    .unwrap_or("");
-                let method = request
-                    .call_metadata
-                    .as_ref()
-                    .map(|m| m.method.as_str())
-                    .unwrap_or("");
-                let is_bidi = if request.call_metadata.is_some() {
-                    bridge.is_bidi_stream(service, method)
-                } else {
-                    bidi.contains_key(&session_key)
-                };
-                if is_bidi {
-                    let response_identity = resolve_response_identity(
-                        &request,
-                        event_participant.clone(),
-                        remote_identities,
-                    )
-                    .ok_or_else(|| {
-                        "no response destination for stream (sender_identity absent, multiple remotes)"
-                            .to_string()
-                    })?;
-                    if let Some(meta) = request.call_metadata.as_ref() {
-                        bidi.insert(
-                            session_key.clone(),
-                            BidiStreamMeta {
-                                service: meta.service.clone(),
-                                method: meta.method.clone(),
-                            },
-                        );
-                    }
-                    let service_name = bidi
-                        .get(&session_key)
-                        .map(|m| m.service.clone())
-                        .unwrap_or_default();
-                    let method_name = bidi
-                        .get(&session_key)
-                        .map(|m| m.method.clone())
-                        .unwrap_or_default();
-
-                    let (input_tx, input_rx) = mpsc::channel::<RpcMessage>(64);
-
-                    let first_msg = RpcMessage {
-                        payload: request.request_message.clone(),
-                        metadata: RequestMetadata {
-                            sender_identity: request.sender_identity.clone(),
-                        },
-                    };
-                    log::trace!(
-                        "[BIDI_TRACE] participant: creating NEW bidi session request_id={} service={} method={} first_payload_len={}",
-                        request_id, service_name, method_name, first_msg.payload.len()
-                    );
-                    let _ = input_tx.send(first_msg).await;
-
-                    {
-                        let mut sessions = active_bidi_sessions.lock().await;
-                        sessions.insert(session_key.clone(), BidiSession { input_tx });
-                    }
-
-                    let bridge = bridge.clone();
-                    let local = local.clone();
-                    let shared_publisher = shared_publisher.clone();
-                    tokio::spawn(async move {
-                        log::trace!(
-                            "[BIDI_TRACE] participant: calling bridge.start_bidi_stream request_id={}", request_id
-                        );
-                        match bridge
-                            .start_bidi_stream(&service_name, &method_name, input_rx)
-                            .await
-                        {
-                            Ok(handle) => {
-                                log::trace!(
-                                    "[BIDI_TRACE] participant: bridge.start_bidi_stream OK request_id={}, spawning streaming response", request_id
-                                );
-                                Self::spawn_streaming_response(
-                                    request_id,
-                                    handle.output,
-                                    local,
-                                    response_identity,
-                                    true,
-                                    shared_publisher,
-                                );
-                            }
-                            Err(e) => {
-                                log::error!(
-                                    "[BIDI_TRACE] participant: start_bidi_stream FAILED request_id={}: {}",
-                                    request_id,
-                                    e
-                                );
-                            }
-                        }
-                    });
-                    return Ok(());
-                } else if request.call_metadata.is_some() {
-                    let sender_identity = resolve_response_identity(
-                        &request,
-                        event_participant.clone(),
-                        remote_identities,
-                    )
-                    .ok_or_else(|| {
-                        "no response destination for stream (sender_identity absent, multiple remotes)"
-                            .to_string()
-                    })?;
-                    streams.insert(
-                        session_key.clone(),
-                        ActiveStream {
-                            sender_identity,
-                            messages: vec![request],
-                        },
-                    );
-                    None
-                } else if let Some(stream) = streams.get_mut(&session_key) {
-                    stream.messages.push(request);
-                    None
-                } else {
-                    None
-                }
-            }
-        };
-
-        let Some((messages, response_identity)) = to_process else {
-            return Ok(());
-        };
-
-        let service = messages
-            .first()
-            .and_then(|m| m.call_metadata.as_ref())
-            .map(|m| m.service.as_str())
-            .unwrap_or("");
-        let method = messages
-            .first()
-            .and_then(|m| m.call_metadata.as_ref())
-            .map(|m| m.method.as_str())
-            .unwrap_or("");
-        let request_end_of_stream = messages.iter().any(|r| r.end_of_stream);
-        let rpc_messages: Vec<RpcMessage> = messages
-            .iter()
-            .map(|r| RpcMessage {
-                payload: r.request_message.clone(),
-                metadata: RequestMetadata {
-                    sender_identity: r.sender_identity.clone(),
-                },
-            })
-            .collect();
-        let result = bridge.handle_messages(service, method, &rpc_messages).await;
-
-        match result {
-            Ok(body) => match body {
-                ResponseBody::Complete(chunks) => {
-                    let len = chunks.len();
-                    log::info!(
-                        "[echo_server] RPC request_id={} response sent ({} chunk(s))",
-                        request_id,
-                        len
-                    );
-                    for (i, bytes) in chunks.into_iter().enumerate() {
-                        let end_of_stream = i == len - 1;
-                        let response = crate::proto::RpcResponse {
-                            request_id,
-                            response_message: bytes,
-                            metadata: None,
-                            end_of_stream,
-                            error: None,
-                            trailers: None,
-                        };
-                        let encoded = encode_response(response)?;
-                        let packet = DataPacket {
-                            payload: encoded,
-                            topic: Some(RPC_TOPIC.to_string()),
-                            reliable: true,
-                            destination_identities: vec![response_identity.clone()],
-                        };
-                        local
-                            .publish_data(packet)
-                            .await
-                            .map_err(|e| e.to_string())?;
-                    }
-                }
-                ResponseBody::Streaming(mut rx) => {
-                    log::info!(
-                        "[echo_server] RPC request_id={} streaming response (spawned task) response_identity={:?}",
-                        request_id,
-                        response_identity
-                    );
-                    let local = local.clone();
-                    let response_identity = response_identity.clone();
-                    let send_empty_end_frame = request_end_of_stream;
-                    tokio::spawn(async move {
-                        let mut chunk_index = 0u64;
-                        while let Some(item) = rx.recv().await {
-                            let bytes = match item {
-                                Ok(b) => b,
-                                Err(e) => {
-                                    log::error!(
-                                        "Stream request_id={} chunk error: {}",
-                                        request_id,
-                                        e
-                                    );
-                                    break;
-                                }
-                            };
-                            log::info!(
-                                "[echo_server] RPC request_id={} stream chunk #{} received ({} bytes)",
-                                request_id,
-                                chunk_index + 1,
-                                bytes.len()
-                            );
-                            let response = crate::proto::RpcResponse {
-                                request_id,
-                                response_message: bytes,
-                                metadata: None,
-                                end_of_stream: false,
-                                error: None,
-                                trailers: None,
-                            };
-                            if let Ok(encoded) = encode_response(response) {
-                                let len = encoded.len();
-                                let packet = DataPacket {
-                                    payload: encoded,
-                                    topic: Some(RPC_TOPIC.to_string()),
-                                    reliable: true,
-                                    destination_identities: vec![response_identity.clone()],
-                                };
-                                if local.publish_data(packet).await.is_err() {
-                                    log::error!(
-                                        "[echo_server] RPC request_id={} publish_data failed",
-                                        request_id
-                                    );
-                                    break;
-                                }
-                                log::info!(
-                                    "[echo_server] RPC request_id={} published chunk #{} ({} bytes)",
-                                    request_id,
-                                    chunk_index + 1,
-                                    len
-                                );
-                            }
-                            chunk_index += 1;
-                        }
-                        if send_empty_end_frame {
-                            let end_response = crate::proto::RpcResponse {
-                                request_id,
-                                response_message: vec![],
-                                metadata: None,
-                                end_of_stream: true,
-                                error: None,
-                                trailers: None,
-                            };
-                            if let Ok(encoded) = encode_response(end_response) {
-                                let _ = local
-                                    .publish_data(DataPacket {
-                                        payload: encoded,
-                                        topic: Some(RPC_TOPIC.to_string()),
-                                        reliable: true,
-                                        destination_identities: vec![response_identity],
-                                    })
-                                    .await;
-                            }
-                        }
-                        log::info!(
-                            "[echo_server] RPC request_id={} stream finished ({} chunks)",
-                            request_id,
-                            chunk_index
-                        );
-                    });
-                }
-            },
-            Err(status) => {
-                log::info!(
-                    "[echo_server] RPC request_id={} error response: {}",
-                    request_id,
-                    status
-                );
-                let response = response_from_result(request_id, Err(status));
-                let encoded = encode_response(response)?;
-                let packet = DataPacket {
-                    payload: encoded,
-                    topic: Some(RPC_TOPIC.to_string()),
-                    reliable: true,
-                    destination_identities: vec![response_identity],
-                };
-                local
-                    .publish_data(packet)
-                    .await
-                    .map_err(|e| e.to_string())?;
-            }
-        }
-
+        server
+            .on_request(response_identity.as_str(), request, outgoing.clone())
+            .await;
         Ok(())
-    }
-
-    fn spawn_streaming_response(
-        request_id: i32,
-        output: ResponseBody,
-        local: LocalParticipant,
-        response_identity: ParticipantIdentity,
-        send_empty_end_frame: bool,
-        shared_publisher: Option<SharedPublisher>,
-    ) {
-        match output {
-            ResponseBody::Streaming(mut rx) => {
-                log::info!(
-                    "[echo_server] RPC request_id={} bidi streaming response (spawned task) response_identity={:?} reconnectable={}",
-                    request_id,
-                    response_identity,
-                    shared_publisher.is_some(),
-                );
-                tokio::spawn(async move {
-                    let mut chunk_index = 0u64;
-                    while let Some(item) = rx.recv().await {
-                        let bytes = match item {
-                            Ok(b) => b,
-                            Err(e) => {
-                                log::error!("Stream request_id={} chunk error: {}", request_id, e);
-                                break;
-                            }
-                        };
-                        let response = crate::proto::RpcResponse {
-                            request_id,
-                            response_message: bytes,
-                            metadata: None,
-                            end_of_stream: false,
-                            error: None,
-                            trailers: None,
-                        };
-                        if let Ok(encoded) = encode_response(response) {
-                            let dest = [response_identity.clone()];
-                            if let Some(ref sp) = shared_publisher {
-                                if let Err(e) = sp.publish_data(encoded, &dest).await {
-                                    log::error!(
-                                        "[echo_server] RPC request_id={} reconnectable publish failed: {}",
-                                        request_id,
-                                        e,
-                                    );
-                                    break;
-                                }
-                            } else {
-                                let packet = DataPacket {
-                                    payload: encoded,
-                                    topic: Some(RPC_TOPIC.to_string()),
-                                    reliable: true,
-                                    destination_identities: dest.to_vec(),
-                                };
-                                if local.publish_data(packet).await.is_err() {
-                                    log::error!(
-                                        "[echo_server] RPC request_id={} publish_data failed",
-                                        request_id
-                                    );
-                                    break;
-                                }
-                            }
-                        }
-                        chunk_index += 1;
-                    }
-                    if send_empty_end_frame {
-                        let end_response = crate::proto::RpcResponse {
-                            request_id,
-                            response_message: vec![],
-                            metadata: None,
-                            end_of_stream: true,
-                            error: None,
-                            trailers: None,
-                        };
-                        if let Ok(encoded) = encode_response(end_response) {
-                            let dest = [response_identity];
-                            if let Some(ref sp) = shared_publisher {
-                                let _ = sp.publish_data(encoded, &dest).await;
-                            } else {
-                                let _ = local
-                                    .publish_data(DataPacket {
-                                        payload: encoded,
-                                        topic: Some(RPC_TOPIC.to_string()),
-                                        reliable: true,
-                                        destination_identities: dest.to_vec(),
-                                    })
-                                    .await;
-                            }
-                        }
-                    }
-                    log::info!(
-                        "[echo_server] RPC request_id={} stream finished ({} chunks)",
-                        request_id,
-                        chunk_index
-                    );
-                });
-            }
-            ResponseBody::Complete(chunks) => {
-                log::info!(
-                    "[echo_server] RPC request_id={} bidi complete response ({} chunk(s))",
-                    request_id,
-                    chunks.len()
-                );
-                let len = chunks.len();
-                tokio::spawn(async move {
-                    for (i, bytes) in chunks.into_iter().enumerate() {
-                        let end_of_stream = i == len - 1;
-                        let response = crate::proto::RpcResponse {
-                            request_id,
-                            response_message: bytes,
-                            metadata: None,
-                            end_of_stream,
-                            error: None,
-                            trailers: None,
-                        };
-                        if let Ok(encoded) = encode_response(response) {
-                            let packet = DataPacket {
-                                payload: encoded,
-                                topic: Some(RPC_TOPIC.to_string()),
-                                reliable: true,
-                                destination_identities: vec![response_identity.clone()],
-                            };
-                            let _ = local.publish_data(packet).await;
-                        }
-                    }
-                });
-            }
-        }
     }
 
     /// Access the underlying room.
@@ -1247,7 +804,6 @@ pub(crate) fn resolve_response_identity(
 mod tests {
     use super::*;
     use crate::proto::CallMetadata;
-    use serde_json::Value;
 
     #[test]
     fn resolve_response_identity_uses_sender_identity_from_request_when_present() {
