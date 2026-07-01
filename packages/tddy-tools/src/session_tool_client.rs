@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-pub use tddy_sandbox::{session_id_from_env, ToolIpcRequest, ToolIpcResponse};
+pub use tddy_sandbox::session_id_from_env;
 
 /// How `tddy-tools --mcp` reaches the daemon's `ExecuteTool` handler.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,23 +239,6 @@ pub async fn dispatch_via_stdio_rpc(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn tool_ipc_response_round_trips_json() {
-        // Given
-        let resp = ToolIpcResponse {
-            result_json: r#"{"ok":true}"#.to_string(),
-            is_error: false,
-            error_message: String::new(),
-        };
-
-        // When
-        let json = resp.to_json_string();
-        let parsed: ToolIpcResponse = serde_json::from_str(&json).expect("parse");
-
-        // Then
-        assert_eq!(parsed, resp);
-    }
 
     #[test]
     fn format_tool_dispatch_result_returns_result_json_on_success() {
