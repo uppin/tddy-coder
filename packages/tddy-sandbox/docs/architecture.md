@@ -22,6 +22,13 @@ single implementation consumed by the daemon (real `tool_engine` exec), the stan
 (stub handler) — it answers `HostPoll`, relays CONNECT tunnels (host owns the outbound socket; TLS
 stays end-to-end), and forwards PTY output.
 
+**Session-end signaling:** when the jailed PTY command exits, the runner records the exit code but
+never pushes `SessionEnded` immediately on the raw outbound stream — it is always deferred to the next
+`HostPoll` reply, after any queued `terminal_backlog` has been drained. The host-side reader processes
+frames strictly in order and stops as soon as it sees `SessionEnded`, so delivering it ahead of
+still-queued terminal output would drop the tail of the PTY's output and, if no `HostPoll` had arrived
+yet, could stall the sandboxed process waiting on a stream that never closes.
+
 ### Control-channel transport
 
 | Platform | gRPC `SessionChannel` transport |

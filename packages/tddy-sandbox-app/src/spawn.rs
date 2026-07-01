@@ -28,6 +28,154 @@ pub struct SpawnParams {
     pub session_dir: PathBuf,
     /// Working directory for Claude inside the jail. Defaults to the mounted repo root.
     pub cwd: Option<PathBuf>,
+    /// Persistent jail `$HOME`, mounted read-write and reused across restarts. Separate from the
+    /// real host `~/.claude`.
+    ///
+    /// Deliberately shared across all `tddy-sandbox-app` invocations on a host, not per-session —
+    /// that's the point (settings/session-history/credentials persist across restarts). Concurrent
+    /// runs sharing this dir is analogous to a user running multiple concurrent `claude` CLI
+    /// sessions against their real `~/.claude` today; this is not an oversight.
+    pub claude_home_dir: PathBuf,
+    /// Remote-codebase mode: don't mount `repo` into the jail. Claude reaches it only via
+    /// `mcp__tddy-tools__*` calls, which the host relays against the real `repo` path (see
+    /// `bridge::AppToolHandler`). Matches the daemon's sandboxed-session isolation model.
+    pub remote_codebase: bool,
+}
+
+/// Seed `claude_home_dir/.claude/.credentials.json` from the real host `~/.claude` once, so the
+/// jail can authenticate on its first run. Never overwrites an existing file — the jail may have
+/// since refreshed its own token, and the host copy must not clobber it on later restarts.
+pub(crate) fn seed_claude_credentials(claude_home_dir: &Path) -> Result<()> {
+    let dest_dir = claude_home_dir.join(".claude");
+    std::fs::create_dir_all(&dest_dir)
+        .with_context(|| format!("create persistent claude home {}", dest_dir.display()))?;
+    let dest = dest_dir.join(".credentials.json");
+    if dest.exists() {
+        return Ok(());
+    }
+    let Some(host_home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return Ok(());
+    };
+    let src = host_home.join(".claude").join(".credentials.json");
+    if !src.is_file() {
+        return Ok(());
+    }
+    std::fs::copy(&src, &dest)
+        .with_context(|| format!("seed credentials {} -> {}", src.display(), dest.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+/// Mirror the host's self-managed install layout
+/// (`$HOME/.local/bin/claude` -> `$HOME/.local/share/claude/versions/<version>` -> real binary)
+/// inside the persistent jail home, so Claude's own startup self-check — which looks for itself
+/// at `$HOME/.local/bin/claude` — finds a consistent install instead of warning "missing or
+/// broken — run claude install to repair". The actually-exec'd binary stays the resolved
+/// `claude_binary` path passed to the runner; these are just symlinks pointing at the same file.
+pub(crate) fn seed_claude_local_install(claude_home_dir: &Path, claude_binary: &str) -> Result<()> {
+    use std::os::unix::fs::symlink;
+
+    let real_bin = Path::new(claude_binary);
+    let local_bin_dir = claude_home_dir.join(".local").join("bin");
+    std::fs::create_dir_all(&local_bin_dir)
+        .with_context(|| format!("create {}", local_bin_dir.display()))?;
+    let local_bin_claude = local_bin_dir.join("claude");
+
+    // Detect the installer's `.../versions/<version>/<real binary>` shape and mirror it so a
+    // version-manifest check (if any) also finds a matching entry; otherwise fall back to a flat
+    // symlink straight at the resolved binary.
+    let link_target = if is_versioned_install_layout(real_bin) {
+        mirror_versioned_symlink(claude_home_dir, real_bin)?
+    } else {
+        real_bin.to_path_buf()
+    };
+
+    let _ = std::fs::remove_file(&local_bin_claude);
+    symlink(&link_target, &local_bin_claude).with_context(|| {
+        format!(
+            "symlink {} -> {}",
+            local_bin_claude.display(),
+            link_target.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn is_versioned_install_layout(real_bin: &Path) -> bool {
+    real_bin
+        .parent()
+        .and_then(|p| p.file_name())
+        .is_some_and(|n| n == "versions")
+}
+
+/// Mirror `real_bin` (`.../versions/<version>/<binary>`) under
+/// `claude_home_dir/.local/share/claude/versions/<version>`, returning the mirrored symlink path.
+fn mirror_versioned_symlink(claude_home_dir: &Path, real_bin: &Path) -> Result<PathBuf> {
+    use std::os::unix::fs::symlink;
+
+    let version = real_bin
+        .file_name()
+        .map(|n| n.to_owned())
+        .context("versioned claude binary has no file name")?;
+    let versions_dir = claude_home_dir
+        .join(".local")
+        .join("share")
+        .join("claude")
+        .join("versions");
+    std::fs::create_dir_all(&versions_dir)
+        .with_context(|| format!("create {}", versions_dir.display()))?;
+    let versioned_link = versions_dir.join(&version);
+    let _ = std::fs::remove_file(&versioned_link);
+    symlink(real_bin, &versioned_link).with_context(|| {
+        format!(
+            "symlink {} -> {}",
+            versioned_link.display(),
+            real_bin.display()
+        )
+    })?;
+    Ok(versioned_link)
+}
+
+/// Resolve Claude's working directory inside the jail: the explicit `cwd` override if given,
+/// else `context_dir` in remote-codebase mode (the repo isn't mounted there) or `repo` otherwise
+/// (the repo is mounted read-write and Claude works on the real project tree).
+pub(crate) fn resolve_jail_cwd(
+    cwd: Option<&Path>,
+    remote_codebase: bool,
+    repo: &Path,
+    context_dir: &Path,
+) -> PathBuf {
+    cwd.map(Path::to_path_buf).unwrap_or_else(|| {
+        if remote_codebase {
+            context_dir.to_path_buf()
+        } else {
+            repo.to_path_buf()
+        }
+    })
+}
+
+/// Build the list of read-write mounts passed to `spawn_sandbox_runner`: in remote-codebase mode
+/// only the persistent jail home is mounted (the repo is reached only via `mcp__tddy-tools__*`
+/// relayed by the host); otherwise both the repo and the jail home are mounted.
+pub(crate) fn build_sandbox_mounts(
+    remote_codebase: bool,
+    repo: &Path,
+    scratch_home: &Path,
+) -> Vec<tddy_sandbox::MountSpec> {
+    if remote_codebase {
+        vec![tddy_sandbox::MountSpec::read_write(
+            scratch_home.to_path_buf(),
+        )]
+    } else {
+        vec![
+            tddy_sandbox::MountSpec::read_write(repo.to_path_buf()),
+            tddy_sandbox::MountSpec::read_write(scratch_home.to_path_buf()),
+        ]
+    }
 }
 
 /// A sandboxed Claude session ready for host `SessionChannel` attach.
@@ -119,17 +267,17 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
 
     let sandbox_root = session_dir.join("sandbox");
     let egress_dir = session_dir.join("egress");
-    std::fs::create_dir_all(sandbox_root.join(".work").join("home"))
-        .context("mkdir sandbox scratch home")?;
     std::fs::create_dir_all(sandbox_root.join(".work").join("tmp"))
         .context("mkdir sandbox scratch tmp")?;
     std::fs::create_dir_all(sandbox_root.join("context")).context("mkdir sandbox context")?;
     std::fs::create_dir_all(&egress_dir).context("mkdir sandbox egress")?;
+    seed_claude_credentials(&params.claude_home_dir)?;
 
     let sandbox_root = std::fs::canonicalize(&sandbox_root).unwrap_or(sandbox_root);
     let egress_dir = std::fs::canonicalize(&egress_dir).unwrap_or(egress_dir);
     let scratch_dir = sandbox_root.join(".work");
-    let scratch_home = scratch_dir.join("home");
+    let scratch_home = std::fs::canonicalize(&params.claude_home_dir)
+        .unwrap_or_else(|_| params.claude_home_dir.clone());
     let scratch_tmp = scratch_dir.join("tmp");
     let context_dir = sandbox_root.join("context");
 
@@ -159,6 +307,7 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         .map(|p| canonicalize_exec_path(&p))
         .unwrap_or_else(|| canonicalize_exec_path(&resolve_sandbox_runner_path()));
     let claude_binary = resolve_claude_binary(params.claude_binary.as_deref())?;
+    seed_claude_local_install(&params.claude_home_dir, &claude_binary)?;
 
     let grpc_socket = sandbox_root.join("sandbox.grpc.sock");
     let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(&params.session_id);
@@ -178,8 +327,15 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
     };
 
     // Mount the repo into the jail (read-write) and start Claude there, so the agent works on the
-    // real project tree instead of the (guidance-only) context dir.
-    let jail_cwd = params.cwd.clone().unwrap_or_else(|| repo.clone());
+    // real project tree instead of the (guidance-only) context dir — unless `remote_codebase` is
+    // set, in which case the repo is never mounted and Claude starts in the read-only context dir,
+    // reaching the real repo only via `mcp__tddy-tools__*` calls relayed by the host.
+    let jail_cwd = resolve_jail_cwd(
+        params.cwd.as_deref(),
+        params.remote_codebase,
+        &repo,
+        &context_dir,
+    );
 
     let runner_argv = vec![
         sandbox_runner_path,
@@ -231,7 +387,7 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         env,
         loopback_allow_ports,
         ipc_socket: Some(tool_ipc_socket),
-        mounts: vec![tddy_sandbox::MountSpec::read_write(repo.clone())],
+        mounts: build_sandbox_mounts(params.remote_codebase, &repo, &scratch_home),
     })
     .map_err(|e| {
         let logs = tddy_sandbox::format_egress_logs(&egress_dir);
@@ -302,4 +458,282 @@ pub fn log_spawn_diagnostics(egress_dir: &Path, session_dir: &Path) {
     let project_root = session_dir.join("sandbox");
     let logs = tddy_sandbox::format_sandbox_diagnostics(egress_dir, Some(&project_root));
     log::error!(target: "tddy_sandbox_app::spawn", "sandbox diagnostics:\n{logs}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+
+    /// `seed_claude_credentials` copies the real host `~/.claude/.credentials.json` into the jail
+    /// home the first time it's called, so the jail can authenticate on its first run.
+    #[test]
+    #[serial]
+    fn seed_claude_credentials_copies_source_file_when_dest_does_not_exist() {
+        // Given
+        let host_home = tempfile::tempdir().expect("temp host home");
+        let claude_dir = host_home.path().join(".claude");
+        std::fs::create_dir_all(&claude_dir).expect("mkdir host .claude");
+        std::fs::write(claude_dir.join(".credentials.json"), "{\"token\":\"abc\"}")
+            .expect("write host credentials");
+
+        let claude_home_dir = tempfile::tempdir().expect("temp jail home");
+
+        let prev_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", host_home.path());
+
+        // When
+        let result = seed_claude_credentials(claude_home_dir.path());
+
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+
+        // Then
+        assert!(result.is_ok(), "expected Ok(()), got: {result:?}");
+        let dest = claude_home_dir
+            .path()
+            .join(".claude")
+            .join(".credentials.json");
+        let contents = std::fs::read_to_string(&dest).expect("dest credentials file must exist");
+        assert_eq!(contents, "{\"token\":\"abc\"}");
+    }
+
+    /// `seed_claude_credentials` never overwrites an existing dest file — the jail may have since
+    /// refreshed its own token, and the host copy must not clobber it on later restarts.
+    #[test]
+    #[serial]
+    fn seed_claude_credentials_does_not_overwrite_existing_dest_file() {
+        // Given
+        let host_home = tempfile::tempdir().expect("temp host home");
+        let claude_dir = host_home.path().join(".claude");
+        std::fs::create_dir_all(&claude_dir).expect("mkdir host .claude");
+        std::fs::write(
+            claude_dir.join(".credentials.json"),
+            "{\"token\":\"from-host\"}",
+        )
+        .expect("write host credentials");
+
+        let claude_home_dir = tempfile::tempdir().expect("temp jail home");
+        let dest_dir = claude_home_dir.path().join(".claude");
+        std::fs::create_dir_all(&dest_dir).expect("mkdir jail .claude");
+        std::fs::write(
+            dest_dir.join(".credentials.json"),
+            "{\"token\":\"refreshed-by-jail\"}",
+        )
+        .expect("write existing jail credentials marker");
+
+        let prev_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", host_home.path());
+
+        // When
+        let result = seed_claude_credentials(claude_home_dir.path());
+
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+
+        // Then
+        assert!(result.is_ok(), "expected Ok(()), got: {result:?}");
+        let contents = std::fs::read_to_string(dest_dir.join(".credentials.json"))
+            .expect("dest credentials file must still exist");
+        assert_eq!(
+            contents, "{\"token\":\"refreshed-by-jail\"}",
+            "existing dest file must survive untouched, got: {contents}"
+        );
+    }
+
+    /// `seed_claude_credentials` is a graceful no-op when the host has no `~/.claude/.credentials.json`
+    /// to seed from (e.g. a fresh host, or a host that never authenticated).
+    #[test]
+    #[serial]
+    fn seed_claude_credentials_no_ops_when_source_file_is_missing() {
+        // Given
+        let host_home = tempfile::tempdir().expect("temp host home");
+        let claude_home_dir = tempfile::tempdir().expect("temp jail home");
+
+        let prev_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", host_home.path());
+
+        // When
+        let result = seed_claude_credentials(claude_home_dir.path());
+
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+
+        // Then
+        assert!(
+            result.is_ok(),
+            "must no-op gracefully when source file is missing, got: {result:?}"
+        );
+        let dest = claude_home_dir
+            .path()
+            .join(".claude")
+            .join(".credentials.json");
+        assert!(
+            !dest.exists(),
+            "dest file must not be created when there's nothing to seed"
+        );
+    }
+
+    /// `seed_claude_local_install` symlinks `claude_home_dir/.local/bin/claude` at the resolved
+    /// binary path, so Claude's own startup self-check finds a consistent install.
+    #[test]
+    fn seed_claude_local_install_creates_symlink_at_local_bin_claude() {
+        // Given
+        let claude_home_dir = tempfile::tempdir().expect("temp jail home");
+        let real_bin_dir = tempfile::tempdir().expect("temp bin dir");
+        let real_bin = real_bin_dir.path().join("claude");
+        std::fs::write(&real_bin, "#!/bin/sh\necho fake claude\n").expect("write fake binary");
+
+        // When
+        let result = seed_claude_local_install(claude_home_dir.path(), real_bin.to_str().unwrap());
+
+        // Then
+        assert!(result.is_ok(), "expected Ok(()), got: {result:?}");
+        let local_bin_claude = claude_home_dir
+            .path()
+            .join(".local")
+            .join("bin")
+            .join("claude");
+        assert!(
+            local_bin_claude.is_symlink(),
+            "expected a symlink at {}",
+            local_bin_claude.display()
+        );
+        let resolved = std::fs::canonicalize(&local_bin_claude).expect("resolve symlink target");
+        let expected = std::fs::canonicalize(&real_bin).expect("resolve real bin");
+        assert_eq!(
+            resolved, expected,
+            "symlink must point at the given binary path"
+        );
+    }
+
+    /// When the binary's parent directory is literally named `versions` (the self-managed
+    /// install layout), `seed_claude_local_install` also mirrors a versioned symlink under
+    /// `.local/share/claude/versions/<version>` so a version-manifest check finds a match too.
+    #[test]
+    fn seed_claude_local_install_mirrors_versioned_symlink_when_parent_dir_is_versions() {
+        // Given
+        let claude_home_dir = tempfile::tempdir().expect("temp jail home");
+        let install_root = tempfile::tempdir().expect("temp install root");
+        let versions_dir = install_root.path().join("versions");
+        std::fs::create_dir_all(&versions_dir).expect("mkdir versions dir");
+        let real_bin = versions_dir.join("1.2.3");
+        std::fs::write(&real_bin, "#!/bin/sh\necho fake claude\n").expect("write fake binary");
+
+        // When
+        let result = seed_claude_local_install(claude_home_dir.path(), real_bin.to_str().unwrap());
+
+        // Then
+        assert!(result.is_ok(), "expected Ok(()), got: {result:?}");
+        let versioned_link = claude_home_dir
+            .path()
+            .join(".local")
+            .join("share")
+            .join("claude")
+            .join("versions")
+            .join("1.2.3");
+        assert!(
+            versioned_link.is_symlink(),
+            "expected a versioned mirror symlink at {}",
+            versioned_link.display()
+        );
+        let resolved = std::fs::canonicalize(&versioned_link).expect("resolve versioned symlink");
+        let expected = std::fs::canonicalize(&real_bin).expect("resolve real bin");
+        assert_eq!(
+            resolved, expected,
+            "versioned symlink must point at the real binary"
+        );
+    }
+
+    /// `build_sandbox_mounts` mounts only the repo and the persistent jail home — in that order —
+    /// when not in remote-codebase mode.
+    #[test]
+    fn build_sandbox_mounts_mounts_repo_then_scratch_home_when_not_remote_codebase() {
+        // Given
+        let repo = PathBuf::from("/tmp/repo");
+        let scratch_home = PathBuf::from("/tmp/scratch-home");
+
+        // When
+        let mounts = build_sandbox_mounts(false, &repo, &scratch_home);
+
+        // Then
+        assert_eq!(
+            mounts.iter().map(|m| m.host.clone()).collect::<Vec<_>>(),
+            vec![repo, scratch_home],
+            "expected exactly [repo, scratch_home] in that order"
+        );
+    }
+
+    /// `build_sandbox_mounts` mounts only the persistent jail home in remote-codebase mode — the
+    /// repo is reached only via `mcp__tddy-tools__*` calls relayed by the host, never mounted.
+    #[test]
+    fn build_sandbox_mounts_mounts_only_scratch_home_when_remote_codebase() {
+        // Given
+        let repo = PathBuf::from("/tmp/repo");
+        let scratch_home = PathBuf::from("/tmp/scratch-home");
+
+        // When
+        let mounts = build_sandbox_mounts(true, &repo, &scratch_home);
+
+        // Then
+        assert_eq!(
+            mounts.iter().map(|m| m.host.clone()).collect::<Vec<_>>(),
+            vec![scratch_home],
+            "expected exactly [scratch_home] alone"
+        );
+    }
+
+    /// `resolve_jail_cwd` starts Claude in the read-only context dir when in remote-codebase mode
+    /// and no explicit `cwd` override was given.
+    #[test]
+    fn resolve_jail_cwd_returns_context_dir_when_remote_codebase_and_no_explicit_cwd() {
+        // Given
+        let repo = PathBuf::from("/tmp/repo");
+        let context_dir = PathBuf::from("/tmp/context");
+
+        // When
+        let jail_cwd = resolve_jail_cwd(None, true, &repo, &context_dir);
+
+        // Then
+        assert_eq!(jail_cwd, context_dir);
+    }
+
+    /// `resolve_jail_cwd` starts Claude at the mounted repo root when not in remote-codebase mode
+    /// and no explicit `cwd` override was given.
+    #[test]
+    fn resolve_jail_cwd_returns_repo_when_not_remote_codebase_and_no_explicit_cwd() {
+        // Given
+        let repo = PathBuf::from("/tmp/repo");
+        let context_dir = PathBuf::from("/tmp/context");
+
+        // When
+        let jail_cwd = resolve_jail_cwd(None, false, &repo, &context_dir);
+
+        // Then
+        assert_eq!(jail_cwd, repo);
+    }
+
+    /// `resolve_jail_cwd` always honors an explicit `cwd` override verbatim, regardless of
+    /// remote-codebase mode.
+    #[test]
+    fn resolve_jail_cwd_returns_explicit_cwd_verbatim_regardless_of_remote_codebase() {
+        // Given
+        let repo = PathBuf::from("/tmp/repo");
+        let context_dir = PathBuf::from("/tmp/context");
+        let explicit_cwd = PathBuf::from("/tmp/explicit");
+
+        // When
+        let jail_cwd_remote = resolve_jail_cwd(Some(&explicit_cwd), true, &repo, &context_dir);
+        let jail_cwd_local = resolve_jail_cwd(Some(&explicit_cwd), false, &repo, &context_dir);
+
+        // Then
+        assert_eq!(jail_cwd_remote, explicit_cwd);
+        assert_eq!(jail_cwd_local, explicit_cwd);
+    }
 }

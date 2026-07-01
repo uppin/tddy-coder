@@ -7,6 +7,8 @@
 //! tools; tests stub them).
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -23,6 +25,40 @@ use tddy_service::tonic_sandbox::{
 };
 
 use crate::runner::SandboxClient;
+
+/// One-shot "the pty session ended" flag, race-free regardless of whether `signal()` or `wait()`
+/// runs first (the classic check-notify-check-await pattern for `tokio::sync::Notify`).
+struct EndSignal {
+    ended: AtomicBool,
+    notify: tokio::sync::Notify,
+}
+
+impl EndSignal {
+    fn new() -> Self {
+        Self {
+            ended: AtomicBool::new(false),
+            notify: tokio::sync::Notify::new(),
+        }
+    }
+
+    fn signal(&self) {
+        self.ended.store(true, Ordering::SeqCst);
+        self.notify.notify_waiters();
+    }
+
+    async fn wait(&self) {
+        loop {
+            if self.ended.load(Ordering::SeqCst) {
+                return;
+            }
+            let notified = self.notify.notified();
+            if self.ended.load(Ordering::SeqCst) {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
 
 /// Injected tool-execution behavior for the host side of a sandbox `SessionChannel`.
 #[async_trait]
@@ -93,54 +129,64 @@ pub async fn run_host_relay<H: HostToolHandler>(
     let session_id = config.session_id.clone();
     let terminal_sink = config.terminal_sink;
     let host_tx_reader = host_tx.clone();
+    let end_signal = Arc::new(EndSignal::new());
 
-    let reader = tokio::spawn(async move {
-        // CONNECT tunnels: tunnel_id → sender feeding agent→host bytes into the outbound TCP socket.
-        let mut tunnels: HashMap<String, mpsc::UnboundedSender<Bytes>> = HashMap::new();
-        while let Some(Ok(frame)) = session.next().await {
-            match frame.payload {
-                Some(SessionPayload::ToolRequest(req)) => {
-                    let resp = tool_handler
-                        .execute(&session_id, &req.tool_name, &req.args_json)
-                        .await;
-                    let _ = host_tx_reader
-                        .send(SessionFrame {
-                            payload: Some(SessionPayload::ToolResponse(resp)),
-                        })
-                        .await;
-                }
-                Some(SessionPayload::EgressRequest(req)) => {
-                    let resp = relay_egress_request(req).await;
-                    let _ = host_tx_reader
-                        .send(SessionFrame {
-                            payload: Some(SessionPayload::EgressResponse(resp)),
-                        })
-                        .await;
-                }
-                Some(SessionPayload::TunnelOpen(open)) => {
-                    // Agent issued CONNECT host:port — the host owns the real outbound socket.
-                    let (tcp_in_tx, tcp_in_rx) = mpsc::unbounded_channel::<Bytes>();
-                    tunnels.insert(open.tunnel_id.clone(), tcp_in_tx);
-                    spawn_tunnel(open, tcp_in_rx, host_tx_reader.clone());
-                }
-                Some(SessionPayload::TunnelData(data)) => {
-                    // Agent→host bytes: feed into the outbound socket for this tunnel.
-                    if let Some(tx) = tunnels.get(&data.tunnel_id) {
-                        if tx.send(Bytes::from(data.data)).is_err() {
-                            tunnels.remove(&data.tunnel_id);
+    let reader = tokio::spawn({
+        let end_signal = Arc::clone(&end_signal);
+        async move {
+            // CONNECT tunnels: tunnel_id → sender feeding agent→host bytes into the outbound TCP socket.
+            let mut tunnels: HashMap<String, mpsc::UnboundedSender<Bytes>> = HashMap::new();
+            while let Some(Ok(frame)) = session.next().await {
+                match frame.payload {
+                    Some(SessionPayload::SessionEnded(_)) => {
+                        // The pty command exited — stop polling and let both ends of the stream drop,
+                        // so the in-jail gRPC server can finish shutting down (see `signal_session_ended`).
+                        end_signal.signal();
+                        break;
+                    }
+                    Some(SessionPayload::ToolRequest(req)) => {
+                        let resp = tool_handler
+                            .execute(&session_id, &req.tool_name, &req.args_json)
+                            .await;
+                        let _ = host_tx_reader
+                            .send(SessionFrame {
+                                payload: Some(SessionPayload::ToolResponse(resp)),
+                            })
+                            .await;
+                    }
+                    Some(SessionPayload::EgressRequest(req)) => {
+                        let resp = relay_egress_request(req).await;
+                        let _ = host_tx_reader
+                            .send(SessionFrame {
+                                payload: Some(SessionPayload::EgressResponse(resp)),
+                            })
+                            .await;
+                    }
+                    Some(SessionPayload::TunnelOpen(open)) => {
+                        // Agent issued CONNECT host:port — the host owns the real outbound socket.
+                        let (tcp_in_tx, tcp_in_rx) = mpsc::unbounded_channel::<Bytes>();
+                        tunnels.insert(open.tunnel_id.clone(), tcp_in_tx);
+                        spawn_tunnel(open, tcp_in_rx, host_tx_reader.clone());
+                    }
+                    Some(SessionPayload::TunnelData(data)) => {
+                        // Agent→host bytes: feed into the outbound socket for this tunnel.
+                        if let Some(tx) = tunnels.get(&data.tunnel_id) {
+                            if tx.send(Bytes::from(data.data)).is_err() {
+                                tunnels.remove(&data.tunnel_id);
+                            }
                         }
                     }
-                }
-                Some(SessionPayload::TunnelClose(close)) => {
-                    // Agent closed its end: drop the sender so the socket writer shuts down.
-                    tunnels.remove(&close.tunnel_id);
-                }
-                Some(SessionPayload::TerminalOutput(out)) => {
-                    if !out.data.is_empty() {
-                        let _ = terminal_sink.send(Bytes::from(out.data));
+                    Some(SessionPayload::TunnelClose(close)) => {
+                        // Agent closed its end: drop the sender so the socket writer shuts down.
+                        tunnels.remove(&close.tunnel_id);
                     }
+                    Some(SessionPayload::TerminalOutput(out)) => {
+                        if !out.data.is_empty() {
+                            let _ = terminal_sink.send(Bytes::from(out.data));
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
         }
     });
@@ -149,10 +195,13 @@ pub async fn run_host_relay<H: HostToolHandler>(
     tokio::spawn(async move {
         let mut poll = tokio::time::interval(Duration::from_millis(25));
         // Keep polling even after the caller drops its stdin sender — a closed stdin must not stop
-        // `HostPoll` (which drives terminal output and poll-gated frames).
+        // `HostPoll` (which drives terminal output and poll-gated frames). Polling does stop once
+        // the pty session has ended (`end_signal`), so both ends of the stream can drop and the
+        // in-jail gRPC server can finish shutting down.
         let mut stdin_open = true;
         loop {
             tokio::select! {
+                _ = end_signal.wait() => break,
                 chunk = stdin_rx.recv(), if stdin_open => {
                     match chunk {
                         Some(chunk) => {
