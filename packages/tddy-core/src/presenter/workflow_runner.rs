@@ -657,7 +657,12 @@ pub fn run_workflow(
     };
 
     let session_dir = match session_dir {
-        Some(p) => p,
+        Some(p) => {
+            if let Err(e) = crate::changeset::ensure_changeset_recipe(&p, recipe.name()) {
+                log::warn!("ensure_changeset_recipe (run_workflow): {}", e);
+            }
+            p
+        }
         None => {
             let input = match initial_prompt {
                 Some(p) => p,
