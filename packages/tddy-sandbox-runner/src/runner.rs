@@ -1037,7 +1037,10 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
     argv.push(permission_mode.to_string());
 
     let scratch_dir = claude_scratch_mcp_dir(context_dir);
-    append_claude_mcp_args(&mut argv, &scratch_dir, tddy_tools_path)
+    let subagent_enabled = std::env::var("TDDY_SUBAGENT")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
+    append_claude_mcp_args(&mut argv, &scratch_dir, tddy_tools_path, subagent_enabled)
         .context("append sandbox claude MCP allowlist args")?;
     boot_log(
         "INFO",

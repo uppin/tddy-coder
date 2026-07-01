@@ -21,7 +21,7 @@ use tddy_core::{BackendError, ProgressEvent};
 
 use crate::discovery::extract_final_answer;
 use crate::openai::{
-    ChatCompletionRequest, ChatMessage, OpenAiClient, ToolDefinition, ToolFunctionDef,
+    discovery_tool_definitions, ChatCompletionRequest, ChatMessage, OpenAiClient,
 };
 use crate::tools::ToolExecutor;
 
@@ -40,54 +40,6 @@ impl FastContextBackend {
             max_turns,
         }
     }
-}
-
-fn discovery_tools() -> Vec<ToolDefinition> {
-    vec![
-        ToolDefinition {
-            tool_type: "function".to_string(),
-            function: ToolFunctionDef {
-                name: "READ".to_string(),
-                description: "Read a file and return its contents with line numbers.".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string", "description": "File path to read." }
-                    },
-                    "required": ["path"]
-                }),
-            },
-        },
-        ToolDefinition {
-            tool_type: "function".to_string(),
-            function: ToolFunctionDef {
-                name: "GLOB".to_string(),
-                description: "Return file paths matching a glob pattern.".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "pattern": { "type": "string", "description": "Glob pattern." }
-                    },
-                    "required": ["pattern"]
-                }),
-            },
-        },
-        ToolDefinition {
-            tool_type: "function".to_string(),
-            function: ToolFunctionDef {
-                name: "GREP".to_string(),
-                description: "Search files with a regex pattern.".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "pattern": { "type": "string", "description": "Regex pattern." },
-                        "path": { "type": "string", "description": "Optional path to search in." }
-                    },
-                    "required": ["pattern"]
-                }),
-            },
-        },
-    ]
 }
 
 fn build_system_message(request: &InvokeRequest) -> Option<ChatMessage> {
@@ -163,7 +115,7 @@ impl CodingBackend for FastContextBackend {
         }
         messages.push(ChatMessage::user(request.prompt.clone()));
 
-        let tools = discovery_tools();
+        let tools = discovery_tool_definitions();
         let mut last_content = String::new();
 
         for turn in 0..self.max_turns {

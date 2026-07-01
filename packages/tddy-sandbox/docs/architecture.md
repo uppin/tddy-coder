@@ -96,7 +96,7 @@ spawn_plan}`; the daemon's `build_sandbox_plan` builds it from the Claude recipe
 
 ## Context dir
 
-`SandboxContextDir` copies project guidance files (`CLAUDE.md`, `AGENTS.md`, skills) into a read-only tree and appends `REMOTE_APPENDIX` (same notice as remote-codebase mode). In remote-codebase mode the host worktree is reached only via MCP tools. Alternatively a caller may mount the repo into the jail (`MountSpec`, e.g. `tddy-sandbox-app --repo`, read-write) and set the runner's `--cwd` so `claude` starts in the real project tree.
+`SandboxContextDir` copies project guidance files (`CLAUDE.md`, `AGENTS.md`, skills) into a read-only tree and appends `SANDBOX_REMOTE_APPENDIX` (same "Managed Codebase" notice as managed-codebase mode). In managed-codebase mode the host worktree is reached only via MCP tools — optionally with a [discovery subagent](../../../docs/ft/coder/managed-codebase-subagents.md) wired in, if `tddy-sandbox-app --discovery-subagent` was given. Alternatively a caller may mount the repo into the jail (`MountSpec`, e.g. `tddy-sandbox-app --repo`, read-write) and set the runner's `--cwd` so `claude` starts in the real project tree.
 
 ## Unsupported platforms
 

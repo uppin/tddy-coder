@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use spawn::{spawn_claude_sandbox, SpawnParams};
+use spawn::{resolve_codebase_mode, spawn_claude_sandbox, SpawnParams, SubagentSpawnConfig};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_task::TaskRegistry;
 use uuid::Uuid;
@@ -73,8 +73,33 @@ struct Args {
     /// (read-only) context dir and the persistent home; the real repo is reachable only via
     /// `mcp__tddy-tools__*` calls, which the host relays against the real `--repo` path. Matches
     /// the daemon's sandboxed-session isolation model (see docs/ft/daemon/remote-codebase-mode.md).
+    /// Deprecated: prefer `--codebase-mode managed`, which this remains a working alias for.
     #[arg(long)]
     remote_codebase: bool,
+
+    /// Codebase mode: `mounted` (default) mounts `--repo` read-write into the jail; `managed`
+    /// keeps the repo unmounted, reaching it only via `mcp__tddy-tools__*` calls relayed by the
+    /// host. Supersedes `--remote-codebase` (still accepted as a working alias).
+    #[arg(long)]
+    codebase_mode: Option<String>,
+
+    /// Discovery subagent to wire into the session (e.g. `fastcontext`). When set, Claude gains
+    /// the `subagent_new_session`/`subagent_prompt`/`subagent_cancel` MCP tools (see
+    /// docs/ft/coder/managed-codebase-subagents.md).
+    #[arg(long)]
+    discovery_subagent: Option<String>,
+
+    /// FastContext discovery-subagent endpoint (default: `http://localhost:30000`).
+    #[arg(long)]
+    fastcontext_url: Option<String>,
+
+    /// FastContext discovery-subagent model id (default: `microsoft/FastContext-1.0-4B-RL`).
+    #[arg(long)]
+    fastcontext_model: Option<String>,
+
+    /// FastContext discovery-subagent per-prompt turn budget (default: 10).
+    #[arg(long)]
+    fastcontext_max_turns: Option<u32>,
 
     /// Enable debug logging for tddy sandbox components (HTTP/gRPC frame traces stay quiet).
     #[arg(short, long)]
@@ -131,10 +156,23 @@ async fn main() -> Result<()> {
         "claude_home_dir={} (persistent across restarts)",
         claude_home_dir.display()
     );
-    if args.remote_codebase {
+
+    let managed_codebase =
+        resolve_codebase_mode(args.codebase_mode.as_deref(), args.remote_codebase)
+            .map_err(|e| anyhow::anyhow!(e))?;
+    if managed_codebase {
         eprintln!(
-            "remote_codebase=true: repo not mounted; Claude reaches it only via mcp__tddy-tools__* calls"
+            "codebase_mode=managed: repo not mounted; Claude reaches it only via mcp__tddy-tools__* calls"
         );
+    }
+    let subagent = SubagentSpawnConfig {
+        discovery_subagent: args.discovery_subagent,
+        fastcontext_url: args.fastcontext_url,
+        fastcontext_model: args.fastcontext_model,
+        fastcontext_max_turns: args.fastcontext_max_turns,
+    };
+    if let Some(ref name) = subagent.discovery_subagent {
+        eprintln!("discovery_subagent={name}");
     }
 
     let spawned = tokio::select! {
@@ -149,7 +187,8 @@ async fn main() -> Result<()> {
             session_dir: session_dir.clone(),
             cwd: args.cwd,
             claude_home_dir,
-            remote_codebase: args.remote_codebase,
+            remote_codebase: managed_codebase,
+            subagent,
         }) => res?,
         _ = tokio::signal::ctrl_c() => {
             eprintln!("interrupted");

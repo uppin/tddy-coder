@@ -3,4 +3,5 @@
 pub mod backend;
 pub mod discovery;
 pub mod openai;
+pub mod subagent;
 pub mod tools;

@@ -87,6 +87,57 @@ pub struct ToolFunctionDef {
     pub parameters: serde_json::Value,
 }
 
+/// The READ/GLOB/GREP tool schemas sent to the model on every turn — shared by
+/// `FastContextBackend::invoke` (one-shot) and `FastContextSession` (stateful), the two turn
+/// loops that both talk to a FastContext-compatible endpoint.
+pub fn discovery_tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition {
+            tool_type: "function".to_string(),
+            function: ToolFunctionDef {
+                name: "READ".to_string(),
+                description: "Read a file and return its contents with line numbers.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "File path to read." }
+                    },
+                    "required": ["path"]
+                }),
+            },
+        },
+        ToolDefinition {
+            tool_type: "function".to_string(),
+            function: ToolFunctionDef {
+                name: "GLOB".to_string(),
+                description: "Return file paths matching a glob pattern.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "pattern": { "type": "string", "description": "Glob pattern." }
+                    },
+                    "required": ["pattern"]
+                }),
+            },
+        },
+        ToolDefinition {
+            tool_type: "function".to_string(),
+            function: ToolFunctionDef {
+                name: "GREP".to_string(),
+                description: "Search files with a regex pattern.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "pattern": { "type": "string", "description": "Regex pattern." },
+                        "path": { "type": "string", "description": "Optional path to search in." }
+                    },
+                    "required": ["pattern"]
+                }),
+            },
+        },
+    ]
+}
+
 /// Request body for `/v1/chat/completions`.
 #[derive(Debug, Serialize)]
 pub struct ChatCompletionRequest {

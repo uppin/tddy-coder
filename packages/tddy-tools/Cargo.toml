@@ -30,7 +30,9 @@ tddy-rpc = { path = "../tddy-rpc" }
 tddy-stdio = { path = "../tddy-stdio" }
 async-trait = "0.1"
 tddy-core = { path = "../tddy-core" }
+tddy-discovery = { path = "../tddy-discovery" }
 tddy-sandbox = { path = "../tddy-sandbox" }
+uuid = { version = "1", features = ["v4"] }
 tddy-build = { path = "../tddy-build" }
 tddy-build-rust = { path = "../tddy-build-rust" }
 tddy-build-typescript = { path = "../tddy-build-typescript" }
@@ -78,3 +80,5 @@ pretty_assertions = { workspace = true }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 # Relay integration: `start_toolcall_listener` + CLI subprocess (`submit_relay_no_poll`).
 tddy-core = { path = "../tddy-core" }
+# subagent_mcp_acceptance.rs: mocks the FastContext /v1/chat/completions endpoint.
+wiremock = "0.6"
