@@ -525,21 +525,36 @@ pub fn build_sandbox_plan(params: SandboxRunnerSpawn) -> Result<SandboxPlan, San
     })
 }
 
-/// Spawn sandbox-runner inside Seatbelt jail.
+/// When set to `qemu`, [`spawn_sandbox_runner`] and [`crate::sandbox_action::spawn_confined_plan`]
+/// route to [`tddy_sandbox_qemu::spawn_plan`] instead of the per-OS default (Seatbelt on macOS,
+/// cgroups+namespaces on Linux). Unset (or any other value) leaves existing per-OS dispatch
+/// unchanged — this is an explicit opt-in, not a fallback.
+pub fn qemu_backend_requested() -> bool {
+    std::env::var("TDDY_SANDBOX_BACKEND").as_deref() == Ok("qemu")
+}
+
+/// Spawn sandbox-runner inside Seatbelt jail (or the QEMU VM backend, if requested).
 #[cfg(target_os = "macos")]
 pub fn spawn_sandbox_runner(
     params: SandboxRunnerSpawn,
 ) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
     let plan = build_sandbox_plan(params)?;
+    if qemu_backend_requested() {
+        return tddy_sandbox_qemu::spawn_plan(plan);
+    }
     tddy_sandbox_darwin::spawn_plan(plan)
 }
 
-/// Spawn sandbox-runner inside a rootless cgroups + namespaces jail (Linux).
+/// Spawn sandbox-runner inside a rootless cgroups + namespaces jail (or the QEMU VM backend, if
+/// requested) on Linux.
 #[cfg(target_os = "linux")]
 pub fn spawn_sandbox_runner(
     params: SandboxRunnerSpawn,
 ) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
     let plan = build_sandbox_plan(params)?;
+    if qemu_backend_requested() {
+        return tddy_sandbox_qemu::spawn_plan(plan);
+    }
     tddy_sandbox_cgroups::spawn_plan(plan)
 }
 

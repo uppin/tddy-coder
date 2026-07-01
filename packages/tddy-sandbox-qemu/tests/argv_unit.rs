@@ -164,7 +164,7 @@ fn guest_plan_json_includes_mounts_env_cwd_and_command() {
     .build()
     .expect("plan must build");
 
-    let json = guest_plan_json(&plan);
+    let json = guest_plan_json(&plan, &backend_options());
     let parsed: serde_json::Value =
         serde_json::from_str(&json).expect("guest_plan_json must produce valid JSON");
 
@@ -197,6 +197,11 @@ fn guest_plan_json_includes_mounts_env_cwd_and_command() {
         parsed["mounts"][0]["writable"],
         serde_json::json!(true),
         "guest plan JSON must carry the writable flag"
+    );
+    assert_eq!(
+        parsed["control_port"],
+        serde_json::json!(6700),
+        "guest plan JSON must carry the control port so the init hook knows what to bind"
     );
 }
 

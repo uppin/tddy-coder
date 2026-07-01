@@ -78,8 +78,11 @@ pub fn spawn_plan_with(
     //    will be 9p-mounted into the guest under `argv::PLAN_MOUNT_TAG`.
     let plan_dir = plan_config_dir(&opts);
     std::fs::create_dir_all(&plan_dir).map_err(|e| SandboxError::Io(e.to_string()))?;
-    std::fs::write(plan_dir.join("plan.json"), argv::guest_plan_json(&plan))
-        .map_err(|e| SandboxError::Io(e.to_string()))?;
+    std::fs::write(
+        plan_dir.join("plan.json"),
+        argv::guest_plan_json(&plan, &opts),
+    )
+    .map_err(|e| SandboxError::Io(e.to_string()))?;
 
     // 3. Boot qemu-system-x86_64 against the overlay with the full sandbox argv.
     let args = qemu_sandbox_argv(&plan, &opts);
@@ -98,11 +101,51 @@ pub fn spawn_plan_with(
         .spawn()
         .map_err(|e| SandboxError::Io(format!("qemu-system-x86_64 spawn failed: {e}")))?;
 
+    // 4. Signal readiness the same way the darwin/cgroups backends' in-jail runner does:
+    // write the control port to `ready_marker_path` once it's reachable, so the *existing*,
+    // unmodified `tddy_sandbox_runner::connect_sandbox_client(ready_marker)` — which reads a
+    // port number from that file and dials `http://127.0.0.1:<port>` — works for this
+    // backend without any daemon-side changes. Unlike darwin/cgroups (where the in-jail
+    // process itself writes its own ready marker), nothing inside the guest can write to a
+    // host path, so the host polls the QEMU hostfwd'd control port directly instead — no
+    // guest cooperation, no shared filesystem, needed for readiness detection itself.
+    let ready_marker_path = plan_dir.join("ready");
+    let control_port = opts.control_port;
+    let ready_marker_writer = ready_marker_path.clone();
+    tokio::spawn(async move {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(180);
+        loop {
+            if tokio::net::TcpStream::connect(("127.0.0.1", control_port))
+                .await
+                .is_ok()
+            {
+                if let Err(e) =
+                    tokio::fs::write(&ready_marker_writer, control_port.to_string()).await
+                {
+                    log::error!(
+                        target: "tddy_sandbox_qemu::spawn",
+                        "failed to write ready marker at {}: {e}",
+                        ready_marker_writer.display()
+                    );
+                }
+                return;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                log::error!(
+                    target: "tddy_sandbox_qemu::spawn",
+                    "timed out waiting for guest control port {control_port} to become reachable"
+                );
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    });
+
     Ok(SandboxHandle::new(
         child,
         plan.spec.profile_path.clone(),
         plan_dir.join("runner.grpc.sock"),
-        plan_dir.join("ready"),
+        ready_marker_path,
     ))
 }
 

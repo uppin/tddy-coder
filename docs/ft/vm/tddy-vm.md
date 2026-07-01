@@ -130,6 +130,17 @@ tddy-vm-build --spec <path-to-.config> --output <path> --format qcow2|raw
   same core with its gRPC progress channel as the `progress` sink — no behavior change to
   the RPC path.
 - **Requires `BUILDROOT_DIR`** in the environment, exactly as the RPC path does today.
+- **macOS builds route through Docker.** Buildroot's own dependency checker
+  (`support/dependencies/dependencies.sh`) rejects Apple Clang's `gcc` trampoline and
+  expects several Linux-only host tools. On macOS, `run_buildroot_pipeline` (shared by
+  `build_image` and `build_vm_image_from_spec`) transparently runs `make olddefconfig`/
+  `make -j<nproc>` inside a small Linux container instead of natively, building the image
+  from `packages/tddy-vm/docker/buildroot-host/Dockerfile` on first use (cached
+  thereafter via `docker image inspect`). `BUILDROOT_DIR`/the download cache/the build
+  tree are bind-mounted (not copied) so the produced image lands at the same host path
+  either way. Override via `TDDY_VM_BUILD_TOOLCHAIN=native|docker`; every non-macOS host
+  defaults to `native`. Requires Docker to be installed and running — already a repo
+  dependency via `tddy-build-docker`.
 
 ## QEMU sandbox backend (`tddy-sandbox-qemu`) (Added: 2026-07-01)
 

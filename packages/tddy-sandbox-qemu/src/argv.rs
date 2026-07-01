@@ -66,9 +66,10 @@ pub fn overlay_create_argv(base: &Path, overlay: &Path) -> Vec<String> {
     ]
 }
 
-/// Serialize the parts of `plan` the guest init hook needs (mounts, env, cwd, command)
-/// to JSON, for delivery over the [`PLAN_MOUNT_TAG`] 9p share.
-pub fn guest_plan_json(plan: &SandboxPlan) -> String {
+/// Serialize the parts of `plan`/`opts` the guest init hook needs (mounts, env, cwd,
+/// command, and the control port to bind the runner's gRPC server on) to JSON, for
+/// delivery over the [`PLAN_MOUNT_TAG`] 9p share.
+pub fn guest_plan_json(plan: &SandboxPlan, opts: &QemuBackendOptions) -> String {
     let mounts: Vec<serde_json::Value> = plan
         .mounts
         .iter()
@@ -86,6 +87,7 @@ pub fn guest_plan_json(plan: &SandboxPlan) -> String {
         "cwd": plan.spec.cwd.as_ref().map(|p| p.display().to_string()),
         "env": plan.env.vars,
         "mounts": mounts,
+        "control_port": opts.control_port,
     })
     .to_string()
 }
