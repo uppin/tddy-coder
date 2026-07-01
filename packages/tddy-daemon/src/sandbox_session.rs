@@ -138,6 +138,31 @@ pub async fn wait_for_sandbox_ready(
     }
 }
 
+/// Bridge a sandboxed process's piped stdio (spawned with `--stdio` in its argv — see
+/// `tddy_sandbox_darwin::spawn_plan`) into an RPC endpoint, hosting `service` for inbound calls
+/// (none exist in the current `SandboxService` protocol: the runner never initiates calls into
+/// the daemon, only sends frames within the bidi `SessionChannel` the daemon itself calls) and
+/// returning a client for calling into the runner. Spawns the endpoint's read/dispatch/write loop
+/// on the current tokio runtime; the returned `JoinHandle` completes when the pipe closes (the
+/// sandboxed process exits).
+pub fn bridge_sandbox_stdio<S: tddy_rpc::RpcService>(
+    handle: &mut tddy_sandbox::SandboxHandle,
+    service: S,
+) -> Result<(Arc<tddy_stdio::StdioRpcClient>, tokio::task::JoinHandle<()>), String> {
+    use std::os::fd::OwnedFd;
+
+    let (stdin, stdout) = handle
+        .take_stdio()
+        .ok_or_else(|| "sandbox process was not spawned with piped stdio (--stdio)".to_string())?;
+    let sender = tokio::net::unix::pipe::Sender::from_owned_fd(OwnedFd::from(stdin))
+        .map_err(|e| format!("wrap sandbox stdin as async pipe: {e}"))?;
+    let receiver = tokio::net::unix::pipe::Receiver::from_owned_fd(OwnedFd::from(stdout))
+        .map_err(|e| format!("wrap sandbox stdout as async pipe: {e}"))?;
+    let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(receiver, sender, service);
+    let run_handle = tokio::spawn(endpoint.run());
+    Ok((client, run_handle))
+}
+
 /// TCP dialer for the in-jail gRPC server (macOS Seatbelt path; Linux uses AF_UNIX).
 #[cfg(not(target_os = "linux"))]
 async fn connect_sandbox_client(

@@ -142,6 +142,39 @@ async fn free_prompting_backend_invoke_completes_without_tddy_tools_submit() {
     assert!(matches!(result.next_action, NextAction::Continue));
 }
 
+/// The no-submit `Continue` path must persist the backend's response into `context["output"]`
+/// (mirroring the submit-success branch) so plain-mode CLI callers — which only ever see
+/// `session.context` after the engine call returns, never the `TaskResult` itself — have
+/// something to print instead of nothing.
+#[tokio::test]
+async fn free_prompting_backend_invoke_persists_output_into_context_for_plain_mode_completion() {
+    // Given
+    let recipe: Arc<dyn WorkflowRecipe> = Arc::new(FreePromptingRecipe);
+    let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
+    let task = BackendInvokeTask::from_recipe(
+        "prompting",
+        GoalId::new("prompting"),
+        recipe.clone(),
+        backend,
+    );
+    let ctx = Context::new();
+    ctx.set_sync("feature_input", "hello");
+    ctx.set_sync("output_dir", std::env::temp_dir());
+
+    // When
+    task.run(ctx.clone())
+        .await
+        .expect("task should succeed without submit");
+
+    // Then
+    let output: Option<String> = ctx.get_sync("output");
+    assert_eq!(
+        output.as_deref(),
+        Some("agent reply without submit"),
+        "context[\"output\"] must carry the backend's response after a no-submit Continue turn"
+    );
+}
+
 #[test]
 fn free_prompting_prompting_goal_opted_out_of_tddy_tools_submit() {
     // Given

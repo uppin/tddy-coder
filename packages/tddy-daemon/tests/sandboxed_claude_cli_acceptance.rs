@@ -214,7 +214,9 @@ async fn sandboxed_claude_cli_start_persists_metadata_and_empty_livekit() {
 #[tokio::test]
 async fn sandboxed_claude_cli_starts_on_linux_with_the_cgroups_backend() {
     if !tddy_sandbox_cgroups::unprivileged_userns_available() {
-        eprintln!("SKIP: host forbids unprivileged user namespaces (cannot create the sandbox here)");
+        eprintln!(
+            "SKIP: host forbids unprivileged user namespaces (cannot create the sandbox here)"
+        );
         return;
     }
 

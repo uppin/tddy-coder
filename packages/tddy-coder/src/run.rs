@@ -6,8 +6,6 @@
 use anyhow::Context;
 use clap::Parser;
 use std::io::{self, IsTerminal, Read, Write};
-#[cfg(unix)]
-use std::os::fd::IntoRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -301,7 +299,12 @@ pub fn run_main(mut args: Args) {
         std::process::exit(1);
     }
 
-    let log_config = effective_log_config(&args);
+    let mut log_config = effective_log_config(&args);
+    if args.stdio {
+        // --stdio dedicates fd 1 to RPC framing; a misconfigured `output: stdout` logger would
+        // corrupt it. Must run before init_tddy_logger — log::set_logger only succeeds once.
+        tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut log_config);
+    }
     let has_file_output = tddy_core::config_has_file_output(&log_config);
     tddy_core::init_tddy_logger(log_config);
     if let Some(session_dir) = session_artifact_dir_for_args(&args) {
@@ -315,11 +318,19 @@ pub fn run_main(mut args: Args) {
         // so crossterm/terminal APIs that may probe stderr work correctly (e.g. VirtualTui).
         #[cfg(unix)]
         if args.daemon {
-            if let Ok(file) = std::fs::File::create(logs.join("daemon_stderr.log")) {
-                let fd = file.into_raw_fd();
-                let _ = unsafe { libc::dup2(fd, libc::STDERR_FILENO) };
-                let _ = unsafe { libc::close(fd) };
-            }
+            let _ = tddy_core::stdio_safety::redirect_fd_to_file(
+                libc::STDERR_FILENO,
+                &logs.join("daemon_stderr.log"),
+            );
+        }
+        // --stdio keeps stdin/stdout live (unlike --daemon) — only stderr needs to leave the
+        // terminal, so crossterm/terminal APIs still work without landing on fd 1's RPC channel.
+        #[cfg(unix)]
+        if args.stdio {
+            let _ = tddy_core::stdio_safety::redirect_fd_to_file(
+                libc::STDERR_FILENO,
+                &logs.join("stdio_stderr.log"),
+            );
         }
     }
 
@@ -403,6 +414,10 @@ pub struct Args {
     pub resume_from: Option<String>,
     /// When true, run as headless gRPC daemon (no TUI).
     pub daemon: bool,
+    /// When true, serve the remote-control surface over stdin/stdout (RPC over stdio, see
+    /// `tddy-stdio`) instead of `--grpc`'s TCP socket. No local TUI is rendered — physical fd 1
+    /// is dedicated to RPC framing.
+    pub stdio: bool,
     /// LiveKit server WebSocket URL (e.g. ws://localhost:7880)
     pub livekit_url: Option<String>,
     /// LiveKit access token for room join
@@ -479,6 +494,10 @@ pub struct Args {
 
     /// Maximum number of model turns in the FastContext multi-turn loop (default: 10).
     pub fastcontext_max_turns: Option<u32>,
+
+    /// Model id sent to the FastContext endpoint (default: `microsoft/FastContext-1.0-4B-RL`).
+    /// Set to a locally-served model tag (e.g. an Ollama model) to run against it.
+    pub fastcontext_model: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -540,6 +559,11 @@ pub struct CoderArgs {
     /// Run as headless gRPC daemon (systemd-friendly)
     #[arg(long)]
     pub daemon: bool,
+
+    /// Serve the remote-control surface over stdin/stdout (RPC over stdio) instead of --grpc's
+    /// TCP socket. No local TUI is rendered.
+    #[arg(long)]
+    pub stdio: bool,
 
     /// LiveKit server WebSocket URL (e.g. ws://localhost:7880). Requires --livekit-token, --livekit-room, --livekit-identity.
     #[arg(long)]
@@ -679,6 +703,11 @@ pub struct CoderArgs {
     /// Maximum model turns for the FastContext multi-turn loop (default: 10).
     #[arg(long)]
     pub fastcontext_max_turns: Option<u32>,
+
+    /// Model id for the FastContext endpoint (default `microsoft/FastContext-1.0-4B-RL`).
+    /// Set to your locally-served model tag (e.g. an Ollama model) to run against it.
+    #[arg(long)]
+    pub fastcontext_model: Option<String>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -733,6 +762,11 @@ pub struct DemoArgs {
     /// Run as headless gRPC daemon (systemd-friendly)
     #[arg(long)]
     pub daemon: bool,
+
+    /// Serve the remote-control surface over stdin/stdout (RPC over stdio) instead of --grpc's
+    /// TCP socket. No local TUI is rendered.
+    #[arg(long)]
+    pub stdio: bool,
 
     /// LiveKit WebSocket URL for terminal streaming (e.g. ws://127.0.0.1:7880)
     #[arg(long)]
@@ -874,6 +908,7 @@ impl From<CoderArgs> for Args {
             session_id: a.session_id,
             resume_from: a.resume_from,
             daemon: a.daemon,
+            stdio: a.stdio,
             livekit_url: a.livekit_url,
             livekit_token: a.livekit_token,
             livekit_room: a.livekit_room,
@@ -905,6 +940,7 @@ impl From<CoderArgs> for Args {
             stack_base: a.stack_base,
             fastcontext_url: a.fastcontext_url,
             fastcontext_max_turns: a.fastcontext_max_turns,
+            fastcontext_model: a.fastcontext_model,
         }
     }
 }
@@ -927,6 +963,7 @@ impl From<DemoArgs> for Args {
             session_id: a.session_id,
             resume_from: a.resume_from,
             daemon: a.daemon,
+            stdio: a.stdio,
             livekit_url: a.livekit_url,
             livekit_token: a.livekit_token,
             livekit_room: a.livekit_room,
@@ -958,6 +995,7 @@ impl From<DemoArgs> for Args {
             stack_base: None,
             fastcontext_url: None,
             fastcontext_max_turns: None,
+            fastcontext_model: None,
         }
     }
 }
@@ -1128,7 +1166,11 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         return run_daemon(args, shutdown);
     }
     if args.goal.is_none() {
-        let use_tui = should_run_tui(io::stdin().is_terminal(), io::stderr().is_terminal());
+        // --stdio dedicates real stdin/stdout to RPC framing — never a TTY in practice, but must
+        // still route to run_full_workflow_tui (which serves stdio RPC instead of rendering a
+        // TUI when args.stdio is set), not the plain-mode fallback that reads stdin directly.
+        let use_tui =
+            args.stdio || should_run_tui(io::stdin().is_terminal(), io::stderr().is_terminal());
         if use_tui {
             return run_full_workflow_tui(args, shutdown);
         }
@@ -1156,6 +1198,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         None,
         args.fastcontext_url.as_deref(),
         args.fastcontext_max_turns,
+        args.fastcontext_model.as_deref(),
     );
 
     if args.goal.as_deref() == Some("acceptance-tests") {
@@ -1373,6 +1416,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         None,
         args.fastcontext_url.as_deref(),
         args.fastcontext_max_turns,
+        args.fastcontext_model.as_deref(),
     );
     let has_token = args.livekit_token.is_some();
     let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
@@ -2015,6 +2059,7 @@ fn create_backend(
     _working_dir: Option<&Path>,
     fastcontext_url: Option<&str>,
     fastcontext_max_turns: Option<u32>,
+    fastcontext_model: Option<&str>,
 ) -> SharedBackend {
     log::info!("[tddy-coder] using agent: {}", agent);
     if agent == "fastcontext" {
@@ -2022,12 +2067,13 @@ fn create_backend(
             .unwrap_or("http://localhost:30000")
             .to_string();
         let max_turns = fastcontext_max_turns.unwrap_or(10);
-        log::info!("[tddy-coder] FastContext backend: url={base_url} max_turns={max_turns}");
-        let fc = tddy_discovery::backend::FastContextBackend::new(
-            base_url,
-            "microsoft/FastContext-1.0-4B-RL",
-            max_turns,
+        let model = fastcontext_model
+            .unwrap_or("microsoft/FastContext-1.0-4B-RL")
+            .to_string();
+        log::info!(
+            "[tddy-coder] FastContext backend: url={base_url} model={model} max_turns={max_turns}"
         );
+        let fc = tddy_discovery::backend::FastContextBackend::new(base_url, model, max_turns);
         return SharedBackend::from_arc(Arc::new(fc));
     }
     let backend: AnyBackend = match agent {
@@ -2260,6 +2306,23 @@ fn run_goal_plain(
                     .block_on(engine.get_session(&result.session_id))
                     .map_err(|e| anyhow::anyhow!("get session: {}", e))?
                     .ok_or_else(|| anyhow::anyhow!("session not found"))?;
+                if !waiting_for_input_has_pending_questions(&session.context) {
+                    let session_dir: PathBuf = session
+                        .context
+                        .get_sync("session_dir")
+                        .or_else(|| session.context.get_sync("output_dir"))
+                        .unwrap_or_else(|| {
+                            args.session_dir
+                                .clone()
+                                .unwrap_or_else(|| PathBuf::from("."))
+                        });
+                    let output: Option<String> = session.context.get_sync("output");
+                    if print_output {
+                        print_goal_output(goal, output.as_deref(), &session_dir, recipe.as_ref())?;
+                    }
+                    print_session_info_on_exit(&session_dir);
+                    return Ok(());
+                }
                 let questions: Vec<tddy_core::ClarificationQuestion> = session
                     .context
                     .get_sync("pending_questions")
@@ -2348,6 +2411,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         let codex_acp_path_for_factory = args.codex_acp_cli_path.clone();
         let fastcontext_url_for_factory = args.fastcontext_url.clone();
         let fastcontext_max_turns_for_factory = args.fastcontext_max_turns;
+        let fastcontext_model_for_factory = args.fastcontext_model.clone();
         let mut p = presenter.lock().unwrap();
         p.configure_deferred_workflow_start(
             Box::new(move |agent: &str| {
@@ -2361,6 +2425,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     None,
                     fastcontext_url_for_factory.as_deref(),
                     fastcontext_max_turns_for_factory,
+                    fastcontext_model_for_factory.as_deref(),
                 ))
             }),
             PendingWorkflowStart {
@@ -2388,6 +2453,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             None,
             args.fastcontext_url.as_deref(),
             args.fastcontext_max_turns,
+            args.fastcontext_model.as_deref(),
         );
         presenter.lock().unwrap().start_workflow(
             backend,
@@ -2672,13 +2738,35 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         std::thread::sleep(std::time::Duration::from_millis(10));
     });
 
-    tddy_tui::run_event_loop(
-        conn,
-        shutdown.as_ref(),
-        None,
-        is_debug_mode(args),
-        args.mouse,
-    )?;
+    if args.stdio {
+        // `--stdio` dedicates this process's real stdin/stdout to RPC framing (see
+        // `tddy_core::stdio_safety`) — serve the same remote-control surface as `--grpc`, but
+        // never touch physical fd 1 for TUI rendering (no `run_event_loop`/crossterm here).
+        let handle = tddy_core::PresenterHandle {
+            event_tx: event_tx.clone(),
+            intent_tx: intent_tx.clone(),
+        };
+        let service = tddy_service::proto::remote::TddyRemoteServer::new(
+            tddy_service::TddyRemoteService::new(handle),
+        );
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        rt.block_on(async move {
+            let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_process_stdio(service);
+            endpoint.run().await;
+        });
+        shutdown.store(true, Ordering::Relaxed);
+    } else {
+        tddy_tui::run_event_loop(
+            conn,
+            shutdown.as_ref(),
+            None,
+            is_debug_mode(args),
+            args.mouse,
+        )?;
+    }
 
     presenter_handle.join().expect("presenter thread panicked");
 
@@ -2714,6 +2802,19 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     Ok(())
 }
 
+/// Distinguishes a genuine clarification pause (backend/recipe explicitly asked a question) from
+/// `tddy-graph`'s `FlowRunner` synthesizing `ExecutionStatus::WaitingForInput` because a task
+/// returned `Continue`/`ContinueAndExecute` with no outgoing graph edge (e.g. `FreePromptingRecipe`'s
+/// single `prompting` task, by design, so interactive sessions can keep chatting). Only the former
+/// carries a non-empty `pending_questions` context value.
+fn waiting_for_input_has_pending_questions(
+    context: &tddy_core::workflow::context::Context,
+) -> bool {
+    context
+        .get_sync::<Vec<tddy_core::ClarificationQuestion>>("pending_questions")
+        .is_some_and(|qs| !qs.is_empty())
+}
+
 fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     let agent_str = resolve_agent_for_full_workflow_plain(args)?;
     let backend = create_backend(
@@ -2725,6 +2826,7 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
         None,
         args.fastcontext_url.as_deref(),
         args.fastcontext_max_turns,
+        args.fastcontext_model.as_deref(),
     );
 
     let recipe = recipe_arc_for_args(args)?;
@@ -2868,6 +2970,24 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
                     .block_on(engine.get_session(&result.session_id))
                     .map_err(|e| anyhow::anyhow!("get session: {}", e))?
                     .ok_or_else(|| anyhow::anyhow!("session not found"))?;
+                if !waiting_for_input_has_pending_questions(&session.context) {
+                    let output: Option<String> = session.context.get_sync("output");
+                    let session_dir_final: PathBuf = session
+                        .context
+                        .get_sync("session_dir")
+                        .or_else(|| session.context.get_sync("output_dir"))
+                        .unwrap_or_else(|| session_dir.clone());
+                    let goal = result.current_task_id.clone().unwrap_or_default();
+                    print_goal_output(
+                        &goal,
+                        output.as_deref(),
+                        &session_dir_final,
+                        recipe.as_ref(),
+                    )?;
+                    println!("\nSession dir: {}", session_dir_final.display());
+                    print_session_info_on_exit(&session_dir_final);
+                    return Ok(());
+                }
                 let questions: Vec<tddy_core::ClarificationQuestion> = session
                     .context
                     .get_sync("pending_questions")
@@ -3238,6 +3358,7 @@ mod resume_session_config_tests {
             session_id: None,
             resume_from: Some(sid.to_string()),
             daemon: false,
+            stdio: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3269,6 +3390,7 @@ mod resume_session_config_tests {
             stack_base: None,
             fastcontext_url: None,
             fastcontext_max_turns: None,
+            fastcontext_model: None,
         };
 
         merge_session_coder_config_for_resume(&mut args, &tmp).expect("merge");
@@ -3307,6 +3429,7 @@ mod resume_session_identity_tests {
             session_id: None,
             resume_from: Some(sid.to_string()),
             daemon: false,
+            stdio: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3338,6 +3461,7 @@ mod resume_session_identity_tests {
             stack_base: None,
             fastcontext_url: None,
             fastcontext_max_turns: None,
+            fastcontext_model: None,
         };
 
         assign_default_session_id(&mut args);
@@ -3377,6 +3501,7 @@ mod session_dir_sync_tests {
             session_id: Some(sid.to_string()),
             resume_from: Some(sid.to_string()),
             daemon: false,
+            stdio: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3408,6 +3533,7 @@ mod session_dir_sync_tests {
             stack_base: None,
             fastcontext_url: None,
             fastcontext_max_turns: None,
+            fastcontext_model: None,
         };
 
         sync_session_dir_from_args(&mut args, &tmp).expect("apply");
@@ -3463,6 +3589,7 @@ mod changeset_agent_resume_tests {
             session_id: Some(sid.to_string()),
             resume_from: Some(sid.to_string()),
             daemon: false,
+            stdio: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3494,6 +3621,7 @@ mod changeset_agent_resume_tests {
             stack_base: None,
             fastcontext_url: None,
             fastcontext_max_turns: None,
+            fastcontext_model: None,
         };
 
         apply_agent_from_changeset_if_needed(&mut args).expect("apply");
@@ -3566,6 +3694,7 @@ mod post_tui_workflow_exit_tests {
             session_id: Some(session_id.to_string()),
             resume_from: None,
             daemon: false,
+            stdio: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3597,6 +3726,7 @@ mod post_tui_workflow_exit_tests {
             stack_base: None,
             fastcontext_url: None,
             fastcontext_max_turns: None,
+            fastcontext_model: None,
         }
     }
 
@@ -3834,5 +3964,75 @@ mod recipe_value_parser_tests {
                 result.err()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod waiting_for_input_pending_questions_tests {
+    //! Unit tests: `waiting_for_input_has_pending_questions` — the predicate the plain CLI uses
+    //! to distinguish a genuine clarification pause from `FreePromptingRecipe`'s "Continue with
+    //! no graph successor" pause (which never sets `pending_questions`).
+    //!
+    //! Feature: docs/ft/coder/1-WIP/PRD-2026-07-01-plain-mode-free-prompting-completion.md
+    //! Changeset: docs/dev/1-WIP/2026-07-01-plain-mode-free-prompting-completion.md
+
+    use super::waiting_for_input_has_pending_questions;
+    use tddy_core::workflow::context::Context;
+    use tddy_core::{ClarificationQuestion, QuestionOption};
+
+    fn a_clarification_question() -> ClarificationQuestion {
+        ClarificationQuestion {
+            header: "Scope".to_string(),
+            question: "Which auth method?".to_string(),
+            options: vec![QuestionOption {
+                label: "OAuth".to_string(),
+                description: String::new(),
+            }],
+            multi_select: false,
+            allow_other: true,
+        }
+    }
+
+    /// No `pending_questions` key at all — the "Continue with no successor" pause case.
+    #[test]
+    fn returns_false_when_pending_questions_is_absent() {
+        // Given
+        let context = Context::new();
+
+        // Then
+        assert!(
+            !waiting_for_input_has_pending_questions(&context),
+            "a context with no pending_questions key must not be treated as clarification-pending"
+        );
+    }
+
+    /// A non-empty `pending_questions` — the genuine clarification-request case.
+    #[test]
+    fn returns_true_when_pending_questions_is_non_empty() {
+        // Given
+        let context = Context::new();
+        context.set_sync("pending_questions", vec![a_clarification_question()]);
+
+        // Then
+        assert!(
+            waiting_for_input_has_pending_questions(&context),
+            "a context with a non-empty pending_questions vec must be treated as clarification-pending"
+        );
+    }
+
+    /// An empty `pending_questions` vec — defensive edge case: presence of the key alone must
+    /// not be enough, since `BackendInvokeTask` only ever sets it when non-empty; a future
+    /// producer setting an empty vec by mistake must not be mistaken for a real question.
+    #[test]
+    fn returns_false_when_pending_questions_is_an_empty_vec() {
+        // Given
+        let context = Context::new();
+        context.set_sync("pending_questions", Vec::<ClarificationQuestion>::new());
+
+        // Then
+        assert!(
+            !waiting_for_input_has_pending_questions(&context),
+            "an empty pending_questions vec must not be treated as clarification-pending"
+        );
     }
 }

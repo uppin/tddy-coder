@@ -72,6 +72,21 @@ impl<S: RpcService> StdioEndpoint<S> {
         )
     }
 
+    /// Wrap an already-open duplex byte channel (e.g. pipes obtained from a child process spawned
+    /// by something other than [`spawn_child_endpoint`] — a jailed/sandboxed spawn that needs
+    /// platform-specific process creation `spawn_child_endpoint`'s plain `tokio::process::Command`
+    /// can't express). The caller owns spawning the child and converting its stdio into async
+    /// `AsyncRead`/`AsyncWrite` handles (e.g. via `tokio::net::unix::pipe` wrapping raw fds from a
+    /// blocking `std::process::Child`); this just hosts `service` over them like any other
+    /// transport. Returns a client for calling into that peer.
+    pub fn from_duplex(
+        reader: impl AsyncRead + Unpin + Send + 'static,
+        writer: impl AsyncWrite + Unpin + Send + 'static,
+        service: S,
+    ) -> (Arc<StdioRpcClient>, Self) {
+        Self::new(Box::new(reader), Box::new(writer), service)
+    }
+
     pub(crate) fn from_child_stdio(
         stdin: ChildStdin,
         stdout: ChildStdout,

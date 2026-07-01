@@ -8587,6 +8587,7 @@ dependencies = [
  "tddy-livekit",
  "tddy-rpc",
  "tddy-service",
+ "tddy-stdio",
  "tddy-testing-commons",
  "tddy-tui",
  "tddy-workflow-recipes",
@@ -8706,6 +8707,7 @@ dependencies = [
  "tddy-sandbox-recipes",
  "tddy-sandbox-runner",
  "tddy-service",
+ "tddy-stdio",
  "tddy-task",
  "tddy-testing-commons",
  "tddy-tools",
@@ -8768,6 +8770,7 @@ dependencies = [
  "serde_json",
  "tddy-core",
  "tddy-testing-commons",
+ "tempfile",
  "tokio",
  "wiremock",
 ]
@@ -8779,6 +8782,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "async-stream",
+ "async-trait",
  "clap",
  "crossterm",
  "env_logger",
@@ -8796,6 +8800,7 @@ dependencies = [
  "tddy-livekit-testkit",
  "tddy-rpc",
  "tddy-service",
+ "tddy-stdio",
  "tddy-testing-commons",
  "tddy-tui",
  "tddy-tui-testkit",
@@ -8984,8 +8989,6 @@ name = "tddy-sandbox"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "serde",
- "serde_json",
  "tempfile",
  "walkdir",
 ]
@@ -9105,9 +9108,12 @@ dependencies = [
  "prost 0.13.5",
  "reqwest 0.12.28",
  "serde_json",
+ "tddy-core",
+ "tddy-rpc",
  "tddy-sandbox",
  "tddy-sandbox-recipes",
  "tddy-service",
+ "tddy-stdio",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -9221,6 +9227,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "async-trait",
  "bytes",
  "clap",
  "env_logger",
@@ -9248,13 +9255,18 @@ dependencies = [
  "tddy-build-rust",
  "tddy-build-typescript",
  "tddy-core",
+ "tddy-discovery",
  "tddy-livekit",
+ "tddy-rpc",
  "tddy-sandbox",
  "tddy-service",
+ "tddy-stdio",
  "tddy-testing-commons",
  "tddy-workflow-recipes",
  "tempfile",
  "tokio",
+ "uuid",
+ "wiremock",
 ]
 
 [[package]]

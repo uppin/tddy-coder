@@ -123,7 +123,7 @@ impl WorkflowRecipe for FreePromptingRecipe {
             session_dir.display()
         );
         if let Some(o) = output {
-            log::info!("[free-prompting] output:\n{}", o);
+            println!("{}", o);
         }
         Ok(())
     }

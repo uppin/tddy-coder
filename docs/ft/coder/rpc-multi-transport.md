@@ -41,6 +41,16 @@ both worse than reusing the existing envelope and dispatch machinery.
   (`tddy-livekit-web`).
 - No changes to `tddy-connectrpc` (HTTP/Connect transport) or its consumers.
 
+## Real consumers (2026-07-01 follow-up)
+
+Beyond the `tddy-livekit` refactor this feature originally proved the transport with, real consumers
+now exist: `tddy-coder`/`tddy-demo --stdio` and `tddy-sandbox-runner --stdio` both serve their
+existing remote-control surfaces over this transport, and `tddy-tools`' sandbox tool-IPC dispatch
+rides the same framing over a Unix socket (`StdioEndpoint::from_duplex`, added to wrap
+already-open duplex streams a caller spawned itself — not just a `tokio::process::Command`
+`spawn_child_endpoint` owns). See [grpc-remote-control.md](grpc-remote-control.md#stdio-transport)
+and [tddy-sandbox architecture](../../../packages/tddy-sandbox/docs/architecture.md#control-channel-transport).
+
 ## Reference
 
 Framing/multiplexing approach adapted from the `serial-comm` RPC-over-transport pattern documented

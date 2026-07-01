@@ -77,6 +77,7 @@ fn runner_args(tmp: &Path, claude_binary: &Path) -> (SandboxRunnerArgs, PathBuf)
         egress_shim_port: None,
         grpc_uds: None,
         pty_command: vec![],
+        stdio: false,
     };
     (args, egress)
 }

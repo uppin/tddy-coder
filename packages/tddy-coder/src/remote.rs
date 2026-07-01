@@ -1,16 +1,17 @@
-//! Remote-codebase mode constants and helpers.
+//! Managed-codebase mode constants and helpers.
 //!
-//! When `--remote` is passed to tddy-coder, the agent operates against a remote worktree
-//! via the `mcp__tddy-tools__*` MCP tools instead of native Claude Code filesystem tools.
+//! When `--remote` is passed to tddy-coder, the agent operates against a managed (remote)
+//! worktree via the `mcp__tddy-tools__*` MCP tools instead of native Claude Code filesystem tools.
 
 use std::path::Path;
 
-/// Appended to CLAUDE.md and AGENTS.md in the remote context dir, and to the agent system prompt.
+/// Appended to CLAUDE.md and AGENTS.md in the managed-codebase context dir, and to the agent
+/// system prompt.
 pub const REMOTE_APPENDIX: &str = r#"
 
-## Appendix: Remote Codebase
+## Appendix: Managed Codebase
 
-The real codebase is REMOTE — it is NOT in this local directory.
+The real codebase is MANAGED — it is NOT in this local directory.
 This local directory is read-only and contains only documentation and synced skills.
 
 You MUST use the `mcp__tddy-tools__*` tools (Read, Write, StrReplace, Delete, Grep, Glob, Shell,
@@ -18,7 +19,7 @@ Await, ReadLints, SemanticSearch) for ALL file and shell operations.
 Do not use native tools to interact with the codebase.
 "#;
 
-/// RAII wrapper for the temporary read-only context directory used in remote mode.
+/// RAII wrapper for the temporary read-only context directory used in managed-codebase mode.
 ///
 /// Created by copying source_dir contents into a new tempdir, appending REMOTE_APPENDIX
 /// to CLAUDE.md and AGENTS.md, then making all files read-only (mode 0o444 on Unix).

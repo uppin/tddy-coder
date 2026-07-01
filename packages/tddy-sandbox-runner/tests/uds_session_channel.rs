@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use common::{serve_fake_over_uds, Mode};
 use tddy_sandbox_runner::connect_sandbox_client_uds;
-use tddy_service::tonic_sandbox::EchoRequest;
+use tddy_service::proto::sandbox::EchoRequest;
 
 /// **round_trips_an_echo_over_an_af_unix_socket**: a client built by `connect_sandbox_client_uds`
 /// can call `Echo` against a server bound on a Unix domain socket.
