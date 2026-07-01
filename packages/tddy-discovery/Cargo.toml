@@ -18,3 +18,5 @@ tddy-core = { path = "../tddy-core" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 wiremock = "0.6"
+# subagent_session_red.rs / codebase_access_red.rs: local-filesystem CodebaseAccess fixtures.
+tempfile = "3"

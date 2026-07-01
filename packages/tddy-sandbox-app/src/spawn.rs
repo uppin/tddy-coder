@@ -40,6 +40,76 @@ pub struct SpawnParams {
     /// `mcp__tddy-tools__*` calls, which the host relays against the real `repo` path (see
     /// `bridge::AppToolHandler`). Matches the daemon's sandboxed-session isolation model.
     pub remote_codebase: bool,
+    /// Discovery subagent to wire into the in-jail `tddy-tools --mcp` process, if any.
+    pub subagent: SubagentSpawnConfig,
+}
+
+/// Resolves the effective codebase mode from `--codebase-mode` and the deprecated
+/// `--remote-codebase` boolean alias. Returns `true` for managed mode, `false` for mounted mode.
+///
+/// `--remote-codebase` predates `--codebase-mode` and remains a working alias for
+/// `--codebase-mode managed`; an explicit `--codebase-mode mounted` alongside it is a
+/// contradiction (the caller asked for both at once) and is rejected rather than silently
+/// resolved to either value.
+pub(crate) fn resolve_codebase_mode(
+    codebase_mode: Option<&str>,
+    remote_codebase_flag: bool,
+) -> Result<bool, String> {
+    match codebase_mode {
+        Some("managed") => Ok(true),
+        Some("mounted") => {
+            if remote_codebase_flag {
+                Err(
+                    "conflicting codebase mode: --codebase-mode mounted was given together with \
+                     --remote-codebase (which implies managed mode)"
+                        .to_string(),
+                )
+            } else {
+                Ok(false)
+            }
+        }
+        Some(other) => Err(format!(
+            "unrecognized --codebase-mode value {other:?}; expected \"mounted\" or \"managed\""
+        )),
+        None => Ok(remote_codebase_flag),
+    }
+}
+
+/// Spawn-time discovery-subagent configuration. `discovery_subagent: None` means no subagent is
+/// wired into the session.
+#[derive(Default, Clone)]
+pub(crate) struct SubagentSpawnConfig {
+    pub discovery_subagent: Option<String>,
+    pub fastcontext_url: Option<String>,
+    pub fastcontext_model: Option<String>,
+    pub fastcontext_max_turns: Option<u32>,
+}
+
+/// Builds the `TDDY_SUBAGENT_*` env overlay for the in-jail `tddy-tools --mcp` process from the
+/// spawn-time subagent flags. Empty when no subagent is configured. Only sets a `FASTCONTEXT_*`
+/// key for a field that was actually given — env-var defaulting for absent fields happens on the
+/// reading side (`tddy-tools`), not here.
+pub(crate) fn subagent_env_overlay(
+    config: &SubagentSpawnConfig,
+) -> std::collections::BTreeMap<String, String> {
+    let mut env = std::collections::BTreeMap::new();
+    let Some(ref subagent) = config.discovery_subagent else {
+        return env;
+    };
+    env.insert("TDDY_SUBAGENT".to_string(), subagent.clone());
+    if let Some(ref url) = config.fastcontext_url {
+        env.insert("TDDY_SUBAGENT_FASTCONTEXT_URL".to_string(), url.clone());
+    }
+    if let Some(ref model) = config.fastcontext_model {
+        env.insert("TDDY_SUBAGENT_FASTCONTEXT_MODEL".to_string(), model.clone());
+    }
+    if let Some(max_turns) = config.fastcontext_max_turns {
+        env.insert(
+            "TDDY_SUBAGENT_FASTCONTEXT_MAX_TURNS".to_string(),
+            max_turns.to_string(),
+        );
+    }
+    env
 }
 
 /// Seed `claude_home_dir/.claude/.credentials.json` from the real host `~/.claude` once, so the
@@ -365,13 +435,14 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         egress_shim_port.to_string(),
     ];
 
-    let env = build_sandbox_runner_env(
+    let mut env = build_sandbox_runner_env(
         &scratch_home,
         &scratch_tmp,
         &params.session_id,
         &tool_ipc_socket,
         &egress_dir,
     );
+    env.extend(subagent_env_overlay(&params.subagent));
 
     spawn_trace(
         &session_dir,
@@ -735,5 +806,177 @@ mod tests {
         // Then
         assert_eq!(jail_cwd_remote, explicit_cwd);
         assert_eq!(jail_cwd_local, explicit_cwd);
+    }
+
+    // ─── Managed-codebase mode + discovery subagent wiring ─────────────────────────
+    //
+    // Feature: docs/ft/coder/managed-codebase-subagents.md (criteria 11-12)
+    // Changeset: docs/dev/1-WIP/2026-07-01-changeset-managed-codebase-subagents.md
+
+    /// `--codebase-mode managed` resolves to managed mode (`true`), independent of the deprecated
+    /// `--remote-codebase` boolean flag.
+    #[test]
+    fn resolve_codebase_mode_returns_true_for_explicit_managed_mode() {
+        // Given / When
+        let managed = resolve_codebase_mode(Some("managed"), false)
+            .expect("'managed' must be a valid codebase mode");
+
+        // Then
+        assert!(
+            managed,
+            "--codebase-mode managed must resolve to managed mode"
+        );
+    }
+
+    /// `--codebase-mode mounted` resolves to unmanaged mode (`false`).
+    #[test]
+    fn resolve_codebase_mode_returns_false_for_explicit_mounted_mode() {
+        // Given / When
+        let managed = resolve_codebase_mode(Some("mounted"), false)
+            .expect("'mounted' must be a valid codebase mode");
+
+        // Then
+        assert!(
+            !managed,
+            "--codebase-mode mounted must resolve to unmanaged mode"
+        );
+    }
+
+    /// With no `--codebase-mode` given, the deprecated `--remote-codebase` boolean flag remains a
+    /// working alias for managed mode.
+    #[test]
+    fn resolve_codebase_mode_treats_remote_codebase_flag_as_a_managed_alias() {
+        // Given / When
+        let managed = resolve_codebase_mode(None, true)
+            .expect("the --remote-codebase alias must resolve without error");
+
+        // Then
+        assert!(
+            managed,
+            "--remote-codebase must remain equivalent to --codebase-mode managed"
+        );
+    }
+
+    /// With neither flag given, the default is unmanaged (mounted) mode — today's non-remote
+    /// default behavior is preserved.
+    #[test]
+    fn resolve_codebase_mode_defaults_to_unmanaged_when_neither_flag_is_given() {
+        // Given / When
+        let managed =
+            resolve_codebase_mode(None, false).expect("the default must resolve without error");
+
+        // Then
+        assert!(
+            !managed,
+            "default codebase mode must be unmanaged (mounted)"
+        );
+    }
+
+    /// An explicit `--codebase-mode mounted` together with the deprecated `--remote-codebase` flag
+    /// is a contradictory combination — it must be rejected, not silently resolved to either value.
+    #[test]
+    fn resolve_codebase_mode_errors_when_flags_conflict() {
+        // Given / When
+        let result = resolve_codebase_mode(Some("mounted"), true);
+
+        // Then
+        assert!(
+            result.is_err(),
+            "conflicting --codebase-mode mounted + --remote-codebase must be rejected"
+        );
+    }
+
+    /// An unrecognized `--codebase-mode` value is a typed error, not a silent fallback.
+    #[test]
+    fn resolve_codebase_mode_errors_on_an_unrecognized_value() {
+        // Given / When
+        let result = resolve_codebase_mode(Some("bogus"), false);
+
+        // Then
+        assert!(
+            result.is_err(),
+            "an unrecognized --codebase-mode value must be rejected"
+        );
+    }
+
+    /// With no discovery subagent configured, the env overlay is empty — nothing is threaded into
+    /// the in-jail `tddy-tools --mcp` process.
+    #[test]
+    fn subagent_env_overlay_is_empty_when_no_discovery_subagent_is_configured() {
+        // Given
+        let config = SubagentSpawnConfig::default();
+
+        // When
+        let overlay = subagent_env_overlay(&config);
+
+        // Then
+        assert!(
+            overlay.is_empty(),
+            "overlay must be empty with no discovery subagent configured; got: {overlay:?}"
+        );
+    }
+
+    /// With `--discovery-subagent fastcontext` and all FastContext flags given, every one of them
+    /// is threaded into the `TDDY_SUBAGENT_*` env overlay.
+    #[test]
+    fn subagent_env_overlay_carries_every_configured_fastcontext_field() {
+        // Given
+        let config = SubagentSpawnConfig {
+            discovery_subagent: Some("fastcontext".to_string()),
+            fastcontext_url: Some("http://localhost:30000".to_string()),
+            fastcontext_model: Some("microsoft/FastContext-1.0-4B-RL".to_string()),
+            fastcontext_max_turns: Some(6),
+        };
+
+        // When
+        let overlay = subagent_env_overlay(&config);
+
+        // Then
+        assert_eq!(
+            overlay.get("TDDY_SUBAGENT").map(String::as_str),
+            Some("fastcontext")
+        );
+        assert_eq!(
+            overlay
+                .get("TDDY_SUBAGENT_FASTCONTEXT_URL")
+                .map(String::as_str),
+            Some("http://localhost:30000")
+        );
+        assert_eq!(
+            overlay
+                .get("TDDY_SUBAGENT_FASTCONTEXT_MODEL")
+                .map(String::as_str),
+            Some("microsoft/FastContext-1.0-4B-RL")
+        );
+        assert_eq!(
+            overlay
+                .get("TDDY_SUBAGENT_FASTCONTEXT_MAX_TURNS")
+                .map(String::as_str),
+            Some("6")
+        );
+    }
+
+    /// Optional FastContext fields left unset are simply absent from the overlay — this function
+    /// never invents a default value; env-var defaulting happens on the reading side
+    /// (`tddy-tools`), not here.
+    #[test]
+    fn subagent_env_overlay_omits_unset_optional_fastcontext_fields() {
+        // Given
+        let config = SubagentSpawnConfig {
+            discovery_subagent: Some("fastcontext".to_string()),
+            fastcontext_url: None,
+            fastcontext_model: None,
+            fastcontext_max_turns: None,
+        };
+
+        // When
+        let overlay = subagent_env_overlay(&config);
+
+        // Then
+        assert_eq!(
+            overlay.keys().collect::<Vec<_>>(),
+            vec!["TDDY_SUBAGENT"],
+            "only TDDY_SUBAGENT must be set when the optional fields are all None; got: {overlay:?}"
+        );
     }
 }

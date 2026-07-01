@@ -2,6 +2,14 @@
 
 Release note history for the Coder product area.
 
+## 2026-07-02 — Managed-codebase mode + discovery subagents over MCP
+
+- Renamed the user-facing "remote codebase" concept to **managed-codebase mode** — the context-dir appendix Claude reads now says "MANAGED"/"Managed Codebase" instead of "REMOTE"/"Remote Codebase"; internal identifiers and `TDDY_REMOTE_*` env vars are unchanged for wire stability
+- `tddy-sandbox-app` gains `--codebase-mode {mounted,managed}` as the primary flag (`--remote-codebase` remains a working deprecated alias) plus `--discovery-subagent <name>`, `--fastcontext-url`, `--fastcontext-model`, `--fastcontext-max-turns`
+- New discovery-subagent abstraction in `tddy-discovery` (`SubagentSession`, `CodebaseAccess`, stateful `FastContextSession`, pluggable `SubagentRegistry`) lets a coding agent open a conversation with a lightweight local-model helper (starting with FastContext) instead of spending its own tool-call budget on codebase exploration
+- `tddy-tools`' MCP server exposes three ACP-shaped tools — `subagent_new_session`, `subagent_prompt`, `subagent_cancel` (mirroring ACP's `session/new`/`session/prompt`/`session/cancel`) — gated on `TDDY_SUBAGENT`; the caller (main agent) chooses the conversation id, and the subagent's own internal READ/GLOB/GREP tool loop can read the codebase directly or through the same proxy the main agent's exec tools use
+- Feature: [managed-codebase-subagents.md](managed-codebase-subagents.md)
+
 ## 2026-07-01 — stdio RPC transport for gRPC-hosting binaries
 
 - `tddy-coder`/`tddy-demo` gain a `--stdio` flag serving the existing `TddyRemote` remote-control surface over `tddy-stdio`, running concurrently with `--grpc` (not mutually exclusive — verified empirically, corrected from the original plan)

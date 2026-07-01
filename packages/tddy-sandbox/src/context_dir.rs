@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 /// Appended to CLAUDE.md and AGENTS.md in the sandbox read-only context dir.
 pub const SANDBOX_REMOTE_APPENDIX: &str = r#"
 
-## Appendix: Remote Codebase
+## Appendix: Managed Codebase
 
-The real codebase is REMOTE — it is NOT in this local directory.
+The real codebase is MANAGED — it is NOT in this local directory.
 This local directory is read-only and contains only documentation and synced skills.
 
 You MUST use the `mcp__tddy-tools__*` tools (Read, Write, StrReplace, Delete, Grep, Glob, Shell,

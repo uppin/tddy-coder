@@ -8769,6 +8769,7 @@ dependencies = [
  "serde_json",
  "tddy-core",
  "tddy-testing-commons",
+ "tempfile",
  "tokio",
  "wiremock",
 ]
@@ -9233,6 +9234,7 @@ dependencies = [
  "tddy-build-rust",
  "tddy-build-typescript",
  "tddy-core",
+ "tddy-discovery",
  "tddy-livekit",
  "tddy-rpc",
  "tddy-sandbox",
@@ -9242,6 +9244,8 @@ dependencies = [
  "tddy-workflow-recipes",
  "tempfile",
  "tokio",
+ "uuid",
+ "wiremock",
 ]
 
 [[package]]

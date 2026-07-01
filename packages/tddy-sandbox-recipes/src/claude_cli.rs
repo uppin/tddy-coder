@@ -59,9 +59,23 @@ pub fn claude_runner_env_overlay(scratch_tmp: &Path) -> BTreeMap<String, String>
 const PERMISSION_PROMPT_TOOL: &str = "mcp__tddy-tools__approval_prompt";
 const MCP_CONFIG_FILENAME: &str = "claude-mcp-config.json";
 
-/// `--allowedTools` entries for sandbox claude: `mcp__tddy-tools__*` exec tools + `AskUserQuestion`.
-pub fn build_claude_allowlist() -> Vec<String> {
-    tddy_workflow_recipes::permissions::build_remote_allowlist(workspace_exec_tool_names())
+/// ACP-shaped subagent tools (see docs/ft/coder/managed-codebase-subagents.md) that a sandboxed
+/// Claude must be allowed to call when a discovery subagent is wired into the session.
+const SUBAGENT_TOOLS: &[&str] = &[
+    "mcp__tddy-tools__subagent_new_session",
+    "mcp__tddy-tools__subagent_prompt",
+    "mcp__tddy-tools__subagent_cancel",
+];
+
+/// `--allowedTools` entries for sandbox claude: `mcp__tddy-tools__*` exec tools +
+/// `AskUserQuestion`, plus the subagent tools when `subagent_enabled` is `true`.
+pub fn build_claude_allowlist(subagent_enabled: bool) -> Vec<String> {
+    let mut allowlist =
+        tddy_workflow_recipes::permissions::build_remote_allowlist(workspace_exec_tool_names());
+    if subagent_enabled {
+        allowlist.extend(SUBAGENT_TOOLS.iter().map(|s| s.to_string()));
+    }
+    allowlist
 }
 
 /// Write MCP config registering `tddy-tools --mcp` under a writable scratch directory.
@@ -87,13 +101,16 @@ pub fn write_claude_mcp_config(scratch_dir: &Path, tddy_tools_path: &Path) -> Re
 }
 
 /// Append `--allowedTools`, `--permission-prompt-tool`, and `--mcp-config` for sandbox spawn.
+/// `subagent_enabled` mirrors `tddy_tools::server::subagent_enabled()`'s `TDDY_SUBAGENT` check —
+/// the caller decides, so this crate stays free of an env-reading dependency of its own.
 pub fn append_claude_mcp_args(
     argv: &mut Vec<String>,
     scratch_dir: &Path,
     tddy_tools_path: &Path,
+    subagent_enabled: bool,
 ) -> Result<()> {
     let mcp_path = write_claude_mcp_config(scratch_dir, tddy_tools_path)?;
-    for tool in build_claude_allowlist() {
+    for tool in build_claude_allowlist(subagent_enabled) {
         argv.push("--allowedTools".into());
         argv.push(tool);
     }
@@ -132,7 +149,7 @@ mod tests {
 
     #[test]
     fn claude_allowlist_uses_mcp_prefix_and_excludes_native_tools() {
-        let allowlist = build_claude_allowlist();
+        let allowlist = build_claude_allowlist(false);
         let allowset: HashSet<_> = allowlist.iter().cloned().collect();
 
         for name in workspace_exec_tool_names() {
@@ -147,6 +164,49 @@ mod tests {
             assert!(
                 !allowset.contains(*native),
                 "native tool {native} must not appear un-prefixed in sandbox allowlist"
+            );
+        }
+    }
+
+    /// Feature: docs/ft/coder/managed-codebase-subagents.md (criterion 10)
+    /// Changeset: docs/dev/1-WIP/2026-07-01-changeset-managed-codebase-subagents.md
+    ///
+    /// When a discovery subagent is wired into the session, the sandboxed Claude CLI's
+    /// `--allowedTools` must include the three ACP-shaped subagent tools — otherwise Claude Code
+    /// would have no way to call `subagent_new_session`/`subagent_prompt`/`subagent_cancel` even
+    /// though the MCP server exposes them.
+    #[test]
+    fn claude_allowlist_includes_subagent_tools_when_subagent_is_enabled() {
+        let allowlist = build_claude_allowlist(true);
+        let allowset: HashSet<_> = allowlist.iter().cloned().collect();
+
+        for tool in [
+            "mcp__tddy-tools__subagent_new_session",
+            "mcp__tddy-tools__subagent_prompt",
+            "mcp__tddy-tools__subagent_cancel",
+        ] {
+            assert!(
+                allowset.contains(tool),
+                "allowlist must contain {tool} when a subagent is enabled; got: {allowlist:?}"
+            );
+        }
+    }
+
+    /// The converse of the above: without a subagent wired in, none of the three subagent tools
+    /// should be advertised to Claude — there is nothing behind them to dispatch to.
+    #[test]
+    fn claude_allowlist_omits_subagent_tools_when_subagent_is_disabled() {
+        let allowlist = build_claude_allowlist(false);
+        let allowset: HashSet<_> = allowlist.iter().cloned().collect();
+
+        for tool in [
+            "mcp__tddy-tools__subagent_new_session",
+            "mcp__tddy-tools__subagent_prompt",
+            "mcp__tddy-tools__subagent_cancel",
+        ] {
+            assert!(
+                !allowset.contains(tool),
+                "allowlist must NOT contain {tool} when no subagent is enabled; got: {allowlist:?}"
             );
         }
     }
