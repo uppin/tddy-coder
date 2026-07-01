@@ -72,7 +72,6 @@ pub struct GithubUpdatePullRequestToolInput {
 /// MCP server that handles permission prompts for Claude Code.
 #[derive(Debug, Clone)]
 pub struct PermissionServer {
-    #[allow(dead_code)] // Used by #[tool_router] macro
     tool_router: ToolRouter<Self>,
     socket_path: Option<PathBuf>,
 }
@@ -80,10 +79,28 @@ pub struct PermissionServer {
 impl PermissionServer {
     pub fn new() -> Self {
         let socket_path = permission_relay_socket_path();
+        let mut tool_router = Self::tool_router();
+        // Session-tool transport (sandbox IPC or daemon HTTP) present => forward the
+        // dynamic exec-tool catalog too, so Claude Code sees Read/Write/Shell/etc.
+        // alongside the 3 static tools. Both transport variants use the same static
+        // catalog today (see exec_tool_catalog doc comment for why).
+        if crate::session_tool_client::detect_session_tool_transport().is_some() {
+            tool_router.merge(dynamic_tool_router(&exec_tool_catalog()));
+        }
         Self {
-            tool_router: Self::tool_router(),
+            tool_router,
             socket_path,
         }
+    }
+
+    /// Every tool name currently registered in this server's live `ToolRouter` — the exact
+    /// set `tools/list` will report, including any merged-in dynamic exec tools.
+    pub fn tool_names(&self) -> Vec<String> {
+        self.tool_router
+            .list_all()
+            .into_iter()
+            .map(|t| t.name.to_string())
+            .collect()
     }
 
     /// Allowed dirs from TDDY_SESSION_DIR and TDDY_REPO_DIR (canonicalized).
@@ -396,7 +413,10 @@ impl PermissionServer {
     }
 }
 
-#[tool_handler]
+// Explicit `router = self.tool_router` — the default `#[tool_handler]` expansion calls the
+// static `Self::tool_router()` (the macro-generated router only), which would silently ignore
+// any dynamic tools merged into the instance's `self.tool_router` field by `PermissionServer::new()`.
+#[tool_handler(router = self.tool_router)]
 impl rmcp::ServerHandler for PermissionServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
@@ -478,6 +498,115 @@ pub fn is_native_tool_denied_in_remote_mode(tool_name: &str) -> bool {
 /// `TDDY_SANDBOX_TOOL_IPC` is set, otherwise HTTP to `TDDY_REMOTE_DAEMON_URL`.
 pub async fn dispatch_dynamic_tool(tool_name: &str, args: serde_json::Value) -> String {
     crate::session_tool_client::dispatch_session_tool(tool_name, args).await
+}
+
+/// Static catalog of the "cursor" exec tools forwarded to Claude Code when a session-tool
+/// transport (sandbox IPC or daemon HTTP) is configured. Names/descriptions/schemas mirror
+/// `tddy_daemon::tool_catalog::tool_catalog()` verbatim (adapted from `ToolDef` to
+/// `RemoteToolDef`) — the two must never drift; `exec_tool_catalog_names_match_workspace_exec_tool_names`
+/// and `tddy_daemon`'s own `workspace_exec_tool_names_match_tool_catalog` test both guard this.
+///
+/// TODO: both transport variants currently use this same static catalog rather than live-fetching
+/// the catalog from the daemon over the transport (there is no such message type over
+/// SandboxIpc, and it was deliberately scoped out for DaemonHttp too for now).
+pub fn exec_tool_catalog() -> Vec<RemoteToolDef> {
+    vec![
+        RemoteToolDef {
+            name: "Read".to_string(),
+            description: "Read file contents from the workspace.".to_string(),
+            input_schema_json: r#"{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}}}"#.to_string(),
+        },
+        RemoteToolDef {
+            name: "Write".to_string(),
+            description: "Write file contents to the workspace.".to_string(),
+            input_schema_json: r#"{"type":"object","required":["path","contents"],"properties":{"path":{"type":"string"},"contents":{"type":"string"}}}"#.to_string(),
+        },
+        RemoteToolDef {
+            name: "StrReplace".to_string(),
+            description: "Replace a string in a file.".to_string(),
+            input_schema_json: r#"{"type":"object","required":["path","old_string","new_string"],"properties":{"path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"}}}"#.to_string(),
+        },
+        RemoteToolDef {
+            name: "Delete".to_string(),
+            description: "Delete a file from the workspace.".to_string(),
+            input_schema_json: r#"{"type":"object","required":["path"],"properties":{"path":{"type":"string"}}}"#.to_string(),
+        },
+        RemoteToolDef {
+            name: "Grep".to_string(),
+            description: "Search for a pattern in files.".to_string(),
+            input_schema_json: r#"{"type":"object","required":["pattern"],"properties":{"pattern":{"type":"string"},"path":{"type":"string"},"include":{"type":"string"}}}"#.to_string(),
+        },
+        RemoteToolDef {
+            name: "Glob".to_string(),
+            description: "Find files matching a glob pattern.".to_string(),
+            input_schema_json: r#"{"type":"object","required":["pattern"],"properties":{"pattern":{"type":"string"}}}"#.to_string(),
+        },
+        RemoteToolDef {
+            name: "Shell".to_string(),
+            description: "Run a shell command in the workspace.".to_string(),
+            input_schema_json: r#"{"type":"object","required":["command"],"properties":{"command":{"type":"string"},"block_until_ms":{"type":"integer"}}}"#.to_string(),
+        },
+        RemoteToolDef {
+            name: "Await".to_string(),
+            description: "Wait for a background shell job to complete.".to_string(),
+            input_schema_json: r#"{"type":"object","properties":{"job_id":{"type":"string"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer"},"block_until_ms":{"type":"integer"}}}"#.to_string(),
+        },
+        RemoteToolDef {
+            name: "ReadLints".to_string(),
+            description: "Read linting diagnostics for the workspace.".to_string(),
+            input_schema_json: r#"{"type":"object","properties":{"path":{"type":"string"}}}"#.to_string(),
+        },
+        RemoteToolDef {
+            name: "SemanticSearch".to_string(),
+            description: "Search the codebase semantically.".to_string(),
+            input_schema_json: r#"{"type":"object","required":["query"],"properties":{"query":{"type":"string"},"path":{"type":"string"}}}"#.to_string(),
+        },
+    ]
+}
+
+/// Build a live `ToolRouter<PermissionServer>` from an arbitrary catalog of [`RemoteToolDef`]s.
+///
+/// Pure: reads no env vars, special-cases nothing. Each catalog entry becomes one dynamically
+/// dispatched `ToolRoute` whose handler forwards the call name + arguments to
+/// [`dispatch_dynamic_tool`] and converts the resulting JSON string into a `CallToolResult`.
+pub fn dynamic_tool_router(
+    catalog: &[RemoteToolDef],
+) -> rmcp::handler::server::router::tool::ToolRouter<PermissionServer> {
+    use rmcp::handler::server::router::tool::{ToolRoute, ToolRouter};
+
+    let mut router = ToolRouter::new();
+    for def in catalog {
+        let schema_value: serde_json::Value = serde_json::from_str(&def.input_schema_json)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "RemoteToolDef '{}': invalid input_schema_json: {}",
+                    def.name, e
+                )
+            });
+        let schema_map = schema_value.as_object().cloned().unwrap_or_else(|| {
+            panic!(
+                "RemoteToolDef '{}': input_schema_json must be a JSON object",
+                def.name
+            )
+        });
+        let tool = rmcp::model::Tool::new(
+            def.name.clone(),
+            def.description.clone(),
+            std::sync::Arc::new(schema_map),
+        );
+        let route = ToolRoute::new_dyn(tool, move |ctx| {
+            let tool_name = ctx.name().to_string();
+            let arguments = serde_json::Value::Object(ctx.arguments.clone().unwrap_or_default());
+            Box::pin(async move {
+                let result_string = dispatch_dynamic_tool(&tool_name, arguments).await;
+                Ok(rmcp::model::CallToolResult::success(vec![
+                    rmcp::model::Content::text(result_string),
+                ]))
+            })
+        });
+        router.add_route(route);
+    }
+    router
 }
 
 #[cfg(test)]

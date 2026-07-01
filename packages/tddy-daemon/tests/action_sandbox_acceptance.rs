@@ -5,7 +5,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use prost::Message;
 use tddy_actions::build_action_fields_to_spec;
@@ -99,33 +98,40 @@ async fn call_tasks<Req: Message, Resp: Message + Default>(
     Resp::decode(&chunks[0][..]).expect("decode response")
 }
 
+/// Await the task's actual completion event via `WatchTask`'s terminal-status frame — the
+/// stream only closes once the registry reports a terminal status, so this has no fixed
+/// timeout or polling interval to outrun under load (see `TaskServiceImpl::watch_task`).
 async fn wait_for_terminal_task(
     bridge: &RpcBridge<TaskServiceServer<TaskServiceImpl>>,
     task_id: &str,
 ) -> GetTaskResponse {
-    for _ in 0..100 {
-        let resp: GetTaskResponse = call_tasks(
-            bridge,
-            "GetTask",
-            GetTaskRequest {
-                session_token: GOOD_TOKEN.to_string(),
-                task_id: task_id.to_string(),
-                daemon_instance_id: String::new(),
-            },
-        )
-        .await;
-        let status = resp.task.as_ref().map(|t| t.status).unwrap_or(0);
-        if matches!(
-            status,
-            x if x == TaskStatusProto::TaskStatusCompleted as i32
-                || x == TaskStatusProto::TaskStatusFailed as i32
-                || x == TaskStatusProto::TaskStatusCancelled as i32
-        ) {
-            return resp;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    panic!("task {task_id} did not reach terminal status within timeout");
+    let events: Vec<TaskOutputEvent> = call_streaming(
+        bridge,
+        "WatchTask",
+        WatchTaskRequest {
+            session_token: GOOD_TOKEN.to_string(),
+            task_id: task_id.to_string(),
+            channel_id: String::new(),
+            daemon_instance_id: String::new(),
+        },
+    )
+    .await;
+    assert!(
+        events
+            .last()
+            .is_some_and(|e| e.status != TaskStatusProto::TaskStatusUnknown as i32),
+        "WatchTask stream must end with a terminal-status event; got {events:?}"
+    );
+    call_tasks(
+        bridge,
+        "GetTask",
+        GetTaskRequest {
+            session_token: GOOD_TOKEN.to_string(),
+            task_id: task_id.to_string(),
+            daemon_instance_id: String::new(),
+        },
+    )
+    .await
 }
 
 fn tddy_coder_binary() -> PathBuf {
@@ -327,7 +333,11 @@ async fn sandboxed_tddy_coder_writes_under_output_dir() {
     // Then
     let terminal = wait_for_terminal_task(&harness.task_bridge, &start.task_id).await;
     let task = terminal.task.expect("task");
-    assert_eq!(task.exit_code, 0, "tddy-coder must exit 0: {}", task.result_json);
+    assert_eq!(
+        task.exit_code, 0,
+        "tddy-coder must exit 0: {}",
+        task.result_json
+    );
     let sessions_dir = output_path.join("sessions");
     assert!(
         sessions_dir.is_dir(),
@@ -361,7 +371,13 @@ async fn sandboxed_build_action_with_ro_mount() {
             working_dir: None,
         },
     );
-    spec = attach_sandbox_request(spec, output_path.clone(), Some("generic".into()), vec![], None);
+    spec = attach_sandbox_request(
+        spec,
+        output_path.clone(),
+        Some("generic".into()),
+        vec![],
+        None,
+    );
 
     // When
     let handle = SandboxRuntime::spawn(&registry, spec, "sandbox-build")
@@ -379,19 +395,31 @@ async fn sandboxed_build_action_with_ro_mount() {
     assert_eq!(written, "built");
 }
 
+/// Await the task's actual completion event via its `status_watch()` channel — blocks on the
+/// next real status transition rather than sleep-polling against a fixed timeout budget.
 async fn wait_for_task_exit_code(registry: &TaskRegistry, task_id: &str) -> i32 {
     use tddy_task::{TaskId, TaskStatus};
-    for _ in 0..100 {
-        if let Some(handle) = registry.get(&TaskId(task_id.to_string())).await {
-            match handle.status() {
-                TaskStatus::Completed { exit_code } => return exit_code.unwrap_or(0),
-                TaskStatus::Failed { .. } | TaskStatus::Cancelled => return -1,
-                _ => {}
-            }
+    let handle = registry
+        .get(&TaskId(task_id.to_string()))
+        .await
+        .expect("task must be registered before waiting on it");
+    let mut status_rx = handle.status_watch();
+    loop {
+        if status_rx.borrow().is_terminal() {
+            break;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        status_rx
+            .changed()
+            .await
+            .expect("status watch closed before task reached a terminal status");
     }
-    panic!("task {task_id} did not reach terminal status");
+    match handle.status() {
+        TaskStatus::Completed { exit_code } => exit_code.unwrap_or(0),
+        TaskStatus::Failed { .. } | TaskStatus::Cancelled => -1,
+        TaskStatus::Pending | TaskStatus::Running => {
+            unreachable!("loop above only exits once status_watch reports a terminal status")
+        }
+    }
 }
 
 #[tokio::test]
@@ -474,7 +502,11 @@ async fn sandboxed_bash_pty_action_streams_output() {
 
     // Then
     let task = terminal.task.expect("task");
-    assert_eq!(task.exit_code, 0, "pty bash must exit 0: {}", task.result_json);
+    assert_eq!(
+        task.exit_code, 0,
+        "pty bash must exit 0: {}",
+        task.result_json
+    );
     let output = String::from_utf8_lossy(&replay);
     assert!(
         output.contains("pty_ok"),

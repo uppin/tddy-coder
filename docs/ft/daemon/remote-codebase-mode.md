@@ -75,11 +75,16 @@ remote `tddy-daemon`) so that my agent can plan, read, write, and test code in a
 ### tddy-tools dynamic MCP proxy
 
 15. With `TDDY_REMOTE_*` env vars set and a running relay daemon, `tddy-tools --mcp` reports a
-    `tools/list` result that includes `approval_prompt` and `submit` (static) **plus** exactly the
-    tools returned by `ListExecTools` — no extra tools, no hardcoded remote-tool names.
-16. Renaming a tool in the daemon's catalog (changing a `ToolDef.name`) causes the next
-    `tddy-tools --mcp` startup to advertise the new name and not the old one.
-17. A `call_tool` request for `approval_prompt` or `submit` is handled locally (no relay call made).
+    `tools/list` result that includes `approval_prompt`, `github_create_pull_request`, and
+    `github_update_pull_request` (static) **plus** exactly the tools returned by `ListExecTools` —
+    no extra tools, no hardcoded remote-tool names.
+16. The tddy-tools-side exec-tool catalog (`exec_tool_catalog()`) is a static list mirroring the
+    daemon's `tool_catalog()`; a test (`exec_tool_catalog_names_match_workspace_exec_tool_names`)
+    guards against the two drifting apart, but a daemon-side catalog rename requires a matching
+    manual update in `tddy-tools` — there is no live catalog fetch over either transport
+    (`SandboxIpc` has no such message type; it was deliberately scoped out for `DaemonHttp` too).
+17. A `call_tool` request for `approval_prompt`, `github_create_pull_request`, or
+    `github_update_pull_request` is handled locally (no relay call made).
 18. A `call_tool` request for a dynamically-discovered tool name is forwarded to the relay via
     `ExecuteTool` and the `result_json` is returned as the tool result.
 19. If `TDDY_REMOTE_*` env vars are not set, `list_tools` returns only the static tools; dynamic

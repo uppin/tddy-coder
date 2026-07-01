@@ -21,8 +21,8 @@ use tddy_service::proto::connection::{
 use tddy_service::tonic_sandbox::sandbox_service_server::{SandboxService, SandboxServiceServer};
 use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::tonic_sandbox::{
-    EchoRequest, EchoResponse, EchoStreamFrame, EgressRequest, EgressResponse, SessionFrame,
-    TunnelClose, TunnelData, TunnelOpen, TunnelOpenAck,
+    EchoRequest, EchoResponse, EchoStreamFrame, EgressRequest, EgressResponse, SessionEnded,
+    SessionFrame, TunnelClose, TunnelData, TunnelOpen, TunnelOpenAck,
 };
 
 use tddy_sandbox::{
@@ -222,6 +222,9 @@ struct SandboxSessionRelay {
     terminal_subscribed: Mutex<bool>,
     /// PTY bytes produced before the host sends `SubscribeTerminal` (broadcast drops them).
     terminal_backlog: Mutex<VecDeque<Bytes>>,
+    /// Set once the pty command exits; delivered on the next `HostPoll`, after the terminal
+    /// backlog is drained. See `signal_session_ended`.
+    session_ended: Mutex<Option<i32>>,
     egress_seq: AtomicU64,
     /// Server-stream sender, captured when the host opens the `SessionChannel`. Tunnel frames are
     /// pushed here directly (not poll-gated) so relayed TLS bytes don't incur the `HostPoll` cadence.
@@ -394,6 +397,15 @@ impl SandboxSessionRelay {
         self.terminal_backlog.lock().unwrap().push_back(chunk);
     }
 
+    /// Tell the host the pty command exited, so it stops `HostPoll`-ing and lets the session
+    /// channel close. Always deferred to the next `HostPoll` (`handle_host_poll` delivers it
+    /// exactly once) rather than pushed immediately: an immediate push on `outbound` could race
+    /// ahead of terminal output still sitting in `terminal_backlog` awaiting a poll to flush it,
+    /// since the reader breaks its loop as soon as it sees `SessionEnded`.
+    fn signal_session_ended(&self, exit_code: i32) {
+        *self.session_ended.lock().unwrap() = Some(exit_code);
+    }
+
     fn handle_host_poll(
         &self,
         out_tx: &tokio::sync::mpsc::UnboundedSender<Result<SessionFrame, Status>>,
@@ -432,23 +444,30 @@ impl SandboxSessionRelay {
             }
         }
 
-        if !*self.terminal_subscribed.lock().unwrap() {
-            return;
+        if *self.terminal_subscribed.lock().unwrap() {
+            loop {
+                let chunk = self.terminal_backlog.lock().unwrap().pop_front();
+                let Some(chunk) = chunk else { break };
+                if chunk.is_empty() {
+                    continue;
+                }
+                let frame = SessionFrame {
+                    payload: Some(SessionPayload::TerminalOutput(SessionTerminalOutput {
+                        data: chunk.to_vec(),
+                    })),
+                };
+                if out_tx.send(Ok(frame)).is_err() {
+                    break;
+                }
+            }
         }
-        loop {
-            let chunk = self.terminal_backlog.lock().unwrap().pop_front();
-            let Some(chunk) = chunk else { break };
-            if chunk.is_empty() {
-                continue;
-            }
-            let frame = SessionFrame {
-                payload: Some(SessionPayload::TerminalOutput(SessionTerminalOutput {
-                    data: chunk.to_vec(),
-                })),
-            };
-            if out_tx.send(Ok(frame)).is_err() {
-                break;
-            }
+
+        // Sent last: the reader breaks its loop on `SessionEnded`, so any trailing terminal output
+        // must already be queued ahead of it in this same batch, not behind it.
+        if let Some(exit_code) = self.session_ended.lock().unwrap().take() {
+            let _ = out_tx.send(Ok(SessionFrame {
+                payload: Some(SessionPayload::SessionEnded(SessionEnded { exit_code })),
+            }));
         }
     }
 }
@@ -576,10 +595,7 @@ fn run_generic_pty_thread(
 ) -> Result<i32> {
     boot_log(
         "INFO",
-        &format!(
-            "pty: openpty generic cwd={} argv={argv:?}",
-            cwd.display(),
-        ),
+        &format!("pty: openpty generic cwd={} argv={argv:?}", cwd.display(),),
     );
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -606,7 +622,7 @@ fn run_generic_pty_thread(
 
     let master_reader = Arc::clone(&master);
     let relay_reader = Arc::clone(&relay);
-    std::thread::spawn(move || {
+    let reader_thread = std::thread::spawn(move || {
         let reader = master_reader.lock().unwrap().try_clone_reader();
         let mut r = match reader {
             Ok(r) => r,
@@ -658,6 +674,12 @@ fn run_generic_pty_thread(
             1
         }
     };
+    // Join the reader thread first: it only returns after observing EOF on the pty master, which
+    // guarantees every byte the child ever wrote has already been pushed to the relay. Without
+    // this, `signal_session_ended` could race ahead of trailing output still sitting in the pty's
+    // kernel buffer, since `child.wait()` returning doesn't imply the reader thread has drained it.
+    let _ = reader_thread.join();
+    relay.signal_session_ended(exit_code);
     Ok(exit_code)
 }
 
@@ -1219,9 +1241,10 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
             "INFO",
             &format!("boot: spawn_claude_pty binary={}", args.claude_binary),
         );
-        let tddy_tools_path = args.tddy_tools_path.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("tddy_tools_path is required for claude pty mode")
-        })?;
+        let tddy_tools_path = args
+            .tddy_tools_path
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("tddy_tools_path is required for claude pty mode"))?;
         let pty_state = spawn_claude_pty(SpawnClaudePtyParams {
             context_dir: &args.context_dir,
             cwd: &cwd,
@@ -1467,9 +1490,6 @@ mod tests {
             "--pty-command=pty_ok",
         ])
         .expect("argv must parse");
-        assert_eq!(
-            args.pty_command,
-            vec!["/bin/sh", "-c", "printf", "pty_ok"]
-        );
+        assert_eq!(args.pty_command, vec!["/bin/sh", "-c", "printf", "pty_ok"]);
     }
 }
