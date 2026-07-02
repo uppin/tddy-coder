@@ -205,6 +205,8 @@ allowed_agents:
         permission_mode: String::new(),
         stack_parent: String::new(),
         sandbox: false,
+        managed_codebase: false,
+        specialized_agents: vec![],
     });
 
     // When

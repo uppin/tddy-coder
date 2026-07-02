@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
-import type { AgentInfo, ConnectionService, ProjectEntry, SessionEntry, ToolInfo } from "../../gen/connection_pb";
+import type { AgentInfo, ConnectionService, ProjectEntry, SessionEntry, SubagentInfo, ToolInfo } from "../../gen/connection_pb";
 import { CLAUDE_CLI_MODELS } from "../../constants/claudeCliModels";
 import { prStackOrchestrators } from "../../utils/stackParents";
 import { Button } from "../ui/button";
@@ -70,10 +70,23 @@ export function CreateSessionPane({
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [tools, setTools] = useState<ToolInfo[]>([]);
+  const [subagents, setSubagents] = useState<SubagentInfo[]>([]);
+  const [selectedSubagents, setSelectedSubagents] = useState<string[]>([]);
+  const [managedCodebaseExpanded, setManagedCodebaseExpanded] = useState(false);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Managed codebase is implied by having at least one specialized subagent selected — see
+  // docs/ft/coder/specialized-subagents.md.
+  const managedCodebase = selectedSubagents.length > 0;
+
+  const toggleSubagent = (name: string) => {
+    setSelectedSubagents((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
+    );
+  };
 
   // Load data on mount
   useEffect(() => {
@@ -89,6 +102,21 @@ export function CreateSessionPane({
       })
       .catch(() => {
         // Session list is best-effort; failing to fetch it just hides the parent picker.
+      });
+
+    // Fetch subagents separately (best-effort, like sessions above) — a daemon that doesn't
+    // implement ListSubagents yet, or a test double that doesn't stub it, must not block the
+    // core project/agent/tool fields from loading.
+    client
+      .listSubagents({})
+      .then((resp) => {
+        if (!cancelled) {
+          setSubagents(resp.subagents as SubagentInfo[]);
+        }
+      })
+      .catch(() => {
+        // Specialized subagents are best-effort; failing to fetch them just leaves the
+        // "Managed codebase" section with no options to pick.
       });
 
     Promise.all([
@@ -205,6 +233,8 @@ export function CreateSessionPane({
           permissionMode,
           initialPrompt,
           sandbox,
+          managedCodebase,
+          specializedAgents: selectedSubagents,
         });
       }
       onCreated(res.sessionId);
@@ -387,6 +417,46 @@ export function CreateSessionPane({
               onChange={(e) => setInitialPrompt(e.target.value)}
               placeholder="Optional initial prompt"
             />
+          </div>
+
+          {/* Managed codebase — specialized subagents (see docs/ft/coder/specialized-subagents.md) */}
+          <div>
+            <button
+              type="button"
+              data-testid="create-session-managed-codebase-toggle"
+              onClick={() => setManagedCodebaseExpanded((prev) => !prev)}
+              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+              aria-expanded={managedCodebaseExpanded}
+            >
+              <span>{managedCodebaseExpanded ? "▾" : "▸"}</span>
+              Managed codebase
+            </button>
+            {managedCodebaseExpanded && (
+              <div
+                data-testid="create-session-managed-codebase-section"
+                className="mt-2 space-y-1 pl-4"
+              >
+                {subagents.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No specialized subagents available</p>
+                ) : (
+                  subagents.map((sa) => (
+                    <label
+                      key={sa.name}
+                      className="flex items-center gap-2 text-sm text-muted-foreground"
+                    >
+                      <input
+                        data-testid={`create-session-subagent-checkbox-${sa.name}`}
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-input"
+                        checked={selectedSubagents.includes(sa.name)}
+                        onChange={() => toggleSubagent(sa.name)}
+                      />
+                      {sa.label || sa.name}
+                    </label>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         </>
       )}

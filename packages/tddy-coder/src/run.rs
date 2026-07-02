@@ -212,6 +212,14 @@ fn resolve_tddy_data_dir(args: &Args) -> PathBuf {
         })
 }
 
+/// Resolve the specialized-agent def set (builtin + `<tddyhome>/agents/*.yaml`) for `create_backend`
+/// — see docs/ft/coder/specialized-subagents.md.
+fn resolve_specialized_agent_defs(
+    args: &Args,
+) -> Vec<tddy_discovery::agent_def::SpecializedAgentDef> {
+    tddy_discovery::agent_def::resolve_agent_defs(&resolve_tddy_data_dir(args).join("agents"))
+}
+
 /// CLI `--output-dir` when set, else `"."` (derive repo root from cwd / default sessions base).
 fn cli_output_dir_param(args: &Args) -> PathBuf {
     args.output_dir
@@ -542,6 +550,11 @@ pub struct CoderArgs {
     pub log_level: Option<String>,
 
     /// Agent backend: claude, claude-acp, cursor, codex, codex-acp, fastcontext, or stub. Omit to choose interactively at startup.
+    // TODO(docs/ft/coder/specialized-subagents.md AC14): this static allowlist rejects a
+    // user-defined specialized-agent name (e.g. "my-explorer") before create_backend ever sees
+    // it. Making this dynamic requires scanning <tddyhome>/agents at clap-parse time, before
+    // --tddy-data-dir itself has been resolved from the parsed args — a chicken-and-egg ordering
+    // problem with no test coverage yet; deferred rather than implemented speculatively.
     #[arg(
         long,
         value_parser = ["claude", "claude-acp", "cursor", "codex", "codex-acp", "fastcontext", "stub"]
@@ -1199,6 +1212,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         args.fastcontext_url.as_deref(),
         args.fastcontext_max_turns,
         args.fastcontext_model.as_deref(),
+        &resolve_specialized_agent_defs(args),
     );
 
     if args.goal.as_deref() == Some("acceptance-tests") {
@@ -1417,6 +1431,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         args.fastcontext_url.as_deref(),
         args.fastcontext_max_turns,
         args.fastcontext_model.as_deref(),
+        &tddy_discovery::agent_def::resolve_agent_defs(&tddy_data_dir.join("agents")),
     );
     let has_token = args.livekit_token.is_some();
     let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
@@ -2060,8 +2075,27 @@ fn create_backend(
     fastcontext_url: Option<&str>,
     fastcontext_max_turns: Option<u32>,
     fastcontext_model: Option<&str>,
+    // Resolved specialized-agent defs (builtin + <tddyhome>/agents/*.yaml — see
+    // docs/ft/coder/specialized-subagents.md).
+    specialized_agent_defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
 ) -> SharedBackend {
     log::info!("[tddy-coder] using agent: {}", agent);
+    if let Some(def) = specialized_agent_defs.iter().find(|d| d.name == agent) {
+        // Explicit CLI overrides still win over a resolved def's values.
+        let base_url = fastcontext_url
+            .map(str::to_string)
+            .unwrap_or_else(|| def.base_url.clone());
+        let max_turns = fastcontext_max_turns.unwrap_or(def.max_turns);
+        let model = fastcontext_model
+            .map(str::to_string)
+            .unwrap_or_else(|| def.model.clone());
+        log::info!(
+            "[tddy-coder] FastContext backend (from resolved def '{}'): url={base_url} model={model} max_turns={max_turns}",
+            def.name
+        );
+        let fc = tddy_discovery::backend::FastContextBackend::new(base_url, model, max_turns);
+        return SharedBackend::from_arc(Arc::new(fc));
+    }
     if agent == "fastcontext" {
         let base_url = fastcontext_url
             .unwrap_or("http://localhost:30000")
@@ -2110,6 +2144,152 @@ fn create_backend(
         _ => AnyBackend::Claude(ClaudeCodeBackend::new().with_progress(on_progress)),
     };
     SharedBackend::from_any(backend)
+}
+
+#[cfg(test)]
+mod create_backend_specialized_agent_tests {
+    //! Unit tests: `create_backend("fastcontext", ...)` migrating to a resolved
+    //! `SpecializedAgentDef` instead of hardcoded literals / explicit CLI-only overrides.
+    //!
+    //! Feature: docs/ft/coder/specialized-subagents.md (criteria 13-14)
+    //! Changeset: docs/dev/1-WIP/specialized-subagents.md
+    //!
+    //! No mocking crate is added for this: a minimal raw-socket one-shot HTTP responder is
+    //! sufficient to observe which endpoint `FastContextBackend` actually called.
+
+    use super::create_backend;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use tddy_core::backend::{CodingBackend, InvokeRequest};
+    use tddy_discovery::agent_def::SpecializedAgentDef;
+
+    /// Binds an ephemeral local port, accepts exactly one HTTP request, and replies with a
+    /// FastContext-shaped `<final_answer>` completion. Returns the `http://127.0.0.1:PORT` base
+    /// url to hand to the backend under test.
+    fn spawn_one_shot_final_answer_server(answer: &str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let port = listener.local_addr().expect("local_addr").port();
+        let body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": format!("<final_answer>\n{answer}\n</final_answer>")
+                },
+                "finish_reason": "stop"
+            }]
+        })
+        .to_string();
+        std::thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            // Drain the request (headers + body) so the client's write completes.
+            let mut buf = [0u8; 8192];
+            let _ = stream.read(&mut buf);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
+        });
+        format!("http://127.0.0.1:{port}")
+    }
+
+    /// With no explicit `--fastcontext-url`/`--fastcontext-model` CLI override, `create_backend`
+    /// must build its `FastContextBackend` from a resolved `SpecializedAgentDef` named
+    /// `"fastcontext"` — not the hardcoded `http://localhost:30000` default. Today it always uses
+    /// the hardcoded default, so invoking against the def's endpoint fails to connect there and
+    /// the call never reaches the mock server below.
+    #[tokio::test]
+    async fn create_backend_builds_fastcontext_backend_from_the_resolved_defs_model_and_base_url() {
+        // Given — a resolved "fastcontext" def pointing at a local mock server, no CLI overrides
+        let base_url = spawn_one_shot_final_answer_server("src/lib.rs:1-1");
+        let def = SpecializedAgentDef {
+            name: "fastcontext".to_string(),
+            label: None,
+            model: "a-locally-served-model".to_string(),
+            base_url: base_url.clone(),
+            system_prompt: None,
+            system_prompt_path: None,
+            tools: vec![],
+            max_turns: 4,
+        };
+
+        // When
+        let backend = create_backend(
+            "fastcontext",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // no --fastcontext-url override
+            None, // no --fastcontext-max-turns override
+            None, // no --fastcontext-model override
+            std::slice::from_ref(&def),
+        );
+        let result = backend
+            .invoke(InvokeRequest {
+                prompt: "Where is the entry point?".to_string(),
+                ..InvokeRequest::default()
+            })
+            .await;
+
+        // Then — the backend reached the resolved def's endpoint and returned its citation
+        assert!(
+            result.is_ok(),
+            "create_backend must route to the resolved fastcontext def's base_url, not the \
+             hardcoded http://localhost:30000 default; got: {:?}",
+            result.err()
+        );
+        assert_eq!(result.unwrap().output, "src/lib.rs:1-1");
+    }
+
+    /// AC14: `--agent <name>` must accept any name present in the resolved specialized-agent def
+    /// set, not only the literal `"fastcontext"`. Today, a custom-named def (e.g. `my-explorer`)
+    /// is not recognized at all — `create_backend` falls through to the default Claude backend
+    /// instead of building a `FastContextBackend` from that def.
+    #[tokio::test]
+    async fn create_backend_recognizes_any_resolved_specialized_agent_name_not_only_fastcontext() {
+        // Given — a def named "my-explorer" (not "fastcontext")
+        let def = SpecializedAgentDef {
+            name: "my-explorer".to_string(),
+            label: None,
+            model: "qwen2.5-coder:7b".to_string(),
+            base_url: "http://127.0.0.1:1".to_string(),
+            system_prompt: None,
+            system_prompt_path: None,
+            tools: vec![],
+            max_turns: 4,
+        };
+
+        // When
+        let backend = create_backend(
+            "my-explorer",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::slice::from_ref(&def),
+        );
+
+        // Then — a specialized agent def name must build a fastcontext-shaped backend, not
+        // silently fall back to the default Claude backend
+        assert_eq!(
+            backend.name(),
+            "fastcontext",
+            "create_backend must recognize 'my-explorer' as a resolved specialized-agent def and \
+             build a FastContextBackend from it, not silently fall back to the default Claude \
+             backend (got backend name: {:?})",
+            backend.name()
+        );
+    }
 }
 
 /// Resolve conversation_output and debug_output defaults to session_dir/logs/ when not set.
@@ -2412,6 +2592,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         let fastcontext_url_for_factory = args.fastcontext_url.clone();
         let fastcontext_max_turns_for_factory = args.fastcontext_max_turns;
         let fastcontext_model_for_factory = args.fastcontext_model.clone();
+        let specialized_agent_defs_for_factory = resolve_specialized_agent_defs(args);
         let mut p = presenter.lock().unwrap();
         p.configure_deferred_workflow_start(
             Box::new(move |agent: &str| {
@@ -2426,6 +2607,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     fastcontext_url_for_factory.as_deref(),
                     fastcontext_max_turns_for_factory,
                     fastcontext_model_for_factory.as_deref(),
+                    &specialized_agent_defs_for_factory,
                 ))
             }),
             PendingWorkflowStart {
@@ -2454,6 +2636,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             args.fastcontext_url.as_deref(),
             args.fastcontext_max_turns,
             args.fastcontext_model.as_deref(),
+            &resolve_specialized_agent_defs(args),
         );
         presenter.lock().unwrap().start_workflow(
             backend,
@@ -2827,6 +3010,7 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
         args.fastcontext_url.as_deref(),
         args.fastcontext_max_turns,
         args.fastcontext_model.as_deref(),
+        &resolve_specialized_agent_defs(args),
     );
 
     let recipe = recipe_arc_for_args(args)?;

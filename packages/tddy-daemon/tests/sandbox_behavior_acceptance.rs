@@ -148,6 +148,8 @@ fn sandbox_start_request() -> StartSessionRequest {
         permission_mode: String::new(),
         stack_parent: String::new(),
         sandbox: true,
+        managed_codebase: false,
+        specialized_agents: vec![],
     }
 }
 
