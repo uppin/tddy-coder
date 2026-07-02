@@ -175,16 +175,16 @@ message StartSessionRequest {
   bool sandbox = 16;
   // Discovery subagent to wire into a sandboxed claude-cli session (e.g. "fastcontext"). Empty =
   // no subagent. Only meaningful with session_type="claude-cli" and sandbox=true.
-  string discovery_subagent = 17;
+  string discovery_subagent = 19;
   // FastContext discovery-subagent endpoint override. Empty = subagent's own default.
-  string fastcontext_url = 18;
+  string fastcontext_url = 20;
   // FastContext discovery-subagent model id override. Empty = subagent's own default.
-  string fastcontext_model = 19;
+  string fastcontext_model = 21;
   // FastContext discovery-subagent per-prompt turn budget override. 0 = subagent's own default.
-  uint32 fastcontext_max_turns = 20;
+  uint32 fastcontext_max_turns = 22;
   // Exec tools the wired-in discovery subagent replaces (comma-separated, e.g. "grep,glob").
   // Empty = subagent's declared default (see docs/ft/coder/managed-codebase-subagents.md § Tool replacement).
-  string subagent_replaces = 21;
+  string subagent_replaces = 23;
 }
 message StartSessionResponse {
   string session_id = 1;
