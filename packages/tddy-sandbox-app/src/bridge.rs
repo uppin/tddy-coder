@@ -97,7 +97,10 @@ pub async fn run_terminal_bridge(
     let _raw = RawMode::enable();
     let shutdown = Arc::new(AtomicBool::new(false));
 
-    // Real stdin → the jail PTY. A blocking read thread feeds the relay's stdin channel.
+    // Real stdin → the jail PTY. A blocking read thread feeds the relay's stdin channel. Clone the
+    // sender first: the resize-polling loop below also needs to push in-band OSC resize frames
+    // down the same channel, but the thread closure takes ownership of its own sender.
+    let resize_tx = stdin_tx.clone();
     let shutdown_stdin = Arc::clone(&shutdown);
     std::thread::spawn(move || {
         let mut buf = [0u8; 256];
@@ -126,13 +129,25 @@ pub async fn run_terminal_bridge(
         }
     });
 
-    // Block until stdin EOF/Ctrl-C, the relay ends, or an OS Ctrl-C arrives.
+    // Block until stdin EOF/Ctrl-C, the relay ends, or an OS Ctrl-C arrives. Also polls the local
+    // terminal size on the same cadence, so a live window resize reaches the jail PTY via the same
+    // in-band OSC convention ordinary keystrokes already use (no dedicated proto message).
+    let mut last_sent_size = (rows, cols);
     while !shutdown.load(Ordering::Relaxed) {
         if relay.is_finished() {
             break;
         }
         tokio::select! {
-            _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+            _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                let current = terminal_size_or_default();
+                if let Some(frame) = resize_frame_if_changed(current, last_sent_size) {
+                    if resize_tx.send(frame).is_err() {
+                        log::warn!(target: "tddy_sandbox_app::bridge", "resize frame: stdin channel closed");
+                    } else {
+                        last_sent_size = current;
+                    }
+                }
+            }
             res = tokio::signal::ctrl_c() => {
                 match res {
                     Ok(()) => {
@@ -153,7 +168,27 @@ pub async fn run_terminal_bridge(
     Ok(())
 }
 
-fn terminal_size_or_default() -> (u16, u16) {
+/// Encode a live terminal resize as the `\x1b]resize;{cols};{rows}\x07` OSC sequence understood by
+/// `tddy_sandbox_runner`'s `strip_resize_escape`, when `current` differs from `last_sent`.
+///
+/// Both tuples are `(rows, cols)` (matching [`terminal_size_or_default`]'s return order); the OSC
+/// payload itself is `cols;rows`, matching the wire format `tddy_daemon::claude_cli_session::
+/// strip_resize` and `tddy_tools::pty_relay::encode_resize_osc` already use.
+fn resize_frame_if_changed(current: (u16, u16), last_sent: (u16, u16)) -> Option<Bytes> {
+    if current == last_sent {
+        return None;
+    }
+    let (rows, cols) = current;
+    Some(Bytes::from(
+        format!("\x1b]resize;{cols};{rows}\x07").into_bytes(),
+    ))
+}
+
+/// The host's own controlling terminal size, `(rows, cols)`. Read both here (to size the PTY
+/// live-resize polling loop) and from `spawn::spawn_claude_sandbox` (to open the jail's PTY at
+/// the right size from the start, via `--initial-cols`/`--initial-rows`) — same ioctl, same
+/// controlling terminal, just called at two different points before/after attach.
+pub(crate) fn terminal_size_or_default() -> (u16, u16) {
     #[cfg(unix)]
     unsafe {
         let mut ws: libc::winsize = std::mem::zeroed();
@@ -197,5 +232,66 @@ impl Drop for RawMode {
         unsafe {
             libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &self.saved);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // resize_frame_if_changed — decides whether a polled host terminal size (as returned by
+    // `terminal_size_or_default`, `(rows, cols)`) differs from the size last sent to the jail,
+    // and if so encodes the `\x1b]resize;{cols};{rows}\x07` OSC sequence (the same wire format
+    // `tddy_daemon::claude_cli_session::strip_resize` and `tddy_tools::pty_relay::encode_resize_osc`
+    // already use) so the sandboxed PTY can be resized live instead of only once at attach time.
+    // -----------------------------------------------------------------------
+
+    /// No terminal resize occurred since the last frame was sent — nothing should go out over
+    /// the stdin channel to avoid spamming the jail with no-op resize escapes.
+    #[test]
+    fn returns_none_when_terminal_size_is_unchanged() {
+        // Given
+        let last_sent = (57, 170);
+        let current = (57, 170);
+
+        // When
+        let frame = resize_frame_if_changed(current, last_sent);
+
+        // Then
+        assert_eq!(frame, None);
+    }
+
+    /// A genuine terminal resize is encoded as the OSC escape sequence the sandbox-runner's
+    /// `strip_resize_escape` understands, with cols before rows in the payload.
+    #[test]
+    fn returns_the_encoded_osc_resize_sequence_when_size_changes() {
+        // Given
+        let last_sent = (24, 80);
+        let current = (30, 100);
+
+        // When
+        let frame = resize_frame_if_changed(current, last_sent);
+
+        // Then
+        assert_eq!(
+            frame,
+            Some(Bytes::from_static(b"\x1b]resize;100;30\x07"))
+        );
+    }
+
+    /// A change in rows alone (columns unchanged) still counts as a resize — a naive
+    /// implementation that only compares columns would miss this.
+    #[test]
+    fn detects_a_size_change_when_only_rows_differ() {
+        // Given
+        let last_sent = (24, 80);
+        let current = (40, 80);
+
+        // When
+        let frame = resize_frame_if_changed(current, last_sent);
+
+        // Then
+        assert_eq!(frame, Some(Bytes::from_static(b"\x1b]resize;80;40\x07")));
     }
 }

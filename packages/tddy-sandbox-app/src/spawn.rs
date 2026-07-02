@@ -459,6 +459,12 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         &context_dir,
     );
 
+    // Read the host's own controlling terminal size now, before `bridge::run_terminal_bridge`
+    // hands stdin over to the jail — so the jail's PTY opens at the right size from the very
+    // first frame instead of starting at a hardcoded default and waiting on a live resize (which
+    // never fires if the user's terminal never actually changes size after attach) to correct it.
+    let (initial_rows, initial_cols) = crate::bridge::terminal_size_or_default();
+
     let runner_argv = vec![
         sandbox_runner_path,
         "--session-id".into(),
@@ -485,6 +491,10 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         grpc_listen_port.to_string(),
         "--egress-shim-port".into(),
         egress_shim_port.to_string(),
+        "--initial-cols".into(),
+        initial_cols.to_string(),
+        "--initial-rows".into(),
+        initial_rows.to_string(),
     ];
 
     let mut env = build_sandbox_runner_env(
