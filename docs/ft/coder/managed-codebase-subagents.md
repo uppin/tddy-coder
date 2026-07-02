@@ -78,6 +78,29 @@ tool-call budget exploring the repo — and keep talking to that same subagent a
 questions in one session, so that discovery stays fast and cheap without giving the main agent
 direct filesystem access.
 
+## Tool replacement (subagent-declared)
+
+Wiring in a subagent is additive-only today: the three `subagent_*` tools are added, but the main
+agent keeps its full exec-tool set, so nothing steers it toward actually using the subagent instead
+of grepping/globbing the codebase itself.
+
+A subagent can declare the exec tools it **replaces** (FastContext replaces `Grep`/`Glob` — its own
+internal READ/GLOB/GREP loop already covers that ground). When a subagent with a non-empty replaced
+set is wired in:
+
+- **Enforcement (hard):** the replaced tools are dropped from the sandboxed Claude CLI's
+  `--allowedTools` before the `mcp__tddy-tools__` prefix is applied — a direct call to a replaced
+  tool is impossible, not merely discouraged.
+- **Guidance (soft):** the managed-codebase appendix in CLAUDE.md/AGENTS.md is rendered to say those
+  tools are unavailable and name the subagent that must be used instead.
+
+The declared set has a per-subagent default (`tddy_discovery::subagent_replaced_tools`), carried as
+`TDDY_SUBAGENT_REPLACES` into the jail. There is no caller-facing override for it (nor for a
+subagent's `model`/`base_url`/`max_turns`) — all of it comes exclusively from the resolved agent's
+YAML def (or the builtin `fastcontext` def); the earlier `--fastcontext-url`/`--fastcontext-model`/
+`--fastcontext-max-turns`/`--subagent-replaces` flags and their `StartSessionRequest`/
+`SessionMetadata` equivalents were removed (see criterion 24).
+
 ## Acceptance Criteria
 
 ### Subagent session lifecycle (`tddy-discovery`)
@@ -123,9 +146,99 @@ direct filesystem access.
 
 11. `--codebase-mode managed` is accepted and is equivalent to today's `--remote-codebase`; the
     latter remains a working (deprecated) alias.
-12. `--discovery-subagent fastcontext` (with `--fastcontext-url`/`--fastcontext-model`/
-    `--fastcontext-max-turns`) is threaded into the spawned sandbox's environment so the in-jail
-    `tddy-tools --mcp` process constructs a `fastcontext` subagent on demand.
+12. `--specialized-agent fastcontext` is threaded into the spawned sandbox's environment so the
+    in-jail `tddy-tools --mcp` process constructs a `fastcontext` subagent on demand, using that
+    def's own YAML-declared `base_url`/`model`/`max_turns` (see criterion 24 — there is no
+    caller-facing override).
+
+### Tool replacement (`tddy-discovery`, `tddy-sandbox`, `tddy-sandbox-recipes`, `tddy-sandbox-app`)
+
+13. `tddy_discovery::subagent_replaced_tools("fastcontext")` returns `["Grep", "Glob"]`; an unknown
+    subagent name returns an empty set (no panic, no fabricated tool name).
+14. `tddy_discovery::resolve_replaced_tools(name, override_csv)` returns the declared default when
+    `override_csv` is `None` or empty, and the override's tool names (normalized to the exec
+    catalog's casing) when non-empty — the override always wins over the default, never merges with
+    it. A token that doesn't match a known exec tool is dropped rather than passed through.
+15. `tddy_sandbox_recipes::build_claude_allowlist(subagent_enabled, replaced)` omits
+    `mcp__tddy-tools__<Tool>` for every `Tool` in `replaced`, while every other exec tool from
+    `tddy_sandbox::workspace_exec_tool_names()` (plus `AskUserQuestion`, plus the subagent tools when
+    `subagent_enabled`) is still present. An empty `replaced` slice reproduces today's full-exec
+    allowlist exactly (no regression for sessions without a replacing subagent).
+16. `tddy_sandbox::context_dir::sandbox_remote_appendix(subagent, replaced)` — when `replaced` is
+    non-empty — states that those tools are not available as direct tools and names the subagent
+    that must be used for them, in addition to (not instead of) listing the still-available exec
+    tools. When `replaced` is empty, the rendered text is unchanged from today's appendix.
+17. ~~`tddy-sandbox-app`'s `subagent_env_overlay` sets `TDDY_SUBAGENT_REPLACES` only when an
+    explicit override is given~~ — superseded by criterion 24: there is no override anymore.
+    `TDDY_SUBAGENT_REPLACES` always carries the resolved def's own declared `replaces`
+    (normalized), set unconditionally whenever exactly one agent is wired.
+18. ~~`tddy-daemon`'s own sandboxed-session path threads `StartSessionRequest`'s
+    `fastcontext_url`/`fastcontext_model`/`fastcontext_max_turns`/`subagent_replaces` fields~~ —
+    those fields were removed (criterion 24), along with the `discovery_subagent` field itself
+    (criterion 24) and its parallel `TDDY_SUBAGENT_FASTCONTEXT_*` env mechanism. `specialized_agents`
+    (even a single-element array) is the only wiring path, for both new-session start and resume.
+
+### Tool replacement, generalized to the specialized-agent array
+
+[specialized-subagents.md](specialized-subagents.md) generalized subagent wiring from one hardcoded
+name to an array of YAML-defined `SpecializedAgentDef`s, but shipped with no tool-replacement
+wiring for that array path — only the single-name `discovery_subagent` path (criteria 13-18 above,
+since removed) enforced/rendered replaced tools. The following criteria connect the two: every
+specialized agent in the array can declare its own replaced-tool set, and `tddy-sandbox-app` is
+fully migrated onto the array model.
+
+19. `SpecializedAgentDef` gains a `replaces: Vec<String>` field (`#[serde(default)]` — absent in
+    YAML defaults to `[]`, replacing nothing). `builtin_fastcontext_def()` sets
+    `replaces: ["Grep", "Glob"]`, matching criterion 13's single-name default exactly (single
+    source of truth — `tddy_discovery::subagent::subagent_replaced_tools("fastcontext")` now derives
+    from this field rather than a separate hardcoded literal).
+20. `tddy_discovery::subagent::normalize_replaced_tools(tokens)` trims, case-insensitively matches
+    against the canonical exec-tool catalog, canonicalizes casing, drops unrecognized tokens, and
+    de-duplicates preserving first-occurrence order.
+    `resolve_replaced_tools_for_defs(defs: &[SpecializedAgentDef])` unions every def's own
+    `replaces` list through that same normalization — the array-model counterpart to criterion 14's
+    single-name `resolve_replaced_tools`.
+21. `tddy_sandbox::context_dir::sandbox_remote_appendix(replacements: &[SubagentReplacement])`
+    accepts one entry per active agent (`SubagentReplacement { name, replaced }`) and renders a
+    per-agent breakdown — each agent named next to the tools it specifically replaces, not a single
+    flattened list — plus an "pass `agent: "<name>"` to select which subagent" hint when more than
+    one agent is active. An empty `replacements` slice (or one where every entry's `replaced` is
+    empty) reproduces today's unchanged appendix (no regression for sessions without a replacing
+    subagent). `SandboxContextDir::create_with_subagent` takes the same `&[SubagentReplacement]`
+    slice, replacing its old single `(subagent: Option<&str>, replaced: &[&str])` signature.
+22. `tddy-daemon` has a single wiring path: `specialized_agents` (array — even a single-element
+    array selects exactly one agent). `ConnectionServiceImpl::resolve_specialized_agent_defs`
+    resolves `specialized_agents` names once per call (unknown name ⇒ `InvalidArgument`, naming the
+    unresolvable agent); `specialized_subagent_env` builds the `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON`
+    env pair from the already-resolved defs. The per-agent `SubagentReplacement` list feeds
+    `prepare_context_dir_with_subagent` for both `start_sandboxed_claude_cli_session` and
+    `relaunch_sandboxed_runner` (the latter takes a `specialized_agents: &[String]` parameter, so a
+    resumed session re-resolves and re-wires the same defs it started with). There is no
+    `discovery_subagent` field, and therefore no mutual-exclusivity concern to guard against.
+23. `SessionMetadata` has a `specialized_agents: Vec<String>` field
+    (`#[serde(default, skip_serializing_if = "Vec::is_empty")]`) — omitted from `.session.yaml` when
+    empty, defaults to empty for legacy files without the key. `resume_sandboxed_claude_cli_session`
+    reads `meta.specialized_agents` and passes it straight through to `relaunch_sandboxed_runner`
+    (criterion 22), so a resumed session's specialized-agent wiring survives a daemon restart. There
+    is no `discovery_subagent` field on `SessionMetadata` to fold in.
+24. `tddy-sandbox-app` is migrated off the single-subagent-only flag set onto the array model:
+    `--specialized-agent <name>` (repeatable) + `--agents-dir` (default `<session-base>/agents`) is
+    the only way to wire a subagent in — **no backwards compatibility was retained**.
+    `--discovery-subagent` (the deprecated single-name alias) was removed entirely, not merely
+    deprecated: from `tddy-sandbox-app`'s CLI, from `StartSessionRequest`'s proto field 19, from
+    `SessionMetadata`, and from `tddy-daemon`'s request handling — a caller wanting exactly one agent
+    passes a single-element `specialized_agents`/`--specialized-agent` value. **The legacy
+    `--fastcontext-url`/`--fastcontext-model`/`--fastcontext-max-turns`/`--subagent-replaces`
+    override flags were also removed entirely** (from `tddy-sandbox-app`'s CLI and
+    `SubagentSpawnConfig`, from `StartSessionRequest`'s proto fields 20-23 — now `reserved` — and
+    daemon threading, and from `SessionMetadata`): every specialized agent's configuration comes
+    exclusively from its resolved YAML def (or the builtin `fastcontext` def), with no
+    caller-facing override at any layer. `spawn::subagent_env_overlay(defs)` emits `TDDY_SUBAGENT`
+    (comma names) + `TDDY_SUBAGENTS_JSON` (serialized defs) for any number of agents, plus
+    `TDDY_SUBAGENT_REPLACES` in the single-agent case (always the def's own declared `replaces`) —
+    the same env shape `tddy-sandbox-runner` and `tddy-tools --mcp` already consume via
+    `TDDY_SUBAGENTS_JSON` (criterion 9). This closes out `docs/ft/coder/specialized-subagents.md`
+    ACs 11-12 (previously tracked as unimplemented in `docs/dev/TODO.md`).
 
 ## Non-goals (out of scope for v1)
 
@@ -143,3 +256,7 @@ direct filesystem access.
   [specialized-subagents.md](specialized-subagents.md) for the daemon-driven web UI (a collapsible
   "Managed codebase" multi-select in session creation); the standalone `tddy-sandbox-app` CLI
   picker remains flag-driven only (tracked in `docs/dev/TODO.md`).
+- Extending tool-replacement enforcement to the `tddy-coder --remote` path (that path does not wire
+  subagents at all today — see `docs/dev/TODO.md`).
+- Per-tool replacement policies beyond a flat replaced-set (e.g. partial replacement of `Grep` for
+  some file types only).

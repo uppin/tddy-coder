@@ -271,6 +271,7 @@ mod tests {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }

@@ -83,23 +83,16 @@ struct Args {
     #[arg(long)]
     codebase_mode: Option<String>,
 
-    /// Discovery subagent to wire into the session (e.g. `fastcontext`). When set, Claude gains
-    /// the `subagent_new_session`/`subagent_prompt`/`subagent_cancel` MCP tools (see
-    /// docs/ft/coder/managed-codebase-subagents.md).
-    #[arg(long)]
-    discovery_subagent: Option<String>,
+    /// Specialized agent to wire into the session (e.g. `fastcontext`), repeatable for multiple
+    /// agents. When set, Claude gains the `subagent_new_session`/`subagent_prompt`/
+    /// `subagent_cancel` MCP tools (see docs/ft/coder/specialized-subagents.md).
+    #[arg(long = "specialized-agent")]
+    specialized_agent: Vec<String>,
 
-    /// FastContext discovery-subagent endpoint (default: `http://localhost:30000`).
+    /// Directory to resolve named agents from, in addition to the builtins (default:
+    /// `<session-base>/agents`).
     #[arg(long)]
-    fastcontext_url: Option<String>,
-
-    /// FastContext discovery-subagent model id (default: `microsoft/FastContext-1.0-4B-RL`).
-    #[arg(long)]
-    fastcontext_model: Option<String>,
-
-    /// FastContext discovery-subagent per-prompt turn budget (default: 10).
-    #[arg(long)]
-    fastcontext_max_turns: Option<u32>,
+    agents_dir: Option<PathBuf>,
 
     /// Enable debug logging for tddy sandbox components (HTTP/gRPC frame traces stay quiet).
     #[arg(short, long)]
@@ -165,14 +158,18 @@ async fn main() -> Result<()> {
             "codebase_mode=managed: repo not mounted; Claude reaches it only via mcp__tddy-tools__* calls"
         );
     }
+    let agents_dir = args
+        .agents_dir
+        .unwrap_or_else(|| session_base.join("agents"));
     let subagent = SubagentSpawnConfig {
-        discovery_subagent: args.discovery_subagent,
-        fastcontext_url: args.fastcontext_url,
-        fastcontext_model: args.fastcontext_model,
-        fastcontext_max_turns: args.fastcontext_max_turns,
+        specialized_agents: args.specialized_agent,
+        agents_dir,
     };
-    if let Some(ref name) = subagent.discovery_subagent {
-        eprintln!("discovery_subagent={name}");
+    if !subagent.specialized_agents.is_empty() {
+        eprintln!(
+            "specialized_agents={}",
+            subagent.specialized_agents.join(",")
+        );
     }
 
     let spawned = tokio::select! {

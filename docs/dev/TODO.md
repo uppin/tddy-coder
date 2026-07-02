@@ -2,6 +2,15 @@
 
 ## Future Enhancements
 
+### tddy-coder (source: subagent-tool-replacement changeset, 2026-07-02)
+
+- **Extend subagent tool-replacement to the `--remote` path** — `packages/tddy-coder/src/remote.rs`'s `RemoteContextDir`/`REMOTE_APPENDIX` and `build_remote_allowlist` have no subagent concept at all today (no `SUBAGENT_TOOLS`, no `subagent_*` wiring in `run_remote`). Extending the tool-replacement mechanism there requires wiring subagent support into that path first — deferred to keep this changeset scoped to the sandbox/daemon managed path where subagents already exist.
+- **Per-tool replacement policies** — the replaced-tool set is a flat list today (e.g. all of `Grep`, unconditionally). A future refinement could scope replacement (e.g. only for certain file types or path prefixes) rather than an all-or-nothing per-tool switch.
+
+### tddy-vm / tddy-daemon (discovered while verifying the subagent-tool-replacement changeset, 2026-07-02)
+
+- **`vm_service_acceptance.rs`'s `BuildVmImage` tests hang in the standard nix dev shell** — `build_vm_image_adapter_still_delivers_progress_messages`, `build_vm_image_streams_progress_messages`, and `vm_build_task_appears_in_registry_after_build_call` (`packages/tddy-daemon/tests/vm_service_acceptance.rs`) all assume `BUILDROOT_DIR` is unset so `run_buildroot_pipeline` (`packages/tddy-vm/src/build.rs:968-976`) takes the fast `STAGE_ERROR` path. `./dev`'s nix shell unconditionally exports `BUILDROOT_DIR` to a real Buildroot source tree, so these tests instead fall through to a real `make olddefconfig`/`make -j<nproc>` build (via Docker on macOS) — effectively hanging (or taking a very long time) rather than failing fast. Pre-existing, unrelated to any code in this changeset; not fixed here because the right fix (mock/stub the pipeline at a lower level, or have the dev shell not export `BUILDROOT_DIR` for test runs) needs a decision from whoever owns the VM-build feature. Workaround used during this changeset's verification: `cargo test -- --skip build_vm_image_adapter_still_delivers_progress_messages --skip build_vm_image_streams_progress_messages --skip vm_build_task_appears_in_registry_after_build_call`.
+
 ### tddy-sandbox-cgroups (source: finish-stdio-ipc-migration changeset, 2026-07-02)
 
 - **Verify `--stdio` jail-spawn piping through a real Linux jail** — `spawn_plan` now pipes
@@ -10,9 +19,10 @@
   `#[cfg(target_os = "linux")]`-gated and the dev environment that made this change has no Linux
   box); needs a real-jail run in Linux CI to confirm the daemon's now-stdio-only session control
   channel (`docs/dev/1-WIP/finish-stdio-ipc-migration.md`) actually works cross-platform.
+
 ### tddy-sandbox-app (source: specialized-subagents changeset, 2026-07-02)
 
-- **`--specialized-agent` CLI flag + deprecated aliases** — the standalone `tddy-sandbox-app` CLI still only supports the single hardcoded `--discovery-subagent`/`--fastcontext-*` flags from #254; it was not migrated to the new `SpecializedAgentDef`/`TDDY_SUBAGENTS_JSON` model this changeset introduces for the MCP registry, `tddy-coder`, and the daemon. Deferred because no acceptance/unit test was written for this specific CLI surface (the changeset's test budget focused on the daemon-driven UI path); implementing it without test coverage would be speculative. See `docs/ft/coder/specialized-subagents.md` (Design overview) for the intended shape.
+- ~~`--specialized-agent` CLI flag + deprecated aliases~~ — done (2026-07-02, multi-agent tool-replacement changeset; overrides and the deprecated alias fully removed 2026-07-02 in a follow-up cleanup — see below). `tddy-sandbox-app` takes repeatable `--specialized-agent <name>` + `--agents-dir`, resolves them via `spawn::resolve_specialized_agents`, and threads the resolved array into the jail as `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` via `spawn::subagent_env_overlay`. There is no `--discovery-subagent` alias and no `--fastcontext-*`/`--subagent-replaces` override flags — all configuration comes exclusively from the resolved agent's YAML def. See `docs/ft/coder/managed-codebase-subagents.md` and `docs/ft/coder/specialized-subagents.md`.
 - **`--agent` CLI validation for custom specialized-agent names (`tddy-coder`)** — `create_backend` recognizes any resolved specialized-agent name, but `packages/tddy-coder/src/run.rs`'s clap `value_parser` on `--agent` still hardcodes a fixed allowlist and rejects a custom name (e.g. `my-explorer`) before `create_backend` ever runs. Fixing it requires resolving `<tddyhome>/agents` before `--tddy-data-dir` itself is parsed from CLI args — an ordering problem — and has no dedicated test (only `create_backend` itself is tested directly, bypassing clap). See the `TODO` comment at the `Args.agent` field.
 
 ### tddy-core (source: stdio-transport-for-grpc-binaries changeset, 2026-07-01)

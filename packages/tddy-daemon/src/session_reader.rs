@@ -115,6 +115,7 @@ mod tests {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            specialized_agents: Vec::new(),
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 

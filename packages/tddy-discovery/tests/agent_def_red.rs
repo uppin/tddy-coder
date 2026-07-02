@@ -100,6 +100,38 @@ fn builtin_fastcontext_def_matches_todays_shipped_defaults() {
     );
 }
 
+/// The builtin `fastcontext` def declares `Grep`/`Glob` as tools it replaces on the main agent —
+/// this is the single source of truth `subagent_replaced_tools("fastcontext")` derives from (see
+/// docs/ft/coder/managed-codebase-subagents.md § Tool replacement, AC19).
+#[test]
+fn builtin_fastcontext_def_declares_grep_and_glob_in_replaces() {
+    // When
+    let def = builtin_fastcontext_def();
+
+    // Then
+    assert_eq!(def.replaces, vec!["Grep".to_string(), "Glob".to_string()]);
+}
+
+/// A YAML def without a `replaces:` key deserializes to an empty list — absent means "replaces
+/// nothing", not a parse error.
+#[test]
+fn agent_def_replaces_field_defaults_to_empty_when_absent() {
+    // Given
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_yaml(
+        dir.path(),
+        "my-explorer.yaml",
+        "name: my-explorer\nmodel: qwen2.5-coder:7b\n",
+    );
+
+    // When
+    let defs = load_agent_defs(dir.path());
+
+    // Then
+    assert_eq!(defs.len(), 1, "expected exactly one loaded def: {defs:?}");
+    assert_eq!(defs[0].replaces, Vec::<String>::new());
+}
+
 /// A user-defined `<tddyhome>/agents/fastcontext.yaml` (or any def named `fastcontext`) overrides
 /// the builtin def of the same name — user config always wins over the shipped default.
 #[test]

@@ -47,6 +47,10 @@ pub struct SessionMetadata {
     /// When true, the claude-cli session runs inside a platform sandbox (darwin Seatbelt).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<bool>,
+    /// Specialized-agent names wired into a sandboxed claude-cli session (array model). Empty for
+    /// non-subagent sessions, legacy-single-subagent sessions, and legacy files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub specialized_agents: Vec<String>,
 }
 
 pub const SESSION_METADATA_FILENAME: &str = ".session.yaml";
@@ -110,6 +114,7 @@ pub fn write_initial_tool_session_metadata(
         activity_status: opts.activity_status,
         hook_token: opts.hook_token,
         sandbox: opts.sandbox,
+        specialized_agents: Vec::new(),
     };
     write_session_metadata(session_dir, &metadata)
 }
@@ -414,6 +419,97 @@ previous_session_id: {prev}
         assert!(
             serde_yaml::from_str::<SessionMetadata>(&yaml).is_ok(),
             "SessionMetadata must accept optional previous_session_id and deserialize from .session.yaml (PRD session chaining)"
+        );
+    }
+
+    /// `specialized_agents` (array-of-agent-names model) survives a write/read round-trip through
+    /// `.session.yaml` — needed so a daemon-hosted sandboxed claude-cli session can reconstruct its
+    /// specialized-agent config on resume.
+    #[test]
+    fn specialized_agents_round_trips_through_session_yaml() {
+        let tmp = std::env::temp_dir().join(format!(
+            "tddy-session-meta-specialized-rt-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&tmp);
+        let session_dir = tmp.join("sessions").join("sess-specialized-rt");
+        fs::create_dir_all(&session_dir).unwrap();
+
+        let metadata = SessionMetadata {
+            session_id: "sess-specialized-rt".to_string(),
+            project_id: "proj-specialized".to_string(),
+            created_at: "2026-07-02T10:00:00Z".to_string(),
+            updated_at: "2026-07-02T10:00:00Z".to_string(),
+            status: "active".to_string(),
+            repo_path: Some("/tmp/worktrees/specialized".to_string()),
+            pid: Some(1234),
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("claude-cli".to_string()),
+            model: Some("claude-sonnet-4-6".to_string()),
+            activity_status: None,
+            hook_token: None,
+            sandbox: Some(true),
+            specialized_agents: vec!["fastcontext".to_string(), "my-linter".to_string()],
+        };
+        write_session_metadata(&session_dir, &metadata).unwrap();
+
+        let read = read_session_metadata(&session_dir).unwrap();
+        assert_eq!(
+            read.specialized_agents,
+            vec!["fastcontext".to_string(), "my-linter".to_string()]
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// `specialized_agents` is omitted from the YAML when empty (no key present in file).
+    #[test]
+    fn specialized_agents_omitted_from_yaml_when_empty() {
+        let tmp = std::env::temp_dir().join(format!(
+            "tddy-session-meta-specialized-empty-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&tmp);
+        let session_dir = tmp.join("sessions").join("sess-specialized-empty");
+        fs::create_dir_all(&session_dir).unwrap();
+
+        write_initial_tool_session_metadata(
+            &session_dir,
+            InitialToolSessionMetadataOpts {
+                project_id: "proj-specialized-empty".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let yaml_text =
+            std::fs::read_to_string(session_dir.join(SESSION_METADATA_FILENAME)).unwrap();
+        assert!(
+            !yaml_text.contains("specialized_agents"),
+            "specialized_agents must not appear in YAML when empty; got:\n{yaml_text}"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Legacy `.session.yaml` without `specialized_agents` must still deserialize, defaulting to
+    /// an empty vec (`#[serde(default)]`).
+    #[test]
+    fn legacy_session_yaml_without_specialized_agents_defaults_to_empty() {
+        let yaml = r#"session_id: old-sess
+project_id: proj-legacy
+created_at: "2026-01-01T00:00:00Z"
+updated_at: "2026-01-01T00:00:00Z"
+status: active
+"#;
+        let meta: SessionMetadata =
+            serde_yaml::from_str(yaml).expect("legacy YAML must deserialise");
+        assert!(
+            meta.specialized_agents.is_empty(),
+            "specialized_agents must default to empty vec for legacy sessions"
         );
     }
 }

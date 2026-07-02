@@ -53,6 +53,13 @@ pub struct SpecializedAgentDef {
     pub tools: Vec<SubagentTool>,
     #[serde(default = "default_max_turns")]
     pub max_turns: u32,
+    /// Main-agent exec-catalog tools this subagent replaces (e.g. "Grep","Glob") — canonical
+    /// casing normalized at resolution time (see `crate::subagent::normalize_replaced_tools`), not
+    /// at load time. Empty = replaces nothing. NOT the same universe as `tools` above (this
+    /// subagent's own internal Read/Glob/Grep loop) — this names *main-agent* exec-catalog tools,
+    /// a ten-value superset.
+    #[serde(default)]
+    pub replaces: Vec<String>,
 }
 
 /// The always-available default: identical to today's shipped FastContext defaults
@@ -68,7 +75,15 @@ pub fn builtin_fastcontext_def() -> SpecializedAgentDef {
         system_prompt_path: None,
         tools: default_tools(),
         max_turns: default_max_turns(),
+        replaces: vec!["Grep".to_string(), "Glob".to_string()],
     }
+}
+
+/// Every builtin specialized-agent def, always available regardless of `<tddyhome>/agents/`'s
+/// contents. `v1` ships exactly one (`fastcontext`); a future builtin is one more entry here, not a
+/// schema rework.
+pub fn builtin_agent_defs() -> Vec<SpecializedAgentDef> {
+    vec![builtin_fastcontext_def()]
 }
 
 /// Parse every `*.yaml` file in `dir` into a [`SpecializedAgentDef`]. A malformed file (invalid
@@ -108,7 +123,7 @@ pub fn load_agent_defs(dir: &Path) -> Vec<SpecializedAgentDef> {
 /// found in `dir`, with a user-defined def overriding the builtin of the same name (user config
 /// always wins over the shipped default).
 pub fn resolve_agent_defs(dir: &Path) -> Vec<SpecializedAgentDef> {
-    let mut defs = vec![builtin_fastcontext_def()];
+    let mut defs = builtin_agent_defs();
     for loaded in load_agent_defs(dir) {
         match defs.iter_mut().find(|d| d.name == loaded.name) {
             Some(existing) => *existing = loaded,

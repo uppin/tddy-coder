@@ -609,6 +609,7 @@ impl ConnectionServiceImpl {
             activity_status: None,
             hook_token: Some(hook_token),
             sandbox: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
@@ -676,14 +677,14 @@ impl ConnectionServiceImpl {
         }))
     }
 
-    /// Resolve `specialized_agents` names against `<tddyhome>/agents` (+ builtins) and build the
-    /// `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` jail env pair for them (see
-    /// docs/ft/coder/specialized-subagents.md). An unresolvable name is a request error — the
-    /// session is never started with a silently-dropped subagent.
-    fn specialized_subagent_env(
+    /// Resolve `specialized_agents` names against `<tddyhome>/agents` (+ builtins) into their
+    /// full defs (see docs/ft/coder/specialized-subagents.md). An unresolvable name is a request
+    /// error — the session is never started with a silently-dropped subagent. An empty input
+    /// resolves to an empty output, not an error.
+    fn resolve_specialized_agent_defs(
         &self,
         specialized_agents: &[String],
-    ) -> Result<Vec<(String, String)>, Status> {
+    ) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
         if specialized_agents.is_empty() {
             return Ok(Vec::new());
         }
@@ -699,8 +700,25 @@ impl ConnectionServiceImpl {
             })?;
             selected.push(def.clone());
         }
-        let names = specialized_agents.join(",");
-        let defs_json = serde_json::to_string(&selected).map_err(|e| {
+        Ok(selected)
+    }
+
+    /// Build the `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` jail env pair for already-resolved
+    /// specialized-agent defs (see [`Self::resolve_specialized_agent_defs`]). Empty input produces
+    /// no env pairs.
+    fn specialized_subagent_env(
+        &self,
+        defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
+    ) -> Result<Vec<(String, String)>, Status> {
+        if defs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let names = defs
+            .iter()
+            .map(|d| d.name.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        let defs_json = serde_json::to_string(defs).map_err(|e| {
             Status::internal(format!("failed to serialize specialized agent defs: {e}"))
         })?;
         Ok(vec![
@@ -724,11 +742,12 @@ impl ConnectionServiceImpl {
         selected_branch_to_work_on: &str,
         permission_mode: &str,
         stack_parent: Option<&str>,
-        // Managed-codebase mode + specialized subagents (see
-        // docs/ft/coder/specialized-subagents.md). This sandboxed path already never mounts the
-        // repo (`mounts: vec![]` below, unconditionally) — `managed_codebase` is accepted for
-        // request-shape/UI-intent clarity, not to toggle mount behavior. `specialized_agents`
-        // resolves named defs from `<tddyhome>/agents` and wires them into the jail env.
+        // Specialized subagents (see docs/ft/coder/specialized-subagents.md). This sandboxed path
+        // already never mounts the repo (`mounts: vec![]` below, unconditionally) —
+        // `managed_codebase` is accepted for request-shape/UI-intent clarity, not to toggle mount
+        // behavior. Names resolve against `<tddyhome>/agents` (+ builtins) and are wired into the
+        // jail env; all configuration (model, base_url, max_turns, replaces) comes exclusively
+        // from the resolved def.
         _managed_codebase: bool,
         specialized_agents: &[String],
     ) -> Result<Response<StartSessionResponse>, Status> {
@@ -743,6 +762,7 @@ impl ConnectionServiceImpl {
                 "project_id is required for claude-cli sessions",
             ));
         }
+        let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
 
         let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
@@ -858,8 +878,24 @@ impl ConnectionServiceImpl {
         let scratch_tmp = scratch_dir.join("tmp");
         let context_dir = sandbox_root.join("context");
 
-        let ctx = crate::sandbox_session::prepare_context_dir(&worktree_path)
-            .map_err(Status::internal)?;
+        let replacement_pairs = subagent_replacement_pairs(&specialized_defs);
+        let replacement_refs: Vec<Vec<&str>> = replacement_pairs
+            .iter()
+            .map(|(_, tools)| tools.iter().map(String::as_str).collect())
+            .collect();
+        let replacements: Vec<tddy_sandbox::SubagentReplacement<'_>> = replacement_pairs
+            .iter()
+            .zip(replacement_refs.iter())
+            .map(|((name, _), refs)| tddy_sandbox::SubagentReplacement {
+                name,
+                replaced: refs,
+            })
+            .collect();
+        let ctx = crate::sandbox_session::prepare_context_dir_with_subagent(
+            &worktree_path,
+            &replacements,
+        )
+        .map_err(Status::internal)?;
         crate::sandbox_session::copy_dir_all(ctx.path(), &context_dir).map_err(Status::internal)?;
 
         let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
@@ -941,8 +977,8 @@ impl ConnectionServiceImpl {
             &tool_ipc_socket,
             &egress_dir,
         );
-        if !specialized_agents.is_empty() {
-            env.extend(self.specialized_subagent_env(specialized_agents)?);
+        if !specialized_defs.is_empty() {
+            env.extend(self.specialized_subagent_env(&specialized_defs)?);
         }
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
@@ -1024,6 +1060,7 @@ impl ConnectionServiceImpl {
             activity_status: None,
             hook_token: None,
             sandbox: Some(true),
+            specialized_agents: specialized_agents.to_vec(),
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
@@ -1128,7 +1165,14 @@ impl ConnectionServiceImpl {
             .ok_or_else(|| Status::internal("sandbox session missing repo_path in metadata"))?;
 
         let pid = self
-            .relaunch_sandboxed_runner(session_id, &session_dir, &worktree_path, &model, "auto")
+            .relaunch_sandboxed_runner(
+                session_id,
+                &session_dir,
+                &worktree_path,
+                &model,
+                "auto",
+                &meta.specialized_agents,
+            )
             .await?;
 
         let now = chrono::Utc::now().to_rfc3339();
@@ -1150,6 +1194,7 @@ impl ConnectionServiceImpl {
     }
 
     /// Spawn sandbox-runner + SessionChannel bridge for an existing session directory.
+    #[allow(clippy::too_many_arguments)]
     async fn relaunch_sandboxed_runner(
         &self,
         session_id: &str,
@@ -1157,7 +1202,9 @@ impl ConnectionServiceImpl {
         worktree_path: &Path,
         model: &str,
         permission_mode: &str,
+        specialized_agents: &[String],
     ) -> Result<u32, Status> {
+        let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
         let sandbox_root = session_dir.join("sandbox");
         let egress_dir = session_dir.join("egress");
         std::fs::create_dir_all(sandbox_root.join(".work").join("home"))
@@ -1176,8 +1223,22 @@ impl ConnectionServiceImpl {
         let scratch_tmp = scratch_dir.join("tmp");
         let context_dir = sandbox_root.join("context");
 
-        let ctx = crate::sandbox_session::prepare_context_dir(worktree_path)
-            .map_err(|e| Status::internal(format!("prepare context dir: {e}")))?;
+        let replacement_pairs = subagent_replacement_pairs(&specialized_defs);
+        let replacement_refs: Vec<Vec<&str>> = replacement_pairs
+            .iter()
+            .map(|(_, tools)| tools.iter().map(String::as_str).collect())
+            .collect();
+        let replacements: Vec<tddy_sandbox::SubagentReplacement<'_>> = replacement_pairs
+            .iter()
+            .zip(replacement_refs.iter())
+            .map(|((name, _), refs)| tddy_sandbox::SubagentReplacement {
+                name,
+                replaced: refs,
+            })
+            .collect();
+        let ctx =
+            crate::sandbox_session::prepare_context_dir_with_subagent(worktree_path, &replacements)
+                .map_err(|e| Status::internal(format!("prepare context dir: {e}")))?;
         if context_dir.exists() {
             std::fs::remove_dir_all(&context_dir)
                 .map_err(|e| Status::internal(format!("clear context dir: {e}")))?;
@@ -1251,13 +1312,16 @@ impl ConnectionServiceImpl {
             "--stdio".into(),
         ];
 
-        let env = crate::sandbox_session::build_sandbox_runner_env(
+        let mut env = crate::sandbox_session::build_sandbox_runner_env(
             &scratch_home,
             &scratch_tmp,
             session_id,
             &tool_ipc_socket,
             &egress_dir,
         );
+        if !specialized_defs.is_empty() {
+            env.extend(self.specialized_subagent_env(&specialized_defs)?);
+        }
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
@@ -1327,6 +1391,22 @@ impl ConnectionServiceImpl {
             .await;
         Ok(pid)
     }
+}
+
+/// Build the (name, replaced-tools) pairs for every resolved specialized-agent def — each its own
+/// name + its own YAML-declared `replaces`, normalized.
+fn subagent_replacement_pairs(
+    specialized_defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
+) -> Vec<(String, Vec<String>)> {
+    specialized_defs
+        .iter()
+        .map(|def| {
+            (
+                def.name.clone(),
+                tddy_discovery::subagent::normalize_replaced_tools(&def.replaces),
+            )
+        })
+        .collect()
 }
 
 /// Merge local `ListProjects` rows with [`EligibleDaemonSource::peer_project_entries`].
@@ -3621,6 +3701,7 @@ mod signal_session_unit_tests {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -3801,6 +3882,7 @@ mod list_sessions_unit_tests {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            specialized_agents: Vec::new(),
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -3892,6 +3974,7 @@ mod report_session_status_unit_tests {
             activity_status: None,
             hook_token: Some(hook_token.to_string()),
             sandbox: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -3988,6 +4071,7 @@ mod report_session_status_unit_tests {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -4087,12 +4171,12 @@ mod specialized_subagent_env_unit_tests {
     }
 
     /// An empty `specialized_agents` list is never consulted by the caller (see the `if
-    /// !specialized_agents.is_empty()` guard in `start_sandboxed_claude_cli_session`) — this test
-    /// documents that `specialized_subagent_env` itself, when called directly with an empty list,
-    /// still resolves cleanly (an empty env pair list), matching "no subagents requested = no
-    /// subagent env vars" rather than an error.
+    /// !specialized_defs.is_empty()` guard in `start_sandboxed_claude_cli_session`) — this test
+    /// documents that `specialized_subagent_env` itself, when called directly with an empty def
+    /// list, still resolves cleanly (an empty env pair list), matching "no subagents requested =
+    /// no subagent env vars" rather than an error.
     #[test]
-    fn specialized_subagent_env_with_no_names_produces_no_env_pairs() {
+    fn specialized_subagent_env_with_no_defs_produces_no_env_pairs() {
         // Given
         let tddy_home = tempfile::tempdir().unwrap();
         let service = make_unit_service(tddy_home.path().to_path_buf());
@@ -4104,26 +4188,87 @@ mod specialized_subagent_env_unit_tests {
         assert_eq!(
             result.unwrap(),
             Vec::<(String, String)>::new(),
-            "an empty specialized_agents list must resolve to no env pairs, not an error"
+            "an empty defs list must resolve to no env pairs, not an error"
         );
     }
 
-    /// A single resolvable name (the always-available builtin `fastcontext`) produces both
-    /// `TDDY_SUBAGENT` (comma names) and `TDDY_SUBAGENTS_JSON` (the serialized def) — the exact
-    /// env shape `tddy-tools --mcp` (see `subagents_from_env` in `tddy-tools/src/server.rs`)
-    /// expects.
+    /// An empty `specialized_agents` name list resolves to an empty defs list, not an error.
     #[test]
-    fn specialized_subagent_env_resolves_the_builtin_fastcontext_name() {
+    fn resolve_specialized_agent_defs_with_no_names_produces_no_defs() {
+        // Given
+        let tddy_home = tempfile::tempdir().unwrap();
+        let service = make_unit_service(tddy_home.path().to_path_buf());
+
+        // When
+        let result = service.resolve_specialized_agent_defs(&[]);
+
+        // Then
+        assert_eq!(
+            result.unwrap(),
+            Vec::<tddy_discovery::agent_def::SpecializedAgentDef>::new(),
+            "an empty specialized_agents list must resolve to no defs, not an error"
+        );
+    }
+
+    /// A single resolvable name (the always-available builtin `fastcontext`) resolves to that
+    /// def — no `<tddyhome>/agents` override needed.
+    #[test]
+    fn resolve_specialized_agent_defs_resolves_the_builtin_fastcontext_name() {
         // Given — no <tddyhome>/agents overrides; "fastcontext" must still resolve via the
         // builtin def
         let tddy_home = tempfile::tempdir().unwrap();
         let service = make_unit_service(tddy_home.path().to_path_buf());
 
         // When
-        let result = service.specialized_subagent_env(&["fastcontext".to_string()]);
+        let result = service.resolve_specialized_agent_defs(&["fastcontext".to_string()]);
 
         // Then
-        let env = result.expect("fastcontext must resolve via the builtin def");
+        let defs = result.expect("fastcontext must resolve via the builtin def");
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].name, "fastcontext");
+    }
+
+    /// A name that resolves against neither the builtins nor `<tddyhome>/agents` must reject the
+    /// whole request — no partial resolution for the names that *did* resolve.
+    #[test]
+    fn resolve_specialized_agent_defs_rejects_unknown_name() {
+        // Given
+        let tddy_home = tempfile::tempdir().unwrap();
+        let service = make_unit_service(tddy_home.path().to_path_buf());
+
+        // When
+        let result = service.resolve_specialized_agent_defs(&[
+            "fastcontext".to_string(),
+            "ghost-agent".to_string(),
+        ]);
+
+        // Then
+        let err = result.expect_err("an unresolvable name must reject the whole request");
+        assert_eq!(err.code(), tddy_rpc::Code::InvalidArgument);
+        assert!(
+            err.message().contains("ghost-agent"),
+            "the error must name the unresolvable subagent; got: {}",
+            err.message()
+        );
+    }
+
+    /// A resolved `fastcontext` def produces both `TDDY_SUBAGENT` (comma names) and
+    /// `TDDY_SUBAGENTS_JSON` (the serialized def) — the exact env shape `tddy-tools --mcp` (see
+    /// `subagents_from_env` in `tddy-tools/src/server.rs`) expects.
+    #[test]
+    fn specialized_subagent_env_builds_env_pairs_for_a_resolved_def() {
+        // Given
+        let tddy_home = tempfile::tempdir().unwrap();
+        let service = make_unit_service(tddy_home.path().to_path_buf());
+        let defs = service
+            .resolve_specialized_agent_defs(&["fastcontext".to_string()])
+            .expect("fastcontext must resolve via the builtin def");
+
+        // When
+        let result = service.specialized_subagent_env(&defs);
+
+        // Then
+        let env = result.expect("a resolved def must build env pairs without error");
         let names = env
             .iter()
             .find(|(k, _)| k == "TDDY_SUBAGENT")
@@ -4137,28 +4282,6 @@ mod specialized_subagent_env_unit_tests {
         assert!(
             defs_json.contains("fastcontext"),
             "TDDY_SUBAGENTS_JSON must serialize the resolved fastcontext def; got: {defs_json}"
-        );
-    }
-
-    /// A name that resolves against neither the builtins nor `<tddyhome>/agents` must reject the
-    /// whole request — no partial env is built for the names that *did* resolve.
-    #[test]
-    fn specialized_subagent_env_rejects_an_unresolvable_name() {
-        // Given
-        let tddy_home = tempfile::tempdir().unwrap();
-        let service = make_unit_service(tddy_home.path().to_path_buf());
-
-        // When
-        let result = service
-            .specialized_subagent_env(&["fastcontext".to_string(), "ghost-agent".to_string()]);
-
-        // Then
-        let err = result.expect_err("an unresolvable name must reject the whole request");
-        assert_eq!(err.code(), tddy_rpc::Code::InvalidArgument);
-        assert!(
-            err.message().contains("ghost-agent"),
-            "the error must name the unresolvable subagent; got: {}",
-            err.message()
         );
     }
 }

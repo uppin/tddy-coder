@@ -264,6 +264,7 @@ async fn execute_tool_connect_by_id_works_on_cli_session_worktree() {
         activity_status: None,
         hook_token: None,
         sandbox: None,
+        specialized_agents: Vec::new(),
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
     let service = test_service(sessions_tmp.path().to_path_buf());

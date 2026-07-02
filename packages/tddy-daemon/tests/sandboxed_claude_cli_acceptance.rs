@@ -115,6 +115,23 @@ fn write_echo_argv_script(dir: &std::path::Path) -> std::path::PathBuf {
     script_path
 }
 
+/// Like [`write_echo_argv_script`], but also echoes `TDDY_SUBAGENT` so a test can confirm the
+/// specialized-agent env overlay actually reached the spawned process inside the jail.
+fn write_echo_argv_and_subagent_env_script(dir: &std::path::Path) -> std::path::PathBuf {
+    let script_path = dir.join("stub_claude_subagent.sh");
+    std::fs::write(
+        &script_path,
+        "#!/bin/sh\necho \"ARGV: $@\"\necho \"TDDY_SUBAGENT=$TDDY_SUBAGENT\"\ncat\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    script_path
+}
+
 fn sandbox_start_request() -> StartSessionRequest {
     StartSessionRequest {
         session_token: VALID_TOKEN.to_string(),
@@ -419,5 +436,70 @@ async fn sandboxed_claude_cli_tool_exec_via_ipc_reads_host_worktree() {
         result.get("content").and_then(|v| v.as_str()),
         Some("host-worktree-contents"),
         "Read must return host worktree file contents, got: {result}"
+    );
+}
+
+/// **sandboxed_claude_cli_start_wires_specialized_agents_env_and_metadata**: a
+/// `StartSession(sandbox=true, specialized_agents=["fastcontext"])` request threads the resolved
+/// agent through to (a) the persisted `.session.yaml` and (b) the actual process env the spawned
+/// runner exposes to the jailed `claude` process — proving the proto field → resolved YAML def →
+/// `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` env wiring end to end (see
+/// docs/ft/coder/managed-codebase-subagents.md § Tool replacement).
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn sandboxed_claude_cli_start_wires_specialized_agents_env_and_metadata() {
+    // Given
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+    let stub = write_echo_argv_and_subagent_env_script(repo_dir.path());
+    let (_cfg_dir, config) = write_config_with_claude_cli_binary(stub.to_str().unwrap());
+    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+    let request = StartSessionRequest {
+        specialized_agents: vec!["fastcontext".to_string()],
+        ..sandbox_start_request()
+    };
+
+    // When
+    let resp = service
+        .start_session(Request::new(request))
+        .await
+        .expect("sandbox StartSession with specialized_agents must succeed on darwin");
+    let inner = resp.into_inner();
+
+    // Then — persisted metadata
+    let session_dir = sessions_tmp.path().join("sessions").join(&inner.session_id);
+    let meta = read_session_metadata(&session_dir).expect(".session.yaml must exist");
+    assert_eq!(meta.specialized_agents, vec!["fastcontext".to_string()]);
+
+    // Then — the jailed process actually received TDDY_SUBAGENT in its env
+    let stream_resp = service
+        .stream_terminal_output(Request::new(StreamTerminalOutputRequest {
+            session_token: VALID_TOKEN.to_string(),
+            session_id: inner.session_id.clone(),
+            terminal_id: String::new(),
+            initial_cols: 80,
+            initial_rows: 24,
+        }))
+        .await
+        .expect("stream_terminal_output must succeed for sandbox session");
+    let mut stream = stream_resp.into_inner();
+
+    let saw_subagent_env = tokio::time::timeout(Duration::from_secs(30), async {
+        while let Some(Ok(msg)) = stream.next().await {
+            let text = String::from_utf8_lossy(&msg.data);
+            if text.contains("TDDY_SUBAGENT=fastcontext") {
+                return true;
+            }
+        }
+        false
+    })
+    .await
+    .unwrap_or(false);
+
+    assert!(
+        saw_subagent_env,
+        "jailed process env must include TDDY_SUBAGENT=fastcontext"
     );
 }
