@@ -9370,6 +9370,7 @@ dependencies = [
  "rstest 0.24.0",
  "serde_yml",
  "serial_test",
+ "tddy-core",
  "tddy-vm",
  "tempfile",
  "tokio",
