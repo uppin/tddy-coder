@@ -231,6 +231,15 @@ pub struct SandboxRunnerArgs {
     /// `--grpc-uds`/`--grpc-listen-port`/`--grpc-socket`'s UDS/TCP transport.
     #[arg(long)]
     pub stdio: bool,
+    /// Initial PTY width, known by the host before it even attaches (e.g. `tddy-sandbox-app`
+    /// reads its own controlling terminal's size before spawning this process). Opening the PTY
+    /// at this size from the start avoids a visible resize/redraw once the host's `SubscribeTerminal`
+    /// arrives, and avoids ever being wrong if the host never sends a live resize afterward.
+    #[arg(long, default_value_t = 80)]
+    pub initial_cols: u16,
+    /// Initial PTY height — see `initial_cols`.
+    #[arg(long, default_value_t = 24)]
+    pub initial_rows: u16,
 }
 
 struct PendingToolCall {
@@ -751,6 +760,52 @@ pub fn resolve_secret_envs(
     resolved
 }
 
+// ---------------------------------------------------------------------------
+// Resize escape parsing
+// ---------------------------------------------------------------------------
+
+/// In-jail counterpart of `tddy_daemon::claude_cli_session::strip_resize`: strips an OSC resize
+/// sequence (`\x1b]resize;{cols};{rows}\x07`) from `data`.
+///
+/// Returns `(Some((cols, rows)), remaining)` when found, or `(None, original)` otherwise. The
+/// escape sequence is removed from the returned bytes so it is not forwarded to the PTY stdin.
+fn strip_resize_escape(data: &[u8]) -> (Option<(u16, u16)>, Bytes) {
+    let prefix = b"\x1b]resize;";
+    let start = match (0..data.len().saturating_sub(prefix.len()))
+        .find(|&i| data[i..].starts_with(prefix))
+    {
+        Some(i) => i,
+        None => return (None, Bytes::copy_from_slice(data)),
+    };
+    let after = &data[start + prefix.len()..];
+    let bel = match after.iter().position(|&b| b == 0x07) {
+        Some(i) => i,
+        None => return (None, Bytes::copy_from_slice(data)),
+    };
+    let inner = &after[..bel];
+    let semi = match inner.iter().position(|&b| b == b';') {
+        Some(i) => i,
+        None => return (None, Bytes::copy_from_slice(data)),
+    };
+    let parsed = std::str::from_utf8(&inner[..semi])
+        .ok()
+        .and_then(|s| s.parse::<u16>().ok())
+        .zip(
+            std::str::from_utf8(&inner[semi + 1..])
+                .ok()
+                .and_then(|s| s.parse::<u16>().ok()),
+        );
+    match parsed {
+        Some((cols, rows)) => {
+            let end = start + prefix.len() + bel + 1;
+            let mut remaining = data[..start].to_vec();
+            remaining.extend_from_slice(&data[end..]);
+            (Some((cols, rows)), Bytes::from(remaining))
+        }
+        None => (None, Bytes::copy_from_slice(data)),
+    }
+}
+
 struct PtyState {
     stdin_tx: std::sync::mpsc::Sender<Bytes>,
 }
@@ -760,16 +815,21 @@ fn run_generic_pty_thread(
     cwd: PathBuf,
     relay: Arc<SandboxSessionRelay>,
     stdin_rx: std::sync::mpsc::Receiver<Bytes>,
+    initial_cols: u16,
+    initial_rows: u16,
 ) -> Result<i32> {
     boot_log(
         "INFO",
-        &format!("pty: openpty generic cwd={} argv={argv:?}", cwd.display(),),
+        &format!(
+            "pty: openpty generic cwd={} argv={argv:?} size={initial_cols}x{initial_rows}",
+            cwd.display(),
+        ),
     );
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
-            rows: 24,
-            cols: 80,
+            rows: initial_rows,
+            cols: initial_cols,
             pixel_width: 0,
             pixel_height: 0,
         })
@@ -825,7 +885,19 @@ fn run_generic_pty_thread(
             }
         };
         while let Ok(chunk) = stdin_rx.recv() {
-            if std::io::Write::write_all(&mut w, &chunk).is_err() {
+            let (resize, remaining) = strip_resize_escape(&chunk);
+            if let Some((cols, rows)) = resize {
+                let _ = master_writer.lock().unwrap().resize(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                });
+            }
+            if remaining.is_empty() {
+                continue;
+            }
+            if std::io::Write::write_all(&mut w, &remaining).is_err() {
                 break;
             }
             let _ = std::io::Write::flush(&mut w);
@@ -855,12 +927,21 @@ fn spawn_generic_pty(
     argv: Vec<String>,
     cwd: PathBuf,
     relay: Arc<SandboxSessionRelay>,
+    initial_cols: u16,
+    initial_rows: u16,
 ) -> Result<(PtyState, std::sync::mpsc::Receiver<i32>)> {
     let (stdin_tx, stdin_rx) = std::sync::mpsc::channel::<Bytes>();
     let (done_tx, done_rx) = std::sync::mpsc::channel::<i32>();
     let relay_thread = Arc::clone(&relay);
     std::thread::spawn(move || {
-        let code = match run_generic_pty_thread(argv, cwd, relay_thread, stdin_rx) {
+        let code = match run_generic_pty_thread(
+            argv,
+            cwd,
+            relay_thread,
+            stdin_rx,
+            initial_cols,
+            initial_rows,
+        ) {
             Ok(code) => code,
             Err(e) => {
                 boot_log_error("spawn_generic_pty", format!("{e:#}"));
@@ -879,11 +960,13 @@ fn run_claude_pty_thread(
     egress_shim: String,
     relay: Arc<SandboxSessionRelay>,
     stdin_rx: std::sync::mpsc::Receiver<Bytes>,
+    initial_cols: u16,
+    initial_rows: u16,
 ) -> Result<()> {
     boot_log(
         "INFO",
         &format!(
-            "pty: openpty claude={} cwd={} argv={argv:?}",
+            "pty: openpty claude={} cwd={} argv={argv:?} size={initial_cols}x{initial_rows}",
             argv.first().map(String::as_str).unwrap_or("<missing>"),
             cwd.display(),
         ),
@@ -891,8 +974,8 @@ fn run_claude_pty_thread(
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
-            rows: 24,
-            cols: 80,
+            rows: initial_rows,
+            cols: initial_cols,
             pixel_width: 0,
             pixel_height: 0,
         })
@@ -982,7 +1065,19 @@ fn run_claude_pty_thread(
             }
         };
         while let Ok(chunk) = stdin_rx.recv() {
-            if let Err(e) = std::io::Write::write_all(&mut w, &chunk) {
+            let (resize, remaining) = strip_resize_escape(&chunk);
+            if let Some((cols, rows)) = resize {
+                let _ = master_writer.lock().unwrap().resize(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                });
+            }
+            if remaining.is_empty() {
+                continue;
+            }
+            if let Err(e) = std::io::Write::write_all(&mut w, &remaining) {
                 boot_log("ERROR", &format!("pty: stdin write failed: {e}"));
                 break;
             }
@@ -1057,6 +1152,8 @@ struct SpawnClaudePtyParams<'a> {
     tddy_tools_path: &'a Path,
     egress_shim: &'a str,
     relay: Arc<SandboxSessionRelay>,
+    initial_cols: u16,
+    initial_rows: u16,
 }
 
 fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
@@ -1070,6 +1167,8 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
         tddy_tools_path,
         egress_shim,
         relay,
+        initial_cols,
+        initial_rows,
     } = params;
     let (stdin_tx, stdin_rx) = std::sync::mpsc::channel::<Bytes>();
 
@@ -1111,7 +1210,15 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
     let egress_shim = egress_shim.to_string();
 
     std::thread::spawn(move || {
-        if let Err(e) = run_claude_pty_thread(argv, cwd, egress_shim, relay_thread, stdin_rx) {
+        if let Err(e) = run_claude_pty_thread(
+            argv,
+            cwd,
+            egress_shim,
+            relay_thread,
+            stdin_rx,
+            initial_cols,
+            initial_rows,
+        ) {
             boot_log_error("spawn_claude_pty", format!("{e:#}"));
             write_failure_marker(&format!("spawn_claude_pty failed: {e:#}"));
         }
@@ -1440,9 +1547,14 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
             "INFO",
             &format!("boot: spawn_generic_pty argv={:?}", args.pty_command),
         );
-        let (pty_state, done_rx) =
-            spawn_generic_pty(args.pty_command.clone(), cwd, Arc::clone(&relay))
-                .inspect_err(|e| boot_log_error("spawn_generic_pty", format!("{e:#}")))?;
+        let (pty_state, done_rx) = spawn_generic_pty(
+            args.pty_command.clone(),
+            cwd,
+            Arc::clone(&relay),
+            args.initial_cols,
+            args.initial_rows,
+        )
+        .inspect_err(|e| boot_log_error("spawn_generic_pty", format!("{e:#}")))?;
         let notify = Arc::clone(&shutdown_notify);
         tokio::spawn(async move {
             let _ = tokio::task::spawn_blocking(move || done_rx.recv()).await;
@@ -1470,6 +1582,8 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
             tddy_tools_path,
             egress_shim: &egress_shim,
             relay: Arc::clone(&relay),
+            initial_cols: args.initial_cols,
+            initial_rows: args.initial_rows,
         })
         .inspect_err(|e| boot_log_error("spawn_claude_pty", format!("{e:#}")))?;
         boot_log("INFO", "boot: claude pty thread spawned");
@@ -1923,5 +2037,134 @@ mod tests {
         // Then grpc_socket is absent and the stdio transport is requested
         assert_eq!(args.grpc_socket, None);
         assert!(args.stdio);
+    }
+
+    /// Without `--initial-cols`/`--initial-rows`, the PTY still opens at the same 80x24 default
+    /// the hardcoded `openpty` call used before these flags existed — callers that don't know or
+    /// care about the host terminal size keep today's behavior unchanged.
+    #[test]
+    fn sandbox_runner_args_default_initial_size_matches_the_historical_hardcoded_pty_size() {
+        // Given argv with none of the new sizing flags
+        let args = SandboxRunnerArgs::try_parse_from([
+            "tddy-sandbox-runner",
+            "--session-id",
+            "sess",
+            "--context-dir",
+            "/tmp/ctx",
+            "--tool-ipc-socket",
+            "/tmp/ipc.sock",
+            "--model",
+            "",
+            "--ready-marker",
+            "/tmp/ready",
+            "--stdio",
+        ])
+        .expect("argv must parse without --initial-cols/--initial-rows");
+
+        // Then the defaults match the pre-existing hardcoded openpty(PtySize{rows:24,cols:80,..})
+        assert_eq!(args.initial_cols, 80);
+        assert_eq!(args.initial_rows, 24);
+    }
+
+    /// A host that knows its real terminal size (e.g. `tddy-sandbox-app`, before it even spawns
+    /// this process) can open the PTY at that size from the start, instead of relying entirely on
+    /// a live resize to correct an initially-wrong size after the fact.
+    #[test]
+    fn sandbox_runner_args_parses_explicit_initial_terminal_size() {
+        // Given argv with an explicit, non-default terminal size
+        let args = SandboxRunnerArgs::try_parse_from([
+            "tddy-sandbox-runner",
+            "--session-id",
+            "sess",
+            "--context-dir",
+            "/tmp/ctx",
+            "--tool-ipc-socket",
+            "/tmp/ipc.sock",
+            "--model",
+            "",
+            "--ready-marker",
+            "/tmp/ready",
+            "--stdio",
+            "--initial-cols",
+            "170",
+            "--initial-rows",
+            "57",
+        ])
+        .expect("argv must parse with explicit --initial-cols/--initial-rows");
+
+        // Then the parsed values match the caller's real terminal size, not the defaults
+        assert_eq!(args.initial_cols, 170);
+        assert_eq!(args.initial_rows, 57);
+    }
+
+    // -----------------------------------------------------------------------
+    // strip_resize_escape — in-jail counterpart of
+    // `tddy_daemon::claude_cli_session::strip_resize`, applied to the sandboxed Claude CLI's PTY
+    // stdin so a live host terminal resize (see docs on `tddy_sandbox_app::bridge`) can reach the
+    // jail instead of only sizing the PTY once at `SubscribeTerminal` time.
+    // -----------------------------------------------------------------------
+
+    /// A well-formed `\x1b]resize;{cols};{rows}\x07` sequence with nothing else in the buffer is
+    /// fully consumed: the dimensions are extracted and no bytes are forwarded to the child PTY.
+    #[test]
+    fn strip_resize_escape_extracts_cols_and_rows_from_a_well_formed_sequence() {
+        // Given
+        let data = b"\x1b]resize;170;57\x07";
+
+        // When
+        let (resize, remaining) = strip_resize_escape(data);
+
+        // Then
+        assert_eq!(resize, Some((170, 57)));
+        assert!(
+            remaining.is_empty(),
+            "expected no bytes left after stripping the whole escape sequence, got {remaining:?}"
+        );
+    }
+
+    /// The escape sequence is removed even when surrounded by real keystrokes, and the
+    /// surrounding bytes are stitched back together untouched.
+    #[test]
+    fn strip_resize_escape_removes_the_sequence_but_preserves_surrounding_keystrokes() {
+        // Given
+        let mut data = b"ab".to_vec();
+        data.extend_from_slice(b"\x1b]resize;80;24\x07");
+        data.extend_from_slice(b"cd");
+
+        // When
+        let (resize, remaining) = strip_resize_escape(&data);
+
+        // Then
+        assert_eq!(resize, Some((80, 24)));
+        assert_eq!(remaining.as_ref(), b"abcd");
+    }
+
+    /// Plain input with no resize escape sequence at all passes through byte-for-byte.
+    #[test]
+    fn strip_resize_escape_returns_none_and_original_bytes_when_no_escape_is_present() {
+        // Given
+        let data = b"hello world";
+
+        // When
+        let (resize, remaining) = strip_resize_escape(data);
+
+        // Then
+        assert_eq!(resize, None);
+        assert_eq!(remaining.as_ref(), data);
+    }
+
+    /// A truncated sequence missing its BEL (`\x07`) terminator is not a valid resize request —
+    /// it must not be parsed, and must not be silently swallowed from the stream either.
+    #[test]
+    fn strip_resize_escape_returns_none_when_the_bel_terminator_is_missing() {
+        // Given
+        let data = b"\x1b]resize;80;24";
+
+        // When
+        let (resize, remaining) = strip_resize_escape(data);
+
+        // Then
+        assert_eq!(resize, None);
+        assert_eq!(remaining.as_ref(), data);
     }
 }
