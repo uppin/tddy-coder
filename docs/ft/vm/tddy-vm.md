@@ -186,6 +186,89 @@ tddy-sandbox-qemu --image <qcow2> \
   QEMU is not `target_os`-gated like darwin/cgroups) to route `spawn_sandbox_runner` to
   `tddy_sandbox_qemu::spawn_plan` — additive, opt-in, existing backends remain default.
 
+## Cloud-init image build with image-chaining (`tddy-vm-build cloud-init`) (Added: 2026-07-02)
+
+**Product area:** VM
+**Feature PRD:** this section
+**Status:** Implemented — unit tests (22) pass; real QEMU boot verified to succeed
+end-to-end multiple times in a nested-virtualization sandbox, including one real bug
+found+fixed (a benign `set_hostname` module failure misclassified as fatal) and one
+boot-speed fix (`ds=nocloud` SMBIOS pinning) — see
+[packages/tddy-vm/docs/changesets.md](../../../packages/tddy-vm/docs/changesets.md)
+and [docs/dev/changesets.md](../../dev/changesets.md) for details. The
+`#[ignore]`+`#[serial]` real-boot acceptance tests remain timing-sensitive under that
+sandbox's fixed budgets due to environment resource contention, not implementation
+defects.
+
+A second `tddy-vm-build` subcommand, alongside `build` (renamed from the previous flat
+invocation — see Migration note below), that provisions a cloud-init cloud image instead
+of running a Buildroot build:
+
+```
+tddy-vm-build cloud-init \
+  --name <image-name> \
+  --base-image <path-to-cached-cloud-image>   # defaults to a well-known cache path
+  --output-dir <dir> \
+  --user-data <cloud-init-user-data.yaml> \
+  --disk-size 20G --memory 2048M --cpus 2 --ssh-host-port 2222 \
+  [--ssh-public-key <path>] [--timeout-secs 300]
+```
+
+Borrows the proven pattern from the `makers-lt` reference project (image-chaining +
+NoCloud seed generation), reusing this repo's existing QEMU primitives instead of
+duplicating them:
+
+- **Immutable base + chained delta overlay.** The base cloud image is **copied** from
+  the caller-provided source (never downloaded by this feature, never re-fetched, never
+  mutated) into `<output-dir>/<name>-base.qcow2` via `qemu-img convert -f qcow2 -O
+  qcow2`. A delta overlay `<output-dir>/<name>.qcow2` is created with `qemu-img create -f
+  qcow2 -F qcow2 -b <name>-base.qcow2 <overlay> <disk-size>` — a **relative** backing
+  reference, so the base and overlay must stay co-located in the same directory (the
+  "image" produced by this feature is the pair, not a single file). Mirrors the existing
+  ephemeral-overlay primitive in `tddy-sandbox-qemu`'s `overlay_create_argv`
+  (`packages/tddy-sandbox-qemu/src/argv.rs`), adapted for disk sizing and relative
+  basenames.
+- **NoCloud cloud-init seed.** User-data/meta-data are rendered to a `seed/nocloud/`
+  directory and packed into a `cidata`-labeled ISO9660 image (Joliet + Rock Ridge) via
+  `xorriso -as mkisofs` (mkisofs-emulation mode — no new Rust ISO dependency). The
+  `{{SSH_PUBLIC_KEY}}` placeholder in `ssh_authorized_keys` is replaced with either a
+  caller-supplied key (`--ssh-public-key`) or a freshly generated keypair
+  (`ssh-keygen`). A `cloud-init clean --logs --seed` `bootcmd` is injected so a
+  pre-baked cloud image's prior cloud-init state doesn't suppress re-provisioning on the
+  copy.
+- **Bake-in by booting.** The overlay is booted with the seed ISO attached
+  (`-cdrom`), reusing `QemuVmArgs`' argv shape (`packages/tddy-vm/src/qemu.rs`) with the
+  differences needed to observe completion: `-serial stdio` (not `file:`) and
+  `-no-reboot`. A deterministic completion token
+  (`CLOUDINIT_COMPLETE_<name>_<sha256(provisioning-input)[:12]>`) is embedded in
+  user-data as a per-boot script that prints the token then calls `shutdown -h now` (or
+  `<token>_FAILED` on error); the host watches the serial stream line-by-line (reusing
+  the `BufReader`/`tokio::select!` draining pattern from `build.rs::run_parallel_build`)
+  and returns once the token is observed, with `send_monitor_command`
+  (`packages/tddy-vm/src/qemu.rs`) as a graceful-shutdown fallback on timeout. The
+  overlay this produces is fully provisioned — no first-boot cloud-init step needed by
+  the consumer.
+- **New module `tddy_vm::cloud_init`** — all argv/document-rendering logic is exposed
+  as pure, unit-testable builder functions (`base_convert_argv`, `overlay_create_argv`,
+  `render_user_data`, `render_meta_data`, `completion_token`, `seed_iso_argv`,
+  `iso_tool_command`, `cloud_init_boot_argv`, `classify_serial_line`), composed by an
+  async orchestrator `build_cloud_init_image`.
+
+### Migration note
+
+Introducing this subcommand requires `tddy-vm-build` to gain a `Cli { #[command(subcommand)] }`
+wrapper with `build` and `cloud-init` variants. The previous flat invocation
+(`tddy-vm-build --spec … --output … --format …`) becomes `tddy-vm-build build --spec … --output … --format …`.
+
+### Out of scope for this sub-feature
+
+- Downloading the base cloud image (the base is always caller-supplied/copied).
+- Flattening the chained pair into a single standalone qcow2 (the delta-overlay model is
+  the explicit goal).
+- Non-Debian/non-cloud-image bases, multi-NIC network-config beyond DHCP, or a
+  persistent registry of cloud-init-built images (the existing `ListVmImages` gap
+  applies here too — see Known gaps below).
+
 ## Out of scope for this changeset
 
 - ScreenShare VM mode.
