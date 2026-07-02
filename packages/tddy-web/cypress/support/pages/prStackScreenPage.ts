@@ -76,6 +76,18 @@ export const prStackScreenPage = {
   chatSendBtn: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.prStackChatSendBtn, { timeout: 5000, ...options }),
 
+  /** The chat's inline error banner — connection failures, stream failures, or a rejected send. */
+  chatError: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackChatError, { timeout: 5000, ...options }),
+
+  /** The overlay shown while the presenter's own LiveKit room is still connecting. */
+  chatConnectingOverlay: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackChatConnecting, { timeout: 5000, ...options }),
+
+  /** The persistent presenter connection status label (Not connected / Connecting… / Connected / Disconnected). */
+  chatStatus: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackChatStatus, { timeout: 5000, ...options }),
+
   /** Type a message into the chat input and click Send. */
   sendChatMessage(text: string) {
     byTestId(TEST_IDS.prStackChatInput).clear().type(text);

@@ -238,6 +238,9 @@ export const TEST_IDS = {
   prStackChatMessages: "pr-stack-chat-messages",
   prStackChatInput: "pr-stack-chat-input",
   prStackChatSendBtn: "pr-stack-chat-send-btn",
+  prStackChatError: "pr-stack-chat-error",
+  prStackChatConnecting: "pr-stack-chat-connecting",
+  prStackChatStatus: "pr-stack-chat-status",
 } as const;
 
 // ---------------------------------------------------------------------------

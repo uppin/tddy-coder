@@ -1,7 +1,7 @@
 import React from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
-import type { Room } from "livekit-client";
+import type { SessionAttachmentState } from "./useSessionAttachment";
 import { PrStackScreen } from "./prstack/PrStackScreen";
 
 type ConnectionClient = Client<typeof ConnectionService>;
@@ -10,10 +10,12 @@ type ConnectionClient = Client<typeof ConnectionService>;
 export interface WorkflowViewContext {
   client?: ConnectionClient;
   sessionToken?: string;
-  /** LiveKit room for the orchestrator session, when attached over LiveKit. Null otherwise. */
-  room?: Room | null;
-  /** LiveKit identity of the server participant to target for RPC (e.g. the daemon). */
-  livekitServerIdentity?: string;
+  /**
+   * The session's own attach state. Custom views that need a LiveKit room (e.g. the PR-Stack
+   * Chat Screen) derive their own independent connection from this rather than being handed a
+   * room from above — see `usePresenterLiveKitRoom`.
+   */
+  attachment?: SessionAttachmentState;
   /** Fired after a child session is spawned inside the view — see `PrStackScreenProps.onChildSessionStarted`. */
   onChildSessionStarted?: (entry: {
     sessionId: string;
@@ -42,8 +44,7 @@ export function resolveWorkflowView(
         session={session}
         client={context.client}
         sessionToken={context.sessionToken}
-        room={context.room ?? null}
-        livekitServerIdentity={context.livekitServerIdentity}
+        attachment={context.attachment}
         onChildSessionStarted={context.onChildSessionStarted}
       />
     );

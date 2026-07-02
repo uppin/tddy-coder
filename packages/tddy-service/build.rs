@@ -15,6 +15,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &["proto"],
         )?;
 
+    // TddyRemote (async trait + RpcService server for LiveKit/tddy-rpc). The plain-gRPC path
+    // above still owns the tonic server/client for remote.proto; this second pass exists so
+    // TddyRemoteService can *also* be registered in a LiveKit MultiRpcService — previously it
+    // only implemented the tonic trait and could never be wrapped as an RpcService.
+    // Dedicated out_dir: the tonic_build call above also compiles package `tddy.v1` (shared
+    // with observer.proto/presenter_intent.proto) into the default OUT_DIR as `tddy.v1.rs` —
+    // without a separate directory here, prost_build's own `tddy.v1.rs` output for this pass
+    // would silently overwrite (or be overwritten by) that file, since both default to the same
+    // package-derived filename in the same OUT_DIR.
+    let tddy_remote_rpc_dir = format!("{}/tddy_remote_rpc", std::env::var("OUT_DIR")?);
+    std::fs::create_dir_all(&tddy_remote_rpc_dir)?;
+    prost_build::Config::new()
+        .out_dir(&tddy_remote_rpc_dir)
+        .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
+            generate_rpc_server: true,
+            generate_tonic_adapter: false,
+            rpc_crate_path: "tddy_rpc".to_string(),
+        }))
+        .compile_protos(&["proto/tddy/v1/remote.proto"], &["proto"])?;
+
     // Echo service (async trait + RpcService server for LiveKit/tddy-rpc)
     prost_build::Config::new()
         .out_dir(std::env::var("OUT_DIR")?)

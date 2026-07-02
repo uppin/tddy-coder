@@ -618,6 +618,175 @@ mod tests {
     }
 }
 
+/// LiveKit/RpcService acceptance tests: the browser-facing PR-Stack Chat Screen must reach the
+/// Presenter over `MultiRpcService` (the LiveKit transport), not just the plain gRPC port.
+/// Mirrors `mod tests::submit_feature_input_triggers_goal_started_and_mode_changed` exactly, but
+/// drives the bidi stream through `RpcBridge::start_bidi_stream` instead of a tonic server —
+/// this is the actual serving path a LiveKit `MultiRpcService` entry uses, and the one that was
+/// previously missing `TddyRemote` entirely (see `run_daemon`'s `livekit_entries` in
+/// tddy-coder/src/run.rs, which only registered `TerminalService` and `LoopbackTunnelService`).
+#[cfg(test)]
+mod tddy_remote_livekit_acceptance {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    use prost::Message;
+    use tokio::sync::broadcast;
+    use tokio::sync::mpsc as tokio_mpsc;
+
+    use tddy_rpc::{RequestMetadata, ResponseBody, RpcMessage};
+
+    use crate::proto::tddy_remote::{
+        client_message, server_message, ClientMessage, ServerMessage, SubmitFeatureInput,
+        TddyRemoteServer,
+    };
+    use crate::TddyRemoteService;
+
+    use tddy_core::AnyBackend;
+    use tddy_core::{Presenter, PresenterHandle, SharedBackend, StubBackend};
+    use tddy_workflow_recipes::TddRecipe;
+
+    #[test]
+    fn tddy_remote_server_has_the_fully_qualified_service_name() {
+        // Given — the generated TddyRemoteServer wrapper (RpcService, for LiveKit/MultiRpcService)
+        // When — reading its NAME constant
+        // Then — it matches the fully-qualified proto service name the browser's ConnectRPC
+        // client addresses over the LiveKit data channel (tddy.v1.TddyRemote/Stream)
+        assert_eq!(
+            TddyRemoteServer::<TddyRemoteService>::NAME,
+            "tddy.v1.TddyRemote"
+        );
+    }
+
+    #[tokio::test]
+    async fn submit_feature_input_over_the_livekit_transport_triggers_goal_started_and_mode_changed(
+    ) {
+        // Given — a Presenter with StubBackend running in a background thread, wired to a
+        // TddyRemoteServer registered the same way a LiveKit MultiRpcService entry would use it
+        // (not a tonic gRPC server)
+        let (event_tx, _) = broadcast::channel(256);
+        let (intent_tx, intent_rx) = mpsc::channel();
+        let handle = PresenterHandle {
+            event_tx: event_tx.clone(),
+            intent_tx: intent_tx.clone(),
+        };
+
+        let tddy_data_dir = std::env::temp_dir().join(format!(
+            "tddy-service-livekit-test-home-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&tddy_data_dir).unwrap();
+        let mut presenter = Presenter::new("stub", "opus", Arc::new(TddRecipe), tddy_data_dir)
+            .with_broadcast(event_tx)
+            .with_intent_sender(intent_tx);
+        let backend = SharedBackend::from_any(AnyBackend::Stub(StubBackend::new()));
+        let output_dir = std::env::temp_dir().join("tddy-service-livekit-test");
+        std::fs::create_dir_all(&output_dir).unwrap();
+        presenter.start_workflow(
+            backend, output_dir, None, None, None, None, false, None, None, None,
+        );
+
+        let shutdown = AtomicBool::new(false);
+        let shutdown_clone = Arc::new(shutdown);
+        let presenter_handle = thread::spawn({
+            let shutdown = shutdown_clone.clone();
+            move || {
+                for _ in 0..500 {
+                    if shutdown.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    while let Ok(intent) = intent_rx.try_recv() {
+                        presenter.handle_intent(intent);
+                    }
+                    presenter.poll_workflow();
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+        });
+
+        let bridge = tddy_rpc::RpcBridge::new(TddyRemoteServer::new(TddyRemoteService::new(handle)));
+
+        // When — streaming a SubmitFeatureInput intent through the RpcBridge bidi entry point,
+        // exactly as a LiveKit MultiRpcService dispatches an incoming data-channel RPC
+        let (tx, rx) = tokio_mpsc::channel::<RpcMessage>(64);
+        tx.send(RpcMessage {
+            payload: ClientMessage {
+                intent: Some(client_message::Intent::SubmitFeatureInput(
+                    SubmitFeatureInput {
+                        text: "test feature".to_string(),
+                    },
+                )),
+            }
+            .encode_to_vec(),
+            metadata: RequestMetadata::default(),
+        })
+        .await
+        .unwrap();
+        drop(tx);
+
+        let handle = bridge
+            .start_bidi_stream("tddy.v1.TddyRemote", "Stream", rx)
+            .await
+            .expect("start_bidi_stream should succeed");
+
+        let mut output_rx = match handle.output {
+            ResponseBody::Streaming(rx) => rx,
+            ResponseBody::Complete(_) => panic!("expected Streaming"),
+        };
+
+        // Then — the event stream eventually emits both GoalStarted and ModeChanged, proving the
+        // intent reached the real Presenter and its broadcast events came back out the same bidi
+        // stream a LiveKit-connected browser would be reading
+        let mut events = Vec::new();
+        for _ in 0..50 {
+            match tokio::time::timeout(Duration::from_millis(200), output_rx.recv()).await {
+                Ok(Some(Ok(bytes))) => {
+                    let msg = ServerMessage::decode(&bytes[..]).expect("decode ServerMessage");
+                    if let Some(event) = msg.event {
+                        events.push(event);
+                        let has_goal = events
+                            .iter()
+                            .any(|e| matches!(e, server_message::Event::GoalStarted(_)));
+                        let has_mode = events
+                            .iter()
+                            .any(|e| matches!(e, server_message::Event::ModeChanged(_)));
+                        if has_goal && has_mode {
+                            break;
+                        }
+                    }
+                }
+                Ok(Some(Err(_))) => {}
+                Ok(None) => break,
+                Err(_) => {}
+            }
+        }
+
+        shutdown_clone.store(true, Ordering::Relaxed);
+        let _ = presenter_handle.join();
+
+        let has_goal_started = events
+            .iter()
+            .any(|e| matches!(e, server_message::Event::GoalStarted(_)));
+        let has_mode_changed = events
+            .iter()
+            .any(|e| matches!(e, server_message::Event::ModeChanged(_)));
+
+        assert!(
+            has_goal_started,
+            "Expected GoalStarted event, got: {:?}",
+            events
+        );
+        assert!(
+            has_mode_changed,
+            "Expected ModeChanged event, got: {:?}",
+            events
+        );
+    }
+}
+
 /// Daemon acceptance tests: GetSession and ListSessions read from disk.
 #[cfg(test)]
 mod daemon_tests {
@@ -963,7 +1132,10 @@ mod daemon_tests {
             .expect("session dir basename");
         assert_eq!(meta.session_id, sid);
         assert_eq!(meta.status, "active");
-        assert_eq!(meta.tool.as_deref(), Some("tddy-coder"));
+        // Recorded tool is the actual path this process was invoked with (std::env::args().next()),
+        // not a hardcoded guess — ResumeSession needs a real, resolvable path, and a bare literal
+        // like "tddy-coder" isn't one in this project's dev toolchain layout.
+        assert_eq!(meta.tool, std::env::args().next());
         assert_eq!(
             meta.repo_path.as_deref(),
             Some(repo_root_str.as_str()),
@@ -1020,6 +1192,270 @@ mod daemon_tests {
             "unexpected message: {:?}",
             msg.event
         );
+    }
+}
+
+/// LiveKit/RpcService acceptance test for `DaemonService`: `run_daemon`'s pr-stack sessions
+/// serve `TddyRemote` via `DaemonService`, not `TddyRemoteService` — this proves the same
+/// disk-reading logic `get_session_returns_status_from_disk` (above, over tonic) already covers
+/// is also reachable over the LiveKit-shaped `RpcBridge` transport, with no duplicated logic
+/// (see `daemon_service::livekit_transport`, which delegates to the existing tonic-trait method
+/// via a byte roundtrip).
+#[cfg(test)]
+mod daemon_service_livekit_acceptance {
+    use std::fs;
+
+    use prost::Message;
+
+    use crate::proto::tddy_remote::{GetSessionRequest, GetSessionResponse, TddyRemoteServer};
+    use crate::DaemonService;
+    use tddy_core::write_changeset;
+    use tddy_core::WorkflowState;
+    use tddy_rpc::{RequestMetadata, ResponseBody, RpcMessage};
+
+    fn temp_sessions_dir(label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "tddy-daemon-livekit-test-{}-{}",
+            label,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn get_session_over_the_livekit_transport_returns_status_from_disk() {
+        // Given — a session directory on disk with a changeset in Planned state, and a
+        // DaemonService registered in an RpcBridge the same way a LiveKit MultiRpcService entry
+        // would use it (not a tonic gRPC server)
+        let base = temp_sessions_dir("get-session-livekit");
+        let session_dir = base.join(tddy_core::output::SESSIONS_SUBDIR).join("session-1");
+        fs::create_dir_all(&session_dir).unwrap();
+
+        let changeset = tddy_core::Changeset {
+            initial_prompt: Some("test feature".to_string()),
+            state: tddy_core::ChangesetState {
+                current: WorkflowState::new("Planned"),
+                ..tddy_core::Changeset::default().state
+            },
+            worktree: Some("path/to/worktree".to_string()),
+            branch: Some("feature/foo".to_string()),
+            ..Default::default()
+        };
+        write_changeset(&session_dir, &changeset).unwrap();
+
+        let backend = tddy_core::SharedBackend::from_any(tddy_core::AnyBackend::Stub(
+            tddy_core::StubBackend::new(),
+        ));
+        let bridge = tddy_rpc::RpcBridge::new(TddyRemoteServer::new(DaemonService::new(
+            base.clone(),
+            backend,
+        )));
+
+        // When — requesting that session by id via the RpcBridge unary entry point
+        let msg = RpcMessage {
+            payload: GetSessionRequest {
+                session_id: "session-1".to_string(),
+            }
+            .encode_to_vec(),
+            metadata: RequestMetadata::default(),
+        };
+        let result = bridge
+            .handle_messages("tddy.v1.TddyRemote", "GetSession", &[msg])
+            .await
+            .expect("handle_messages should succeed");
+
+        // Then — the response reflects the on-disk changeset fields
+        let chunks = match result {
+            ResponseBody::Complete(c) => c,
+            _ => panic!("expected Complete for unary"),
+        };
+        assert_eq!(chunks.len(), 1);
+        let response = GetSessionResponse::decode(&chunks[0][..]).expect("decode response");
+        let session = response.session.expect("session should be present");
+        assert_eq!(session.session_id, "session-1");
+        assert_eq!(session.status, "Active");
+        assert_eq!(session.branch, "feature/foo");
+        assert_eq!(session.worktree, "path/to/worktree");
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn start_session_over_the_livekit_transport_creates_worktree_and_runs_workflow() {
+        // Given — a git-initialised repo dir and a DaemonService registered in an RpcBridge —
+        // this is the actual code path a browser's PR-Stack Chat Screen exercises over LiveKit
+        // when it submits a session's first message (see run_daemon's livekit_entries)
+        let base = temp_sessions_dir("start-session-livekit");
+        let repo = base.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+
+        let backend = tddy_core::SharedBackend::from_any(tddy_core::AnyBackend::Stub(
+            tddy_core::StubBackend::new(),
+        ));
+        let bridge = tddy_rpc::RpcBridge::new(TddyRemoteServer::new(DaemonService::new(
+            base.clone(),
+            backend,
+        )));
+
+        use crate::proto::tddy_remote::{client_message, server_message, ClientMessage, StartSession};
+
+        // When — streaming a StartSession intent through the RpcBridge bidi entry point
+        let (tx, rx) = tokio::sync::mpsc::channel::<RpcMessage>(64);
+        tx.send(RpcMessage {
+            payload: ClientMessage {
+                intent: Some(client_message::Intent::StartSession(StartSession {
+                    prompt: "add auth feature".to_string(),
+                    repo_root: repo.to_string_lossy().to_string(),
+                    recipe: String::new(),
+                })),
+            }
+            .encode_to_vec(),
+            metadata: RequestMetadata::default(),
+        })
+        .await
+        .unwrap();
+        drop(tx);
+
+        let handle = bridge
+            .start_bidi_stream("tddy.v1.TddyRemote", "Stream", rx)
+            .await
+            .expect("start_bidi_stream should succeed");
+
+        let mut output_rx = match handle.output {
+            ResponseBody::Streaming(rx) => rx,
+            ResponseBody::Complete(_) => panic!("expected Streaming"),
+        };
+
+        // Then — the first event is either SessionCreated or ModeChanged (plan-approval step)
+        let bytes = output_rx
+            .recv()
+            .await
+            .expect("should receive a response")
+            .expect("response should not be an error");
+        let msg = crate::proto::tddy_remote::ServerMessage::decode(&bytes[..])
+            .expect("decode ServerMessage");
+        assert!(
+            matches!(
+                msg.event,
+                Some(server_message::Event::SessionCreated(_))
+                    | Some(server_message::Event::ModeChanged(_))
+            ),
+            "expected SessionCreated or ModeChanged (plan approval), got {:?}",
+            msg.event
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// The browser's PR-Stack Chat Screen never sends `StartSession` — the session already
+    /// exists (created by `ConnectionService.StartSession`/`run_with_args`, which already wrote
+    /// `changeset.yaml` with `recipe` set and spawned this exact `tddy-coder --daemon` process
+    /// for it). It sends `SubmitFeatureInput` as its first message, matching the *other* backend
+    /// (`TddyRemoteService`)'s protocol. `DaemonService` must accept that as "run the workflow
+    /// for the session this process was already bound to" instead of silently discarding it
+    /// while waiting forever for a `StartSession` intent that will never come.
+    #[tokio::test]
+    async fn submit_feature_input_runs_the_workflow_for_the_bound_session_without_a_start_session_intent(
+    ) {
+        // Given — a session directory that already exists on disk, exactly as
+        // ConnectionService.StartSession/run_with_args leaves it before ever spawning this
+        // process: a changeset with `recipe` set and no `initial_prompt` yet
+        let base = temp_sessions_dir("submit-feature-input-bound-session");
+        let repo = base.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+
+        let session_id = "already-started-session-0001";
+        let session_dir = tddy_core::output::create_session_dir_under(&base, session_id)
+            .expect("create session dir");
+        write_changeset(
+            &session_dir,
+            &tddy_core::changeset::Changeset {
+                recipe: Some("pr-stack".to_string()),
+                ..tddy_core::changeset::Changeset::default()
+            },
+        )
+        .expect("write initial changeset");
+
+        let backend = tddy_core::SharedBackend::from_any(tddy_core::AnyBackend::Stub(
+            tddy_core::StubBackend::new(),
+        ));
+        let bridge = tddy_rpc::RpcBridge::new(TddyRemoteServer::new(DaemonService::for_session(
+            base.clone(),
+            backend,
+            session_id.to_string(),
+            repo.clone(),
+        )));
+
+        use crate::proto::tddy_remote::{client_message, server_message, ClientMessage, SubmitFeatureInput};
+
+        // When — SubmitFeatureInput arrives as the first message on a fresh Stream call, with no
+        // preceding StartSession intent
+        let (tx, rx) = tokio::sync::mpsc::channel::<RpcMessage>(64);
+        tx.send(RpcMessage {
+            payload: ClientMessage {
+                intent: Some(client_message::Intent::SubmitFeatureInput(SubmitFeatureInput {
+                    text: "add auth feature".to_string(),
+                })),
+            }
+            .encode_to_vec(),
+            metadata: RequestMetadata::default(),
+        })
+        .await
+        .unwrap();
+        drop(tx);
+
+        let handle = bridge
+            .start_bidi_stream("tddy.v1.TddyRemote", "Stream", rx)
+            .await
+            .expect("start_bidi_stream should succeed");
+
+        let mut output_rx = match handle.output {
+            ResponseBody::Streaming(rx) => rx,
+            ResponseBody::Complete(_) => panic!("expected Streaming"),
+        };
+
+        // Then — the workflow actually runs GoalStarted names the pr-stack recipe's own start
+        // goal ("analyze-stack"), proving the *existing* session's own recorded recipe was
+        // loaded and used — not the "tdd" default a freshly-created session would get
+        let bytes = output_rx
+            .recv()
+            .await
+            .expect("should receive a response")
+            .expect("response should not be an error");
+        let msg = crate::proto::tddy_remote::ServerMessage::decode(&bytes[..])
+            .expect("decode ServerMessage");
+        match msg.event {
+            Some(server_message::Event::GoalStarted(g)) => {
+                assert_eq!(
+                    g.goal, "analyze-stack",
+                    "expected the pr-stack recipe's own start goal, proving the existing \
+                     session's recorded recipe was used"
+                );
+            }
+            other => panic!("expected GoalStarted, got {:?}", other),
+        }
+
+        // And — the *existing* session's changeset now carries the submitted prompt, with its
+        // original recipe untouched (proving no new session directory was created elsewhere)
+        let updated = tddy_core::read_changeset(&session_dir).expect("read updated changeset");
+        assert_eq!(updated.initial_prompt.as_deref(), Some("add auth feature"));
+        assert_eq!(updated.recipe.as_deref(), Some("pr-stack"));
+
+        let _ = fs::remove_dir_all(&base);
     }
 }
 

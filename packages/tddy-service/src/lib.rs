@@ -33,6 +33,7 @@ pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
 pub use proto::reflection::ServerReflectionServer;
 pub use proto::screen_sharing::ScreenSharingServiceServer;
 pub use proto::tasks::TaskServiceServer;
+pub use proto::tddy_remote::TddyRemoteServer;
 pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
@@ -52,6 +53,12 @@ pub mod gen {
 pub mod proto {
     pub mod test {
         include!(concat!(env!("OUT_DIR"), "/test.rs"));
+    }
+    /// RpcService-compatible generated code for remote.proto (LiveKit/MultiRpcService path).
+    /// See `crate::gen` for the tonic-generated types used by the plain gRPC path.
+    #[allow(unused_imports, unused_variables)]
+    pub mod tddy_remote {
+        include!(concat!(env!("OUT_DIR"), "/tddy_remote_rpc/tddy.v1.rs"));
     }
     pub mod terminal {
         include!(concat!(env!("OUT_DIR"), "/terminal.rs"));

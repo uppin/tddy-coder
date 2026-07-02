@@ -1,20 +1,26 @@
 import React, { useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry } from "../../../gen/connection_pb";
+import type { SessionAttachmentState } from "../useSessionAttachment";
+import { usePresenterLiveKitRoom } from "./usePresenterLiveKitRoom";
 import { PlannedPrList } from "./PlannedPrList";
 import { PrStackChat } from "./PrStackChat";
 import { parseStackPlan, type StackNode } from "./stackPlan";
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
+const IDLE_ATTACHMENT: SessionAttachmentState = { status: "idle" };
+
 export interface PrStackScreenProps {
   session: SessionEntry;
   client?: ConnectionClient;
   sessionToken?: string;
-  /** LiveKit room for this orchestrator session, when attached over LiveKit. Null otherwise. */
-  room?: Room | null;
-  livekitServerIdentity?: string;
+  /**
+   * The session's own attach state. The chat panel derives its own independent LiveKit room
+   * connection from this (see `usePresenterLiveKitRoom`) rather than being handed a room from
+   * above — `SessionMainPane`'s `room` prop is VNC-purpose and unrelated.
+   */
+  attachment?: SessionAttachmentState;
   /**
    * Fired after a child session is spawned so the caller can make it appear in the drawer.
    * Receives just enough of the new `SessionEntry` to render a drawer row immediately —
@@ -38,10 +44,12 @@ export function PrStackScreen({
   session,
   client,
   sessionToken = "",
-  room = null,
-  livekitServerIdentity,
+  attachment = IDLE_ATTACHMENT,
   onChildSessionStarted,
 }: PrStackScreenProps) {
+  const { room, status: roomStatus, error: roomError } = usePresenterLiveKitRoom(attachment);
+  const livekitServerIdentity =
+    attachment.status === "connected-livekit" ? attachment.livekitServerIdentity : undefined;
   const stack = useMemo(() => parseStackPlan(session.stackPlanJson), [session.stackPlanJson]);
   const [startingNodeId, setStartingNodeId] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
@@ -101,6 +109,8 @@ export function PrStackScreen({
           session={session}
           room={room}
           livekitServerIdentity={livekitServerIdentity}
+          roomStatus={roomStatus}
+          roomError={roomError}
         />
       </div>
     </div>

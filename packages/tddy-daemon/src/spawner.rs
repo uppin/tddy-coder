@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Duration;
 
 use uuid::Uuid;
 
@@ -24,6 +25,61 @@ fn level_filter_to_yaml(level: log::LevelFilter) -> &'static str {
         log::LevelFilter::Debug => "debug",
         log::LevelFilter::Trace => "trace",
     }
+}
+
+/// Resolve `tool_path` (from `dev.daemon.yaml`'s `allowed_tools`, e.g. `"target/debug/tddy-coder"`)
+/// to an absolute path anchored to the **daemon's own toolchain root** — never to the target
+/// session's `repo_path`.
+///
+/// The daemon and the `tddy-coder` it spawns are built from the same checkout/workspace (the
+/// same `cargo build`, the same `target/` directory) — which *project* a session happens to
+/// operate on must not change which binary gets executed. A `repo_path` is just an arbitrary
+/// target codebase (it could be a TODO app); it is not expected to contain a `tddy-coder` build
+/// of its own, and resolving `tool_path` against it was the bug (a session against
+/// `main_repo_path`s that don't coincidentally contain a `tddy-coder` build would spawn the
+/// wrong binary — or nothing at all).
+///
+/// An already-absolute `tool_path` is returned unchanged (an operator override).
+fn resolve_tool_path(tool_path: &str, daemon_toolchain_root: &Path) -> PathBuf {
+    resolve_relative_to_daemon_toolchain_root(Path::new(tool_path), daemon_toolchain_root)
+}
+
+/// Resolve `tddy_data_dir` (already-parsed `DaemonConfig::tddy_data_dir` / `ConnectionService::tddy_data_dir`,
+/// e.g. `tddy_core::output::default_tddy_data_dir()`'s relative debug-build default `"tmp/.tddy"`)
+/// to an absolute path anchored to the **daemon's own toolchain root** — never to the target
+/// session's `repo_path`.
+///
+/// Same rationale as [`resolve_tool_path`]: the daemon and the `tddy-coder` child it spawns must
+/// agree on where session state (`changeset.yaml`, `.session.yaml`, etc.) lives. The child's own
+/// cwd is set to `repo_path` (an arbitrary target codebase), so if the child were left to
+/// independently re-derive a relative `tddy_data_dir` default against its own cwd, it would write
+/// session state into `repo_path`'s tree instead of the daemon's — and the daemon's `ListSessions`
+/// (which scans relative to its own launch dir) would never find it. Passing the daemon's already-
+/// resolved value explicitly (via `--tddy-data-dir`) removes the guesswork.
+///
+/// An already-absolute `tddy_data_dir` is returned unchanged (an operator override).
+fn resolve_tddy_data_dir(tddy_data_dir: &Path, daemon_toolchain_root: &Path) -> PathBuf {
+    resolve_relative_to_daemon_toolchain_root(tddy_data_dir, daemon_toolchain_root)
+}
+
+/// Shared absolute/relative resolution rule for [`resolve_tool_path`] and [`resolve_tddy_data_dir`]:
+/// an absolute `path` is returned unchanged (an operator override); a relative `path` is joined
+/// onto `daemon_toolchain_root` (the daemon's own process cwd — never the target session's
+/// `repo_path`).
+fn resolve_relative_to_daemon_toolchain_root(path: &Path, daemon_toolchain_root: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        daemon_toolchain_root.join(path)
+    }
+}
+
+/// Last `n` non-empty lines of `s`, joined by `\n`. Used to fold a crashed child's stderr into an
+/// RPC error message without dumping an arbitrarily long stack trace.
+fn tail_lines(s: &str, n: usize) -> String {
+    let lines: Vec<&str> = s.lines().filter(|l| !l.trim().is_empty()).collect();
+    let start = lines.len().saturating_sub(n);
+    lines[start..].join("\n")
 }
 
 /// Escape `s` for use as a YAML double-quoted scalar (child session `log.loggers.default.format`).
@@ -392,9 +448,11 @@ pub fn clone_as_user(_os_user: &str, _git_url: &str, _destination: &Path) -> any
 
 /// Spawn a tddy-* process as the given OS user.
 #[cfg(unix)]
+#[allow(clippy::too_many_arguments)] // os_user/tool_path/tddy_data_dir/repo_path/livekit/opts/log level+format; a struct would obscure call sites for a spawn-time argument bundle.
 pub fn spawn_as_user(
     os_user: &str,
     tool_path: &str,
+    tddy_data_dir: &Path,
     repo_path: &Path,
     livekit: &LiveKitCreds,
     opts: SpawnOptions<'_>,
@@ -474,7 +532,17 @@ pub fn spawn_as_user(
     let grpc_port = allocate_verified_grpc_listen_port()
         .map_err(|e| anyhow::anyhow!("allocate gRPC listen port for tddy-coder: {}", e))?;
 
-    let mut cmd = std::process::Command::new(tool_path);
+    // Anchor a relative tool_path to the daemon's own toolchain root (its own process cwd —
+    // nothing in this crate ever calls set_current_dir, so this reliably reflects wherever
+    // ./web-dev / cargo run -p tddy-daemon was launched from), not to repo_path. repo_path is an
+    // arbitrary target codebase for the session to operate on; it is not expected to contain a
+    // tddy-coder build of its own.
+    let daemon_toolchain_root = std::env::current_dir()
+        .map_err(|e| anyhow::anyhow!("resolve daemon's own toolchain root (current_dir): {}", e))?;
+    let resolved_tool_path = resolve_tool_path(tool_path, &daemon_toolchain_root);
+    let resolved_tddy_data_dir = resolve_tddy_data_dir(tddy_data_dir, &daemon_toolchain_root);
+
+    let mut cmd = std::process::Command::new(&resolved_tool_path);
     cmd.current_dir(repo_path)
         .stdin(Stdio::null())
         .stdout(Stdio::from(logs.stdout))
@@ -493,7 +561,9 @@ pub fn spawn_as_user(
         .arg("--livekit-room")
         .arg(&livekit_room)
         .arg("--livekit-identity")
-        .arg(&identity);
+        .arg(&identity)
+        .arg("--tddy-data-dir")
+        .arg(&resolved_tddy_data_dir);
 
     if let Some(resume_id) = opts.resume_session_id {
         cmd.arg("--resume-from").arg(resume_id);
@@ -556,7 +626,7 @@ pub fn spawn_as_user(
     log::info!(
         "spawning process os_user={} tool={} repo={} session_id={} grpc_port={} livekit_room={} livekit_identity={} livekit_url={}",
         os_user,
-        tool_path,
+        resolved_tool_path.display(),
         repo_path.display(),
         session_id,
         grpc_port,
@@ -613,6 +683,56 @@ pub fn spawn_as_user(
         identity
     );
 
+    // Grace period: `cmd.spawn()` only confirms fork+exec succeeded, not that the process is
+    // actually alive and serving. A bad CLI arg (e.g. an unknown --recipe) or an early panic
+    // exits within milliseconds — without this check that would still return a "successful"
+    // SpawnResult with a session_id that never becomes a real session. Poll non-blockingly
+    // (`try_wait`, not `wait`) so a healthy long-running child is never delayed beyond this
+    // fixed window.
+    const STARTUP_GRACE_PERIOD: Duration = Duration::from_millis(500);
+    const STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(25);
+    let mut waited = Duration::ZERO;
+    let early_exit = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if waited >= STARTUP_GRACE_PERIOD => break None,
+            Ok(None) => {
+                std::thread::sleep(STARTUP_POLL_INTERVAL);
+                waited += STARTUP_POLL_INTERVAL;
+            }
+            Err(e) => {
+                log::warn!(
+                    "spawner: try_wait failed during startup grace period session_id={} pid={} err={}",
+                    session_id,
+                    pid,
+                    e
+                );
+                break None;
+            }
+        }
+    };
+
+    if let Some(status) = early_exit {
+        let stderr_tail = std::fs::read_to_string(&logs.stderr_path)
+            .map(|s| tail_lines(&s, 20))
+            .unwrap_or_default();
+        log::warn!(
+            "spawner: child exited during startup grace period session_id={} pid={} status={} stderr={}",
+            session_id,
+            pid,
+            status,
+            err_abs.display()
+        );
+        return Err(anyhow::anyhow!(
+            "tddy-coder exited immediately after starting ({status}){}",
+            if stderr_tail.is_empty() {
+                String::new()
+            } else {
+                format!(": {stderr_tail}")
+            }
+        ));
+    }
+
     let session_id_exit = session_id.clone();
     std::thread::spawn(move || match child.wait() {
         Ok(status) => log::info!(
@@ -640,9 +760,11 @@ pub fn spawn_as_user(
 }
 
 #[cfg(not(unix))]
+#[allow(clippy::too_many_arguments)] // Mirrors the #[cfg(unix)] spawn_as_user signature.
 pub fn spawn_as_user(
     _os_user: &str,
     _tool_path: &str,
+    _tddy_data_dir: &Path,
     _repo_path: &Path,
     _livekit: &LiveKitCreds,
     _opts: SpawnOptions<'_>,
@@ -876,6 +998,425 @@ mod stack_parent_spawn_tests {
             opts.stack_parent,
             Some("orch-session-id-42"),
             "SpawnOptions::stack_parent must round-trip correctly"
+        );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod startup_grace_period_tests {
+    use super::{spawn_as_user, LiveKitCreds, SpawnOptions};
+
+    fn current_username() -> String {
+        std::env::var("USER").expect("USER env var must be set to run this test")
+    }
+
+    fn a_livekit_creds() -> LiveKitCreds {
+        LiveKitCreds {
+            url: "ws://127.0.0.1:7880".to_string(),
+            api_key: "test-key".to_string(),
+            api_secret: "test-secret".to_string(),
+            common_room: None,
+            daemon_instance_id: None,
+        }
+    }
+
+    #[test]
+    fn spawning_a_binary_that_exits_immediately_returns_an_error_with_its_stderr() {
+        // Given — /bin/false ignores every argument (including the --daemon/--grpc/... flags
+        // spawn_as_user appends) and exits 1 immediately, simulating a child that crashes on
+        // startup (e.g. an unknown --recipe value) rather than becoming a running session
+        let tmp = tempfile::tempdir().unwrap();
+        let tddy_data_dir = tempfile::tempdir().unwrap();
+        let os_user = current_username();
+
+        // When
+        let result = spawn_as_user(
+            &os_user,
+            "/bin/false",
+            tddy_data_dir.path(),
+            tmp.path(),
+            &a_livekit_creds(),
+            SpawnOptions::default(),
+            "info",
+            super::CHILD_LOG_FORMAT_FALLBACK,
+        );
+
+        // Then — a startup crash is reported as an error, not a fake-success SpawnResult
+        let err = result.expect_err("a child that exits immediately must not report success");
+        assert!(
+            err.to_string().contains("exited immediately"),
+            "expected the error to explain the child exited during startup, got: {err}"
+        );
+    }
+
+    /// A script that ignores every argument (spawn_as_user appends `--daemon --grpc ...`) and
+    /// just sleeps, standing in for a `tddy-coder` process that starts up successfully.
+    fn a_script_that_outlives_the_grace_period(dir: &std::path::Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("fake-long-running-tddy-coder.sh");
+        std::fs::write(&path, "#!/bin/sh\nsleep 2\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    #[test]
+    fn spawning_a_process_that_outlives_the_grace_period_returns_ok() {
+        // Given — a process that stays alive well past the startup grace period
+        let tmp = tempfile::tempdir().unwrap();
+        let tddy_data_dir = tempfile::tempdir().unwrap();
+        let os_user = current_username();
+        let script = a_script_that_outlives_the_grace_period(tmp.path());
+
+        // When
+        let result = spawn_as_user(
+            &os_user,
+            script.to_str().unwrap(),
+            tddy_data_dir.path(),
+            tmp.path(),
+            &a_livekit_creds(),
+            SpawnOptions::default(),
+            "info",
+            super::CHILD_LOG_FORMAT_FALLBACK,
+        );
+
+        // Then — spawn_as_user does not wait for the child to exit; it only guards against an
+        // immediate crash, so a long-running child is reported as a successful spawn
+        let spawned = result.expect("a long-running child must be reported as a successful spawn");
+        assert!(spawned.pid > 0);
+    }
+}
+
+#[cfg(test)]
+mod resolve_tool_path_tests {
+    use super::resolve_tool_path;
+    use std::path::Path;
+
+    #[test]
+    fn an_absolute_tool_path_is_returned_unchanged() {
+        // Given — an operator override, already a full path (e.g. "/usr/local/bin/tddy-coder")
+        let daemon_toolchain_root = Path::new("/var/tddy/Code/tddy-coder-worktrees/pr-stacking-ui");
+
+        // When
+        let resolved = resolve_tool_path("/usr/local/bin/tddy-coder", daemon_toolchain_root);
+
+        // Then — the daemon toolchain root is irrelevant; the absolute path wins as-is
+        assert_eq!(resolved, Path::new("/usr/local/bin/tddy-coder"));
+    }
+
+    #[test]
+    fn a_relative_tool_path_is_joined_with_the_daemon_toolchain_root() {
+        // Given — the shape every `allowed_tools` entry in dev.daemon.yaml actually uses
+        let daemon_toolchain_root = Path::new("/var/tddy/Code/tddy-coder-worktrees/pr-stacking-ui");
+
+        // When
+        let resolved = resolve_tool_path("target/debug/tddy-coder", daemon_toolchain_root);
+
+        // Then
+        assert_eq!(
+            resolved,
+            Path::new("/var/tddy/Code/tddy-coder-worktrees/pr-stacking-ui/target/debug/tddy-coder")
+        );
+    }
+
+    #[test]
+    fn a_relative_tool_path_never_resolves_against_some_other_directory() {
+        // Given — two candidate anchors that must never be conflated: the daemon's own
+        // toolchain root, and an unrelated directory that happens to be passed around
+        // elsewhere in spawn_as_user (a target session's repo_path)
+        let daemon_toolchain_root = Path::new("/var/tddy/Code/tddy-coder-worktrees/pr-stacking-ui");
+        let unrelated_target_repo = Path::new("/home/dev/some-unrelated-todo-app");
+
+        // When
+        let resolved = resolve_tool_path("target/debug/tddy-coder", daemon_toolchain_root);
+
+        // Then — resolution only ever depends on daemon_toolchain_root
+        assert!(!resolved.starts_with(unrelated_target_repo));
+        assert!(resolved.starts_with(daemon_toolchain_root));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod daemon_toolchain_resolution_tests {
+    use super::{spawn_as_user, LiveKitCreds, SpawnOptions};
+    use serial_test::serial;
+    use std::path::{Path, PathBuf};
+
+    fn current_username() -> String {
+        std::env::var("USER").expect("USER env var must be set to run this test")
+    }
+
+    fn a_livekit_creds() -> LiveKitCreds {
+        LiveKitCreds {
+            url: "ws://127.0.0.1:7880".to_string(),
+            api_key: "test-key".to_string(),
+            api_secret: "test-secret".to_string(),
+            common_room: None,
+            daemon_instance_id: None,
+        }
+    }
+
+    /// Writes an executable script at `<dir>/target/debug/tddy-coder`, mirroring the relative
+    /// layout every real `dev.daemon.yaml` `allowed_tools` entry points at. Sleeps rather than
+    /// exiting immediately so it survives `spawn_as_user`'s startup grace-period check — this
+    /// test is about *locating* the binary, not about post-spawn liveness.
+    fn a_fake_tddy_coder_build_under(dir: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let script_dir = dir.join("target").join("debug");
+        std::fs::create_dir_all(&script_dir).unwrap();
+        let script_path = script_dir.join("tddy-coder");
+        std::fs::write(&script_path, "#!/bin/sh\nsleep 2\n").unwrap();
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// RAII guard: switches the test process's cwd for the duration of the test (simulating
+    /// "wherever `./web-dev` launched the daemon from") and restores the original cwd on drop —
+    /// including when the test panics — so a failing assertion never corrupts the cwd for
+    /// whichever test `#[serial]` runs next.
+    struct CwdGuard(PathBuf);
+    impl CwdGuard {
+        fn switch_to(dir: &Path) -> Self {
+            let original = std::env::current_dir().expect("read current_dir");
+            std::env::set_current_dir(dir).expect("switch current_dir for test");
+            Self(original)
+        }
+    }
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.0);
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn spawn_as_user_locates_a_relative_tool_path_against_the_daemons_own_cwd_not_the_target_repo()
+    {
+        // Given — the daemon's own toolchain root (simulated here by the process's cwd, matching
+        // "wherever ./web-dev launched the daemon from") contains a tddy-coder build; the target
+        // session's repo_path is a *completely unrelated* directory that contains no such build
+        // at all — like the TODO-app project this recipe is meant to work against
+        let daemon_toolchain_root = tempfile::tempdir().unwrap();
+        a_fake_tddy_coder_build_under(daemon_toolchain_root.path());
+        let target_repo = tempfile::tempdir().unwrap();
+        let tddy_data_dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = CwdGuard::switch_to(daemon_toolchain_root.path());
+
+        let os_user = current_username();
+
+        // When — spawn_as_user receives the *relative* tool_path every real `allowed_tools`
+        // entry actually uses ("target/debug/tddy-coder"), and a repo_path pointing at the
+        // unrelated target project
+        let result = spawn_as_user(
+            &os_user,
+            "target/debug/tddy-coder",
+            tddy_data_dir.path(),
+            target_repo.path(),
+            &a_livekit_creds(),
+            SpawnOptions::default(),
+            "info",
+            super::CHILD_LOG_FORMAT_FALLBACK,
+        );
+
+        // Then — it finds and runs the daemon's own toolchain build, even though target_repo
+        // has no tddy-coder build of its own; project selection must never change which binary
+        // gets executed
+        result.expect(
+            "spawn_as_user must locate a relative tool_path against the daemon's own toolchain \
+             root, not against the target session's repo_path",
+        );
+    }
+}
+
+#[cfg(test)]
+mod resolve_tddy_data_dir_tests {
+    use super::resolve_tddy_data_dir;
+    use std::path::Path;
+
+    #[test]
+    fn an_absolute_tddy_data_dir_is_returned_unchanged() {
+        // Given — an operator override via dev.daemon.yaml's `tddy_data_dir`, already absolute
+        let daemon_toolchain_root = Path::new("/var/tddy/Code/tddy-coder-worktrees/pr-stacking-ui");
+
+        // When
+        let resolved = resolve_tddy_data_dir(Path::new("/var/tddy/.tddy"), daemon_toolchain_root);
+
+        // Then — the daemon toolchain root is irrelevant; the absolute path wins as-is
+        assert_eq!(resolved, Path::new("/var/tddy/.tddy"));
+    }
+
+    #[test]
+    fn a_relative_tddy_data_dir_is_joined_with_the_daemon_toolchain_root() {
+        // Given — the shape `default_tddy_data_dir()` actually returns for a debug build
+        let daemon_toolchain_root = Path::new("/var/tddy/Code/tddy-coder-worktrees/pr-stacking-ui");
+
+        // When
+        let resolved = resolve_tddy_data_dir(Path::new("tmp/.tddy"), daemon_toolchain_root);
+
+        // Then
+        assert_eq!(
+            resolved,
+            Path::new("/var/tddy/Code/tddy-coder-worktrees/pr-stacking-ui/tmp/.tddy")
+        );
+    }
+
+    #[test]
+    fn a_relative_tddy_data_dir_never_resolves_against_some_other_directory() {
+        // Given — two candidate anchors that must never be conflated: the daemon's own
+        // toolchain root, and an unrelated directory that happens to be passed around
+        // elsewhere in spawn_as_user (a target session's repo_path)
+        let daemon_toolchain_root = Path::new("/var/tddy/Code/tddy-coder-worktrees/pr-stacking-ui");
+        let unrelated_target_repo = Path::new("/home/dev/some-unrelated-todo-app");
+
+        // When
+        let resolved = resolve_tddy_data_dir(Path::new("tmp/.tddy"), daemon_toolchain_root);
+
+        // Then — resolution only ever depends on daemon_toolchain_root, never on repo_path
+        assert!(!resolved.starts_with(unrelated_target_repo));
+        assert!(resolved.starts_with(daemon_toolchain_root));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod daemon_data_dir_passthrough_tests {
+    use super::{spawn_as_user, LiveKitCreds, SpawnOptions};
+    use serial_test::serial;
+    use std::path::{Path, PathBuf};
+
+    fn current_username() -> String {
+        std::env::var("USER").expect("USER env var must be set to run this test")
+    }
+
+    fn a_livekit_creds() -> LiveKitCreds {
+        LiveKitCreds {
+            url: "ws://127.0.0.1:7880".to_string(),
+            api_key: "test-key".to_string(),
+            api_secret: "test-secret".to_string(),
+            common_room: None,
+            daemon_instance_id: None,
+        }
+    }
+
+    /// Writes an executable script at `<dir>/target/debug/tddy-coder` that records the argv it
+    /// was actually invoked with (one argument per line) to `argv_file`, then sleeps rather than
+    /// exiting immediately so it survives `spawn_as_user`'s startup grace-period check — these
+    /// tests are about what argv the child *received*, not about post-spawn liveness.
+    fn a_fake_tddy_coder_build_that_records_its_argv(dir: &Path, argv_file: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let script_dir = dir.join("target").join("debug");
+        std::fs::create_dir_all(&script_dir).unwrap();
+        let script_path = script_dir.join("tddy-coder");
+        let script = format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"{}\"\nsleep 2\n",
+            argv_file.display()
+        );
+        std::fs::write(&script_path, script).unwrap();
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// Reads back the argv recorded by [`a_fake_tddy_coder_build_that_records_its_argv`] and
+    /// returns the value immediately following `flag` (e.g. `--tddy-data-dir`), if present.
+    fn recorded_argv_value_after(argv_file: &Path, flag: &str) -> Option<String> {
+        let contents = std::fs::read_to_string(argv_file).expect("read recorded argv file");
+        let lines: Vec<&str> = contents.lines().collect();
+        lines
+            .iter()
+            .position(|l| *l == flag)
+            .and_then(|i| lines.get(i + 1))
+            .map(|s| s.to_string())
+    }
+
+    /// RAII guard: switches the test process's cwd for the duration of the test (simulating
+    /// "wherever `./web-dev` launched the daemon from") and restores the original cwd on drop —
+    /// including when the test panics — so a failing assertion never corrupts the cwd for
+    /// whichever test `#[serial]` runs next.
+    struct CwdGuard(PathBuf);
+    impl CwdGuard {
+        fn switch_to(dir: &Path) -> Self {
+            let original = std::env::current_dir().expect("read current_dir");
+            std::env::set_current_dir(dir).expect("switch current_dir for test");
+            Self(original)
+        }
+    }
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.0);
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn spawn_as_user_passes_the_daemons_tddy_data_dir_to_the_child_as_an_absolute_path_argument()
+    {
+        // Given — an absolute tddy_data_dir (an operator override, or the daemon's already-
+        // resolved home) that is distinct from both the daemon's own toolchain root and the
+        // target session's repo_path
+        let daemon_toolchain_root = tempfile::tempdir().unwrap();
+        let target_repo = tempfile::tempdir().unwrap();
+        let tddy_data_dir = tempfile::tempdir().unwrap();
+        let argv_file = target_repo.path().join("captured-argv.txt");
+        a_fake_tddy_coder_build_that_records_its_argv(daemon_toolchain_root.path(), &argv_file);
+        let _cwd_guard = CwdGuard::switch_to(daemon_toolchain_root.path());
+
+        let os_user = current_username();
+
+        // When
+        let result = spawn_as_user(
+            &os_user,
+            "target/debug/tddy-coder",
+            tddy_data_dir.path(),
+            target_repo.path(),
+            &a_livekit_creds(),
+            SpawnOptions::default(),
+            "info",
+            super::CHILD_LOG_FORMAT_FALLBACK,
+        );
+        result.expect("spawn_as_user must succeed");
+
+        // Then — the child receives the daemon's own tddy_data_dir verbatim, regardless of
+        // repo_path; it must never fall back to deriving session storage from its own cwd
+        let received = recorded_argv_value_after(&argv_file, "--tddy-data-dir")
+            .expect("child argv must include --tddy-data-dir");
+        assert_eq!(received, tddy_data_dir.path().to_str().unwrap());
+    }
+
+    #[test]
+    #[serial]
+    fn spawn_as_user_resolves_a_relative_tddy_data_dir_against_the_daemons_own_cwd_not_the_target_repo()
+    {
+        // Given — the shape `default_tddy_data_dir()` actually returns for a debug build
+        // ("tmp/.tddy", relative) when no operator override is configured; the target session's
+        // repo_path is a completely unrelated directory the child's cwd gets set to
+        let daemon_toolchain_root = tempfile::tempdir().unwrap();
+        let target_repo = tempfile::tempdir().unwrap();
+        let argv_file = target_repo.path().join("captured-argv.txt");
+        a_fake_tddy_coder_build_that_records_its_argv(daemon_toolchain_root.path(), &argv_file);
+        let _cwd_guard = CwdGuard::switch_to(daemon_toolchain_root.path());
+
+        let os_user = current_username();
+
+        // When
+        let result = spawn_as_user(
+            &os_user,
+            "target/debug/tddy-coder",
+            Path::new("tmp/.tddy"),
+            target_repo.path(),
+            &a_livekit_creds(),
+            SpawnOptions::default(),
+            "info",
+            super::CHILD_LOG_FORMAT_FALLBACK,
+        );
+        result.expect("spawn_as_user must succeed");
+
+        // Then — resolved against the daemon's own cwd, never against repo_path (which would
+        // silently split session storage between the daemon and the child it spawned)
+        let received = recorded_argv_value_after(&argv_file, "--tddy-data-dir")
+            .expect("child argv must include --tddy-data-dir");
+        assert_eq!(
+            received,
+            daemon_toolchain_root
+                .path()
+                .join("tmp/.tddy")
+                .to_str()
+                .unwrap()
         );
     }
 }

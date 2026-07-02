@@ -1751,6 +1751,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let spawn_mouse = self.config.spawn_mouse;
         let os_user = os_user.to_string();
         let tool_path = req.tool_path.clone();
+        let tddy_data_dir_for_spawn = self.tddy_data_dir.clone();
         let repo_path = repo_path.to_path_buf();
         let livekit = livekit.clone();
         let pid_for_spawn = project.project_id.clone();
@@ -1793,6 +1794,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 let spawn_req = spawn_worker::build_spawn_request(
                     &os_user,
                     &tool_path,
+                    &tddy_data_dir_for_spawn,
                     &repo_path,
                     &livekit,
                     SpawnOptions {
@@ -1813,6 +1815,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 spawner::spawn_as_user(
                     &os_user,
                     &tool_path,
+                    &tddy_data_dir_for_spawn,
                     &repo_path,
                     &livekit,
                     SpawnOptions {
@@ -1936,7 +1939,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         } else {
             session_dir.clone()
         };
-        let tool_path = metadata.tool.as_deref().unwrap_or("tddy-coder").to_string();
+        let tool_path = metadata
+            .tool
+            .clone()
+            .ok_or_else(|| Status::failed_precondition("session has no recorded tool path"))?;
         let livekit = spawner::livekit_creds_from_config(&self.config)
             .ok_or_else(|| Status::failed_precondition("LiveKit not configured"))?;
         let spawn_client = self.spawn_client.clone();
@@ -1945,6 +1951,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let session_id = req.session_id.clone();
         let livekit = livekit.clone();
         let project_id_resume = metadata.project_id.clone();
+        let tddy_data_dir_for_spawn = self.tddy_data_dir.clone();
         let timeout = self.config.spawn_worker_request_timeout();
         let daemon_log = self.config.log.clone();
         let result = spawn_blocking_with_timeout(timeout, "ResumeSession: spawn", move || {
@@ -1957,6 +1964,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 let spawn_req = spawn_worker::build_spawn_request(
                     &os_user,
                     &tool_path,
+                    &tddy_data_dir_for_spawn,
                     &repo_path,
                     &livekit,
                     SpawnOptions {
@@ -1977,6 +1985,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 spawner::spawn_as_user(
                     &os_user,
                     &tool_path,
+                    &tddy_data_dir_for_spawn,
                     &repo_path,
                     &livekit,
                     SpawnOptions {

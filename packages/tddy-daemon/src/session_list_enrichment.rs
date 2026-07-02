@@ -189,8 +189,11 @@ pub fn session_list_status_from_session_dir(
             agent: "—".to_string(),
             model: "—".to_string(),
             activity_status: String::new(),
-            orchestrator_session_id: String::new(),
-            recipe: String::new(),
+            orchestrator_session_id: changeset
+                .orchestrator_session_id
+                .clone()
+                .unwrap_or_default(),
+            recipe: changeset.recipe.clone().unwrap_or_default(),
             stack_plan_json: stack_plan_json_for_changeset(&changeset),
         });
     };
@@ -1030,6 +1033,60 @@ state:
         assert_eq!(
             got.recipe, "",
             "recipe must be empty string when absent from changeset.yaml"
+        );
+    }
+
+    /// `enrichment_surfaces_recipe_before_the_sessions_own_row_exists` — a freshly created
+    /// `pr-stack` session sits at `state: Init` with an empty `changeset.sessions` list (no goal
+    /// has run yet to add its own row), but `changeset.recipe` is already set. The recipe is a
+    /// changeset-level field, not a session-row field, so it must still surface — otherwise the
+    /// web UI's per-workflow view routing (which keys off `SessionEntry.recipe`) falls back to
+    /// the generic terminal for every brand-new pr-stack session.
+    #[test]
+    fn enrichment_surfaces_recipe_before_the_sessions_own_row_exists() {
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path();
+
+        fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            r"session_id: fresh-pr-stack-sess
+project_id: proj-fresh-pr-stack
+created_at: '2026-07-01T23:05:00Z'
+updated_at: '2026-07-01T23:05:00Z'
+status: active
+repo_path: /tmp/repo
+pid: 123
+",
+        )
+        .unwrap();
+
+        // Given — Init state, no session rows yet, but recipe already set (matches a real
+        // freshly-created pr-stack session before any chat turn starts the workflow)
+        fs::write(
+            session_dir.join("changeset.yaml"),
+            r"version: 1
+models: {}
+sessions: []
+state:
+  current: Init
+  updated_at: '2026-07-01T23:05:36Z'
+  history:
+    - state: Init
+      at: '2026-07-01T23:05:36Z'
+recipe: pr-stack
+",
+        )
+        .unwrap();
+
+        // When
+        let got = session_list_status_from_session_dir(session_dir)
+            .expect("enrichment must not error for a fresh session with no session rows yet");
+
+        // Then — recipe surfaces even though the session's own row hasn't been added yet
+        assert_eq!(
+            got.recipe, "pr-stack",
+            "recipe must be read from changeset.yaml even when the session's own row is absent \
+             from changeset.sessions"
         );
     }
 

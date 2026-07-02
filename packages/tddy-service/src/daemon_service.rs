@@ -3,8 +3,10 @@
 //! Implements GetSession, ListSessions, and Stream (StartSession flow).
 
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::mpsc;
 
+use futures_util::{Stream, StreamExt};
 use tokio::sync::mpsc as tokio_mpsc;
 use tonic::{Request, Response, Status};
 
@@ -44,20 +46,29 @@ const CHANGESET_FILENAME: &str = "changeset.yaml";
 
 // --- Helpers ---
 
+/// The client-message source `DaemonStreamHandler` reads from — boxed so the *same* handler and
+/// state machine serve both the plain-gRPC transport (a real `tonic::codec::Streaming`, which
+/// already implements `Stream`) and the LiveKit/RpcService transport (a `tddy_rpc::Streaming`,
+/// fed via a byte-roundtrip adapter — see `livekit_transport` below). Everything else about
+/// `DaemonStreamHandler` (the session/workflow state machine, `tx`, disk I/O) is transport-
+/// agnostic already and needs no change.
+type ClientMessageStream =
+    Pin<Box<dyn Stream<Item = Result<crate::gen::ClientMessage, Status>> + Send>>;
+
 /// Receive next client message. On Ok(None) or Err, returns None and may send error to tx.
 async fn recv_client_message(
-    client_stream: &mut tonic::codec::Streaming<crate::gen::ClientMessage>,
+    client_stream: &mut ClientMessageStream,
     tx: &tokio_mpsc::Sender<Result<ServerMessage, Status>>,
 ) -> Option<crate::gen::ClientMessage> {
-    match client_stream.message().await {
-        Ok(Some(m)) => Some(m),
-        Ok(None) => None,
-        Err(e) => {
+    match client_stream.next().await {
+        Some(Ok(m)) => Some(m),
+        Some(Err(e)) => {
             let _ = tx
                 .send(Err(Status::internal(format!("stream error: {}", e))))
                 .await;
             None
         }
+        None => None,
     }
 }
 
@@ -107,12 +118,26 @@ pub(crate) fn resolve_start_session_repo(repo_root: &str) -> Result<PathBuf, Str
     Ok(PathBuf::from(t))
 }
 
+/// A session this `DaemonService` is already bound to — set when the daemon spawned this exact
+/// `tddy-coder --daemon` process for a session that `ConnectionService.StartSession` (and
+/// `run_with_args`) already created on disk, complete with a `changeset.yaml` that has `recipe`
+/// set. Browser clients (the PR-Stack Chat Screen) never send a `StartSession` intent over
+/// `TddyRemote.Stream` for such a session — they send `SubmitFeatureInput` directly, the same
+/// first message `TddyRemoteService`'s protocol uses. See `DaemonStreamHandler::run`.
+#[derive(Clone)]
+struct BoundSession {
+    session_id: String,
+    repo_root: PathBuf,
+}
+
 /// Daemon gRPC service. Reads session state from disk; runs workflow on Stream.
+#[derive(Clone)]
 pub struct DaemonService {
     tddy_data_dir: PathBuf,
     backend: SharedBackend,
     workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
     artifact_manifest: std::sync::Arc<dyn SessionArtifactManifest>,
+    bound_session: Option<BoundSession>,
 }
 
 impl DaemonService {
@@ -135,7 +160,26 @@ impl DaemonService {
             backend,
             workflow_recipe,
             artifact_manifest,
+            bound_session: None,
         }
+    }
+
+    /// A `DaemonService` bound to a session that already exists on disk — used by `run_daemon`,
+    /// which is always spawned for one specific `session_id` that `ConnectionService.StartSession`
+    /// already created (changeset + `.session.yaml` already written). `Stream`'s first message is
+    /// expected to be `SubmitFeatureInput`, not `StartSession` — see [`BoundSession`].
+    pub fn for_session(
+        tddy_data_dir: PathBuf,
+        backend: SharedBackend,
+        session_id: String,
+        repo_root: PathBuf,
+    ) -> Self {
+        let mut service = Self::new(tddy_data_dir, backend);
+        service.bound_session = Some(BoundSession {
+            session_id,
+            repo_root,
+        });
+        service
     }
 }
 
@@ -153,8 +197,9 @@ impl TddyRemote for DaemonService {
             self.backend.clone(),
             self.workflow_recipe.clone(),
             self.artifact_manifest.clone(),
-            request.into_inner(),
+            Box::pin(request.into_inner()),
             tx,
+            self.bound_session.clone(),
         );
         tokio::spawn(handler.run());
         Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
@@ -237,6 +282,131 @@ impl TddyRemote for DaemonService {
     }
 }
 
+/// Second transport for the same `DaemonService`: an `RpcService`-compatible impl so it can be
+/// registered in a LiveKit `MultiRpcService` (the plain-gRPC impl above only satisfies tonic's
+/// server trait, which `MultiRpcService` cannot wrap — this is the gap that left `run_daemon`'s
+/// pr-stack sessions unable to receive chat messages at all). Mirrors
+/// `crate::service::livekit_transport`'s pattern for `TddyRemoteService`.
+///
+/// `get_session`/`list_sessions` delegate to the existing tonic-trait methods above via a byte
+/// roundtrip at the request/response boundary — no disk-reading logic is duplicated. `stream`
+/// cannot delegate the same way (`tonic::codec::Streaming` isn't constructible from arbitrary
+/// data), so it builds its own `DaemonStreamHandler` directly — the *only* reason
+/// `DaemonStreamHandler.client_stream` was changed from a concrete `tonic::codec::Streaming` to
+/// a boxed `ClientMessageStream`: both transports' streams already implement `Stream`, so the
+/// same handler and state machine serve either one unmodified.
+mod livekit_transport {
+    use futures_util::StreamExt;
+    use prost::Message;
+    use tokio_stream::wrappers::ReceiverStream;
+
+    use crate::gen::{
+        tddy_remote_server::TddyRemote as TonicTddyRemote, GetSessionRequest as TonicGetSessionRequest,
+        ListSessionsRequest as TonicListSessionsRequest,
+        ListSessionsResponse as TonicListSessionsResponse,
+    };
+    use crate::proto::tddy_remote::{
+        ClientMessage, GetSessionRequest, GetSessionResponse, ListSessionsRequest,
+        ListSessionsResponse, ServerMessage, TddyRemote,
+    };
+
+    use super::{ClientMessageStream, DaemonService, DaemonStreamHandler, STREAM_CHANNEL_CAPACITY};
+
+    /// Both message types are compiled from the same .proto and are therefore wire-compatible —
+    /// re-encoding one and decoding the other is exact, and avoids duplicating conversion logic
+    /// or business logic between the two independently-codegen'd type sets.
+    fn roundtrip<From: Message, To: Message + Default>(msg: From) -> To {
+        To::decode(&msg.encode_to_vec()[..])
+            .expect("message is wire-compatible across both TddyRemote codegen passes")
+    }
+
+    fn tonic_status_to_rpc(status: tonic::Status) -> tddy_rpc::Status {
+        use tonic::Code;
+        let msg = status.message().to_string();
+        match status.code() {
+            Code::NotFound => tddy_rpc::Status::not_found(msg),
+            Code::InvalidArgument => tddy_rpc::Status::invalid_argument(msg),
+            Code::DeadlineExceeded => tddy_rpc::Status::deadline_exceeded(msg),
+            Code::Unimplemented => tddy_rpc::Status::unimplemented(msg),
+            Code::Unauthenticated => tddy_rpc::Status::unauthenticated(msg),
+            Code::PermissionDenied => tddy_rpc::Status::permission_denied(msg),
+            Code::FailedPrecondition => tddy_rpc::Status::failed_precondition(msg),
+            _ => tddy_rpc::Status::internal(msg),
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl TddyRemote for DaemonService {
+        type StreamStream = ReceiverStream<Result<ServerMessage, tddy_rpc::Status>>;
+
+        async fn stream(
+            &self,
+            request: tddy_rpc::Request<tddy_rpc::Streaming<ClientMessage>>,
+        ) -> Result<tddy_rpc::Response<Self::StreamStream>, tddy_rpc::Status> {
+            let input: ClientMessageStream = Box::pin(request.into_inner().map(|item| {
+                item.map(roundtrip)
+                    .map_err(|e: tddy_rpc::Status| tonic::Status::internal(e.message().to_string()))
+            }));
+
+            let (tonic_tx, mut tonic_rx) = tokio::sync::mpsc::channel(STREAM_CHANNEL_CAPACITY);
+            let handler = DaemonStreamHandler::new(
+                self.tddy_data_dir.clone(),
+                self.backend.clone(),
+                self.workflow_recipe.clone(),
+                self.artifact_manifest.clone(),
+                input,
+                tonic_tx,
+                self.bound_session.clone(),
+            );
+            tokio::spawn(handler.run());
+
+            let (out_tx, out_rx) = tokio::sync::mpsc::channel(STREAM_CHANNEL_CAPACITY);
+            tokio::spawn(async move {
+                while let Some(item) = tonic_rx.recv().await {
+                    let converted = match item {
+                        Ok(msg) => Ok(roundtrip(msg)),
+                        Err(status) => Err(tonic_status_to_rpc(status)),
+                    };
+                    if out_tx.send(converted).await.is_err() {
+                        break;
+                    }
+                }
+            });
+
+            Ok(tddy_rpc::Response::new(ReceiverStream::new(out_rx)))
+        }
+
+        async fn get_session(
+            &self,
+            request: tddy_rpc::Request<GetSessionRequest>,
+        ) -> Result<tddy_rpc::Response<GetSessionResponse>, tddy_rpc::Status> {
+            let tonic_req = tonic::Request::new(roundtrip::<_, TonicGetSessionRequest>(
+                request.into_inner(),
+            ));
+            let tonic_resp = <DaemonService as TonicTddyRemote>::get_session(self, tonic_req)
+                .await
+                .map_err(tonic_status_to_rpc)?;
+            Ok(tddy_rpc::Response::new(roundtrip(tonic_resp.into_inner())))
+        }
+
+        async fn list_sessions(
+            &self,
+            request: tddy_rpc::Request<ListSessionsRequest>,
+        ) -> Result<tddy_rpc::Response<ListSessionsResponse>, tddy_rpc::Status> {
+            let tonic_req = tonic::Request::new(roundtrip::<_, TonicListSessionsRequest>(
+                request.into_inner(),
+            ));
+            let tonic_resp = <DaemonService as TonicTddyRemote>::list_sessions(self, tonic_req)
+                .await
+                .map_err(tonic_status_to_rpc)?;
+            Ok(tddy_rpc::Response::new(roundtrip::<
+                TonicListSessionsResponse,
+                ListSessionsResponse,
+            >(tonic_resp.into_inner())))
+        }
+    }
+}
+
 #[derive(Clone)]
 enum DaemonStreamState {
     Idle,
@@ -250,13 +420,14 @@ struct DaemonStreamHandler {
     backend: SharedBackend,
     workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
     artifact_manifest: std::sync::Arc<dyn SessionArtifactManifest>,
-    client_stream: tonic::codec::Streaming<crate::gen::ClientMessage>,
+    client_stream: ClientMessageStream,
     tx: tokio_mpsc::Sender<Result<ServerMessage, Status>>,
     state: DaemonStreamState,
     session_id: Option<String>,
     session_dir: Option<PathBuf>,
     repo_root: Option<PathBuf>,
     engine: Option<WorkflowEngine>,
+    bound_session: Option<BoundSession>,
 }
 
 impl DaemonStreamHandler {
@@ -265,8 +436,9 @@ impl DaemonStreamHandler {
         backend: SharedBackend,
         workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
         artifact_manifest: std::sync::Arc<dyn SessionArtifactManifest>,
-        client_stream: tonic::codec::Streaming<crate::gen::ClientMessage>,
+        client_stream: ClientMessageStream,
         tx: tokio_mpsc::Sender<Result<ServerMessage, Status>>,
+        bound_session: Option<BoundSession>,
     ) -> Self {
         Self {
             tddy_data_dir,
@@ -280,6 +452,7 @@ impl DaemonStreamHandler {
             session_dir: None,
             repo_root: None,
             engine: None,
+            bound_session,
         }
     }
 
@@ -298,6 +471,11 @@ impl DaemonStreamHandler {
                 DaemonStreamState::Idle => {
                     if let Some(client_message::Intent::StartSession(start)) = msg.intent {
                         self.handle_start_session(&start).await
+                    } else if let (Some(client_message::Intent::SubmitFeatureInput(input)), true) =
+                        (&msg.intent, self.bound_session.is_some())
+                    {
+                        self.handle_submit_feature_input_for_bound_session(input.text.clone())
+                            .await
                     } else {
                         false
                     }
@@ -375,13 +553,16 @@ impl DaemonStreamHandler {
             recipe_key
         );
 
+        // std::env::Args is not Send; bind the resolved Option<String> before the `if let` below
+        // so no non-Send temporary is live across the error branch's `.await`.
+        let invoked_tool_path = std::env::args().next();
         if let Err(e) = tddy_core::write_initial_tool_session_metadata(
             &plan,
             tddy_core::InitialToolSessionMetadataOpts {
                 project_id: String::new(),
                 repo_path: Some(repo.display().to_string()),
                 pid: Some(std::process::id()),
-                tool: Some("tddy-coder".to_string()),
+                tool: invoked_tool_path,
                 livekit_room: None,
                 previous_session_id: None,
                 session_type: None,
@@ -395,6 +576,74 @@ impl DaemonStreamHandler {
             return true;
         }
 
+        self.run_goal_for_session(sid, plan, repo, workflow_recipe, prompt, true)
+            .await
+    }
+
+    /// `SubmitFeatureInput` arriving as the first message on a fresh `Stream` call, for a
+    /// `DaemonService` bound to a session that already exists on disk (see [`BoundSession`]).
+    /// Unlike [`handle_start_session`](Self::handle_start_session), this never creates a new
+    /// session directory or overwrites the already-recorded `recipe` — it loads the existing
+    /// changeset, records the submitted prompt into it, and runs the same workflow-engine
+    /// kickoff against the session that was already there.
+    async fn handle_submit_feature_input_for_bound_session(&mut self, text: String) -> bool {
+        let bound = self
+            .bound_session
+            .clone()
+            .expect("caller only invokes this when bound_session is Some");
+
+        let plan = match create_session_dir_under(&self.tddy_data_dir, &bound.session_id) {
+            Ok(p) => p,
+            Err(e) => {
+                send_workflow_complete(&self.tx, false, format!("open session dir: {}", e)).await;
+                return true;
+            }
+        };
+
+        let mut cs = read_changeset(&plan).unwrap_or_default();
+        let recipe_key = cs.recipe.clone().unwrap_or_else(|| "tdd".to_string());
+        let (workflow_recipe, artifact_manifest) =
+            match workflow_recipe_and_manifest_from_cli_name(&recipe_key) {
+                Ok(pair) => pair,
+                Err(msg) => {
+                    send_workflow_complete(&self.tx, false, msg).await;
+                    return true;
+                }
+            };
+        self.workflow_recipe = workflow_recipe.clone();
+        self.artifact_manifest = artifact_manifest;
+
+        cs.initial_prompt = Some(text.clone());
+        if let Err(e) = tddy_core::changeset::write_changeset(&plan, &cs) {
+            send_workflow_complete(&self.tx, false, format!("write changeset: {}", e)).await;
+            return true;
+        }
+
+        self.run_goal_for_session(
+            bound.session_id.clone(),
+            plan,
+            bound.repo_root.clone(),
+            workflow_recipe,
+            text,
+            false,
+        )
+        .await
+    }
+
+    /// Shared tail of [`handle_start_session`](Self::handle_start_session) and
+    /// [`handle_submit_feature_input_for_bound_session`](Self::handle_submit_feature_input_for_bound_session):
+    /// set up the workflow engine and run the recipe's start goal against `plan`/`repo`, driving
+    /// `self.state` from the result. `announce_session_created` sends a `SessionCreated` event
+    /// first — only meaningful for a session the caller didn't already know the id of.
+    async fn run_goal_for_session(
+        &mut self,
+        sid: String,
+        plan: PathBuf,
+        repo: PathBuf,
+        workflow_recipe: std::sync::Arc<dyn WorkflowRecipe>,
+        prompt: String,
+        announce_session_created: bool,
+    ) -> bool {
         self.session_id = Some(sid.clone());
         self.session_dir = Some(plan.clone());
         self.repo_root = Some(repo.clone());
@@ -442,19 +691,24 @@ impl DaemonStreamHandler {
             serde_json::to_value(conv_path).unwrap(),
         );
 
-        let _ = self
-            .tx
-            .send(Ok(ServerMessage {
-                event: Some(server_message::Event::SessionCreated(SessionCreated {
-                    session_id: sid.clone(),
-                })),
-            }))
-            .await;
+        if announce_session_created {
+            let _ = self
+                .tx
+                .send(Ok(ServerMessage {
+                    event: Some(server_message::Event::SessionCreated(SessionCreated {
+                        session_id: sid.clone(),
+                    })),
+                }))
+                .await;
+        }
 
-        let rt = tokio::runtime::Handle::current();
         let plan_goal = workflow_recipe.start_goal();
-        let result = rt
-            .block_on(self.engine.as_ref().unwrap().run_goal(&plan_goal, ctx))
+        let result = self
+            .engine
+            .as_ref()
+            .unwrap()
+            .run_goal(&plan_goal, ctx)
+            .await
             .map_err(|e| Status::internal(format!("run_goal: {}", e)))
             .unwrap();
 

@@ -1271,7 +1271,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             project_id: args.project_id.clone().unwrap_or_default(),
             repo_path: Some(output_dir_for_ctx.display().to_string()),
             pid: Some(std::process::id()),
-            tool: Some("tddy-coder".to_string()),
+            tool: std::env::args().next(),
             livekit_room: None,
             previous_session_id: args.stack_base.clone(),
             session_type: None,
@@ -1381,7 +1381,20 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         && args.livekit_room.is_some()
         && args.livekit_identity.is_some();
 
-    let service = tddy_service::DaemonService::new(tddy_data_dir.clone(), backend.clone());
+    // This process is always spawned for one specific, already-created session (`--session-id`,
+    // by `ConnectionService.StartSession`/`run_with_args`, which already wrote `changeset.yaml`
+    // with `recipe` set — see `DaemonService::for_session`). The browser's PR-Stack Chat Screen
+    // sends `SubmitFeatureInput` as its first message, not `StartSession`, so `DaemonService`
+    // must know which session it's bound to in order to load that existing state.
+    let service = match (args.session_id.clone(), std::env::current_dir().ok()) {
+        (Some(session_id), Some(repo_root)) => tddy_service::DaemonService::for_session(
+            tddy_data_dir.clone(),
+            backend.clone(),
+            session_id,
+            repo_root,
+        ),
+        _ => tddy_service::DaemonService::new(tddy_data_dir.clone(), backend.clone()),
+    };
     #[allow(clippy::type_complexity)]
     let (view_factory, presenter_observer, presenter_intent_tx): (
         Option<Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>>,
@@ -1434,7 +1447,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     .ok()
                     .map(|p| p.display().to_string()),
                 pid: Some(std::process::id()),
-                tool: Some("tddy-coder".to_string()),
+                tool: std::env::args().next(),
                 livekit_room: args.livekit_room.clone(),
                 previous_session_id: args.stack_base.clone(),
                 session_type: None,
@@ -1517,6 +1530,10 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             .context("bind gRPC port")?;
         log::info!("tddy-coder daemon listening on port {}", port);
 
+        // Cloned before being moved into the plain-gRPC router below — also registered in
+        // livekit_entries further down so pr-stack sessions (LiveKit-connected browsers) can
+        // reach the same DaemonService, not just gRPC-port clients.
+        let daemon_service_for_livekit = service.clone();
         let mut grpc_router = tonic::transport::Server::builder()
             .add_service(tddy_service::gen::tddy_remote_server::TddyRemoteServer::new(service));
         if let (Some(observer), Some(intent_tx_grpc)) = (presenter_observer, presenter_intent_tx) {
@@ -1640,6 +1657,15 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     >::NAME,
                     service: std::sync::Arc::new(tddy_service::LoopbackTunnelServiceServer::new(
                         tddy_service::LoopbackTunnelServiceImpl,
+                    )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
+                },
+                // The PR-Stack Chat Screen (and any other browser-side presenter over LiveKit)
+                // reaches the session's workflow through this entry — without it, TddyRemote.Stream
+                // requests over the LiveKit data channel had no handler at all and vanished silently.
+                tddy_rpc::ServiceEntry {
+                    name: tddy_service::TddyRemoteServer::<tddy_service::DaemonService>::NAME,
+                    service: std::sync::Arc::new(tddy_service::TddyRemoteServer::new(
+                        daemon_service_for_livekit,
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
             ];
@@ -2959,7 +2985,7 @@ fn run_plan_bootstrap_in_session_dir(
             project_id: args.project_id.clone().unwrap_or_default(),
             repo_path: Some(output_dir_for_ctx.display().to_string()),
             pid: Some(std::process::id()),
-            tool: Some("tddy-coder".to_string()),
+            tool: std::env::args().next(),
             livekit_room: None,
             previous_session_id: args.stack_base.clone(),
             session_type: None,

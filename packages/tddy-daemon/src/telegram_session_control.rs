@@ -906,14 +906,6 @@ pub fn map_elicitation_callback_to_presenter_input(callback_data: &str) -> Prese
     PresenterInputPayload { bytes }
 }
 
-fn default_tool_path_for_spawn(config: &DaemonConfig) -> String {
-    config
-        .allowed_tools()
-        .first()
-        .map(|t| t.path.clone())
-        .unwrap_or_else(|| "tddy-coder".to_string())
-}
-
 fn projects_dir_for_telegram_workflow_spawn(
     deps: &TelegramWorkflowSpawn,
 ) -> anyhow::Result<PathBuf> {
@@ -998,7 +990,7 @@ impl TelegramWorkflowSpawn {
                 }
             }
         }
-        let tool_path = default_tool_path_for_spawn(&self.config);
+        let tool_path = self.config.default_tool_path();
         let spawn_mouse = self.config.spawn_mouse;
         let agent_for_spawn = agent.and_then(|a| {
             let t = a.trim();
@@ -1031,6 +1023,7 @@ impl TelegramWorkflowSpawn {
             let req = spawn_worker::build_spawn_request(
                 &self.os_user,
                 &tool_path,
+                &self.tddy_data_dir,
                 repo_path,
                 &livekit,
                 opts,
@@ -1043,6 +1036,7 @@ impl TelegramWorkflowSpawn {
             spawner::spawn_as_user(
                 &self.os_user,
                 &tool_path,
+                &self.tddy_data_dir,
                 repo_path,
                 &livekit,
                 opts,
