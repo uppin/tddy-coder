@@ -77,15 +77,29 @@ A table of all defined VMs with their state, SSH host port, share URL, and **Sta
 
 ```
 tddy-vm (new)
-├── vm.rs         — Vm trait (mockable boundary), VmConfig, RunningVm, VmError, PortForward
-├── qemu.rs       — QemuVm (full impl), QemuVmArgs (pure arg builder), wait_for_ssh_port, send_monitor_command
-├── mock.rs       — MockVm (recording test double)
-├── build.rs      — build_vm_image() — currently wraps tddy-build (WRONG for spec-based builds; needs new direct-Buildroot path)
-├── registry.rs   — VmSpec, VmState, VmManager (HashMap + JSON persistence)
-└── service.rs    — VmServiceImpl (implements generated vm::VmService trait)
+├── vm.rs           — Vm trait (mockable boundary), VmConfig, RunningVm, VmError, PortForward
+├── qemu.rs         — QemuVm (full impl), QemuVmArgs (pure arg builder), wait_for_ssh_port, send_monitor_command
+├── mock.rs         — MockVm (recording test double)
+├── build.rs        — build_vm_image() — currently wraps tddy-build (WRONG for spec-based builds; needs new direct-Buildroot path)
+├── cloud_init.rs   — image-chaining argv/document builders + build_cloud_init_image orchestrator;
+│                     cloud_init_library_paths maps a build's outputs into the VM & Image Library
+├── library.rs      — VmLibrary: images/01-base, images/02-prepared-base, vm/<name>/ layout;
+│                     init, import_base_image, write/read/list_manifests, remove_vm, create_vm;
+│                     set_readonly_file, vm_overlay_create_argv (absolute-backing overlay argv)
+├── vm_manifest.rs  — VmManifest, RunPolicy, LoginPolicy (per-VM manifest.yaml)
+├── registry.rs     — VmSpec, VmState, VmManager (Storage::Json — HashMap + JSON persistence —
+│                     or Storage::Library — VmLibrary-backed, source of truth going forward)
+└── service.rs      — VmServiceImpl (implements generated vm::VmService trait)
+
+tddy-vm-build
+└── src/lib.rs — `build` (Buildroot spec) + `cloud-init` (image-chaining, via VmLibrary) subcommands
 
 tddy-service
 └── proto/vm.proto — VmService definition → generates Rust + TypeScript clients
+
+tddy-daemon (repointed)
+└── main.rs — VM service construction builds a VmLibrary at the resolved data root and
+    constructs VmManager::from_library, instead of the old vm-registry.json-backed VmManager::new
 
 tddy-demo-runner (refactored)
 └── orchestrator.rs — DemoOrchestrator uses tddy_vm::Vm; vm.rs/qemu.rs/mock.rs deleted
@@ -280,6 +294,94 @@ or auto-discovered image.
 - Non-Debian/non-cloud-image bases, multi-NIC network-config beyond DHCP, or a
   persistent registry of cloud-init-built images (the existing `ListVmImages` gap
   applies here too — see Known gaps below).
+
+## VM & Image Library (Added: 2026-07-02)
+
+**Product area:** VM
+**Feature PRD:** this section
+**Status:** Implemented and verified — 65 unit/acceptance tests pass in `tddy-vm`
+(0 failed, 3 correctly-gated `#[ignore]`d), `clippy -D warnings` clean across `tddy-vm`,
+`tddy-vm-build`, and `tddy-daemon`, daemon repointed. `VmLibrary::create_vm`'s real
+`qemu-img create` overlay was additionally run against a real prepared base (makers-lt's
+`debian-12-base.qcow2`) and confirmed via `qemu-img info` to record the expected
+absolute backing-file path. The `tddy-vm-build cloud-init` CLI wiring compiles and its
+4 production tests (split by semantic claim: produces a valid chained pair, imports the
+raw base, locks both halves read-only, keeps scratch artifacts out of the flat
+`02-prepared-base/`) are correctly updated/gated, but could not be run end-to-end in
+this environment (no `xorriso`/`mkisofs`/`genisoimage` on PATH for the seed-ISO step).
+See [packages/tddy-vm/docs/changesets.md](../../../packages/tddy-vm/docs/changesets.md),
+[packages/tddy-vm-build/docs/changesets.md](../../../packages/tddy-vm-build/docs/changesets.md),
+and [docs/dev/changesets.md](../../dev/changesets.md) for the full delta.
+
+Organizes base images, prepared bases, and per-VM state under a single **library**
+rooted at the existing tddy data dir (the same root `tddy-daemon` already resolves via
+`default_tddy_data_dir()`/`tddy_data_root_matching_child()` — no new env var):
+
+```
+<tddy_data_dir>/
+  images/
+    01-base/            immutable base images, downloaded from the internet   (files chmod 0444)
+    02-prepared-base/   read-only, cloud-init-baked prepared bases            (files chmod 0444)
+  vm/
+    <vm-name>/
+      manifest.yaml     how to run, login policy, SSH keys, prepared-base reference
+      <name>.qcow2      mutable overlay backed by a prepared base
+      id_<name>[.pub]   SSH keypair for login (private key chmod 0600)
+```
+
+Design mirrors `~/Code/makers-lt`'s `maker-vm` package: image chaining is pure qcow2
+backing files (pristine download → flattened immutable base → cloud-init overlay → per-VM
+mutable overlay), reusing this crate's existing `cloud_init` argv builders
+(`base_convert_argv`, `overlay_create_argv`) rather than reinventing them.
+
+- **`VmLibrary`** (`packages/tddy-vm/src/library.rs`) — path accessors for the layout
+  above; `init()` creates the tree; `import_base_image` copies a base into `01-base` and
+  locks it read-only; `write_manifest`/`read_manifest`/`list_manifests`/`remove_vm` manage
+  per-VM manifest files; `create_vm` builds a per-VM overlay from a named prepared base
+  and writes the manifest + SSH keys. `vm_overlay_create_argv` builds the per-VM overlay's
+  `qemu-img create` argv using an **absolute** backing-file path (the overlay lives in
+  `vm/<name>/`, separate from the read-only `02-prepared-base/` its prepared base lives
+  in) — contrast `cloud_init::overlay_create_argv`'s co-located **relative** basename.
+- **`VmManifest`** (`packages/tddy-vm/src/vm_manifest.rs`) — the per-VM manifest, in
+  YAML: `name`, `prepared_base` (name of an image in `02-prepared-base`) or `image_path`
+  (an existing, library-unmanaged qcow2 — mutually exclusive, mirrors `VmSpec`'s existing
+  `build_target`/`image_path` duality), a `RunPolicy` (memory, cpus, disk size, SSH host
+  port, port forwards), and a `LoginPolicy` (SSH username + key paths).
+- **`VmManager` becomes library-backed** — `VmManager::from_library(library, backend)` is
+  a new constructor alongside the existing JSON-backed `VmManager::new`; per-VM
+  `manifest.yaml` files are the source of truth for VMs created this way, superseding the
+  single shared `vm-registry.json` for the daemon's own wiring. `VmSpec` remains the
+  in-memory/RPC DTO — the existing `VmService` RPC surface and web UI are unaffected;
+  `VmManager` maps between `VmSpec` and `VmManifest` internally.
+- **Cloud-init wiring** — `cloud_init_library_paths` (in `tddy_vm::cloud_init`) resolves a
+  cloud-init build's outputs into the library: the downloaded input base into `01-base/`,
+  and the flattened base + provisioned overlay pair into `02-prepared-base/` (co-located,
+  preserving the relative-backing-file invariant the pair depends on). `tddy-vm-build
+  cloud-init` points the existing `build_cloud_init_image` pipeline at a per-image scratch
+  subdirectory, `02-prepared-base/<name>/`, so every artifact it produces (seed ISO,
+  `seed/nocloud/` sources, generated SSH keypair, boot log) lands there; once baking
+  succeeds, only the finished qcow2 pair is moved out to the flat `02-prepared-base/`
+  location (both files together, so the overlay's relative backing reference to the base
+  stays valid), leaving the scratch artifacts behind in the subdirectory instead of
+  cluttering `02-prepared-base/` with non-image files.
+- **Filesystem protection** — files placed into `01-base`/`02-prepared-base` are chmod
+  `0o444` (read-only) via `set_readonly_file`; the two directories stay `0755`. No
+  download of any image is performed by this feature — tests reuse an already-built base
+  image supplied via `TDDY_CLOUDINIT_BASE_IMAGE` (e.g. makers-lt's `debian-12-base.qcow2`).
+
+### Out of scope for this sub-feature
+
+- Deleting the JSON-backed `VmManager::new`/`vm-registry.json` code path — it remains
+  available; only the daemon's own construction is repointed at the library.
+- RPC/proto changes or web UI changes — backend-only.
+- Downloading any base image.
+
+### Known gaps — VM & Image Library (Added: 2026-07-02)
+
+- **The `tddy-vm-build cloud-init` production test was not run end-to-end** in the
+  environment this feature was implemented in (missing ISO tooling) — only compiled and
+  gating-verified. The equivalent `tddy-vm`-level `create_vm` production test was run for
+  real, against a real prepared base.
 
 ## Out of scope for this changeset
 

@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 tddy-vm = { path = "../tddy-vm" }
+tddy-core = { path = "../tddy-core" }
 anyhow = "1"
 log = "0.4"
 env_logger = "0.11"

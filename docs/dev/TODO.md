@@ -10,6 +10,19 @@
   `#[cfg(target_os = "linux")]`-gated and the dev environment that made this change has no Linux
   box); needs a real-jail run in Linux CI to confirm the daemon's now-stdio-only session control
   channel (`docs/dev/1-WIP/finish-stdio-ipc-migration.md`) actually works cross-platform.
+### tddy-sandbox-app (source: specialized-subagents changeset, 2026-07-02)
+
+- **`--specialized-agent` CLI flag + deprecated aliases** — the standalone `tddy-sandbox-app` CLI still only supports the single hardcoded `--discovery-subagent`/`--fastcontext-*` flags from #254; it was not migrated to the new `SpecializedAgentDef`/`TDDY_SUBAGENTS_JSON` model this changeset introduces for the MCP registry, `tddy-coder`, and the daemon. Deferred because no acceptance/unit test was written for this specific CLI surface (the changeset's test budget focused on the daemon-driven UI path); implementing it without test coverage would be speculative. See `docs/ft/coder/specialized-subagents.md` (Design overview) for the intended shape.
+- **`--agent` CLI validation for custom specialized-agent names (`tddy-coder`)** — `create_backend` recognizes any resolved specialized-agent name, but `packages/tddy-coder/src/run.rs`'s clap `value_parser` on `--agent` still hardcodes a fixed allowlist and rejects a custom name (e.g. `my-explorer`) before `create_backend` ever runs. Fixing it requires resolving `<tddyhome>/agents` before `--tddy-data-dir` itself is parsed from CLI args — an ordering problem — and has no dedicated test (only `create_backend` itself is tested directly, bypassing clap). See the `TODO` comment at the `Args.agent` field.
+
+### tddy-core (source: stdio-transport-for-grpc-binaries changeset, 2026-07-01)
+
+- **Migrate the toolcall listener to tddy-rpc/tddy-stdio** — `tddy-core/src/toolcall/listener.rs` is a third bespoke newline-delimited-JSON protocol (`submit`/`ask`/`approve`/`list-actions`/`build`) between `tddy-coder` and the Claude Code CLI subprocess it spawns, distinct from the sandbox tool-IPC and gRPC-over-UDS relay this changeset migrates. Same category of problem, same fix would apply, deferred to keep this changeset scoped.
+
+### tddy-daemon (source: stdio-transport-for-grpc-binaries changeset, 2026-07-01)
+
+- **Switch `tddy-daemon`'s real session lifecycle onto the stdio transport** — `connection_service.rs`'s spawn/dial orchestration and `sandbox_session.rs`'s `dial_and_bridge` still spawn `tddy-sandbox-runner` with `--grpc-uds`/`--grpc-listen-port` and dial the tonic `SandboxServiceClient`, for every real sandboxed session. All the primitives to switch this over are built and proven end-to-end through a real Seatbelt jail (`bridge_sandbox_stdio`, `StdioSandboxClient`, transport-agnostic `run_host_relay`) — what remains is purely wiring the daemon's own spawn/dial call sites in `connection_service.rs`, deferred because that file's orchestration is large (1300+ lines) and the switch changes live transport behavior for every real session. Once done, `--grpc-socket`/`--grpc-uds`/`--grpc-listen-port` and their port/path-allocation code (`pick_free_loopback_port`, the `ready_marker` polling handshake) can be deleted outright — no dual-path fallback, per this repo's convention.
+- **Linux (`tddy-sandbox-cgroups`) jail-spawn stdio piping** — `tddy-sandbox-darwin::spawn_plan` was updated to pipe stdin/stdout (instead of redirecting stdout to an egress log) when `--stdio` is in the command; `tddy-sandbox-cgroups` needs the equivalent change on Linux. Not attempted in the original changeset because that crate is `#[cfg(target_os = "linux")]`-gated and couldn't even be compile-checked on the macOS dev environment that did the work, let alone verified through a real jail.
 
 ### tddy-sandbox-cgroups (source: sandbox-builder changeset, 2026-06-28)
 

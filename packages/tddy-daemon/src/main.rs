@@ -434,17 +434,27 @@ fn main() -> anyhow::Result<()> {
             });
 
             // VM lifecycle service — gated on auth being configured (same as ConnectionService).
-            let vm_state_file = {
+            // Per-VM manifest files under the VM & Image Library are the source of truth
+            // (superseding the old single shared vm-registry.json); rooted at the same
+            // config-only tddy data dir every other per-user store here resolves from.
+            let vm_library = {
                 let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
                 let base = tddy_daemon::user_sessions_path::tddy_data_root_matching_child(
                     &user,
                     Some(&tddy_data_dir),
                 )
                 .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
-                base.join("vm-registry.json")
+                let library = tddy_vm::VmLibrary::new(base);
+                if let Err(e) = library.init() {
+                    log::error!(
+                        "Failed to initialize VM & Image Library at {}: {e}",
+                        library.root().display()
+                    );
+                }
+                library
             };
-            let vm_manager = Arc::new(tddy_vm::VmManager::new(
-                &vm_state_file,
+            let vm_manager = Arc::new(tddy_vm::VmManager::from_library(
+                vm_library,
                 Box::new(tddy_vm::QemuVm),
             ));
             let vm_service_impl = tddy_vm::VmServiceImpl::new(

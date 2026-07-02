@@ -17,6 +17,10 @@ Discovery can operate in two modes:
 Citations produced by Discovery are mapped onto `DiscoveryData.relevant_code` entries
 (`RelevantCode{path, reason}`) and can be consumed by other workflow steps (e.g. the planning step).
 
+FastContext is also the always-available builtin entry in the **specialized subagents** system
+(see [specialized-subagents.md](specialized-subagents.md)), which generalizes this single
+hardcoded model into any number of YAML-defined agents selectable from the session-creation UI.
+
 ## Background: `tddy-graph` extraction
 
 Discovery's multi-turn tool-calling loop needs a graph-runner that is independent of `tddy-core`.
