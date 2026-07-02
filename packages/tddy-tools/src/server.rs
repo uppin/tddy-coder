@@ -14,6 +14,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use tddy_discovery::agent_def::SpecializedAgentDef;
 use tddy_discovery::subagent::{
     CodebaseAccess, PromptOutcome, SubagentConfig, SubagentRegistry, SubagentSession,
 };
@@ -667,8 +668,22 @@ fn managed_codebase_access() -> CodebaseAccess {
     })
 }
 
+/// Parse `TDDY_SUBAGENTS_JSON` (a JSON array of [`SpecializedAgentDef`] — see
+/// docs/ft/coder/specialized-subagents.md) into the resolved specialized-agent defs for this
+/// process. Empty (unset, blank, or unparseable) when the env var is absent — the caller falls
+/// back to the legacy single-fastcontext `SubagentRegistry::new()` path in that case, preserving
+/// today's `TDDY_SUBAGENT=fastcontext` + `TDDY_SUBAGENT_FASTCONTEXT_*` behavior unchanged.
+fn subagents_from_env() -> Vec<SpecializedAgentDef> {
+    env_non_empty("TDDY_SUBAGENTS_JSON")
+        .and_then(|json| serde_json::from_str::<Vec<SpecializedAgentDef>>(&json).ok())
+        .unwrap_or_default()
+}
+
 /// Build a [`SubagentConfig`] from `TDDY_SUBAGENT_FASTCONTEXT_*` env vars, with defaults matching
-/// `tddy-coder`'s `--fastcontext-*` CLI flags (see docs/ft/coder/discovery-agent.md).
+/// `tddy-coder`'s `--fastcontext-*` CLI flags (see docs/ft/coder/discovery-agent.md). Only
+/// `access` is meaningful when the registry was built via [`subagents_from_env`]'s defs (the def
+/// itself supplies base_url/model/max_turns in that case — see
+/// `SubagentRegistry::create`'s doc comment in `tddy-discovery`).
 fn subagent_config_from_env() -> SubagentConfig {
     SubagentConfig {
         base_url: env_non_empty("TDDY_SUBAGENT_FASTCONTEXT_URL")
@@ -712,7 +727,12 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
         .map(str::to_string)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    let registry = SubagentRegistry::new();
+    let defs = subagents_from_env();
+    let registry = if defs.is_empty() {
+        SubagentRegistry::new()
+    } else {
+        SubagentRegistry::from_defs(defs)
+    };
     match registry.create(&agent_name, subagent_config_from_env()) {
         Ok(session) => {
             subagent_sessions()

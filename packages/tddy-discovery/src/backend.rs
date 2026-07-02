@@ -20,9 +20,7 @@ use tddy_core::backend::{CodingBackend, InvokeRequest, InvokeResponse};
 use tddy_core::{BackendError, ProgressEvent};
 
 use crate::discovery::extract_final_answer;
-use crate::openai::{
-    discovery_tool_definitions, ChatCompletionRequest, ChatMessage, OpenAiClient,
-};
+use crate::openai::{discovery_tool_definitions, ChatCompletionRequest, ChatMessage, OpenAiClient};
 use crate::tools::ToolExecutor;
 
 /// FastContext Discovery backend — drives the multi-turn model loop.

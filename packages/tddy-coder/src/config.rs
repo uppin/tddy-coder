@@ -478,6 +478,7 @@ github:
             fastcontext_max_turns: None,
             fastcontext_model: Some("cli-model".to_string()),
             tddy_data_dir: None,
+            stdio: false,
         };
         // When
         merge_config_into_args(&mut args, config);
@@ -537,6 +538,7 @@ github:
             fastcontext_max_turns: None,
             fastcontext_model: None,
             tddy_data_dir: None,
+            stdio: false,
         };
         // When
         merge_config_into_args(&mut args, config);

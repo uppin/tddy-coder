@@ -2,6 +2,11 @@
 
 ## Future Enhancements
 
+### tddy-sandbox-app (source: specialized-subagents changeset, 2026-07-02)
+
+- **`--specialized-agent` CLI flag + deprecated aliases** — the standalone `tddy-sandbox-app` CLI still only supports the single hardcoded `--discovery-subagent`/`--fastcontext-*` flags from #254; it was not migrated to the new `SpecializedAgentDef`/`TDDY_SUBAGENTS_JSON` model this changeset introduces for the MCP registry, `tddy-coder`, and the daemon. Deferred because no acceptance/unit test was written for this specific CLI surface (the changeset's test budget focused on the daemon-driven UI path); implementing it without test coverage would be speculative. See `docs/ft/coder/specialized-subagents.md` (Design overview) for the intended shape.
+- **`--agent` CLI validation for custom specialized-agent names (`tddy-coder`)** — `create_backend` recognizes any resolved specialized-agent name, but `packages/tddy-coder/src/run.rs`'s clap `value_parser` on `--agent` still hardcodes a fixed allowlist and rejects a custom name (e.g. `my-explorer`) before `create_backend` ever runs. Fixing it requires resolving `<tddyhome>/agents` before `--tddy-data-dir` itself is parsed from CLI args — an ordering problem — and has no dedicated test (only `create_backend` itself is tested directly, bypassing clap). See the `TODO` comment at the `Args.agent` field.
+
 ### tddy-core (source: stdio-transport-for-grpc-binaries changeset, 2026-07-01)
 
 - **Migrate the toolcall listener to tddy-rpc/tddy-stdio** — `tddy-core/src/toolcall/listener.rs` is a third bespoke newline-delimited-JSON protocol (`submit`/`ask`/`approve`/`list-actions`/`build`) between `tddy-coder` and the Claude Code CLI subprocess it spawns, distinct from the sandbox tool-IPC and gRPC-over-UDS relay this changeset migrates. Same category of problem, same fix would apply, deferred to keep this changeset scoped.

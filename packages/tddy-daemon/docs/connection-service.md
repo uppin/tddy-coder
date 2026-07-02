@@ -8,6 +8,7 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 |-----|---------|
 | `ListTools` | Allowed `tddy-*` binaries from config (`allowed_tools`) |
 | `ListAgents` | Allowed coding backends from config (`allowed_agents`): each entry has `id` (value for `StartSession.agent` / `tddy-coder --agent`) and `label` (display string; optional YAML `label` trimmed; blank or whitespace-only falls back to `id`) |
+| `ListSubagents` | Resolved specialized-agent defs (builtin `fastcontext` + `<tddyhome>/agents/*.yaml` — see [specialized-subagents.md](../../../docs/ft/coder/specialized-subagents.md)): each `SubagentInfo` carries `name` (value for `StartSession.specialized_agents` entries), `label` (blank falls back to `name`), and `model`. |
 | `ListSessions` | Lists directories under `{sessions_base}/sessions/` that contain `.session.yaml` (includes `project_id` and `daemon_instance_id` for the owning daemon); each entry includes workflow fields populated from **`changeset.yaml`** when present (see below). **`sessions_base`** is the Tddy data directory for the mapped OS user (typically `~/.tddy`), so session trees are **`{sessions_base}/sessions/{session_id}/`**. |
 | `ListProjects` | Builds the response from the local registry file **`~/.tddy/projects/projects.yaml`**, then appends optional extra rows from **`EligibleDaemonSource::peer_project_entries(session_token)`** (each **`ProjectEntry`** carries **`daemon_instance_id`** for the owning instance). The default **`EligibleDaemonSource`** supplies **no** peer rows; deployments that implement the trait may merge peer-supplied projects (merge semantics and partial failures are defined by that implementation). |
 | `CreateProject` | Clone (or adopt existing path) + append registry |
@@ -99,6 +100,8 @@ When `StartSessionRequest.session_type == "claude-cli"` **and** `sandbox == true
 3. Renders an SBPL profile and spawns `tddy-tools sandbox-runner` via `sandbox-exec` (`tddy-sandbox-darwin`).
 4. Waits for the in-jail gRPC ready marker, then **`dial_and_bridge`** on a single bidi **`SessionChannel`** (`sandbox_session.rs`).
 5. Writes `.session.yaml` with `sandbox: true`; returns empty LiveKit fields.
+
+**Specialized subagents:** the jail never mounts the repo — the agent reaches it only through the `mcp__tddy-tools__*` exec tools (this is what `managed_codebase` on `StartSessionRequest` names for users; it doesn't toggle mount behavior, since this path is always mount-free). When `specialized_agents` is non-empty, `ConnectionServiceImpl::specialized_subagent_env` resolves each name against the builtin + `<tddyhome>/agents` defs (an unresolvable name fails the request with `INVALID_ARGUMENT`) and adds `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` to the spawned jail's env, so the in-jail `tddy-tools --mcp` process registers the `subagent_new_session`/`subagent_prompt`/`subagent_cancel` MCP tools for those agents — see [specialized-subagents.md](../../../docs/ft/coder/specialized-subagents.md).
 
 **`SessionChannel`** (`packages/tddy-service/proto/sandbox.proto`) multiplexes PTY output, MCP tool exec, and LLM egress on one host-poll-driven bidi stream:
 

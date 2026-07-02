@@ -121,6 +121,8 @@ async fn workspace_session_creates_worktree_with_no_pty() {
             permission_mode: String::new(),
             stack_parent: String::new(),
             sandbox: false,
+            managed_codebase: false,
+            specialized_agents: vec![],
         }))
         .await
         .expect("StartSession with session_type=workspace must succeed");
