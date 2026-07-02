@@ -188,7 +188,7 @@ pub struct AskResponse {
 }
 
 /// Exit codes: 0=success, 1=general failure, 2=usage error, 3=validation error
-pub fn run_submit(args: SubmitArgs) -> Result<()> {
+pub async fn run_submit(args: SubmitArgs) -> Result<()> {
     let json_str = read_input(&args.data, args.data_stdin)?;
 
     let data: serde_json::Value = serde_json::from_str(&json_str).map_err(|e| {
@@ -212,7 +212,7 @@ pub fn run_submit(args: SubmitArgs) -> Result<()> {
     }
 
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
-        relay_submit(std::path::Path::new(&socket_path), &goal, &data)?;
+        relay_submit(std::path::Path::new(&socket_path), &goal, &data).await?;
     } else {
         if goal == "branch-review" {
             if let Ok(session_dir) = std::env::var("TDDY_SESSION_DIR") {
@@ -300,34 +300,21 @@ fn output_validation_error_with_tip(errors: &[schema::SchemaError], tip: &str) {
 }
 
 #[cfg(unix)]
-fn relay_submit(socket_path: &std::path::Path, goal: &str, data: &serde_json::Value) -> Result<()> {
-    use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixStream;
-
-    let mut stream = UnixStream::connect(socket_path).with_context(|| {
-        format!(
-            "failed to connect to TDDY_SOCKET: {}",
-            socket_path.display()
-        )
-    })?;
-
-    let req = SubmitRequest {
+async fn relay_submit(
+    socket_path: &std::path::Path,
+    goal: &str,
+    data: &serde_json::Value,
+) -> Result<()> {
+    let req = serde_json::to_value(SubmitRequest {
         r#type: "submit".to_string(),
         goal: goal.to_string(),
         data: data.clone(),
-    };
-    let line = serde_json::to_string(&req)?;
-    stream.write_all(line.as_bytes())?;
-    stream.write_all(b"\n")?;
-    stream.flush()?;
-
-    let mut reader = BufReader::new(&mut stream);
-    let mut response_line = String::new();
-    reader.read_line(&mut response_line)?;
-    let response_line = response_line.trim();
-
-    let response: SubmitResponse = serde_json::from_str(response_line)
-        .with_context(|| format!("invalid response from tddy-coder: {}", response_line))?;
+    })?;
+    let response_json = tddy_tools::toolcall_client::dispatch_toolcall(socket_path, req)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
+    let response: SubmitResponse = serde_json::from_value(response_json)
+        .with_context(|| "invalid response from tddy-coder")?;
 
     if response.status == "ok" {
         output_success(response.goal.as_deref().unwrap_or(goal));
@@ -343,7 +330,7 @@ fn relay_submit(socket_path: &std::path::Path, goal: &str, data: &serde_json::Va
 }
 
 #[cfg(not(unix))]
-fn relay_submit(
+async fn relay_submit(
     _socket_path: &std::path::Path,
     goal: &str,
     _data: &serde_json::Value,
@@ -352,7 +339,7 @@ fn relay_submit(
     Ok(())
 }
 
-pub fn run_ask(args: AskArgs) -> Result<()> {
+pub async fn run_ask(args: AskArgs) -> Result<()> {
     let json_str = read_input(&args.data, false)?;
 
     let parsed: serde_json::Value = serde_json::from_str(&json_str).map_err(|e| {
@@ -375,7 +362,7 @@ pub fn run_ask(args: AskArgs) -> Result<()> {
         })?;
 
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
-        relay_ask(std::path::Path::new(&socket_path), &questions)?;
+        relay_ask(std::path::Path::new(&socket_path), &questions).await?;
     } else {
         let out = serde_json::json!({
             "status": "ok",
@@ -388,33 +375,16 @@ pub fn run_ask(args: AskArgs) -> Result<()> {
 }
 
 #[cfg(unix)]
-fn relay_ask(socket_path: &std::path::Path, questions: &[AskQuestionItem]) -> Result<()> {
-    use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixStream;
-
-    let mut stream = UnixStream::connect(socket_path).with_context(|| {
-        format!(
-            "failed to connect to TDDY_SOCKET: {}",
-            socket_path.display()
-        )
-    })?;
-
-    let req = AskRequest {
+async fn relay_ask(socket_path: &std::path::Path, questions: &[AskQuestionItem]) -> Result<()> {
+    let req = serde_json::to_value(AskRequest {
         r#type: "ask".to_string(),
         questions: questions.to_vec(),
-    };
-    let line = serde_json::to_string(&req)?;
-    stream.write_all(line.as_bytes())?;
-    stream.write_all(b"\n")?;
-    stream.flush()?;
-
-    let mut reader = BufReader::new(&mut stream);
-    let mut response_line = String::new();
-    reader.read_line(&mut response_line)?;
-    let response_line = response_line.trim();
-
-    let response: AskResponse = serde_json::from_str(response_line)
-        .with_context(|| format!("invalid response from tddy-coder: {}", response_line))?;
+    })?;
+    let response_json = tddy_tools::toolcall_client::dispatch_toolcall(socket_path, req)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
+    let response: AskResponse = serde_json::from_value(response_json)
+        .with_context(|| "invalid response from tddy-coder")?;
 
     if response.status == "ok" {
         let out = serde_json::json!({
@@ -542,9 +512,9 @@ struct InvokeActionRelayResponse {
     exit_code: Option<i32>,
 }
 
-pub fn run_list_actions(args: ListActionsArgs) -> Result<()> {
+pub async fn run_list_actions(args: ListActionsArgs) -> Result<()> {
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
-        relay_list_actions(std::path::Path::new(&socket_path), &args)?;
+        relay_list_actions(std::path::Path::new(&socket_path), &args).await?;
     } else {
         let session_dir = args.session_dir.as_deref().ok_or_else(|| {
             anyhow::anyhow!("--session-dir is required when TDDY_SOCKET is not set")
@@ -560,9 +530,9 @@ pub fn run_list_actions(args: ListActionsArgs) -> Result<()> {
     Ok(())
 }
 
-pub fn run_invoke_action(args: InvokeActionArgs) -> Result<()> {
+pub async fn run_invoke_action(args: InvokeActionArgs) -> Result<()> {
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
-        relay_invoke_action(std::path::Path::new(&socket_path), &args)?;
+        relay_invoke_action(std::path::Path::new(&socket_path), &args).await?;
     } else {
         let session_dir = args.session_dir.as_deref().ok_or_else(|| {
             anyhow::anyhow!("--session-dir is required when TDDY_SOCKET is not set")
@@ -573,18 +543,8 @@ pub fn run_invoke_action(args: InvokeActionArgs) -> Result<()> {
 }
 
 #[cfg(unix)]
-fn relay_list_actions(socket_path: &std::path::Path, args: &ListActionsArgs) -> Result<()> {
-    use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixStream;
-
-    let mut stream = UnixStream::connect(socket_path).with_context(|| {
-        format!(
-            "failed to connect to TDDY_SOCKET: {}",
-            socket_path.display()
-        )
-    })?;
-
-    let req = ListActionsRelayRequest {
+async fn relay_list_actions(socket_path: &std::path::Path, args: &ListActionsArgs) -> Result<()> {
+    let req = serde_json::to_value(ListActionsRelayRequest {
         r#type: "list-actions",
         path_prefix: args.path.clone(),
         query: args.query.clone(),
@@ -594,19 +554,12 @@ fn relay_list_actions(socket_path: &std::path::Path, args: &ListActionsArgs) -> 
         } else {
             None
         },
-    };
-    let line = serde_json::to_string(&req)?;
-    stream.write_all(line.as_bytes())?;
-    stream.write_all(b"\n")?;
-    stream.flush()?;
-
-    let mut reader = BufReader::new(&mut stream);
-    let mut response_line = String::new();
-    reader.read_line(&mut response_line)?;
-    let response_line = response_line.trim();
-
-    let response: ListActionsRelayResponse = serde_json::from_str(response_line)
-        .with_context(|| format!("invalid response from relay: {}", response_line))?;
+    })?;
+    let response_json = tddy_tools::toolcall_client::dispatch_toolcall(socket_path, req)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
+    let response: ListActionsRelayResponse =
+        serde_json::from_value(response_json).with_context(|| "invalid response from relay")?;
 
     if response.status == "ok" {
         let out = serde_json::json!({
@@ -628,7 +581,7 @@ fn relay_list_actions(socket_path: &std::path::Path, args: &ListActionsArgs) -> 
 }
 
 #[cfg(not(unix))]
-fn relay_list_actions(_socket_path: &std::path::Path, args: &ListActionsArgs) -> Result<()> {
+async fn relay_list_actions(_socket_path: &std::path::Path, args: &ListActionsArgs) -> Result<()> {
     // No relay available; fall back to local path (will re-check session_dir).
     if let Some(ref session_dir) = args.session_dir {
         session_actions_cli::run_list_actions(
@@ -645,34 +598,17 @@ fn relay_list_actions(_socket_path: &std::path::Path, args: &ListActionsArgs) ->
 }
 
 #[cfg(unix)]
-fn relay_invoke_action(socket_path: &std::path::Path, args: &InvokeActionArgs) -> Result<()> {
-    use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixStream;
-
-    let mut stream = UnixStream::connect(socket_path).with_context(|| {
-        format!(
-            "failed to connect to TDDY_SOCKET: {}",
-            socket_path.display()
-        )
-    })?;
-
-    let req = InvokeActionRelayRequest {
+async fn relay_invoke_action(socket_path: &std::path::Path, args: &InvokeActionArgs) -> Result<()> {
+    let req = serde_json::to_value(InvokeActionRelayRequest {
         r#type: "invoke-action",
         action: args.action.clone(),
         data: args.data.clone(),
-    };
-    let line = serde_json::to_string(&req)?;
-    stream.write_all(line.as_bytes())?;
-    stream.write_all(b"\n")?;
-    stream.flush()?;
-
-    let mut reader = BufReader::new(&mut stream);
-    let mut response_line = String::new();
-    reader.read_line(&mut response_line)?;
-    let response_line = response_line.trim();
-
-    let response: InvokeActionRelayResponse = serde_json::from_str(response_line)
-        .with_context(|| format!("invalid response from relay: {}", response_line))?;
+    })?;
+    let response_json = tddy_tools::toolcall_client::dispatch_toolcall(socket_path, req)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
+    let response: InvokeActionRelayResponse =
+        serde_json::from_value(response_json).with_context(|| "invalid response from relay")?;
 
     if response.status == "ok" {
         if let Some(record) = response.record {
@@ -694,7 +630,10 @@ fn relay_invoke_action(socket_path: &std::path::Path, args: &InvokeActionArgs) -
 }
 
 #[cfg(not(unix))]
-fn relay_invoke_action(_socket_path: &std::path::Path, args: &InvokeActionArgs) -> Result<()> {
+async fn relay_invoke_action(
+    _socket_path: &std::path::Path,
+    args: &InvokeActionArgs,
+) -> Result<()> {
     if let Some(ref session_dir) = args.session_dir {
         session_actions_cli::run_invoke_action(session_dir, &args.action, &args.data)?;
     } else {
@@ -722,7 +661,7 @@ pub fn run_get_schema(args: GetSchemaArgs) -> Result<()> {
 }
 
 #[cfg(not(unix))]
-fn relay_ask(_socket_path: &std::path::Path, _questions: &[AskQuestionItem]) -> Result<()> {
+async fn relay_ask(_socket_path: &std::path::Path, _questions: &[AskQuestionItem]) -> Result<()> {
     let out = serde_json::json!({
         "status": "ok",
         "message": "Unix socket not available on this platform"

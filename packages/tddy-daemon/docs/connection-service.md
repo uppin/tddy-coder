@@ -97,7 +97,7 @@ When `StartSessionRequest.session_type == "claude-cli"` **and** `sandbox == true
 1. Creates the same git worktree as a non-sandbox claude-cli session (host `tool_engine::execute_tool` operates on this worktree).
 2. Prepares a read-only **context dir** (`SandboxContextDir`: synced `CLAUDE.md`/`AGENTS.md`/skills + `REMOTE_APPENDIX`).
 3. Renders an SBPL profile and spawns `tddy-tools sandbox-runner` via `sandbox-exec` (`tddy-sandbox-darwin`).
-4. Waits for the in-jail gRPC ready marker, then **`dial_and_bridge`** on a single bidi **`SessionChannel`** (`sandbox_session.rs`).
+4. Waits for the ready marker, then **`dial_and_bridge`** dials the runner over its piped stdio (`--stdio`, via `bridge_sandbox_stdio` → `StdioSandboxClient`) for a single bidi **`SessionChannel`** (`sandbox_session.rs`) — no gRPC socket or port is involved for this call site (the runner's own tonic gRPC server is retained only for `tddy-sandbox-app`'s standalone demo path and `sandbox_action.rs`'s separate generic-action-execution flow).
 5. Writes `.session.yaml` with `sandbox: true`; returns empty LiveKit fields.
 
 **`SessionChannel`** (`packages/tddy-service/proto/sandbox.proto`) multiplexes PTY output, MCP tool exec, and LLM egress on one host-poll-driven bidi stream:

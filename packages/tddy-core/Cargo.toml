@@ -26,6 +26,11 @@ tddy-workflow = { path = "../tddy-workflow" }
 tddy-graph = { path = "../tddy-graph" }
 tddy-actions = { path = "../tddy-actions" }
 tddy-task = { path = "../tddy-task" }
+# Toolcall relay transport (see docs/dev/1-WIP/finish-stdio-ipc-migration.md, Item C):
+# `toolcall/listener.rs` serves `ToolcallRpcService` over `tddy-stdio` instead of a bespoke
+# newline-delimited-JSON protocol.
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-stdio = { path = "../tddy-stdio" }
 
 [dev-dependencies]
 async-trait = "0.1"

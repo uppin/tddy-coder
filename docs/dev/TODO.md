@@ -2,14 +2,14 @@
 
 ## Future Enhancements
 
-### tddy-core (source: stdio-transport-for-grpc-binaries changeset, 2026-07-01)
+### tddy-sandbox-cgroups (source: finish-stdio-ipc-migration changeset, 2026-07-02)
 
-- **Migrate the toolcall listener to tddy-rpc/tddy-stdio** — `tddy-core/src/toolcall/listener.rs` is a third bespoke newline-delimited-JSON protocol (`submit`/`ask`/`approve`/`list-actions`/`build`) between `tddy-coder` and the Claude Code CLI subprocess it spawns, distinct from the sandbox tool-IPC and gRPC-over-UDS relay this changeset migrates. Same category of problem, same fix would apply, deferred to keep this changeset scoped.
-
-### tddy-daemon (source: stdio-transport-for-grpc-binaries changeset, 2026-07-01)
-
-- **Switch `tddy-daemon`'s real session lifecycle onto the stdio transport** — `connection_service.rs`'s spawn/dial orchestration and `sandbox_session.rs`'s `dial_and_bridge` still spawn `tddy-sandbox-runner` with `--grpc-uds`/`--grpc-listen-port` and dial the tonic `SandboxServiceClient`, for every real sandboxed session. All the primitives to switch this over are built and proven end-to-end through a real Seatbelt jail (`bridge_sandbox_stdio`, `StdioSandboxClient`, transport-agnostic `run_host_relay`) — what remains is purely wiring the daemon's own spawn/dial call sites in `connection_service.rs`, deferred because that file's orchestration is large (1300+ lines) and the switch changes live transport behavior for every real session. Once done, `--grpc-socket`/`--grpc-uds`/`--grpc-listen-port` and their port/path-allocation code (`pick_free_loopback_port`, the `ready_marker` polling handshake) can be deleted outright — no dual-path fallback, per this repo's convention.
-- **Linux (`tddy-sandbox-cgroups`) jail-spawn stdio piping** — `tddy-sandbox-darwin::spawn_plan` was updated to pipe stdin/stdout (instead of redirecting stdout to an egress log) when `--stdio` is in the command; `tddy-sandbox-cgroups` needs the equivalent change on Linux. Not attempted in the original changeset because that crate is `#[cfg(target_os = "linux")]`-gated and couldn't even be compile-checked on the macOS dev environment that did the work, let alone verified through a real jail.
+- **Verify `--stdio` jail-spawn piping through a real Linux jail** — `spawn_plan` now pipes
+  stdin/stdout (instead of leaving stdout on its prior default) when `--stdio` is in the command,
+  mirroring `tddy-sandbox-darwin::spawn_plan`. Compile-checked only (the crate is
+  `#[cfg(target_os = "linux")]`-gated and the dev environment that made this change has no Linux
+  box); needs a real-jail run in Linux CI to confirm the daemon's now-stdio-only session control
+  channel (`docs/dev/1-WIP/finish-stdio-ipc-migration.md`) actually works cross-platform.
 
 ### tddy-sandbox-cgroups (source: sandbox-builder changeset, 2026-06-28)
 
