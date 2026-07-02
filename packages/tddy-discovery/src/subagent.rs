@@ -326,6 +326,60 @@ async fn dispatch_tool_call(access: &CodebaseAccess, tool_call: &ToolCall) -> St
     }
 }
 
+/// Shared prefix of every subagent turn loop (`FastContextSession`/`SpecializedSubagentSession`):
+/// send the current history, then short-circuit with `EndTurn` if the model produced a non-empty
+/// `<final_answer>`. Returns `Ok(Some(outcome))` on a final answer (the assistant message has
+/// already been appended to `messages`); returns `Ok(None)` with `messages` unchanged otherwise,
+/// leaving the model's `ChatMessage` in `last_message` for the caller to handle tool-calls / plain
+/// prose itself (those two cases differ between the two session types).
+async fn send_turn_and_check_final_answer(
+    client: &OpenAiClient,
+    model: &str,
+    messages: &mut Vec<ChatMessage>,
+    tools: Vec<crate::openai::ToolDefinition>,
+    error_context: &str,
+) -> Result<TurnStep, SubagentError> {
+    let request = ChatCompletionRequest {
+        model: model.to_string(),
+        messages: messages.clone(),
+        tools,
+        tool_choice: serde_json::json!("auto"),
+        temperature: 0.0,
+    };
+    let response = client
+        .complete(request)
+        .await
+        .map_err(|e| SubagentError(format!("{error_context}: {e}")))?;
+    let message = response
+        .choices
+        .into_iter()
+        .next()
+        .ok_or_else(|| SubagentError("no choices in response".to_string()))?
+        .message;
+
+    if let Some(answer) = message
+        .content
+        .as_deref()
+        .and_then(extract_final_answer)
+        .filter(|a| !a.is_empty())
+    {
+        let answer = answer.to_string();
+        messages.push(ChatMessage::assistant(message.content.clone(), None));
+        return Ok(TurnStep::FinalAnswer(PromptOutcome {
+            stop_reason: StopReason::EndTurn,
+            content: vec![ContentBlock::text(answer)],
+        }));
+    }
+    Ok(TurnStep::Continue(message))
+}
+
+/// Result of [`send_turn_and_check_final_answer`] — either the loop is done, or the caller must
+/// still handle the model's tool-calls / plain-prose message itself.
+enum TurnStep {
+    FinalAnswer(PromptOutcome),
+    Continue(ChatMessage),
+}
+
 /// Stateful FastContext discovery session: owns its message history across `prompt()` calls,
 /// unlike `FastContextBackend::invoke`'s one-shot-per-`InvokeRequest` loop.
 pub struct FastContextSession {
@@ -358,39 +412,18 @@ impl FastContextSession {
     /// tool calls. Returns `Some(outcome)` once the model yields a `<final_answer>`, or `None` to
     /// keep looping.
     async fn run_one_turn(&mut self) -> Result<Option<PromptOutcome>, SubagentError> {
-        let request = ChatCompletionRequest {
-            model: self.model.clone(),
-            messages: self.messages.clone(),
-            tools: discovery_tool_definitions(),
-            tool_choice: serde_json::json!("auto"),
-            temperature: 0.0,
-        };
-        let response = self
-            .client
-            .complete(request)
-            .await
-            .map_err(|e| SubagentError(format!("FastContextSession: {e}")))?;
-        let message = response
-            .choices
-            .into_iter()
-            .next()
-            .ok_or_else(|| SubagentError("no choices in response".to_string()))?
-            .message;
-
-        if let Some(answer) = message
-            .content
-            .as_deref()
-            .and_then(extract_final_answer)
-            .filter(|a| !a.is_empty())
+        let message = match send_turn_and_check_final_answer(
+            &self.client,
+            &self.model,
+            &mut self.messages,
+            discovery_tool_definitions(),
+            "FastContextSession",
+        )
+        .await?
         {
-            let answer = answer.to_string();
-            self.messages
-                .push(ChatMessage::assistant(message.content.clone(), None));
-            return Ok(Some(PromptOutcome {
-                stop_reason: StopReason::EndTurn,
-                content: vec![ContentBlock::text(answer)],
-            }));
-        }
+            TurnStep::FinalAnswer(outcome) => return Ok(Some(outcome)),
+            TurnStep::Continue(message) => message,
+        };
 
         match message.tool_calls {
             Some(ref tool_calls) if !tool_calls.is_empty() => {
@@ -436,12 +469,154 @@ impl SubagentSession for FastContextSession {
     }
 }
 
+/// Maps a bound-tool kind to the model-facing tool name (`"READ"`/`"GLOB"`/`"GREP"`).
+fn tool_name(tool: crate::agent_def::SubagentTool) -> &'static str {
+    match tool {
+        crate::agent_def::SubagentTool::Read => "READ",
+        crate::agent_def::SubagentTool::Glob => "GLOB",
+        crate::agent_def::SubagentTool::Grep => "GREP",
+    }
+}
+
+/// A subagent session built from a YAML-defined [`crate::agent_def::SpecializedAgentDef`] rather
+/// than the single hardcoded `"fastcontext"` factory (see [`FastContextSession`]). Generalizes
+/// that session in three ways: an optional system prompt seeds the conversation, only the def's
+/// bound tools are advertised to (and dispatchable by) the model, and a plain-prose turn with no
+/// tool call and no `<final_answer>` terminates `EndTurn` instead of continuing toward
+/// `max_turns` — useful for a model that doesn't follow FastContext's citation convention.
+pub struct SpecializedSubagentSession {
+    client: OpenAiClient,
+    model: String,
+    max_turns: u32,
+    access: CodebaseAccess,
+    messages: Vec<ChatMessage>,
+    tools: Vec<crate::agent_def::SubagentTool>,
+}
+
+impl SpecializedSubagentSession {
+    pub fn new(
+        base_url: impl Into<String>,
+        model: impl Into<String>,
+        max_turns: u32,
+        access: CodebaseAccess,
+        system_prompt: Option<String>,
+        tools: Vec<crate::agent_def::SubagentTool>,
+    ) -> Self {
+        let mut messages = Vec::new();
+        if let Some(prompt) = system_prompt {
+            messages.push(ChatMessage::system(prompt));
+        }
+        Self {
+            client: OpenAiClient::new(base_url),
+            model: model.into(),
+            max_turns,
+            access,
+            messages,
+            tools,
+        }
+    }
+
+    /// Only the def's bound tools are advertised to the model.
+    fn tool_definitions(&self) -> Vec<crate::openai::ToolDefinition> {
+        discovery_tool_definitions()
+            .into_iter()
+            .filter(|d| self.tools.iter().any(|t| tool_name(*t) == d.function.name))
+            .collect()
+    }
+
+    /// Dispatches a model-issued tool call, rejecting one that names a tool the def did not bind
+    /// (a typed error tool-result, not a silent execution and not a panic).
+    async fn dispatch_bounded(&self, tool_call: &ToolCall) -> String {
+        let bound = self
+            .tools
+            .iter()
+            .any(|t| tool_name(*t) == tool_call.function.name);
+        if !bound {
+            return format!(
+                "{{\"error\": \"tool '{}' is not bound for this subagent\"}}",
+                tool_call.function.name
+            );
+        }
+        dispatch_tool_call(&self.access, tool_call).await
+    }
+
+    async fn run_one_turn(&mut self) -> Result<Option<PromptOutcome>, SubagentError> {
+        let tools = self.tool_definitions();
+        let message = match send_turn_and_check_final_answer(
+            &self.client,
+            &self.model,
+            &mut self.messages,
+            tools,
+            "SpecializedSubagentSession",
+        )
+        .await?
+        {
+            TurnStep::FinalAnswer(outcome) => return Ok(Some(outcome)),
+            TurnStep::Continue(message) => message,
+        };
+
+        match message.tool_calls {
+            Some(ref tool_calls) if !tool_calls.is_empty() => {
+                self.messages.push(ChatMessage::assistant(
+                    message.content.clone(),
+                    message.tool_calls.clone(),
+                ));
+                for tool_call in tool_calls {
+                    let result_str = self.dispatch_bounded(tool_call).await;
+                    self.messages.push(ChatMessage::tool_result(
+                        result_str,
+                        tool_call.id.clone(),
+                        tool_call.function.name.clone(),
+                    ));
+                }
+                Ok(None)
+            }
+            // No tool call and no <final_answer> — plain prose. Unlike FastContextSession (which
+            // keeps looping toward max_turns on such a turn, matching the citation convention it
+            // expects), a generic specialized agent may simply answer in prose on a single turn —
+            // treat that prose as the answer instead of forcing max_turns.
+            _ => {
+                let content = message.content.clone().unwrap_or_default();
+                self.messages
+                    .push(ChatMessage::assistant(message.content.clone(), None));
+                Ok(Some(PromptOutcome {
+                    stop_reason: StopReason::EndTurn,
+                    content: vec![ContentBlock::text(content)],
+                }))
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl SubagentSession for SpecializedSubagentSession {
+    async fn prompt(&mut self, text: &str) -> Result<PromptOutcome, SubagentError> {
+        self.messages.push(ChatMessage::user(text.to_string()));
+
+        for _turn in 0..self.max_turns {
+            if let Some(outcome) = self.run_one_turn().await? {
+                return Ok(outcome);
+            }
+        }
+
+        Ok(PromptOutcome {
+            stop_reason: StopReason::MaxTurnRequests,
+            content: Vec::new(),
+        })
+    }
+}
+
 type SessionFactory = Box<dyn Fn(SubagentConfig) -> Box<dyn SubagentSession> + Send + Sync>;
 
 /// Name → factory registry for subagent sessions. Pluggable: `"fastcontext"` ships built in;
 /// future subagents register under their own name.
+///
+/// `defs` (populated via [`SubagentRegistry::from_defs`]) is the generalized path — see
+/// docs/ft/coder/specialized-subagents.md: any number of YAML-defined
+/// [`crate::agent_def::SpecializedAgentDef`]s, not just the one hardcoded `factories` entry.
 pub struct SubagentRegistry {
     factories: HashMap<String, SessionFactory>,
+    defs: Vec<crate::agent_def::SpecializedAgentDef>,
 }
 
 impl SubagentRegistry {
@@ -458,19 +633,46 @@ impl SubagentRegistry {
                 ))
             }) as SessionFactory,
         );
-        Self { factories }
+        Self {
+            factories,
+            defs: Vec::new(),
+        }
+    }
+
+    /// Build a registry backed by YAML-defined [`crate::agent_def::SpecializedAgentDef`]s instead
+    /// of the single hardcoded `"fastcontext"` factory — any number of defs, each resolved by its
+    /// own `name`. See docs/ft/coder/specialized-subagents.md.
+    pub fn from_defs(defs: Vec<crate::agent_def::SpecializedAgentDef>) -> Self {
+        Self {
+            factories: HashMap::new(),
+            defs,
+        }
     }
 
     /// Create a session for `name`, or a [`SubagentError`] naming the unknown subagent.
+    ///
+    /// `config.access` is always honored (it depends on the runtime transport, not on a static
+    /// def); when `name` resolves through `defs` rather than the legacy `factories` map,
+    /// `config.base_url`/`model`/`max_turns` are ignored in favor of the def's own values.
     pub fn create(
         &self,
         name: &str,
         config: SubagentConfig,
     ) -> Result<Box<dyn SubagentSession>, SubagentError> {
-        match self.factories.get(name) {
-            Some(factory) => Ok(factory(config)),
-            None => Err(SubagentError(format!("unknown subagent: {name}"))),
+        if let Some(factory) = self.factories.get(name) {
+            return Ok(factory(config));
         }
+        if let Some(def) = self.defs.iter().find(|d| d.name == name) {
+            return Ok(Box::new(SpecializedSubagentSession::new(
+                def.base_url.clone(),
+                def.model.clone(),
+                def.max_turns,
+                config.access,
+                def.system_prompt.clone(),
+                def.tools.clone(),
+            )));
+        }
+        Err(SubagentError(format!("unknown subagent: {name}")))
     }
 }
 

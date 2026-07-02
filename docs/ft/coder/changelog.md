@@ -8,6 +8,16 @@ Release note history for the Coder product area.
 - New `--subagent-replaces <csv>` flag on `tddy-sandbox-app` (default: the subagent's own declared set)
 - Daemon-hosted sandboxed sessions — previously with no discovery-subagent support at all — gain full parity with the standalone `tddy-sandbox-app` CLI, for both new-session start and resume
 - Feature: [managed-codebase-subagents.md § Tool replacement](managed-codebase-subagents.md#tool-replacement-subagent-declared)
+## 2026-07-02 — Specialized subagents (YAML-defined) + session-creation picker
+
+- Generalizes the single hardcoded FastContext discovery subagent into **specialized subagents**: named configs (model, endpoint, system prompt, bound tools, turn budget) loaded from `<tddyhome>/agents/*.yaml`, resolved via `tddy_discovery::agent_def::resolve_agent_defs` (builtin `fastcontext` always available; a user-defined def of the same name overrides it)
+- `tddy-discovery`'s MCP subagent registry (`SubagentRegistry::from_defs`) now supports any number of registered defs, each with its own model/endpoint, an optional seeded system prompt, a bound-tool allowlist (unbound tool calls are rejected, not silently executed), and EndTurn-on-plain-prose termination — in addition to the existing `<final_answer>` convention
+- `tddy-tools`' MCP server reads `TDDY_SUBAGENTS_JSON` (a JSON array of resolved defs) alongside the existing `TDDY_SUBAGENT` gate; `TDDY_SUBAGENT=fastcontext` alone (no `TDDY_SUBAGENTS_JSON`) keeps working unmodified for back-compat
+- `tddy-coder`'s `create_backend` recognizes any resolved specialized-agent name (not just the literal `"fastcontext"`), building its `FastContextBackend` from the resolved def's model/endpoint — explicit `--fastcontext-*` CLI flags still take precedence
+- New `ListSubagents` RPC + `StartSessionRequest.managed_codebase`/`.specialized_agents` fields: the daemon resolves named specialized agents into the sandboxed jail's env (`ConnectionServiceImpl::specialized_subagent_env`); an unresolvable name rejects the request
+- `tddy-web`'s new-session form gains a collapsible **"Managed codebase"** section (claude-cli sessions only) listing available specialized subagents as a multi-select
+- **Deferred** (tracked in `docs/dev/TODO.md`): the standalone `tddy-sandbox-app` CLI was not migrated off its #254 `--discovery-subagent`/`--fastcontext-*` flags to the new def-driven model; `--agent`'s clap allowlist doesn't yet recognize custom specialized-agent names (`create_backend` itself does)
+- Feature: [specialized-subagents.md](specialized-subagents.md); builds on [discovery-agent.md](discovery-agent.md), [managed-codebase-subagents.md](managed-codebase-subagents.md)
 
 ## 2026-07-02 — Managed-codebase mode + discovery subagents over MCP
 

@@ -389,6 +389,45 @@ pub fn classify_serial_line(line: &str, completion_token: &str) -> CloudInitOutc
     }
 }
 
+// ── Library path mapping ────────────────────────────────────────────────────────────
+
+/// Where a cloud-init build's inputs/outputs land in the [`crate::library::VmLibrary`],
+/// instead of a bare caller-chosen `--output-dir`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloudInitLibraryPaths {
+    /// The downloaded/cached input base image, imported into `images/01-base/`.
+    pub base_image_in_01_base: PathBuf,
+    /// The flattened, immutable base produced by [`base_convert_argv`], in
+    /// `images/02-prepared-base/` — co-located with `prepared_overlay_output` so the
+    /// overlay's relative backing-file reference stays valid.
+    pub prepared_base_output: PathBuf,
+    /// The provisioned delta overlay produced by [`overlay_create_argv`] +
+    /// [`build_cloud_init_image`], in `images/02-prepared-base/`.
+    pub prepared_overlay_output: PathBuf,
+}
+
+/// Resolve the library paths for a cloud-init build.
+///
+/// `base_image_name` identifies the raw, downloaded/cached input base as imported into
+/// `images/01-base/` (e.g. `"debian-12"`) — distinct from `name`, the identifier for
+/// *this* provisioned build's output pair in `images/02-prepared-base/` (e.g.
+/// `"debian-12-nodejs"`). Multiple builds can share one imported base.
+pub fn cloud_init_library_paths(
+    library: &crate::library::VmLibrary,
+    base_image_name: &str,
+    name: &str,
+) -> CloudInitLibraryPaths {
+    CloudInitLibraryPaths {
+        base_image_in_01_base: library
+            .base_images_dir()
+            .join(format!("{base_image_name}.qcow2")),
+        prepared_base_output: library
+            .prepared_base_dir()
+            .join(format!("{name}-base.qcow2")),
+        prepared_overlay_output: library.prepared_base_dir().join(format!("{name}.qcow2")),
+    }
+}
+
 // ── Orchestrator ──────────────────────────────────────────────────────────────────
 
 /// Options for [`build_cloud_init_image`].
@@ -417,8 +456,9 @@ struct TokenDataInput<'a> {
 }
 
 /// Run `qemu-img` with `args`, surfacing stderr on a non-zero exit — mirrors the
-/// error-handling shape of `build.rs::convert_to_qcow2`.
-async fn run_qemu_img(args: &[String]) -> Result<(), String> {
+/// error-handling shape of `build.rs::convert_to_qcow2`. `pub(crate)` so
+/// [`crate::library::VmLibrary::create_vm`] can reuse it for its own `qemu-img create`.
+pub(crate) async fn run_qemu_img(args: &[String]) -> Result<(), String> {
     let out = tokio::process::Command::new("qemu-img")
         .args(args)
         .output()

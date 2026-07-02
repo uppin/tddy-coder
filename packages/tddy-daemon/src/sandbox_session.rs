@@ -24,7 +24,6 @@ pub struct SandboxSessionState {
     /// Rolling PTY output for late `StreamTerminalOutput` subscribers (broadcast drops when idle).
     pub capture: Arc<StdMutex<Vec<u8>>>,
     pub stdin_tx: mpsc::UnboundedSender<Bytes>,
-    pub grpc_socket: PathBuf,
     pub ready_marker: PathBuf,
     /// Kept so delete/resume can SIGKILL the sandbox-exec tree reliably.
     handle: StdMutex<Option<tddy_sandbox::SandboxHandle>>,
@@ -37,7 +36,6 @@ pub struct SandboxSessionStateInit {
     pub stdout_tx: broadcast::Sender<Bytes>,
     pub capture: Arc<StdMutex<Vec<u8>>>,
     pub stdin_tx: mpsc::UnboundedSender<Bytes>,
-    pub grpc_socket: PathBuf,
     pub ready_marker: PathBuf,
     pub handle: tddy_sandbox::SandboxHandle,
 }
@@ -50,7 +48,6 @@ impl SandboxSessionState {
             stdout_tx: init.stdout_tx,
             capture: init.capture,
             stdin_tx: init.stdin_tx,
-            grpc_socket: init.grpc_socket,
             ready_marker: init.ready_marker,
             handle: StdMutex::new(Some(init.handle)),
         }
@@ -232,45 +229,45 @@ pub async fn connect_sandbox_session_client(
     connect_sandbox_client(ready_marker).await
 }
 
-/// Dial the in-jail gRPC server over the platform's transport: loopback TCP on macOS (port from
-/// the ready marker), AF_UNIX on Linux (a netns-isolated cgroups jail can't be reached over
-/// loopback TCP — a UDS on the shared filesystem can).
-#[cfg(target_os = "linux")]
-async fn connect_session_client(
-    ready_marker: &Path,
-    grpc_socket: &Path,
-) -> Result<SandboxServiceClient<tonic::transport::Channel>, String> {
-    connect_sandbox_session_client(ready_marker, grpc_socket).await
+/// The runner never initiates calls into the daemon over the stdio-served `SessionChannel` — it
+/// only sends frames within the bidi call the daemon itself opens. This exists purely to satisfy
+/// [`bridge_sandbox_stdio`]'s hosting requirement; any inbound request here is a bug.
+struct NoCallbackSandboxService;
+
+#[async_trait]
+impl tddy_rpc::RpcService for NoCallbackSandboxService {
+    async fn handle_rpc(
+        &self,
+        service: &str,
+        method: &str,
+        _message: &tddy_rpc::RpcMessage,
+    ) -> tddy_rpc::RpcResult {
+        tddy_rpc::RpcResult::Unary(Err(Status::unimplemented(format!(
+            "tddy-daemon hosts no callback service, got {service}/{method}"
+        ))))
+    }
 }
 
-#[cfg(not(target_os = "linux"))]
-async fn connect_session_client(
-    ready_marker: &Path,
-    grpc_socket: &Path,
-) -> Result<SandboxServiceClient<tonic::transport::Channel>, String> {
-    connect_sandbox_session_client(ready_marker, grpc_socket).await
-}
-
-/// Dial the sandbox gRPC server and drive the host side via the shared relay. PTY output fans into
-/// the broadcast channel (live subscribers) and the rolling capture buffer (late subscribers);
-/// tool calls run in `worktree_path`.
+/// Dial the sandboxed runner over its stdio-served `SessionChannel` and drive the host side via
+/// the shared relay. PTY output fans into the broadcast channel (live subscribers) and the
+/// rolling capture buffer (late subscribers); tool calls run in `worktree_path`.
 #[allow(clippy::too_many_arguments)]
 pub async fn dial_and_bridge(
     session_id: &str,
     worktree_path: PathBuf,
-    ready_marker: PathBuf,
-    grpc_socket: PathBuf,
+    handle: &mut tddy_sandbox::SandboxHandle,
     task_registry: tddy_task::TaskRegistry,
     stdout_tx: broadcast::Sender<Bytes>,
     capture: Arc<StdMutex<Vec<u8>>>,
     stdin_rx: mpsc::UnboundedReceiver<Bytes>,
 ) -> Result<(), String> {
-    let client = connect_session_client(&ready_marker, &grpc_socket).await?;
-
     log::info!(
         target: "tddy_daemon::sandbox_session",
         "opening sandbox SessionChannel for session {session_id}"
     );
+
+    let (client, _run_handle) = bridge_sandbox_stdio(handle, NoCallbackSandboxService)?;
+    let stdio_client = tddy_sandbox_runner::StdioSandboxClient::new(client);
 
     let (term_tx, mut term_rx) = mpsc::unbounded_channel::<Bytes>();
     let stdout_out = stdout_tx.clone();
@@ -289,7 +286,7 @@ pub async fn dial_and_bridge(
         task_registry,
     };
     tddy_sandbox_runner::run_host_relay(
-        client,
+        stdio_client,
         handler,
         tddy_sandbox_runner::HostRelayConfig::new(session_id, term_tx),
         stdin_rx,
@@ -656,7 +653,7 @@ pub fn spawn_sandbox_runner(
 }
 
 #[cfg(test)]
-mod tests {
+mod subagent_env_overlay_tests {
     use super::*;
 
     // ─── subagent_env_overlay ────────────────────────────────────────────────────
@@ -794,5 +791,111 @@ mod tests {
             overlay.get("TDDY_SUBAGENT_REPLACES").map(String::as_str),
             Some("Read")
         );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+
+    fn sandbox_runner_binary() -> PathBuf {
+        std::env::var_os("CARGO_BIN_EXE_tddy-sandbox-runner")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../target/debug/tddy-sandbox-runner")
+            })
+    }
+
+    /// **dial_and_bridge_drives_run_host_relay_over_a_stdio_sandbox_client**: `dial_and_bridge`
+    /// must dial the runner via `StdioSandboxClient` — not the tonic `SandboxServiceClient` — so
+    /// it works against a directly spawned (unsandboxed) `tddy-sandbox-runner --stdio`, with no
+    /// gRPC socket or port anywhere. `sandbox_session_stdio_acceptance.rs` proves the same
+    /// function through a real Seatbelt jail with a real tool-call round trip; this unit-level
+    /// test isolates `dial_and_bridge`'s own dial/bridge/subscribe wiring, mirroring
+    /// `sandbox_runner_stdio_acceptance.rs`'s "usage-error-as-deterministic-PTY-output" technique
+    /// so no jail, tool-IPC socket, or real Claude binary is needed.
+    #[tokio::test]
+    async fn dial_and_bridge_drives_run_host_relay_over_a_stdio_sandbox_client() {
+        // Given a directly spawned (unsandboxed) tddy-sandbox-runner --stdio
+        let runner = sandbox_runner_binary();
+        assert!(runner.exists(), "build tddy-sandbox-runner first");
+
+        let tmp = tempfile::tempdir().unwrap();
+        let context_dir = tmp.path().join("context");
+        std::fs::create_dir_all(&context_dir).unwrap();
+
+        let child = Command::new(&runner)
+            .env_clear()
+            .args([
+                "--session-id",
+                "dial-and-bridge-unit",
+                "--context-dir",
+                context_dir.to_str().unwrap(),
+                "--tool-ipc-socket",
+                tmp.path().join("tool_ipc.sock").to_str().unwrap(),
+                "--tddy-tools-path",
+                "/bin/sleep",
+                "--ready-marker",
+                tmp.path().join("sandbox.ready").to_str().unwrap(),
+                "--claude-binary",
+                "/bin/sleep",
+                "--model",
+                "claude-opus-4-8",
+                "--permission-mode",
+                "auto",
+                "--stdio",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn tddy-sandbox-runner directly");
+
+        let mut handle = tddy_sandbox::SandboxHandle::new(
+            child,
+            tmp.path().join("profile.sb"),
+            tmp.path().join("unused.grpc.sock"),
+            tmp.path().join("sandbox.ready"),
+        );
+
+        // When driving the production dial_and_bridge over its piped stdio, with the terminal
+        // output subscription held before the call so we can observe the relay's own PTY-poll
+        // loop deliver something
+        let (stdout_tx, mut stdout_rx) = broadcast::channel(16);
+        let capture = Arc::new(StdMutex::new(Vec::new()));
+        let (_stdin_tx, stdin_rx) = mpsc::unbounded_channel();
+        let task_registry = tddy_task::TaskRegistry::default();
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            dial_and_bridge(
+                "dial-and-bridge-unit",
+                tmp.path().join("worktree"),
+                &mut handle,
+                task_registry,
+                stdout_tx,
+                capture,
+                stdin_rx,
+            ),
+        )
+        .await
+        .expect("dial_and_bridge timed out")
+        .expect("dial_and_bridge over stdio");
+
+        // Then terminal output eventually arrives — `/bin/sleep` rejects the claude-style flags
+        // it was invoked with and writes a usage error to its controlling PTY; that real output
+        // reaching us here is the deterministic proof that dial_and_bridge actually dialed and
+        // subscribed over stdio (a tonic dial would have failed immediately: no gRPC socket or
+        // port exists anywhere in this test).
+        let chunk = tokio::time::timeout(Duration::from_secs(5), stdout_rx.recv())
+            .await
+            .expect("no terminal output arrived over the stdio-served SessionChannel")
+            .expect("terminal broadcast channel closed");
+        assert!(!chunk.is_empty(), "expected non-empty terminal output");
+
+        handle.child_mut().kill().ok();
+        handle.child_mut().wait().ok();
     }
 }

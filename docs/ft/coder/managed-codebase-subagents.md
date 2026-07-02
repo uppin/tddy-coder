@@ -192,12 +192,16 @@ optional override (`--subagent-replaces <csv>` on `tddy-sandbox-app`, carried as
   `exec_tool_catalog()` limitation — see remote-codebase-mode.md AC16).
 - Streaming partial subagent output back to the main agent mid-turn (a `subagent_prompt` call
   returns only once the subagent yields).
-- Subagents other than FastContext (the registry is pluggable; only `"fastcontext"` ships in v1).
+- ~~Subagents other than FastContext~~ — addressed by
+  [specialized-subagents.md](specialized-subagents.md): the registry now resolves any number of
+  YAML-defined agents (`<tddyhome>/agents/*.yaml`), not just the hardcoded `"fastcontext"` factory.
 - Renaming the internal `RemoteToolEnv` / `TDDY_REMOTE_*` wire vocabulary to "managed" — only the
   user-facing surface (CLI flags, help text, context-dir appendix prose, docs) is renamed; the
   daemon/sandbox IPC wire and its tests are left alone.
-- A UI/CLI picker for choosing which subagents to wire — v1 is flag-driven
-  (`--discovery-subagent <name>`).
+- ~~A UI/CLI picker for choosing which subagents to wire~~ — addressed by
+  [specialized-subagents.md](specialized-subagents.md) for the daemon-driven web UI (a collapsible
+  "Managed codebase" multi-select in session creation); the standalone `tddy-sandbox-app` CLI
+  picker remains flag-driven only (tracked in `docs/dev/TODO.md`).
 - Extending tool-replacement enforcement to the `tddy-coder --remote` path (that path does not wire
   subagents at all today — see `docs/dev/TODO.md`).
 - Per-tool replacement policies beyond a flat replaced-set (e.g. partial replacement of `Grep` for
