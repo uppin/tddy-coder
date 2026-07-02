@@ -12,8 +12,8 @@ config surface:
 
 1. The **MCP subagent registry** (`tddy-tools`'s `subagent_new_session`/`subagent_prompt`/`subagent_cancel`
    tools) — now backed by any number of registered defs instead of one hardcoded `"fastcontext"` factory.
-2. The **standalone `tddy-sandbox-app` CLI** — `--discovery-subagent`/`--fastcontext-*` flags become
-   deprecated aliases for selecting/overriding a def.
+2. The **standalone `tddy-sandbox-app` CLI** — `--specialized-agent <name>` (repeatable) selects one
+   or more defs by name; there is no legacy single-name alias and no override flags.
 3. The **workflow backend** (`tddy-coder --agent fastcontext` / `create_backend`) — builds its
    `FastContextBackend` from the resolved def's `model`/`base_url` instead of hardcoded literals.
 
@@ -122,12 +122,10 @@ of being limited to the single hardcoded FastContext discovery agent and CLI fla
 11. `--specialized-agent <name>` is repeatable; each maps to a def resolved from `<tddyhome>/agents`
     + builtins (`spawn::resolve_specialized_agents`), serialized into `TDDY_SUBAGENTS_JSON` alongside
     `TDDY_SUBAGENT` (comma names) via `spawn::subagent_env_overlay`.
-12. `--discovery-subagent`/`--fastcontext-url`/`--fastcontext-model`/`--fastcontext-max-turns` keep
-    working as deprecated aliases: `--discovery-subagent` folds into a single-entry
-    `specialized_agents` list (`spawn::resolve_specialized_agent_names`) and is rejected outright if
-    given together with `--specialized-agent`; the `--fastcontext-*` fields (plus
-    `--subagent-replaces`) remain single-agent-only overrides, baked onto the one matched def and
-    rejected if more than one specialized agent is selected — see
+12. ~~`--discovery-subagent`/`--fastcontext-url`/`--fastcontext-model`/`--fastcontext-max-turns` keep
+    working as deprecated aliases~~ — removed entirely, no backwards compatibility retained.
+    `--specialized-agent` (repeatable) is the only way to select an agent, and every agent's
+    configuration comes exclusively from its resolved YAML def — see
     [managed-codebase-subagents.md](managed-codebase-subagents.md) AC24.
 
 ### Workflow backend (`tddy-coder`)

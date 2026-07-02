@@ -610,11 +610,6 @@ impl ConnectionServiceImpl {
             hook_token: Some(hook_token),
             sandbox: None,
             specialized_agents: Vec::new(),
-            discovery_subagent: None,
-            fastcontext_url: None,
-            fastcontext_model: None,
-            fastcontext_max_turns: None,
-            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
@@ -747,12 +742,12 @@ impl ConnectionServiceImpl {
         selected_branch_to_work_on: &str,
         permission_mode: &str,
         stack_parent: Option<&str>,
-        subagent: crate::sandbox_session::SubagentSpawnConfig,
-        // Managed-codebase mode + specialized subagents (see
-        // docs/ft/coder/specialized-subagents.md). This sandboxed path already never mounts the
-        // repo (`mounts: vec![]` below, unconditionally) — `managed_codebase` is accepted for
-        // request-shape/UI-intent clarity, not to toggle mount behavior. `specialized_agents`
-        // resolves named defs from `<tddyhome>/agents` and wires them into the jail env.
+        // Specialized subagents (see docs/ft/coder/specialized-subagents.md). This sandboxed path
+        // already never mounts the repo (`mounts: vec![]` below, unconditionally) —
+        // `managed_codebase` is accepted for request-shape/UI-intent clarity, not to toggle mount
+        // behavior. Names resolve against `<tddyhome>/agents` (+ builtins) and are wired into the
+        // jail env; all configuration (model, base_url, max_turns, replaces) comes exclusively
+        // from the resolved def.
         _managed_codebase: bool,
         specialized_agents: &[String],
     ) -> Result<Response<StartSessionResponse>, Status> {
@@ -765,12 +760,6 @@ impl ConnectionServiceImpl {
         if project_id.is_empty() {
             return Err(Status::invalid_argument(
                 "project_id is required for claude-cli sessions",
-            ));
-        }
-        if subagent.discovery_subagent.is_some() && !specialized_agents.is_empty() {
-            return Err(Status::invalid_argument(
-                "discovery_subagent and specialized_agents are mutually exclusive — use \
-                 specialized_agents (the array model) for new sessions",
             ));
         }
         let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
@@ -889,18 +878,7 @@ impl ConnectionServiceImpl {
         let scratch_tmp = scratch_dir.join("tmp");
         let context_dir = sandbox_root.join("context");
 
-        let subagent_name = subagent.discovery_subagent.clone();
-        let replaced_tools: Vec<String> = match subagent_name.as_deref() {
-            Some(name) => {
-                tddy_discovery::subagent::resolve_replaced_tools(name, subagent.replaces.as_deref())
-            }
-            None => Vec::new(),
-        };
-        let replacement_pairs = subagent_replacement_pairs(
-            subagent_name.as_deref(),
-            &replaced_tools,
-            &specialized_defs,
-        );
+        let replacement_pairs = subagent_replacement_pairs(&specialized_defs);
         let replacement_refs: Vec<Vec<&str>> = replacement_pairs
             .iter()
             .map(|(_, tools)| tools.iter().map(String::as_str).collect())
@@ -999,7 +977,6 @@ impl ConnectionServiceImpl {
             &tool_ipc_socket,
             &egress_dir,
         );
-        env.extend(crate::sandbox_session::subagent_env_overlay(&subagent));
         if !specialized_defs.is_empty() {
             env.extend(self.specialized_subagent_env(&specialized_defs)?);
         }
@@ -1084,11 +1061,6 @@ impl ConnectionServiceImpl {
             hook_token: None,
             sandbox: Some(true),
             specialized_agents: specialized_agents.to_vec(),
-            discovery_subagent: subagent.discovery_subagent.clone(),
-            fastcontext_url: subagent.fastcontext_url.clone(),
-            fastcontext_model: subagent.fastcontext_model.clone(),
-            fastcontext_max_turns: subagent.fastcontext_max_turns,
-            subagent_replaces: subagent.replaces.clone(),
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
@@ -1192,13 +1164,6 @@ impl ConnectionServiceImpl {
             .map(PathBuf::from)
             .ok_or_else(|| Status::internal("sandbox session missing repo_path in metadata"))?;
 
-        let subagent = crate::sandbox_session::SubagentSpawnConfig {
-            discovery_subagent: meta.discovery_subagent.clone(),
-            fastcontext_url: meta.fastcontext_url.clone(),
-            fastcontext_model: meta.fastcontext_model.clone(),
-            fastcontext_max_turns: meta.fastcontext_max_turns,
-            replaces: meta.subagent_replaces.clone(),
-        };
         let pid = self
             .relaunch_sandboxed_runner(
                 session_id,
@@ -1206,7 +1171,6 @@ impl ConnectionServiceImpl {
                 &worktree_path,
                 &model,
                 "auto",
-                &subagent,
                 &meta.specialized_agents,
             )
             .await?;
@@ -1238,7 +1202,6 @@ impl ConnectionServiceImpl {
         worktree_path: &Path,
         model: &str,
         permission_mode: &str,
-        subagent: &crate::sandbox_session::SubagentSpawnConfig,
         specialized_agents: &[String],
     ) -> Result<u32, Status> {
         let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
@@ -1260,18 +1223,7 @@ impl ConnectionServiceImpl {
         let scratch_tmp = scratch_dir.join("tmp");
         let context_dir = sandbox_root.join("context");
 
-        let subagent_name = subagent.discovery_subagent.clone();
-        let replaced_tools: Vec<String> = match subagent_name.as_deref() {
-            Some(name) => {
-                tddy_discovery::subagent::resolve_replaced_tools(name, subagent.replaces.as_deref())
-            }
-            None => Vec::new(),
-        };
-        let replacement_pairs = subagent_replacement_pairs(
-            subagent_name.as_deref(),
-            &replaced_tools,
-            &specialized_defs,
-        );
+        let replacement_pairs = subagent_replacement_pairs(&specialized_defs);
         let replacement_refs: Vec<Vec<&str>> = replacement_pairs
             .iter()
             .map(|(_, tools)| tools.iter().map(String::as_str).collect())
@@ -1367,7 +1319,6 @@ impl ConnectionServiceImpl {
             &tool_ipc_socket,
             &egress_dir,
         );
-        env.extend(crate::sandbox_session::subagent_env_overlay(subagent));
         if !specialized_defs.is_empty() {
             env.extend(self.specialized_subagent_env(&specialized_defs)?);
         }
@@ -1442,19 +1393,11 @@ impl ConnectionServiceImpl {
     }
 }
 
-/// Build the (name, replaced-tools) pairs for a session's active subagent-replacement config:
-/// either the legacy single discovery-subagent (name + its already-resolved replaced tools) or
-/// every specialized-agent def in the array (each its own name + its own `replaces`, normalized).
-/// Never both — callers must enforce mutual exclusivity before calling this (see the
-/// `discovery_subagent`/`specialized_agents` guard in `start_sandboxed_claude_cli_session`).
+/// Build the (name, replaced-tools) pairs for every resolved specialized-agent def — each its own
+/// name + its own YAML-declared `replaces`, normalized.
 fn subagent_replacement_pairs(
-    subagent_name: Option<&str>,
-    replaced_tools: &[String],
     specialized_defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
 ) -> Vec<(String, Vec<String>)> {
-    if let Some(name) = subagent_name {
-        return vec![(name.to_string(), replaced_tools.to_vec())];
-    }
     specialized_defs
         .iter()
         .map(|def| {
@@ -1865,45 +1808,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 }
             };
             if req.sandbox {
-                let subagent_for_claude_cli = crate::sandbox_session::SubagentSpawnConfig {
-                    discovery_subagent: {
-                        let t = req.discovery_subagent.trim();
-                        if t.is_empty() {
-                            None
-                        } else {
-                            Some(t.to_string())
-                        }
-                    },
-                    fastcontext_url: {
-                        let t = req.fastcontext_url.trim();
-                        if t.is_empty() {
-                            None
-                        } else {
-                            Some(t.to_string())
-                        }
-                    },
-                    fastcontext_model: {
-                        let t = req.fastcontext_model.trim();
-                        if t.is_empty() {
-                            None
-                        } else {
-                            Some(t.to_string())
-                        }
-                    },
-                    fastcontext_max_turns: if req.fastcontext_max_turns == 0 {
-                        None
-                    } else {
-                        Some(req.fastcontext_max_turns)
-                    },
-                    replaces: {
-                        let t = req.subagent_replaces.trim();
-                        if t.is_empty() {
-                            None
-                        } else {
-                            Some(t.to_string())
-                        }
-                    },
-                };
                 return self
                     .start_sandboxed_claude_cli_session(
                         os_user,
@@ -1917,7 +1821,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         req.selected_branch_to_work_on.trim(),
                         req.permission_mode.trim(),
                         stack_parent_for_claude_cli.as_deref(),
-                        subagent_for_claude_cli,
                         req.managed_codebase,
                         &req.specialized_agents,
                     )
@@ -3799,11 +3702,6 @@ mod signal_session_unit_tests {
             hook_token: None,
             sandbox: None,
             specialized_agents: Vec::new(),
-            discovery_subagent: None,
-            fastcontext_url: None,
-            fastcontext_model: None,
-            fastcontext_max_turns: None,
-            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -3985,11 +3883,6 @@ mod list_sessions_unit_tests {
             hook_token: None,
             sandbox: None,
             specialized_agents: Vec::new(),
-            discovery_subagent: None,
-            fastcontext_url: None,
-            fastcontext_model: None,
-            fastcontext_max_turns: None,
-            subagent_replaces: None,
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -4082,11 +3975,6 @@ mod report_session_status_unit_tests {
             hook_token: Some(hook_token.to_string()),
             sandbox: None,
             specialized_agents: Vec::new(),
-            discovery_subagent: None,
-            fastcontext_url: None,
-            fastcontext_model: None,
-            fastcontext_max_turns: None,
-            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -4184,11 +4072,6 @@ mod report_session_status_unit_tests {
             hook_token: None,
             sandbox: None,
             specialized_agents: Vec::new(),
-            discovery_subagent: None,
-            fastcontext_url: None,
-            fastcontext_model: None,
-            fastcontext_max_turns: None,
-            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -4399,54 +4282,6 @@ mod specialized_subagent_env_unit_tests {
         assert!(
             defs_json.contains("fastcontext"),
             "TDDY_SUBAGENTS_JSON must serialize the resolved fastcontext def; got: {defs_json}"
-        );
-    }
-
-    /// `discovery_subagent` (legacy single) and `specialized_agents` (array) are mutually
-    /// exclusive — a request setting both is rejected before any repo/project resolution is
-    /// attempted, not silently resolved by one taking precedence.
-    #[tokio::test]
-    async fn start_sandboxed_session_rejects_both_discovery_subagent_and_specialized_agents() {
-        // Given
-        let tddy_home = tempfile::tempdir().unwrap();
-        let service = make_unit_service(tddy_home.path().to_path_buf());
-        let subagent = crate::sandbox_session::SubagentSpawnConfig {
-            discovery_subagent: Some("fastcontext".to_string()),
-            fastcontext_url: None,
-            fastcontext_model: None,
-            fastcontext_max_turns: None,
-            replaces: None,
-        };
-
-        // When
-        let result = service
-            .start_sandboxed_claude_cli_session(
-                "u",
-                "sess-mutex",
-                tddy_home.path().to_path_buf(),
-                "claude-sonnet-4-6",
-                "proj-1",
-                "",
-                "",
-                "",
-                "",
-                "",
-                None,
-                subagent,
-                false,
-                &["fastcontext".to_string()],
-            )
-            .await;
-
-        // Then
-        let err = result.expect_err(
-            "discovery_subagent + specialized_agents together must be rejected, not resolved",
-        );
-        assert_eq!(err.code(), tddy_rpc::Code::InvalidArgument);
-        assert!(
-            err.message().contains("mutually exclusive"),
-            "error must explain the mutual-exclusivity conflict; got: {}",
-            err.message()
         );
     }
 }

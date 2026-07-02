@@ -207,11 +207,6 @@ allowed_agents:
         sandbox: false,
         managed_codebase: false,
         specialized_agents: vec![],
-        discovery_subagent: String::new(),
-        fastcontext_url: String::new(),
-        fastcontext_model: String::new(),
-        fastcontext_max_turns: 0,
-        subagent_replaces: String::new(),
     });
 
     // When

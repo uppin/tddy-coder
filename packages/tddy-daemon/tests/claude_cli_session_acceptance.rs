@@ -187,11 +187,6 @@ async fn claude_cli_session_metadata_fields_persisted() {
             sandbox: false,
             managed_codebase: false,
             specialized_agents: vec![],
-            discovery_subagent: String::new(),
-            fastcontext_url: String::new(),
-            fastcontext_model: String::new(),
-            fastcontext_max_turns: 0,
-            subagent_replaces: String::new(),
         }))
         .await
         .expect("StartSession with session_type=claude-cli must succeed");
@@ -280,11 +275,6 @@ async fn claude_cli_session_livekit_fields_empty() {
             sandbox: false,
             managed_codebase: false,
             specialized_agents: vec![],
-            discovery_subagent: String::new(),
-            fastcontext_url: String::new(),
-            fastcontext_model: String::new(),
-            fastcontext_max_turns: 0,
-            subagent_replaces: String::new(),
         }))
         .await
         .expect("StartSession must succeed")
@@ -342,11 +332,6 @@ async fn claude_cli_session_enrichment_reads_from_metadata() {
         hook_token: None,
         sandbox: None,
         specialized_agents: Vec::new(),
-        discovery_subagent: None,
-        fastcontext_url: None,
-        fastcontext_model: None,
-        fastcontext_max_turns: None,
-        subagent_replaces: None,
     };
     write_session_metadata(&session_dir, &meta).unwrap();
     // No changeset.yaml — intentionally absent to test the claude-cli fallback path.
@@ -433,11 +418,6 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
         hook_token: None,
         sandbox: None,
         specialized_agents: Vec::new(),
-        discovery_subagent: None,
-        fastcontext_url: None,
-        fastcontext_model: None,
-        fastcontext_max_turns: None,
-        subagent_replaces: None,
     };
     write_session_metadata(&session_dir, &meta).unwrap();
 
@@ -516,11 +496,6 @@ users:
             sandbox: false,
             managed_codebase: false,
             specialized_agents: vec![],
-            discovery_subagent: String::new(),
-            fastcontext_url: String::new(),
-            fastcontext_model: String::new(),
-            fastcontext_max_turns: 0,
-            subagent_replaces: String::new(),
         }))
         .await
         .expect_err("StartSession with claude-cli and empty model must fail");
@@ -571,11 +546,6 @@ async fn claude_cli_start_session_requires_project() {
             sandbox: false,
             managed_codebase: false,
             specialized_agents: vec![],
-            discovery_subagent: String::new(),
-            fastcontext_url: String::new(),
-            fastcontext_model: String::new(),
-            fastcontext_max_turns: 0,
-            subagent_replaces: String::new(),
         }))
         .await
         .expect_err("StartSession with empty project_id must fail");
@@ -608,11 +578,6 @@ async fn claude_cli_start_session_requires_project() {
             sandbox: false,
             managed_codebase: false,
             specialized_agents: vec![],
-            discovery_subagent: String::new(),
-            fastcontext_url: String::new(),
-            fastcontext_model: String::new(),
-            fastcontext_max_turns: 0,
-            subagent_replaces: String::new(),
         }))
         .await
         .expect_err("StartSession with unknown project_id must fail");
@@ -852,11 +817,6 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
             sandbox: false,
             managed_codebase: false,
             specialized_agents: vec![],
-            discovery_subagent: String::new(),
-            fastcontext_url: String::new(),
-            fastcontext_model: String::new(),
-            fastcontext_max_turns: 0,
-            subagent_replaces: String::new(),
         }))
         .await
         .expect("StartSession with initial_prompt must succeed");

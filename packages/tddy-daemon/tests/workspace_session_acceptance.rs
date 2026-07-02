@@ -123,11 +123,6 @@ async fn workspace_session_creates_worktree_with_no_pty() {
             sandbox: false,
             managed_codebase: false,
             specialized_agents: vec![],
-            discovery_subagent: String::new(),
-            fastcontext_url: String::new(),
-            fastcontext_model: String::new(),
-            fastcontext_max_turns: 0,
-            subagent_replaces: String::new(),
         }))
         .await
         .expect("StartSession with session_type=workspace must succeed");

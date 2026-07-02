@@ -265,11 +265,6 @@ async fn execute_tool_connect_by_id_works_on_cli_session_worktree() {
         hook_token: None,
         sandbox: None,
         specialized_agents: Vec::new(),
-        discovery_subagent: None,
-        fastcontext_url: None,
-        fastcontext_model: None,
-        fastcontext_max_turns: None,
-        subagent_replaces: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
     let service = test_service(sessions_tmp.path().to_path_buf());

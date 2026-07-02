@@ -16,10 +16,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use spawn::{
-    resolve_codebase_mode, resolve_specialized_agent_names, spawn_claude_sandbox, SpawnParams,
-    SubagentSpawnConfig,
-};
+use spawn::{resolve_codebase_mode, spawn_claude_sandbox, SpawnParams, SubagentSpawnConfig};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_task::TaskRegistry;
 use uuid::Uuid;
@@ -97,31 +94,6 @@ struct Args {
     #[arg(long)]
     agents_dir: Option<PathBuf>,
 
-    /// Deprecated: single-name alias for `--specialized-agent`. Rejected if both are given.
-    #[arg(long)]
-    discovery_subagent: Option<String>,
-
-    /// FastContext endpoint override (default: `http://localhost:30000`). Only meaningful when
-    /// exactly one specialized agent is selected.
-    #[arg(long)]
-    fastcontext_url: Option<String>,
-
-    /// FastContext model id override (default: `microsoft/FastContext-1.0-4B-RL`). Only
-    /// meaningful when exactly one specialized agent is selected.
-    #[arg(long)]
-    fastcontext_model: Option<String>,
-
-    /// FastContext per-prompt turn budget override (default: 10). Only meaningful when exactly
-    /// one specialized agent is selected.
-    #[arg(long)]
-    fastcontext_max_turns: Option<u32>,
-
-    /// Exec tools the wired-in specialized agent replaces (comma-separated, e.g. `grep,glob`).
-    /// Overrides the agent's declared default (see docs/ft/coder/managed-codebase-subagents.md
-    /// § Tool replacement). Only meaningful when exactly one specialized agent is selected.
-    #[arg(long)]
-    subagent_replaces: Option<String>,
-
     /// Enable debug logging for tddy sandbox components (HTTP/gRPC frame traces stay quiet).
     #[arg(short, long)]
     verbose: bool,
@@ -186,21 +158,12 @@ async fn main() -> Result<()> {
             "codebase_mode=managed: repo not mounted; Claude reaches it only via mcp__tddy-tools__* calls"
         );
     }
-    let specialized_agents = resolve_specialized_agent_names(
-        &args.specialized_agent,
-        args.discovery_subagent.as_deref(),
-    )
-    .map_err(|e| anyhow::anyhow!(e))?;
     let agents_dir = args
         .agents_dir
         .unwrap_or_else(|| session_base.join("agents"));
     let subagent = SubagentSpawnConfig {
-        specialized_agents,
+        specialized_agents: args.specialized_agent,
         agents_dir,
-        fastcontext_url: args.fastcontext_url,
-        fastcontext_model: args.fastcontext_model,
-        fastcontext_max_turns: args.fastcontext_max_turns,
-        replaces: args.subagent_replaces,
     };
     if !subagent.specialized_agents.is_empty() {
         eprintln!(

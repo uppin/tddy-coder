@@ -124,11 +124,6 @@ pub struct SessionMetadataBuilder {
     hook_token: Option<String>,
     sandbox: Option<bool>,
     specialized_agents: Vec<String>,
-    discovery_subagent: Option<String>,
-    fastcontext_url: Option<String>,
-    fastcontext_model: Option<String>,
-    fastcontext_max_turns: Option<u32>,
-    subagent_replaces: Option<String>,
 }
 
 /// Start building a [`SessionMetadata`] with sensible defaults.
@@ -153,11 +148,6 @@ pub fn a_session_metadata() -> SessionMetadataBuilder {
         hook_token: None,
         sandbox: None,
         specialized_agents: Vec::new(),
-        discovery_subagent: None,
-        fastcontext_url: None,
-        fastcontext_model: None,
-        fastcontext_max_turns: None,
-        subagent_replaces: None,
     }
 }
 
@@ -239,11 +229,6 @@ impl SessionMetadataBuilder {
             hook_token: self.hook_token,
             sandbox: self.sandbox,
             specialized_agents: self.specialized_agents,
-            discovery_subagent: self.discovery_subagent,
-            fastcontext_url: self.fastcontext_url,
-            fastcontext_model: self.fastcontext_model,
-            fastcontext_max_turns: self.fastcontext_max_turns,
-            subagent_replaces: self.subagent_replaces,
         }
     }
 }

@@ -462,11 +462,6 @@ state:
             hook_token: None,
             sandbox: None,
             specialized_agents: Vec::new(),
-            discovery_subagent: None,
-            fastcontext_url: None,
-            fastcontext_model: None,
-            fastcontext_max_turns: None,
-            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         // Intentionally NO changeset.yaml — claude-cli sessions never have one.
@@ -522,11 +517,6 @@ state:
             hook_token: None,
             sandbox: None,
             specialized_agents: Vec::new(),
-            discovery_subagent: None,
-            fastcontext_url: None,
-            fastcontext_model: None,
-            fastcontext_max_turns: None,
-            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -567,11 +557,6 @@ state:
             hook_token: None,
             sandbox: None,
             specialized_agents: Vec::new(),
-            discovery_subagent: None,
-            fastcontext_url: None,
-            fastcontext_model: None,
-            fastcontext_max_turns: None,
-            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -612,11 +597,6 @@ state:
             hook_token: None,
             sandbox: None,
             specialized_agents: Vec::new(),
-            discovery_subagent: None,
-            fastcontext_url: None,
-            fastcontext_model: None,
-            fastcontext_max_turns: None,
-            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -677,11 +657,6 @@ sessions:
             hook_token: None,
             sandbox: None,
             specialized_agents: Vec::new(),
-            discovery_subagent: None,
-            fastcontext_url: None,
-            fastcontext_model: None,
-            fastcontext_max_turns: None,
-            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -742,11 +717,6 @@ sessions:
             hook_token: None,
             sandbox: None,
             specialized_agents: Vec::new(),
-            discovery_subagent: None,
-            fastcontext_url: None,
-            fastcontext_model: None,
-            fastcontext_max_turns: None,
-            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         assert!(

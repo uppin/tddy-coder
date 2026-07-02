@@ -1763,8 +1763,8 @@ mod tests {
     }
 
     /// With a known subagent name and no override, the runner falls back to that subagent's
-    /// declared default — so `--discovery-subagent fastcontext` alone (no `--subagent-replaces`)
-    /// still filters `Grep`/`Glob` from the allowlist.
+    /// declared default — so `--specialized-agent fastcontext` alone still filters `Grep`/`Glob`
+    /// from the allowlist.
     #[test]
     fn resolve_subagent_replaced_tools_falls_back_to_the_subagent_default_when_no_override_env_is_set(
     ) {

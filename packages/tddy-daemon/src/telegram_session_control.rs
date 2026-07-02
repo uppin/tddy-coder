@@ -2627,11 +2627,6 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             hook_token: None,
             sandbox: None,
             specialized_agents: Vec::new(),
-            discovery_subagent: None,
-            fastcontext_url: None,
-            fastcontext_model: None,
-            fastcontext_max_turns: None,
-            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| anyhow::anyhow!("write session metadata: {e}"))?;

@@ -76,51 +76,17 @@ pub(crate) fn resolve_codebase_mode(
 
 /// Spawn-time specialized-agent configuration (array model — see
 /// docs/ft/coder/specialized-subagents.md). `specialized_agents` empty means no subagent is wired
-/// into the session. The deprecated `--discovery-subagent` single-name alias is folded into
-/// `specialized_agents` by [`resolve_specialized_agent_names`] before this config is built — never
-/// both set at once.
+/// into the session.
 #[derive(Default, Clone)]
 pub(crate) struct SubagentSpawnConfig {
     pub specialized_agents: Vec<String>,
     /// Directory to resolve named agents from (`<tddyhome>/agents`), in addition to the builtins.
     pub agents_dir: PathBuf,
-    /// Single-agent-only override: only valid when exactly one specialized agent is selected.
-    pub fastcontext_url: Option<String>,
-    /// Single-agent-only override: only valid when exactly one specialized agent is selected.
-    pub fastcontext_model: Option<String>,
-    /// Single-agent-only override: only valid when exactly one specialized agent is selected.
-    pub fastcontext_max_turns: Option<u32>,
-    /// `--subagent-replaces` override (comma-separated tool names), single-agent-only. `None`
-    /// means "use the declared default(s)" — resolved via
-    /// [`tddy_discovery::subagent::resolve_replaced_tools_for_defs`].
-    pub replaces: Option<String>,
 }
 
-/// Resolve the effective specialized-agent name list from `--specialized-agent` (repeatable) and
-/// the deprecated `--discovery-subagent` single-name alias. Mirrors [`resolve_codebase_mode`]'s
-/// contract: the alias is folded in when the new flag is absent, and giving both at once is a
-/// contradiction rejected outright rather than silently resolved by precedence.
-pub(crate) fn resolve_specialized_agent_names(
-    specialized_agent: &[String],
-    discovery_subagent: Option<&str>,
-) -> Result<Vec<String>, String> {
-    let discovery_subagent = discovery_subagent.map(str::trim).filter(|s| !s.is_empty());
-    match (specialized_agent.is_empty(), discovery_subagent) {
-        (false, Some(_)) => Err(
-            "conflicting subagent selection: --specialized-agent was given together with \
-             --discovery-subagent (a deprecated alias for a single specialized agent)"
-                .to_string(),
-        ),
-        (false, None) => Ok(specialized_agent.to_vec()),
-        (true, Some(name)) => Ok(vec![name.to_string()]),
-        (true, None) => Ok(Vec::new()),
-    }
-}
-
-/// Resolve `config.specialized_agents` against builtins + `config.agents_dir`, baking any
-/// single-agent `--fastcontext-*` override onto the matched def. An unresolvable name is an
-/// error. Giving a single-agent override alongside more than one selected agent is also an
-/// error — there is no well-defined agent to apply it to.
+/// Resolve `config.specialized_agents` against builtins + `config.agents_dir`. An unresolvable
+/// name is an error. All configuration (model, base_url, max_turns, replaces) comes exclusively
+/// from the resolved def — there is no caller-facing override.
 pub(crate) fn resolve_specialized_agents(
     config: &SubagentSpawnConfig,
 ) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>> {
@@ -138,50 +104,14 @@ pub(crate) fn resolve_specialized_agents(
         })?;
         selected.push(def.clone());
     }
-
-    let has_single_agent_overrides = config.fastcontext_url.is_some()
-        || config.fastcontext_model.is_some()
-        || config.fastcontext_max_turns.is_some();
-    if has_single_agent_overrides {
-        anyhow::ensure!(
-            selected.len() == 1,
-            "--fastcontext-url/--fastcontext-model/--fastcontext-max-turns only apply when \
-             exactly one specialized agent is selected; got {}",
-            selected.len()
-        );
-        let def = &mut selected[0];
-        if let Some(ref url) = config.fastcontext_url {
-            def.base_url = url.clone();
-        }
-        if let Some(ref model) = config.fastcontext_model {
-            def.model = model.clone();
-        }
-        if let Some(max_turns) = config.fastcontext_max_turns {
-            def.max_turns = max_turns;
-        }
-    }
     Ok(selected)
 }
 
-/// Build the (name, replaced-tools) pairs for a session's resolved specialized-agent defs.
-/// `replaces_override` (from `--subagent-replaces`) is single-agent-only: it only applies (and is
-/// only meaningful) when exactly one def is given, overriding that def's own declared `replaces`
-/// outright rather than merging with it.
+/// Build the (name, replaced-tools) pairs for a session's resolved specialized-agent defs — each
+/// its own name + its own YAML-declared `replaces`, normalized.
 pub(crate) fn specialized_agent_replacement_pairs(
     defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
-    replaces_override: Option<&str>,
 ) -> Vec<(String, Vec<String>)> {
-    if defs.len() == 1 {
-        let replaced = match replaces_override.map(str::trim).filter(|s| !s.is_empty()) {
-            Some(csv) => {
-                let tokens: Vec<String> =
-                    csv.split(',').map(str::trim).map(str::to_string).collect();
-                tddy_discovery::subagent::normalize_replaced_tools(&tokens)
-            }
-            None => tddy_discovery::subagent::normalize_replaced_tools(&defs[0].replaces),
-        };
-        return vec![(defs[0].name.clone(), replaced)];
-    }
     defs.iter()
         .map(|def| {
             (
@@ -197,7 +127,6 @@ pub(crate) fn specialized_agent_replacement_pairs(
 /// defs. Empty when no agent is configured.
 pub(crate) fn subagent_env_overlay(
     defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
-    replaces_override: Option<&str>,
 ) -> std::collections::BTreeMap<String, String> {
     let mut env = std::collections::BTreeMap::new();
     if defs.is_empty() {
@@ -213,7 +142,7 @@ pub(crate) fn subagent_env_overlay(
         env.insert("TDDY_SUBAGENTS_JSON".to_string(), defs_json);
     }
     if defs.len() == 1 {
-        let (_, replaced) = &specialized_agent_replacement_pairs(defs, replaces_override)[0];
+        let (_, replaced) = &specialized_agent_replacement_pairs(defs)[0];
         if !replaced.is_empty() {
             env.insert("TDDY_SUBAGENT_REPLACES".to_string(), replaced.join(","));
         }
@@ -466,8 +395,7 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
     );
     let repo_for_context = repo.clone();
     let specialized_defs = resolve_specialized_agents(&params.subagent)?;
-    let replacement_pairs =
-        specialized_agent_replacement_pairs(&specialized_defs, params.subagent.replaces.as_deref());
+    let replacement_pairs = specialized_agent_replacement_pairs(&specialized_defs);
     let ctx: SandboxContextDir = tokio::task::spawn_blocking(move || {
         let replacement_refs: Vec<Vec<&str>> = replacement_pairs
             .iter()
@@ -566,10 +494,7 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         &tool_ipc_socket,
         &egress_dir,
     );
-    env.extend(subagent_env_overlay(
-        &specialized_defs,
-        params.subagent.replaces.as_deref(),
-    ));
+    env.extend(subagent_env_overlay(&specialized_defs));
 
     spawn_trace(
         &session_dir,
@@ -1026,72 +951,12 @@ mod tests {
         );
     }
 
-    // ─── resolve_specialized_agent_names ────────────────────────────────────────
-    //
-    // Feature: docs/ft/coder/specialized-subagents.md (tddy-sandbox-app migration)
-
-    /// With neither `--specialized-agent` nor `--discovery-subagent` given, no agent is selected.
-    #[test]
-    fn resolve_specialized_agent_names_returns_empty_when_neither_flag_is_given() {
-        // Given / When
-        let names = resolve_specialized_agent_names(&[], None)
-            .expect("no flags given must resolve without error");
-
-        // Then
-        assert_eq!(names, Vec::<String>::new());
-    }
-
-    /// Repeated `--specialized-agent` flags produce the array verbatim, in the given order.
-    #[test]
-    fn resolve_specialized_agent_names_returns_the_array_when_specialized_agent_repeated() {
-        // Given
-        let given = vec!["fastcontext".to_string(), "my-linter".to_string()];
-
-        // When
-        let names = resolve_specialized_agent_names(&given, None)
-            .expect("repeated --specialized-agent must resolve without error");
-
-        // Then
-        assert_eq!(names, given);
-    }
-
-    /// With no `--specialized-agent` given, the deprecated `--discovery-subagent` single name is
-    /// folded into a one-element array.
-    #[test]
-    fn resolve_specialized_agent_names_folds_discovery_subagent_alias_into_single_entry_array() {
-        // Given / When
-        let names = resolve_specialized_agent_names(&[], Some("fastcontext"))
-            .expect("the deprecated alias alone must resolve without error");
-
-        // Then
-        assert_eq!(names, vec!["fastcontext".to_string()]);
-    }
-
-    /// Giving both `--specialized-agent` and `--discovery-subagent` at once is a contradiction —
-    /// rejected outright, not silently resolved by one taking precedence.
-    #[test]
-    fn resolve_specialized_agent_names_errors_when_both_flags_are_given() {
-        // Given / When
-        let result =
-            resolve_specialized_agent_names(&["fastcontext".to_string()], Some("fastcontext"));
-
-        // Then
-        assert!(
-            result.is_err(),
-            "--specialized-agent + --discovery-subagent together must be rejected"
-        );
-    }
-
     // ─── resolve_specialized_agents ─────────────────────────────────────────────
 
     fn config_with_names(names: &[&str]) -> SubagentSpawnConfig {
         SubagentSpawnConfig {
             specialized_agents: names.iter().map(|s| s.to_string()).collect(),
             agents_dir: PathBuf::from("/nonexistent-agents-dir-for-tests"),
-            fastcontext_url: None,
-            fastcontext_model: None,
-            fastcontext_max_turns: None,
-            replaces: None,
         }
     }
 
@@ -1140,44 +1005,6 @@ mod tests {
         );
     }
 
-    /// A single-agent `--fastcontext-*` override is baked onto the one matched def.
-    #[test]
-    fn resolve_specialized_agents_bakes_single_agent_overrides_onto_the_matched_def() {
-        // Given
-        let mut config = config_with_names(&["fastcontext"]);
-        config.fastcontext_url = Some("http://localhost:9999".to_string());
-        config.fastcontext_model = Some("custom-model".to_string());
-        config.fastcontext_max_turns = Some(3);
-
-        // When
-        let defs = resolve_specialized_agents(&config).expect("override must resolve cleanly");
-
-        // Then
-        assert_eq!(defs.len(), 1);
-        assert_eq!(defs[0].base_url, "http://localhost:9999");
-        assert_eq!(defs[0].model, "custom-model");
-        assert_eq!(defs[0].max_turns, 3);
-    }
-
-    /// A single-agent override alongside more than one selected agent is rejected — there is no
-    /// well-defined agent to apply it to.
-    #[test]
-    fn resolve_specialized_agents_errors_when_overrides_given_with_more_than_one_agent() {
-        // Given — "fastcontext" twice just to get 2 resolvable entries without needing a second
-        // real agent def on disk
-        let mut config = config_with_names(&["fastcontext", "fastcontext"]);
-        config.fastcontext_url = Some("http://localhost:9999".to_string());
-
-        // When
-        let result = resolve_specialized_agents(&config);
-
-        // Then
-        assert!(
-            result.is_err(),
-            "a single-agent override with 2 selected agents must be rejected"
-        );
-    }
-
     // ─── subagent_env_overlay ────────────────────────────────────────────────────
     //
     // Feature: docs/ft/coder/specialized-subagents.md, docs/ft/coder/managed-codebase-subagents.md
@@ -1202,7 +1029,7 @@ mod tests {
     #[test]
     fn subagent_env_overlay_is_empty_when_no_defs_are_given() {
         // Given / When
-        let overlay = subagent_env_overlay(&[], None);
+        let overlay = subagent_env_overlay(&[]);
 
         // Then
         assert!(
@@ -1219,7 +1046,7 @@ mod tests {
         let defs = vec![a_def("fastcontext", &["Grep", "Glob"])];
 
         // When
-        let overlay = subagent_env_overlay(&defs, None);
+        let overlay = subagent_env_overlay(&defs);
 
         // Then
         assert_eq!(
@@ -1246,7 +1073,7 @@ mod tests {
         ];
 
         // When
-        let overlay = subagent_env_overlay(&defs, None);
+        let overlay = subagent_env_overlay(&defs);
 
         // Then
         assert_eq!(
@@ -1259,37 +1086,20 @@ mod tests {
         );
     }
 
-    /// With a single def and no `--subagent-replaces` override, `TDDY_SUBAGENT_REPLACES` carries
-    /// that def's own declared `replaces` set.
+    /// With a single def, `TDDY_SUBAGENT_REPLACES` carries that def's own YAML-declared `replaces`
+    /// set — there is no caller-facing override.
     #[test]
-    fn subagent_env_overlay_single_agent_uses_declared_default_when_no_override_given() {
+    fn subagent_env_overlay_single_agent_uses_declared_default() {
         // Given
         let defs = vec![a_def("fastcontext", &["Grep", "Glob"])];
 
         // When
-        let overlay = subagent_env_overlay(&defs, None);
+        let overlay = subagent_env_overlay(&defs);
 
         // Then
         assert_eq!(
             overlay.get("TDDY_SUBAGENT_REPLACES").map(String::as_str),
             Some("Grep,Glob")
-        );
-    }
-
-    /// With a single def, an explicit `--subagent-replaces` override wins outright over that
-    /// def's declared default, with tokens normalized to canonical exec-tool casing.
-    #[test]
-    fn subagent_env_overlay_single_agent_override_wins_over_declared_default() {
-        // Given
-        let defs = vec![a_def("fastcontext", &["Grep", "Glob"])];
-
-        // When
-        let overlay = subagent_env_overlay(&defs, Some("read"));
-
-        // Then
-        assert_eq!(
-            overlay.get("TDDY_SUBAGENT_REPLACES").map(String::as_str),
-            Some("Read")
         );
     }
 }

@@ -116,11 +116,6 @@ mod tests {
             hook_token: None,
             sandbox: None,
             specialized_agents: Vec::new(),
-            discovery_subagent: None,
-            fastcontext_url: None,
-            fastcontext_model: None,
-            fastcontext_max_turns: None,
-            subagent_replaces: None,
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 
