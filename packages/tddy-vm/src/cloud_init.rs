@@ -1,14 +1,12 @@
 //! Cloud-init based VM image building with image-chaining.
 //!
-//! Borrows the immutable-base + qcow2 delta-overlay chaining and NoCloud cloud-init
-//! seed pattern from the `makers-lt` reference project: copy an immutable base cloud
-//! image, chain a qcow2 delta overlay onto it (`qemu-img create -b`), generate a
-//! NoCloud cloud-init seed ISO, then boot QEMU to actually bake the provisioning into
-//! the overlay (watching the serial console for a completion token; the guest
-//! self-shuts-down when done). The output is the chained pair — `<name>-base.qcow2`
-//! (immutable) + `<name>.qcow2` (provisioned delta overlay) — co-located, since the
-//! overlay uses a **relative** backing-file reference and is not self-contained
-//! without its base.
+//! Copies an immutable base cloud image, chains a qcow2 delta overlay onto it
+//! (`qemu-img create -b`), generates a NoCloud cloud-init seed ISO, then boots QEMU to
+//! actually bake the provisioning into the overlay (watching the serial console for a
+//! completion token; the guest self-shuts-down when done). The output is the chained
+//! pair — `<name>-base.qcow2` (immutable) + `<name>.qcow2` (provisioned delta overlay)
+//! — co-located, since the overlay uses a **relative** backing-file reference and is
+//! not self-contained without its base.
 //!
 //! All argv/document-rendering logic is exposed as pure, unit-testable builder
 //! functions; [`build_cloud_init_image`] composes them into the full pipeline.

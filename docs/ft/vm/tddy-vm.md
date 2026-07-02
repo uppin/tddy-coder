@@ -207,16 +207,17 @@ of running a Buildroot build:
 ```
 tddy-vm-build cloud-init \
   --name <image-name> \
-  --base-image <path-to-cached-cloud-image>   # defaults to a well-known cache path
+  --base-image <path-to-a-real-cloud-image>   # or set TDDY_CLOUDINIT_BASE_IMAGE
   --output-dir <dir> \
   --user-data <cloud-init-user-data.yaml> \
   --disk-size 20G --memory 2048M --cpus 2 --ssh-host-port 2222 \
   [--ssh-public-key <path>] [--timeout-secs 300]
 ```
 
-Borrows the proven pattern from the `makers-lt` reference project (image-chaining +
-NoCloud seed generation), reusing this repo's existing QEMU primitives instead of
-duplicating them:
+`--base-image` (or the `TDDY_CLOUDINIT_BASE_IMAGE` env var) is the only way to point
+this feature at a base image — there is no bundled or auto-downloaded default, and no
+machine-specific path is baked into the CLI. Reuses this repo's existing QEMU
+primitives instead of duplicating them:
 
 - **Immutable base + chained delta overlay.** The base cloud image is **copied** from
   the caller-provided source (never downloaded by this feature, never re-fetched, never
@@ -259,6 +260,17 @@ duplicating them:
 Introducing this subcommand requires `tddy-vm-build` to gain a `Cli { #[command(subcommand)] }`
 wrapper with `build` and `cloud-init` variants. The previous flat invocation
 (`tddy-vm-build --spec … --output … --format …`) becomes `tddy-vm-build build --spec … --output … --format …`.
+
+### Production tests (manual trigger only)
+
+The real-QEMU-boot tests (`packages/tddy-vm/tests/cloud_init_acceptance.rs`,
+`packages/tddy-vm-build/tests/cloud_init_cli_acceptance.rs`) are production tests per
+[docs/dev/guides/testing.md](../../dev/guides/testing.md#production-tests): `#[ignore]`d
+(excluded from `./test`/`./verify`/plain `cargo test`) *and* gated on
+`TDDY_CLOUDINIT_BASE_IMAGE` pointing at a real cloud-init-compatible qcow2 image — the
+same config the CLI's `--base-image` reads. They do not run at all, even with
+`--ignored`, unless a developer explicitly supplies that env var; there is no bundled
+or auto-discovered image.
 
 ### Out of scope for this sub-feature
 

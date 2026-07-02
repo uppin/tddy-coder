@@ -1,19 +1,24 @@
-//! Cloud-init image build integration test — real qemu-img/qemu-system-x86_64/xorriso
-//! boot, gated on tool + base-image-cache availability (mirrors the skip-guard
-//! convention in `build_image_acceptance.rs`).
+//! Cloud-init image build production test — boots a real `qemu-system-x86_64` VM
+//! against a developer-supplied base cloud image.
 //!
-//! ## Real QEMU boot (opt-in, slow)
+//! ## Real QEMU boot (production test — manual trigger only)
 //!
-//! This test copies the makers-lt Debian 12 cloud image cache, chains an immutable
-//! base + delta overlay, bakes a NoCloud cloud-init seed into the overlay by actually
-//! booting `qemu-system-x86_64` and watching the serial console for a completion
-//! token, then asserts the guest shut itself down and the overlay is a valid,
-//! base-backed qcow2. `#[ignore]`d and excluded from `./test`/`./verify`/plain
-//! `cargo test` by default because it boots a real VM (~1-3 min).
+//! Chains an immutable base + delta overlay from a real cloud image, bakes a NoCloud
+//! cloud-init seed into the overlay by actually booting `qemu-system-x86_64` and
+//! watching the serial console for a completion token, then asserts the guest shut
+//! itself down and the overlay is a valid, base-backed qcow2.
+//!
+//! This is a production test: it never runs on its own. `#[ignore]`d (excluded from
+//! `./test`/`./verify`/plain `cargo test`) *and* gated on `TDDY_CLOUDINIT_BASE_IMAGE`
+//! — the same config the `tddy-vm-build cloud-init` CLI reads for `--base-image` —
+//! pointing at a real cloud-init-compatible qcow2 image (e.g. a Debian genericcloud
+//! image). There is no bundled or auto-downloaded image; a developer must supply one
+//! explicitly to run this test.
 //!
 //! Run explicitly with:
 //! ```text
-//! cargo test -p tddy-vm --test cloud_init_acceptance -- --ignored --nocapture
+//! TDDY_CLOUDINIT_BASE_IMAGE=/path/to/base.qcow2 \
+//!   cargo test -p tddy-vm --test cloud_init_acceptance -- --ignored --nocapture
 //! ```
 
 use serial_test::serial;
@@ -24,30 +29,13 @@ use tddy_vm::cloud_init::{
 };
 use tempfile::tempdir;
 
-/// The makers-lt cache path this feature copies its immutable base from (never
-/// downloaded, never mutated by this feature). Not part of this repo — the test skips
-/// itself if the host doesn't have a `~/Code/makers-lt` checkout with this image
-/// already cached.
-fn makers_lt_base_image() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").expect("HOME must be set")).join(
-        "Code/makers-lt/packages/agentic-drone/.maker-build-cache/external-sources/\
-         7191be88beba48b2/debian-12-genericcloud-amd64.qcow2",
-    )
-}
+/// The env var this production test reads its base image path from — the same config
+/// knob the `tddy-vm-build cloud-init` CLI's `--base-image` flag reads.
+const BASE_IMAGE_ENV: &str = "TDDY_CLOUDINIT_BASE_IMAGE";
 
-fn binary_available(name: &str) -> bool {
-    std::process::Command::new(name)
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
-fn tooling_available() -> bool {
-    binary_available("qemu-img")
-        && binary_available("qemu-system-x86_64")
-        && binary_available("xorriso")
-        && makers_lt_base_image().exists()
+/// Resolve the base image path from `TDDY_CLOUDINIT_BASE_IMAGE`, or `None` if unset.
+fn configured_base_image() -> Option<PathBuf> {
+    std::env::var(BASE_IMAGE_ENV).ok().map(PathBuf::from)
 }
 
 fn a_minimal_cloud_init_user_data() -> CloudInitUserData {
@@ -67,22 +55,22 @@ fn a_minimal_cloud_init_user_data() -> CloudInitUserData {
 }
 
 #[tokio::test]
-#[ignore = "boots a real QEMU VM to bake cloud-init, ~1-3 min; run with --ignored (see module docs)"]
+#[ignore = "production test: boots a real QEMU VM to bake cloud-init, ~1-3 min; requires \
+            TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with --ignored"]
 #[serial(cloud_init_qemu_vm)]
 async fn builds_a_ready_to_use_provisioned_qcow2_by_baking_cloud_init_into_an_overlay() {
-    if !tooling_available() {
+    let Some(base_image_src) = configured_base_image() else {
         eprintln!(
-            "qemu-img/qemu-system-x86_64/xorriso/makers-lt base cache not available — \
-             skipping cloud-init build test"
+            "{BASE_IMAGE_ENV} not set — skipping production test (see module docs to run it)"
         );
         return;
-    }
+    };
 
     // Given an output directory and a minimal provisioning spec
     let dir = tempdir().unwrap();
     let opts = CloudInitBuildOptions {
         name: "cloud-init-demo".to_string(),
-        base_image_src: makers_lt_base_image(),
+        base_image_src,
         output_dir: dir.path().to_path_buf(),
         user_data: a_minimal_cloud_init_user_data(),
         disk_size: "10G".to_string(),
@@ -116,22 +104,22 @@ async fn builds_a_ready_to_use_provisioned_qcow2_by_baking_cloud_init_into_an_ov
 }
 
 #[tokio::test]
-#[ignore = "boots a real QEMU VM to bake cloud-init, ~1-3 min; run with --ignored (see module docs)"]
+#[ignore = "production test: boots a real QEMU VM to bake cloud-init, ~1-3 min; requires \
+            TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with --ignored"]
 #[serial(cloud_init_qemu_vm)]
 async fn the_overlay_records_its_immutable_base_as_a_relative_backing_file() {
-    if !tooling_available() {
+    let Some(base_image_src) = configured_base_image() else {
         eprintln!(
-            "qemu-img/qemu-system-x86_64/xorriso/makers-lt base cache not available — \
-             skipping cloud-init build test"
+            "{BASE_IMAGE_ENV} not set — skipping production test (see module docs to run it)"
         );
         return;
-    }
+    };
 
     // Given a completed cloud-init build
     let dir = tempdir().unwrap();
     let opts = CloudInitBuildOptions {
         name: "cloud-init-backing".to_string(),
-        base_image_src: makers_lt_base_image(),
+        base_image_src,
         output_dir: dir.path().to_path_buf(),
         user_data: a_minimal_cloud_init_user_data(),
         disk_size: "10G".to_string(),

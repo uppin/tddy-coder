@@ -104,7 +104,7 @@ fn overlay_create_argv_orders_the_flags_as_create_f_qcow2_capital_f_qcow2_b_base
     // When building the overlay-create argv
     let args = overlay_create_argv("demo-base.qcow2", &overlay, "20G");
 
-    // Then the full argv matches the makers-lt-derived flag order exactly
+    // Then the full argv matches the expected flag order exactly
     assert_eq!(
         args,
         vec![
