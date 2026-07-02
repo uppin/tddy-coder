@@ -78,6 +78,27 @@ tool-call budget exploring the repo — and keep talking to that same subagent a
 questions in one session, so that discovery stays fast and cheap without giving the main agent
 direct filesystem access.
 
+## Tool replacement (subagent-declared)
+
+Wiring in a subagent is additive-only today: the three `subagent_*` tools are added, but the main
+agent keeps its full exec-tool set, so nothing steers it toward actually using the subagent instead
+of grepping/globbing the codebase itself.
+
+A subagent can declare the exec tools it **replaces** (FastContext replaces `Grep`/`Glob` — its own
+internal READ/GLOB/GREP loop already covers that ground). When a subagent with a non-empty replaced
+set is wired in:
+
+- **Enforcement (hard):** the replaced tools are dropped from the sandboxed Claude CLI's
+  `--allowedTools` before the `mcp__tddy-tools__` prefix is applied — a direct call to a replaced
+  tool is impossible, not merely discouraged.
+- **Guidance (soft):** the managed-codebase appendix in CLAUDE.md/AGENTS.md is rendered to say those
+  tools are unavailable and name the subagent that must be used instead.
+
+The declared set has a per-subagent default (`tddy_discovery::subagent_replaced_tools`) and an
+optional override (`--subagent-replaces <csv>` on `tddy-sandbox-app`, carried as
+`TDDY_SUBAGENT_REPLACES` into the jail) — the same flag/env-override shape already used for
+`--discovery-subagent`/`TDDY_SUBAGENT` and the `--fastcontext-*` family.
+
 ## Acceptance Criteria
 
 ### Subagent session lifecycle (`tddy-discovery`)
@@ -127,6 +148,44 @@ direct filesystem access.
     `--fastcontext-max-turns`) is threaded into the spawned sandbox's environment so the in-jail
     `tddy-tools --mcp` process constructs a `fastcontext` subagent on demand.
 
+### Tool replacement (`tddy-discovery`, `tddy-sandbox`, `tddy-sandbox-recipes`, `tddy-sandbox-app`)
+
+13. `tddy_discovery::subagent_replaced_tools("fastcontext")` returns `["Grep", "Glob"]`; an unknown
+    subagent name returns an empty set (no panic, no fabricated tool name).
+14. `tddy_discovery::resolve_replaced_tools(name, override_csv)` returns the declared default when
+    `override_csv` is `None` or empty, and the override's tool names (normalized to the exec
+    catalog's casing) when non-empty — the override always wins over the default, never merges with
+    it. A token that doesn't match a known exec tool is dropped rather than passed through.
+15. `tddy_sandbox_recipes::build_claude_allowlist(subagent_enabled, replaced)` omits
+    `mcp__tddy-tools__<Tool>` for every `Tool` in `replaced`, while every other exec tool from
+    `tddy_sandbox::workspace_exec_tool_names()` (plus `AskUserQuestion`, plus the subagent tools when
+    `subagent_enabled`) is still present. An empty `replaced` slice reproduces today's full-exec
+    allowlist exactly (no regression for sessions without a replacing subagent).
+16. `tddy_sandbox::context_dir::sandbox_remote_appendix(subagent, replaced)` — when `replaced` is
+    non-empty — states that those tools are not available as direct tools and names the subagent
+    that must be used for them, in addition to (not instead of) listing the still-available exec
+    tools. When `replaced` is empty, the rendered text is unchanged from today's appendix.
+17. `tddy-sandbox-app`'s `subagent_env_overlay` sets `TDDY_SUBAGENT_REPLACES` only when
+    `SubagentSpawnConfig.replaces` is explicitly given (`Some`) — it never invents the
+    per-subagent default when the field is `None`, matching the existing
+    `TDDY_SUBAGENT_FASTCONTEXT_*` fields' "omit when absent, default resolved on the reading side"
+    contract. When given, the value is the CSV-joined, normalized result of
+    `resolve_replaced_tools(name, replaces)` (criterion 14) — never the raw override string.
+    The host-side context-dir appendix, by contrast, resolves the *effective* set directly from
+    `SubagentSpawnConfig` (default included when no override was given) since it has the config
+    value in hand without needing an env round-trip; `tddy-sandbox-runner` mirrors this on the jail
+    side by falling back to `subagent_replaced_tools(TDDY_SUBAGENT)`'s default whenever
+    `TDDY_SUBAGENT_REPLACES` is absent — so the allowlist filter and the appendix text agree
+    whether or not `--subagent-replaces` was passed.
+18. `tddy-daemon`'s own sandboxed-session path has parity with `tddy-sandbox-app`:
+    `StartSessionRequest`'s `discovery_subagent`/`fastcontext_url`/`fastcontext_model`/
+    `fastcontext_max_turns`/`subagent_replaces` fields thread through to the same
+    `TDDY_SUBAGENT_*` env overlay (`sandbox_session::subagent_env_overlay`) and context-dir
+    appendix (`prepare_context_dir_with_subagent`) as `tddy-sandbox-app`, for both new-session
+    start and resume. On resume, the subagent config is reconstructed from the 5 corresponding
+    fields persisted on `SessionMetadata` (no live `StartSessionRequest` available) rather than
+    re-supplied by the caller.
+
 ## Non-goals (out of scope for v1)
 
 - Live catalog fetch of subagent tool schemas over the transport (mirrors the existing
@@ -139,3 +198,7 @@ direct filesystem access.
   daemon/sandbox IPC wire and its tests are left alone.
 - A UI/CLI picker for choosing which subagents to wire — v1 is flag-driven
   (`--discovery-subagent <name>`).
+- Extending tool-replacement enforcement to the `tddy-coder --remote` path (that path does not wire
+  subagents at all today — see `docs/dev/TODO.md`).
+- Per-tool replacement policies beyond a flat replaced-set (e.g. partial replacement of `Grep` for
+  some file types only).

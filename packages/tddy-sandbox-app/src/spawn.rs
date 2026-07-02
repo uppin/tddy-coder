@@ -4,9 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use tddy_daemon::sandbox_session::{
-    build_sandbox_runner_env, copy_dir_all, pick_free_loopback_port, prepare_context_dir,
-    resolve_sandbox_runner_path, resolve_tddy_tools_path, spawn_sandbox_runner,
-    wait_for_sandbox_ready, SandboxRunnerSpawn,
+    build_sandbox_runner_env, copy_dir_all, pick_free_loopback_port, resolve_sandbox_runner_path,
+    resolve_tddy_tools_path, spawn_sandbox_runner, wait_for_sandbox_ready, SandboxRunnerSpawn,
 };
 use tddy_sandbox::{append_line, SandboxContextDir, SandboxHandle};
 
@@ -83,6 +82,9 @@ pub(crate) struct SubagentSpawnConfig {
     pub fastcontext_url: Option<String>,
     pub fastcontext_model: Option<String>,
     pub fastcontext_max_turns: Option<u32>,
+    /// `--subagent-replaces` override (comma-separated tool names). `None` means "use the
+    /// subagent's declared default" — resolved via [`tddy_discovery::subagent::resolve_replaced_tools`].
+    pub replaces: Option<String>,
 }
 
 /// Builds the `TDDY_SUBAGENT_*` env overlay for the in-jail `tddy-tools --mcp` process from the
@@ -108,6 +110,13 @@ pub(crate) fn subagent_env_overlay(
             "TDDY_SUBAGENT_FASTCONTEXT_MAX_TURNS".to_string(),
             max_turns.to_string(),
         );
+    }
+    if let Some(ref replaces) = config.replaces {
+        let resolved =
+            tddy_discovery::subagent::resolve_replaced_tools(subagent, Some(replaces.as_str()));
+        if !resolved.is_empty() {
+            env.insert("TDDY_SUBAGENT_REPLACES".to_string(), resolved.join(","));
+        }
     }
     env
 }
@@ -356,8 +365,21 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         &format!("preparing context from {} …", repo.display()),
     );
     let repo_for_context = repo.clone();
+    let subagent_name = params.subagent.discovery_subagent.clone();
+    let replaced_tools: Vec<String> = match subagent_name.as_deref() {
+        Some(name) => tddy_discovery::subagent::resolve_replaced_tools(
+            name,
+            params.subagent.replaces.as_deref(),
+        ),
+        None => Vec::new(),
+    };
     let ctx: SandboxContextDir = tokio::task::spawn_blocking(move || {
-        prepare_context_dir(&repo_for_context).map_err(|e| anyhow::anyhow!(e))
+        let replaced_refs: Vec<&str> = replaced_tools.iter().map(String::as_str).collect();
+        SandboxContextDir::create_with_subagent(
+            &repo_for_context,
+            subagent_name.as_deref(),
+            &replaced_refs,
+        )
     })
     .await
     .context("context prep task join")??;
@@ -926,6 +948,7 @@ mod tests {
             fastcontext_url: Some("http://localhost:30000".to_string()),
             fastcontext_model: Some("microsoft/FastContext-1.0-4B-RL".to_string()),
             fastcontext_max_turns: Some(6),
+            replaces: None,
         };
 
         // When
@@ -967,6 +990,7 @@ mod tests {
             fastcontext_url: None,
             fastcontext_model: None,
             fastcontext_max_turns: None,
+            replaces: None,
         };
 
         // When
@@ -977,6 +1001,59 @@ mod tests {
             overlay.keys().collect::<Vec<_>>(),
             vec!["TDDY_SUBAGENT"],
             "only TDDY_SUBAGENT must be set when the optional fields are all None; got: {overlay:?}"
+        );
+    }
+
+    // ─── TDDY_SUBAGENT_REPLACES ──────────────────────────────────────────────────
+    //
+    // Feature: docs/ft/coder/managed-codebase-subagents.md § Tool replacement (criterion 17)
+    // Changeset: docs/dev/1-WIP/2026-07-02-changeset-subagent-tool-replacement.md
+
+    /// With `replaces: None` (no `--subagent-replaces` flag), the overlay never invents the
+    /// per-subagent default — `TDDY_SUBAGENT_REPLACES` is simply absent, exactly like the
+    /// `TDDY_SUBAGENT_FASTCONTEXT_*` fields when their source field is unset.
+    #[test]
+    fn subagent_env_overlay_omits_replaces_when_not_explicitly_given() {
+        // Given
+        let config = SubagentSpawnConfig {
+            discovery_subagent: Some("fastcontext".to_string()),
+            fastcontext_url: None,
+            fastcontext_model: None,
+            fastcontext_max_turns: None,
+            replaces: None,
+        };
+
+        // When
+        let overlay = subagent_env_overlay(&config);
+
+        // Then
+        assert!(
+            !overlay.contains_key("TDDY_SUBAGENT_REPLACES"),
+            "TDDY_SUBAGENT_REPLACES must be absent when replaces is None; got: {overlay:?}"
+        );
+    }
+
+    /// With `--subagent-replaces read`, the overlay carries the normalized, CSV-joined resolved
+    /// set — not the raw override string — so a jail that only trusts the env var still sees
+    /// canonical tool casing.
+    #[test]
+    fn subagent_env_overlay_carries_the_normalized_replaces_override() {
+        // Given
+        let config = SubagentSpawnConfig {
+            discovery_subagent: Some("fastcontext".to_string()),
+            fastcontext_url: None,
+            fastcontext_model: None,
+            fastcontext_max_turns: None,
+            replaces: Some("read".to_string()),
+        };
+
+        // When
+        let overlay = subagent_env_overlay(&config);
+
+        // Then
+        assert_eq!(
+            overlay.get("TDDY_SUBAGENT_REPLACES").map(String::as_str),
+            Some("Read")
         );
     }
 }

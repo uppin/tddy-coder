@@ -240,6 +240,55 @@ fn grep_dir(re: &Regex, dir: &str, matches: &mut Vec<serde_json::Value>) {
     }
 }
 
+/// Canonical exec-tool names a subagent can declare as replaced (mirrors
+/// `tddy_sandbox::workspace_exec_tool_names()`; kept local to avoid a cross-crate dependency for a
+/// name list).
+const CANONICAL_EXEC_TOOL_NAMES: &[&str] = &[
+    "Read",
+    "Write",
+    "StrReplace",
+    "Delete",
+    "Grep",
+    "Glob",
+    "Shell",
+    "Await",
+    "ReadLints",
+    "SemanticSearch",
+];
+
+/// Tools this subagent replaces on the main agent. Empty for unknown names — no fabricated tool
+/// name, no panic.
+pub fn subagent_replaced_tools(name: &str) -> Vec<String> {
+    match name {
+        "fastcontext" => vec!["Grep".to_string(), "Glob".to_string()],
+        _ => Vec::new(),
+    }
+}
+
+/// Effective replaced set for `name`: a non-empty `override_csv` replaces the declared default
+/// outright (never merges with it); `None` or an empty override falls back to the default.
+///
+/// Override tokens are comma-separated, trimmed, matched case-insensitively against the
+/// canonical exec-tool names, and normalized to that canonical casing. A token that doesn't match
+/// a known exec tool is dropped rather than passed through — a typo must not silently disable
+/// enforcement or invent a tool name.
+pub fn resolve_replaced_tools(name: &str, override_csv: Option<&str>) -> Vec<String> {
+    match override_csv.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(csv) => csv
+            .split(',')
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+            .filter_map(|token| {
+                CANONICAL_EXEC_TOOL_NAMES
+                    .iter()
+                    .find(|canonical| canonical.eq_ignore_ascii_case(token))
+                    .map(|canonical| canonical.to_string())
+            })
+            .collect(),
+        None => subagent_replaced_tools(name),
+    }
+}
+
 /// Configuration for constructing a subagent session via [`SubagentRegistry::create`].
 pub struct SubagentConfig {
     pub base_url: String,

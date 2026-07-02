@@ -101,6 +101,12 @@ struct Args {
     #[arg(long)]
     fastcontext_max_turns: Option<u32>,
 
+    /// Exec tools the wired-in discovery subagent replaces (comma-separated, e.g. `grep,glob`).
+    /// Overrides the subagent's declared default (see docs/ft/coder/managed-codebase-subagents.md
+    /// § Tool replacement). Only meaningful together with `--discovery-subagent`.
+    #[arg(long)]
+    subagent_replaces: Option<String>,
+
     /// Enable debug logging for tddy sandbox components (HTTP/gRPC frame traces stay quiet).
     #[arg(short, long)]
     verbose: bool,
@@ -170,6 +176,7 @@ async fn main() -> Result<()> {
         fastcontext_url: args.fastcontext_url,
         fastcontext_model: args.fastcontext_model,
         fastcontext_max_turns: args.fastcontext_max_turns,
+        replaces: args.subagent_replaces,
     };
     if let Some(ref name) = subagent.discovery_subagent {
         eprintln!("discovery_subagent={name}");

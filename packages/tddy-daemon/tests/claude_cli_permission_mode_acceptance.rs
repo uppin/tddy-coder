@@ -459,6 +459,11 @@ async fn start_session_rpc_threads_permission_mode_to_pty() {
             permission_mode: "bypassPermissions".to_string(), // NEW FIELD — does not exist yet
             stack_parent: String::new(),
             sandbox: false,
+            discovery_subagent: String::new(),
+            fastcontext_url: String::new(),
+            fastcontext_model: String::new(),
+            fastcontext_max_turns: 0,
+            subagent_replaces: String::new(),
         }))
         .await
         .expect("StartSession with permission_mode must succeed");

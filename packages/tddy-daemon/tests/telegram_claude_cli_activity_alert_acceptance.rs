@@ -66,6 +66,11 @@ fn write_claude_cli_session(
         activity_status: initial_activity_status.map(str::to_owned),
         hook_token: Some(hook_token.to_string()),
         sandbox: None,
+        discovery_subagent: None,
+        fastcontext_url: None,
+        fastcontext_model: None,
+        fastcontext_max_turns: None,
+        subagent_replaces: None,
     };
     write_session_metadata(session_dir, &meta).unwrap();
 }

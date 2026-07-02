@@ -182,6 +182,11 @@ async fn start_session_unknown_daemon_instance_id_returns_clear_error() {
         permission_mode: String::new(),
         stack_parent: String::new(),
         sandbox: false,
+        discovery_subagent: String::new(),
+        fastcontext_url: String::new(),
+        fastcontext_model: String::new(),
+        fastcontext_max_turns: 0,
+        subagent_replaces: String::new(),
     });
     // Then
     let err = service
@@ -372,6 +377,11 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         permission_mode: String::new(),
         stack_parent: String::new(),
         sandbox: false,
+        discovery_subagent: String::new(),
+        fastcontext_url: String::new(),
+        fastcontext_model: String::new(),
+        fastcontext_max_turns: 0,
+        subagent_replaces: String::new(),
     });
     let response = service_a.start_session(request).await.unwrap_or_else(|e| {
         panic!(

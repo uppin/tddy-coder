@@ -271,6 +271,11 @@ mod tests {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            discovery_subagent: None,
+            fastcontext_url: None,
+            fastcontext_model: None,
+            fastcontext_max_turns: None,
+            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }

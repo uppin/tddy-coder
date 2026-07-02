@@ -205,6 +205,11 @@ allowed_agents:
         permission_mode: String::new(),
         stack_parent: String::new(),
         sandbox: false,
+        discovery_subagent: String::new(),
+        fastcontext_url: String::new(),
+        fastcontext_model: String::new(),
+        fastcontext_max_turns: 0,
+        subagent_replaces: String::new(),
     });
 
     // When

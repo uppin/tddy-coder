@@ -998,6 +998,29 @@ fn run_claude_pty_thread(
     Ok(())
 }
 
+/// Pure resolution of the effective replaced-tool set: no subagent name (absent or blank) means
+/// nothing is replaced, regardless of any override — there's no subagent behind it to honor.
+/// Otherwise delegates to [`tddy_discovery::subagent::resolve_replaced_tools`], so the
+/// default/override contract matches the one `tddy-discovery` already specifies.
+fn resolve_subagent_replaced_tools(
+    subagent_name: Option<&str>,
+    override_csv: Option<&str>,
+) -> Vec<String> {
+    match subagent_name.map(str::trim).filter(|name| !name.is_empty()) {
+        Some(name) => tddy_discovery::subagent::resolve_replaced_tools(name, override_csv),
+        None => Vec::new(),
+    }
+}
+
+/// Thin env-reading wrapper around [`resolve_subagent_replaced_tools`]: `TDDY_SUBAGENT` names the
+/// subagent, `TDDY_SUBAGENT_REPLACES` carries an optional override.
+fn subagent_replaced_tools_from_env() -> Vec<String> {
+    resolve_subagent_replaced_tools(
+        std::env::var("TDDY_SUBAGENT").ok().as_deref(),
+        std::env::var("TDDY_SUBAGENT_REPLACES").ok().as_deref(),
+    )
+}
+
 struct SpawnClaudePtyParams<'a> {
     context_dir: &'a Path,
     /// Working directory for the Claude process (defaults to `context_dir` when no project dir is
@@ -1040,8 +1063,16 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
     let subagent_enabled = std::env::var("TDDY_SUBAGENT")
         .map(|v| !v.trim().is_empty())
         .unwrap_or(false);
-    append_claude_mcp_args(&mut argv, &scratch_dir, tddy_tools_path, subagent_enabled)
-        .context("append sandbox claude MCP allowlist args")?;
+    let replaced_tools = subagent_replaced_tools_from_env();
+    let replaced_refs: Vec<&str> = replaced_tools.iter().map(String::as_str).collect();
+    append_claude_mcp_args(
+        &mut argv,
+        &scratch_dir,
+        tddy_tools_path,
+        subagent_enabled,
+        &replaced_refs,
+    )
+    .context("append sandbox claude MCP allowlist args")?;
     boot_log(
         "INFO",
         &format!(
@@ -1674,5 +1705,106 @@ mod tests {
         ])
         .expect("argv must parse");
         assert_eq!(args.pty_command, vec!["/bin/sh", "-c", "printf", "pty_ok"]);
+    }
+
+    // ─── resolve_subagent_replaced_tools ────────────────────────────────────────
+    //
+    // Feature: docs/ft/coder/managed-codebase-subagents.md § Tool replacement (criteria 15, 17)
+    // Changeset: docs/dev/1-WIP/2026-07-02-changeset-subagent-tool-replacement.md
+    //
+    // Pure resolution (no env access) so these tests never touch process-global state — the thin
+    // `subagent_replaced_tools_from_env` wrapper reads `TDDY_SUBAGENT`/`TDDY_SUBAGENT_REPLACES`
+    // and delegates here.
+
+    /// No subagent name means nothing is replaced, regardless of any override — there is no
+    /// subagent behind the override to honor.
+    #[test]
+    fn resolve_subagent_replaced_tools_is_empty_when_no_subagent_name_is_given() {
+        // When
+        let replaced = resolve_subagent_replaced_tools(None, Some("grep"));
+
+        // Then
+        assert_eq!(replaced, Vec::<String>::new());
+    }
+
+    /// A blank subagent name (unset env var reads as `Some("")` in some shells) is treated the
+    /// same as no subagent at all.
+    #[test]
+    fn resolve_subagent_replaced_tools_is_empty_when_subagent_name_is_blank() {
+        // When
+        let replaced = resolve_subagent_replaced_tools(Some("  "), None);
+
+        // Then
+        assert_eq!(replaced, Vec::<String>::new());
+    }
+
+    /// With a known subagent name and no override, the runner falls back to that subagent's
+    /// declared default — so `--discovery-subagent fastcontext` alone (no `--subagent-replaces`)
+    /// still filters `Grep`/`Glob` from the allowlist.
+    #[test]
+    fn resolve_subagent_replaced_tools_falls_back_to_the_subagent_default_when_no_override_env_is_set(
+    ) {
+        // When
+        let replaced = resolve_subagent_replaced_tools(Some("fastcontext"), None);
+
+        // Then
+        assert_eq!(replaced, vec!["Grep".to_string(), "Glob".to_string()]);
+    }
+
+    /// An explicit `TDDY_SUBAGENT_REPLACES` override (comma-separated, arbitrary whitespace)
+    /// wins over the subagent's declared default.
+    #[test]
+    fn resolve_subagent_replaced_tools_honors_a_csv_override_with_whitespace() {
+        // When
+        let replaced = resolve_subagent_replaced_tools(Some("fastcontext"), Some(" read , grep "));
+
+        // Then
+        assert_eq!(replaced, vec!["Read".to_string(), "Grep".to_string()]);
+    }
+
+    /// An override that is present but empty is treated as "no override" — the subagent default
+    /// applies, matching `resolve_replaced_tools`'s own contract (criterion 14).
+    #[test]
+    fn resolve_subagent_replaced_tools_treats_an_empty_override_as_no_override() {
+        // When
+        let replaced = resolve_subagent_replaced_tools(Some("fastcontext"), Some(""));
+
+        // Then
+        assert_eq!(replaced, vec!["Grep".to_string(), "Glob".to_string()]);
+    }
+
+    /// An unknown token in the override is dropped, not passed through — a typo in
+    /// `--subagent-replaces` must not silently produce a nonsense allowlist entry.
+    #[test]
+    fn resolve_subagent_replaced_tools_drops_unrecognized_override_tokens() {
+        // When
+        let replaced =
+            resolve_subagent_replaced_tools(Some("fastcontext"), Some("grep,not-a-real-tool"));
+
+        // Then
+        assert_eq!(replaced, vec!["Grep".to_string()]);
+    }
+
+    /// Drift guard (mirrors `tddy-daemon`'s `workspace_exec_tool_names_match_tool_catalog`):
+    /// `tddy_discovery::subagent`'s canonical exec-tool name table is intentionally kept local to
+    /// avoid a `tddy-discovery -> tddy-sandbox` dependency, so nothing enforces that it stays in
+    /// sync with `tddy_sandbox::workspace_exec_tool_names()` at the type level. Round-trip every
+    /// real exec tool name through an override to catch the list silently falling behind: a tool
+    /// missing from the canonical table would be dropped here instead of resolving to itself.
+    #[test]
+    fn every_workspace_exec_tool_name_round_trips_through_an_override() {
+        // Given — the canonical exec-tool names this runner's allowlist is built from
+        // When — each one is passed as a single-tool override
+        // Then — it must resolve back to itself; a dropped name means the tables diverged
+        for name in tddy_sandbox::workspace_exec_tool_names() {
+            let replaced =
+                tddy_discovery::subagent::resolve_replaced_tools("fastcontext", Some(name));
+            assert_eq!(
+                replaced,
+                vec![name.to_string()],
+                "tddy-discovery's canonical exec-tool table is missing {name} — \
+                 update CANONICAL_EXEC_TOOL_NAMES in packages/tddy-discovery/src/subagent.rs"
+            );
+        }
     }
 }

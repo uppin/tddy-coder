@@ -197,7 +197,7 @@ async fn generic_pty_runner_writes_ready_marker_inside_seatbelt() {
     );
 
     // When
-    let mut handle = spawn_sandbox_runner(SandboxRunnerSpawn {
+    let handle = spawn_sandbox_runner(SandboxRunnerSpawn {
         project_root: project.clone(),
         scratch_dir: scratch,
         egress_dir: egress.clone(),
@@ -293,7 +293,7 @@ async fn generic_pty_host_relay_streams_command_output() {
         egress.to_string_lossy().to_string(),
     );
 
-    let mut handle = spawn_sandbox_runner(SandboxRunnerSpawn {
+    let handle = spawn_sandbox_runner(SandboxRunnerSpawn {
         project_root: project.clone(),
         scratch_dir: scratch,
         egress_dir: egress.clone(),

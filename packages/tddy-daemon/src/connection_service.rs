@@ -609,6 +609,11 @@ impl ConnectionServiceImpl {
             activity_status: None,
             hook_token: Some(hook_token),
             sandbox: None,
+            discovery_subagent: None,
+            fastcontext_url: None,
+            fastcontext_model: None,
+            fastcontext_max_turns: None,
+            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
@@ -691,6 +696,7 @@ impl ConnectionServiceImpl {
         selected_branch_to_work_on: &str,
         permission_mode: &str,
         stack_parent: Option<&str>,
+        subagent: crate::sandbox_session::SubagentSpawnConfig,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -818,8 +824,20 @@ impl ConnectionServiceImpl {
         let scratch_tmp = scratch_dir.join("tmp");
         let context_dir = sandbox_root.join("context");
 
-        let ctx = crate::sandbox_session::prepare_context_dir(&worktree_path)
-            .map_err(Status::internal)?;
+        let subagent_name = subagent.discovery_subagent.clone();
+        let replaced_tools: Vec<String> = match subagent_name.as_deref() {
+            Some(name) => {
+                tddy_discovery::subagent::resolve_replaced_tools(name, subagent.replaces.as_deref())
+            }
+            None => Vec::new(),
+        };
+        let replaced_refs: Vec<&str> = replaced_tools.iter().map(String::as_str).collect();
+        let ctx = crate::sandbox_session::prepare_context_dir_with_subagent(
+            &worktree_path,
+            subagent_name.as_deref(),
+            &replaced_refs,
+        )
+        .map_err(Status::internal)?;
         crate::sandbox_session::copy_dir_all(ctx.path(), &context_dir).map_err(Status::internal)?;
 
         let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
@@ -909,13 +927,14 @@ impl ConnectionServiceImpl {
             argv
         };
 
-        let env = crate::sandbox_session::build_sandbox_runner_env(
+        let mut env = crate::sandbox_session::build_sandbox_runner_env(
             &scratch_home,
             &scratch_tmp,
             session_id,
             &tool_ipc_socket,
             &egress_dir,
         );
+        env.extend(crate::sandbox_session::subagent_env_overlay(&subagent));
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
@@ -998,6 +1017,11 @@ impl ConnectionServiceImpl {
             activity_status: None,
             hook_token: None,
             sandbox: Some(true),
+            discovery_subagent: subagent.discovery_subagent.clone(),
+            fastcontext_url: subagent.fastcontext_url.clone(),
+            fastcontext_model: subagent.fastcontext_model.clone(),
+            fastcontext_max_turns: subagent.fastcontext_max_turns,
+            subagent_replaces: subagent.replaces.clone(),
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
@@ -1101,8 +1125,22 @@ impl ConnectionServiceImpl {
             .map(PathBuf::from)
             .ok_or_else(|| Status::internal("sandbox session missing repo_path in metadata"))?;
 
+        let subagent = crate::sandbox_session::SubagentSpawnConfig {
+            discovery_subagent: meta.discovery_subagent.clone(),
+            fastcontext_url: meta.fastcontext_url.clone(),
+            fastcontext_model: meta.fastcontext_model.clone(),
+            fastcontext_max_turns: meta.fastcontext_max_turns,
+            replaces: meta.subagent_replaces.clone(),
+        };
         let pid = self
-            .relaunch_sandboxed_runner(session_id, &session_dir, &worktree_path, &model, "auto")
+            .relaunch_sandboxed_runner(
+                session_id,
+                &session_dir,
+                &worktree_path,
+                &model,
+                "auto",
+                &subagent,
+            )
             .await?;
 
         let now = chrono::Utc::now().to_rfc3339();
@@ -1131,6 +1169,7 @@ impl ConnectionServiceImpl {
         worktree_path: &Path,
         model: &str,
         permission_mode: &str,
+        subagent: &crate::sandbox_session::SubagentSpawnConfig,
     ) -> Result<u32, Status> {
         let sandbox_root = session_dir.join("sandbox");
         let egress_dir = session_dir.join("egress");
@@ -1150,8 +1189,20 @@ impl ConnectionServiceImpl {
         let scratch_tmp = scratch_dir.join("tmp");
         let context_dir = sandbox_root.join("context");
 
-        let ctx = crate::sandbox_session::prepare_context_dir(worktree_path)
-            .map_err(|e| Status::internal(format!("prepare context dir: {e}")))?;
+        let subagent_name = subagent.discovery_subagent.clone();
+        let replaced_tools: Vec<String> = match subagent_name.as_deref() {
+            Some(name) => {
+                tddy_discovery::subagent::resolve_replaced_tools(name, subagent.replaces.as_deref())
+            }
+            None => Vec::new(),
+        };
+        let replaced_refs: Vec<&str> = replaced_tools.iter().map(String::as_str).collect();
+        let ctx = crate::sandbox_session::prepare_context_dir_with_subagent(
+            worktree_path,
+            subagent_name.as_deref(),
+            &replaced_refs,
+        )
+        .map_err(|e| Status::internal(format!("prepare context dir: {e}")))?;
         if context_dir.exists() {
             std::fs::remove_dir_all(&context_dir)
                 .map_err(|e| Status::internal(format!("clear context dir: {e}")))?;
@@ -1241,13 +1292,14 @@ impl ConnectionServiceImpl {
             argv
         };
 
-        let env = crate::sandbox_session::build_sandbox_runner_env(
+        let mut env = crate::sandbox_session::build_sandbox_runner_env(
             &scratch_home,
             &scratch_tmp,
             session_id,
             &tool_ipc_socket,
             &egress_dir,
         );
+        env.extend(crate::sandbox_session::subagent_env_overlay(subagent));
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
@@ -1690,6 +1742,45 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 }
             };
             if req.sandbox {
+                let subagent_for_claude_cli = crate::sandbox_session::SubagentSpawnConfig {
+                    discovery_subagent: {
+                        let t = req.discovery_subagent.trim();
+                        if t.is_empty() {
+                            None
+                        } else {
+                            Some(t.to_string())
+                        }
+                    },
+                    fastcontext_url: {
+                        let t = req.fastcontext_url.trim();
+                        if t.is_empty() {
+                            None
+                        } else {
+                            Some(t.to_string())
+                        }
+                    },
+                    fastcontext_model: {
+                        let t = req.fastcontext_model.trim();
+                        if t.is_empty() {
+                            None
+                        } else {
+                            Some(t.to_string())
+                        }
+                    },
+                    fastcontext_max_turns: if req.fastcontext_max_turns == 0 {
+                        None
+                    } else {
+                        Some(req.fastcontext_max_turns)
+                    },
+                    replaces: {
+                        let t = req.subagent_replaces.trim();
+                        if t.is_empty() {
+                            None
+                        } else {
+                            Some(t.to_string())
+                        }
+                    },
+                };
                 return self
                     .start_sandboxed_claude_cli_session(
                         os_user,
@@ -1703,6 +1794,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         req.selected_branch_to_work_on.trim(),
                         req.permission_mode.trim(),
                         stack_parent_for_claude_cli.as_deref(),
+                        subagent_for_claude_cli,
                     )
                     .await;
             }
@@ -3581,6 +3673,11 @@ mod signal_session_unit_tests {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            discovery_subagent: None,
+            fastcontext_url: None,
+            fastcontext_model: None,
+            fastcontext_max_turns: None,
+            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -3761,6 +3858,11 @@ mod list_sessions_unit_tests {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            discovery_subagent: None,
+            fastcontext_url: None,
+            fastcontext_model: None,
+            fastcontext_max_turns: None,
+            subagent_replaces: None,
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -3852,6 +3954,11 @@ mod report_session_status_unit_tests {
             activity_status: None,
             hook_token: Some(hook_token.to_string()),
             sandbox: None,
+            discovery_subagent: None,
+            fastcontext_url: None,
+            fastcontext_model: None,
+            fastcontext_max_turns: None,
+            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -3948,6 +4055,11 @@ mod report_session_status_unit_tests {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            discovery_subagent: None,
+            fastcontext_url: None,
+            fastcontext_model: None,
+            fastcontext_max_turns: None,
+            subagent_replaces: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 

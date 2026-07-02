@@ -123,6 +123,11 @@ pub struct SessionMetadataBuilder {
     activity_status: Option<String>,
     hook_token: Option<String>,
     sandbox: Option<bool>,
+    discovery_subagent: Option<String>,
+    fastcontext_url: Option<String>,
+    fastcontext_model: Option<String>,
+    fastcontext_max_turns: Option<u32>,
+    subagent_replaces: Option<String>,
 }
 
 /// Start building a [`SessionMetadata`] with sensible defaults.
@@ -146,6 +151,11 @@ pub fn a_session_metadata() -> SessionMetadataBuilder {
         activity_status: None,
         hook_token: None,
         sandbox: None,
+        discovery_subagent: None,
+        fastcontext_url: None,
+        fastcontext_model: None,
+        fastcontext_max_turns: None,
+        subagent_replaces: None,
     }
 }
 
@@ -218,6 +228,11 @@ impl SessionMetadataBuilder {
             activity_status: self.activity_status,
             hook_token: self.hook_token,
             sandbox: self.sandbox,
+            discovery_subagent: self.discovery_subagent,
+            fastcontext_url: self.fastcontext_url,
+            fastcontext_model: self.fastcontext_model,
+            fastcontext_max_turns: self.fastcontext_max_turns,
+            subagent_replaces: self.subagent_replaces,
         }
     }
 }

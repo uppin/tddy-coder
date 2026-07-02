@@ -148,6 +148,11 @@ fn sandbox_start_request() -> StartSessionRequest {
         permission_mode: String::new(),
         stack_parent: String::new(),
         sandbox: true,
+        discovery_subagent: String::new(),
+        fastcontext_url: String::new(),
+        fastcontext_model: String::new(),
+        fastcontext_max_turns: 0,
+        subagent_replaces: String::new(),
     }
 }
 

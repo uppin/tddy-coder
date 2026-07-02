@@ -47,6 +47,26 @@ pub struct SessionMetadata {
     /// When true, the claude-cli session runs inside a platform sandbox (darwin Seatbelt).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<bool>,
+    /// Discovery subagent wired into a sandboxed claude-cli session (e.g. "fastcontext"). Absent
+    /// for non-subagent sessions and legacy files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discovery_subagent: Option<String>,
+    /// FastContext discovery-subagent endpoint override. Absent for non-subagent sessions and
+    /// legacy files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fastcontext_url: Option<String>,
+    /// FastContext discovery-subagent model id override. Absent for non-subagent sessions and
+    /// legacy files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fastcontext_model: Option<String>,
+    /// FastContext discovery-subagent per-prompt turn budget override. Absent for non-subagent
+    /// sessions and legacy files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fastcontext_max_turns: Option<u32>,
+    /// Exec tools the wired-in discovery subagent replaces (comma-separated). Absent for
+    /// non-subagent sessions and legacy files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_replaces: Option<String>,
 }
 
 pub const SESSION_METADATA_FILENAME: &str = ".session.yaml";
@@ -110,6 +130,11 @@ pub fn write_initial_tool_session_metadata(
         activity_status: opts.activity_status,
         hook_token: opts.hook_token,
         sandbox: opts.sandbox,
+        discovery_subagent: None,
+        fastcontext_url: None,
+        fastcontext_model: None,
+        fastcontext_max_turns: None,
+        subagent_replaces: None,
     };
     write_session_metadata(session_dir, &metadata)
 }
@@ -262,6 +287,75 @@ status: active
             legacy.model.is_none(),
             "model must default to None for legacy sessions"
         );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Discovery-subagent fields (`discovery_subagent`, `fastcontext_*`, `subagent_replaces`)
+    /// survive a write/read round-trip through `.session.yaml` — needed so a daemon-hosted
+    /// sandboxed claude-cli session can reconstruct its subagent config on resume.
+    #[test]
+    fn discovery_subagent_fields_round_trip_through_session_yaml() {
+        let tmp = std::env::temp_dir().join(format!(
+            "tddy-session-meta-subagent-rt-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&tmp);
+        let session_dir = tmp.join("sessions").join("sess-subagent-rt");
+        fs::create_dir_all(&session_dir).unwrap();
+
+        let metadata = SessionMetadata {
+            session_id: "sess-subagent-rt".to_string(),
+            project_id: "proj-subagent".to_string(),
+            created_at: "2026-07-02T10:00:00Z".to_string(),
+            updated_at: "2026-07-02T10:00:00Z".to_string(),
+            status: "active".to_string(),
+            repo_path: Some("/tmp/worktrees/subagent".to_string()),
+            pid: Some(1234),
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("claude-cli".to_string()),
+            model: Some("claude-sonnet-4-6".to_string()),
+            activity_status: None,
+            hook_token: None,
+            sandbox: Some(true),
+            discovery_subagent: Some("fastcontext".to_string()),
+            fastcontext_url: Some("http://localhost:30000".to_string()),
+            fastcontext_model: Some("microsoft/FastContext-1.0-4B-RL".to_string()),
+            fastcontext_max_turns: Some(6),
+            subagent_replaces: Some("grep".to_string()),
+        };
+        write_session_metadata(&session_dir, &metadata).unwrap();
+
+        let read = read_session_metadata(&session_dir).unwrap();
+        assert_eq!(read.discovery_subagent.as_deref(), Some("fastcontext"));
+        assert_eq!(
+            read.fastcontext_url.as_deref(),
+            Some("http://localhost:30000")
+        );
+        assert_eq!(
+            read.fastcontext_model.as_deref(),
+            Some("microsoft/FastContext-1.0-4B-RL")
+        );
+        assert_eq!(read.fastcontext_max_turns, Some(6));
+        assert_eq!(read.subagent_replaces.as_deref(), Some("grep"));
+
+        // Legacy .session.yaml without the new keys must still deserialize, defaulting to None.
+        let legacy_yaml = r#"session_id: legacy-sess
+project_id: proj-legacy
+created_at: "2026-01-01T00:00:00Z"
+updated_at: "2026-01-01T00:00:00Z"
+status: active
+"#;
+        let legacy: SessionMetadata = serde_yaml::from_str(legacy_yaml)
+            .expect("legacy .session.yaml without subagent fields must deserialize");
+        assert!(legacy.discovery_subagent.is_none());
+        assert!(legacy.fastcontext_url.is_none());
+        assert!(legacy.fastcontext_model.is_none());
+        assert!(legacy.fastcontext_max_turns.is_none());
+        assert!(legacy.subagent_replaces.is_none());
 
         let _ = fs::remove_dir_all(&tmp);
     }
