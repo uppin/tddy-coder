@@ -1,4 +1,6 @@
+use crate::library::VmLibrary;
 use crate::vm::{PortForward, Vm, VmConfig, VmError};
+use crate::vm_manifest::{LoginPolicy, RunPolicy, VmManifest};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -28,8 +30,26 @@ struct VmHandle {
     running: Option<crate::vm::RunningVm>,
 }
 
+impl VmHandle {
+    /// A freshly defined, not-yet-started handle.
+    fn defined() -> Self {
+        Self {
+            state: VmState::Defined,
+            running: None,
+        }
+    }
+}
+
+/// Where a [`VmManager`]'s specs are persisted: the original single shared JSON file,
+/// or the new per-VM manifest library (source of truth going forward — see
+/// [`VmManager::from_library`]).
+enum Storage {
+    Json(PathBuf),
+    Library(VmLibrary),
+}
+
 pub struct VmManager {
-    state_file: PathBuf,
+    storage: Storage,
     backend: Arc<dyn Vm>,
     vms: Mutex<HashMap<String, (VmSpec, VmHandle)>>,
 }
@@ -64,10 +84,40 @@ impl VmManager {
             HashMap::new()
         };
         Self {
-            state_file: state_file.to_path_buf(),
+            storage: Storage::Json(state_file.to_path_buf()),
             backend: Arc::from(backend),
             vms: Mutex::new(vms),
         }
+    }
+
+    /// Construct a `VmManager` backed by a [`VmLibrary`] — per-VM `manifest.yaml` files
+    /// are the source of truth, superseding the single shared JSON state file.
+    /// `VmSpec` remains the in-memory/RPC DTO; specs are mapped to/from
+    /// [`crate::vm_manifest::VmManifest`] when reading or writing the library.
+    pub fn from_library(library: VmLibrary, backend: Box<dyn Vm>) -> Self {
+        let vms = Self::load_from_library(&library);
+        Self {
+            storage: Storage::Library(library),
+            backend: Arc::from(backend),
+            vms: Mutex::new(vms),
+        }
+    }
+
+    fn load_from_library(library: &VmLibrary) -> HashMap<String, (VmSpec, VmHandle)> {
+        let manifests = library.list_manifests().unwrap_or_else(|e| {
+            log::error!(
+                "VmManager: failed to load manifests from library {}: {e}",
+                library.root().display()
+            );
+            Vec::new()
+        });
+        manifests
+            .into_iter()
+            .map(|manifest| {
+                let spec = vm_spec_from_manifest(library, &manifest);
+                (spec.name.clone(), (spec, VmHandle::defined()))
+            })
+            .collect()
     }
 
     pub async fn define(&self, spec: VmSpec) -> Result<(), VmError> {
@@ -75,18 +125,28 @@ impl VmManager {
         if vms.contains_key(&spec.name) {
             return Err(VmError::AlreadyExists(spec.name.clone()));
         }
-        vms.insert(
-            spec.name.clone(),
-            (
-                spec,
-                VmHandle {
-                    state: VmState::Defined,
-                    running: None,
-                },
-            ),
-        );
-        self.persist(&vms);
+        match &self.storage {
+            Storage::Json(path) => {
+                vms.insert(spec.name.clone(), (spec, VmHandle::defined()));
+                self.persist_json(path, &vms);
+            }
+            Storage::Library(library) => {
+                self.write_spec_to_library(library, &spec);
+                vms.insert(spec.name.clone(), (spec, VmHandle::defined()));
+            }
+        }
         Ok(())
+    }
+
+    fn write_spec_to_library(&self, library: &VmLibrary, spec: &VmSpec) {
+        let manifest = vm_manifest_from_spec(spec);
+        if let Err(e) = library.write_manifest(&manifest) {
+            log::error!(
+                "VmManager: failed to write manifest for '{}' to library {}: {e}",
+                spec.name,
+                library.root().display()
+            );
+        }
     }
 
     pub async fn list(&self) -> Vec<(VmSpec, VmState)> {
@@ -209,19 +269,79 @@ impl VmManager {
         }
 
         vms.remove(name);
-        self.persist(&vms);
+        match &self.storage {
+            Storage::Json(path) => self.persist_json(path, &vms),
+            Storage::Library(library) => self.remove_from_library(library, name),
+        }
         Ok(())
     }
 
-    fn persist(&self, vms: &HashMap<String, (VmSpec, VmHandle)>) {
+    fn remove_from_library(&self, library: &VmLibrary, name: &str) {
+        if let Err(e) = library.remove_vm(name) {
+            log::error!(
+                "VmManager: failed to remove '{name}' from library {}: {e}",
+                library.root().display()
+            );
+        }
+    }
+
+    fn persist_json(&self, state_file: &Path, vms: &HashMap<String, (VmSpec, VmHandle)>) {
         let specs: Vec<&VmSpec> = vms.values().map(|(spec, _)| spec).collect();
         if let Ok(json) = serde_json::to_string_pretty(&specs) {
-            if let Err(e) = std::fs::write(&self.state_file, json) {
+            if let Err(e) = std::fs::write(state_file, json) {
                 log::error!(
                     "VmManager: failed to persist state to {}: {e}",
-                    self.state_file.display()
+                    state_file.display()
                 );
             }
         }
+    }
+}
+
+/// Map a loaded [`VmManifest`] to the in-memory/RPC [`VmSpec`] DTO. A manifest with
+/// `prepared_base` set (rather than a direct `image_path`) resolves to the overlay
+/// `create_vm` would have produced at `vm/<name>/<name>.qcow2` — the manifest itself
+/// does not duplicate that derived path.
+fn vm_spec_from_manifest(library: &VmLibrary, manifest: &VmManifest) -> VmSpec {
+    let image_path = manifest.image_path.clone().or_else(|| {
+        manifest.prepared_base.as_ref().map(|_| {
+            library
+                .vm_dir(&manifest.name)
+                .join(format!("{}.qcow2", manifest.name))
+                .to_string_lossy()
+                .into_owned()
+        })
+    });
+    VmSpec {
+        name: manifest.name.clone(),
+        build_target: None,
+        image_path,
+        port_forwards: manifest.run.port_forwards.clone(),
+        ssh_host_port: manifest.run.ssh_host_port,
+    }
+}
+
+/// Map a [`VmSpec`] to a [`VmManifest`] for persistence via `VmManager::define`'s
+/// library-mode path. This is the direct-`image_path` shape (mirrors the JSON-backed
+/// contract); the richer `prepared_base`-driven shape is populated separately by
+/// [`VmLibrary::create_vm`], not through this generic spec mapping.
+fn vm_manifest_from_spec(spec: &VmSpec) -> VmManifest {
+    VmManifest {
+        name: spec.name.clone(),
+        prepared_base: None,
+        image_path: spec.image_path.clone(),
+        run: RunPolicy {
+            memory: "2048M".to_string(),
+            cpus: 2,
+            disk_size: "20G".to_string(),
+            ssh_host_port: spec.ssh_host_port,
+            port_forwards: spec.port_forwards.clone(),
+        },
+        login: LoginPolicy {
+            // SSH-as-root matches this crate's existing `QemuVm` convention (see qemu.rs).
+            username: "root".to_string(),
+            ssh_private_key: None,
+            ssh_public_key: None,
+        },
     }
 }
