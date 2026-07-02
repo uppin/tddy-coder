@@ -66,6 +66,7 @@ fn write_claude_cli_session(
         activity_status: initial_activity_status.map(str::to_owned),
         hook_token: Some(hook_token.to_string()),
         sandbox: None,
+        specialized_agents: Vec::new(),
         discovery_subagent: None,
         fastcontext_url: None,
         fastcontext_model: None,

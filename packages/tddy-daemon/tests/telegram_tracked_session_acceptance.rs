@@ -115,6 +115,7 @@ fn write_minimal_running_session(sessions_base: &std::path::Path, session_id: &s
         activity_status: None,
         hook_token: None,
         sandbox: None,
+        specialized_agents: Vec::new(),
         discovery_subagent: None,
         fastcontext_url: None,
         fastcontext_model: None,

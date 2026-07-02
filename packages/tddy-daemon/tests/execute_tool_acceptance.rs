@@ -264,6 +264,7 @@ async fn execute_tool_connect_by_id_works_on_cli_session_worktree() {
         activity_status: None,
         hook_token: None,
         sandbox: None,
+        specialized_agents: Vec::new(),
         discovery_subagent: None,
         fastcontext_url: None,
         fastcontext_model: None,

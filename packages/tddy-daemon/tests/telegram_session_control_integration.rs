@@ -474,6 +474,7 @@ fn create_fake_sessions(base: &std::path::Path, count: usize) -> Vec<String> {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            specialized_agents: Vec::new(),
             discovery_subagent: None,
             fastcontext_url: None,
             fastcontext_model: None,

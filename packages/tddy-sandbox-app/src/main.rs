@@ -16,7 +16,10 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use spawn::{resolve_codebase_mode, spawn_claude_sandbox, SpawnParams, SubagentSpawnConfig};
+use spawn::{
+    resolve_codebase_mode, resolve_specialized_agent_names, spawn_claude_sandbox, SpawnParams,
+    SubagentSpawnConfig,
+};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_task::TaskRegistry;
 use uuid::Uuid;
@@ -83,27 +86,39 @@ struct Args {
     #[arg(long)]
     codebase_mode: Option<String>,
 
-    /// Discovery subagent to wire into the session (e.g. `fastcontext`). When set, Claude gains
-    /// the `subagent_new_session`/`subagent_prompt`/`subagent_cancel` MCP tools (see
-    /// docs/ft/coder/managed-codebase-subagents.md).
+    /// Specialized agent to wire into the session (e.g. `fastcontext`), repeatable for multiple
+    /// agents. When set, Claude gains the `subagent_new_session`/`subagent_prompt`/
+    /// `subagent_cancel` MCP tools (see docs/ft/coder/specialized-subagents.md).
+    #[arg(long = "specialized-agent")]
+    specialized_agent: Vec<String>,
+
+    /// Directory to resolve named agents from, in addition to the builtins (default:
+    /// `<session-base>/agents`).
+    #[arg(long)]
+    agents_dir: Option<PathBuf>,
+
+    /// Deprecated: single-name alias for `--specialized-agent`. Rejected if both are given.
     #[arg(long)]
     discovery_subagent: Option<String>,
 
-    /// FastContext discovery-subagent endpoint (default: `http://localhost:30000`).
+    /// FastContext endpoint override (default: `http://localhost:30000`). Only meaningful when
+    /// exactly one specialized agent is selected.
     #[arg(long)]
     fastcontext_url: Option<String>,
 
-    /// FastContext discovery-subagent model id (default: `microsoft/FastContext-1.0-4B-RL`).
+    /// FastContext model id override (default: `microsoft/FastContext-1.0-4B-RL`). Only
+    /// meaningful when exactly one specialized agent is selected.
     #[arg(long)]
     fastcontext_model: Option<String>,
 
-    /// FastContext discovery-subagent per-prompt turn budget (default: 10).
+    /// FastContext per-prompt turn budget override (default: 10). Only meaningful when exactly
+    /// one specialized agent is selected.
     #[arg(long)]
     fastcontext_max_turns: Option<u32>,
 
-    /// Exec tools the wired-in discovery subagent replaces (comma-separated, e.g. `grep,glob`).
-    /// Overrides the subagent's declared default (see docs/ft/coder/managed-codebase-subagents.md
-    /// § Tool replacement). Only meaningful together with `--discovery-subagent`.
+    /// Exec tools the wired-in specialized agent replaces (comma-separated, e.g. `grep,glob`).
+    /// Overrides the agent's declared default (see docs/ft/coder/managed-codebase-subagents.md
+    /// § Tool replacement). Only meaningful when exactly one specialized agent is selected.
     #[arg(long)]
     subagent_replaces: Option<String>,
 
@@ -171,15 +186,27 @@ async fn main() -> Result<()> {
             "codebase_mode=managed: repo not mounted; Claude reaches it only via mcp__tddy-tools__* calls"
         );
     }
+    let specialized_agents = resolve_specialized_agent_names(
+        &args.specialized_agent,
+        args.discovery_subagent.as_deref(),
+    )
+    .map_err(|e| anyhow::anyhow!(e))?;
+    let agents_dir = args
+        .agents_dir
+        .unwrap_or_else(|| session_base.join("agents"));
     let subagent = SubagentSpawnConfig {
-        discovery_subagent: args.discovery_subagent,
+        specialized_agents,
+        agents_dir,
         fastcontext_url: args.fastcontext_url,
         fastcontext_model: args.fastcontext_model,
         fastcontext_max_turns: args.fastcontext_max_turns,
         replaces: args.subagent_replaces,
     };
-    if let Some(ref name) = subagent.discovery_subagent {
-        eprintln!("discovery_subagent={name}");
+    if !subagent.specialized_agents.is_empty() {
+        eprintln!(
+            "specialized_agents={}",
+            subagent.specialized_agents.join(",")
+        );
     }
 
     let spawned = tokio::select! {

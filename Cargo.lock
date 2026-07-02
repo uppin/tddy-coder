@@ -9034,6 +9034,7 @@ dependencies = [
  "futures-util",
  "libc",
  "log",
+ "serde_json",
  "serial_test",
  "tddy-core",
  "tddy-daemon",

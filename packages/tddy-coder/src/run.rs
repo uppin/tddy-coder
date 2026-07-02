@@ -2215,6 +2215,7 @@ mod create_backend_specialized_agent_tests {
             system_prompt_path: None,
             tools: vec![],
             max_turns: 4,
+            replaces: vec![],
         };
 
         // When
@@ -2263,6 +2264,7 @@ mod create_backend_specialized_agent_tests {
             system_prompt_path: None,
             tools: vec![],
             max_turns: 4,
+            replaces: vec![],
         };
 
         // When

@@ -387,15 +387,13 @@ pub fn prepare_context_dir(worktree_path: &Path) -> Result<SandboxContextDir, St
     SandboxContextDir::create(worktree_path).map_err(|e| e.to_string())
 }
 
-/// Like [`prepare_context_dir`], but the appended appendix names `subagent` and `replaced` when a
-/// discovery subagent replaces some of the exec tools for this session.
+/// Like [`prepare_context_dir`], but the appended appendix names each entry in `replacements`
+/// next to the exec tools it replaces for this session.
 pub fn prepare_context_dir_with_subagent(
     worktree_path: &Path,
-    subagent: Option<&str>,
-    replaced: &[&str],
+    replacements: &[tddy_sandbox::SubagentReplacement<'_>],
 ) -> Result<SandboxContextDir, String> {
-    SandboxContextDir::create_with_subagent(worktree_path, subagent, replaced)
-        .map_err(|e| e.to_string())
+    SandboxContextDir::create_with_subagent(worktree_path, replacements).map_err(|e| e.to_string())
 }
 
 /// Resolve the `tddy-tools` binary for sandbox MCP and hook wiring.

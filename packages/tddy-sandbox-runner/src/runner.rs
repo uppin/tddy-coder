@@ -1014,9 +1014,31 @@ fn resolve_subagent_replaced_tools(
     }
 }
 
-/// Thin env-reading wrapper around [`resolve_subagent_replaced_tools`]: `TDDY_SUBAGENT` names the
-/// subagent, `TDDY_SUBAGENT_REPLACES` carries an optional override.
+/// Pure resolution of the effective replaced-tool set from a raw `TDDY_SUBAGENTS_JSON` payload
+/// (a serialized `Vec<SpecializedAgentDef>`): parses the JSON and unions every def's own
+/// `replaces` list via [`tddy_discovery::subagent::resolve_replaced_tools_for_defs`]. Absent,
+/// blank, or unparseable JSON resolves to an empty set — no panic, no fallback fabrication.
+fn subagents_json_replaced_tools(raw_json: Option<&str>) -> Vec<String> {
+    let raw_json = match raw_json.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw_json) => raw_json,
+        None => return Vec::new(),
+    };
+    match serde_json::from_str::<Vec<tddy_discovery::agent_def::SpecializedAgentDef>>(raw_json) {
+        Ok(defs) => tddy_discovery::subagent::resolve_replaced_tools_for_defs(&defs),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Thin env-reading wrapper around [`resolve_subagent_replaced_tools`] and
+/// [`subagents_json_replaced_tools`]: prefers the array model (`TDDY_SUBAGENTS_JSON`) when it
+/// parses to a non-empty replaced-tool set, otherwise falls back to the legacy single-subagent
+/// pair (`TDDY_SUBAGENT`/`TDDY_SUBAGENT_REPLACES`).
 fn subagent_replaced_tools_from_env() -> Vec<String> {
+    let from_json =
+        subagents_json_replaced_tools(std::env::var("TDDY_SUBAGENTS_JSON").ok().as_deref());
+    if !from_json.is_empty() {
+        return from_json;
+    }
     resolve_subagent_replaced_tools(
         std::env::var("TDDY_SUBAGENT").ok().as_deref(),
         std::env::var("TDDY_SUBAGENT_REPLACES").ok().as_deref(),
@@ -1808,6 +1830,71 @@ mod tests {
                  update CANONICAL_EXEC_TOOL_NAMES in packages/tddy-discovery/src/subagent.rs"
             );
         }
+    }
+
+    // ─── subagents_json_replaced_tools ───────────────────────────────────────────
+    //
+    // Feature: docs/ft/coder/managed-codebase-subagents.md § Tool replacement (array model)
+    //
+    // Pure resolution (no env access) of the `TDDY_SUBAGENTS_JSON` payload — the array-of-agents
+    // counterpart to `resolve_subagent_replaced_tools`'s single-name path above.
+
+    /// A JSON array of specialized-agent defs unions every def's own `replaces` list.
+    #[test]
+    fn subagents_json_replaced_tools_unions_from_json() {
+        // Given — two defs, one replacing Grep+Glob, the other replacing ReadLints
+        let raw_json = serde_json::json!([
+            {
+                "name": "fastcontext",
+                "model": "some-model",
+                "base_url": "http://localhost:30000",
+                "tools": ["READ"],
+                "max_turns": 6,
+                "replaces": ["Grep", "Glob"]
+            },
+            {
+                "name": "my-linter",
+                "model": "some-model",
+                "base_url": "http://localhost:30001",
+                "tools": ["READ"],
+                "max_turns": 6,
+                "replaces": ["ReadLints"]
+            }
+        ])
+        .to_string();
+
+        // When
+        let replaced = subagents_json_replaced_tools(Some(&raw_json));
+
+        // Then
+        assert_eq!(
+            replaced,
+            vec![
+                "Grep".to_string(),
+                "Glob".to_string(),
+                "ReadLints".to_string()
+            ]
+        );
+    }
+
+    /// Absent or blank JSON resolves to an empty set — no panic, no fallback fabrication.
+    #[test]
+    fn subagents_json_replaced_tools_returns_empty_for_absent_or_blank_json() {
+        assert_eq!(subagents_json_replaced_tools(None), Vec::<String>::new());
+        assert_eq!(
+            subagents_json_replaced_tools(Some("   ")),
+            Vec::<String>::new()
+        );
+    }
+
+    /// Unparseable JSON resolves to an empty set rather than panicking — a malformed
+    /// `TDDY_SUBAGENTS_JSON` must degrade to "nothing replaced", not crash the sandbox runner.
+    #[test]
+    fn subagents_json_replaced_tools_returns_empty_for_unparseable_json() {
+        assert_eq!(
+            subagents_json_replaced_tools(Some("not valid json")),
+            Vec::<String>::new()
+        );
     }
 
     /// **sandbox_runner_args_parse_with_stdio_flag_and_no_grpc_socket**: once the daemon's real

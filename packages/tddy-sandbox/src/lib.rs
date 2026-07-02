@@ -19,7 +19,7 @@ pub use builder::{
 };
 pub use context_dir::{
     copy_context_from_repo, copy_tree, copy_tree_within_root, SandboxContextDir,
-    SANDBOX_REMOTE_APPENDIX,
+    SubagentReplacement, SANDBOX_REMOTE_APPENDIX,
 };
 pub use error::SandboxError;
 pub use exec_reads::{

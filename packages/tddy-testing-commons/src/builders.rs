@@ -123,6 +123,7 @@ pub struct SessionMetadataBuilder {
     activity_status: Option<String>,
     hook_token: Option<String>,
     sandbox: Option<bool>,
+    specialized_agents: Vec<String>,
     discovery_subagent: Option<String>,
     fastcontext_url: Option<String>,
     fastcontext_model: Option<String>,
@@ -151,6 +152,7 @@ pub fn a_session_metadata() -> SessionMetadataBuilder {
         activity_status: None,
         hook_token: None,
         sandbox: None,
+        specialized_agents: Vec::new(),
         discovery_subagent: None,
         fastcontext_url: None,
         fastcontext_model: None,
@@ -210,6 +212,14 @@ impl SessionMetadataBuilder {
         self
     }
 
+    pub fn with_specialized_agents(
+        mut self,
+        names: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.specialized_agents = names.into_iter().map(Into::into).collect();
+        self
+    }
+
     pub fn build(self) -> SessionMetadata {
         SessionMetadata {
             session_id: self.session_id,
@@ -228,6 +238,7 @@ impl SessionMetadataBuilder {
             activity_status: self.activity_status,
             hook_token: self.hook_token,
             sandbox: self.sandbox,
+            specialized_agents: self.specialized_agents,
             discovery_subagent: self.discovery_subagent,
             fastcontext_url: self.fastcontext_url,
             fastcontext_model: self.fastcontext_model,

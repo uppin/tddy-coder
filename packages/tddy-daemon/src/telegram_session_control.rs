@@ -2626,6 +2626,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            specialized_agents: Vec::new(),
             discovery_subagent: None,
             fastcontext_url: None,
             fastcontext_model: None,

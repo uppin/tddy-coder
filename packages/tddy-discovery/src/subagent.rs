@@ -256,11 +256,38 @@ const CANONICAL_EXEC_TOOL_NAMES: &[&str] = &[
     "SemanticSearch",
 ];
 
+/// Normalize a list of free-form tool-name tokens against the canonical exec-tool catalog: trim,
+/// case-insensitive match, canonical casing, drop unrecognized tokens (never fabricate a tool
+/// name), de-duplicate preserving first-occurrence order.
+pub fn normalize_replaced_tools(tools: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for token in tools {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+        if let Some(canonical) = CANONICAL_EXEC_TOOL_NAMES
+            .iter()
+            .find(|canonical| canonical.eq_ignore_ascii_case(token))
+        {
+            let canonical = canonical.to_string();
+            if !out.contains(&canonical) {
+                out.push(canonical);
+            }
+        }
+    }
+    out
+}
+
 /// Tools this subagent replaces on the main agent. Empty for unknown names — no fabricated tool
-/// name, no panic.
+/// name, no panic. The `"fastcontext"` set derives from
+/// [`crate::agent_def::builtin_fastcontext_def`]'s own `replaces` field (single source of truth —
+/// no separate hardcoded literal to drift out of sync).
 pub fn subagent_replaced_tools(name: &str) -> Vec<String> {
     match name {
-        "fastcontext" => vec!["Grep".to_string(), "Glob".to_string()],
+        "fastcontext" => {
+            normalize_replaced_tools(&crate::agent_def::builtin_fastcontext_def().replaces)
+        }
         _ => Vec::new(),
     }
 }
@@ -274,19 +301,22 @@ pub fn subagent_replaced_tools(name: &str) -> Vec<String> {
 /// enforcement or invent a tool name.
 pub fn resolve_replaced_tools(name: &str, override_csv: Option<&str>) -> Vec<String> {
     match override_csv.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(csv) => csv
-            .split(',')
-            .map(str::trim)
-            .filter(|token| !token.is_empty())
-            .filter_map(|token| {
-                CANONICAL_EXEC_TOOL_NAMES
-                    .iter()
-                    .find(|canonical| canonical.eq_ignore_ascii_case(token))
-                    .map(|canonical| canonical.to_string())
-            })
-            .collect(),
+        Some(csv) => {
+            let tokens: Vec<String> = csv.split(',').map(str::trim).map(str::to_string).collect();
+            normalize_replaced_tools(&tokens)
+        }
         None => subagent_replaced_tools(name),
     }
+}
+
+/// Deduped, canonical union of every def's own `replaces` list. Pure aggregation — no CSV-override
+/// concept here, since each def's YAML is itself the user-editable source of truth (unlike the
+/// single-name [`resolve_replaced_tools`], which supports a runtime override).
+pub fn resolve_replaced_tools_for_defs(
+    defs: &[crate::agent_def::SpecializedAgentDef],
+) -> Vec<String> {
+    let combined: Vec<String> = defs.iter().flat_map(|def| def.replaces.clone()).collect();
+    normalize_replaced_tools(&combined)
 }
 
 /// Configuration for constructing a subagent session via [`SubagentRegistry::create`].

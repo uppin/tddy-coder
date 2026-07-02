@@ -38,7 +38,13 @@ system_prompt: |                          # optional; system_prompt_path also su
   You are a codebase explorer. Answer with <final_answer> citations only.
 tools: [READ, GLOB, GREP]                 # optional, defaults to [READ, GLOB, GREP]
 max_turns: 10                             # optional, defaults to 10
+replaces: [Grep, Glob]                    # optional, defaults to [] (replaces nothing)
 ```
+
+`replaces` names main-agent exec-catalog tools (e.g. `Grep`, `Glob`, `Read`) this agent takes over —
+not the same universe as `tools` above (this agent's own internal READ/GLOB/GREP loop). See
+[managed-codebase-subagents.md](managed-codebase-subagents.md) § Tool replacement for the full
+enforcement/guidance contract and how multiple agents' `replaces` lists are unioned.
 
 `tools` is an **extensible registry** — `SubagentTool` is a Rust enum with one variant per bound-tool
 kind. v1 ships exactly `READ`/`GLOB`/`GREP` (the existing read-only codebase tools); the def
@@ -111,14 +117,18 @@ of being limited to the single hardcoded FastContext discovery agent and CLI fla
 10. Back-compat: `TDDY_SUBAGENT=fastcontext` with no `TDDY_SUBAGENTS_JSON` set still works, resolving
     to `builtin_fastcontext_def()` (today's #254 env-var shape keeps working unmodified).
 
-### Standalone CLI (`tddy-sandbox-app`) — **not implemented in v1, tracked in `docs/dev/TODO.md`**
+### Standalone CLI (`tddy-sandbox-app`)
 
-11. *(unimplemented)* `--specialized-agent <name>` is repeatable; each maps to a def resolved from
-    `<tddyhome>/agents` + builtins, serialized into `TDDY_SUBAGENTS_JSON` alongside `TDDY_SUBAGENT`
-    (comma names).
-12. *(unimplemented)* `--discovery-subagent`/`--fastcontext-url`/`--fastcontext-model`/
-    `--fastcontext-max-turns` keep working as deprecated aliases that construct/override a
-    `fastcontext` def. The standalone CLI still only supports the original #254 flag shape.
+11. `--specialized-agent <name>` is repeatable; each maps to a def resolved from `<tddyhome>/agents`
+    + builtins (`spawn::resolve_specialized_agents`), serialized into `TDDY_SUBAGENTS_JSON` alongside
+    `TDDY_SUBAGENT` (comma names) via `spawn::subagent_env_overlay`.
+12. `--discovery-subagent`/`--fastcontext-url`/`--fastcontext-model`/`--fastcontext-max-turns` keep
+    working as deprecated aliases: `--discovery-subagent` folds into a single-entry
+    `specialized_agents` list (`spawn::resolve_specialized_agent_names`) and is rejected outright if
+    given together with `--specialized-agent`; the `--fastcontext-*` fields (plus
+    `--subagent-replaces`) remain single-agent-only overrides, baked onto the one matched def and
+    rejected if more than one specialized agent is selected — see
+    [managed-codebase-subagents.md](managed-codebase-subagents.md) AC24.
 
 ### Workflow backend (`tddy-coder`)
 
