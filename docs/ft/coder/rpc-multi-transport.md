@@ -51,6 +51,34 @@ already-open duplex streams a caller spawned itself — not just a `tokio::proce
 `spawn_child_endpoint` owns). See [grpc-remote-control.md](grpc-remote-control.md#stdio-transport)
 and [tddy-sandbox architecture](../../../packages/tddy-sandbox/docs/architecture.md#control-channel-transport).
 
+## Remaining IPC migration (in progress, source: `docs/dev/TODO.md`)
+
+The transport itself is done and proven, but three local IPC use-cases that predate it still run
+over gRPC or a bespoke protocol instead of adopting it. This is not a transport gap — it's call
+sites that haven't been switched over yet. gRPC is not being removed globally (the `--grpc`
+remote-control surface, the `--daemon` gRPC server, and the sandbox-runner's own gRPC server for
+`tddy-sandbox-app` are unaffected); only gRPC/bespoke-JSON used purely as *local* IPC is in scope,
+and per this repo's convention there is no dual-path fallback — each call site's old transport is
+deleted once it moves to stdio.
+
+1. **Daemon ↔ sandbox-runner session control channel.** `tddy-daemon`'s real session lifecycle
+   (`connection_service.rs` spawn/dial orchestration, `sandbox_session.rs::dial_and_bridge`) still
+   spawns `tddy-sandbox-runner` with `--grpc-socket`/`--grpc-uds`/`--grpc-listen-port` and dials the
+   tonic `SandboxServiceClient`, for every real sandboxed session. The stdio primitives it needs
+   (`bridge_sandbox_stdio`, `StdioSandboxClient`, the transport-agnostic `run_host_relay`) are
+   already built and proven end-to-end through a real Seatbelt jail — only the daemon's own
+   spawn/dial call sites remain to be switched. Once done, the gRPC spawn flags and their
+   supporting port/handshake code are deleted outright (no dual-path fallback).
+2. **Linux (`tddy-sandbox-cgroups`) jail-spawn stdio piping.** `tddy-sandbox-darwin::spawn_plan`
+   pipes stdin/stdout when `--stdio` is present in the runner's argv; the Linux cgroups+namespaces
+   jail-spawn path needs the equivalent change before (1) can work cross-platform.
+3. **Toolcall listener.** `tddy-core/src/toolcall/listener.rs` is a third, unrelated bespoke
+   newline-delimited-JSON protocol (`submit`/`ask`/`approve`/`list-actions`/`invoke-action`/
+   `build`/`build-list`) between `tddy-coder` and the Claude Code CLI subprocess it spawns — same
+   category of problem (bespoke local IPC where `tddy-rpc`/`tddy-stdio` already fits), same fix.
+
+See the `finish-stdio-ipc-migration` changeset for acceptance criteria and test coverage per item.
+
 ## Reference
 
 Framing/multiplexing approach adapted from the `serial-comm` RPC-over-transport pattern documented

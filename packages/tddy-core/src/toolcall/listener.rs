@@ -1,4 +1,4 @@
-//! Unix domain socket listener for tddy-tools relay.
+//! Unix domain socket listener for tddy-tools relay, served over `tddy-rpc`/`tddy-stdio` framing.
 
 use super::build::BuildListQuery;
 use super::{
@@ -10,11 +10,16 @@ use crate::session_actions::{
     classify_session_actions_exit_code, derive_repo_key, invoke_action_core, list_action_summaries,
     repo_actions_root, DiscoveryQuery,
 };
+use async_trait::async_trait;
 use std::io::Write as IoWrite;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tddy_rpc::{RpcMessage, RpcResult, RpcService, Status};
 use tokio::net::UnixListener;
+
+/// RPC service name this listener hosts over `tddy-stdio` — used only for logging/error context;
+/// a single connection only ever hosts this one service.
+const TOOLCALL_SERVICE_NAME: &str = "tddy.toolcall.ToolcallService";
 
 static TOOLCALL_LOG_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
@@ -120,67 +125,90 @@ async fn accept_loop(
             Ok(s) => s,
             Err(_) => break,
         };
-        let tx = tx.clone();
-        let sd = Arc::clone(&session_dir);
-        let rr = Arc::clone(&repo_root);
-        let dd = Arc::clone(&tddy_data_dir);
-        tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, tx, sd, rr, dd).await {
-                toolcall_log(&format!("[error] connection error: {}", e));
-                log::debug!("[toolcall] connection error: {}", e);
-            }
-        });
+        let service = ToolcallRpcService::new(
+            tx.clone(),
+            Arc::clone(&session_dir),
+            Arc::clone(&repo_root),
+            Arc::clone(&tddy_data_dir),
+        );
+        let (reader, writer) = stream.into_split();
+        let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(reader, writer, service);
+        tokio::spawn(endpoint.run());
     }
 }
 
-async fn handle_connection(
-    stream: tokio::net::UnixStream,
+/// Serves the toolcall relay's request/response verbs (`Submit`/`Ask`/`Approve`/`ListActions`/
+/// `InvokeAction`/`Build`/`BuildList`) over `tddy-rpc`, one instance per accepted connection. The
+/// wire *payloads* are unchanged JSON (the same `*Wire` structs and [`ToolCallResponse`] shapes
+/// the old newline-delimited protocol used) — only the framing/dispatch that carries them changed,
+/// from a raw JSON line to a `tddy-rpc` unary call keyed by RPC method name.
+pub struct ToolcallRpcService {
     tx: std::sync::mpsc::SyncSender<ToolCallRequest>,
     session_dir: Arc<Option<PathBuf>>,
     repo_root: Arc<Option<PathBuf>>,
     tddy_data_dir: Arc<PathBuf>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (reader, mut writer) = stream.into_split();
-    let mut reader = BufReader::new(reader);
-    let mut line = String::new();
-    reader.read_line(&mut line).await?;
-    let line = line.trim();
+}
 
-    toolcall_log(&format!("[recv] {}", line));
+impl ToolcallRpcService {
+    pub fn new(
+        tx: std::sync::mpsc::SyncSender<ToolCallRequest>,
+        session_dir: Arc<Option<PathBuf>>,
+        repo_root: Arc<Option<PathBuf>>,
+        tddy_data_dir: Arc<PathBuf>,
+    ) -> Self {
+        Self {
+            tx,
+            session_dir,
+            repo_root,
+            tddy_data_dir,
+        }
+    }
 
-    let request: serde_json::Value =
-        serde_json::from_str(line).map_err(|e| format!("invalid JSON: {}", e))?;
+    async fn dispatch(&self, method: &str, payload: &[u8]) -> Result<ToolCallResponse, Status> {
+        if !matches!(
+            method,
+            "Submit" | "ListActions" | "InvokeAction" | "Build" | "BuildList" | "Ask" | "Approve"
+        ) {
+            toolcall_log(&format!("[error] unknown method: {}", method));
+            return Err(Status::not_found(format!(
+                "unknown toolcall method: {TOOLCALL_SERVICE_NAME}/{method}"
+            )));
+        }
 
-    let req_type = request
-        .get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+        let request: serde_json::Value = serde_json::from_slice(payload)
+            .map_err(|e| Status::invalid_argument(format!("invalid JSON: {e}")))?;
 
-    if req_type == "submit" {
+        match method {
+            "Submit" => self.handle_submit(request),
+            "ListActions" => self.handle_list_actions(request).await,
+            "InvokeAction" => self.handle_invoke_action(request).await,
+            "Build" => Ok(handle_build_request("build", request).await),
+            "BuildList" => Ok(handle_build_request("build-list", request).await),
+            "Ask" => self.handle_ask(request).await,
+            "Approve" => self.handle_approve(request).await,
+            _ => unreachable!("checked above"),
+        }
+    }
+
+    fn handle_submit(&self, request: serde_json::Value) -> Result<ToolCallResponse, Status> {
         let wire: SubmitRequestWire = serde_json::from_value(request)
-            .map_err(|e| format!("invalid submit request: {}", e))?;
+            .map_err(|e| Status::invalid_argument(format!("invalid submit request: {}", e)))?;
         toolcall_log(&format!(
             "[submit] goal={} data_len={}",
             wire.goal,
             wire.data.to_string().len()
         ));
-        let json_str = serde_json::to_string(&wire.data).map_err(|e| e.to_string())?;
+        let json_str =
+            serde_json::to_string(&wire.data).map_err(|e| Status::internal(e.to_string()))?;
         store_submit_result(&wire.goal, &json_str);
         let response = ToolCallResponse::SubmitOk {
             goal: wire.goal.clone(),
         };
-        let response_line = response.to_json_line();
-        toolcall_log(&format!("[send] {}", response_line));
-        writer
-            .write_all(format!("{}\n", response_line).as_bytes())
-            .await?;
-        writer.flush().await?;
         let tool_request = ToolCallRequest::SubmitActivity {
             goal: wire.goal,
             data: wire.data,
         };
-        match tx.try_send(tool_request) {
+        match self.tx.try_send(tool_request) {
             Ok(()) => {}
             Err(std::sync::mpsc::TrySendError::Full(_)) => {
                 toolcall_log(
@@ -193,21 +221,25 @@ async fn handle_connection(
                 );
             }
         }
-        return Ok(());
+        Ok(response)
     }
 
-    // list-actions: handled directly in the listener (self-contained FS op, no presenter needed).
-    if req_type == "list-actions" {
-        let wire: ListActionsRequestWire = serde_json::from_value(request)
-            .map_err(|e| format!("invalid list-actions request: {}", e))?;
+    /// list-actions: handled directly in the listener (self-contained FS op, no presenter needed).
+    async fn handle_list_actions(
+        &self,
+        request: serde_json::Value,
+    ) -> Result<ToolCallResponse, Status> {
+        let wire: ListActionsRequestWire = serde_json::from_value(request).map_err(|e| {
+            Status::invalid_argument(format!("invalid list-actions request: {}", e))
+        })?;
         toolcall_log(&format!(
             "[list-actions] path_prefix={:?} query={:?} limit={:?} offset={:?}",
             wire.path_prefix, wire.query, wire.limit, wire.offset
         ));
 
-        let sd = (*session_dir).clone();
-        let rr = (*repo_root).clone();
-        let dd = Arc::clone(&tddy_data_dir);
+        let sd = (*self.session_dir).clone();
+        let rr = (*self.repo_root).clone();
+        let dd = Arc::clone(&self.tddy_data_dir);
 
         let discovery_query = DiscoveryQuery {
             path_prefix: wire.path_prefix,
@@ -229,7 +261,7 @@ async fn handle_connection(
         })
         .await;
 
-        let response = match result {
+        Ok(match result {
             Ok(Ok((list_result, _store_root))) => {
                 let actions_json = serde_json::to_value(&list_result.actions)
                     .unwrap_or(serde_json::Value::Array(vec![]));
@@ -250,30 +282,26 @@ async fn handle_connection(
                     message: format!("list-actions task failed: {}", e),
                 }
             }
-        };
-
-        let response_line = response.to_json_line();
-        toolcall_log(&format!("[send] {}", response_line));
-        writer
-            .write_all(format!("{}\n", response_line).as_bytes())
-            .await?;
-        writer.flush().await?;
-        return Ok(());
+        })
     }
 
-    // invoke-action: handled directly in the listener (subprocess op, no presenter needed).
-    if req_type == "invoke-action" {
-        let wire: InvokeActionRequestWire = serde_json::from_value(request)
-            .map_err(|e| format!("invalid invoke-action request: {}", e))?;
+    /// invoke-action: handled directly in the listener (subprocess op, no presenter needed).
+    async fn handle_invoke_action(
+        &self,
+        request: serde_json::Value,
+    ) -> Result<ToolCallResponse, Status> {
+        let wire: InvokeActionRequestWire = serde_json::from_value(request).map_err(|e| {
+            Status::invalid_argument(format!("invalid invoke-action request: {}", e))
+        })?;
         toolcall_log(&format!(
             "[invoke-action] action={} data_len={}",
             wire.action,
             wire.data.len()
         ));
 
-        let sd = (*session_dir).clone();
-        let rr = (*repo_root).clone();
-        let dd = Arc::clone(&tddy_data_dir);
+        let sd = (*self.session_dir).clone();
+        let rr = (*self.repo_root).clone();
+        let dd = Arc::clone(&self.tddy_data_dir);
 
         let result = tokio::task::spawn_blocking(move || {
             let store_root: Option<PathBuf> = rr.as_ref().map(|r| {
@@ -292,7 +320,7 @@ async fn handle_connection(
         })
         .await;
 
-        let response = match result {
+        Ok(match result {
             Ok(Ok(record)) => ToolCallResponse::ActionInvokeOk { record },
             Ok(Err(e)) => {
                 toolcall_log(&format!("[invoke-action] error: {}", e));
@@ -308,33 +336,12 @@ async fn handle_connection(
                     message: format!("invoke-action task failed: {}", e),
                 }
             }
-        };
-
-        let response_line = response.to_json_line();
-        toolcall_log(&format!("[send] {}", response_line));
-        writer
-            .write_all(format!("{}\n", response_line).as_bytes())
-            .await?;
-        writer.flush().await?;
-        return Ok(());
+        })
     }
 
-    // build-list / build: served by the registered BuildExecutor (set by tddy-coder).
-    // tddy-core has no tddy-build dependency — only this extension point.
-    if req_type == "build-list" || req_type == "build" {
-        let response = handle_build_request(&req_type, request).await;
-        let response_line = response.to_json_line();
-        toolcall_log(&format!("[send] {}", response_line));
-        writer
-            .write_all(format!("{}\n", response_line).as_bytes())
-            .await?;
-        writer.flush().await?;
-        return Ok(());
-    }
-
-    let (tool_request, response_rx) = if req_type == "ask" {
-        let wire: AskRequestWire =
-            serde_json::from_value(request).map_err(|e| format!("invalid ask request: {}", e))?;
+    async fn handle_ask(&self, request: serde_json::Value) -> Result<ToolCallResponse, Status> {
+        let wire: AskRequestWire = serde_json::from_value(request)
+            .map_err(|e| Status::invalid_argument(format!("invalid ask request: {}", e)))?;
         toolcall_log(&format!(
             "[ask] {} question(s): {}",
             wire.questions.len(),
@@ -349,10 +356,13 @@ async fn handle_connection(
             questions: wire.questions,
             response_tx,
         };
-        (tool_request, response_rx)
-    } else if req_type == "approve" {
+        self.await_presenter_response(tool_request, response_rx)
+            .await
+    }
+
+    async fn handle_approve(&self, request: serde_json::Value) -> Result<ToolCallResponse, Status> {
         let wire: ApproveRequestWire = serde_json::from_value(request)
-            .map_err(|e| format!("invalid approve request: {}", e))?;
+            .map_err(|e| Status::invalid_argument(format!("invalid approve request: {}", e)))?;
         toolcall_log(&format!(
             "[approve] tool={} input_len={}",
             wire.tool_name,
@@ -364,36 +374,44 @@ async fn handle_connection(
             input: wire.input,
             response_tx,
         };
-        (tool_request, response_rx)
-    } else {
-        toolcall_log(&format!("[error] unknown request type: {}", req_type));
-        let response = ToolCallResponse::Error {
-            message: format!("unknown request type: {}", req_type),
+        self.await_presenter_response(tool_request, response_rx)
+            .await
+    }
+
+    /// `ask`/`approve` block until the presenter responds via the oneshot channel carried on
+    /// `tool_request` — see this module's doc comment.
+    async fn await_presenter_response(
+        &self,
+        tool_request: ToolCallRequest,
+        response_rx: tokio::sync::oneshot::Receiver<ToolCallResponse>,
+    ) -> Result<ToolCallResponse, Status> {
+        self.tx
+            .send(tool_request)
+            .map_err(|_| Status::internal("channel closed"))?;
+        toolcall_log("[wait] waiting for presenter response...");
+
+        Ok(response_rx
+            .await
+            .unwrap_or_else(|_| ToolCallResponse::Error {
+                message: "response channel dropped".to_string(),
+            }))
+    }
+}
+
+#[async_trait]
+impl RpcService for ToolcallRpcService {
+    async fn handle_rpc(&self, _service: &str, method: &str, message: &RpcMessage) -> RpcResult {
+        toolcall_log(&format!("[recv] {method}"));
+        let result = match self.dispatch(method, &message.payload).await {
+            Ok(response) => {
+                let response_line = response.to_json_line();
+                toolcall_log(&format!("[send] {}", response_line));
+                Ok(response_line.into_bytes())
+            }
+            Err(status) => Err(status),
         };
-        writer.write_all(response.to_json_line().as_bytes()).await?;
-        writer.write_all(b"\n").await?;
-        writer.flush().await?;
-        return Ok(());
-    };
-
-    tx.send(tool_request).map_err(|_| "channel closed")?;
-    toolcall_log("[wait] waiting for presenter response...");
-
-    let response = response_rx
-        .await
-        .unwrap_or_else(|_| ToolCallResponse::Error {
-            message: "response channel dropped".to_string(),
-        });
-
-    let response_line = response.to_json_line();
-    toolcall_log(&format!("[send] {}", response_line));
-
-    writer
-        .write_all(format!("{}\n", response_line).as_bytes())
-        .await?;
-    writer.flush().await?;
-
-    Ok(())
+        RpcResult::Unary(result)
+    }
 }
 
 /// Serve a `build-list` / `build` request via the registered [`BuildExecutor`].
@@ -439,5 +457,120 @@ async fn handle_build_request(req_type: &str, request: serde_json::Value) -> Too
         Err(e) => ToolCallResponse::Error {
             message: format!("build task failed: {}", e),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use tddy_rpc::{RpcMessage, RpcResult, RpcService};
+
+    /// A toolcall RPC service with nobody draining its request channel — enough for `submit`
+    /// (acknowledged on the wire immediately, per this module's own doc comment) and the
+    /// listener-local verbs (`list-actions`), which never touch the channel at all. Scoped to a
+    /// real (empty) repo root — `list_action_summaries` errors when given neither a session dir
+    /// nor a repo root to look in at all.
+    fn a_toolcall_service() -> (
+        ToolcallRpcService,
+        std::sync::mpsc::Receiver<ToolCallRequest>,
+        tempfile::TempDir,
+    ) {
+        let (tx, rx) = std::sync::mpsc::sync_channel(32);
+        let repo_root = tempfile::tempdir().unwrap();
+        let tddy_data_dir = std::env::temp_dir().join(format!(
+            "tddy-toolcall-rpc-service-test-{}",
+            std::process::id()
+        ));
+        let service = ToolcallRpcService::new(
+            tx,
+            Arc::new(None),
+            Arc::new(Some(repo_root.path().to_path_buf())),
+            Arc::new(tddy_data_dir),
+        );
+        (service, rx, repo_root)
+    }
+
+    /// **toolcall_rpc_service_dispatches_submit_immediately_without_a_presenter**: a `Submit`
+    /// call is acknowledged with the submitted goal even though nothing is draining the
+    /// service's `ToolCallRequest` channel — matching the existing `submit` behavior
+    /// (`submit_relay_no_poll.rs`), now over `tddy-rpc` framing instead of a raw JSON line.
+    #[tokio::test]
+    async fn toolcall_rpc_service_dispatches_submit_immediately_without_a_presenter() {
+        // Given a toolcall RPC service with nobody draining its request channel
+        let (service, _rx, _repo_root) = a_toolcall_service();
+        let request = RpcMessage::new(
+            serde_json::to_vec(&json!({
+                "type": "submit",
+                "goal": "plan",
+                "data": {"prd": "# minimal"},
+            }))
+            .unwrap(),
+            Default::default(),
+        );
+
+        // When dispatching a Submit call
+        let result = service
+            .handle_rpc("tddy.toolcall.ToolcallService", "Submit", &request)
+            .await;
+
+        // Then it is acknowledged immediately with the submitted goal
+        let RpcResult::Unary(Ok(bytes)) = result else {
+            panic!("expected a successful unary Submit response");
+        };
+        let response: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(response["status"], "ok");
+        assert_eq!(response["goal"], "plan");
+    }
+
+    /// **toolcall_rpc_service_dispatches_list_actions_directly_without_a_presenter**: a
+    /// `ListActions` call against an empty repo (no actions defined) returns zero actions — the
+    /// listener-local verbs never touch the presenter/request channel.
+    #[tokio::test]
+    async fn toolcall_rpc_service_dispatches_list_actions_directly_without_a_presenter() {
+        // Given a toolcall RPC service
+        let (service, _rx, _repo_root) = a_toolcall_service();
+        let request = RpcMessage::new(
+            serde_json::to_vec(&json!({"type": "list-actions"})).unwrap(),
+            Default::default(),
+        );
+
+        // When dispatching a ListActions call
+        let result = service
+            .handle_rpc("tddy.toolcall.ToolcallService", "ListActions", &request)
+            .await;
+
+        // Then the (nonexistent) repo yields zero actions
+        let RpcResult::Unary(Ok(bytes)) = result else {
+            panic!("expected a successful unary ListActions response");
+        };
+        let response: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(response["status"], "ok");
+        assert_eq!(response["total"], 0);
+    }
+
+    /// **toolcall_rpc_service_returns_an_error_for_an_unknown_method**: an unrecognized method
+    /// name reports an error rather than silently no-op'ing — mirroring the old protocol's
+    /// `unknown request type` handling (see `handle_connection`'s final `else` branch above).
+    #[tokio::test]
+    async fn toolcall_rpc_service_returns_an_error_for_an_unknown_method() {
+        // Given a toolcall RPC service
+        let (service, _rx, _repo_root) = a_toolcall_service();
+        let request = RpcMessage::new(Vec::new(), Default::default());
+
+        // When dispatching an unrecognized method
+        let result = service
+            .handle_rpc("tddy.toolcall.ToolcallService", "DoesNotExist", &request)
+            .await;
+
+        // Then it reports an error naming the unknown method, rather than silently no-op'ing
+        let RpcResult::Unary(Err(status)) = result else {
+            panic!("expected a unary error for an unknown method");
+        };
+        assert!(
+            status.message().contains("DoesNotExist"),
+            "expected the error to name the unknown method, got: {}",
+            status.message()
+        );
     }
 }

@@ -97,16 +97,24 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
     let gid_map = format!("0 {gid} 1\n");
     let bind_mounts = plan_to_bind_mounts(&plan);
 
+    // `--stdio` dedicates the sandboxed process's stdin/stdout to RPC framing (see
+    // `tddy_core::stdio_safety`, `tddy-stdio`) instead of the `--grpc-uds`/`--grpc-listen-port`
+    // transport — pipe both back to the caller, mirroring `tddy-sandbox-darwin::spawn_plan`.
+    let stdio_mode = plan.spec.command.iter().any(|arg| arg == "--stdio");
+
     let mut cmd = Command::new(&plan.spec.command[0]);
     cmd.args(&plan.spec.command[1..]);
     cmd.env_clear();
     cmd.envs(&plan.spec.env);
     cmd.current_dir(plan.spec.cwd.as_ref().unwrap_or(&plan.spec.project_root));
-    cmd.stdin(if plan.stdin.is_some() {
+    cmd.stdin(if stdio_mode || plan.stdin.is_some() {
         Stdio::piped()
     } else {
         Stdio::null()
     });
+    if stdio_mode {
+        cmd.stdout(Stdio::piped());
+    }
 
     // SAFETY: runs in the forked child before `execve`; only namespace setup + RO bind mounts.
     unsafe {

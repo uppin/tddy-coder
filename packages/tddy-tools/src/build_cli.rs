@@ -67,9 +67,9 @@ pub struct BuildArgs {
     pub dry_run: bool,
 }
 
-pub fn run_build_list(args: BuildListArgs) -> Result<()> {
+pub async fn run_build_list(args: BuildListArgs) -> Result<()> {
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
-        return relay_build_list(Path::new(&socket_path), &args);
+        return relay_build_list(Path::new(&socket_path), &args).await;
     }
     let query = BuildListQuery {
         query: args.query.clone(),
@@ -84,7 +84,7 @@ pub fn run_build_list(args: BuildListArgs) -> Result<()> {
 
 pub async fn run_build(args: BuildArgs) -> Result<()> {
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
-        return relay_build(Path::new(&socket_path), &args);
+        return relay_build(Path::new(&socket_path), &args).await;
     }
     let registry = plugin_registry();
     let value = build_json(
@@ -132,7 +132,7 @@ struct BuildRelayResponse {
 }
 
 #[cfg(unix)]
-fn relay_build_list(socket_path: &Path, args: &BuildListArgs) -> Result<()> {
+async fn relay_build_list(socket_path: &Path, args: &BuildListArgs) -> Result<()> {
     let request = BuildListRelayRequest {
         r#type: "build-list",
         repo_dir: args.repo_dir.to_string_lossy().into_owned(),
@@ -140,11 +140,11 @@ fn relay_build_list(socket_path: &Path, args: &BuildListArgs) -> Result<()> {
         limit: args.limit,
         offset: args.offset,
     };
-    relay(socket_path, &request)
+    relay(socket_path, &request).await
 }
 
 #[cfg(unix)]
-fn relay_build(socket_path: &Path, args: &BuildArgs) -> Result<()> {
+async fn relay_build(socket_path: &Path, args: &BuildArgs) -> Result<()> {
     let request = BuildRelayRequest {
         r#type: "build",
         repo_dir: args.repo_dir.to_string_lossy().into_owned(),
@@ -152,32 +152,17 @@ fn relay_build(socket_path: &Path, args: &BuildArgs) -> Result<()> {
         no_cache: args.no_cache,
         dry_run: args.dry_run,
     };
-    relay(socket_path, &request)
+    relay(socket_path, &request).await
 }
 
 #[cfg(unix)]
-fn relay<T: Serialize>(socket_path: &Path, request: &T) -> Result<()> {
-    use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixStream;
-
-    let mut stream = UnixStream::connect(socket_path).with_context(|| {
-        format!(
-            "failed to connect to TDDY_SOCKET: {}",
-            socket_path.display()
-        )
-    })?;
-    let line = serde_json::to_string(request)?;
-    stream.write_all(line.as_bytes())?;
-    stream.write_all(b"\n")?;
-    stream.flush()?;
-
-    let mut reader = BufReader::new(&mut stream);
-    let mut response_line = String::new();
-    reader.read_line(&mut response_line)?;
-    let response_line = response_line.trim();
-
-    let response: BuildRelayResponse = serde_json::from_str(response_line)
-        .with_context(|| format!("invalid response from relay: {}", response_line))?;
+async fn relay<T: Serialize>(socket_path: &Path, request: &T) -> Result<()> {
+    let req = serde_json::to_value(request)?;
+    let response_json = tddy_tools::toolcall_client::dispatch_toolcall(socket_path, req)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
+    let response: BuildRelayResponse =
+        serde_json::from_value(response_json).with_context(|| "invalid response from relay")?;
 
     if response.status == "error" {
         let msg = response
@@ -208,11 +193,11 @@ fn relay<T: Serialize>(socket_path: &Path, request: &T) -> Result<()> {
 }
 
 #[cfg(not(unix))]
-fn relay_build_list(_socket_path: &Path, _args: &BuildListArgs) -> Result<()> {
+async fn relay_build_list(_socket_path: &Path, _args: &BuildListArgs) -> Result<()> {
     anyhow::bail!("TDDY_SOCKET relay is not supported on this platform")
 }
 
 #[cfg(not(unix))]
-fn relay_build(_socket_path: &Path, _args: &BuildArgs) -> Result<()> {
+async fn relay_build(_socket_path: &Path, _args: &BuildArgs) -> Result<()> {
     anyhow::bail!("TDDY_SOCKET relay is not supported on this platform")
 }

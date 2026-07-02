@@ -195,8 +195,10 @@ pub struct SandboxRunnerArgs {
     /// project dir so the agent starts inside the repo.
     #[arg(long)]
     pub cwd: Option<PathBuf>,
+    /// Vestigial: unused once `--stdio` is passed. Kept optional for callers that still pass it
+    /// (e.g. `tddy-sandbox-app`'s standalone gRPC demo path).
     #[arg(long)]
-    pub grpc_socket: PathBuf,
+    pub grpc_socket: Option<PathBuf>,
     #[arg(long)]
     pub tool_ipc_socket: PathBuf,
     /// Path to `tddy-tools` for in-jail MCP config (`--mcp` server). Required for Claude mode.
@@ -1674,5 +1676,33 @@ mod tests {
         ])
         .expect("argv must parse");
         assert_eq!(args.pty_command, vec!["/bin/sh", "-c", "printf", "pty_ok"]);
+    }
+
+    /// **sandbox_runner_args_parse_with_stdio_flag_and_no_grpc_socket**: once the daemon's real
+    /// session lifecycle switches to stdio (see docs/dev/TODO.md), it stops passing
+    /// `--grpc-socket`/`--grpc-listen-port`/`--grpc-uds` entirely — `grpc_socket` must become
+    /// optional so argv built without any gRPC flags still parses.
+    #[test]
+    fn sandbox_runner_args_parse_with_stdio_flag_and_no_grpc_socket() {
+        // Given argv with --stdio and no --grpc-socket/--grpc-listen-port/--grpc-uds at all
+        let args = SandboxRunnerArgs::try_parse_from([
+            "tddy-sandbox-runner",
+            "--session-id",
+            "sess",
+            "--context-dir",
+            "/tmp/ctx",
+            "--tool-ipc-socket",
+            "/tmp/ipc.sock",
+            "--model",
+            "",
+            "--ready-marker",
+            "/tmp/ready",
+            "--stdio",
+        ])
+        .expect("argv must parse without --grpc-socket when --stdio is set");
+
+        // Then grpc_socket is absent and the stdio transport is requested
+        assert_eq!(args.grpc_socket, None);
+        assert!(args.stdio);
     }
 }

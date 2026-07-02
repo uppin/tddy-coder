@@ -894,7 +894,6 @@ impl ConnectionServiceImpl {
         let claude_binary = canonicalize_exec(claude_binary_cfg);
         let claude_binary = claude_binary.as_str();
 
-        let grpc_socket = sandbox_root.join("sandbox.grpc.sock");
         // The tool-IPC AF_UNIX socket must fit within SUN_LEN (104 bytes on macOS); the
         // canonical session dir is far too deep, so use a short out-of-tree path that the
         // SBPL profile grants an explicit literal allow (see SandboxSpec::ipc_socket).
@@ -908,11 +907,9 @@ impl ConnectionServiceImpl {
             permission_mode.trim()
         };
 
-        let grpc_listen_port =
-            crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
         let egress_shim_port =
             crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
-        let loopback_allow_ports = vec![grpc_listen_port, egress_shim_port];
+        let loopback_allow_ports = vec![egress_shim_port];
 
         let runner_argv = vec![
             sandbox_runner_path,
@@ -920,8 +917,6 @@ impl ConnectionServiceImpl {
             session_id.to_string(),
             "--context-dir".into(),
             context_dir.to_string_lossy().to_string(),
-            "--grpc-socket".into(),
-            grpc_socket.to_string_lossy().to_string(),
             "--tool-ipc-socket".into(),
             tool_ipc_socket.to_string_lossy().to_string(),
             "--tddy-tools-path".into(),
@@ -934,20 +929,10 @@ impl ConnectionServiceImpl {
             model.to_string(),
             "--permission-mode".into(),
             perm.to_string(),
-            "--grpc-listen-port".into(),
-            grpc_listen_port.to_string(),
             "--egress-shim-port".into(),
             egress_shim_port.to_string(),
+            "--stdio".into(),
         ];
-        // On Linux the gRPC SessionChannel is served over AF_UNIX (it survives the jail's network
-        // namespace, where loopback TCP cannot); prefer it over the TCP port.
-        #[cfg(target_os = "linux")]
-        let runner_argv = {
-            let mut argv = runner_argv;
-            argv.push("--grpc-uds".into());
-            argv.push(grpc_socket.to_string_lossy().to_string());
-            argv
-        };
 
         let mut env = crate::sandbox_session::build_sandbox_runner_env(
             &scratch_home,
@@ -996,8 +981,7 @@ impl ConnectionServiceImpl {
         crate::sandbox_session::dial_and_bridge(
             session_id,
             worktree_path.clone(),
-            ready_marker.clone(),
-            grpc_socket.clone(),
+            &mut handle,
             self.task_registry.clone(),
             stdout_tx.clone(),
             Arc::clone(&capture),
@@ -1014,7 +998,6 @@ impl ConnectionServiceImpl {
                 stdout_tx,
                 capture,
                 stdin_tx,
-                grpc_socket: grpc_socket.clone(),
                 ready_marker: ready_marker.clone(),
                 handle,
             },
@@ -1230,12 +1213,10 @@ impl ConnectionServiceImpl {
             canonicalize_exec(&crate::sandbox_session::resolve_sandbox_runner_path());
         let claude_binary = canonicalize_exec(claude_binary_cfg);
 
-        let grpc_socket = sandbox_root.join("sandbox.grpc.sock");
         let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(session_id);
         let ready_marker = sandbox_root.join("sandbox.ready");
         let _ = std::fs::remove_file(&tool_ipc_socket);
         let _ = std::fs::remove_file(&ready_marker);
-        let _ = std::fs::remove_file(&grpc_socket);
         let profile_path = sandbox_root.join("sandbox.sb");
         let perm = if permission_mode.trim().is_empty() {
             "auto"
@@ -1243,11 +1224,9 @@ impl ConnectionServiceImpl {
             permission_mode.trim()
         };
 
-        let grpc_listen_port =
-            crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
         let egress_shim_port =
             crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
-        let loopback_allow_ports = vec![grpc_listen_port, egress_shim_port];
+        let loopback_allow_ports = vec![egress_shim_port];
 
         let runner_argv = vec![
             sandbox_runner_path,
@@ -1255,8 +1234,6 @@ impl ConnectionServiceImpl {
             session_id.to_string(),
             "--context-dir".into(),
             context_dir.to_string_lossy().to_string(),
-            "--grpc-socket".into(),
-            grpc_socket.to_string_lossy().to_string(),
             "--tool-ipc-socket".into(),
             tool_ipc_socket.to_string_lossy().to_string(),
             "--tddy-tools-path".into(),
@@ -1269,20 +1246,10 @@ impl ConnectionServiceImpl {
             model.to_string(),
             "--permission-mode".into(),
             perm.to_string(),
-            "--grpc-listen-port".into(),
-            grpc_listen_port.to_string(),
             "--egress-shim-port".into(),
             egress_shim_port.to_string(),
+            "--stdio".into(),
         ];
-        // On Linux the gRPC SessionChannel is served over AF_UNIX (it survives the jail's network
-        // namespace, where loopback TCP cannot); prefer it over the TCP port.
-        #[cfg(target_os = "linux")]
-        let runner_argv = {
-            let mut argv = runner_argv;
-            argv.push("--grpc-uds".into());
-            argv.push(grpc_socket.to_string_lossy().to_string());
-            argv
-        };
 
         let env = crate::sandbox_session::build_sandbox_runner_env(
             &scratch_home,
@@ -1331,8 +1298,7 @@ impl ConnectionServiceImpl {
         crate::sandbox_session::dial_and_bridge(
             session_id,
             worktree_path.to_path_buf(),
-            ready_marker.clone(),
-            grpc_socket.clone(),
+            &mut handle,
             self.task_registry.clone(),
             stdout_tx.clone(),
             Arc::clone(&capture),
@@ -1352,7 +1318,6 @@ impl ConnectionServiceImpl {
                 stdout_tx,
                 capture,
                 stdin_tx,
-                grpc_socket,
                 ready_marker,
                 handle,
             },

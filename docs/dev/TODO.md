@@ -2,6 +2,14 @@
 
 ## Future Enhancements
 
+### tddy-sandbox-cgroups (source: finish-stdio-ipc-migration changeset, 2026-07-02)
+
+- **Verify `--stdio` jail-spawn piping through a real Linux jail** — `spawn_plan` now pipes
+  stdin/stdout (instead of leaving stdout on its prior default) when `--stdio` is in the command,
+  mirroring `tddy-sandbox-darwin::spawn_plan`. Compile-checked only (the crate is
+  `#[cfg(target_os = "linux")]`-gated and the dev environment that made this change has no Linux
+  box); needs a real-jail run in Linux CI to confirm the daemon's now-stdio-only session control
+  channel (`docs/dev/1-WIP/finish-stdio-ipc-migration.md`) actually works cross-platform.
 ### tddy-sandbox-app (source: specialized-subagents changeset, 2026-07-02)
 
 - **`--specialized-agent` CLI flag + deprecated aliases** — the standalone `tddy-sandbox-app` CLI still only supports the single hardcoded `--discovery-subagent`/`--fastcontext-*` flags from #254; it was not migrated to the new `SpecializedAgentDef`/`TDDY_SUBAGENTS_JSON` model this changeset introduces for the MCP registry, `tddy-coder`, and the daemon. Deferred because no acceptance/unit test was written for this specific CLI surface (the changeset's test budget focused on the daemon-driven UI path); implementing it without test coverage would be speculative. See `docs/ft/coder/specialized-subagents.md` (Design overview) for the intended shape.

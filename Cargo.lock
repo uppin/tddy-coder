@@ -8672,6 +8672,8 @@ dependencies = [
  "serial_test",
  "tddy-actions",
  "tddy-graph",
+ "tddy-rpc",
+ "tddy-stdio",
  "tddy-task",
  "tddy-testing-commons",
  "tddy-workflow",
