@@ -60,6 +60,9 @@ fn apply_env_overrides(config: &mut tddy_daemon::config::DaemonConfig) {
             g.redirect_uri = Some(v);
         }
     }
+    if let Some(v) = env_var("TDDY_DAEMON_INSTANCE_ID") {
+        config.daemon_instance_id = Some(v);
+    }
     config.apply_oauth_loopback_proxy_env_override();
     config.apply_telegram_env_overrides();
 }

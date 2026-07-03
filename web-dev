@@ -6,6 +6,7 @@
 # Usage: ./web-dev                        # tddy-daemon with dev.daemon.yaml (see DAEMON_CONFIG)
 #        ./web-dev -c my-config.yaml     # extra CLI for tddy-daemon (pass-through)
 #        ./web-dev --github-stub         # e.g. extra CLI overrides
+#        ./web-dev --headless            # daemon/worker only; no Vite dev server, no web bundle needed
 #
 # Environment variables:
 #   WEB_HOST        — Address Vite listens on (default: 127.0.0.1). Use 0.0.0.0 for LAN. Separate from
@@ -18,6 +19,9 @@
 #                     for web-dev; a stale value in .env is overridden).
 #   DAEMON_CONFIG   — YAML for tddy-daemon (default: dev.daemon.yaml at repo root).
 #                     CONFIG from .env is not used for the daemon backend; use DAEMON_CONFIG.
+#   TDDY_DAEMON_INSTANCE_ID — Override the daemon's LiveKit instance id (its participant identity in
+#                     the shared room). Overrides daemon_instance_id in the YAML; default is the
+#                     YAML value (dev) or the machine hostname. Inherited by tddy-daemon via env.
 #   LIVEKIT_PUBLIC_URL — Override LiveKit URL (tddy-daemon); e.g. ws://192.168.1.10:7880
 #   LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET — LiveKit overrides (tddy-daemon)
 #   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_REDIRECT_URI — GitHub OAuth (tddy-daemon)
@@ -42,6 +46,19 @@ if [ -f .env ]; then
     fi
   done < .env
 fi
+
+# --headless: launch only tddy-daemon (RPC/worker backend); skip the Vite dev server.
+# In this mode no web bundle is needed. The flag is consumed here and not passed to the daemon.
+HEADLESS=false
+filtered_args=()
+for arg in "$@"; do
+  if [ "$arg" = "--headless" ]; then
+    HEADLESS=true
+  else
+    filtered_args+=("$arg")
+  fi
+done
+set -- "${filtered_args[@]+"${filtered_args[@]}"}"
 
 WEB_HOST="${WEB_HOST:-127.0.0.1}"
 VITE_PORT="${VITE_PORT:-5173}"
@@ -87,13 +104,18 @@ echo "=== VITE_URL=${VITE_URL} (open this in the browser; OAuth redirect base fo
 
 # Readiness uses GET /api/config (always 200 when the daemon is up). Do not use GET / alone:
 # without packages/tddy-web/dist (run: ./dev bun run build), static / may 404 while RPC is fine.
-if [ ! -f packages/tddy-web/dist/index.html ]; then
+if [ "$HEADLESS" != "true" ] && [ ! -f packages/tddy-web/dist/index.html ]; then
   echo "=== Note: packages/tddy-web/dist/index.html missing — open the Vite URL above for HMR; optional: ./dev bun run build for daemon static bundle ===" >&2
 fi
 
 # Clean up stale processes from previous runs. SIGKILLs listeners on these ports; on a shared
 # machine, ensure ports are free or avoid conflicts before running ./web-dev.
-fuser -k -9 -s "${DAEMON_PORT}/tcp" "${VITE_PORT}/tcp" 2>/dev/null || true
+# In headless mode the Vite port is never used, so leave it alone.
+if [ "$HEADLESS" = "true" ]; then
+  fuser -k -9 -s "${DAEMON_PORT}/tcp" 2>/dev/null || true
+else
+  fuser -k -9 -s "${DAEMON_PORT}/tcp" "${VITE_PORT}/tcp" 2>/dev/null || true
+fi
 sleep 2
 
 # Ensure writable build output dirs exist before the daemon starts.
@@ -123,6 +145,28 @@ if [ "$daemon_ready" != "true" ]; then
   echo "Check tmp/logs/daemon for errors. Port may be in use: fuser ${DAEMON_PORT}/tcp" >&2
   kill -9 -"$daemon_pid" 2>/dev/null || true
   exit 1
+fi
+
+# Headless: daemon/worker only. No Vite dev server, no web bundle. Wait on the daemon.
+if [ "$HEADLESS" = "true" ]; then
+  echo ""
+  echo "=== Headless mode: tddy-daemon running on :${DAEMON_PORT} (no Vite dev server) ==="
+  echo "  Daemon (RPC):  http://127.0.0.1:${DAEMON_PORT}"
+  echo ""
+
+  headless_cleanup() {
+    kill -TERM -"$daemon_pid" 2>/dev/null || true
+    sleep 2
+    kill -KILL -"$daemon_pid" 2>/dev/null || true
+    sleep 1
+    fuser -k -9 -s "${DAEMON_PORT:-8899}/tcp" 2>/dev/null || true
+    exit 0
+  }
+  trap headless_cleanup INT TERM
+
+  wait "$daemon_pid" 2>/dev/null || true
+  echo "Daemon exited — stopping" >&2
+  headless_cleanup
 fi
 
 echo ""
