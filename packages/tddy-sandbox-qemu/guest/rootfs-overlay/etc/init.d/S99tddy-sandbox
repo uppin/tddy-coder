@@ -1,0 +1,73 @@
+#!/bin/sh
+# Guest-side init hook for tddy-sandbox-qemu: mounts the reserved 9p shares (see
+# ../../../src/argv.rs RUNNER_MOUNT_TAG/PLAN_MOUNT_TAG), mounts each plan-declared host
+# directory at its jail path, then execs tddy-sandbox-runner with the plan's command as
+# --pty-command flags. Runs as the last BusyBox init script (S99) so the rest of boot
+# (getty, networking) completes normally instead of blocking on this — see
+# ../../docs/guest-image-9p-init.md "Why S99 backgrounds the runner" for why this isn't a
+# foreground exec.
+#
+# Requires BR2_PACKAGE_JQ=y in the Buildroot spec (see guest-image-9p-init.md) — jq's `@sh`
+# filter is what makes shell-safe extraction of plan.json's nested command/env/mounts
+# fields tractable in BusyBox ash without a real JSON library.
+set -e
+
+PLAN_DIR=/mnt/tddy-plan
+RUNNER_DIR=/mnt/tddy-runner
+PLAN_JSON="$PLAN_DIR/plan.json"
+
+mkdir -p "$PLAN_DIR" "$RUNNER_DIR"
+mount -t 9p -o trans=virtio,version=9p2000.L,ro tddy-plan "$PLAN_DIR"
+mount -t 9p -o trans=virtio,version=9p2000.L,ro tddy-runner "$RUNNER_DIR"
+
+# Mount each plan-declared host directory at its jail path (defaulting to `host` when
+# `jail` is null — matches MountSpec's "None = same path" convention). Index order must
+# match qemu_sandbox_argv's enumeration order (tag `tddy-mount<index>`); plan.json's
+# `mounts` array is written in that same order, so array position IS the tag suffix.
+# This loop only issues `mount` syscalls (no shell state to preserve), so running inside
+# a piped `while read` subshell — unlike the command/env extraction below — is harmless.
+jq -r '.mounts | to_entries[] | [(.key|tostring), (.value.jail // .value.host), (.value.writable|tostring)] | @tsv' "$PLAN_JSON" |
+while IFS="$(printf '\t')" read -r index jail_path writable; do
+    mkdir -p "$jail_path"
+    if [ "$writable" = "true" ]; then
+        mount -t 9p -o trans=virtio,version=9p2000.L "tddy-mount${index}" "$jail_path"
+    else
+        mount -t 9p -o trans=virtio,version=9p2000.L,ro "tddy-mount${index}" "$jail_path"
+    fi
+done
+
+CONTROL_PORT=$(jq -r '.control_port' "$PLAN_JSON")
+GUEST_CWD=$(jq -r '.cwd // "/"' "$PLAN_JSON")
+
+# Build env exports as a sourced file rather than acting inside a piped `while read` —
+# pipeline stages run in subshells under BusyBox ash, so `export` there wouldn't survive
+# back to this script. `@sh` gives shell-safe quoting for values containing spaces/quotes.
+jq -r '.env | to_entries[] | "export \(.key)=\(.value|@sh)"' "$PLAN_JSON" >/run/tddy-sandbox-env.sh
+. /run/tddy-sandbox-env.sh
+
+# Build the full runner invocation (fixed flags + one --pty-command per command token) as
+# a single `set --` line via jq, then source it — this keeps every argument, including
+# ones containing spaces, as its own correctly-quoted positional parameter. (An earlier
+# draft concatenated `--pty-command=$tok` into one string and relied on word-splitting at
+# exec time, which silently broke any command argument containing a space — verified with
+# a manual dash repro before settling on this jq-native approach.)
+{
+    printf 'set --'
+    jq -r --arg port "$CONTROL_PORT" --arg cwd "$GUEST_CWD" '
+        ["--session-id", "tddy-sandbox-qemu",
+         "--context-dir", $cwd,
+         "--grpc-socket", "/run/tddy-sandbox-runner.sock",
+         "--tool-ipc-socket", "/run/tddy-sandbox-runner-tools.sock",
+         "--model", "none",
+         "--ready-marker", "/run/tddy-sandbox-runner.ready",
+         "--grpc-listen-port", $port]
+        + (.command | map("--pty-command=" + .))
+        | .[] | @sh
+    ' "$PLAN_JSON" | while IFS= read -r tok; do printf ' %s' "$tok"; done
+    printf '\n'
+} >/run/tddy-sandbox-runner-args.sh
+. /run/tddy-sandbox-runner-args.sh
+
+cd "$GUEST_CWD" || cd /
+
+"$RUNNER_DIR/tddy-sandbox-runner" "$@" >/dev/console 2>&1 &

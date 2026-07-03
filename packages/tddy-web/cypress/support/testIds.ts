@@ -146,6 +146,11 @@ export const TEST_IDS = {
   createSessionModelSelect: "create-session-model-select",
   createSessionPermissionModeSelect: "create-session-permission-mode-select",
   createSessionSandboxToggle: "create-session-sandbox-toggle",
+  /** Collapsible "Managed codebase" section header — claude-cli sessions only. See
+   * docs/ft/coder/specialized-subagents.md. */
+  createSessionManagedCodebaseToggle: "create-session-managed-codebase-toggle",
+  /** Expanded "Managed codebase" section content (specialized-subagent multi-select). */
+  createSessionManagedCodebaseSection: "create-session-managed-codebase-section",
   createSessionInitialPromptInput: "create-session-initial-prompt-input",
   createSessionBranchIntentSelect: "create-session-branch-intent-select",
   createSessionNewBranchNameInput: "create-session-new-branch-name-input",
@@ -261,6 +266,11 @@ export const sessionsTable = (projectId: string) => `sessions-table-${projectId}
 
 /** `[data-testid="connect-<sessionId>"]` */
 export const connectBtn = (sessionId: string) => `connect-${sessionId}`;
+
+/** `[data-testid="create-session-subagent-checkbox-<name>"]` — one per row in the "Managed
+ * codebase" specialized-subagent multi-select. See docs/ft/coder/specialized-subagents.md. */
+export const createSessionSubagentCheckbox = (name: string) =>
+  `create-session-subagent-checkbox-${name}`;
 
 /** `[data-testid="delete-session-<sessionId>"]` */
 export const deleteSessionBtn = (sessionId: string) => `delete-session-${sessionId}`;

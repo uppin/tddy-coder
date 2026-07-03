@@ -65,6 +65,10 @@ pub struct Config {
     /// Maximum number of model turns in the FastContext multi-turn loop.
     #[serde(default)]
     pub fastcontext_max_turns: Option<u32>,
+    /// Model id sent to the FastContext endpoint (default: `microsoft/FastContext-1.0-4B-RL`).
+    /// Set to a locally-served model tag (e.g. an Ollama model) to run against it.
+    #[serde(default)]
+    pub fastcontext_model: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -278,6 +282,9 @@ pub fn merge_config_into_args(args: &mut Args, config: Config) {
     if args.fastcontext_max_turns.is_none() {
         args.fastcontext_max_turns = config.fastcontext_max_turns;
     }
+    if args.fastcontext_model.is_none() {
+        args.fastcontext_model = config.fastcontext_model;
+    }
 }
 
 #[cfg(test)]
@@ -338,6 +345,14 @@ github:
     }
 
     #[test]
+    fn parse_config_fastcontext_model() {
+        // When
+        let config: Config = serde_yaml::from_str("fastcontext_model: my-ollama-model\n").unwrap();
+        // Then
+        assert_eq!(config.fastcontext_model.as_deref(), Some("my-ollama-model"));
+    }
+
+    #[test]
     fn parse_config_tddy_data_dir() {
         // When
         let config: Config =
@@ -370,6 +385,7 @@ github:
             session_id: None,
             resume_from: None,
             daemon: false,
+            stdio: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -401,6 +417,7 @@ github:
             stack_base: None,
             fastcontext_url: None,
             fastcontext_max_turns: None,
+            fastcontext_model: None,
             tddy_data_dir: Some(cli_base.clone()),
         };
         // When
@@ -410,9 +427,9 @@ github:
     }
 
     #[test]
-    fn merge_config_applies_tddy_data_dir_when_cli_unset() {
+    fn merge_config_fastcontext_model_cli_precedence() {
         // Given
-        let config: Config = serde_yaml::from_str("tddy_data_dir: /from/config\n").unwrap();
+        let config: Config = serde_yaml::from_str("fastcontext_model: config-model\n").unwrap();
         let mut args = Args {
             goal: None,
             session_dir: None,
@@ -459,6 +476,128 @@ github:
             stack_base: None,
             fastcontext_url: None,
             fastcontext_max_turns: None,
+            fastcontext_model: Some("cli-model".to_string()),
+            tddy_data_dir: None,
+            stdio: false,
+        };
+        // When
+        merge_config_into_args(&mut args, config);
+        // Then — CLI already set fastcontext_model=cli-model, config has config-model → cli-model wins
+        assert_eq!(args.fastcontext_model.as_deref(), Some("cli-model"));
+    }
+
+    #[test]
+    fn merge_applies_fastcontext_model_when_cli_unset() {
+        // Given
+        let config: Config = serde_yaml::from_str("fastcontext_model: config-model\n").unwrap();
+        let mut args = Args {
+            goal: None,
+            session_dir: None,
+            output_dir: None,
+            conversation_output: None,
+            model: None,
+            allowed_tools: None,
+            log: None,
+            log_level: None,
+            agent: None,
+            prompt: None,
+            grpc: None,
+            session_id: None,
+            resume_from: None,
+            daemon: false,
+            livekit_url: None,
+            livekit_token: None,
+            livekit_room: None,
+            livekit_identity: None,
+            livekit_api_key: None,
+            livekit_api_secret: None,
+            livekit_public_url: None,
+            web_port: None,
+            web_bundle_path: None,
+            web_host: None,
+            web_public_url: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_redirect_uri: None,
+            github_stub: false,
+            github_stub_codes: None,
+            mouse: false,
+            project_id: None,
+            cursor_agent_path: None,
+            codex_cli_path: None,
+            codex_acp_cli_path: None,
+            codex_oauth_login: false,
+            recipe: None,
+            remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
+            stack_parent: None,
+            stack_base: None,
+            fastcontext_url: None,
+            fastcontext_max_turns: None,
+            fastcontext_model: None,
+            tddy_data_dir: None,
+            stdio: false,
+        };
+        // When
+        merge_config_into_args(&mut args, config);
+        // Then — CLI didn't set fastcontext_model, config has config-model → config-model applies
+        assert_eq!(args.fastcontext_model.as_deref(), Some("config-model"));
+    }
+
+    #[test]
+    fn merge_config_applies_tddy_data_dir_when_cli_unset() {
+        // Given
+        let config: Config = serde_yaml::from_str("tddy_data_dir: /from/config\n").unwrap();
+        let mut args = Args {
+            goal: None,
+            session_dir: None,
+            output_dir: None,
+            conversation_output: None,
+            model: None,
+            allowed_tools: None,
+            log: None,
+            log_level: None,
+            agent: None,
+            prompt: None,
+            grpc: None,
+            session_id: None,
+            resume_from: None,
+            daemon: false,
+            stdio: false,
+            livekit_url: None,
+            livekit_token: None,
+            livekit_room: None,
+            livekit_identity: None,
+            livekit_api_key: None,
+            livekit_api_secret: None,
+            livekit_public_url: None,
+            web_port: None,
+            web_bundle_path: None,
+            web_host: None,
+            web_public_url: None,
+            github_client_id: None,
+            github_client_secret: None,
+            github_redirect_uri: None,
+            github_stub: false,
+            github_stub_codes: None,
+            mouse: false,
+            project_id: None,
+            cursor_agent_path: None,
+            codex_cli_path: None,
+            codex_acp_cli_path: None,
+            codex_oauth_login: false,
+            recipe: None,
+            remote: false,
+            remote_daemon_url: None,
+            remote_session_token: None,
+            remote_daemon_id: None,
+            stack_parent: None,
+            stack_base: None,
+            fastcontext_url: None,
+            fastcontext_max_turns: None,
+            fastcontext_model: None,
             tddy_data_dir: None,
         };
         // When
@@ -489,6 +628,7 @@ github:
             session_id: None,
             resume_from: None,
             daemon: false,
+            stdio: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -520,6 +660,7 @@ github:
             stack_base: None,
             fastcontext_url: None,
             fastcontext_max_turns: None,
+            fastcontext_model: None,
             tddy_data_dir: None,
         };
         // When
@@ -547,6 +688,7 @@ github:
             session_id: None,
             resume_from: None,
             daemon: false,
+            stdio: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -578,6 +720,7 @@ github:
             stack_base: None,
             fastcontext_url: None,
             fastcontext_max_turns: None,
+            fastcontext_model: None,
             tddy_data_dir: None,
         };
         // When
@@ -672,6 +815,7 @@ log:
             session_id: None,
             resume_from: None,
             daemon: false,
+            stdio: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -703,6 +847,7 @@ log:
             stack_base: None,
             fastcontext_url: None,
             fastcontext_max_turns: None,
+            fastcontext_model: None,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);

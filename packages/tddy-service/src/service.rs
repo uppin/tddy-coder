@@ -131,7 +131,7 @@ pub fn session_view_adapter_surface(
     mut base_entries: Vec<tddy_rpc::ServiceEntry>,
     view_factory: std::sync::Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>,
 ) -> tddy_rpc::MultiRpcService {
-    use crate::proto::tddy_remote::TddyRemoteServer;
+    use crate::proto::remote::TddyRemoteServer;
     base_entries.push(tddy_rpc::ServiceEntry {
         name: TddyRemoteServer::<TddyRemoteService>::NAME,
         service: std::sync::Arc::new(TddyRemoteServer::new(TddyRemoteService::with_view_factory(
@@ -255,92 +255,64 @@ impl TddyRemote for TddyRemoteService {
     }
 }
 
-/// Second transport for the same `TddyRemoteService`: an `RpcService`-compatible impl so it can
-/// be registered in a LiveKit `MultiRpcService` (the plain-gRPC impl above only satisfies
-/// tonic's server trait, which `MultiRpcService` cannot wrap). The message types on this side
-/// come from a separate codegen pass (`crate::proto::tddy_remote`, see build.rs) and are
-/// nominally distinct from `crate::gen`'s tonic-generated types even though both are compiled
-/// from the same remote.proto — `rpc_*`/`tonic_*` helpers below bridge the two by re-encoding
-/// and decoding, which is exact since both sides share the same wire format.
-mod livekit_transport {
-    use futures_util::StreamExt;
-    use prost::Message;
-    use tokio_stream::wrappers::ReceiverStream;
+/// `RpcService`-compatible impl of `TddyRemote` — the transport-agnostic counterpart to the
+/// tonic impl above, so `TddyRemoteService` can be mounted on any `tddy_rpc` transport
+/// (`--stdio`, or a LiveKit `MultiRpcService`; the plain-gRPC impl above only satisfies tonic's
+/// server trait, which neither of those can wrap). Generated with `extern_path` back onto the
+/// same `crate::gen::{ClientMessage, ServerMessage, ...}` structs used above (see build.rs), so
+/// this is the *same* Rust type on both sides of `remote.proto` — no re-encoding needed, and
+/// `event_to_server_message`/`client_message_to_intent` work unchanged. Delegates the
+/// snapshot-replay + live-event forwarding to the single shared implementation
+/// (`TddyRemoteService::open_view_stream`), exactly like the tonic impl.
+#[async_trait::async_trait]
+impl crate::proto::remote::TddyRemote for TddyRemoteService {
+    type StreamStream = ReceiverStream<Result<ServerMessage, tddy_rpc::Status>>;
 
-    use crate::convert::client_message_to_intent;
-    use crate::gen::{ClientMessage as TonicClientMessage, ServerMessage as TonicServerMessage};
-    use crate::proto::tddy_remote::{
-        ClientMessage, GetSessionRequest, GetSessionResponse, ListSessionsRequest,
-        ListSessionsResponse, ServerMessage, TddyRemote,
-    };
+    async fn stream(
+        &self,
+        request: tddy_rpc::Request<tddy_rpc::Streaming<ClientMessage>>,
+    ) -> Result<tddy_rpc::Response<Self::StreamStream>, tddy_rpc::Status> {
+        let (mut outbound_rx, intent_tx) = self
+            .open_view_stream("stdio/LiveKit")
+            .map_err(tddy_rpc::Status::internal)?;
+        let mut client_stream = request.into_inner();
 
-    use super::TddyRemoteService;
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        tokio::spawn(async move {
+            while let Some(msg) = outbound_rx.recv().await {
+                if tx.send(Ok(msg)).await.is_err() {
+                    break;
+                }
+            }
+        });
 
-    fn to_tonic_client_message(msg: ClientMessage) -> TonicClientMessage {
-        TonicClientMessage::decode(&msg.encode_to_vec()[..])
-            .expect("ClientMessage is wire-compatible across both TddyRemote codegen passes")
+        tokio::spawn(async move {
+            use futures_util::StreamExt;
+            while let Some(Ok(msg)) = client_stream.next().await {
+                if let Some(intent) = client_message_to_intent(msg) {
+                    let _ = intent_tx.send(intent);
+                }
+            }
+        });
+
+        Ok(tddy_rpc::Response::new(ReceiverStream::new(rx)))
     }
 
-    fn from_tonic_server_message(msg: TonicServerMessage) -> ServerMessage {
-        ServerMessage::decode(&msg.encode_to_vec()[..])
-            .expect("ServerMessage is wire-compatible across both TddyRemote codegen passes")
+    async fn get_session(
+        &self,
+        _request: tddy_rpc::Request<GetSessionRequest>,
+    ) -> Result<tddy_rpc::Response<GetSessionResponse>, tddy_rpc::Status> {
+        Err(tddy_rpc::Status::unimplemented(
+            "GetSession is only available in daemon mode",
+        ))
     }
 
-    #[async_trait::async_trait]
-    impl TddyRemote for TddyRemoteService {
-        type StreamStream = ReceiverStream<Result<ServerMessage, tddy_rpc::Status>>;
-
-        async fn stream(
-            &self,
-            request: tddy_rpc::Request<tddy_rpc::Streaming<ClientMessage>>,
-        ) -> Result<tddy_rpc::Response<Self::StreamStream>, tddy_rpc::Status> {
-            // Delegates the snapshot-replay + live-event forwarding to the single shared
-            // implementation (`TddyRemoteService::open_view_stream`); only the wire-format bridging
-            // to this codegen pass's message types is transport-specific.
-            let (mut outbound_rx, intent_tx) = self
-                .open_view_stream("LiveKit")
-                .map_err(tddy_rpc::Status::internal)?;
-            let mut client_stream = request.into_inner();
-
-            let (tx, rx) = tokio::sync::mpsc::channel(64);
-            tokio::spawn(async move {
-                while let Some(msg) = outbound_rx.recv().await {
-                    if tx.send(Ok(from_tonic_server_message(msg))).await.is_err() {
-                        break;
-                    }
-                }
-            });
-
-            tokio::spawn(async move {
-                while let Some(item) = client_stream.next().await {
-                    if let Ok(msg) = item {
-                        if let Some(intent) = client_message_to_intent(to_tonic_client_message(msg))
-                        {
-                            let _ = intent_tx.send(intent);
-                        }
-                    }
-                }
-            });
-
-            Ok(tddy_rpc::Response::new(ReceiverStream::new(rx)))
-        }
-
-        async fn get_session(
-            &self,
-            _request: tddy_rpc::Request<GetSessionRequest>,
-        ) -> Result<tddy_rpc::Response<GetSessionResponse>, tddy_rpc::Status> {
-            Err(tddy_rpc::Status::unimplemented(
-                "GetSession is only available in daemon mode",
-            ))
-        }
-
-        async fn list_sessions(
-            &self,
-            _request: tddy_rpc::Request<ListSessionsRequest>,
-        ) -> Result<tddy_rpc::Response<ListSessionsResponse>, tddy_rpc::Status> {
-            Err(tddy_rpc::Status::unimplemented(
-                "ListSessions is only available in daemon mode",
-            ))
-        }
+    async fn list_sessions(
+        &self,
+        _request: tddy_rpc::Request<ListSessionsRequest>,
+    ) -> Result<tddy_rpc::Response<ListSessionsResponse>, tddy_rpc::Status> {
+        Err(tddy_rpc::Status::unimplemented(
+            "ListSessions is only available in daemon mode",
+        ))
     }
 }

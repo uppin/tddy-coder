@@ -5,6 +5,9 @@ package connection;
 service ConnectionService {
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
   rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  // Specialized subagents (YAML-defined; see docs/ft/coder/specialized-subagents.md) available to
+  // wire into a managed-codebase session — builtin defs plus <tddyhome>/agents/*.yaml.
+  rpc ListSubagents(ListSubagentsRequest) returns (ListSubagentsResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
   rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
@@ -63,6 +66,16 @@ message ListAgentsResponse {
 message AgentInfo {
   string id = 1;
   string label = 2;
+}
+
+message ListSubagentsRequest {}
+message ListSubagentsResponse {
+  repeated SubagentInfo subagents = 1;
+}
+message SubagentInfo {
+  string name = 1;
+  string label = 2;
+  string model = 3;
 }
 
 message ListSessionsRequest {
@@ -178,6 +191,20 @@ message StartSessionRequest {
   string stack_parent = 15;
   // When true with session_type = "claude-cli", spawn claude inside a platform sandbox (darwin Seatbelt).
   bool sandbox = 16;
+  // Managed-codebase mode (see docs/ft/coder/managed-codebase-subagents.md): the sandboxed jail does
+  // not mount the repo — the agent reaches it only via mcp__tddy-tools__* exec tools. Only meaningful
+  // when session_type = "claude-cli" (and typically sandbox = true).
+  bool managed_codebase = 17;
+  // Names of specialized subagents (see docs/ft/coder/specialized-subagents.md) to wire into this
+  // session's mcp__tddy-tools__subagent_* tools. Each name must resolve to a builtin or
+  // <tddyhome>/agents/*.yaml def; an unresolvable name is a request error.
+  repeated string specialized_agents = 18;
+  // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
+  // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
+  // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved
+  // against the caller's YAML defs (or the builtin `fastcontext` def) — no caller-facing override,
+  // no single-name alias. No backwards compatibility retained.
+  reserved 19, 20, 21, 22, 23;
 }
 message StartSessionResponse {
   string session_id = 1;

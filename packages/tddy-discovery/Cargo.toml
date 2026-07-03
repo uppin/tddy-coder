@@ -11,6 +11,8 @@ regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# agent_def.rs: <tddyhome>/agents/*.yaml specialized-subagent definitions.
+serde_yaml = "0.9"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 tddy-core = { path = "../tddy-core" }
 
@@ -18,3 +20,5 @@ tddy-core = { path = "../tddy-core" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 wiremock = "0.6"
+# subagent_session_red.rs / codebase_access_red.rs: local-filesystem CodebaseAccess fixtures.
+tempfile = "3"

@@ -2623,6 +2623,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             sandbox: None,
             agent: None,
             recipe: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| anyhow::anyhow!("write session metadata: {e}"))?;

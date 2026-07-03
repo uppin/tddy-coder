@@ -1,5 +1,11 @@
 # Remote-Codebase Mode
 
+> User-facing note: this mechanism is presented to users as **managed-codebase mode** (see
+> [managed-codebase-subagents.md](../coder/managed-codebase-subagents.md), which also adds
+> pluggable discovery subagents on top of it). The identifiers, RPCs, and env vars documented
+> below (`RemoteToolEnv`, `TDDY_REMOTE_*`, `ExecuteTool`, etc.) keep their existing names for wire
+> stability — only the prose a human/agent reads was renamed.
+
 ## Summary
 
 Remote-codebase mode lets `tddy-coder` run an agent against a codebase hosted on a **remote

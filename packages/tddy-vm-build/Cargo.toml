@@ -1,0 +1,31 @@
+[package]
+name = "tddy-vm-build"
+version = "0.1.0"
+edition = "2021"
+description = "CLI: build a QEMU VM image from a Buildroot spec and write it to a file (raw or qcow2)"
+
+[lib]
+name = "tddy_vm_build"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tddy-vm-build"
+path = "src/main.rs"
+
+[dependencies]
+tddy-vm = { path = "../tddy-vm" }
+tddy-core = { path = "../tddy-core" }
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+clap = { version = "4", features = ["derive", "env"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs"] }
+serde_yml = "0.0.12"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+serial_test = "3"
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }

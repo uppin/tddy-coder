@@ -19,7 +19,7 @@ pub use builder::{
 };
 pub use context_dir::{
     copy_context_from_repo, copy_tree, copy_tree_within_root, SandboxContextDir,
-    SANDBOX_REMOTE_APPENDIX,
+    SubagentReplacement, SANDBOX_REMOTE_APPENDIX,
 };
 pub use error::SandboxError;
 pub use exec_reads::{
@@ -33,7 +33,7 @@ pub use log::{
 pub use materialize::{materialize_copies, materialize_secrets, materialize_symlinks};
 pub use runner_env::{process_jail_env, scratch_runner_env};
 pub use spec::{SandboxHandle, SandboxSpec};
-pub use tool_ipc::{session_id_from_env, ToolIpcRequest, ToolIpcResponse};
+pub use tool_ipc::session_id_from_env;
 
 /// Exec tool names served by the daemon `ExecuteTool` RPC for workspace/sandbox sessions.
 ///

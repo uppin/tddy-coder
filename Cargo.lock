@@ -4502,6 +4502,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "libyml"
+version = "0.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3302702afa434ffa30847a83305f0a69d6abd74293b6554c18ec85c7ef30c980"
+dependencies = [
+ "anyhow",
+ "version_check",
+]
+
+[[package]]
 name = "libz-sys"
 version = "1.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7813,6 +7823,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yml"
+version = "0.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59e2dd588bf1597a252c3b920e0143eb99b0f76e4e082f4c92ce34fbc9e71ddd"
+dependencies = [
+ "indexmap 2.14.0",
+ "itoa",
+ "libyml",
+ "memchr",
+ "ryu",
+ "serde",
+ "version_check",
+]
+
+[[package]]
 name = "serdect"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8587,6 +8612,7 @@ dependencies = [
  "tddy-livekit",
  "tddy-rpc",
  "tddy-service",
+ "tddy-stdio",
  "tddy-testing-commons",
  "tddy-tui",
  "tddy-workflow-recipes",
@@ -8646,6 +8672,8 @@ dependencies = [
  "serial_test",
  "tddy-actions",
  "tddy-graph",
+ "tddy-rpc",
+ "tddy-stdio",
  "tddy-task",
  "tddy-testing-commons",
  "tddy-workflow",
@@ -8695,6 +8723,7 @@ dependencies = [
  "tddy-core",
  "tddy-demo-runner",
  "tddy-demo-tui",
+ "tddy-discovery",
  "tddy-github",
  "tddy-livekit",
  "tddy-livekit-testkit",
@@ -8702,9 +8731,11 @@ dependencies = [
  "tddy-sandbox",
  "tddy-sandbox-cgroups",
  "tddy-sandbox-darwin",
+ "tddy-sandbox-qemu",
  "tddy-sandbox-recipes",
  "tddy-sandbox-runner",
  "tddy-service",
+ "tddy-stdio",
  "tddy-task",
  "tddy-testing-commons",
  "tddy-tools",
@@ -8765,8 +8796,10 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tddy-core",
  "tddy-testing-commons",
+ "tempfile",
  "tokio",
  "wiremock",
 ]
@@ -8778,6 +8811,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "async-stream",
+ "async-trait",
  "clap",
  "crossterm",
  "env_logger",
@@ -8795,6 +8829,7 @@ dependencies = [
  "tddy-livekit-testkit",
  "tddy-rpc",
  "tddy-service",
+ "tddy-stdio",
  "tddy-testing-commons",
  "tddy-tui",
  "tddy-tui-testkit",
@@ -8984,8 +9019,6 @@ name = "tddy-sandbox"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "serde",
- "serde_json",
  "tempfile",
  "walkdir",
 ]
@@ -9002,9 +9035,11 @@ dependencies = [
  "futures-util",
  "libc",
  "log",
+ "serde_json",
  "serial_test",
  "tddy-core",
  "tddy-daemon",
+ "tddy-discovery",
  "tddy-sandbox",
  "tddy-sandbox-darwin",
  "tddy-sandbox-runner",
@@ -9058,6 +9093,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-sandbox-qemu"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "bytes",
+ "clap",
+ "env_logger",
+ "log",
+ "predicates",
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "serde_json",
+ "tddy-sandbox",
+ "tddy-sandbox-runner",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-sandbox-recipes"
 version = "0.1.0"
 dependencies = [
@@ -9085,9 +9140,13 @@ dependencies = [
  "prost 0.13.5",
  "reqwest 0.12.28",
  "serde_json",
+ "tddy-core",
+ "tddy-discovery",
+ "tddy-rpc",
  "tddy-sandbox",
  "tddy-sandbox-recipes",
  "tddy-service",
+ "tddy-stdio",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -9201,6 +9260,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "async-trait",
  "bytes",
  "clap",
  "env_logger",
@@ -9228,13 +9288,18 @@ dependencies = [
  "tddy-build-rust",
  "tddy-build-typescript",
  "tddy-core",
+ "tddy-discovery",
  "tddy-livekit",
+ "tddy-rpc",
  "tddy-sandbox",
  "tddy-service",
+ "tddy-stdio",
  "tddy-testing-commons",
  "tddy-workflow-recipes",
  "tempfile",
  "tokio",
+ "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -9281,8 +9346,12 @@ dependencies = [
  "bytes",
  "libc",
  "log",
+ "pretty_assertions",
  "serde",
  "serde_json",
+ "serde_yml",
+ "serial_test",
+ "sha2 0.10.9",
  "tddy-build",
  "tddy-build-qemu",
  "tddy-rpc",
@@ -9293,6 +9362,26 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+]
+
+[[package]]
+name = "tddy-vm-build"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap",
+ "env_logger",
+ "log",
+ "predicates",
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "serde_yml",
+ "serial_test",
+ "tddy-core",
+ "tddy-vm",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

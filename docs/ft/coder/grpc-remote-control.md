@@ -6,6 +6,8 @@
 
 `tddy-coder` and `tddy-demo` support a `--grpc` flag that starts a gRPC server alongside the TUI. The gRPC server exposes a bidirectional streaming RPC that connects to the same Presenter instance as the TUI, enabling programmatic remote control of the application — sending `UserIntent`s and receiving `PresenterView` events — analogous to Selenium/Playwright for browser automation.
 
+They also support a `--stdio` flag serving the same remote-control surface (`tddy.v1.TddyRemote/Stream`) over the process's own stdin/stdout via `tddy-stdio`, instead of a TCP port. `--stdio` runs *concurrently* with `--grpc` when both are passed (they're independent transports onto the same `PresenterHandle`) but is exclusive with local TUI/plain-mode dispatch, since fd 1 can't be shared between RPC framing and terminal rendering — no local view is rendered under `--stdio`. See [Stdio transport](#stdio-transport) below.
+
 ## Background
 
 The TUI is the only way to interact with the running application. There is no programmatic interface for:
@@ -27,6 +29,14 @@ Remote control and terminal streaming use these workspace crates:
 - **`tddy-connectrpc`**: Connect-RPC HTTP handlers for browser clients (e.g. `TokenService`, `AuthService`) where applicable.
 
 Application code wires `tddy-service` + `tddy-livekit` (and Connect-RPC) at runtime.
+
+## Stdio transport
+
+`--stdio` serves the same `TddyRemote` surface over `tddy-rpc`/`tddy-stdio` (see [rpc-multi-transport.md](rpc-multi-transport.md)) instead of a `tonic::transport::Server`:
+
+- **Stdio-safe core** (`tddy_core::stdio_safety`): before serving, force-overrides any `LogOutput::Stdout` logger destination to stderr and redirects real stderr to a log file (`redirect_fd_to_file`, generalizing `--daemon`'s stderr-redirect pattern) — stdin/stdout stay live for RPC framing, unlike `--daemon`'s fully-null stdio. `--stdio` is dispatched before any TUI/plain-mode fallback, so `plain.rs`'s direct stdin/stdout usage can never run concurrently with the RPC framing.
+- **Dual-codegen'd `TddyRemote`**: `tddy-service/build.rs` generates `TddyRemote` twice — once via `tonic_build` (the original, canonical pass) and once as an `RpcService` (`crate::proto::remote`, via `tddy-codegen`'s `TddyServiceGenerator`), `extern_path`-reusing the same message types from the tonic pass so both trait impls on `TddyRemoteService` speak identical wire types (mirrors `terminal.proto`'s dual-codegen pattern). The two trait impls duplicate the same business logic against different wrapper types (`tddy_rpc::{Request,Response,Streaming,Status}` vs. `tonic::{Request,Response,Status}`) rather than delegating — the established pattern for every dual-transport service in this codebase.
+- **`tddy-sandbox-runner`** also supports `--stdio` for its own `SandboxService` (PTY/session-control for sandboxed sessions) — see [tddy-sandbox architecture](../../../packages/tddy-sandbox/docs/architecture.md#control-channel-transport) for that transport's design and current status (proven through a real Seatbelt jail; not yet wired into `tddy-daemon`'s actual session-lifecycle call sites — tracked in `docs/dev/TODO.md`).
 
 ## Requirements
 
@@ -67,6 +77,7 @@ Replace the single `V: PresenterView` generic with a broadcast channel pattern:
 - When `--grpc` is passed: start gRPC server on a configurable port (default: `50051`), then run TUI as normal
 - Both TUI and gRPC operate on the same Presenter instance simultaneously
 - Optional `--grpc-port <port>` to override the default
+- `--stdio` flag, also on both `CoderArgs`/`DemoArgs`: serves `TddyRemote` over stdin/stdout (see [Stdio transport](#stdio-transport)). Runs concurrently with `--grpc` if both are passed; skips local TUI/plain-mode rendering entirely (no `CapturingWriter::headless()` — simpler, matches `--daemon`'s existing "headless, no local view" precedent).
 
 ### 5. Daemon mode
 

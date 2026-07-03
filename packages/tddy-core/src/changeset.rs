@@ -1108,11 +1108,13 @@ mod stack_tests {
     fn update_stack_atomic_reads_and_writes_back() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
-        let mut cs = Changeset::default();
-        cs.stack = Some(Stack {
-            version: 1,
-            nodes: vec![],
-        });
+        let cs = Changeset {
+            stack: Some(Stack {
+                version: 1,
+                nodes: vec![],
+            }),
+            ..Default::default()
+        };
         write_changeset(dir, &cs).unwrap();
 
         update_stack_atomic(dir, |stack| {
@@ -1128,21 +1130,23 @@ mod stack_tests {
     fn link_stack_node_to_child_session_sets_fields() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
-        let mut cs = Changeset::default();
-        cs.stack = Some(Stack {
-            version: 1,
-            nodes: vec![StackNode {
-                node_id: "n1".to_string(),
-                title: "Node 1".to_string(),
-                description: String::new(),
-                branch_suggestion: None,
-                branch: None,
-                session_id: None,
-                parents: vec![],
-                pr_status: None,
-                child_state: None,
-            }],
-        });
+        let cs = Changeset {
+            stack: Some(Stack {
+                version: 1,
+                nodes: vec![StackNode {
+                    node_id: "n1".to_string(),
+                    title: "Node 1".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: None,
+                    session_id: None,
+                    parents: vec![],
+                    pr_status: None,
+                    child_state: None,
+                }],
+            }),
+            ..Default::default()
+        };
         write_changeset(dir, &cs).unwrap();
 
         link_stack_node_to_child_session(dir, "n1", "sess-abc", Some("feature/n1".to_string()))
@@ -1179,21 +1183,23 @@ mod stack_tests {
         });
         write_changeset(&child_dir, &child_cs).unwrap();
 
-        let mut orch_cs = Changeset::default();
-        orch_cs.stack = Some(Stack {
-            version: 1,
-            nodes: vec![StackNode {
-                node_id: "n1".to_string(),
-                title: "Node 1".to_string(),
-                description: String::new(),
-                branch_suggestion: None,
-                branch: Some("feature/n1".to_string()),
-                session_id: Some(child_id.to_string()),
-                parents: vec![],
-                pr_status: None,
-                child_state: None,
-            }],
-        });
+        let orch_cs = Changeset {
+            stack: Some(Stack {
+                version: 1,
+                nodes: vec![StackNode {
+                    node_id: "n1".to_string(),
+                    title: "Node 1".to_string(),
+                    description: String::new(),
+                    branch_suggestion: None,
+                    branch: Some("feature/n1".to_string()),
+                    session_id: Some(child_id.to_string()),
+                    parents: vec![],
+                    pr_status: None,
+                    child_state: None,
+                }],
+            }),
+            ..Default::default()
+        };
         write_changeset(orch_dir, &orch_cs).unwrap();
 
         sync_stack_node_from_child(orch_dir, sessions_root, "n1").unwrap();

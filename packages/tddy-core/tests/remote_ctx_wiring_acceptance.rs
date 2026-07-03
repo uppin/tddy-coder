@@ -4,7 +4,6 @@
 //! `"remote_session_token"` keys set, `BackendInvokeTask` constructs `InvokeRequest.remote`
 //! as `Some(RemoteToolEnv)` with all fields populated.
 
-use tddy_core::backend::{InvokeRequest, RemoteToolEnv};
 use tddy_core::workflow::extract_remote_env_from_ctx;
 
 /// Phase 5 AC: `extract_remote_env_from_ctx` returns `Some(RemoteToolEnv)` when required keys present.

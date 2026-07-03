@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use spawn::{spawn_claude_sandbox, SpawnParams};
+use spawn::{resolve_codebase_mode, spawn_claude_sandbox, SpawnParams, SubagentSpawnConfig};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_task::TaskRegistry;
 use uuid::Uuid;
@@ -73,8 +73,26 @@ struct Args {
     /// (read-only) context dir and the persistent home; the real repo is reachable only via
     /// `mcp__tddy-tools__*` calls, which the host relays against the real `--repo` path. Matches
     /// the daemon's sandboxed-session isolation model (see docs/ft/daemon/remote-codebase-mode.md).
+    /// Deprecated: prefer `--codebase-mode managed`, which this remains a working alias for.
     #[arg(long)]
     remote_codebase: bool,
+
+    /// Codebase mode: `mounted` (default) mounts `--repo` read-write into the jail; `managed`
+    /// keeps the repo unmounted, reaching it only via `mcp__tddy-tools__*` calls relayed by the
+    /// host. Supersedes `--remote-codebase` (still accepted as a working alias).
+    #[arg(long)]
+    codebase_mode: Option<String>,
+
+    /// Specialized agent to wire into the session (e.g. `fastcontext`), repeatable for multiple
+    /// agents. When set, Claude gains the `subagent_new_session`/`subagent_prompt`/
+    /// `subagent_cancel` MCP tools (see docs/ft/coder/specialized-subagents.md).
+    #[arg(long = "specialized-agent")]
+    specialized_agent: Vec<String>,
+
+    /// Directory to resolve named agents from, in addition to the builtins (default:
+    /// `<session-base>/agents`).
+    #[arg(long)]
+    agents_dir: Option<PathBuf>,
 
     /// Enable debug logging for tddy sandbox components (HTTP/gRPC frame traces stay quiet).
     #[arg(short, long)]
@@ -131,9 +149,26 @@ async fn main() -> Result<()> {
         "claude_home_dir={} (persistent across restarts)",
         claude_home_dir.display()
     );
-    if args.remote_codebase {
+
+    let managed_codebase =
+        resolve_codebase_mode(args.codebase_mode.as_deref(), args.remote_codebase)
+            .map_err(|e| anyhow::anyhow!(e))?;
+    if managed_codebase {
         eprintln!(
-            "remote_codebase=true: repo not mounted; Claude reaches it only via mcp__tddy-tools__* calls"
+            "codebase_mode=managed: repo not mounted; Claude reaches it only via mcp__tddy-tools__* calls"
+        );
+    }
+    let agents_dir = args
+        .agents_dir
+        .unwrap_or_else(|| session_base.join("agents"));
+    let subagent = SubagentSpawnConfig {
+        specialized_agents: args.specialized_agent,
+        agents_dir,
+    };
+    if !subagent.specialized_agents.is_empty() {
+        eprintln!(
+            "specialized_agents={}",
+            subagent.specialized_agents.join(",")
         );
     }
 
@@ -149,7 +184,8 @@ async fn main() -> Result<()> {
             session_dir: session_dir.clone(),
             cwd: args.cwd,
             claude_home_dir,
-            remote_codebase: args.remote_codebase,
+            remote_codebase: managed_codebase,
+            subagent,
         }) => res?,
         _ = tokio::signal::ctrl_c() => {
             eprintln!("interrupted");

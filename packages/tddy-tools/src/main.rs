@@ -86,15 +86,15 @@ async fn main() -> Result<()> {
     }
 
     match args.subcommand {
-        Some(Subcommand::Submit(s)) => cli::run_submit(s)?,
-        Some(Subcommand::Ask(s)) => cli::run_ask(s)?,
+        Some(Subcommand::Submit(s)) => cli::run_submit(s).await?,
+        Some(Subcommand::Ask(s)) => cli::run_ask(s).await?,
         Some(Subcommand::GetSchema(s)) => cli::run_get_schema(s)?,
         Some(Subcommand::ListSchemas(s)) => cli::run_list_schemas(s)?,
         Some(Subcommand::SetSessionContext(s)) => cli::run_set_session_context(s)?,
         Some(Subcommand::PersistChangesetWorkflow(s)) => cli::run_persist_changeset_workflow(s)?,
-        Some(Subcommand::ListActions(s)) => cli::run_list_actions(s)?,
-        Some(Subcommand::InvokeAction(s)) => cli::run_invoke_action(s)?,
-        Some(Subcommand::BuildList(s)) => build_cli::run_build_list(s)?,
+        Some(Subcommand::ListActions(s)) => cli::run_list_actions(s).await?,
+        Some(Subcommand::InvokeAction(s)) => cli::run_invoke_action(s).await?,
+        Some(Subcommand::BuildList(s)) => build_cli::run_build_list(s).await?,
         Some(Subcommand::Build(s)) => build_cli::run_build(s).await?,
         Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(*s).await?,
         Some(Subcommand::Remote(s)) => remote_cli::run_remote(s).await?,

@@ -36,11 +36,13 @@ livekit = "0.7"
 prost = "0.13"
 tddy-coder = { path = "../tddy-coder" }
 tddy-core = { path = "../tddy-core" }
+tddy-discovery = { path = "../tddy-discovery" }
 tddy-demo-runner = { path = "../tddy-demo-runner" }
 tddy-github = { path = "../tddy-github" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-rpc = { path = "../tddy-rpc" }
+tddy-stdio = { path = "../tddy-stdio" }
 tddy-service = { path = "../tddy-service" }
 tddy-actions = { path = "../tddy-actions" }
 tddy-task = { path = "../tddy-task" }
@@ -54,6 +56,7 @@ tddy-connectrpc = { path = "../tddy-connectrpc" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
+tddy-sandbox-qemu = { path = "../tddy-sandbox-qemu" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }

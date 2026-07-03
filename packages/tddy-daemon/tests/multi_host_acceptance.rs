@@ -182,6 +182,8 @@ async fn start_session_unknown_daemon_instance_id_returns_clear_error() {
         permission_mode: String::new(),
         stack_parent: String::new(),
         sandbox: false,
+        managed_codebase: false,
+        specialized_agents: vec![],
     });
     // Then
     let err = service
@@ -372,6 +374,8 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         permission_mode: String::new(),
         stack_parent: String::new(),
         sandbox: false,
+        managed_codebase: false,
+        specialized_agents: vec![],
     });
     let response = service_a.start_session(request).await.unwrap_or_else(|e| {
         panic!(

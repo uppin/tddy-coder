@@ -287,9 +287,7 @@ mod tests {
         let plan = build_action_sandbox_plan(&spec, &layout, "sess", BTreeMap::new())
             .expect("plan must build");
         assert!(
-            plan.reads
-                .iter()
-                .any(|r| r.host == PathBuf::from("/usr/bin")),
+            plan.reads.iter().any(|r| r.host == Path::new("/usr/bin")),
             "extra_read_paths must appear in plan reads"
         );
     }

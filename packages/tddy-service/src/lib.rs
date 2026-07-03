@@ -111,6 +111,15 @@ pub mod proto {
     pub mod reflection {
         include!(concat!(env!("OUT_DIR"), "/grpc.reflection.v1.rs"));
     }
+    /// `TddyRemote` as an `RpcService` (stdio/tddy-rpc transport), reusing the tonic-generated
+    /// message types from `crate::gen` via `extern_path`. Most of remote.proto's ~30 nested
+    /// message types aren't referenced directly by the service methods (only transitively,
+    /// through the already-extern'd `ClientMessage`/`ServerMessage`), so prost regenerates them
+    /// here too as unused duplicates — harmless, but silenced like the other proto modules below.
+    #[allow(dead_code, unused_imports, unused_variables)]
+    pub mod remote {
+        include!(concat!(env!("OUT_DIR"), "/rpc_remote/tddy.v1.rs"));
+    }
 }
 
 /// Combined `FileDescriptorSet` (serialized) for all service protos, used by the

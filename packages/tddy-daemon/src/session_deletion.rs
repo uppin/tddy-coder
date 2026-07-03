@@ -273,6 +273,7 @@ mod tests {
             sandbox: None,
             agent: None,
             recipe: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }

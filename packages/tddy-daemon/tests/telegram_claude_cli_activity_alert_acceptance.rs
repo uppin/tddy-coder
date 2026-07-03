@@ -68,6 +68,7 @@ fn write_claude_cli_session(
         sandbox: None,
         agent: None,
         recipe: None,
+        specialized_agents: Vec::new(),
     };
     write_session_metadata(session_dir, &meta).unwrap();
 }

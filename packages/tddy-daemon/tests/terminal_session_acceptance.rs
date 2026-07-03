@@ -26,8 +26,6 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 const VALID_TOKEN: &str = "valid-token";
 const SESSION_ID: &str = "term-test-session";
-/// Stub for the main `claude` terminal: `/bin/cat` stays alive reading PTY stdin.
-const MAIN_STUB: &str = "/bin/cat";
 /// Login shell used for started terminals in tests.
 const SHELL: &str = "/bin/sh";
 

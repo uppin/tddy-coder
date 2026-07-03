@@ -103,17 +103,19 @@ fn remote_flag_without_recipe_yields_clear_error() {
     );
 }
 
-/// AC24 (unit): `REMOTE_APPENDIX` must state the codebase is remote and reference `mcp__tddy-tools__`.
+/// AC24 (unit): `REMOTE_APPENDIX` must state the codebase is managed and reference
+/// `mcp__tddy-tools__` (see docs/ft/coder/managed-codebase-subagents.md's "remote" → "managed"
+/// user-facing rename).
 #[test]
-fn remote_appendix_wording_states_remote_codebase_and_required_tools() {
+fn remote_appendix_wording_states_managed_codebase_and_required_tools() {
     // When
     let appendix = tddy_coder::remote::REMOTE_APPENDIX;
     let lowercase = appendix.to_lowercase();
 
     // Then
     assert!(
-        lowercase.contains("remote"),
-        "REMOTE_APPENDIX must contain the word 'remote'; got: {:?}",
+        lowercase.contains("managed"),
+        "REMOTE_APPENDIX must contain the word 'managed'; got: {:?}",
         appendix
     );
     assert!(

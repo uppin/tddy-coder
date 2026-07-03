@@ -117,6 +117,7 @@ mod tests {
             sandbox: None,
             agent: None,
             recipe: None,
+            specialized_agents: Vec::new(),
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 

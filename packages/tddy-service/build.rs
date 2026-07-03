@@ -15,19 +15,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &["proto"],
         )?;
 
-    // TddyRemote (async trait + RpcService server for LiveKit/tddy-rpc). The plain-gRPC path
-    // above still owns the tonic server/client for remote.proto; this second pass exists so
-    // TddyRemoteService can *also* be registered in a LiveKit MultiRpcService — previously it
-    // only implemented the tonic trait and could never be wrapped as an RpcService.
-    // Dedicated out_dir: the tonic_build call above also compiles package `tddy.v1` (shared
-    // with observer.proto/presenter_intent.proto) into the default OUT_DIR as `tddy.v1.rs` —
-    // without a separate directory here, prost_build's own `tddy.v1.rs` output for this pass
-    // would silently overwrite (or be overwritten by) that file, since both default to the same
-    // package-derived filename in the same OUT_DIR.
-    let tddy_remote_rpc_dir = format!("{}/tddy_remote_rpc", std::env::var("OUT_DIR")?);
-    std::fs::create_dir_all(&tddy_remote_rpc_dir)?;
+    // TddyRemote as an RpcService (async trait + RpcService server for stdio and LiveKit/tddy-rpc),
+    // reusing the tonic-generated message types above via extern_path — one canonical Rust type
+    // per message, no re-encode/decode bridging needed between transports. Own out_dir
+    // subdirectory: this pass's default filename (`tddy.v1.rs`, from the proto package) would
+    // otherwise collide with the first tonic_build pass's own `tddy.v1.rs` in the top-level
+    // OUT_DIR.
+    let rpc_remote_dir = format!("{}/rpc_remote", std::env::var("OUT_DIR")?);
+    std::fs::create_dir_all(&rpc_remote_dir)?;
     prost_build::Config::new()
-        .out_dir(&tddy_remote_rpc_dir)
+        .out_dir(&rpc_remote_dir)
+        .extern_path(".tddy.v1.ClientMessage", "crate::gen::ClientMessage")
+        .extern_path(".tddy.v1.ServerMessage", "crate::gen::ServerMessage")
+        .extern_path(
+            ".tddy.v1.GetSessionRequest",
+            "crate::gen::GetSessionRequest",
+        )
+        .extern_path(
+            ".tddy.v1.GetSessionResponse",
+            "crate::gen::GetSessionResponse",
+        )
+        .extern_path(
+            ".tddy.v1.ListSessionsRequest",
+            "crate::gen::ListSessionsRequest",
+        )
+        .extern_path(
+            ".tddy.v1.ListSessionsResponse",
+            "crate::gen::ListSessionsResponse",
+        )
         .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
@@ -209,6 +224,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .extern_path(
             ".connection.ExecuteToolResponse",
             "crate::proto::connection::ExecuteToolResponse",
+        )
+        // sandbox.proto's own message types: reuse the RpcService-flavored pass's canonical
+        // structs above (same pattern as terminal.proto) so both `SandboxService` trait impls
+        // (tonic and RpcService/stdio) operate on identical Rust types.
+        .extern_path(
+            ".sandbox.SessionFrame",
+            "crate::proto::sandbox::SessionFrame",
+        )
+        .extern_path(".sandbox.HostPoll", "crate::proto::sandbox::HostPoll")
+        .extern_path(
+            ".sandbox.SubscribeTerminal",
+            "crate::proto::sandbox::SubscribeTerminal",
+        )
+        .extern_path(
+            ".sandbox.SandboxInput",
+            "crate::proto::sandbox::SandboxInput",
+        )
+        .extern_path(".sandbox.EchoRequest", "crate::proto::sandbox::EchoRequest")
+        .extern_path(
+            ".sandbox.EchoResponse",
+            "crate::proto::sandbox::EchoResponse",
+        )
+        .extern_path(
+            ".sandbox.EchoStreamFrame",
+            "crate::proto::sandbox::EchoStreamFrame",
+        )
+        .extern_path(
+            ".sandbox.EgressRequest",
+            "crate::proto::sandbox::EgressRequest",
+        )
+        .extern_path(
+            ".sandbox.EgressResponse",
+            "crate::proto::sandbox::EgressResponse",
+        )
+        .extern_path(
+            ".sandbox.EgressHeader",
+            "crate::proto::sandbox::EgressHeader",
+        )
+        .extern_path(".sandbox.TunnelOpen", "crate::proto::sandbox::TunnelOpen")
+        .extern_path(
+            ".sandbox.TunnelOpenAck",
+            "crate::proto::sandbox::TunnelOpenAck",
+        )
+        .extern_path(".sandbox.TunnelData", "crate::proto::sandbox::TunnelData")
+        .extern_path(".sandbox.TunnelClose", "crate::proto::sandbox::TunnelClose")
+        .extern_path(
+            ".sandbox.SessionEnded",
+            "crate::proto::sandbox::SessionEnded",
         )
         .compile_protos(&["proto/sandbox.proto"], &["proto"])?;
 

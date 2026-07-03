@@ -476,6 +476,7 @@ fn create_fake_sessions(base: &std::path::Path, count: usize) -> Vec<String> {
             sandbox: None,
             agent: None,
             recipe: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         ids.push(id);

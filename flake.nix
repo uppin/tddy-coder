@@ -63,6 +63,8 @@
             pkgs.util-linux
             pkgs.gnumake
             pkgs.qemu
+            pkgs.xorriso
+            pkgs.openssh
           ];
           shellHook = ''
             echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer, bun, node"

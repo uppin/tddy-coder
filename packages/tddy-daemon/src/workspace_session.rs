@@ -105,6 +105,7 @@ pub async fn start_workspace_session(
         sandbox: None,
         agent: None,
         recipe: None,
+        specialized_agents: Vec::new(),
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;

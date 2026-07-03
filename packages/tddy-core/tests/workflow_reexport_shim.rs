@@ -15,9 +15,7 @@ use tddy_graph::graph::Graph as TddyGraphGraph;
 use std::sync::Arc;
 
 use tddy_core::workflow::context::Context;
-use tddy_core::workflow::graph::{
-    ElicitationEvent, ExecutionResult, ExecutionStatus, Graph, GraphBuilder,
-};
+use tddy_core::workflow::graph::{ElicitationEvent, Graph, GraphBuilder};
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::runner::FlowRunner;
 use tddy_core::workflow::session::{
@@ -73,7 +71,7 @@ fn workflow_context_path_still_exposes_context() {
     let ctx = Context::new();
 
     // When
-    ctx.set_sync("shim_test_key", &"shim_test_value".to_string());
+    ctx.set_sync("shim_test_key", "shim_test_value".to_string());
     let val = ctx.get_sync::<String>("shim_test_key");
 
     // Then

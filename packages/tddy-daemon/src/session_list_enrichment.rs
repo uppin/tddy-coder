@@ -491,6 +491,7 @@ state:
             sandbox: None,
             agent: None,
             recipe: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         // Intentionally NO changeset.yaml — claude-cli sessions never have one.
@@ -547,6 +548,7 @@ state:
             sandbox: None,
             agent: None,
             recipe: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -588,6 +590,7 @@ state:
             sandbox: None,
             agent: None,
             recipe: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -629,6 +632,7 @@ state:
             sandbox: None,
             agent: None,
             recipe: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -690,6 +694,7 @@ sessions:
             sandbox: None,
             agent: None,
             recipe: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -752,6 +757,7 @@ sessions:
             sandbox: None,
             agent: None,
             recipe: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         assert!(

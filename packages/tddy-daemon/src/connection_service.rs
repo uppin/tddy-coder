@@ -19,8 +19,8 @@ use tddy_service::proto::connection::{
     ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
     ListProjectsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
-    ListSessionsRequest, ListSessionsResponse, ListTerminalSessionsRequest,
-    ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
+    ListSessionsRequest, ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse,
+    ListTerminalSessionsRequest, ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreesForProjectRequest, ListWorktreesForProjectResponse,
     ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
     ReadSessionWorkflowFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
@@ -29,7 +29,7 @@ use tddy_service::proto::connection::{
     SessionTerminalInput, SessionTerminalOutput, Signal, SignalSessionRequest,
     SignalSessionResponse, StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
     StartTerminalSessionResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    StreamTerminalOutputRequest, TerminalControlEvent, TerminalSessionInfo, ToolInfo,
+    StreamTerminalOutputRequest, SubagentInfo, TerminalControlEvent, TerminalSessionInfo, ToolInfo,
     WatchTerminalControlRequest, WorkflowFileEntry, WorktreeRow,
 };
 use uuid::Uuid;
@@ -627,6 +627,7 @@ impl ConnectionServiceImpl {
             sandbox: None,
             agent: None,
             recipe: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
@@ -694,6 +695,56 @@ impl ConnectionServiceImpl {
         }))
     }
 
+    /// Resolve `specialized_agents` names against `<tddyhome>/agents` (+ builtins) into their
+    /// full defs (see docs/ft/coder/specialized-subagents.md). An unresolvable name is a request
+    /// error — the session is never started with a silently-dropped subagent. An empty input
+    /// resolves to an empty output, not an error.
+    fn resolve_specialized_agent_defs(
+        &self,
+        specialized_agents: &[String],
+    ) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
+        if specialized_agents.is_empty() {
+            return Ok(Vec::new());
+        }
+        let agents_dir = self.tddy_data_dir.join("agents");
+        let resolved = tddy_discovery::agent_def::resolve_agent_defs(&agents_dir);
+        let mut selected = Vec::with_capacity(specialized_agents.len());
+        for name in specialized_agents {
+            let def = resolved.iter().find(|d| &d.name == name).ok_or_else(|| {
+                Status::invalid_argument(format!(
+                    "specialized_agents: unknown subagent '{name}' (not a builtin and not \
+                         found under <tddyhome>/agents)"
+                ))
+            })?;
+            selected.push(def.clone());
+        }
+        Ok(selected)
+    }
+
+    /// Build the `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` jail env pair for already-resolved
+    /// specialized-agent defs (see [`Self::resolve_specialized_agent_defs`]). Empty input produces
+    /// no env pairs.
+    fn specialized_subagent_env(
+        &self,
+        defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
+    ) -> Result<Vec<(String, String)>, Status> {
+        if defs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let names = defs
+            .iter()
+            .map(|d| d.name.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        let defs_json = serde_json::to_string(defs).map_err(|e| {
+            Status::internal(format!("failed to serialize specialized agent defs: {e}"))
+        })?;
+        Ok(vec![
+            ("TDDY_SUBAGENT".to_string(), names),
+            ("TDDY_SUBAGENTS_JSON".to_string(), defs_json),
+        ])
+    }
+
     /// Handle `StartSession` for sandboxed `claude-cli` sessions (darwin Seatbelt, local gRPC).
     #[allow(clippy::too_many_arguments)]
     async fn start_sandboxed_claude_cli_session(
@@ -709,6 +760,14 @@ impl ConnectionServiceImpl {
         selected_branch_to_work_on: &str,
         permission_mode: &str,
         stack_parent: Option<&str>,
+        // Specialized subagents (see docs/ft/coder/specialized-subagents.md). This sandboxed path
+        // already never mounts the repo (`mounts: vec![]` below, unconditionally) —
+        // `managed_codebase` is accepted for request-shape/UI-intent clarity, not to toggle mount
+        // behavior. Names resolve against `<tddyhome>/agents` (+ builtins) and are wired into the
+        // jail env; all configuration (model, base_url, max_turns, replaces) comes exclusively
+        // from the resolved def.
+        _managed_codebase: bool,
+        specialized_agents: &[String],
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -721,6 +780,7 @@ impl ConnectionServiceImpl {
                 "project_id is required for claude-cli sessions",
             ));
         }
+        let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
 
         let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
@@ -836,8 +896,24 @@ impl ConnectionServiceImpl {
         let scratch_tmp = scratch_dir.join("tmp");
         let context_dir = sandbox_root.join("context");
 
-        let ctx = crate::sandbox_session::prepare_context_dir(&worktree_path)
-            .map_err(Status::internal)?;
+        let replacement_pairs = subagent_replacement_pairs(&specialized_defs);
+        let replacement_refs: Vec<Vec<&str>> = replacement_pairs
+            .iter()
+            .map(|(_, tools)| tools.iter().map(String::as_str).collect())
+            .collect();
+        let replacements: Vec<tddy_sandbox::SubagentReplacement<'_>> = replacement_pairs
+            .iter()
+            .zip(replacement_refs.iter())
+            .map(|((name, _), refs)| tddy_sandbox::SubagentReplacement {
+                name,
+                replaced: refs,
+            })
+            .collect();
+        let ctx = crate::sandbox_session::prepare_context_dir_with_subagent(
+            &worktree_path,
+            &replacements,
+        )
+        .map_err(Status::internal)?;
         crate::sandbox_session::copy_dir_all(ctx.path(), &context_dir).map_err(Status::internal)?;
 
         let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
@@ -872,7 +948,6 @@ impl ConnectionServiceImpl {
         let claude_binary = canonicalize_exec(claude_binary_cfg);
         let claude_binary = claude_binary.as_str();
 
-        let grpc_socket = sandbox_root.join("sandbox.grpc.sock");
         // The tool-IPC AF_UNIX socket must fit within SUN_LEN (104 bytes on macOS); the
         // canonical session dir is far too deep, so use a short out-of-tree path that the
         // SBPL profile grants an explicit literal allow (see SandboxSpec::ipc_socket).
@@ -886,11 +961,9 @@ impl ConnectionServiceImpl {
             permission_mode.trim()
         };
 
-        let grpc_listen_port =
-            crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
         let egress_shim_port =
             crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
-        let loopback_allow_ports = vec![grpc_listen_port, egress_shim_port];
+        let loopback_allow_ports = vec![egress_shim_port];
 
         let runner_argv = vec![
             sandbox_runner_path,
@@ -898,8 +971,6 @@ impl ConnectionServiceImpl {
             session_id.to_string(),
             "--context-dir".into(),
             context_dir.to_string_lossy().to_string(),
-            "--grpc-socket".into(),
-            grpc_socket.to_string_lossy().to_string(),
             "--tool-ipc-socket".into(),
             tool_ipc_socket.to_string_lossy().to_string(),
             "--tddy-tools-path".into(),
@@ -912,28 +983,21 @@ impl ConnectionServiceImpl {
             model.to_string(),
             "--permission-mode".into(),
             perm.to_string(),
-            "--grpc-listen-port".into(),
-            grpc_listen_port.to_string(),
             "--egress-shim-port".into(),
             egress_shim_port.to_string(),
+            "--stdio".into(),
         ];
-        // On Linux the gRPC SessionChannel is served over AF_UNIX (it survives the jail's network
-        // namespace, where loopback TCP cannot); prefer it over the TCP port.
-        #[cfg(target_os = "linux")]
-        let runner_argv = {
-            let mut argv = runner_argv;
-            argv.push("--grpc-uds".into());
-            argv.push(grpc_socket.to_string_lossy().to_string());
-            argv
-        };
 
-        let env = crate::sandbox_session::build_sandbox_runner_env(
+        let mut env = crate::sandbox_session::build_sandbox_runner_env(
             &scratch_home,
             &scratch_tmp,
             session_id,
             &tool_ipc_socket,
             &egress_dir,
         );
+        if !specialized_defs.is_empty() {
+            env.extend(self.specialized_subagent_env(&specialized_defs)?);
+        }
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
@@ -971,8 +1035,7 @@ impl ConnectionServiceImpl {
         crate::sandbox_session::dial_and_bridge(
             session_id,
             worktree_path.clone(),
-            ready_marker.clone(),
-            grpc_socket.clone(),
+            &mut handle,
             self.task_registry.clone(),
             stdout_tx.clone(),
             Arc::clone(&capture),
@@ -989,7 +1052,6 @@ impl ConnectionServiceImpl {
                 stdout_tx,
                 capture,
                 stdin_tx,
-                grpc_socket: grpc_socket.clone(),
                 ready_marker: ready_marker.clone(),
                 handle,
             },
@@ -1018,6 +1080,7 @@ impl ConnectionServiceImpl {
             sandbox: Some(true),
             agent: None,
             recipe: None,
+            specialized_agents: specialized_agents.to_vec(),
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
@@ -1122,7 +1185,14 @@ impl ConnectionServiceImpl {
             .ok_or_else(|| Status::internal("sandbox session missing repo_path in metadata"))?;
 
         let pid = self
-            .relaunch_sandboxed_runner(session_id, &session_dir, &worktree_path, &model, "auto")
+            .relaunch_sandboxed_runner(
+                session_id,
+                &session_dir,
+                &worktree_path,
+                &model,
+                "auto",
+                &meta.specialized_agents,
+            )
             .await?;
 
         let now = chrono::Utc::now().to_rfc3339();
@@ -1144,6 +1214,7 @@ impl ConnectionServiceImpl {
     }
 
     /// Spawn sandbox-runner + SessionChannel bridge for an existing session directory.
+    #[allow(clippy::too_many_arguments)]
     async fn relaunch_sandboxed_runner(
         &self,
         session_id: &str,
@@ -1151,7 +1222,9 @@ impl ConnectionServiceImpl {
         worktree_path: &Path,
         model: &str,
         permission_mode: &str,
+        specialized_agents: &[String],
     ) -> Result<u32, Status> {
+        let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
         let sandbox_root = session_dir.join("sandbox");
         let egress_dir = session_dir.join("egress");
         std::fs::create_dir_all(sandbox_root.join(".work").join("home"))
@@ -1170,8 +1243,22 @@ impl ConnectionServiceImpl {
         let scratch_tmp = scratch_dir.join("tmp");
         let context_dir = sandbox_root.join("context");
 
-        let ctx = crate::sandbox_session::prepare_context_dir(worktree_path)
-            .map_err(|e| Status::internal(format!("prepare context dir: {e}")))?;
+        let replacement_pairs = subagent_replacement_pairs(&specialized_defs);
+        let replacement_refs: Vec<Vec<&str>> = replacement_pairs
+            .iter()
+            .map(|(_, tools)| tools.iter().map(String::as_str).collect())
+            .collect();
+        let replacements: Vec<tddy_sandbox::SubagentReplacement<'_>> = replacement_pairs
+            .iter()
+            .zip(replacement_refs.iter())
+            .map(|((name, _), refs)| tddy_sandbox::SubagentReplacement {
+                name,
+                replaced: refs,
+            })
+            .collect();
+        let ctx =
+            crate::sandbox_session::prepare_context_dir_with_subagent(worktree_path, &replacements)
+                .map_err(|e| Status::internal(format!("prepare context dir: {e}")))?;
         if context_dir.exists() {
             std::fs::remove_dir_all(&context_dir)
                 .map_err(|e| Status::internal(format!("clear context dir: {e}")))?;
@@ -1207,12 +1294,10 @@ impl ConnectionServiceImpl {
             canonicalize_exec(&crate::sandbox_session::resolve_sandbox_runner_path());
         let claude_binary = canonicalize_exec(claude_binary_cfg);
 
-        let grpc_socket = sandbox_root.join("sandbox.grpc.sock");
         let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(session_id);
         let ready_marker = sandbox_root.join("sandbox.ready");
         let _ = std::fs::remove_file(&tool_ipc_socket);
         let _ = std::fs::remove_file(&ready_marker);
-        let _ = std::fs::remove_file(&grpc_socket);
         let profile_path = sandbox_root.join("sandbox.sb");
         let perm = if permission_mode.trim().is_empty() {
             "auto"
@@ -1220,11 +1305,9 @@ impl ConnectionServiceImpl {
             permission_mode.trim()
         };
 
-        let grpc_listen_port =
-            crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
         let egress_shim_port =
             crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
-        let loopback_allow_ports = vec![grpc_listen_port, egress_shim_port];
+        let loopback_allow_ports = vec![egress_shim_port];
 
         let runner_argv = vec![
             sandbox_runner_path,
@@ -1232,8 +1315,6 @@ impl ConnectionServiceImpl {
             session_id.to_string(),
             "--context-dir".into(),
             context_dir.to_string_lossy().to_string(),
-            "--grpc-socket".into(),
-            grpc_socket.to_string_lossy().to_string(),
             "--tool-ipc-socket".into(),
             tool_ipc_socket.to_string_lossy().to_string(),
             "--tddy-tools-path".into(),
@@ -1246,28 +1327,21 @@ impl ConnectionServiceImpl {
             model.to_string(),
             "--permission-mode".into(),
             perm.to_string(),
-            "--grpc-listen-port".into(),
-            grpc_listen_port.to_string(),
             "--egress-shim-port".into(),
             egress_shim_port.to_string(),
+            "--stdio".into(),
         ];
-        // On Linux the gRPC SessionChannel is served over AF_UNIX (it survives the jail's network
-        // namespace, where loopback TCP cannot); prefer it over the TCP port.
-        #[cfg(target_os = "linux")]
-        let runner_argv = {
-            let mut argv = runner_argv;
-            argv.push("--grpc-uds".into());
-            argv.push(grpc_socket.to_string_lossy().to_string());
-            argv
-        };
 
-        let env = crate::sandbox_session::build_sandbox_runner_env(
+        let mut env = crate::sandbox_session::build_sandbox_runner_env(
             &scratch_home,
             &scratch_tmp,
             session_id,
             &tool_ipc_socket,
             &egress_dir,
         );
+        if !specialized_defs.is_empty() {
+            env.extend(self.specialized_subagent_env(&specialized_defs)?);
+        }
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
@@ -1308,8 +1382,7 @@ impl ConnectionServiceImpl {
         crate::sandbox_session::dial_and_bridge(
             session_id,
             worktree_path.to_path_buf(),
-            ready_marker.clone(),
-            grpc_socket.clone(),
+            &mut handle,
             self.task_registry.clone(),
             stdout_tx.clone(),
             Arc::clone(&capture),
@@ -1329,7 +1402,6 @@ impl ConnectionServiceImpl {
                 stdout_tx,
                 capture,
                 stdin_tx,
-                grpc_socket,
                 ready_marker,
                 handle,
             },
@@ -1339,6 +1411,22 @@ impl ConnectionServiceImpl {
             .await;
         Ok(pid)
     }
+}
+
+/// Build the (name, replaced-tools) pairs for every resolved specialized-agent def — each its own
+/// name + its own YAML-declared `replaces`, normalized.
+fn subagent_replacement_pairs(
+    specialized_defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
+) -> Vec<(String, Vec<String>)> {
+    specialized_defs
+        .iter()
+        .map(|def| {
+            (
+                def.name.clone(),
+                tddy_discovery::subagent::normalize_replaced_tools(&def.replaces),
+            )
+        })
+        .collect()
 }
 
 /// Merge local `ListProjects` rows with [`EligibleDaemonSource::peer_project_entries`].
@@ -1409,6 +1497,36 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .collect();
         log::info!("list_agents RPC: returning {} agent(s)", agents.len());
         Ok(Response::new(ListAgentsResponse { agents }))
+    }
+
+    /// Resolved specialized-agent defs (builtin + `<tddyhome>/agents/*.yaml` — see
+    /// docs/ft/coder/specialized-subagents.md) available to wire into a managed-codebase session.
+    async fn list_subagents(
+        &self,
+        _request: Request<ListSubagentsRequest>,
+    ) -> Result<Response<ListSubagentsResponse>, Status> {
+        log::debug!("list_subagents RPC: resolving <tddyhome>/agents defs");
+        let agents_dir = self.tddy_data_dir.join("agents");
+        let subagents: Vec<SubagentInfo> =
+            tddy_discovery::agent_def::resolve_agent_defs(&agents_dir)
+                .into_iter()
+                .map(|def| {
+                    let label = def
+                        .label
+                        .filter(|s| !s.trim().is_empty())
+                        .unwrap_or_else(|| def.name.clone());
+                    SubagentInfo {
+                        name: def.name,
+                        label,
+                        model: def.model,
+                    }
+                })
+                .collect();
+        log::info!(
+            "list_subagents RPC: returning {} subagent(s)",
+            subagents.len()
+        );
+        Ok(Response::new(ListSubagentsResponse { subagents }))
     }
 
     async fn list_sessions(
@@ -1724,6 +1842,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         req.selected_branch_to_work_on.trim(),
                         req.permission_mode.trim(),
                         stack_parent_for_claude_cli.as_deref(),
+                        req.managed_codebase,
+                        &req.specialized_agents,
                     )
                     .await;
             }
@@ -3614,6 +3734,7 @@ mod signal_session_unit_tests {
             sandbox: None,
             agent: None,
             recipe: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -3796,6 +3917,7 @@ mod list_sessions_unit_tests {
             sandbox: None,
             agent: None,
             recipe: None,
+            specialized_agents: Vec::new(),
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -3889,6 +4011,7 @@ mod report_session_status_unit_tests {
             sandbox: None,
             agent: None,
             recipe: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -3987,6 +4110,7 @@ mod report_session_status_unit_tests {
             sandbox: None,
             agent: None,
             recipe: None,
+            specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -4100,5 +4224,168 @@ status: active
         // Then there is nothing to restore (tddy-coder applies its own resolution downstream)
         assert!(agent.is_none(), "legacy session has no persisted agent to restore");
         assert!(recipe.is_none(), "legacy session has no persisted recipe to restore");
+    }
+}
+
+#[cfg(test)]
+mod specialized_subagent_env_unit_tests {
+    //! Unit tests: `ConnectionServiceImpl::specialized_subagent_env` — resolving
+    //! `StartSessionRequest.specialized_agents` names into the `TDDY_SUBAGENT`/
+    //! `TDDY_SUBAGENTS_JSON` jail env pair.
+    //!
+    //! Feature: docs/ft/coder/specialized-subagents.md (criteria 17-18)
+    //! Changeset: docs/dev/1-WIP/specialized-subagents.md
+    //!
+    //! The full sandboxed spawn (`start_sandboxed_claude_cli_session`) requires a real git
+    //! repo/project/platform sandbox (darwin Seatbelt / Linux cgroups) — see
+    //! `sandboxed_claude_cli_acceptance.rs` for that heavier end-to-end harness. This module
+    //! isolates the new, platform-independent resolution logic this changeset adds.
+
+    use super::*;
+
+    fn make_unit_config() -> crate::config::DaemonConfig {
+        let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        crate::config::DaemonConfig::load(&path).unwrap()
+    }
+
+    fn make_unit_service(tddy_data_dir: std::path::PathBuf) -> ConnectionServiceImpl {
+        let config = make_unit_config();
+        let base = tddy_data_dir.clone();
+        let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
+        let user_resolver: SessionUserResolver = Arc::new(|token| {
+            if token == "valid" {
+                Some("u".to_string())
+            } else {
+                None
+            }
+        });
+        ConnectionServiceImpl::new(
+            config,
+            sessions_base_resolver,
+            tddy_data_dir,
+            user_resolver,
+            None,
+            None,
+            None,
+            Arc::new(ClaudeCliSessionManager::new()),
+        )
+    }
+
+    /// An empty `specialized_agents` list is never consulted by the caller (see the `if
+    /// !specialized_defs.is_empty()` guard in `start_sandboxed_claude_cli_session`) — this test
+    /// documents that `specialized_subagent_env` itself, when called directly with an empty def
+    /// list, still resolves cleanly (an empty env pair list), matching "no subagents requested =
+    /// no subagent env vars" rather than an error.
+    #[test]
+    fn specialized_subagent_env_with_no_defs_produces_no_env_pairs() {
+        // Given
+        let tddy_home = tempfile::tempdir().unwrap();
+        let service = make_unit_service(tddy_home.path().to_path_buf());
+
+        // When
+        let result = service.specialized_subagent_env(&[]);
+
+        // Then
+        assert_eq!(
+            result.unwrap(),
+            Vec::<(String, String)>::new(),
+            "an empty defs list must resolve to no env pairs, not an error"
+        );
+    }
+
+    /// An empty `specialized_agents` name list resolves to an empty defs list, not an error.
+    #[test]
+    fn resolve_specialized_agent_defs_with_no_names_produces_no_defs() {
+        // Given
+        let tddy_home = tempfile::tempdir().unwrap();
+        let service = make_unit_service(tddy_home.path().to_path_buf());
+
+        // When
+        let result = service.resolve_specialized_agent_defs(&[]);
+
+        // Then
+        assert_eq!(
+            result.unwrap(),
+            Vec::<tddy_discovery::agent_def::SpecializedAgentDef>::new(),
+            "an empty specialized_agents list must resolve to no defs, not an error"
+        );
+    }
+
+    /// A single resolvable name (the always-available builtin `fastcontext`) resolves to that
+    /// def — no `<tddyhome>/agents` override needed.
+    #[test]
+    fn resolve_specialized_agent_defs_resolves_the_builtin_fastcontext_name() {
+        // Given — no <tddyhome>/agents overrides; "fastcontext" must still resolve via the
+        // builtin def
+        let tddy_home = tempfile::tempdir().unwrap();
+        let service = make_unit_service(tddy_home.path().to_path_buf());
+
+        // When
+        let result = service.resolve_specialized_agent_defs(&["fastcontext".to_string()]);
+
+        // Then
+        let defs = result.expect("fastcontext must resolve via the builtin def");
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].name, "fastcontext");
+    }
+
+    /// A name that resolves against neither the builtins nor `<tddyhome>/agents` must reject the
+    /// whole request — no partial resolution for the names that *did* resolve.
+    #[test]
+    fn resolve_specialized_agent_defs_rejects_unknown_name() {
+        // Given
+        let tddy_home = tempfile::tempdir().unwrap();
+        let service = make_unit_service(tddy_home.path().to_path_buf());
+
+        // When
+        let result = service.resolve_specialized_agent_defs(&[
+            "fastcontext".to_string(),
+            "ghost-agent".to_string(),
+        ]);
+
+        // Then
+        let err = result.expect_err("an unresolvable name must reject the whole request");
+        assert_eq!(err.code(), tddy_rpc::Code::InvalidArgument);
+        assert!(
+            err.message().contains("ghost-agent"),
+            "the error must name the unresolvable subagent; got: {}",
+            err.message()
+        );
+    }
+
+    /// A resolved `fastcontext` def produces both `TDDY_SUBAGENT` (comma names) and
+    /// `TDDY_SUBAGENTS_JSON` (the serialized def) — the exact env shape `tddy-tools --mcp` (see
+    /// `subagents_from_env` in `tddy-tools/src/server.rs`) expects.
+    #[test]
+    fn specialized_subagent_env_builds_env_pairs_for_a_resolved_def() {
+        // Given
+        let tddy_home = tempfile::tempdir().unwrap();
+        let service = make_unit_service(tddy_home.path().to_path_buf());
+        let defs = service
+            .resolve_specialized_agent_defs(&["fastcontext".to_string()])
+            .expect("fastcontext must resolve via the builtin def");
+
+        // When
+        let result = service.specialized_subagent_env(&defs);
+
+        // Then
+        let env = result.expect("a resolved def must build env pairs without error");
+        let names = env
+            .iter()
+            .find(|(k, _)| k == "TDDY_SUBAGENT")
+            .map(|(_, v)| v.clone());
+        assert_eq!(names.as_deref(), Some("fastcontext"));
+        let defs_json = env
+            .iter()
+            .find(|(k, _)| k == "TDDY_SUBAGENTS_JSON")
+            .map(|(_, v)| v.clone())
+            .expect("TDDY_SUBAGENTS_JSON must be present");
+        assert!(
+            defs_json.contains("fastcontext"),
+            "TDDY_SUBAGENTS_JSON must serialize the resolved fastcontext def; got: {defs_json}"
+        );
     }
 }

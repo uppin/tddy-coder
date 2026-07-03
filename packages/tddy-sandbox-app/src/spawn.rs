@@ -4,11 +4,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use tddy_daemon::sandbox_session::{
-    build_sandbox_runner_env, copy_dir_all, pick_free_loopback_port, prepare_context_dir,
-    resolve_sandbox_runner_path, resolve_tddy_tools_path, spawn_sandbox_runner,
-    wait_for_sandbox_ready, SandboxRunnerSpawn,
+    build_sandbox_runner_env, copy_dir_all, pick_free_loopback_port, resolve_sandbox_runner_path,
+    resolve_tddy_tools_path, spawn_sandbox_runner, wait_for_sandbox_ready, SandboxRunnerSpawn,
 };
-use tddy_sandbox::{append_line, SandboxContextDir, SandboxHandle};
+use tddy_sandbox::{append_line, SandboxContextDir, SandboxHandle, SubagentReplacement};
 
 fn spawn_trace(session_dir: &Path, message: &str) {
     eprintln!("{message}");
@@ -40,6 +39,115 @@ pub struct SpawnParams {
     /// `mcp__tddy-tools__*` calls, which the host relays against the real `repo` path (see
     /// `bridge::AppToolHandler`). Matches the daemon's sandboxed-session isolation model.
     pub remote_codebase: bool,
+    /// Discovery subagent to wire into the in-jail `tddy-tools --mcp` process, if any.
+    pub subagent: SubagentSpawnConfig,
+}
+
+/// Resolves the effective codebase mode from `--codebase-mode` and the deprecated
+/// `--remote-codebase` boolean alias. Returns `true` for managed mode, `false` for mounted mode.
+///
+/// `--remote-codebase` predates `--codebase-mode` and remains a working alias for
+/// `--codebase-mode managed`; an explicit `--codebase-mode mounted` alongside it is a
+/// contradiction (the caller asked for both at once) and is rejected rather than silently
+/// resolved to either value.
+pub(crate) fn resolve_codebase_mode(
+    codebase_mode: Option<&str>,
+    remote_codebase_flag: bool,
+) -> Result<bool, String> {
+    match codebase_mode {
+        Some("managed") => Ok(true),
+        Some("mounted") => {
+            if remote_codebase_flag {
+                Err(
+                    "conflicting codebase mode: --codebase-mode mounted was given together with \
+                     --remote-codebase (which implies managed mode)"
+                        .to_string(),
+                )
+            } else {
+                Ok(false)
+            }
+        }
+        Some(other) => Err(format!(
+            "unrecognized --codebase-mode value {other:?}; expected \"mounted\" or \"managed\""
+        )),
+        None => Ok(remote_codebase_flag),
+    }
+}
+
+/// Spawn-time specialized-agent configuration (array model — see
+/// docs/ft/coder/specialized-subagents.md). `specialized_agents` empty means no subagent is wired
+/// into the session.
+#[derive(Default, Clone)]
+pub(crate) struct SubagentSpawnConfig {
+    pub specialized_agents: Vec<String>,
+    /// Directory to resolve named agents from (`<tddyhome>/agents`), in addition to the builtins.
+    pub agents_dir: PathBuf,
+}
+
+/// Resolve `config.specialized_agents` against builtins + `config.agents_dir`. An unresolvable
+/// name is an error. All configuration (model, base_url, max_turns, replaces) comes exclusively
+/// from the resolved def — there is no caller-facing override.
+pub(crate) fn resolve_specialized_agents(
+    config: &SubagentSpawnConfig,
+) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>> {
+    if config.specialized_agents.is_empty() {
+        return Ok(Vec::new());
+    }
+    let resolved = tddy_discovery::agent_def::resolve_agent_defs(&config.agents_dir);
+    let mut selected = Vec::with_capacity(config.specialized_agents.len());
+    for name in &config.specialized_agents {
+        let def = resolved.iter().find(|d| &d.name == name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "specialized agent '{name}' not found (not a builtin and not present under {})",
+                config.agents_dir.display()
+            )
+        })?;
+        selected.push(def.clone());
+    }
+    Ok(selected)
+}
+
+/// Build the (name, replaced-tools) pairs for a session's resolved specialized-agent defs — each
+/// its own name + its own YAML-declared `replaces`, normalized.
+pub(crate) fn specialized_agent_replacement_pairs(
+    defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
+) -> Vec<(String, Vec<String>)> {
+    defs.iter()
+        .map(|def| {
+            (
+                def.name.clone(),
+                tddy_discovery::subagent::normalize_replaced_tools(&def.replaces),
+            )
+        })
+        .collect()
+}
+
+/// Builds the `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON`/(single-agent) `TDDY_SUBAGENT_REPLACES` jail
+/// env overlay for the in-jail `tddy-tools --mcp` process from already-resolved specialized-agent
+/// defs. Empty when no agent is configured.
+pub(crate) fn subagent_env_overlay(
+    defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
+) -> std::collections::BTreeMap<String, String> {
+    let mut env = std::collections::BTreeMap::new();
+    if defs.is_empty() {
+        return env;
+    }
+    let names = defs
+        .iter()
+        .map(|d| d.name.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    env.insert("TDDY_SUBAGENT".to_string(), names);
+    if let Ok(defs_json) = serde_json::to_string(defs) {
+        env.insert("TDDY_SUBAGENTS_JSON".to_string(), defs_json);
+    }
+    if defs.len() == 1 {
+        let (_, replaced) = &specialized_agent_replacement_pairs(defs)[0];
+        if !replaced.is_empty() {
+            env.insert("TDDY_SUBAGENT_REPLACES".to_string(), replaced.join(","));
+        }
+    }
+    env
 }
 
 /// Seed `claude_home_dir/.claude/.credentials.json` from the real host `~/.claude` once, so the
@@ -286,8 +394,22 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         &format!("preparing context from {} …", repo.display()),
     );
     let repo_for_context = repo.clone();
+    let specialized_defs = resolve_specialized_agents(&params.subagent)?;
+    let replacement_pairs = specialized_agent_replacement_pairs(&specialized_defs);
     let ctx: SandboxContextDir = tokio::task::spawn_blocking(move || {
-        prepare_context_dir(&repo_for_context).map_err(|e| anyhow::anyhow!(e))
+        let replacement_refs: Vec<Vec<&str>> = replacement_pairs
+            .iter()
+            .map(|(_, tools)| tools.iter().map(String::as_str).collect())
+            .collect();
+        let replacements: Vec<SubagentReplacement<'_>> = replacement_pairs
+            .iter()
+            .zip(replacement_refs.iter())
+            .map(|((name, _), refs)| SubagentReplacement {
+                name,
+                replaced: refs,
+            })
+            .collect();
+        SandboxContextDir::create_with_subagent(&repo_for_context, &replacements)
     })
     .await
     .context("context prep task join")??;
@@ -337,6 +459,12 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         &context_dir,
     );
 
+    // Read the host's own controlling terminal size now, before `bridge::run_terminal_bridge`
+    // hands stdin over to the jail — so the jail's PTY opens at the right size from the very
+    // first frame instead of starting at a hardcoded default and waiting on a live resize (which
+    // never fires if the user's terminal never actually changes size after attach) to correct it.
+    let (initial_rows, initial_cols) = crate::bridge::terminal_size_or_default();
+
     let runner_argv = vec![
         sandbox_runner_path,
         "--session-id".into(),
@@ -363,15 +491,20 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         grpc_listen_port.to_string(),
         "--egress-shim-port".into(),
         egress_shim_port.to_string(),
+        "--initial-cols".into(),
+        initial_cols.to_string(),
+        "--initial-rows".into(),
+        initial_rows.to_string(),
     ];
 
-    let env = build_sandbox_runner_env(
+    let mut env = build_sandbox_runner_env(
         &scratch_home,
         &scratch_tmp,
         &params.session_id,
         &tool_ipc_socket,
         &egress_dir,
     );
+    env.extend(subagent_env_overlay(&specialized_defs));
 
     spawn_trace(
         &session_dir,
@@ -735,5 +868,248 @@ mod tests {
         // Then
         assert_eq!(jail_cwd_remote, explicit_cwd);
         assert_eq!(jail_cwd_local, explicit_cwd);
+    }
+
+    // ─── Managed-codebase mode + discovery subagent wiring ─────────────────────────
+    //
+    // Feature: docs/ft/coder/managed-codebase-subagents.md (criteria 11-12)
+    // Changeset: docs/dev/1-WIP/2026-07-01-changeset-managed-codebase-subagents.md
+
+    /// `--codebase-mode managed` resolves to managed mode (`true`), independent of the deprecated
+    /// `--remote-codebase` boolean flag.
+    #[test]
+    fn resolve_codebase_mode_returns_true_for_explicit_managed_mode() {
+        // Given / When
+        let managed = resolve_codebase_mode(Some("managed"), false)
+            .expect("'managed' must be a valid codebase mode");
+
+        // Then
+        assert!(
+            managed,
+            "--codebase-mode managed must resolve to managed mode"
+        );
+    }
+
+    /// `--codebase-mode mounted` resolves to unmanaged mode (`false`).
+    #[test]
+    fn resolve_codebase_mode_returns_false_for_explicit_mounted_mode() {
+        // Given / When
+        let managed = resolve_codebase_mode(Some("mounted"), false)
+            .expect("'mounted' must be a valid codebase mode");
+
+        // Then
+        assert!(
+            !managed,
+            "--codebase-mode mounted must resolve to unmanaged mode"
+        );
+    }
+
+    /// With no `--codebase-mode` given, the deprecated `--remote-codebase` boolean flag remains a
+    /// working alias for managed mode.
+    #[test]
+    fn resolve_codebase_mode_treats_remote_codebase_flag_as_a_managed_alias() {
+        // Given / When
+        let managed = resolve_codebase_mode(None, true)
+            .expect("the --remote-codebase alias must resolve without error");
+
+        // Then
+        assert!(
+            managed,
+            "--remote-codebase must remain equivalent to --codebase-mode managed"
+        );
+    }
+
+    /// With neither flag given, the default is unmanaged (mounted) mode — today's non-remote
+    /// default behavior is preserved.
+    #[test]
+    fn resolve_codebase_mode_defaults_to_unmanaged_when_neither_flag_is_given() {
+        // Given / When
+        let managed =
+            resolve_codebase_mode(None, false).expect("the default must resolve without error");
+
+        // Then
+        assert!(
+            !managed,
+            "default codebase mode must be unmanaged (mounted)"
+        );
+    }
+
+    /// An explicit `--codebase-mode mounted` together with the deprecated `--remote-codebase` flag
+    /// is a contradictory combination — it must be rejected, not silently resolved to either value.
+    #[test]
+    fn resolve_codebase_mode_errors_when_flags_conflict() {
+        // Given / When
+        let result = resolve_codebase_mode(Some("mounted"), true);
+
+        // Then
+        assert!(
+            result.is_err(),
+            "conflicting --codebase-mode mounted + --remote-codebase must be rejected"
+        );
+    }
+
+    /// An unrecognized `--codebase-mode` value is a typed error, not a silent fallback.
+    #[test]
+    fn resolve_codebase_mode_errors_on_an_unrecognized_value() {
+        // Given / When
+        let result = resolve_codebase_mode(Some("bogus"), false);
+
+        // Then
+        assert!(
+            result.is_err(),
+            "an unrecognized --codebase-mode value must be rejected"
+        );
+    }
+
+    // ─── resolve_specialized_agents ─────────────────────────────────────────────
+
+    fn config_with_names(names: &[&str]) -> SubagentSpawnConfig {
+        SubagentSpawnConfig {
+            specialized_agents: names.iter().map(|s| s.to_string()).collect(),
+            agents_dir: PathBuf::from("/nonexistent-agents-dir-for-tests"),
+        }
+    }
+
+    /// An empty `specialized_agents` list resolves to no defs, not an error.
+    #[test]
+    fn resolve_specialized_agents_returns_empty_for_no_names() {
+        // Given
+        let config = config_with_names(&[]);
+
+        // When
+        let defs = resolve_specialized_agents(&config).expect("empty names must not error");
+
+        // Then
+        assert!(defs.is_empty());
+    }
+
+    /// The always-available builtin `fastcontext` resolves without any `--agents-dir` override.
+    #[test]
+    fn resolve_specialized_agents_resolves_the_builtin_fastcontext_name() {
+        // Given
+        let config = config_with_names(&["fastcontext"]);
+
+        // When
+        let defs = resolve_specialized_agents(&config)
+            .expect("fastcontext must resolve via the builtin def");
+
+        // Then
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].name, "fastcontext");
+    }
+
+    /// A name that resolves against neither the builtins nor `agents_dir` is a typed error.
+    #[test]
+    fn resolve_specialized_agents_errors_on_unknown_name() {
+        // Given
+        let config = config_with_names(&["ghost-agent"]);
+
+        // When
+        let result = resolve_specialized_agents(&config);
+
+        // Then
+        let err = result.expect_err("an unresolvable name must be rejected");
+        assert!(
+            err.to_string().contains("ghost-agent"),
+            "the error must name the unresolvable agent; got: {err}"
+        );
+    }
+
+    // ─── subagent_env_overlay ────────────────────────────────────────────────────
+    //
+    // Feature: docs/ft/coder/specialized-subagents.md, docs/ft/coder/managed-codebase-subagents.md
+    // § Tool replacement
+
+    fn a_def(name: &str, replaces: &[&str]) -> tddy_discovery::agent_def::SpecializedAgentDef {
+        tddy_discovery::agent_def::SpecializedAgentDef {
+            name: name.to_string(),
+            label: None,
+            model: "some-model".to_string(),
+            base_url: "http://localhost:30000".to_string(),
+            system_prompt: None,
+            system_prompt_path: None,
+            tools: vec![tddy_discovery::agent_def::SubagentTool::Read],
+            max_turns: 10,
+            replaces: replaces.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    /// With no defs given, the env overlay is empty — nothing is threaded into the in-jail
+    /// `tddy-tools --mcp` process.
+    #[test]
+    fn subagent_env_overlay_is_empty_when_no_defs_are_given() {
+        // Given / When
+        let overlay = subagent_env_overlay(&[]);
+
+        // Then
+        assert!(
+            overlay.is_empty(),
+            "overlay must be empty with no defs given; got: {overlay:?}"
+        );
+    }
+
+    /// A single resolved def carries `TDDY_SUBAGENT` (its name) and `TDDY_SUBAGENTS_JSON` (the
+    /// serialized def).
+    #[test]
+    fn subagent_env_overlay_carries_name_and_json_for_a_single_def() {
+        // Given
+        let defs = vec![a_def("fastcontext", &["Grep", "Glob"])];
+
+        // When
+        let overlay = subagent_env_overlay(&defs);
+
+        // Then
+        assert_eq!(
+            overlay.get("TDDY_SUBAGENT").map(String::as_str),
+            Some("fastcontext")
+        );
+        let defs_json = overlay
+            .get("TDDY_SUBAGENTS_JSON")
+            .expect("TDDY_SUBAGENTS_JSON must be present");
+        assert!(
+            defs_json.contains("fastcontext"),
+            "TDDY_SUBAGENTS_JSON must serialize the def; got: {defs_json}"
+        );
+    }
+
+    /// Multiple resolved defs carry a comma-joined `TDDY_SUBAGENT` name list and no
+    /// `TDDY_SUBAGENT_REPLACES` (that key is single-agent-only).
+    #[test]
+    fn subagent_env_overlay_carries_comma_joined_names_for_multiple_defs() {
+        // Given
+        let defs = vec![
+            a_def("fastcontext", &["Grep", "Glob"]),
+            a_def("my-linter", &["ReadLints"]),
+        ];
+
+        // When
+        let overlay = subagent_env_overlay(&defs);
+
+        // Then
+        assert_eq!(
+            overlay.get("TDDY_SUBAGENT").map(String::as_str),
+            Some("fastcontext,my-linter")
+        );
+        assert!(
+            !overlay.contains_key("TDDY_SUBAGENT_REPLACES"),
+            "TDDY_SUBAGENT_REPLACES is single-agent-only; got: {overlay:?}"
+        );
+    }
+
+    /// With a single def, `TDDY_SUBAGENT_REPLACES` carries that def's own YAML-declared `replaces`
+    /// set — there is no caller-facing override.
+    #[test]
+    fn subagent_env_overlay_single_agent_uses_declared_default() {
+        // Given
+        let defs = vec![a_def("fastcontext", &["Grep", "Glob"])];
+
+        // When
+        let overlay = subagent_env_overlay(&defs);
+
+        // Then
+        assert_eq!(
+            overlay.get("TDDY_SUBAGENT_REPLACES").map(String::as_str),
+            Some("Grep,Glob")
+        );
     }
 }

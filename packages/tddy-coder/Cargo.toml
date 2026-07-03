@@ -37,6 +37,7 @@ tddy-tui = { path = "../tddy-tui" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-rpc = { path = "../tddy-rpc" }
+tddy-stdio = { path = "../tddy-stdio" }
 tddy-service = { path = "../tddy-service" }
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-connectrpc = { path = "../tddy-connectrpc" }

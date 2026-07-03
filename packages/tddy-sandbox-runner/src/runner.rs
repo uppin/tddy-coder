@@ -18,24 +18,51 @@ use tonic::{Request, Response, Status, Streaming};
 use tddy_service::proto::connection::{
     ExecuteToolRequest, ExecuteToolResponse, SessionTerminalOutput,
 };
-use tddy_service::tonic_sandbox::sandbox_service_server::{SandboxService, SandboxServiceServer};
-use tddy_service::tonic_sandbox::session_frame::Payload as SessionPayload;
-use tddy_service::tonic_sandbox::{
+use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
+use tddy_service::proto::sandbox::{
     EchoRequest, EchoResponse, EchoStreamFrame, EgressRequest, EgressResponse, SessionEnded,
     SessionFrame, TunnelClose, TunnelData, TunnelOpen, TunnelOpenAck,
 };
+use tddy_service::tonic_sandbox::sandbox_service_server::{
+    SandboxService as TonicSandboxService, SandboxServiceServer as TonicSandboxServiceServer,
+};
 
 use tddy_sandbox::{
-    append_line, egress_log_path, session_id_from_env, ToolIpcRequest, ToolIpcResponse,
-    SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG,
+    append_line, egress_log_path, session_id_from_env, SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG,
 };
 use tddy_sandbox_recipes::{append_claude_mcp_args, claude_scratch_mcp_dir};
 
-fn tool_ipc_response_from_execute(resp: &ExecuteToolResponse) -> ToolIpcResponse {
-    ToolIpcResponse {
-        result_json: resp.result_json.clone(),
-        is_error: resp.is_error,
-        error_message: resp.error_message.clone(),
+/// Hosts `connection.ConnectionService/ExecuteTool` over the tool-IPC socket, using `tddy-rpc`'s
+/// length-prefixed framing instead of the old unframed single-`read()`/`write_all()` JSON
+/// protocol (which silently truncated payloads that didn't arrive in one syscall).
+struct ToolExecService {
+    relay: Arc<SandboxSessionRelay>,
+}
+
+#[async_trait::async_trait]
+impl tddy_rpc::RpcService for ToolExecService {
+    async fn handle_rpc(
+        &self,
+        service: &str,
+        method: &str,
+        message: &tddy_rpc::RpcMessage,
+    ) -> tddy_rpc::RpcResult {
+        use prost::Message;
+        if service != "connection.ConnectionService" || method != "ExecuteTool" {
+            return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::not_found(format!(
+                "unknown {service}/{method}"
+            ))));
+        }
+        let req = match ExecuteToolRequest::decode(message.payload.as_ref()) {
+            Ok(r) => r,
+            Err(e) => {
+                return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::invalid_argument(
+                    format!("decode ExecuteToolRequest: {e}"),
+                )))
+            }
+        };
+        let resp = self.relay.call_tool(&req.tool_name, &req.args_json).await;
+        tddy_rpc::RpcResult::Unary(Ok(resp.encode_to_vec()))
     }
 }
 
@@ -168,8 +195,10 @@ pub struct SandboxRunnerArgs {
     /// project dir so the agent starts inside the repo.
     #[arg(long)]
     pub cwd: Option<PathBuf>,
+    /// Vestigial: unused once `--stdio` is passed. Kept optional for callers that still pass it
+    /// (e.g. `tddy-sandbox-app`'s standalone gRPC demo path).
     #[arg(long)]
-    pub grpc_socket: PathBuf,
+    pub grpc_socket: Option<PathBuf>,
     #[arg(long)]
     pub tool_ipc_socket: PathBuf,
     /// Path to `tddy-tools` for in-jail MCP config (`--mcp` server). Required for Claude mode.
@@ -198,6 +227,19 @@ pub struct SandboxRunnerArgs {
     /// Repeat the flag once per argv token (`--pty-command=/bin/sh --pty-command=-c …`).
     #[arg(long = "pty-command", allow_hyphen_values = true)]
     pub pty_command: Vec<String>,
+    /// Serve `SandboxService` over stdin/stdout (RPC over stdio, see `tddy-stdio`) instead of
+    /// `--grpc-uds`/`--grpc-listen-port`/`--grpc-socket`'s UDS/TCP transport.
+    #[arg(long)]
+    pub stdio: bool,
+    /// Initial PTY width, known by the host before it even attaches (e.g. `tddy-sandbox-app`
+    /// reads its own controlling terminal's size before spawning this process). Opening the PTY
+    /// at this size from the start avoids a visible resize/redraw once the host's `SubscribeTerminal`
+    /// arrives, and avoids ever being wrong if the host never sends a live resize afterward.
+    #[arg(long, default_value_t = 80)]
+    pub initial_cols: u16,
+    /// Initial PTY height — see `initial_cols`.
+    #[arg(long, default_value_t = 24)]
+    pub initial_rows: u16,
 }
 
 struct PendingToolCall {
@@ -479,7 +521,7 @@ struct SandboxRunnerService {
 }
 
 #[tonic::async_trait]
-impl SandboxService for SandboxRunnerService {
+impl TonicSandboxService for SandboxRunnerService {
     type SessionChannelStream =
         tokio_stream::wrappers::UnboundedReceiverStream<Result<SessionFrame, Status>>;
 
@@ -555,6 +597,141 @@ impl SandboxService for SandboxRunnerService {
     }
 }
 
+/// Converts a `tonic::Status` (this crate's tonic version, 0.12) into `tddy_rpc::Status`, by
+/// hand: `tddy-rpc`'s own optional `tonic` feature pins tonic 0.11, an incompatible major version
+/// with this crate's tonic 0.12, so its blanket `From<tonic::Status>` impl doesn't apply here.
+fn tonic_status_to_rpc(status: Status) -> tddy_rpc::Status {
+    use tddy_rpc::Code;
+    let code = match status.code() {
+        tonic::Code::Ok => Code::Ok,
+        tonic::Code::Cancelled => Code::Cancelled,
+        tonic::Code::Unknown => Code::Unknown,
+        tonic::Code::InvalidArgument => Code::InvalidArgument,
+        tonic::Code::DeadlineExceeded => Code::DeadlineExceeded,
+        tonic::Code::NotFound => Code::NotFound,
+        tonic::Code::AlreadyExists => Code::AlreadyExists,
+        tonic::Code::PermissionDenied => Code::PermissionDenied,
+        tonic::Code::ResourceExhausted => Code::ResourceExhausted,
+        tonic::Code::FailedPrecondition => Code::FailedPrecondition,
+        tonic::Code::Aborted => Code::Aborted,
+        tonic::Code::OutOfRange => Code::OutOfRange,
+        tonic::Code::Unimplemented => Code::Unimplemented,
+        tonic::Code::Internal => Code::Internal,
+        tonic::Code::Unavailable => Code::Unavailable,
+        tonic::Code::DataLoss => Code::DataLoss,
+        tonic::Code::Unauthenticated => Code::Unauthenticated,
+    };
+    tddy_rpc::Status {
+        code,
+        message: status.message().to_string(),
+    }
+}
+
+/// Same `SandboxRunnerService`, served over `tddy-stdio` instead of tonic gRPC (`--stdio`).
+/// `sandbox.proto`'s own message types are `extern_path`-linked back to this canonical
+/// `proto::sandbox` module from both the tonic pass (`tonic_sandbox`) and this one (see
+/// `tddy-service/build.rs`), so `SessionFrame`/`EchoRequest`/etc. are the identical Rust types
+/// used by the tonic impl above — this impl mirrors that one's relay logic exactly, just wrapped
+/// in `tddy_rpc::{Request, Response, Streaming, Status}` instead of `tonic::{Request, Response,
+/// Status}` (duplicated, not delegated — same dual-transport pattern as every other service here).
+#[async_trait::async_trait]
+impl tddy_service::proto::sandbox::SandboxService for SandboxRunnerService {
+    type SessionChannelStream =
+        tokio_stream::wrappers::UnboundedReceiverStream<Result<SessionFrame, tddy_rpc::Status>>;
+
+    async fn session_channel(
+        &self,
+        request: tddy_rpc::Request<tddy_rpc::Streaming<SessionFrame>>,
+    ) -> Result<tddy_rpc::Response<Self::SessionChannelStream>, tddy_rpc::Status> {
+        let mut inbound = request.into_inner();
+        // `SandboxSessionRelay`'s outbound channel is typed against `tonic::Status` (shared with
+        // the tonic transport above) — convert to `tddy_rpc::Status` only at this trait's
+        // boundary (`tddy-rpc`'s `tonic` feature provides the `From` impl) rather than making the
+        // relay generic over the status type.
+        let (out_tx, out_rx): (OutboundSender, _) = tokio::sync::mpsc::unbounded_channel();
+        let relay = Arc::clone(&self.relay);
+        // Capture the server-stream sender so the CONNECT proxy can push tunnel frames directly.
+        relay.set_outbound(out_tx.clone());
+        let session_id = self.session_id.clone();
+        let stdin_tx = self.stdin_tx.clone();
+
+        tokio::spawn(async move {
+            while let Some(Ok(frame)) = inbound.next().await {
+                match frame.payload {
+                    Some(SessionPayload::SubscribeTerminal(sub)) => {
+                        if sub.session_id == session_id {
+                            *relay.terminal_subscribed.lock().unwrap() = true;
+                        }
+                    }
+                    Some(SessionPayload::TerminalInput(input)) => {
+                        if !input.data.is_empty() {
+                            let _ = stdin_tx.send(Bytes::from(input.data));
+                        }
+                    }
+                    Some(SessionPayload::ToolResponse(resp)) => relay.deliver_tool_response(resp),
+                    Some(SessionPayload::EgressResponse(resp)) => {
+                        relay.deliver_egress_response(resp)
+                    }
+                    Some(SessionPayload::TunnelOpenAck(ack)) => relay.deliver_tunnel_ack(ack),
+                    Some(SessionPayload::TunnelData(data)) => relay.deliver_tunnel_data(data),
+                    Some(SessionPayload::TunnelClose(close)) => relay.deliver_tunnel_close(close),
+                    Some(SessionPayload::HostPoll(_)) => {
+                        relay.handle_host_poll(&out_tx);
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        // Bridge the relay's tonic::Status-typed channel to this trait's tddy_rpc::Status return
+        // type — a plain forwarding task, same pattern as echo_stream's below. Converts by hand
+        // rather than via tddy-rpc's optional `tonic` feature: that feature pins tonic 0.11,
+        // incompatible with this crate's tonic 0.12.
+        let (final_tx, final_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            let mut out_rx = out_rx;
+            while let Some(item) = out_rx.recv().await {
+                if final_tx.send(item.map_err(tonic_status_to_rpc)).is_err() {
+                    break;
+                }
+            }
+        });
+
+        Ok(tddy_rpc::Response::new(
+            tokio_stream::wrappers::UnboundedReceiverStream::new(final_rx),
+        ))
+    }
+
+    async fn echo(
+        &self,
+        request: tddy_rpc::Request<EchoRequest>,
+    ) -> Result<tddy_rpc::Response<EchoResponse>, tddy_rpc::Status> {
+        let req = request.into_inner();
+        Ok(tddy_rpc::Response::new(EchoResponse {
+            message: req.message,
+        }))
+    }
+
+    type EchoStreamStream =
+        tokio_stream::wrappers::UnboundedReceiverStream<Result<EchoStreamFrame, tddy_rpc::Status>>;
+
+    async fn echo_stream(
+        &self,
+        request: tddy_rpc::Request<tddy_rpc::Streaming<EchoStreamFrame>>,
+    ) -> Result<tddy_rpc::Response<Self::EchoStreamStream>, tddy_rpc::Status> {
+        let mut inbound = request.into_inner();
+        let (out_tx, out_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Some(Ok(frame)) = inbound.next().await {
+                let _ = out_tx.send(Ok(frame));
+            }
+        });
+        Ok(tddy_rpc::Response::new(
+            tokio_stream::wrappers::UnboundedReceiverStream::new(out_rx),
+        ))
+    }
+}
+
 /// Resolve out-of-band secrets passed via `TDDY_SECRET_<NAME>=<file path>` entries.
 ///
 /// For each such entry, read the file at the path, yield `(<NAME>, contents)` to be set on the
@@ -583,6 +760,52 @@ pub fn resolve_secret_envs(
     resolved
 }
 
+// ---------------------------------------------------------------------------
+// Resize escape parsing
+// ---------------------------------------------------------------------------
+
+/// In-jail counterpart of `tddy_daemon::claude_cli_session::strip_resize`: strips an OSC resize
+/// sequence (`\x1b]resize;{cols};{rows}\x07`) from `data`.
+///
+/// Returns `(Some((cols, rows)), remaining)` when found, or `(None, original)` otherwise. The
+/// escape sequence is removed from the returned bytes so it is not forwarded to the PTY stdin.
+fn strip_resize_escape(data: &[u8]) -> (Option<(u16, u16)>, Bytes) {
+    let prefix = b"\x1b]resize;";
+    let start = match (0..data.len().saturating_sub(prefix.len()))
+        .find(|&i| data[i..].starts_with(prefix))
+    {
+        Some(i) => i,
+        None => return (None, Bytes::copy_from_slice(data)),
+    };
+    let after = &data[start + prefix.len()..];
+    let bel = match after.iter().position(|&b| b == 0x07) {
+        Some(i) => i,
+        None => return (None, Bytes::copy_from_slice(data)),
+    };
+    let inner = &after[..bel];
+    let semi = match inner.iter().position(|&b| b == b';') {
+        Some(i) => i,
+        None => return (None, Bytes::copy_from_slice(data)),
+    };
+    let parsed = std::str::from_utf8(&inner[..semi])
+        .ok()
+        .and_then(|s| s.parse::<u16>().ok())
+        .zip(
+            std::str::from_utf8(&inner[semi + 1..])
+                .ok()
+                .and_then(|s| s.parse::<u16>().ok()),
+        );
+    match parsed {
+        Some((cols, rows)) => {
+            let end = start + prefix.len() + bel + 1;
+            let mut remaining = data[..start].to_vec();
+            remaining.extend_from_slice(&data[end..]);
+            (Some((cols, rows)), Bytes::from(remaining))
+        }
+        None => (None, Bytes::copy_from_slice(data)),
+    }
+}
+
 struct PtyState {
     stdin_tx: std::sync::mpsc::Sender<Bytes>,
 }
@@ -592,16 +815,21 @@ fn run_generic_pty_thread(
     cwd: PathBuf,
     relay: Arc<SandboxSessionRelay>,
     stdin_rx: std::sync::mpsc::Receiver<Bytes>,
+    initial_cols: u16,
+    initial_rows: u16,
 ) -> Result<i32> {
     boot_log(
         "INFO",
-        &format!("pty: openpty generic cwd={} argv={argv:?}", cwd.display(),),
+        &format!(
+            "pty: openpty generic cwd={} argv={argv:?} size={initial_cols}x{initial_rows}",
+            cwd.display(),
+        ),
     );
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
-            rows: 24,
-            cols: 80,
+            rows: initial_rows,
+            cols: initial_cols,
             pixel_width: 0,
             pixel_height: 0,
         })
@@ -657,7 +885,19 @@ fn run_generic_pty_thread(
             }
         };
         while let Ok(chunk) = stdin_rx.recv() {
-            if std::io::Write::write_all(&mut w, &chunk).is_err() {
+            let (resize, remaining) = strip_resize_escape(&chunk);
+            if let Some((cols, rows)) = resize {
+                let _ = master_writer.lock().unwrap().resize(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                });
+            }
+            if remaining.is_empty() {
+                continue;
+            }
+            if std::io::Write::write_all(&mut w, &remaining).is_err() {
                 break;
             }
             let _ = std::io::Write::flush(&mut w);
@@ -687,12 +927,21 @@ fn spawn_generic_pty(
     argv: Vec<String>,
     cwd: PathBuf,
     relay: Arc<SandboxSessionRelay>,
+    initial_cols: u16,
+    initial_rows: u16,
 ) -> Result<(PtyState, std::sync::mpsc::Receiver<i32>)> {
     let (stdin_tx, stdin_rx) = std::sync::mpsc::channel::<Bytes>();
     let (done_tx, done_rx) = std::sync::mpsc::channel::<i32>();
     let relay_thread = Arc::clone(&relay);
     std::thread::spawn(move || {
-        let code = match run_generic_pty_thread(argv, cwd, relay_thread, stdin_rx) {
+        let code = match run_generic_pty_thread(
+            argv,
+            cwd,
+            relay_thread,
+            stdin_rx,
+            initial_cols,
+            initial_rows,
+        ) {
             Ok(code) => code,
             Err(e) => {
                 boot_log_error("spawn_generic_pty", format!("{e:#}"));
@@ -711,11 +960,13 @@ fn run_claude_pty_thread(
     egress_shim: String,
     relay: Arc<SandboxSessionRelay>,
     stdin_rx: std::sync::mpsc::Receiver<Bytes>,
+    initial_cols: u16,
+    initial_rows: u16,
 ) -> Result<()> {
     boot_log(
         "INFO",
         &format!(
-            "pty: openpty claude={} cwd={} argv={argv:?}",
+            "pty: openpty claude={} cwd={} argv={argv:?} size={initial_cols}x{initial_rows}",
             argv.first().map(String::as_str).unwrap_or("<missing>"),
             cwd.display(),
         ),
@@ -723,8 +974,8 @@ fn run_claude_pty_thread(
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
-            rows: 24,
-            cols: 80,
+            rows: initial_rows,
+            cols: initial_cols,
             pixel_width: 0,
             pixel_height: 0,
         })
@@ -814,7 +1065,19 @@ fn run_claude_pty_thread(
             }
         };
         while let Ok(chunk) = stdin_rx.recv() {
-            if let Err(e) = std::io::Write::write_all(&mut w, &chunk) {
+            let (resize, remaining) = strip_resize_escape(&chunk);
+            if let Some((cols, rows)) = resize {
+                let _ = master_writer.lock().unwrap().resize(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                });
+            }
+            if remaining.is_empty() {
+                continue;
+            }
+            if let Err(e) = std::io::Write::write_all(&mut w, &remaining) {
                 boot_log("ERROR", &format!("pty: stdin write failed: {e}"));
                 break;
             }
@@ -832,6 +1095,51 @@ fn run_claude_pty_thread(
     Ok(())
 }
 
+/// Pure resolution of the effective replaced-tool set: no subagent name (absent or blank) means
+/// nothing is replaced, regardless of any override — there's no subagent behind it to honor.
+/// Otherwise delegates to [`tddy_discovery::subagent::resolve_replaced_tools`], so the
+/// default/override contract matches the one `tddy-discovery` already specifies.
+fn resolve_subagent_replaced_tools(
+    subagent_name: Option<&str>,
+    override_csv: Option<&str>,
+) -> Vec<String> {
+    match subagent_name.map(str::trim).filter(|name| !name.is_empty()) {
+        Some(name) => tddy_discovery::subagent::resolve_replaced_tools(name, override_csv),
+        None => Vec::new(),
+    }
+}
+
+/// Pure resolution of the effective replaced-tool set from a raw `TDDY_SUBAGENTS_JSON` payload
+/// (a serialized `Vec<SpecializedAgentDef>`): parses the JSON and unions every def's own
+/// `replaces` list via [`tddy_discovery::subagent::resolve_replaced_tools_for_defs`]. Absent,
+/// blank, or unparseable JSON resolves to an empty set — no panic, no fallback fabrication.
+fn subagents_json_replaced_tools(raw_json: Option<&str>) -> Vec<String> {
+    let raw_json = match raw_json.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw_json) => raw_json,
+        None => return Vec::new(),
+    };
+    match serde_json::from_str::<Vec<tddy_discovery::agent_def::SpecializedAgentDef>>(raw_json) {
+        Ok(defs) => tddy_discovery::subagent::resolve_replaced_tools_for_defs(&defs),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Thin env-reading wrapper around [`resolve_subagent_replaced_tools`] and
+/// [`subagents_json_replaced_tools`]: prefers the array model (`TDDY_SUBAGENTS_JSON`) when it
+/// parses to a non-empty replaced-tool set, otherwise falls back to the legacy single-subagent
+/// pair (`TDDY_SUBAGENT`/`TDDY_SUBAGENT_REPLACES`).
+fn subagent_replaced_tools_from_env() -> Vec<String> {
+    let from_json =
+        subagents_json_replaced_tools(std::env::var("TDDY_SUBAGENTS_JSON").ok().as_deref());
+    if !from_json.is_empty() {
+        return from_json;
+    }
+    resolve_subagent_replaced_tools(
+        std::env::var("TDDY_SUBAGENT").ok().as_deref(),
+        std::env::var("TDDY_SUBAGENT_REPLACES").ok().as_deref(),
+    )
+}
+
 struct SpawnClaudePtyParams<'a> {
     context_dir: &'a Path,
     /// Working directory for the Claude process (defaults to `context_dir` when no project dir is
@@ -844,6 +1152,8 @@ struct SpawnClaudePtyParams<'a> {
     tddy_tools_path: &'a Path,
     egress_shim: &'a str,
     relay: Arc<SandboxSessionRelay>,
+    initial_cols: u16,
+    initial_rows: u16,
 }
 
 fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
@@ -857,6 +1167,8 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
         tddy_tools_path,
         egress_shim,
         relay,
+        initial_cols,
+        initial_rows,
     } = params;
     let (stdin_tx, stdin_rx) = std::sync::mpsc::channel::<Bytes>();
 
@@ -871,8 +1183,19 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
     argv.push(permission_mode.to_string());
 
     let scratch_dir = claude_scratch_mcp_dir(context_dir);
-    append_claude_mcp_args(&mut argv, &scratch_dir, tddy_tools_path)
-        .context("append sandbox claude MCP allowlist args")?;
+    let subagent_enabled = std::env::var("TDDY_SUBAGENT")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
+    let replaced_tools = subagent_replaced_tools_from_env();
+    let replaced_refs: Vec<&str> = replaced_tools.iter().map(String::as_str).collect();
+    append_claude_mcp_args(
+        &mut argv,
+        &scratch_dir,
+        tddy_tools_path,
+        subagent_enabled,
+        &replaced_refs,
+    )
+    .context("append sandbox claude MCP allowlist args")?;
     boot_log(
         "INFO",
         &format!(
@@ -887,7 +1210,15 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
     let egress_shim = egress_shim.to_string();
 
     std::thread::spawn(move || {
-        if let Err(e) = run_claude_pty_thread(argv, cwd, egress_shim, relay_thread, stdin_rx) {
+        if let Err(e) = run_claude_pty_thread(
+            argv,
+            cwd,
+            egress_shim,
+            relay_thread,
+            stdin_rx,
+            initial_cols,
+            initial_rows,
+        ) {
             boot_log_error("spawn_claude_pty", format!("{e:#}"));
             write_failure_marker(&format!("spawn_claude_pty failed: {e:#}"));
         }
@@ -910,25 +1241,16 @@ async fn start_tool_ipc_server(path: PathBuf, relay: Arc<SandboxSessionRelay>) -
         };
         let _ = ready_tx.send(());
         loop {
-            let Ok((mut stream, _)) = listener.accept().await else {
+            let Ok((stream, _)) = listener.accept().await else {
                 continue;
             };
             let relay = Arc::clone(&relay);
             tokio::spawn(async move {
-                use tokio::io::{AsyncReadExt, AsyncWriteExt};
-                let mut buf = vec![0u8; 65536];
-                if let Ok(n) = stream.read(&mut buf).await {
-                    if n == 0 {
-                        return;
-                    }
-                    let req: ToolIpcRequest = match serde_json::from_slice(&buf[..n]) {
-                        Ok(v) => v,
-                        Err(_) => return,
-                    };
-                    let resp = relay.call_tool(&req.tool_name, &req.args_json).await;
-                    let out = tool_ipc_response_from_execute(&resp);
-                    let _ = stream.write_all(out.to_json_string().as_bytes()).await;
-                }
+                let (read_half, write_half) = tokio::io::split(stream);
+                let service = ToolExecService { relay };
+                let (_client, endpoint) =
+                    tddy_stdio::StdioEndpoint::from_duplex(read_half, write_half, service);
+                endpoint.run().await;
             });
         }
     });
@@ -1225,9 +1547,14 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
             "INFO",
             &format!("boot: spawn_generic_pty argv={:?}", args.pty_command),
         );
-        let (pty_state, done_rx) =
-            spawn_generic_pty(args.pty_command.clone(), cwd, Arc::clone(&relay))
-                .inspect_err(|e| boot_log_error("spawn_generic_pty", format!("{e:#}")))?;
+        let (pty_state, done_rx) = spawn_generic_pty(
+            args.pty_command.clone(),
+            cwd,
+            Arc::clone(&relay),
+            args.initial_cols,
+            args.initial_rows,
+        )
+        .inspect_err(|e| boot_log_error("spawn_generic_pty", format!("{e:#}")))?;
         let notify = Arc::clone(&shutdown_notify);
         tokio::spawn(async move {
             let _ = tokio::task::spawn_blocking(move || done_rx.recv()).await;
@@ -1255,6 +1582,8 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
             tddy_tools_path,
             egress_shim: &egress_shim,
             relay: Arc::clone(&relay),
+            initial_cols: args.initial_cols,
+            initial_rows: args.initial_rows,
         })
         .inspect_err(|e| boot_log_error("spawn_claude_pty", format!("{e:#}")))?;
         boot_log("INFO", "boot: claude pty thread spawned");
@@ -1266,6 +1595,29 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         stdin_tx: pty.stdin_tx,
         relay,
     };
+
+    if args.stdio {
+        // --stdio dedicates this process's real stdin/stdout to RPC framing (see
+        // `tddy_core::stdio_safety`) — keep stderr off the terminal but stdin/stdout live, same
+        // discipline as `--stdio` on `tddy-coder`. Best-effort: no fallback dir means no terminal
+        // to redirect away from in the first place.
+        if let Some(fallback_dir) = BOOT_LOG_FALLBACK.get() {
+            let _ = tddy_core::stdio_safety::redirect_fd_to_file(
+                libc::STDERR_FILENO,
+                &fallback_dir.join("sandbox-runner.stdio_stderr.log"),
+            );
+        }
+        boot_log("INFO", "boot: serve sandbox SandboxService over stdio");
+        std::fs::write(&args.ready_marker, "stdio")
+            .context("write ready marker")
+            .inspect_err(|e| boot_log_error("write_ready_marker", format!("{e:#}")))?;
+        sandbox_log_line("INFO", "SandboxService serving over stdio");
+        let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_process_stdio(
+            tddy_service::proto::sandbox::SandboxServiceServer::new(service),
+        );
+        endpoint.run().await;
+        return Ok(());
+    }
 
     // AF_UNIX control channel (Linux cgroups path): a UDS on a bind-mounted path crosses the jail's
     // network namespace, where loopback TCP cannot. The ready marker becomes a bind sentinel.
@@ -1302,7 +1654,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         let generic_pty_shutdown = generic_pty;
         let shutdown_notify = Arc::clone(&shutdown_notify);
         Server::builder()
-            .add_service(SandboxServiceServer::new(service))
+            .add_service(TonicSandboxServiceServer::new(service))
             .serve_with_incoming_shutdown(
                 tokio_stream::wrappers::UnixListenerStream::new(listener),
                 async move {
@@ -1362,7 +1714,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
     let generic_pty_shutdown = generic_pty;
     let shutdown_notify = Arc::clone(&shutdown_notify);
     Server::builder()
-        .add_service(SandboxServiceServer::new(service))
+        .add_service(TonicSandboxServiceServer::new(service))
         .serve_with_incoming_shutdown(
             tokio_stream::wrappers::TcpListenerStream::new(listener),
             async move {
@@ -1491,5 +1843,328 @@ mod tests {
         ])
         .expect("argv must parse");
         assert_eq!(args.pty_command, vec!["/bin/sh", "-c", "printf", "pty_ok"]);
+    }
+
+    // ─── resolve_subagent_replaced_tools ────────────────────────────────────────
+    //
+    // Feature: docs/ft/coder/managed-codebase-subagents.md § Tool replacement (criteria 15, 17)
+    // Changeset: docs/dev/1-WIP/2026-07-02-changeset-subagent-tool-replacement.md
+    //
+    // Pure resolution (no env access) so these tests never touch process-global state — the thin
+    // `subagent_replaced_tools_from_env` wrapper reads `TDDY_SUBAGENT`/`TDDY_SUBAGENT_REPLACES`
+    // and delegates here.
+
+    /// No subagent name means nothing is replaced, regardless of any override — there is no
+    /// subagent behind the override to honor.
+    #[test]
+    fn resolve_subagent_replaced_tools_is_empty_when_no_subagent_name_is_given() {
+        // When
+        let replaced = resolve_subagent_replaced_tools(None, Some("grep"));
+
+        // Then
+        assert_eq!(replaced, Vec::<String>::new());
+    }
+
+    /// A blank subagent name (unset env var reads as `Some("")` in some shells) is treated the
+    /// same as no subagent at all.
+    #[test]
+    fn resolve_subagent_replaced_tools_is_empty_when_subagent_name_is_blank() {
+        // When
+        let replaced = resolve_subagent_replaced_tools(Some("  "), None);
+
+        // Then
+        assert_eq!(replaced, Vec::<String>::new());
+    }
+
+    /// With a known subagent name and no override, the runner falls back to that subagent's
+    /// declared default — so `--specialized-agent fastcontext` alone still filters `Grep`/`Glob`
+    /// from the allowlist.
+    #[test]
+    fn resolve_subagent_replaced_tools_falls_back_to_the_subagent_default_when_no_override_env_is_set(
+    ) {
+        // When
+        let replaced = resolve_subagent_replaced_tools(Some("fastcontext"), None);
+
+        // Then
+        assert_eq!(replaced, vec!["Grep".to_string(), "Glob".to_string()]);
+    }
+
+    /// An explicit `TDDY_SUBAGENT_REPLACES` override (comma-separated, arbitrary whitespace)
+    /// wins over the subagent's declared default.
+    #[test]
+    fn resolve_subagent_replaced_tools_honors_a_csv_override_with_whitespace() {
+        // When
+        let replaced = resolve_subagent_replaced_tools(Some("fastcontext"), Some(" read , grep "));
+
+        // Then
+        assert_eq!(replaced, vec!["Read".to_string(), "Grep".to_string()]);
+    }
+
+    /// An override that is present but empty is treated as "no override" — the subagent default
+    /// applies, matching `resolve_replaced_tools`'s own contract (criterion 14).
+    #[test]
+    fn resolve_subagent_replaced_tools_treats_an_empty_override_as_no_override() {
+        // When
+        let replaced = resolve_subagent_replaced_tools(Some("fastcontext"), Some(""));
+
+        // Then
+        assert_eq!(replaced, vec!["Grep".to_string(), "Glob".to_string()]);
+    }
+
+    /// An unknown token in the override is dropped, not passed through — a typo in
+    /// `--subagent-replaces` must not silently produce a nonsense allowlist entry.
+    #[test]
+    fn resolve_subagent_replaced_tools_drops_unrecognized_override_tokens() {
+        // When
+        let replaced =
+            resolve_subagent_replaced_tools(Some("fastcontext"), Some("grep,not-a-real-tool"));
+
+        // Then
+        assert_eq!(replaced, vec!["Grep".to_string()]);
+    }
+
+    /// Drift guard (mirrors `tddy-daemon`'s `workspace_exec_tool_names_match_tool_catalog`):
+    /// `tddy_discovery::subagent`'s canonical exec-tool name table is intentionally kept local to
+    /// avoid a `tddy-discovery -> tddy-sandbox` dependency, so nothing enforces that it stays in
+    /// sync with `tddy_sandbox::workspace_exec_tool_names()` at the type level. Round-trip every
+    /// real exec tool name through an override to catch the list silently falling behind: a tool
+    /// missing from the canonical table would be dropped here instead of resolving to itself.
+    #[test]
+    fn every_workspace_exec_tool_name_round_trips_through_an_override() {
+        // Given — the canonical exec-tool names this runner's allowlist is built from
+        // When — each one is passed as a single-tool override
+        // Then — it must resolve back to itself; a dropped name means the tables diverged
+        for name in tddy_sandbox::workspace_exec_tool_names() {
+            let replaced =
+                tddy_discovery::subagent::resolve_replaced_tools("fastcontext", Some(name));
+            assert_eq!(
+                replaced,
+                vec![name.to_string()],
+                "tddy-discovery's canonical exec-tool table is missing {name} — \
+                 update CANONICAL_EXEC_TOOL_NAMES in packages/tddy-discovery/src/subagent.rs"
+            );
+        }
+    }
+
+    // ─── subagents_json_replaced_tools ───────────────────────────────────────────
+    //
+    // Feature: docs/ft/coder/managed-codebase-subagents.md § Tool replacement (array model)
+    //
+    // Pure resolution (no env access) of the `TDDY_SUBAGENTS_JSON` payload — the array-of-agents
+    // counterpart to `resolve_subagent_replaced_tools`'s single-name path above.
+
+    /// A JSON array of specialized-agent defs unions every def's own `replaces` list.
+    #[test]
+    fn subagents_json_replaced_tools_unions_from_json() {
+        // Given — two defs, one replacing Grep+Glob, the other replacing ReadLints
+        let raw_json = serde_json::json!([
+            {
+                "name": "fastcontext",
+                "model": "some-model",
+                "base_url": "http://localhost:30000",
+                "tools": ["READ"],
+                "max_turns": 6,
+                "replaces": ["Grep", "Glob"]
+            },
+            {
+                "name": "my-linter",
+                "model": "some-model",
+                "base_url": "http://localhost:30001",
+                "tools": ["READ"],
+                "max_turns": 6,
+                "replaces": ["ReadLints"]
+            }
+        ])
+        .to_string();
+
+        // When
+        let replaced = subagents_json_replaced_tools(Some(&raw_json));
+
+        // Then
+        assert_eq!(
+            replaced,
+            vec![
+                "Grep".to_string(),
+                "Glob".to_string(),
+                "ReadLints".to_string()
+            ]
+        );
+    }
+
+    /// Absent or blank JSON resolves to an empty set — no panic, no fallback fabrication.
+    #[test]
+    fn subagents_json_replaced_tools_returns_empty_for_absent_or_blank_json() {
+        assert_eq!(subagents_json_replaced_tools(None), Vec::<String>::new());
+        assert_eq!(
+            subagents_json_replaced_tools(Some("   ")),
+            Vec::<String>::new()
+        );
+    }
+
+    /// Unparseable JSON resolves to an empty set rather than panicking — a malformed
+    /// `TDDY_SUBAGENTS_JSON` must degrade to "nothing replaced", not crash the sandbox runner.
+    #[test]
+    fn subagents_json_replaced_tools_returns_empty_for_unparseable_json() {
+        assert_eq!(
+            subagents_json_replaced_tools(Some("not valid json")),
+            Vec::<String>::new()
+        );
+    }
+
+    /// **sandbox_runner_args_parse_with_stdio_flag_and_no_grpc_socket**: once the daemon's real
+    /// session lifecycle switches to stdio (see docs/dev/TODO.md), it stops passing
+    /// `--grpc-socket`/`--grpc-listen-port`/`--grpc-uds` entirely — `grpc_socket` must become
+    /// optional so argv built without any gRPC flags still parses.
+    #[test]
+    fn sandbox_runner_args_parse_with_stdio_flag_and_no_grpc_socket() {
+        // Given argv with --stdio and no --grpc-socket/--grpc-listen-port/--grpc-uds at all
+        let args = SandboxRunnerArgs::try_parse_from([
+            "tddy-sandbox-runner",
+            "--session-id",
+            "sess",
+            "--context-dir",
+            "/tmp/ctx",
+            "--tool-ipc-socket",
+            "/tmp/ipc.sock",
+            "--model",
+            "",
+            "--ready-marker",
+            "/tmp/ready",
+            "--stdio",
+        ])
+        .expect("argv must parse without --grpc-socket when --stdio is set");
+
+        // Then grpc_socket is absent and the stdio transport is requested
+        assert_eq!(args.grpc_socket, None);
+        assert!(args.stdio);
+    }
+
+    /// Without `--initial-cols`/`--initial-rows`, the PTY still opens at the same 80x24 default
+    /// the hardcoded `openpty` call used before these flags existed — callers that don't know or
+    /// care about the host terminal size keep today's behavior unchanged.
+    #[test]
+    fn sandbox_runner_args_default_initial_size_matches_the_historical_hardcoded_pty_size() {
+        // Given argv with none of the new sizing flags
+        let args = SandboxRunnerArgs::try_parse_from([
+            "tddy-sandbox-runner",
+            "--session-id",
+            "sess",
+            "--context-dir",
+            "/tmp/ctx",
+            "--tool-ipc-socket",
+            "/tmp/ipc.sock",
+            "--model",
+            "",
+            "--ready-marker",
+            "/tmp/ready",
+            "--stdio",
+        ])
+        .expect("argv must parse without --initial-cols/--initial-rows");
+
+        // Then the defaults match the pre-existing hardcoded openpty(PtySize{rows:24,cols:80,..})
+        assert_eq!(args.initial_cols, 80);
+        assert_eq!(args.initial_rows, 24);
+    }
+
+    /// A host that knows its real terminal size (e.g. `tddy-sandbox-app`, before it even spawns
+    /// this process) can open the PTY at that size from the start, instead of relying entirely on
+    /// a live resize to correct an initially-wrong size after the fact.
+    #[test]
+    fn sandbox_runner_args_parses_explicit_initial_terminal_size() {
+        // Given argv with an explicit, non-default terminal size
+        let args = SandboxRunnerArgs::try_parse_from([
+            "tddy-sandbox-runner",
+            "--session-id",
+            "sess",
+            "--context-dir",
+            "/tmp/ctx",
+            "--tool-ipc-socket",
+            "/tmp/ipc.sock",
+            "--model",
+            "",
+            "--ready-marker",
+            "/tmp/ready",
+            "--stdio",
+            "--initial-cols",
+            "170",
+            "--initial-rows",
+            "57",
+        ])
+        .expect("argv must parse with explicit --initial-cols/--initial-rows");
+
+        // Then the parsed values match the caller's real terminal size, not the defaults
+        assert_eq!(args.initial_cols, 170);
+        assert_eq!(args.initial_rows, 57);
+    }
+
+    // -----------------------------------------------------------------------
+    // strip_resize_escape — in-jail counterpart of
+    // `tddy_daemon::claude_cli_session::strip_resize`, applied to the sandboxed Claude CLI's PTY
+    // stdin so a live host terminal resize (see docs on `tddy_sandbox_app::bridge`) can reach the
+    // jail instead of only sizing the PTY once at `SubscribeTerminal` time.
+    // -----------------------------------------------------------------------
+
+    /// A well-formed `\x1b]resize;{cols};{rows}\x07` sequence with nothing else in the buffer is
+    /// fully consumed: the dimensions are extracted and no bytes are forwarded to the child PTY.
+    #[test]
+    fn strip_resize_escape_extracts_cols_and_rows_from_a_well_formed_sequence() {
+        // Given
+        let data = b"\x1b]resize;170;57\x07";
+
+        // When
+        let (resize, remaining) = strip_resize_escape(data);
+
+        // Then
+        assert_eq!(resize, Some((170, 57)));
+        assert!(
+            remaining.is_empty(),
+            "expected no bytes left after stripping the whole escape sequence, got {remaining:?}"
+        );
+    }
+
+    /// The escape sequence is removed even when surrounded by real keystrokes, and the
+    /// surrounding bytes are stitched back together untouched.
+    #[test]
+    fn strip_resize_escape_removes_the_sequence_but_preserves_surrounding_keystrokes() {
+        // Given
+        let mut data = b"ab".to_vec();
+        data.extend_from_slice(b"\x1b]resize;80;24\x07");
+        data.extend_from_slice(b"cd");
+
+        // When
+        let (resize, remaining) = strip_resize_escape(&data);
+
+        // Then
+        assert_eq!(resize, Some((80, 24)));
+        assert_eq!(remaining.as_ref(), b"abcd");
+    }
+
+    /// Plain input with no resize escape sequence at all passes through byte-for-byte.
+    #[test]
+    fn strip_resize_escape_returns_none_and_original_bytes_when_no_escape_is_present() {
+        // Given
+        let data = b"hello world";
+
+        // When
+        let (resize, remaining) = strip_resize_escape(data);
+
+        // Then
+        assert_eq!(resize, None);
+        assert_eq!(remaining.as_ref(), data);
+    }
+
+    /// A truncated sequence missing its BEL (`\x07`) terminator is not a valid resize request —
+    /// it must not be parsed, and must not be silently swallowed from the stream either.
+    #[test]
+    fn strip_resize_escape_returns_none_when_the_bel_terminator_is_missing() {
+        // Given
+        let data = b"\x1b]resize;80;24";
+
+        // When
+        let (resize, remaining) = strip_resize_escape(data);
+
+        // Then
+        assert_eq!(resize, None);
+        assert_eq!(remaining.as_ref(), data);
     }
 }

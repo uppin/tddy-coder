@@ -11,7 +11,13 @@ use rmcp::{
 };
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+use tddy_discovery::agent_def::SpecializedAgentDef;
+use tddy_discovery::subagent::{
+    CodebaseAccess, PromptOutcome, SubagentConfig, SubagentRegistry, SubagentSession,
+};
 
 /// Unix socket for relaying approval prompts to the tddy-coder TUI. In `cfg(test)` builds this is
 /// disabled unless `TDDY_TOOLS_TEST_ALLOW_SOCKET=1`, so unit tests never hit a live session when
@@ -86,6 +92,11 @@ impl PermissionServer {
         // catalog today (see exec_tool_catalog doc comment for why).
         if crate::session_tool_client::detect_session_tool_transport().is_some() {
             tool_router.merge(dynamic_tool_router(&exec_tool_catalog()));
+        }
+        // Discovery-subagent tools (ACP-shaped: subagent_new_session/prompt/cancel) — merged only
+        // when a subagent is actually configured, mirroring the exec-tool merge above.
+        if subagent_enabled() {
+            tool_router.merge(subagent_tool_router());
         }
         Self {
             tool_router,
@@ -606,6 +617,271 @@ pub fn dynamic_tool_router(
         });
         router.add_route(route);
     }
+    router
+}
+
+// --- Discovery subagent MCP tools (ACP-shaped: session/new, session/prompt, session/cancel) ---
+
+/// True when a discovery subagent is configured for this process (`TDDY_SUBAGENT` non-empty).
+fn subagent_enabled() -> bool {
+    env_non_empty("TDDY_SUBAGENT").is_some()
+}
+
+fn env_non_empty(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|v| !v.trim().is_empty())
+}
+
+type SubagentSessionTable = tokio::sync::Mutex<HashMap<String, Box<dyn SubagentSession>>>;
+
+/// Process-wide session table — `PermissionServer` merges the subagent router at construction
+/// time, but the conversation must survive across separate `tools/call` invocations, so the table
+/// lives outside any single `PermissionServer` instance.
+fn subagent_sessions() -> &'static SubagentSessionTable {
+    static SESSIONS: OnceLock<SubagentSessionTable> = OnceLock::new();
+    SESSIONS.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()))
+}
+
+/// Resolve how a subagent's internal READ/GLOB/GREP calls reach the codebase: explicit
+/// `TDDY_SUBAGENT_CODEBASE_ACCESS` override, else `Managed` when a session-tool transport is
+/// configured (mirrors the exec-tool gating above), else `Local`.
+fn subagent_codebase_access_from_env() -> CodebaseAccess {
+    match env_non_empty("TDDY_SUBAGENT_CODEBASE_ACCESS").as_deref() {
+        Some("local") => CodebaseAccess::Local,
+        Some("managed") => managed_codebase_access(),
+        _ => {
+            if crate::session_tool_client::detect_session_tool_transport().is_some() {
+                managed_codebase_access()
+            } else {
+                CodebaseAccess::Local
+            }
+        }
+    }
+}
+
+/// Wrap [`crate::session_tool_client::dispatch_session_tool`] as a `CodebaseAccess::Managed`
+/// dispatch fn — the same proxy transport the exec-tool catalog already uses.
+fn managed_codebase_access() -> CodebaseAccess {
+    CodebaseAccess::managed(|tool_name: String, args: serde_json::Value| {
+        Box::pin(async move {
+            crate::session_tool_client::dispatch_session_tool(&tool_name, args).await
+        })
+    })
+}
+
+/// Parse `TDDY_SUBAGENTS_JSON` (a JSON array of [`SpecializedAgentDef`] — see
+/// docs/ft/coder/specialized-subagents.md) into the resolved specialized-agent defs for this
+/// process. Empty (unset, blank, or unparseable) when the env var is absent — the caller falls
+/// back to the legacy single-fastcontext `SubagentRegistry::new()` path in that case, preserving
+/// today's `TDDY_SUBAGENT=fastcontext` + `TDDY_SUBAGENT_FASTCONTEXT_*` behavior unchanged.
+fn subagents_from_env() -> Vec<SpecializedAgentDef> {
+    env_non_empty("TDDY_SUBAGENTS_JSON")
+        .and_then(|json| serde_json::from_str::<Vec<SpecializedAgentDef>>(&json).ok())
+        .unwrap_or_default()
+}
+
+/// Build a [`SubagentConfig`] from `TDDY_SUBAGENT_FASTCONTEXT_*` env vars, with defaults matching
+/// `tddy-coder`'s `--fastcontext-*` CLI flags (see docs/ft/coder/discovery-agent.md). Only
+/// `access` is meaningful when the registry was built via [`subagents_from_env`]'s defs (the def
+/// itself supplies base_url/model/max_turns in that case — see
+/// `SubagentRegistry::create`'s doc comment in `tddy-discovery`).
+fn subagent_config_from_env() -> SubagentConfig {
+    SubagentConfig {
+        base_url: env_non_empty("TDDY_SUBAGENT_FASTCONTEXT_URL")
+            .unwrap_or_else(|| "http://localhost:30000".to_string()),
+        model: env_non_empty("TDDY_SUBAGENT_FASTCONTEXT_MODEL")
+            .unwrap_or_else(|| "microsoft/FastContext-1.0-4B-RL".to_string()),
+        max_turns: env_non_empty("TDDY_SUBAGENT_FASTCONTEXT_MAX_TURNS")
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(10),
+        access: subagent_codebase_access_from_env(),
+    }
+}
+
+fn subagent_error_json(message: impl std::fmt::Display) -> String {
+    serde_json::json!({ "error": message.to_string(), "is_error": true }).to_string()
+}
+
+fn prompt_outcome_json(outcome: PromptOutcome) -> String {
+    serde_json::json!({
+        "stopReason": outcome.stop_reason,
+        "content": outcome.content,
+    })
+    .to_string()
+}
+
+/// `subagent_new_session` (ACP `session/new`-shaped): opens a conversation with the named
+/// subagent (default: `TDDY_SUBAGENT`) under the given `sessionId` — the caller decides the
+/// conversation id; one is generated only when omitted.
+async fn subagent_new_session_tool(args: serde_json::Value) -> String {
+    let agent_name = args
+        .get("agent")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or_else(|| env_non_empty("TDDY_SUBAGENT"));
+    let Some(agent_name) = agent_name else {
+        return subagent_error_json("no subagent configured: set TDDY_SUBAGENT or pass 'agent'");
+    };
+    let session_id = args
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    let defs = subagents_from_env();
+    let registry = if defs.is_empty() {
+        SubagentRegistry::new()
+    } else {
+        SubagentRegistry::from_defs(defs)
+    };
+    match registry.create(&agent_name, subagent_config_from_env()) {
+        Ok(session) => {
+            subagent_sessions()
+                .lock()
+                .await
+                .insert(session_id.clone(), session);
+            serde_json::json!({ "sessionId": session_id }).to_string()
+        }
+        Err(e) => subagent_error_json(e),
+    }
+}
+
+/// `subagent_prompt` (ACP `session/prompt`-shaped): sends one prompt turn to an already-open
+/// session and returns `{stopReason, content}` once the subagent yields.
+async fn subagent_prompt_tool(args: serde_json::Value) -> String {
+    let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
+        return subagent_error_json("missing required field: sessionId");
+    };
+    let Some(prompt_blocks) = args.get("prompt").and_then(|v| v.as_array()) else {
+        return subagent_error_json("missing required field: prompt");
+    };
+    let prompt_text = prompt_blocks
+        .iter()
+        .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if prompt_text.is_empty() {
+        return subagent_error_json("prompt must contain at least one non-empty text block");
+    }
+
+    let mut sessions = subagent_sessions().lock().await;
+    let Some(session) = sessions.get_mut(session_id) else {
+        return subagent_error_json(format!("unknown subagent session: {session_id}"));
+    };
+    match session.prompt(&prompt_text).await {
+        Ok(outcome) => prompt_outcome_json(outcome),
+        Err(e) => subagent_error_json(e),
+    }
+}
+
+/// `subagent_cancel` (ACP `session/cancel`-shaped): closes an open session, if any.
+async fn subagent_cancel_tool(args: serde_json::Value) -> String {
+    let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
+        return subagent_error_json("missing required field: sessionId");
+    };
+    let cancelled = subagent_sessions()
+        .lock()
+        .await
+        .remove(session_id)
+        .is_some();
+    serde_json::json!({ "cancelled": cancelled }).to_string()
+}
+
+fn schema_object(
+    json: serde_json::Value,
+) -> std::sync::Arc<serde_json::Map<String, serde_json::Value>> {
+    std::sync::Arc::new(json.as_object().cloned().unwrap_or_default())
+}
+
+/// Wraps a subagent tool handler (`async fn(Value) -> String`) into a `ToolRoute` — the same
+/// success-envelope-with-embedded-error convention `dynamic_tool_router` uses for exec tools.
+fn subagent_route<F>(
+    tool: rmcp::model::Tool,
+    handler: F,
+) -> rmcp::handler::server::router::tool::ToolRoute<PermissionServer>
+where
+    F: Fn(serde_json::Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send>>
+        + Send
+        + Sync
+        + 'static,
+{
+    rmcp::handler::server::router::tool::ToolRoute::new_dyn(tool, move |ctx| {
+        let arguments = serde_json::Value::Object(ctx.arguments.clone().unwrap_or_default());
+        let result_future = handler(arguments);
+        Box::pin(async move {
+            let result_string = result_future.await;
+            Ok(rmcp::model::CallToolResult::success(vec![
+                rmcp::model::Content::text(result_string),
+            ]))
+        })
+    })
+}
+
+/// Build the `ToolRouter` for the three ACP-shaped subagent tools. Merged into
+/// `PermissionServer::new()`'s router only when [`subagent_enabled`].
+fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<PermissionServer> {
+    use rmcp::handler::server::router::tool::ToolRouter;
+
+    let mut router = ToolRouter::new();
+
+    let new_session_tool = rmcp::model::Tool::new(
+        "subagent_new_session",
+        "Open a new conversation with a discovery subagent (ACP session/new-shaped). \
+         Returns {sessionId}.",
+        schema_object(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "agent": {"type": "string", "description": "Subagent name, e.g. 'fastcontext'. Defaults to TDDY_SUBAGENT."},
+                "sessionId": {"type": "string", "description": "Caller-chosen conversation id. Generated if omitted."},
+                "cwd": {"type": "string", "description": "Optional working directory hint."}
+            }
+        })),
+    );
+    router.add_route(subagent_route(new_session_tool, |args| {
+        Box::pin(subagent_new_session_tool(args))
+    }));
+
+    let prompt_tool = rmcp::model::Tool::new(
+        "subagent_prompt",
+        "Send a prompt turn to an open subagent session (ACP session/prompt-shaped). \
+         Returns {stopReason, content}.",
+        schema_object(serde_json::json!({
+            "type": "object",
+            "required": ["sessionId", "prompt"],
+            "properties": {
+                "sessionId": {"type": "string"},
+                "prompt": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["type", "text"],
+                        "properties": {
+                            "type": {"type": "string"},
+                            "text": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        })),
+    );
+    router.add_route(subagent_route(prompt_tool, |args| {
+        Box::pin(subagent_prompt_tool(args))
+    }));
+
+    let cancel_tool = rmcp::model::Tool::new(
+        "subagent_cancel",
+        "Close an open subagent session (ACP session/cancel-shaped).",
+        schema_object(serde_json::json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "properties": {
+                "sessionId": {"type": "string"}
+            }
+        })),
+    );
+    router.add_route(subagent_route(cancel_tool, |args| {
+        Box::pin(subagent_cancel_tool(args))
+    }));
+
     router
 }
 

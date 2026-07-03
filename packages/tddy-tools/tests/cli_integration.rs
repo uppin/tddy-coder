@@ -305,29 +305,47 @@ fn mcp_mode_does_not_require_subcommand() {
     );
 }
 
+/// A toolcall listener stand-in that always answers with a fixed `ToolCallResponse::Error`,
+/// over the same `tddy-rpc`/`tddy-stdio` framing the real listener now serves (see
+/// `tddy_core::toolcall::listener::ToolcallRpcService`).
+struct FixedErrorRelay {
+    message: &'static str,
+}
+
+#[async_trait::async_trait]
+impl tddy_rpc::RpcService for FixedErrorRelay {
+    async fn handle_rpc(
+        &self,
+        _service: &str,
+        _method: &str,
+        _message: &tddy_rpc::RpcMessage,
+    ) -> tddy_rpc::RpcResult {
+        let body = serde_json::json!({"status": "error", "message": self.message});
+        tddy_rpc::RpcResult::Unary(Ok(body.to_string().into_bytes()))
+    }
+}
+
 /// Relay `ToolCallResponse::Error` uses `message`, not `errors`. tddy-tools must surface it
 /// (matches `packages/tddy-core/src/toolcall/mod.rs` serialization).
 #[cfg(unix)]
-#[test]
-fn submit_relay_error_with_message_surfaces_detail() {
-    use std::io::{BufRead, Write};
-    use std::os::unix::net::UnixListener;
-    use std::thread;
-
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn submit_relay_error_with_message_surfaces_detail() {
     let dir = tempfile::tempdir().expect("tempdir");
     let sock_path = dir.path().join("relay.sock");
     let _ = std::fs::remove_file(&sock_path);
-    let listener = UnixListener::bind(&sock_path).expect("bind");
+    let listener = tokio::net::UnixListener::bind(&sock_path).expect("bind");
 
-    let handle = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept");
-        let mut line = String::new();
-        std::io::BufReader::new(&mut stream)
-            .read_line(&mut line)
-            .expect("read request");
-        let resp = r#"{"status":"error","message":"presenter did not respond to submit relay in time — poll_tool_calls"}"#;
-        writeln!(stream, "{}", resp).expect("write response");
-        stream.flush().ok();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept");
+        let (reader, writer) = stream.into_split();
+        let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+            reader,
+            writer,
+            FixedErrorRelay {
+                message: "presenter did not respond to submit relay in time — poll_tool_calls",
+            },
+        );
+        endpoint.run().await;
     });
 
     let valid_json =
@@ -347,5 +365,5 @@ fn submit_relay_error_with_message_surfaces_detail() {
         .stdout(predicates::str::contains("presenter did not respond"))
         .stdout(predicates::str::contains("poll_tool_calls"));
 
-    handle.join().expect("server thread");
+    server.abort();
 }

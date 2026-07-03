@@ -2,6 +2,47 @@
 
 Release note history for the Coder product area.
 
+## 2026-07-02 — Subagent-declared tool replacement
+
+- A discovery subagent (FastContext replaces Grep/Glob) can now declare which exec tools it takes over from the main agent — those tools are removed from the sandboxed Claude CLI's allowlist (not just discouraged in the prompt), and the managed-codebase appendix names the subagent that must be used instead
+- New `--subagent-replaces <csv>` flag on `tddy-sandbox-app` (default: the subagent's own declared set)
+- Daemon-hosted sandboxed sessions — previously with no discovery-subagent support at all — gain full parity with the standalone `tddy-sandbox-app` CLI, for both new-session start and resume
+- Feature: [managed-codebase-subagents.md § Tool replacement](managed-codebase-subagents.md#tool-replacement-subagent-declared)
+## 2026-07-02 — Specialized subagents (YAML-defined) + session-creation picker
+
+- Generalizes the single hardcoded FastContext discovery subagent into **specialized subagents**: named configs (model, endpoint, system prompt, bound tools, turn budget) loaded from `<tddyhome>/agents/*.yaml`, resolved via `tddy_discovery::agent_def::resolve_agent_defs` (builtin `fastcontext` always available; a user-defined def of the same name overrides it)
+- `tddy-discovery`'s MCP subagent registry (`SubagentRegistry::from_defs`) now supports any number of registered defs, each with its own model/endpoint, an optional seeded system prompt, a bound-tool allowlist (unbound tool calls are rejected, not silently executed), and EndTurn-on-plain-prose termination — in addition to the existing `<final_answer>` convention
+- `tddy-tools`' MCP server reads `TDDY_SUBAGENTS_JSON` (a JSON array of resolved defs) alongside the existing `TDDY_SUBAGENT` gate; `TDDY_SUBAGENT=fastcontext` alone (no `TDDY_SUBAGENTS_JSON`) keeps working unmodified for back-compat
+- `tddy-coder`'s `create_backend` recognizes any resolved specialized-agent name (not just the literal `"fastcontext"`), building its `FastContextBackend` from the resolved def's model/endpoint — explicit `--fastcontext-*` CLI flags still take precedence
+- New `ListSubagents` RPC + `StartSessionRequest.managed_codebase`/`.specialized_agents` fields: the daemon resolves named specialized agents into the sandboxed jail's env (`ConnectionServiceImpl::specialized_subagent_env`); an unresolvable name rejects the request
+- `tddy-web`'s new-session form gains a collapsible **"Managed codebase"** section (claude-cli sessions only) listing available specialized subagents as a multi-select
+- **Deferred** (tracked in `docs/dev/TODO.md`): the standalone `tddy-sandbox-app` CLI was not migrated off its #254 `--discovery-subagent`/`--fastcontext-*` flags to the new def-driven model; `--agent`'s clap allowlist doesn't yet recognize custom specialized-agent names (`create_backend` itself does)
+- Feature: [specialized-subagents.md](specialized-subagents.md); builds on [discovery-agent.md](discovery-agent.md), [managed-codebase-subagents.md](managed-codebase-subagents.md)
+
+## 2026-07-02 — Managed-codebase mode + discovery subagents over MCP
+
+- Renamed the user-facing "remote codebase" concept to **managed-codebase mode** — the context-dir appendix Claude reads now says "MANAGED"/"Managed Codebase" instead of "REMOTE"/"Remote Codebase"; internal identifiers and `TDDY_REMOTE_*` env vars are unchanged for wire stability
+- `tddy-sandbox-app` gains `--codebase-mode {mounted,managed}` as the primary flag (`--remote-codebase` remains a working deprecated alias) plus `--discovery-subagent <name>`, `--fastcontext-url`, `--fastcontext-model`, `--fastcontext-max-turns`
+- New discovery-subagent abstraction in `tddy-discovery` (`SubagentSession`, `CodebaseAccess`, stateful `FastContextSession`, pluggable `SubagentRegistry`) lets a coding agent open a conversation with a lightweight local-model helper (starting with FastContext) instead of spending its own tool-call budget on codebase exploration
+- `tddy-tools`' MCP server exposes three ACP-shaped tools — `subagent_new_session`, `subagent_prompt`, `subagent_cancel` (mirroring ACP's `session/new`/`session/prompt`/`session/cancel`) — gated on `TDDY_SUBAGENT`; the caller (main agent) chooses the conversation id, and the subagent's own internal READ/GLOB/GREP tool loop can read the codebase directly or through the same proxy the main agent's exec tools use
+- Feature: [managed-codebase-subagents.md](managed-codebase-subagents.md)
+
+## 2026-07-01 — stdio RPC transport for gRPC-hosting binaries
+
+- `tddy-coder`/`tddy-demo` gain a `--stdio` flag serving the existing `TddyRemote` remote-control surface over `tddy-stdio`, running concurrently with `--grpc` (not mutually exclusive — verified empirically, corrected from the original plan)
+- `tddy-sandbox-runner` gains `--stdio` for its own `SandboxService` (`Echo`/`EchoStream`/`SessionChannel`, incl. real PTY output), proven end-to-end through a real macOS Seatbelt jail
+- New `tddy_core::stdio_safety` module guarantees a `--stdio` process's fd 1 carries only RPC frames (log-output override + stderr redirect)
+- `run_host_relay` (the actual production host-side session relay for sandboxed sessions) made transport-agnostic via a new `SessionChannelClient` trait — proven with a full tool-call round trip through a real jail via the new `StdioSandboxClient`, though `tddy-daemon`'s real session-lifecycle call sites aren't switched over yet
+- Sandbox tool-IPC (`tddy-tools` ↔ `tddy-sandbox-runner`) migrated from an unframed JSON protocol to the same `tddy-rpc` framing, fixing a latent large-payload truncation risk
+- Feature: [grpc-remote-control.md](grpc-remote-control.md#stdio-transport), [rpc-multi-transport.md](rpc-multi-transport.md#real-consumers-2026-07-01-follow-up)
+## 2026-07-01 — Configurable FastContext model + fix plain-mode free-prompting crash
+
+- `--fastcontext-model` CLI flag / `fastcontext_model` YAML config key lets the FastContext (Discovery) backend target any OpenAI-compatible model tag — including a locally-served model via Ollama — instead of only the hardcoded `microsoft/FastContext-1.0-4B-RL` default
+- Fixed `tddy-coder`'s plain (non-TUI) CLI crashing with `Error: no pending questions` on any single-shot `--recipe free-prompting` turn (e.g. `--agent fastcontext`, `--agent stub`) — `FreePromptingRecipe`'s single `prompting` task has no graph successor by design, so the workflow engine reports the same "waiting" status it uses for a genuine clarification question; the plain CLI now tells the two apart and completes instead of erroring
+- `BackendInvokeTask` now persists a no-submit turn's response into the session context so plain-mode callers have something to print
+- Feature: [discovery-agent.md](discovery-agent.md), [workflow-recipes.md](workflow-recipes.md)
+- PR: [#251](https://github.com/uppin/tddy-coder/pull/251)
+
 ## 2026-07-01 — RPC multi-transport: stdio/IPC alongside LiveKit
 
 - New `tddy-stdio` package: parent↔child process RPC over stdin/stdout, multiplexed, callable in either direction (the child can call back into the parent over the same pipe pair)

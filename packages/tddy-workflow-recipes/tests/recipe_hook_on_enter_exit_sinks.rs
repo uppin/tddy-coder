@@ -17,8 +17,9 @@ use std::time::Duration;
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::hooks::RunnerHooks;
-// get_agent_sink is re-exported from tddy_core::workflow
-use tddy_core::workflow::get_agent_sink;
+// get_agent_sink / get_progress_sink are re-exported from tddy_core::workflow
+use tddy_core::workflow::{get_agent_sink, get_progress_sink};
+use tddy_core::ProgressEvent;
 use tddy_workflow_recipes::free_prompting::FreePromptingWorkflowHooks;
 
 /// `FreePromptingWorkflowHooks::on_enter_task` must call `set_sinks(...)`, making the
@@ -65,6 +66,60 @@ fn free_prompting_hooks_on_enter_sets_sink_and_on_exit_clears_it() {
     assert!(
         get_agent_sink().is_none(),
         "on_exit_task must call clear_sinks so the sink is not visible to subsequent tasks"
+    );
+}
+
+/// `FreePromptingWorkflowHooks::on_enter_task` must also call `set_sinks(...)` with a populated
+/// `ProgressSink`, making the thread-local progress sink available to tasks running in the same
+/// thread — this is what lets `FastContextBackend` (which has no native CLI stream to parse)
+/// surface `ProgressEvent::ToolUse` in the activity pane. `on_exit_task` must clear it.
+#[test]
+fn free_prompting_hooks_on_enter_sets_progress_sink_and_on_exit_clears_it() {
+    // Given — a hooks instance with an event channel (sink source)
+    let (tx, rx) = mpsc::channel::<WorkflowEvent>();
+    let hooks = FreePromptingWorkflowHooks::new(Some(tx));
+    let ctx = Context::new();
+    let task_id = "prompting";
+
+    // Pre-condition: no progress sink is present before on_enter_task
+    assert!(
+        get_progress_sink().is_none(),
+        "no progress sink should be present before on_enter_task"
+    );
+
+    // When
+    hooks.on_enter_task(task_id, &ctx);
+
+    // Then — the thread-local sink is populated
+    let sink = get_progress_sink().expect(
+        "on_enter_task must call set_sinks so that the progress sink \
+         is available to task.run() in the same thread",
+    );
+
+    // And — emitting through the thread-local sink delivers events to the channel
+    sink.emit(&ProgressEvent::ToolUse {
+        name: "GLOB".to_string(),
+        detail: None,
+    });
+    let ev = rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("sink emit must deliver WorkflowEvent::Progress to the presenter channel");
+    assert!(
+        matches!(
+            ev,
+            WorkflowEvent::Progress(ProgressEvent::ToolUse { ref name, .. }) if name == "GLOB"
+        ),
+        "expected Progress(ToolUse {{ name: \"GLOB\", .. }}), got {:?}",
+        ev
+    );
+
+    // When
+    hooks.on_exit_task(task_id, &ctx);
+
+    // Then — the thread-local sink is cleared
+    assert!(
+        get_progress_sink().is_none(),
+        "on_exit_task must call clear_sinks so the progress sink is not visible to subsequent tasks"
     );
 }
 

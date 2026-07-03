@@ -156,5 +156,7 @@ async fn ignores_a_response_for_an_unknown_request_id() {
     // When a response arrives for a request_id nothing registered (e.g. a duplicate delivery
     // after the pending entry was already removed)
     // Then it is dropped silently — no panic, no pending entry to corrupt
-    engine.on_response(a_response(999, b"unexpected", true)).await;
+    engine
+        .on_response(a_response(999, b"unexpected", true))
+        .await;
 }

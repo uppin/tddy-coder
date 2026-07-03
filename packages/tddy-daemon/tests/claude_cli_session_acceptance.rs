@@ -185,6 +185,8 @@ async fn claude_cli_session_metadata_fields_persisted() {
             permission_mode: String::new(),
             stack_parent: String::new(),
             sandbox: false,
+            managed_codebase: false,
+            specialized_agents: vec![],
         }))
         .await
         .expect("StartSession with session_type=claude-cli must succeed");
@@ -271,6 +273,8 @@ async fn claude_cli_session_livekit_fields_empty() {
             permission_mode: String::new(),
             stack_parent: String::new(),
             sandbox: false,
+            managed_codebase: false,
+            specialized_agents: vec![],
         }))
         .await
         .expect("StartSession must succeed")
@@ -329,6 +333,7 @@ async fn claude_cli_session_enrichment_reads_from_metadata() {
         sandbox: None,
         agent: None,
         recipe: None,
+        specialized_agents: Vec::new(),
     };
     write_session_metadata(&session_dir, &meta).unwrap();
     // No changeset.yaml — intentionally absent to test the claude-cli fallback path.
@@ -416,6 +421,7 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
         sandbox: None,
         agent: None,
         recipe: None,
+        specialized_agents: Vec::new(),
     };
     write_session_metadata(&session_dir, &meta).unwrap();
 
@@ -492,6 +498,8 @@ users:
             permission_mode: String::new(),
             stack_parent: String::new(),
             sandbox: false,
+            managed_codebase: false,
+            specialized_agents: vec![],
         }))
         .await
         .expect_err("StartSession with claude-cli and empty model must fail");
@@ -540,6 +548,8 @@ async fn claude_cli_start_session_requires_project() {
             permission_mode: String::new(),
             stack_parent: String::new(),
             sandbox: false,
+            managed_codebase: false,
+            specialized_agents: vec![],
         }))
         .await
         .expect_err("StartSession with empty project_id must fail");
@@ -570,6 +580,8 @@ async fn claude_cli_start_session_requires_project() {
             permission_mode: String::new(),
             stack_parent: String::new(),
             sandbox: false,
+            managed_codebase: false,
+            specialized_agents: vec![],
         }))
         .await
         .expect_err("StartSession with unknown project_id must fail");
@@ -807,6 +819,8 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
             permission_mode: String::new(),
             stack_parent: String::new(),
             sandbox: false,
+            managed_codebase: false,
+            specialized_agents: vec![],
         }))
         .await
         .expect("StartSession with initial_prompt must succeed");
