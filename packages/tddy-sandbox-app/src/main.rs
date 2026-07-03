@@ -14,6 +14,8 @@ mod config;
 mod spawn;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use clap::Parser;
@@ -266,20 +268,52 @@ async fn main() -> Result<()> {
     };
 
     let task_registry = TaskRegistry::new();
+
+    // Watch the spawned sandbox / in-jail Claude process: when it exits, flip `main_process_exited`
+    // so the terminal bridge stops and the sandbox never lingers after the process it exists to
+    // proxy is gone. The child is shared (via a Mutex) with the post-bridge reap below so both the
+    // watcher's `try_wait` and the cleanup's `kill`/`wait` can reach it.
+    let child = Arc::new(Mutex::new(spawned.handle.into_child()));
+    let main_process_exited = Arc::new(AtomicBool::new(false));
+    let watch_stop = Arc::new(AtomicBool::new(false));
+    let watcher = std::thread::spawn({
+        let child = Arc::clone(&child);
+        let main_process_exited = Arc::clone(&main_process_exited);
+        let watch_stop = Arc::clone(&watch_stop);
+        move || loop {
+            if watch_stop.load(Ordering::Relaxed) {
+                break;
+            }
+            if matches!(child.lock().unwrap().try_wait(), Ok(Some(_))) {
+                main_process_exited.store(true, Ordering::Relaxed);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    });
+
     let bridge_result = bridge::run_terminal_bridge(
         &spawned.ready_marker,
         &spawned.session_id,
         &spawned.worktree_path,
         task_registry,
+        Arc::clone(&main_process_exited),
     )
     .await;
 
+    // Bridge is done — stop the watcher, then reap the child. `kill` is a no-op (logged) if the
+    // process already exited on its own.
+    watch_stop.store(true, Ordering::Relaxed);
+    let _ = watcher.join();
+
     log::info!(target: "tddy_sandbox_app", "stopping sandbox session {session_id}");
-    let mut handle = spawned.handle;
-    if let Err(e) = handle.child_mut().kill() {
-        log::warn!(target: "tddy_sandbox_app", "kill sandbox child: {e}");
+    {
+        let mut child = child.lock().unwrap();
+        if let Err(e) = child.kill() {
+            log::warn!(target: "tddy_sandbox_app", "kill sandbox child: {e}");
+        }
+        let _ = child.wait();
     }
-    let _ = handle.child_mut().wait();
 
     if let Err(e) = bridge_result {
         spawn::log_spawn_diagnostics(&spawned.egress_dir, &spawned.session_dir);

@@ -54,6 +54,7 @@ pub async fn run_terminal_bridge(
     session_id: &str,
     worktree_path: &Path,
     task_registry: TaskRegistry,
+    main_process_exited: Arc<AtomicBool>,
 ) -> Result<()> {
     eprintln!("connecting SessionChannel on loopback…");
     let client = tddy_sandbox_darwin::connect_sandbox_client(ready_marker)
@@ -110,21 +111,24 @@ pub async fn run_terminal_bridge(
                 break;
             }
             match stdin.read(&mut buf) {
-                Ok(0) | Err(_) => {
+                Err(_) => {
                     shutdown_stdin.store(true, Ordering::Relaxed);
                     break;
                 }
-                Ok(n) => {
-                    if n == 1 && buf[0] == 0x03 {
-                        log::info!(target: "tddy_sandbox_app::bridge", "Ctrl-C — disconnecting");
+                // Ctrl-C (0x03) is forwarded to the jail PTY like any other keystroke so the
+                // in-jail `claude` receives the interrupt; only a genuine EOF disconnects.
+                Ok(n) => match classify_stdin_read(n, &buf) {
+                    StdinRead::Disconnected => {
                         shutdown_stdin.store(true, Ordering::Relaxed);
                         break;
                     }
-                    if stdin_tx.send(Bytes::from(buf[..n].to_vec())).is_err() {
-                        shutdown_stdin.store(true, Ordering::Relaxed);
-                        break;
+                    StdinRead::Forward(bytes) => {
+                        if stdin_tx.send(bytes).is_err() {
+                            shutdown_stdin.store(true, Ordering::Relaxed);
+                            break;
+                        }
                     }
-                }
+                },
             }
         }
     });
@@ -133,8 +137,13 @@ pub async fn run_terminal_bridge(
     // terminal size on the same cadence, so a live window resize reaches the jail PTY via the same
     // in-band OSC convention ordinary keystrokes already use (no dedicated proto message).
     let mut last_sent_size = (rows, cols);
-    while !shutdown.load(Ordering::Relaxed) {
-        if relay.is_finished() {
+    loop {
+        if let Some(reason) = bridge_stop_reason(
+            shutdown.load(Ordering::Relaxed),
+            relay.is_finished(),
+            main_process_exited.load(Ordering::Relaxed),
+        ) {
+            log::info!(target: "tddy_sandbox_app::bridge", "bridge loop stopping: {reason:?}");
             break;
         }
         tokio::select! {
@@ -182,6 +191,61 @@ fn resize_frame_if_changed(current: (u16, u16), last_sent: (u16, u16)) -> Option
     Some(Bytes::from(
         format!("\x1b]resize;{cols};{rows}\x07").into_bytes(),
     ))
+}
+
+/// What to do with the result of a blocking read from the host's real stdin.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum StdinRead {
+    /// Forward these bytes verbatim to the in-jail PTY (Claude's stdin). Ctrl-C (`0x03`) is
+    /// included here: in raw mode the terminal delivers it as a byte rather than raising SIGINT,
+    /// and it must reach the underlying `claude` process as an interrupt — not be swallowed by the
+    /// host as a disconnect the way the earlier PTY proxy did.
+    Forward(Bytes),
+    /// stdin reached EOF (`n == 0`, e.g. the controlling terminal closed) — the interactive
+    /// session is over and the bridge disconnects.
+    Disconnected,
+}
+
+/// Classify a blocking stdin read of `n` bytes from `buf` (a fixed-size read buffer). Only the
+/// first `n` bytes are meaningful — the remainder of `buf` is stale and must not be forwarded.
+pub(crate) fn classify_stdin_read(n: usize, buf: &[u8]) -> StdinRead {
+    if n == 0 {
+        StdinRead::Disconnected
+    } else {
+        StdinRead::Forward(Bytes::copy_from_slice(&buf[..n]))
+    }
+}
+
+/// Why the interactive terminal bridge loop stopped.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum BridgeStop {
+    /// A host-side shutdown was requested (stdin EOF / read error propagated into the loop, or a
+    /// host-delivered SIGINT).
+    ShutdownRequested,
+    /// The gRPC `SessionChannel` relay task ended.
+    RelayFinished,
+    /// The spawned sandbox / in-jail Claude main process exited — the sandbox must not outlive the
+    /// process it exists to proxy.
+    MainProcessExited,
+}
+
+/// Decide whether the interactive bridge loop should stop, given the current signals; `None` keeps
+/// it looping. A host-requested shutdown takes precedence, then a finished relay, then a
+/// main-process exit, so the reported reason is deterministic when more than one is true at once.
+pub(crate) fn bridge_stop_reason(
+    shutdown_requested: bool,
+    relay_finished: bool,
+    main_process_exited: bool,
+) -> Option<BridgeStop> {
+    if shutdown_requested {
+        Some(BridgeStop::ShutdownRequested)
+    } else if relay_finished {
+        Some(BridgeStop::RelayFinished)
+    } else if main_process_exited {
+        Some(BridgeStop::MainProcessExited)
+    } else {
+        None
+    }
 }
 
 /// The host's own controlling terminal size, `(rows, cols)`. Read both here (to size the PTY
@@ -290,5 +354,121 @@ mod tests {
 
         // Then
         assert_eq!(frame, Some(Bytes::from_static(b"\x1b]resize;80;40\x07")));
+    }
+
+    // -----------------------------------------------------------------------
+    // classify_stdin_read — decides what to do with the result of a blocking read from the host's
+    // real stdin. The interactive front-end must FORWARD Ctrl-C (0x03) to the in-jail `claude` so
+    // it reaches Claude as an interrupt, rather than intercepting it as a host-side disconnect the
+    // way the earlier PTY proxy did. Only a genuine EOF (n == 0) ends the session.
+    // -----------------------------------------------------------------------
+
+    /// Ctrl-C is a keystroke Claude must see, not a host disconnect signal: a lone 0x03 byte is
+    /// forwarded verbatim to the jail PTY so the underlying `claude` process is interrupted.
+    #[test]
+    fn forwards_ctrl_c_to_the_jail_pty_instead_of_disconnecting() {
+        // Given
+        let buf = [0x03u8];
+
+        // When
+        let decision = classify_stdin_read(1, &buf);
+
+        // Then
+        assert_eq!(decision, StdinRead::Forward(Bytes::from_static(&[0x03])));
+    }
+
+    /// Ordinary typed input is forwarded unchanged to Claude's PTY, exactly the length that was
+    /// read (trailing bytes of the fixed-size read buffer are not leaked).
+    #[test]
+    fn forwards_ordinary_keystrokes_to_the_jail_pty() {
+        // Given
+        let mut buf = [0u8; 256];
+        buf[..3].copy_from_slice(b"ls\r");
+
+        // When
+        let decision = classify_stdin_read(3, &buf);
+
+        // Then
+        assert_eq!(decision, StdinRead::Forward(Bytes::from_static(b"ls\r")));
+    }
+
+    /// Ctrl-C bundled inside a larger chunk is still forwarded whole — the old code special-cased
+    /// only a lone `n == 1` 0x03, so this locks in that 0x03 is never treated specially at all.
+    #[test]
+    fn forwards_ctrl_c_when_bundled_with_other_bytes() {
+        // Given
+        let mut buf = [0u8; 256];
+        buf[..3].copy_from_slice(&[b'a', 0x03, b'b']);
+
+        // When
+        let decision = classify_stdin_read(3, &buf);
+
+        // Then
+        assert_eq!(
+            decision,
+            StdinRead::Forward(Bytes::from_static(&[b'a', 0x03, b'b']))
+        );
+    }
+
+    /// A zero-byte read is stdin EOF (the terminal closed / Ctrl-D): the interactive session is
+    /// over and the bridge disconnects.
+    #[test]
+    fn disconnects_when_stdin_reaches_eof() {
+        // Given
+        let buf = [0u8; 256];
+
+        // When
+        let decision = classify_stdin_read(0, &buf);
+
+        // Then
+        assert_eq!(decision, StdinRead::Disconnected);
+    }
+
+    // -----------------------------------------------------------------------
+    // bridge_stop_reason — decides whether the interactive bridge loop should keep running or
+    // stop, given the current signals. The new requirement: the sandbox must not outlive the main
+    // in-jail process, so `main_process_exited` is a stop condition in its own right (previously
+    // the loop only watched shutdown + relay).
+    // -----------------------------------------------------------------------
+
+    /// While nothing has ended, the loop keeps running (returns no stop reason).
+    #[test]
+    fn keeps_running_while_no_stop_signal_is_present() {
+        // Given / When
+        let reason = bridge_stop_reason(false, false, false);
+
+        // Then
+        assert_eq!(reason, None);
+    }
+
+    /// The core new behavior: when the main process (Claude) has exited, the sandbox bridge stops
+    /// so it does not linger after the process it exists to proxy is gone.
+    #[test]
+    fn stops_when_the_main_process_has_exited() {
+        // Given / When
+        let reason = bridge_stop_reason(false, false, true);
+
+        // Then
+        assert_eq!(reason, Some(BridgeStop::MainProcessExited));
+    }
+
+    /// The gRPC SessionChannel relay ending is a stop condition.
+    #[test]
+    fn stops_when_the_relay_finishes() {
+        // Given / When
+        let reason = bridge_stop_reason(false, true, false);
+
+        // Then
+        assert_eq!(reason, Some(BridgeStop::RelayFinished));
+    }
+
+    /// A host-side shutdown request (e.g. stdin EOF propagated into the loop) stops the loop.
+    #[test]
+    fn stops_when_shutdown_is_requested() {
+        // Given / When
+        let reason = bridge_stop_reason(true, false, false);
+
+        // Then
+        assert_eq!(reason, Some(BridgeStop::ShutdownRequested));
     }
 }
