@@ -2,6 +2,17 @@
 
 Release note history for the Coder product area.
 
+## 2026-07-03 — `./claude-sandbox` launcher + YAML config
+
+- New one-command launcher at the tddy-coder repo root: `./claude-sandbox -c config.yaml -- "prompt"` starts a sandboxed Claude Code session against the current directory as a **managed (unmounted) repo**, with specialized subagents wired in from a single YAML config — symlink-safe root resolution, passes `$PWD` as `--repo`, resolves host `claude` to an absolute path (jail `PATH` is `/usr/bin:/bin` only; prefers `~/.local/bin/claude`, skips `*/.superset*/bin` wrapper shims; `--claude-binary` override), builds `tddy-sandbox-app`+`tddy-tools`+`tddy-sandbox-runner` via `nix develop` into one target dir
+- `tddy-sandbox-app` gains `--config <yaml>` (`SandboxAppConfig`, `deny_unknown_fields`; CLI flags override config); `subagents:` carries full inline `SpecializedAgentDef`s — declaring one both defines and activates it and overrides a same-named builtin (so `fastcontext` can be re-pointed at a local Ollama server with no agents dir); `--model` optional; trailing `-- <args>` forwarded to the in-jail `claude`
+- Egress shim gained a plain-HTTP forward proxy (`rewrite_http_proxy_request`/`handle_http_forward` sharing `open_relay_tunnel`/`pump_tunnel` with the CONNECT handler) so `base_url: http://localhost:11434` works as-is — previously CONNECT/HTTPS-only, the subagent's plain-HTTP `POST` hit the shim's 404 branch
+- Persisted MCP/subagent logs: `tddy-sandbox-runner` sets `TDDY_TOOLS_LOG_FILE` → `<session-dir>/egress/tddy-tools.mcp.log` + `RUST_LOG` (override via `mcp_log_level` config / `--mcp-log-level`); `tddy-tools` `init_logging()` honors it (append; falls back to stderr); `<session-base>/sessions/latest` symlink maintained; `tddy-discovery::subagent` logs each turn (request/completion/errors at `tddy_discovery::subagent`)
+- Replaced-tool enforcement is now defense-in-depth: `--disallowedTools <native>` + `--disallowedTools mcp__tddy-tools__<tool>` (Claude-side) **and** `PermissionServer::new()` filtering the advertised exec catalog by `resolve_replaced_tools_for_defs(&subagents_from_env())` before merging into the tool router (server-side, independent of Claude's allow/disallow lists); builtin `fastcontext` `replaces` now includes `SemanticSearch`
+- 32K Ollama context via `fastcontext-tools-32k.Modelfile` (`PARAMETER num_ctx 32768`) — Ollama's `/v1` endpoint cannot set `num_ctx` per request (ollama/ollama#6137), so the context length is baked into a named model variant the config's `model:` points at
+- **Deferred (Phase 2, tracked in `docs/dev/TODO.md`)**: no automated integration/acceptance test drives a full sandboxed launch with an inline Ollama def — the launcher was verified by a manual full-launch smoke test (config loads → `codebase_mode=managed` → inline `fastcontext` activated, end-to-end through a real macOS Seatbelt jail), but the interactive terminal-attach path was not exercised in CI
+- Feature: [managed-codebase-subagents.md § Standalone launcher](managed-codebase-subagents.md#standalone-launcher-claude-sandbox)
+
 ## 2026-07-02 — Subagent-declared tool replacement
 
 - A discovery subagent (FastContext replaces Grep/Glob) can now declare which exec tools it takes over from the main agent — those tools are removed from the sandboxed Claude CLI's allowlist (not just discouraged in the prompt), and the managed-codebase appendix names the subagent that must be used instead
