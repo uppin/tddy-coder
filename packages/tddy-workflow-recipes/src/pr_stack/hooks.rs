@@ -71,7 +71,9 @@ fn analyze_stack_system_prompt() -> String {
      2. A concise title\n\
      3. A description of what it implements\n\
      4. Its dependencies (which other PRs must merge first)\n\
-     5. A branch name suggestion (e.g. `feature/auth-store`)\n\
+     5. A branch name suggestion grouped under one shared stack namespace, \
+     `feature/<stack-slug>/<node>` (e.g. `feature/auth/token-store`), so the stack's branches \
+     group together\n\
      6. The child recipe to use (default: `tdd`)\n"
         .to_string()
 }
@@ -87,19 +89,22 @@ fn write_stack_plan_system_prompt() -> String {
        - node_id: n1          # stable slug, no spaces\n\
          title: \"Auth token store\"\n\
          description: \"Store tokens securely in the keyring\"\n\
-         branch_suggestion: \"feature/auth-store\"\n\
+         branch_suggestion: \"feature/auth/token-store\"\n\
          parents: []          # empty = root PR, off the stack base branch\n\
          child_recipe: tdd    # optional; default is tdd\n\
        - node_id: n2\n\
          title: \"Auth middleware\"\n\
          description: \"Validate tokens on each request\"\n\
-         branch_suggestion: \"feature/auth-middleware\"\n\
+         branch_suggestion: \"feature/auth/middleware\"\n\
          parents: [n1]        # depends on n1; use node_ids, not branch names\n\
      ```\n\n\
      **Validation rules** (the hook enforces these):\n\
      - `node_id` values must be unique\n\
      - All `parents` entries must reference an existing `node_id`\n\
-     - The dependency graph must be acyclic (no cycles)\n\n\
+     - The dependency graph must be acyclic (no cycles)\n\
+     - Every `branch_suggestion` must be in `feature/<stack-slug>/<node>` form, and all PRs must \
+     share the same `<stack-slug>` so the stack's branches group under one namespace \
+     (e.g. `feature/auth/token-store`, `feature/auth/middleware`)\n\n\
      This may be the first time this plan is written, or a chat-driven refinement of an \
      already-written plan — in both cases, re-emit the full plan.\n\n\
      Also submit a human-readable plan summary using key `stack-plan-md`.\n"

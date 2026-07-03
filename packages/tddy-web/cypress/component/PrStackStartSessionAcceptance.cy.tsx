@@ -57,7 +57,7 @@ beforeEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-it("starts a stack-parented child session with the tdd recipe when Start session is clicked", () => {
+it("starts a stack-parented Claude CLI child session when Start session is clicked", () => {
   // Given
   const backend = aSessionsDrawerBackend([ORCHESTRATOR_SESSION]).onUnary(
     ConnectionService.method.startSession,
@@ -74,13 +74,45 @@ it("starts a stack-parented child session with the tdd recipe when Start session
   sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
   prStackScreenPage.startSessionBtn("n1").click();
 
-  // Then — recipe defaults to "tdd" (the node's child_recipe was unset) and stackParent
-  // is this orchestrator session, giving the child correct hierarchy + base branch.
+  // Then — planned-PR sessions default to a Claude CLI session (see PrStackScreen), stack-parented
+  // to this orchestrator so the child worktree chains onto its branch.
   cy.wrap(backend).should((b) => {
     const calls = b.callsTo(ConnectionService.method.startSession);
     expect(calls).to.have.length(1);
-    expect(calls[0].recipe).to.equal("tdd");
+    expect(calls[0].sessionType).to.equal("claude-cli");
     expect(calls[0].stackParent).to.equal(ORCHESTRATOR_SESSION_ID);
+  });
+});
+
+it("starts a planned PR with its planned branch as new_branch_name", () => {
+  // Given — the planned node carries a grouped stack branch (feature/<stack>/<node>), pre-filled
+  // by the pr-stack agent.
+  const session = {
+    ...ORCHESTRATOR_SESSION,
+    stackPlanJson: aStackPlanJson(1, [
+      aPlannedNode({
+        nodeId: "n1",
+        title: "Add token store",
+        branchSuggestion: "feature/auth-stack/token-store",
+      }),
+    ]),
+  };
+  const backend = aSessionsDrawerBackend([session]).onUnary(
+    ConnectionService.method.startSession,
+    () => ({ sessionId: "child-session-branch-1" }),
+  );
+
+  // When
+  mountWithRpc(<SessionsDrawerScreen />, backend);
+  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  prStackScreenPage.startSessionBtn("n1").click();
+
+  // Then — the StartSession request carries the planned branch, not an empty name. The daemon
+  // rejects branch_worktree_intent = new_branch_from_base with an empty new_branch_name.
+  cy.wrap(null).should(() => {
+    const calls = backend.callsTo(ConnectionService.method.startSession);
+    expect(calls).to.have.length(1);
+    expect(calls[0].newBranchName).to.eq("feature/auth-stack/token-store");
   });
 });
 

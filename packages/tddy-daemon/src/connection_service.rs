@@ -377,6 +377,13 @@ impl ConnectionServiceImpl {
         let Some(sp) = stack_parent else {
             return Ok(None);
         };
+        // A pr-stack orchestrator is a planning session with no branch of its own — chaining a
+        // child onto it means "base off the stack/default branch", not chaining onto a (nonexistent)
+        // orchestrator branch. Treat it as no chain base rather than a failed_precondition. A
+        // branchless *code* session still errors below, per the session-chaining PRD.
+        if Self::parent_is_pr_stack_orchestrator(sessions_base, sp) {
+            return Ok(None);
+        }
         tddy_core::resolve_chain_integration_base_ref_from_parent_session(
             sessions_base,
             sp,
@@ -386,6 +393,22 @@ impl ConnectionServiceImpl {
         .map_err(|e| {
             Status::failed_precondition(format!("could not resolve stack parent branch: {e}"))
         })
+    }
+
+    /// True when the parent session is a pr-stack orchestrator — a planning session carrying a
+    /// planned `stack` (or the `pr-stack` recipe) and therefore no git branch of its own. Such a
+    /// parent is a valid chain target that resolves to the stack/default branch, unlike a branchless
+    /// code session (which is an error). A missing/unreadable parent changeset returns `false` so
+    /// the caller's normal resolution/validation still runs.
+    fn parent_is_pr_stack_orchestrator(
+        sessions_base: &std::path::Path,
+        parent_session_id: &str,
+    ) -> bool {
+        let parent_dir = unified_session_dir_path(sessions_base, parent_session_id);
+        match tddy_core::read_changeset(&parent_dir) {
+            Ok(cs) => cs.recipe.as_deref() == Some("pr-stack") || cs.stack.is_some(),
+            Err(_) => false,
+        }
     }
 
     /// Handle `StartSession` for `session_type = "claude-cli"` sessions.
@@ -2191,6 +2214,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         };
         let timeout = self.config.spawn_worker_request_timeout();
         let daemon_log = self.config.log.clone();
+        let coder_config_path = self.config.coder_config_path.clone();
         let result = spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
             log::debug!(
                 "StartSession: spawn_blocking running, using_spawn_worker={}",
@@ -2200,6 +2224,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             let agent = agent_for_spawn.as_deref();
             let recipe = recipe_for_spawn.as_deref();
             let stack_parent = stack_parent_for_spawn.as_deref();
+            let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
             if let Some(ref client) = spawn_client {
                 let spawn_req = spawn_worker::build_spawn_request(
                     &os_user,
@@ -2217,6 +2242,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         stack_parent,
                     },
                     daemon_log.as_ref(),
+                    coder_log_yaml,
                 );
                 client.spawn(spawn_req)
             } else {
@@ -2239,6 +2265,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     },
                     child_log_level.as_str(),
                     child_log_format.as_str(),
+                    coder_log_yaml.as_deref(),
                 )
             }
         })
@@ -2365,12 +2392,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let tddy_data_dir_for_spawn = self.tddy_data_dir.clone();
         let timeout = self.config.spawn_worker_request_timeout();
         let daemon_log = self.config.log.clone();
+        let coder_config_path = self.config.coder_config_path.clone();
         let result = spawn_blocking_with_timeout(timeout, "ResumeSession: spawn", move || {
             let pid = if project_id_resume.is_empty() {
                 None
             } else {
                 Some(project_id_resume.as_str())
             };
+            let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
             if let Some(ref client) = spawn_client {
                 let spawn_req = spawn_worker::build_spawn_request(
                     &os_user,
@@ -2388,6 +2417,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         stack_parent: None,
                     },
                     daemon_log.as_ref(),
+                    coder_log_yaml,
                 );
                 client.spawn(spawn_req)
             } else {
@@ -2410,6 +2440,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     },
                     child_log_level.as_str(),
                     child_log_format.as_str(),
+                    coder_log_yaml.as_deref(),
                 )
             }
         })
@@ -4910,5 +4941,83 @@ mod add_planned_pr_unit_tests {
             result.is_ok(),
             "a legacy orchestrate-pr-stack alias session must still be accepted"
         );
+    }
+}
+
+#[cfg(test)]
+mod chain_base_resolution_tests {
+    use super::*;
+    use tddy_core::changeset::Stack;
+    use tddy_core::session_lifecycle::unified_session_dir_path;
+    use tddy_core::{write_changeset, Changeset};
+
+    /// Persist `changeset.yaml` for a parent session under `sessions_base`.
+    fn write_parent_changeset(sessions_base: &std::path::Path, session_id: &str, cs: Changeset) {
+        let dir = unified_session_dir_path(sessions_base, session_id);
+        std::fs::create_dir_all(&dir).expect("create parent session dir");
+        write_changeset(&dir, &cs).expect("write parent changeset");
+    }
+
+    #[test]
+    fn resolve_chain_base_ref_returns_none_for_a_branchless_pr_stack_orchestrator_parent() {
+        // Given — a pr-stack orchestrator parent session: it has a planned stack but no branch of
+        // its own (planning sessions never own a code branch).
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let sessions_base = tmp.path();
+        write_parent_changeset(
+            sessions_base,
+            "orchestrator-1",
+            Changeset {
+                recipe: Some("pr-stack".to_string()),
+                stack: Some(Stack {
+                    version: 1,
+                    nodes: vec![],
+                }),
+                branch: None,
+                ..Changeset::default()
+            },
+        );
+
+        // When — a child chains onto that orchestrator
+        let result = ConnectionServiceImpl::resolve_chain_base_ref(
+            sessions_base,
+            Some("orchestrator-1"),
+            tmp.path(),
+        );
+
+        // Then — no chaining; the child bases off the stack/default branch (Ok(None)), not an error
+        assert_eq!(
+            result.expect("branchless orchestrator parent must resolve, not error"),
+            None,
+            "a pr-stack orchestrator parent must yield no chain base (default branch), not failed_precondition"
+        );
+    }
+
+    #[test]
+    fn resolve_chain_base_ref_errors_for_a_branchless_code_session_parent() {
+        // Given — a regular code-session parent with no branch and no stack (not an orchestrator).
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let sessions_base = tmp.path();
+        write_parent_changeset(
+            sessions_base,
+            "code-session-1",
+            Changeset {
+                recipe: Some("tdd".to_string()),
+                stack: None,
+                branch: None,
+                ..Changeset::default()
+            },
+        );
+
+        // When
+        let result = ConnectionServiceImpl::resolve_chain_base_ref(
+            sessions_base,
+            Some("code-session-1"),
+            tmp.path(),
+        );
+
+        // Then — the session-chaining PRD still applies: a branchless code parent cannot be chained
+        let err = result.expect_err("a branchless code-session parent must error");
+        assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
     }
 }

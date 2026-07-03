@@ -8,6 +8,7 @@ import { PlannedPrList } from "./PlannedPrList";
 import { AddPlannedPrForm, type AddPlannedPrFormSubmission } from "./AddPlannedPrForm";
 import { PrStackChat } from "./PrStackChat";
 import { parseStackPlan, type StackNode } from "./stackPlan";
+import { CLAUDE_CLI_MODELS } from "../../../constants/claudeCliModels";
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
@@ -72,20 +73,27 @@ export function PrStackScreen({
     setStartingNodeId(node.nodeId);
     setStartError(null);
     try {
+      // Planned-PR sessions default to a Claude Code CLI session for now. The daemon dispatches on
+      // `sessionType === "claude-cli"` and ignores toolPath/agent/recipe for that path, so those
+      // stay empty — but it *requires* a model and uses `permissionMode`. `stackParent` still chains
+      // the child's worktree onto the orchestrator's branch (see start_claude_cli_session).
       const res = await client.startSession({
         sessionToken,
         projectId: session.projectId,
         toolPath: "",
         agent: "",
-        recipe: node.childRecipe,
+        recipe: "",
         stackParent: session.sessionId,
-        sessionType: "",
-        model: "",
-        permissionMode: "",
-        initialPrompt: "",
+        sessionType: "claude-cli",
+        model: CLAUDE_CLI_MODELS[0]?.id ?? "",
+        permissionMode: "auto",
+        initialPrompt: [node.title, node.description].filter(Boolean).join("\n\n"),
         sandbox: false,
         branchWorktreeIntent: "new_branch_from_base",
-        newBranchName: "",
+        // The planned branch (feature/<stack>/<node>, pre-filled by the pr-stack agent) — the daemon
+        // requires a non-empty new_branch_name for new_branch_from_base. Prefer an already-created
+        // branch, else the plan's suggestion.
+        newBranchName: node.branch ?? node.branchSuggestion ?? "",
         selectedIntegrationBaseRef: "",
         selectedBranchToWorkOn: "",
         daemonInstanceId: session.daemonInstanceId,

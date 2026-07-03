@@ -6,7 +6,7 @@
 //! `PlanPrStackRecipe` — see `docs/ft/coder/pr-stacking.md#legacy-aliases`.
 
 use tddy_workflow_recipes::plan_pr_stack::{
-    planned_prs_into_stack_nodes, validate_stack_plan, StackPlanOutput,
+    planned_prs_into_stack_nodes, validate_stack_plan, PlannedPr, StackPlanOutput,
 };
 use tddy_workflow_recipes::workflow_recipe_and_manifest_from_cli_name;
 
@@ -108,5 +108,97 @@ fn validate_stack_plan_rejects_cycle() {
     assert!(
         msg.to_lowercase().contains("cycle"),
         "validation error must mention cycle; got: {msg}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Branch-name contract: every PR must carry a branch_suggestion, grouped under one
+// `feature/<stack-slug>/<node>` namespace so the whole stack's branches group together and
+// "Start session" can create the branch (branch_worktree_intent = new_branch_from_base requires
+// a non-empty new_branch_name). See docs/ft/coder/pr-stacking.md.
+// ---------------------------------------------------------------------------
+
+/// A PlannedPr with valid defaults — a grouped `feature/todo-app/<node>` branch — so a scenario
+/// overrides only the branch field under test.
+fn a_planned_pr(node_id: &str) -> PlannedPr {
+    PlannedPr {
+        node_id: node_id.into(),
+        title: format!("PR {node_id}"),
+        description: String::new(),
+        branch_suggestion: Some(format!("feature/todo-app/{node_id}")),
+        parents: vec![],
+        child_recipe: None,
+    }
+}
+
+#[test]
+fn validate_stack_plan_rejects_a_pr_without_a_branch_suggestion() {
+    // Given — a structurally valid single-PR plan whose only defect is a missing branch name.
+    // The pr-stack agent must pre-fill branch_suggestion so "Start session" can open the branch.
+    let mut pr = a_planned_pr("scaffold");
+    pr.branch_suggestion = None;
+    let plan = StackPlanOutput {
+        version: 1,
+        prs: vec![pr],
+    };
+
+    // When
+    let result = validate_stack_plan(&plan);
+
+    // Then
+    let msg = result.expect_err("a plan with a missing branch suggestion must be rejected");
+    assert!(
+        msg.to_lowercase().contains("branch"),
+        "error must name the missing branch; got: {msg}"
+    );
+    assert!(
+        msg.contains("scaffold"),
+        "error must identify the offending node; got: {msg}"
+    );
+}
+
+#[test]
+fn validate_stack_plan_rejects_a_branch_not_in_feature_stack_node_shape() {
+    // Given — a branch that is present but not in the `feature/<stack>/<node>` form, so it carries
+    // no shared stack namespace segment.
+    let mut pr = a_planned_pr("scaffold");
+    pr.branch_suggestion = Some("todo-scaffold".into());
+    let plan = StackPlanOutput {
+        version: 1,
+        prs: vec![pr],
+    };
+
+    // When
+    let result = validate_stack_plan(&plan);
+
+    // Then
+    let msg = result.expect_err("a branch not in feature/<stack>/<node> form must be rejected");
+    assert!(
+        msg.contains("feature/"),
+        "error must state the required feature/<stack>/<node> shape; got: {msg}"
+    );
+}
+
+#[test]
+fn validate_stack_plan_rejects_branches_split_across_stack_namespaces() {
+    // Given — two PRs whose branches live under DIFFERENT feature/<stack>/ namespaces
+    // (feature/todo-app/... vs feature/other-thing/...), so they would not group as one stack.
+    let scaffold = a_planned_pr("scaffold"); // feature/todo-app/scaffold
+    let mut core = a_planned_pr("core");
+    core.parents = vec!["scaffold".into()];
+    core.branch_suggestion = Some("feature/other-thing/core".into());
+    let plan = StackPlanOutput {
+        version: 1,
+        prs: vec![scaffold, core],
+    };
+
+    // When
+    let result = validate_stack_plan(&plan);
+
+    // Then
+    let msg = result.expect_err("branches under different stack namespaces must be rejected");
+    assert!(
+        msg.to_lowercase().contains("namespace"),
+        "error must explain the shared-namespace grouping requirement; got: {msg}"
     );
 }
