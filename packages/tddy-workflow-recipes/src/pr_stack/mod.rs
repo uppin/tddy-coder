@@ -24,7 +24,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tddy_core::backend::{CodingBackend, GoalHints, GoalId, PermissionHint};
-use tddy_core::changeset::Changeset;
+use tddy_core::changeset::{Changeset, StackNode};
 use tddy_core::workflow::graph::{Graph, GraphBuilder};
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::ids::WorkflowState;
@@ -288,6 +288,95 @@ pub fn reseed_stack_from_plan_if_unspawned(
         stack.nodes = nodes;
     })
     .map_err(|e| format!("reseed_stack_from_plan_if_unspawned: failed to write stack: {e}"))
+}
+
+/// Input for [`add_planned_pr_node`]. A struct rather than positional params since several
+/// fields share the same `Option<String>` shape — grouping them removes the transposition risk.
+pub struct AddPlannedPrInput {
+    pub title: String,
+    pub description: String,
+    pub branch_suggestion: Option<String>,
+    pub parents: Vec<String>,
+    /// Accepted for symmetry with [`crate::plan_pr_stack::PlannedPr`] but currently unused: like
+    /// [`crate::plan_pr_stack::planned_prs_into_stack_nodes`], `StackNode` has no `child_recipe`
+    /// field to carry it — the web client defaults to `"tdd"` at start-session time regardless
+    /// (see `PrStackScreen.tsx`'s `handleStartSession`).
+    pub child_recipe: Option<String>,
+}
+
+/// Append one manually-created planned PR to an orchestrator session's persisted stack,
+/// choosing its ancestors (parent node ids) from the already-planned nodes.
+///
+/// Unlike [`reseed_stack_from_plan_if_unspawned`] (agent-driven, replaces the whole plan
+/// wholesale and refuses once any node has spawned), this appends a single node and never
+/// touches existing nodes — safe to call regardless of how many nodes have already spawned
+/// child sessions.
+///
+/// The new node's `node_id` is always server-assigned (see [`next_free_node_id`]) — callers
+/// never supply one. Rejects (without writing) a `parents` entry that doesn't resolve to an
+/// existing node, or an append that would introduce a cycle.
+///
+/// PRD: `docs/ft/coder/pr-stacking.md` § Manually adding a planned PR.
+pub fn add_planned_pr_node(
+    session_dir: &Path,
+    input: AddPlannedPrInput,
+) -> Result<StackNode, String> {
+    let changeset = tddy_core::changeset::read_changeset(session_dir)
+        .map_err(|e| format!("add_planned_pr_node: failed to read changeset: {e}"))?;
+    let existing = changeset.stack.unwrap_or_default();
+
+    for parent in &input.parents {
+        if !existing.nodes.iter().any(|n| &n.node_id == parent) {
+            return Err(format!("dangling parent ref: {parent}"));
+        }
+    }
+
+    let node_id = next_free_node_id(&existing);
+    let new_node = StackNode {
+        node_id,
+        title: input.title,
+        description: input.description,
+        branch_suggestion: input.branch_suggestion,
+        branch: None,
+        session_id: None,
+        parents: input.parents,
+        pr_status: None,
+        child_state: None,
+    };
+
+    // Defense-in-depth cycle check: parents are restricted to pre-existing node ids above, so an
+    // append alone can never actually cycle, but this keeps the same guard `validate_stack_plan`
+    // applies to a whole plan, cheaply, rather than special-casing the append path as exempt.
+    let mut candidate_nodes = existing.nodes.clone();
+    candidate_nodes.push(new_node.clone());
+    let candidate_stack = tddy_core::changeset::Stack {
+        version: existing.version,
+        nodes: candidate_nodes,
+    };
+    candidate_stack
+        .topo_order()
+        .map_err(|e| format!("cycle detected: {e}"))?;
+
+    tddy_core::changeset::update_stack_atomic(session_dir, |stack| {
+        stack.nodes.push(new_node.clone());
+    })
+    .map_err(|e| format!("add_planned_pr_node: failed to write stack: {e}"))?;
+
+    Ok(new_node)
+}
+
+/// Next free `"n<N>"` node id for a stack: one past the highest existing numeric suffix among
+/// ids matching `n<digits>` (non-matching ids are ignored for this purpose), or `"n1"` for an
+/// empty/all-non-matching stack. Uses the max, not the count, so a stack with a gap (e.g. `"n1"`,
+/// `"n5"`) still assigns `"n6"` rather than colliding.
+fn next_free_node_id(stack: &tddy_core::changeset::Stack) -> String {
+    let max = stack
+        .nodes
+        .iter()
+        .filter_map(|n| n.node_id.strip_prefix('n')?.parse::<u32>().ok())
+        .max()
+        .unwrap_or(0);
+    format!("n{}", max + 1)
 }
 
 #[cfg(test)]
@@ -746,5 +835,185 @@ mod tests {
             "previous stack must survive untouched"
         );
         assert_eq!(loaded.node("n1").unwrap().title, "Original node");
+    }
+
+    // -----------------------------------------------------------------------
+    // add_planned_pr_node
+    // -----------------------------------------------------------------------
+
+    fn a_changeset_with_stack(nodes: Vec<StackNode>) -> Changeset {
+        Changeset {
+            stack: Some(Stack { version: 1, nodes }),
+            ..Changeset::default()
+        }
+    }
+
+    fn a_node(node_id: &str, title: &str, parents: Vec<&str>) -> StackNode {
+        StackNode {
+            node_id: node_id.to_string(),
+            title: title.to_string(),
+            description: String::new(),
+            branch_suggestion: None,
+            branch: None,
+            session_id: None,
+            parents: parents.into_iter().map(str::to_string).collect(),
+            pr_status: None,
+            child_state: None,
+        }
+    }
+
+    #[test]
+    fn appending_a_root_planned_pr_to_an_empty_stack_assigns_n1_and_persists_it() {
+        // Given — a session with no stack yet
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        tddy_core::changeset::write_changeset(dir, &Changeset::default()).unwrap();
+
+        // When
+        let result = add_planned_pr_node(
+            dir,
+            AddPlannedPrInput {
+                title: "Add token store".to_string(),
+                description: "Persists refresh tokens.".to_string(),
+                branch_suggestion: Some("feature/token-store".to_string()),
+                parents: vec![],
+                child_recipe: None,
+            },
+        );
+
+        // Then
+        assert!(result.is_ok(), "expected Ok, got {result:?}");
+        let node = result.unwrap();
+        assert_eq!(node.node_id, "n1");
+        assert_eq!(node.title, "Add token store");
+        assert_eq!(node.description, "Persists refresh tokens.");
+        assert_eq!(
+            node.branch_suggestion.as_deref(),
+            Some("feature/token-store")
+        );
+        assert_eq!(node.parents, Vec::<String>::new());
+
+        let loaded = read_changeset(dir).unwrap().stack.unwrap();
+        assert_eq!(loaded.nodes.len(), 1);
+        assert_eq!(loaded.node("n1").unwrap().title, "Add token store");
+    }
+
+    #[test]
+    fn appending_a_node_with_valid_parents_persists_them_and_assigns_the_next_free_id() {
+        // Given — a stack with two existing nodes, n1 and n2
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let cs = a_changeset_with_stack(vec![
+            a_node("n1", "Add token store", vec![]),
+            a_node("n2", "Add auth middleware", vec!["n1"]),
+        ]);
+        tddy_core::changeset::write_changeset(dir, &cs).unwrap();
+
+        // When — the new node depends on both existing nodes
+        let result = add_planned_pr_node(
+            dir,
+            AddPlannedPrInput {
+                title: "Add token refresh endpoint".to_string(),
+                description: String::new(),
+                branch_suggestion: None,
+                parents: vec!["n1".to_string(), "n2".to_string()],
+                child_recipe: None,
+            },
+        );
+
+        // Then
+        assert!(result.is_ok(), "expected Ok, got {result:?}");
+        let node = result.unwrap();
+        assert_eq!(node.node_id, "n3");
+        assert_eq!(node.parents, vec!["n1".to_string(), "n2".to_string()]);
+
+        let loaded = read_changeset(dir).unwrap().stack.unwrap();
+        assert_eq!(loaded.nodes.len(), 3);
+        assert_eq!(
+            loaded.node("n3").unwrap().parents,
+            vec!["n1".to_string(), "n2".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_dangling_parent_ref_is_rejected_and_the_stack_on_disk_is_unchanged() {
+        // Given — a stack with a single node, n1
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let cs = a_changeset_with_stack(vec![a_node("n1", "Add token store", vec![])]);
+        tddy_core::changeset::write_changeset(dir, &cs).unwrap();
+
+        // When — the requested ancestor "n99" does not exist
+        let result = add_planned_pr_node(
+            dir,
+            AddPlannedPrInput {
+                title: "Add auth middleware".to_string(),
+                description: String::new(),
+                branch_suggestion: None,
+                parents: vec!["n99".to_string()],
+                child_recipe: None,
+            },
+        );
+
+        // Then
+        assert!(result.is_err(), "expected Err for a dangling parent ref");
+        assert!(result.unwrap_err().contains("n99"));
+        let loaded = read_changeset(dir).unwrap().stack.unwrap();
+        assert_eq!(loaded.nodes.len(), 1, "stack on disk must be unchanged");
+    }
+
+    #[test]
+    fn the_new_node_always_stays_planned_with_no_session_id_or_pr_status() {
+        // Given
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        tddy_core::changeset::write_changeset(dir, &Changeset::default()).unwrap();
+
+        // When
+        let node = add_planned_pr_node(
+            dir,
+            AddPlannedPrInput {
+                title: "Add token store".to_string(),
+                description: String::new(),
+                branch_suggestion: None,
+                parents: vec![],
+                child_recipe: None,
+            },
+        )
+        .unwrap();
+
+        // Then
+        assert_eq!(node.session_id, None);
+        assert_eq!(node.pr_status, None);
+        assert_eq!(node.branch, None);
+        assert_eq!(node.child_state, None);
+    }
+
+    #[test]
+    fn node_id_assignment_picks_up_after_a_non_contiguous_max() {
+        // Given — a stack whose highest existing node id is "n5", not the node count (2)
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let cs = a_changeset_with_stack(vec![
+            a_node("n1", "Add token store", vec![]),
+            a_node("n5", "Add auth middleware", vec![]),
+        ]);
+        tddy_core::changeset::write_changeset(dir, &cs).unwrap();
+
+        // When
+        let node = add_planned_pr_node(
+            dir,
+            AddPlannedPrInput {
+                title: "Add token refresh endpoint".to_string(),
+                description: String::new(),
+                branch_suggestion: None,
+                parents: vec![],
+                child_recipe: None,
+            },
+        )
+        .unwrap();
+
+        // Then — next id is one past the max ("n6"), not one past the count ("n3")
+        assert_eq!(node.node_id, "n6");
     }
 }

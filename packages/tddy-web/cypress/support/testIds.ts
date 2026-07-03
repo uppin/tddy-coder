@@ -255,6 +255,16 @@ export const TEST_IDS = {
   prStackChatQuestionOtherInput: "pr-stack-chat-question-other-input",
   prStackChatQuestionOtherSubmit: "pr-stack-chat-question-other-submit",
   prStackChatMultiSelectSubmit: "pr-stack-chat-multiselect-submit",
+
+  // PR-Stack Chat Screen — manually adding a planned PR (deterministic, non-chat path)
+  prStackAddPlannedPrBtn: "pr-stack-add-planned-pr-btn",
+  prStackAddPlannedPrForm: "pr-stack-add-planned-pr-form",
+  prStackAddPlannedPrTitleInput: "pr-stack-add-planned-pr-title-input",
+  prStackAddPlannedPrDescriptionInput: "pr-stack-add-planned-pr-description-input",
+  prStackAddPlannedPrBranchSuggestionInput: "pr-stack-add-planned-pr-branch-suggestion-input",
+  prStackAddPlannedPrSubmitBtn: "pr-stack-add-planned-pr-submit-btn",
+  prStackAddPlannedPrCancelBtn: "pr-stack-add-planned-pr-cancel-btn",
+  prStackAddPlannedPrError: "pr-stack-add-planned-pr-error",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -472,3 +482,7 @@ export const prStackChatOption = (index: number) => `pr-stack-chat-option-${inde
 
 /** `[data-testid="pr-stack-chat-multiselect-option-<index>"]` — a multi-select option checkbox */
 export const prStackChatMultiSelectOption = (index: number) => `pr-stack-chat-multiselect-option-${index}`;
+
+/** `[data-testid="pr-stack-add-planned-pr-ancestor-<nodeId>"]` — an ancestor checkbox in the "New planned PR" form */
+export const prStackAddPlannedPrAncestorCheckbox = (nodeId: string) =>
+  `pr-stack-add-planned-pr-ancestor-${nodeId}`;

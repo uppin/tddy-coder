@@ -13,6 +13,7 @@ import {
   prStackChatMessage,
   prStackChatOption,
   prStackChatMultiSelectOption,
+  prStackAddPlannedPrAncestorCheckbox,
   TEST_IDS,
 } from "../testIds";
 
@@ -53,6 +54,77 @@ export const prStackScreenPage = {
   /** The status chip on an already-spawned planned-PR row. */
   statusChip: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(prStackStatusChip(nodeId), { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
+  // Manually adding a planned PR (deterministic, non-chat path)
+  // ---------------------------------------------------------------------------
+
+  /** The "+ New planned PR" entry-point button that opens the add-planned-PR form. */
+  addPlannedPrBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackAddPlannedPrBtn, { timeout: 5000, ...options }),
+
+  /** The add-planned-PR form root. */
+  addPlannedPrForm: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackAddPlannedPrForm, { timeout: 5000, ...options }),
+
+  /** The new planned PR's title input. */
+  addPlannedPrTitleInput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackAddPlannedPrTitleInput, { timeout: 5000, ...options }),
+
+  /** The new planned PR's description input. */
+  addPlannedPrDescriptionInput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackAddPlannedPrDescriptionInput, { timeout: 5000, ...options }),
+
+  /** The new planned PR's optional branch-suggestion input. */
+  addPlannedPrBranchSuggestionInput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackAddPlannedPrBranchSuggestionInput, { timeout: 5000, ...options }),
+
+  /** An ancestor checkbox for the given existing planned-PR node id. */
+  addPlannedPrAncestorCheckbox: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackAddPlannedPrAncestorCheckbox(nodeId), { timeout: 5000, ...options }),
+
+  /** Submit button for the add-planned-PR form. */
+  addPlannedPrSubmitBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackAddPlannedPrSubmitBtn, { timeout: 5000, ...options }),
+
+  /** Cancel button for the add-planned-PR form. */
+  addPlannedPrCancelBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackAddPlannedPrCancelBtn, { timeout: 5000, ...options }),
+
+  /** Inline error banner shown when adding a planned PR fails. */
+  addPlannedPrError: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackAddPlannedPrError, { timeout: 5000, ...options }),
+
+  /** Open the "New planned PR" form. */
+  openAddPlannedPrForm() {
+    byTestId(TEST_IDS.prStackAddPlannedPrBtn).click();
+  },
+
+  /**
+   * Fill and submit the "New planned PR" form: types the title (and optional description /
+   * branch suggestion), checks the given ancestor node ids, then clicks submit. Assumes the
+   * form is already open.
+   */
+  fillAndSubmitAddPlannedPrForm(options: {
+    title: string;
+    description?: string;
+    branchSuggestion?: string;
+    ancestorNodeIds?: string[];
+  }) {
+    byTestId(TEST_IDS.prStackAddPlannedPrTitleInput).clear().type(options.title);
+    if (options.description) {
+      byTestId(TEST_IDS.prStackAddPlannedPrDescriptionInput).clear().type(options.description);
+    }
+    if (options.branchSuggestion) {
+      byTestId(TEST_IDS.prStackAddPlannedPrBranchSuggestionInput)
+        .clear()
+        .type(options.branchSuggestion);
+    }
+    for (const nodeId of options.ancestorNodeIds ?? []) {
+      byTestId(prStackAddPlannedPrAncestorCheckbox(nodeId)).click();
+    }
+    byTestId(TEST_IDS.prStackAddPlannedPrSubmitBtn).click();
+  },
 
   // ---------------------------------------------------------------------------
   // Chat window

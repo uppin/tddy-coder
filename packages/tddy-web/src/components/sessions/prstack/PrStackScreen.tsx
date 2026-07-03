@@ -1,9 +1,11 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../../gen/connection_pb";
 import type { SessionAttachmentState } from "../useSessionAttachment";
+import { Button } from "../../ui/button";
 import { usePresenterLiveKitRoom } from "./usePresenterLiveKitRoom";
 import { PlannedPrList } from "./PlannedPrList";
+import { AddPlannedPrForm, type AddPlannedPrFormSubmission } from "./AddPlannedPrForm";
 import { PrStackChat } from "./PrStackChat";
 import { parseStackPlan, type StackNode } from "./stackPlan";
 
@@ -50,9 +52,20 @@ export function PrStackScreen({
   const { room, status: roomStatus, error: roomError } = usePresenterLiveKitRoom(attachment);
   const livekitServerIdentity =
     attachment.status === "connected-livekit" ? attachment.livekitServerIdentity : undefined;
-  const stack = useMemo(() => parseStackPlan(session.stackPlanJson), [session.stackPlanJson]);
+  // Overrides `session.stackPlanJson` immediately after a successful `AddPlannedPr`, since the
+  // `session` prop itself only refreshes once the caller separately refetches the session list.
+  // Reset whenever the prop actually changes so a later real refetch isn't masked by a stale one.
+  const [stackPlanOverride, setStackPlanOverride] = useState<string | null>(null);
+  useEffect(() => {
+    setStackPlanOverride(null);
+  }, [session.stackPlanJson]);
+  const stack = useMemo(
+    () => parseStackPlan(stackPlanOverride ?? session.stackPlanJson),
+    [stackPlanOverride, session.stackPlanJson],
+  );
   const [startingNodeId, setStartingNodeId] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
+  const [isAddingPlannedPr, setIsAddingPlannedPr] = useState(false);
 
   const handleStartSession = async (node: StackNode) => {
     if (!client) return;
@@ -90,6 +103,21 @@ export function PrStackScreen({
     }
   };
 
+  const handleAddPlannedPr = async (input: AddPlannedPrFormSubmission) => {
+    if (!client) return;
+    const res = await client.addPlannedPr({
+      sessionToken,
+      sessionId: session.sessionId,
+      title: input.title,
+      description: input.description,
+      branchSuggestion: input.branchSuggestion,
+      parents: input.parents,
+      childRecipe: "",
+    });
+    setStackPlanOverride(res.stackPlanJson);
+    setIsAddingPlannedPr(false);
+  };
+
   return (
     <div data-testid="pr-stack-screen" className="flex-1 min-h-0 flex overflow-hidden">
       <div className="w-1/2 min-w-0 border-r border-border flex flex-col overflow-hidden">
@@ -97,6 +125,23 @@ export function PrStackScreen({
           <p className="text-xs text-destructive px-3 pt-2" role="alert">
             {startError}
           </p>
+        )}
+        <div className="flex-shrink-0 flex justify-end p-3 pb-0">
+          <Button
+            data-testid="pr-stack-add-planned-pr-btn"
+            size="sm"
+            variant="outline"
+            onClick={() => setIsAddingPlannedPr(true)}
+          >
+            + New planned PR
+          </Button>
+        </div>
+        {isAddingPlannedPr && (
+          <AddPlannedPrForm
+            nodes={stack.nodes}
+            onSubmit={handleAddPlannedPr}
+            onCancel={() => setIsAddingPlannedPr(false)}
+          />
         )}
         <PlannedPrList
           nodes={stack.nodes}
