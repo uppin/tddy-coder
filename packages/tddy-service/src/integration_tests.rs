@@ -639,10 +639,10 @@ mod tddy_remote_livekit_acceptance {
 
     use tddy_rpc::{RequestMetadata, ResponseBody, RpcMessage};
 
-    use crate::proto::tddy_remote::{
+    use crate::gen::{
         client_message, server_message, ClientMessage, ServerMessage, SubmitFeatureInput,
-        TddyRemoteServer,
     };
+    use crate::proto::remote::TddyRemoteServer;
     use crate::TddyRemoteService;
 
     use tddy_core::AnyBackend;
@@ -808,7 +808,7 @@ mod session_view_adapter_surface_acceptance {
 
     use tddy_rpc::{MultiRpcService, RequestMetadata, ResponseBody, RpcBridge, RpcMessage};
 
-    use crate::proto::tddy_remote::{
+    use crate::gen::{
         client_message, server_message, ClientMessage, ServerMessage, SubmitFeatureInput,
     };
     use crate::session_view_adapter_surface;

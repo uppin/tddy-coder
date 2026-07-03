@@ -2963,12 +2963,11 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         // `--stdio` dedicates this process's real stdin/stdout to RPC framing (see
         // `tddy_core::stdio_safety`) — serve the same remote-control surface as `--grpc`, but
         // never touch physical fd 1 for TUI rendering (no `run_event_loop`/crossterm here).
-        let handle = tddy_core::PresenterHandle {
-            event_tx: event_tx.clone(),
-            intent_tx: intent_tx.clone(),
-        };
+        // Uses `with_view_factory` (not a raw `PresenterHandle`) so a client that connects after
+        // agent output was already produced still gets a snapshot replay — same architecture as
+        // the gRPC/LiveKit paths above (`connect_view`, the Presenter is the single source of truth).
         let service = tddy_service::proto::remote::TddyRemoteServer::new(
-            tddy_service::TddyRemoteService::new(handle),
+            tddy_service::TddyRemoteService::with_view_factory(view_factory.clone()),
         );
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()

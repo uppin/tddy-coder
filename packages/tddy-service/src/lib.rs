@@ -31,7 +31,7 @@ pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
 pub use proto::reflection::ServerReflectionServer;
 pub use proto::screen_sharing::ScreenSharingServiceServer;
 pub use proto::tasks::TaskServiceServer;
-pub use proto::tddy_remote::TddyRemoteServer;
+pub use proto::remote::TddyRemoteServer;
 pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
@@ -51,12 +51,6 @@ pub mod gen {
 pub mod proto {
     pub mod test {
         include!(concat!(env!("OUT_DIR"), "/test.rs"));
-    }
-    /// RpcService-compatible generated code for remote.proto (LiveKit/MultiRpcService path).
-    /// See `crate::gen` for the tonic-generated types used by the plain gRPC path.
-    #[allow(unused_imports, unused_variables)]
-    pub mod tddy_remote {
-        include!(concat!(env!("OUT_DIR"), "/tddy_remote_rpc/tddy.v1.rs"));
     }
     pub mod terminal {
         include!(concat!(env!("OUT_DIR"), "/terminal.rs"));
@@ -111,11 +105,12 @@ pub mod proto {
     pub mod reflection {
         include!(concat!(env!("OUT_DIR"), "/grpc.reflection.v1.rs"));
     }
-    /// `TddyRemote` as an `RpcService` (stdio/tddy-rpc transport), reusing the tonic-generated
-    /// message types from `crate::gen` via `extern_path`. Most of remote.proto's ~30 nested
-    /// message types aren't referenced directly by the service methods (only transitively,
-    /// through the already-extern'd `ClientMessage`/`ServerMessage`), so prost regenerates them
-    /// here too as unused duplicates — harmless, but silenced like the other proto modules below.
+    /// `TddyRemote` as an `RpcService` (stdio and LiveKit/`MultiRpcService` transports), reusing
+    /// the tonic-generated message types from `crate::gen` via `extern_path`. Most of
+    /// remote.proto's ~30 nested message types aren't referenced directly by the service methods
+    /// (only transitively, through the already-extern'd `ClientMessage`/`ServerMessage`), so
+    /// prost regenerates them here too as unused duplicates — harmless, but silenced like the
+    /// other proto modules below.
     #[allow(dead_code, unused_imports, unused_variables)]
     pub mod remote {
         include!(concat!(env!("OUT_DIR"), "/rpc_remote/tddy.v1.rs"));
