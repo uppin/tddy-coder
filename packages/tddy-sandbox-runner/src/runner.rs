@@ -1041,7 +1041,7 @@ fn run_claude_pty_thread(
 
     let master_reader = Arc::clone(&master);
     let relay_reader = Arc::clone(&relay);
-    std::thread::spawn(move || {
+    let reader_thread = std::thread::spawn(move || {
         // Clone the reader under the lock, then release it: holding the `master` guard across the
         // read loop would deadlock the stdin writer thread below (edition 2021 keeps a temporary
         // guard in an `if let` scrutinee alive for the whole block).
@@ -1104,10 +1104,22 @@ fn run_claude_pty_thread(
         }
     });
 
-    match child.wait() {
-        Ok(status) => boot_log("INFO", &format!("pty: claude exited {status}")),
-        Err(e) => boot_log("ERROR", &format!("pty: wait failed: {e}")),
-    }
+    let exit_code = match child.wait() {
+        Ok(status) => {
+            boot_log("INFO", &format!("pty: claude exited {status}"));
+            status.exit_code() as i32
+        }
+        Err(e) => {
+            boot_log("ERROR", &format!("pty: wait failed: {e}"));
+            1
+        }
+    };
+    // Join the reader thread first so every byte claude wrote is flushed to the relay before we
+    // announce the session end (mirrors `spawn_generic_pty`). Then signal `SessionEnded` so the
+    // host relay stops `HostPoll`-ing, both stream ends drop, the in-jail gRPC server shuts down,
+    // and the host app's terminal bridge exits — the sandbox must not outlive claude.
+    let _ = reader_thread.join();
+    relay.signal_session_ended(exit_code);
     Ok(())
 }
 
