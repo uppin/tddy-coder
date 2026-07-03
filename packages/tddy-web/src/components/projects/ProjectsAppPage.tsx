@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
-import {
-  ConnectionService,
-  type EligibleDaemonEntry,
-  type ProjectEntry,
-} from "../../gen/connection_pb";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ConnectionService, type ProjectEntry } from "../../gen/connection_pb";
 import { useAuth } from "../../hooks/useAuth";
+import { useCommonRoom } from "../../hooks/useCommonRoom";
+import { useRoomParticipants } from "../../hooks/useRoomParticipants";
+import { daemonHostsFromParticipants } from "../../lib/participantRole";
+import { presenceIdentityForUser } from "../../lib/presenceIdentity";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { DaemonNavMenu } from "../shell/DaemonNavMenu";
 import { UserAvatar } from "../UserAvatar";
@@ -17,10 +17,20 @@ const POLL_INTERVAL_MS = 5000;
 
 /**
  * Data container for the dedicated Projects screen (`/projects`). Polls the project registry and
- * the connected-daemon (host) list, and wires create-project + add-to-host RPCs.
+ * wires create-project + add-to-host RPCs. The selectable hosts are the **daemon-role** participants
+ * currently in the common LiveKit room (derived via {@link daemonHostsFromParticipants}); only
+ * daemons own projects, so coder/browser participants are never offered as hosts.
  */
-export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const { user, logout } = useAuth();
+export function ProjectsAppPage({
+  livekitUrl,
+  commonRoom,
+  onNavigate,
+}: {
+  livekitUrl?: string;
+  commonRoom?: string;
+  onNavigate: (path: string) => void;
+}) {
+  const { user, isAuthenticated, logout } = useAuth();
   // Read the token directly (like SessionsDrawerScreen) so project RPCs fire independent of the
   // auth-status round-trip.
   const sessionToken =
@@ -30,7 +40,16 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
   const client = useHttpClient(ConnectionService);
 
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
-  const [daemons, setDaemons] = useState<EligibleDaemonEntry[]>([]);
+
+  // Hosts come from the common-room presence: only genuine daemons (advertisement metadata),
+  // excluding this browser and any coder/session participants.
+  const identity = useMemo(
+    () => (user ? presenceIdentityForUser(user.login) : undefined),
+    [user],
+  );
+  const { room } = useCommonRoom(livekitUrl, commonRoom, isAuthenticated ? identity : undefined);
+  const participants = useRoomParticipants(room);
+  const daemons = useMemo(() => daemonHostsFromParticipants(participants), [participants]);
 
   const loadProjects = useCallback(() => {
     client
@@ -39,22 +58,11 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
       .catch(() => {});
   }, [client, sessionToken]);
 
-  const loadDaemons = useCallback(() => {
-    client
-      .listEligibleDaemons({ sessionToken })
-      .then((res) => setDaemons(res.daemons))
-      .catch(() => {});
-  }, [client, sessionToken]);
-
   useEffect(() => {
     loadProjects();
-    loadDaemons();
-    const id = setInterval(() => {
-      loadProjects();
-      loadDaemons();
-    }, POLL_INTERVAL_MS);
+    const id = setInterval(loadProjects, POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [loadProjects, loadDaemons]);
+  }, [loadProjects]);
 
   const handleCreateProject = useCallback(
     (input: { name: string; gitUrl: string; userRelativePath: string }) => {

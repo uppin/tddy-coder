@@ -429,7 +429,11 @@ export function App() {
         ) : isVmsPath(path) ? (
           <VmsAppPage onNavigate={navigate} />
         ) : isProjectsPath(path) ? (
-          <ProjectsAppPage onNavigate={navigate} />
+          <ProjectsAppPage
+            livekitUrl={appConfig.livekitUrl}
+            commonRoom={appConfig.commonRoom}
+            onNavigate={navigate}
+          />
         ) : path === "/worktrees" ? (
           <WorktreesAppPage onNavigate={navigate} />
         ) : isSessionsDrawerPath(path) ? (

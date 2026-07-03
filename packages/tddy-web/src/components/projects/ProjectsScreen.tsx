@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import type { EligibleDaemonEntry, ProjectEntry } from "../../gen/connection_pb";
+import type { ProjectEntry } from "../../gen/connection_pb";
+import type { DaemonHost } from "../../lib/participantRole";
 
 /**
  * Presentational Projects screen: lists projects grouped by logical `projectId` (a project may
@@ -9,7 +10,7 @@ import type { EligibleDaemonEntry, ProjectEntry } from "../../gen/connection_pb"
 
 export interface ProjectsScreenProps {
   projects: ProjectEntry[];
-  daemons: EligibleDaemonEntry[];
+  daemons: DaemonHost[];
   onCreateProject: (input: { name: string; gitUrl: string; userRelativePath: string }) => void;
   onAddProjectToHost: (input: {
     projectId: string;
@@ -136,7 +137,7 @@ function ProjectCard({
   onAddProjectToHost,
 }: {
   group: ProjectGroup;
-  daemons: EligibleDaemonEntry[];
+  daemons: DaemonHost[];
   onAddProjectToHost: ProjectsScreenProps["onAddProjectToHost"];
 }) {
   const hostingIds = useMemo(

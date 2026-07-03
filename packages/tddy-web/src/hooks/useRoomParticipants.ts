@@ -5,8 +5,18 @@ import {
   parseCodexOAuthMetadata,
   type CodexOAuthInfo,
 } from "../lib/codexOauthMetadata";
+import {
+  inferParticipantRole,
+  metadataLooksLikeDaemonAdvertisement,
+  type ParticipantRole,
+} from "../lib/participantRole";
 
-export type ParticipantRole = "browser" | "coder" | "daemon" | "unknown";
+// Re-exported from the canonical `lib/participantRole` module (kept here for existing importers).
+export {
+  inferParticipantRole,
+  metadataLooksLikeDaemonAdvertisement,
+  type ParticipantRole,
+};
 
 /** Must match `OWNED_PROJECT_COUNT_METADATA_KEY` in `tddy-livekit` (`participant.rs`). */
 export const OWNED_PROJECT_COUNT_METADATA_KEY = "owned_project_count";
@@ -34,44 +44,6 @@ export interface RoomParticipant {
   codexOAuth: CodexOAuthInfo | null;
   /** From `owned_project_count` in metadata; omit in tests to parse from `metadata` in the UI. */
   ownedProjectCount?: number | null;
-}
-
-/**
- * `tddy-daemon` common-room advertisement (`livekit_peer_discovery`):
- * `{"instance_id":"…","label":"… (this daemon)"}`.
- */
-export function metadataLooksLikeDaemonAdvertisement(metadata: string): boolean {
-  const t = metadata.trim();
-  if (!t.startsWith("{")) return false;
-  try {
-    const o = JSON.parse(t) as { instance_id?: unknown; label?: unknown };
-    if (typeof o.instance_id !== "string" || !o.instance_id.trim()) return false;
-    if (typeof o.label !== "string") return false;
-    return o.label.includes("(this daemon)");
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Infer UI role from LiveKit identity and metadata.
- * - **browser**: dashboard presence (`web-…`, `browser-…`).
- * - **coder**: terminal/session tool side (`server`, `server…`, `daemon-{uuid}-…`).
- * - **daemon**: embedded/CLI `tddy-daemon` in common room (metadata advertisement).
- */
-export function inferParticipantRole(identity: string, metadata: string): ParticipantRole {
-  if (identity.startsWith("web-") || identity.startsWith("browser-")) return "browser";
-  if (
-    identity === "server" ||
-    identity.startsWith("server") ||
-    identity.startsWith("daemon-")
-  ) {
-    return "coder";
-  }
-  if (metadataLooksLikeDaemonAdvertisement(metadata)) {
-    return "daemon";
-  }
-  return "unknown";
 }
 
 function mapParticipant(p: Participant): RoomParticipant {
