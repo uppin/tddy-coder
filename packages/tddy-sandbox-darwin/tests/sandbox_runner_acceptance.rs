@@ -65,7 +65,7 @@ fn runner_args(tmp: &Path, stub_claude: &Path) -> (SandboxRunnerArgs, PathBuf) {
         cwd: None,
         claude_binary: stub_claude.to_string_lossy().to_string(),
         model: TEST_MODEL.to_string(),
-        grpc_socket: tmp.join("sandbox.grpc.sock"),
+        grpc_socket: Some(tmp.join("sandbox.grpc.sock")),
         tool_ipc_socket: tmp.join("tool_ipc.sock"),
         tddy_tools_path: Some(tddy_tools_path()),
         ready_marker: tmp.join("sandbox.ready"),
@@ -75,6 +75,8 @@ fn runner_args(tmp: &Path, stub_claude: &Path) -> (SandboxRunnerArgs, PathBuf) {
         grpc_uds: None,
         pty_command: vec![],
         stdio: false,
+        initial_cols: 80,
+        initial_rows: 24,
     };
     (args, egress)
 }

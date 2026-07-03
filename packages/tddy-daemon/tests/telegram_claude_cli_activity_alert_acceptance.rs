@@ -66,6 +66,8 @@ fn write_claude_cli_session(
         activity_status: initial_activity_status.map(str::to_owned),
         hook_token: Some(hook_token.to_string()),
         sandbox: None,
+        agent: None,
+        recipe: None,
         specialized_agents: Vec::new(),
     };
     write_session_metadata(session_dir, &meta).unwrap();

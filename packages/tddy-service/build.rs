@@ -15,10 +15,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &["proto"],
         )?;
 
-    // TddyRemote as an RpcService (async trait + RpcService server for stdio/tddy-rpc),
-    // reusing the tonic-generated message types above via extern_path. Own out_dir subdirectory:
-    // this pass's default filename (`tddy.v1.rs`, from the proto package) would otherwise
-    // collide with the first tonic_build pass's own `tddy.v1.rs` in the top-level OUT_DIR.
+    // TddyRemote as an RpcService (async trait + RpcService server for stdio and LiveKit/tddy-rpc),
+    // reusing the tonic-generated message types above via extern_path — one canonical Rust type
+    // per message, no re-encode/decode bridging needed between transports. Own out_dir
+    // subdirectory: this pass's default filename (`tddy.v1.rs`, from the proto package) would
+    // otherwise collide with the first tonic_build pass's own `tddy.v1.rs` in the top-level
+    // OUT_DIR.
     let rpc_remote_dir = format!("{}/rpc_remote", std::env::var("OUT_DIR")?);
     std::fs::create_dir_all(&rpc_remote_dir)?;
     prost_build::Config::new()

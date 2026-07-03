@@ -76,8 +76,10 @@ impl GithubPrApi for MockGithubPrApi {
 // ---------------------------------------------------------------------------
 
 fn init_orchestrator_with_stack(session_dir: &std::path::Path, nodes: Vec<StackNode>) {
-    let mut cs = Changeset::default();
-    cs.stack = Some(Stack { version: 1, nodes });
+    let cs = Changeset {
+        stack: Some(Stack { version: 1, nodes }),
+        ..Default::default()
+    };
     write_changeset_atomic(session_dir, &cs).expect("write changeset");
 }
 

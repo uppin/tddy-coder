@@ -46,7 +46,7 @@ web_bundle_path: packages/tddy-web/dist
 # tddy:term:grpc (gRPC byte stream), tddy:term:life, tddy:term:mouse. Use `tddy:term:*` for all.
 # Override per-browser in DevTools: `localStorage.debug = 'tddy:term:write'`; the browser invalidates
 # that override only when this value changes. Comment out (or set "") to disable. `?debug=` URL param wins.
-debug: "tddy:term:*"
+debug: "tddy:term:*,tddy:presenter:*,tddy:rpc:*"
 
 livekit:
   url: ws://127.0.0.1:7880

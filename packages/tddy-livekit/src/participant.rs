@@ -750,6 +750,16 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         outgoing: &mpsc::Sender<(String, RpcResponse)>,
     ) -> Result<(), String> {
         let request = decode_request(payload)?;
+        if let Some(cm) = request.call_metadata.as_ref() {
+            log::info!(
+                "[rpc] incoming call {}/{} request_id={} ({} bytes) from={:?}",
+                cm.service,
+                cm.method,
+                request.request_id,
+                payload.len(),
+                event_participant,
+            );
+        }
         let response_identity =
             resolve_response_identity(&request, event_participant.clone(), remote_identities)
                 .ok_or_else(|| {

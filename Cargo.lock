@@ -9005,6 +9005,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures-core",
+ "log",
  "pretty_assertions",
  "prost 0.13.5",
  "prost-build 0.13.5",

@@ -228,6 +228,8 @@ impl SessionMetadataBuilder {
             activity_status: self.activity_status,
             hook_token: self.hook_token,
             sandbox: self.sandbox,
+            agent: None,
+            recipe: None,
             specialized_agents: self.specialized_agents,
         }
     }

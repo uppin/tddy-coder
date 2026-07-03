@@ -2,8 +2,6 @@
 //! completed plan-pr-stack output and populates the orchestrator's Changeset.stack so the
 //! first assess tick has a real Stack to operate on.
 
-use std::fs;
-
 use tddy_core::{read_changeset, write_changeset_atomic, Changeset};
 use tddy_workflow_recipes::orchestrate_pr_stack::seed_orchestrator_stack_from_plan;
 use tddy_workflow_recipes::plan_pr_stack::{PlannedPr, StackPlanOutput};

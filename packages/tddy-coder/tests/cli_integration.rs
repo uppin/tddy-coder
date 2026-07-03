@@ -821,7 +821,15 @@ fn plan_goal_without_output_dir_creates_session_under_tddy_sessions_dir() {
     let md = tddy_core::read_session_metadata(&session_dir).expect("parse .session.yaml");
     assert_eq!(md.session_id, uuid_part);
     assert_eq!(md.status, "active");
-    assert_eq!(md.tool.as_deref(), Some("tddy-coder"));
+    // `tool` is argv[0] as the process actually observed it — under `cargo_bin_cmd!` that's the
+    // full path to the built binary, not a bare name (matches real `.session.yaml` output).
+    assert!(
+        md.tool
+            .as_deref()
+            .is_some_and(|t| t.ends_with("tddy-coder")),
+        "tool should be the invoked binary path ending in tddy-coder, got: {:?}",
+        md.tool
+    );
     assert!(md.repo_path.is_some());
 
     let _ = std::fs::remove_dir_all(&tmp);

@@ -15,6 +15,7 @@ use super::github::GithubPrApi;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChildPhase {
     NotSpawned,
+    SpawnRequested,
     Building,
     ReadyForPr,
     PrOpen,
@@ -167,7 +168,7 @@ pub fn effective_base_ref(node_id: &str, views: &[NodeView], default_branch: &st
 
 /// Assemble NodeView list from orchestrator changeset + child changesets + live GitHub.
 pub fn assemble_views(
-    _parent_dir: &Path,
+    parent_dir: &Path,
     sessions_root: &Path,
     stack: &Stack,
     gh: &dyn GithubPrApi,
@@ -203,7 +204,14 @@ pub fn assemble_views(
                 Err(_) => (None, ChildPhase::Building),
             }
         } else {
-            (None, ChildPhase::NotSpawned)
+            let spawn_request_marker = parent_dir
+                .join(".workflow")
+                .join(format!("spawn-request-{node_id}.json"));
+            if spawn_request_marker.exists() {
+                (None, ChildPhase::SpawnRequested)
+            } else {
+                (None, ChildPhase::NotSpawned)
+            }
         };
 
         let pr = if node.session_id.is_some() {
@@ -250,6 +258,118 @@ fn workflow_state_to_child_phase(state: &tddy_core::workflow::ids::WorkflowState
     }
 }
 
+/// The assess Task: reads stack, calls assemble_views + decide_next_action, returns GoTo.
+pub struct AssessTask {}
+
+impl AssessTask {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Default for AssessTask {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Task for AssessTask {
+    fn id(&self) -> &str {
+        "assess"
+    }
+
+    async fn run(
+        &self,
+        context: Context,
+    ) -> Result<TaskResult, Box<dyn std::error::Error + Send + Sync>> {
+        use tddy_core::changeset::read_changeset;
+
+        let session_dir = context
+            .get_sync::<std::path::PathBuf>("session_dir")
+            .ok_or("assess: session_dir not set in context")?;
+        // sessions_root = sessions_base (two levels above session_dir: .../sessions/{id}/ → ...)
+        let sessions_root = session_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| session_dir.clone());
+
+        let changeset = read_changeset(&session_dir)?;
+        let stack = changeset.stack.clone().unwrap_or_default();
+        let default_branch = context
+            .get_sync::<String>("default_branch")
+            .unwrap_or_else(|| "master".to_string());
+        let repo_root = changeset
+            .repo_path
+            .clone()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| session_dir.clone());
+        // Derive "owner/repo" from the git remote URL so GitHub API calls use the
+        // correct namespace (changeset.repo_path is a filesystem path, not owner/repo).
+        let github_owner_repo = {
+            let remote_url = std::process::Command::new("git")
+                .current_dir(&repo_root)
+                .args(["remote", "get-url", "origin"])
+                .output()
+                .ok()
+                .and_then(|o| {
+                    if o.status.success() {
+                        Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
+            super::github::owner_repo_from_remote_url(&remote_url)
+                .unwrap_or_else(|| context.get_sync::<String>("repo").unwrap_or_default())
+        };
+
+        let gh = super::github::RealGithubPrApi::new(&github_owner_repo);
+
+        let views = assemble_views(&session_dir, &sessions_root, &stack, &gh, &default_branch)?;
+        let autonomous_merge = context
+            .get_sync::<bool>("autonomous_merge")
+            .unwrap_or(false);
+        let approved: std::collections::HashSet<String> = context
+            .get_sync::<Vec<String>>("approved_nodes")
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+        let action = decide_next_action(&views, autonomous_merge, &approved);
+
+        let next_state = match &action {
+            OrchestratorAction::Spawn { node_ids } => {
+                context.set_sync("spawn_node_ids", node_ids.clone());
+                "spawn"
+            }
+            OrchestratorAction::Merge { node_id, pr_number } => {
+                context.set_sync("merge_node_id", node_id.clone());
+                context.set_sync("merge_pr_number", *pr_number);
+                "merge"
+            }
+            OrchestratorAction::Wait { reason } => {
+                context.set_sync("wait_reason", reason.clone());
+                "wait"
+            }
+            OrchestratorAction::MarkFailed { node_id, reason } => {
+                context.set_sync("failed_node_id", node_id.clone());
+                context.set_sync("failed_reason", reason.clone());
+                "failed"
+            }
+            OrchestratorAction::Done => "done",
+        };
+
+        Ok(TaskResult {
+            response: format!("assess → {next_state}"),
+            next_action: NextAction::GoTo(next_state.to_string()),
+            task_id: self.id().to_string(),
+            status_message: None,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,6 +413,26 @@ mod tests {
         assert!(
             matches!(&action, OrchestratorAction::Spawn { node_ids } if node_ids == &["n1".to_string()]),
             "expected Spawn for unspawned root, got: {action:?}"
+        );
+    }
+
+    /// A node with a spawn already in flight (marker file written, daemon hasn't yet created the
+    /// child session and set `session_id`) must not be re-spawned on the next assess tick — that
+    /// produces an unbounded assess→spawn→assess busy-loop (reproduced live: 1,634+ repeated
+    /// spawn-request writes for the same node in under a second, because the same `NotSpawned`
+    /// view kept winning `decide_next_action`'s spawn rule before the async spawn ever completed).
+    #[test]
+    fn decide_next_action_waits_when_a_node_has_a_pending_spawn_request() {
+        let views = vec![node_view(
+            "n1",
+            &[],
+            ChildPhase::SpawnRequested,
+            PrLiveStatus::None,
+        )];
+        let action = decide_next_action(&views, false, &std::collections::HashSet::new());
+        assert!(
+            matches!(action, OrchestratorAction::Wait { .. }),
+            "expected Wait for a node with a spawn request already in flight, got: {action:?}"
         );
     }
 
@@ -525,8 +665,7 @@ mod tests {
     /// `child_phase == NotSpawned`, and the views must be in topological order.
     #[test]
     fn assemble_views_marks_notspawned_when_session_id_absent() {
-        use tddy_core::changeset::{write_changeset_atomic, Changeset, Stack, StackNode};
-        use tddy_core::session_lifecycle::unified_session_dir_path;
+        use tddy_core::changeset::{Stack, StackNode};
 
         let tmp = tempfile::tempdir().unwrap();
         let parent_dir = tmp.path();
@@ -586,6 +725,54 @@ mod tests {
             matches!(views[1].child_phase, ChildPhase::NotSpawned),
             "n2 must be NotSpawned (no session_id); got: {:?}",
             views[1].child_phase
+        );
+    }
+
+    /// `assemble_views_marks_spawn_requested_when_a_pending_spawn_request_marker_file_exists` —
+    /// `SpawnTask` writes `.workflow/spawn-request-<node_id>.json` before the daemon has had a
+    /// chance to actually create the child session and set `session_id`. While that marker is
+    /// present, `assemble_views` must report `SpawnRequested` (not `NotSpawned`), so
+    /// `decide_next_action` doesn't re-issue the same spawn on the very next assess tick.
+    #[test]
+    fn assemble_views_marks_spawn_requested_when_a_pending_spawn_request_marker_file_exists() {
+        use tddy_core::changeset::{Stack, StackNode};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let parent_dir = tmp.path();
+        let sessions_root = tmp.path();
+
+        let workflow_dir = parent_dir.join(".workflow");
+        std::fs::create_dir_all(&workflow_dir).unwrap();
+        std::fs::write(
+            workflow_dir.join("spawn-request-n1.json"),
+            r#"{"node_id":"n1"}"#,
+        )
+        .unwrap();
+
+        let stack = Stack {
+            version: 1,
+            nodes: vec![StackNode {
+                node_id: "n1".into(),
+                title: "Root".into(),
+                description: String::new(),
+                branch_suggestion: None,
+                branch: None,
+                session_id: None, // daemon hasn't created the child session yet
+                parents: vec![],
+                pr_status: None,
+                child_state: None,
+            }],
+        };
+        let mock_gh = NoneOpenMockGh;
+
+        let views = assemble_views(parent_dir, sessions_root, &stack, &mock_gh, "master")
+            .expect("assemble_views must not error");
+
+        assert_eq!(views.len(), 1);
+        assert!(
+            matches!(views[0].child_phase, ChildPhase::SpawnRequested),
+            "n1 must be SpawnRequested while its spawn-request marker file exists; got: {:?}",
+            views[0].child_phase
         );
     }
 
@@ -658,117 +845,5 @@ mod tests {
             matches!(action, OrchestratorAction::Wait { .. }),
             "expected Wait when merge gate is off (operator-gated default), got: {action:?}"
         );
-    }
-}
-
-/// The assess Task: reads stack, calls assemble_views + decide_next_action, returns GoTo.
-pub struct AssessTask {}
-
-impl AssessTask {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Default for AssessTask {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl Task for AssessTask {
-    fn id(&self) -> &str {
-        "assess"
-    }
-
-    async fn run(
-        &self,
-        context: Context,
-    ) -> Result<TaskResult, Box<dyn std::error::Error + Send + Sync>> {
-        use tddy_core::changeset::read_changeset;
-
-        let session_dir = context
-            .get_sync::<std::path::PathBuf>("session_dir")
-            .ok_or("assess: session_dir not set in context")?;
-        // sessions_root = sessions_base (two levels above session_dir: .../sessions/{id}/ → ...)
-        let sessions_root = session_dir
-            .parent()
-            .and_then(|p| p.parent())
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| session_dir.clone());
-
-        let changeset = read_changeset(&session_dir)?;
-        let stack = changeset.stack.clone().unwrap_or_default();
-        let default_branch = context
-            .get_sync::<String>("default_branch")
-            .unwrap_or_else(|| "master".to_string());
-        let repo_root = changeset
-            .repo_path
-            .clone()
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| session_dir.clone());
-        // Derive "owner/repo" from the git remote URL so GitHub API calls use the
-        // correct namespace (changeset.repo_path is a filesystem path, not owner/repo).
-        let github_owner_repo = {
-            let remote_url = std::process::Command::new("git")
-                .current_dir(&repo_root)
-                .args(["remote", "get-url", "origin"])
-                .output()
-                .ok()
-                .and_then(|o| {
-                    if o.status.success() {
-                        Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_default();
-            super::github::owner_repo_from_remote_url(&remote_url)
-                .unwrap_or_else(|| context.get_sync::<String>("repo").unwrap_or_default())
-        };
-
-        let gh = super::github::RealGithubPrApi::new(&github_owner_repo);
-
-        let views = assemble_views(&session_dir, &sessions_root, &stack, &gh, &default_branch)?;
-        let autonomous_merge = context
-            .get_sync::<bool>("autonomous_merge")
-            .unwrap_or(false);
-        let approved: std::collections::HashSet<String> = context
-            .get_sync::<Vec<String>>("approved_nodes")
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
-
-        let action = decide_next_action(&views, autonomous_merge, &approved);
-
-        let next_state = match &action {
-            OrchestratorAction::Spawn { node_ids } => {
-                context.set_sync("spawn_node_ids", node_ids.clone());
-                "spawn"
-            }
-            OrchestratorAction::Merge { node_id, pr_number } => {
-                context.set_sync("merge_node_id", node_id.clone());
-                context.set_sync("merge_pr_number", *pr_number);
-                "merge"
-            }
-            OrchestratorAction::Wait { reason } => {
-                context.set_sync("wait_reason", reason.clone());
-                "wait"
-            }
-            OrchestratorAction::MarkFailed { node_id, reason } => {
-                context.set_sync("failed_node_id", node_id.clone());
-                context.set_sync("failed_reason", reason.clone());
-                "failed"
-            }
-            OrchestratorAction::Done => "done",
-        };
-
-        Ok(TaskResult {
-            response: format!("assess → {next_state}"),
-            next_action: NextAction::GoTo(next_state.to_string()),
-            task_id: self.id().to_string(),
-            status_message: None,
-        })
     }
 }

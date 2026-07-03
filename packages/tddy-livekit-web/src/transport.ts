@@ -100,7 +100,16 @@ export class LiveKitTransport implements Transport {
       topic?: string
     ) => {
       if (topic !== RPC_TOPIC) return;
-      if (participant != null && participant.identity != null && participant.identity !== this.targetIdentity) return;
+      if (participant != null && participant.identity != null && participant.identity !== this.targetIdentity) {
+        // A frame from a participant other than our target is silently ignored — log it, since a
+        // mismatched/churned presenter identity is an easy-to-miss cause of a stalled stream.
+        if (this.debug) {
+          console.log(
+            `[LiveKitTransport] dropped frame from identity=${participant.identity} (target=${this.targetIdentity}) bytes=${payload.length}`
+          );
+        }
+        return;
+      }
 
       this.meter?.record("in", payload.length);
 

@@ -23,6 +23,11 @@ fn default_spawn_mouse() -> bool {
 pub struct SpawnRequest {
     pub os_user: String,
     pub tool_path: String,
+    /// Daemon's own resolved `tddy_data_dir` (see `ConnectionService::tddy_data_dir` /
+    /// `DaemonConfig::tddy_data_dir`) — passed through verbatim so the worker process (forked
+    /// before tokio starts, its own cwd unchanged) resolves it the same way `spawn_as_user`
+    /// would in-process, never against `repo_path`.
+    pub tddy_data_dir: String,
     pub repo_path: String,
     pub livekit_url: String,
     pub livekit_api_key: String,
@@ -285,6 +290,7 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                 let result = spawner::spawn_as_user(
                     &req.os_user,
                     &req.tool_path,
+                    Path::new(&req.tddy_data_dir),
                     Path::new(&req.repo_path),
                     &livekit,
                     SpawnOptions {
@@ -363,6 +369,7 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
 pub fn build_spawn_request(
     os_user: &str,
     tool_path: &str,
+    tddy_data_dir: &Path,
     repo_path: &Path,
     livekit: &LiveKitCreds,
     opts: SpawnOptions<'_>,
@@ -372,6 +379,7 @@ pub fn build_spawn_request(
     SpawnRequest {
         os_user: os_user.to_string(),
         tool_path: tool_path.to_string(),
+        tddy_data_dir: tddy_data_dir.display().to_string(),
         repo_path: repo_path.display().to_string(),
         livekit_url: livekit.url.clone(),
         livekit_api_key: livekit.api_key.clone(),

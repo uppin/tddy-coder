@@ -331,6 +331,8 @@ async fn claude_cli_session_enrichment_reads_from_metadata() {
         activity_status: None,
         hook_token: None,
         sandbox: None,
+        agent: None,
+        recipe: None,
         specialized_agents: Vec::new(),
     };
     write_session_metadata(&session_dir, &meta).unwrap();
@@ -417,6 +419,8 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
         activity_status: None,
         hook_token: None,
         sandbox: None,
+        agent: None,
+        recipe: None,
         specialized_agents: Vec::new(),
     };
     write_session_metadata(&session_dir, &meta).unwrap();

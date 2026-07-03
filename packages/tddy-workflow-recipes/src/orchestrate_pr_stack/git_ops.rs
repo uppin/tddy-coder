@@ -90,6 +90,18 @@ pub fn merge_base(
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+// TODO: implement — octopus merge of parent_branches into stack-int/<node_id>; used for multi-parent DAG nodes
+/// Build or refresh a local integration ref (`stack-int/<node_id>`) from multiple parent tips.
+/// Returns the SHA of the resulting ref.
+#[allow(dead_code)]
+pub fn build_integration_ref(
+    _repo_root: &std::path::Path,
+    _node_id: &str,
+    _parent_branches: &[String],
+) -> Result<String, tddy_core::WorkflowError> {
+    unimplemented!("build_integration_ref: not yet implemented")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,16 +321,4 @@ mod tests {
             rebase_apply_dir.exists()
         );
     }
-}
-
-// TODO: implement — octopus merge of parent_branches into stack-int/<node_id>; used for multi-parent DAG nodes
-/// Build or refresh a local integration ref (`stack-int/<node_id>`) from multiple parent tips.
-/// Returns the SHA of the resulting ref.
-#[allow(dead_code)]
-pub fn build_integration_ref(
-    _repo_root: &std::path::Path,
-    _node_id: &str,
-    _parent_branches: &[String],
-) -> Result<String, tddy_core::WorkflowError> {
-    unimplemented!("build_integration_ref: not yet implemented")
 }

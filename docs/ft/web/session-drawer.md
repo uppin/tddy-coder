@@ -188,15 +188,21 @@ when multiple tools are available.
 
 ### Recipe Dropdown
 
-The recipe `<select>` lists all 9 workflow recipes (constant `WORKFLOW_RECIPES` in
+The recipe `<select>` lists all 8 workflow recipes (constant `WORKFLOW_RECIPES` in
 `CreateSessionPane.tsx`): `tdd`, `tdd-small`, `bugfix`, `free-prompting`, `grill-me`,
-`review`, `merge-pr`, `plan-pr-stack`, `orchestrate-pr-stack`. Defaults to `tdd`.
+`review`, `merge-pr`, `pr-stack`. Defaults to `tdd`.
+
+> **Updated 2026-07-01** — the legacy `plan-pr-stack` and `orchestrate-pr-stack` entries were
+> consolidated into a single `pr-stack` recipe (see
+> [PR stacking § pr-stack recipe](../coder/pr-stacking.md#pr-stack-recipe)). Both legacy CLI
+> names still resolve on the backend for back-compat, but the dropdown only offers the
+> canonical `pr-stack` name for new sessions.
 
 ### PR Stack Parent Picker
 
 When creating a **tool** or **claude-cli** session, the form also calls `ListSessions` and
-filters to PR-stack orchestrator sessions — sessions with `recipe ∈ {"orchestrate-pr-stack",
-"plan-pr-stack"}` that are not themselves children of another orchestrator. This filtering
+filters to PR-stack orchestrator sessions — sessions with `recipe === "pr-stack"` (or a
+legacy alias) that are not themselves children of another orchestrator. This filtering
 is performed by the `prStackOrchestrators()` helper in `src/utils/stackParents.ts`.
 
 The `recipe` field is populated on `SessionEntry` (proto field 22) by the daemon's enrichment
@@ -287,6 +293,112 @@ Groups are sorted newest-first by the orchestrator's `createdAt`.
 ### Stack Parent Picker
 
 See [PR Stack Parent Picker](#pr-stack-parent-picker) in the Create Session section above.
+
+## Per-Workflow Session Views
+
+> **Added: 2026-07-01** — a session's `recipe` can now select a fully custom main-pane
+> screen instead of the terminal. First (and currently only) consumer: the PR-Stack Chat
+> Screen below.
+
+### View registry
+
+`SessionMainPane.tsx` gains a resolution step before the existing
+`isConnected ? <terminal> : <placeholder>` branch:
+
+```typescript
+const customView = resolveWorkflowView(selectedSession);
+if (customView) return customView;
+```
+
+`resolveWorkflowView(session)` (`src/components/sessions/workflowViews.tsx`) is a small
+registry keyed by `session.recipe`:
+
+```typescript
+resolveWorkflowView({ recipe: "pr-stack", ... }) → <PrStackScreen session={...} />
+resolveWorkflowView({ recipe: "tdd", ... })       → null   // falls through to the terminal
+```
+
+Custom views own their own connection/chrome and render **in place of** the terminal
+container — they are not gated on `attachment.status`; a `pr-stack` session shows its
+screen whether or not a terminal is attached, since the whole point is that the operator
+never needs the raw terminal for this workflow. Every other recipe is unaffected: the
+existing terminal / placeholder behaviour is the fallback when no custom view is
+registered.
+
+### Data source
+
+`SessionEntry.recipe` (proto field 22, already surfaced for the recipe dropdown and stack
+grouping above) is the sole routing key — no new field was needed to decide *which* view
+opens.
+
+## PR-Stack Chat Screen
+
+The custom screen for `recipe === "pr-stack"` sessions. Replaces the terminal with two
+panes: a live list of the planned PRs (left) and a chat window backed by a remote
+Presenter (right). Lets the operator review a freshly-written stack plan, keep refining it
+by chatting with the agent, and start child sessions for each planned PR — all without
+leaving the orchestrator session.
+
+**Component:** `PrStackScreen` (`src/components/sessions/prstack/PrStackScreen.tsx`), with
+`PlannedPrList` / `PlannedPrRow` subcomponents.
+
+### Planned-PR list
+
+Reads the orchestrator's `Stack` (see [PR stacking § Stack data model](../coder/pr-stacking.md#stack-data-model))
+via `SessionEntry.stackPlanJson` (proto field 23 — a JSON-serialized `Stack`, empty string
+until a plan exists) and renders one row per `StackNode` in `Stack::topo_order` (roots
+before dependents):
+
+- **Unspawned node** (`session_id` empty) — shows a **"Start session"** CTA
+  (`data-testid="pr-stack-start-session-<nodeId>"`).
+- **Spawned node** (`session_id` set) — shows a status chip
+  (`data-testid="pr-stack-status-chip-<nodeId>"`) derived from `pr_status.phase` /
+  `child_state` instead of the CTA.
+
+### Start session CTA
+
+Clicking "Start session" on an unspawned node issues the existing `ConnectionService.StartSession`
+RPC (no new RPC surface — `recipe` and `stack_parent` were already added for the
+[parent picker](#pr-stack-parent-picker) in #246):
+
+- `recipe` = the node's `child_recipe` from the plan (defaults to `"tdd"`).
+- `stack_parent` = this orchestrator session's id.
+
+The daemon's existing chain-base-ref resolution (`resolve_chain_integration_base_ref_from_parent_session`)
+derives the child's base branch from the node's *parents* in the stack — `origin/<parent-branch>`
+when the node has an unmerged parent, collapsing to the default branch once all parents are
+merged (`effective_base_ref`, [PR stacking § assess decision algorithm](../coder/pr-stacking.md#assess-decision-algorithm-priority-order)).
+After the child is spawned, the node is linked via `link_stack_node_to_child_session` and the
+row updates from CTA to status chip on the next session-list refresh.
+
+### Chat window (remote Presenter over RPC)
+
+The right-hand chat panel is a thin UI over the session's existing **remote Presenter**
+protocol — the same bidirectional `TddyRemote.Stream` RPC already used for programmatic
+control (`tddy-service/proto/tddy/v1/remote.proto`), not a new backend concept:
+
+- **Inbound** — the screen subscribes to the stream over the session's LiveKit room
+  (`useLiveKitClient(TddyRemote)`), and renders each `ServerMessage` `PresenterEvent` as a
+  chat item: `AgentOutput` / `ActivityLogged` → agent bubbles, `StateChanged` / `GoalStarted`
+  → status lines, `WorkflowComplete` → a completion bubble.
+- **Outbound** — submitting chat text sends a `ClientMessage` intent on the same stream:
+  `QueuePrompt` for a plan-refinement turn, `AnswerSelect` / `AnswerText` for clarification
+  answers.
+- **Refine loop** — a refinement turn causes the recipe's `write-stack-plan` goal to re-run
+  (`plan_refinement_goal()`, [PR stacking § pr-stack recipe](../coder/pr-stacking.md#pr-stack-recipe)),
+  which rewrites `stack-plan.yaml` and re-seeds `Changeset.stack`. The planned-PR list
+  re-reads `stackPlanJson` after a `WorkflowComplete` / `StateChanged` event so edits appear
+  without a manual refresh.
+
+**Component:** `PrStackChat` (`src/components/sessions/prstack/PrStackChat.tsx`) +
+`usePresenterChat` hook.
+
+### New RPCs / proto fields used
+
+- `SessionEntry.stack_plan_json` (proto field 23, new) — JSON-serialized `Stack` for the
+  planned-PR list.
+- `TddyRemote.Stream` (existing) — chat window transport.
+- `ConnectionService.StartSession` (existing, `recipe` + `stack_parent`) — the Start session CTA.
 
 ## Session Traffic Strip
 

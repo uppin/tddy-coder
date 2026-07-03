@@ -4,6 +4,8 @@ Wrapped changeset history for tddy-coder.
 
 **Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
 
+- **2026-07-01** [Feature] **`--recipe pr-stack`** — added to both `--recipe` `value_parser` lists (`run.rs`); `plan-pr-stack`/`orchestrate-pr-stack` remain accepted as legacy aliases resolving to the same unified recipe. Feature [pr-stacking.md](../../../docs/ft/coder/pr-stacking.md#pr-stack-recipe). Cross-package: [docs/dev/changesets.md](../../../docs/dev/changesets.md). (tddy-coder)
+
 - **2026-07-02** [Feature] **`create_backend` resolves any specialized-agent def, not only `"fastcontext"`** — `create_backend` now checks a resolved `Vec<SpecializedAgentDef>` (builtin + `<tddyhome>/agents/*.yaml`, via the new `resolve_specialized_agent_defs` helper, wired at all 5 call sites) for a matching agent name before falling back to the hardcoded `"fastcontext"` branch, building `FastContextBackend` from the def's model/base_url/max_turns; explicit `--fastcontext-*` CLI flags still take precedence over the resolved def. `--agent`'s clap allowlist doesn't yet recognize custom names (tracked in `docs/dev/TODO.md`). Feature [specialized-subagents.md](../../../docs/ft/coder/specialized-subagents.md). (tddy-coder, tddy-discovery)
 - **2026-07-02** [Fix] **"Remote codebase" → "managed codebase" wording** — `REMOTE_APPENDIX`'s prose now reads "MANAGED"/"Managed Codebase" instead of "REMOTE"/"Remote Codebase" (the Rust identifier itself is unchanged — only the text an agent reads). Part of [managed-codebase-subagents.md](../../../docs/ft/coder/managed-codebase-subagents.md)'s user-facing rename. (tddy-coder, tddy-sandbox)
 

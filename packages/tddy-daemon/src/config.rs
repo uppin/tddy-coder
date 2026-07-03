@@ -344,6 +344,18 @@ impl DaemonConfig {
         &self.allowed_tools
     }
 
+    /// The tool path to spawn when nothing more specific was requested — the first configured
+    /// `allowed_tools` entry (e.g. `"target/debug/tddy-coder"` in dev), falling back to a bare
+    /// `"tddy-coder"` only when no tools are configured at all. Single source of truth: callers
+    /// (`StartSession`'s Telegram workflow spawn path, `ResumeSession`'s no-recorded-tool
+    /// fallback) must not each hardcode their own default, or they can silently drift apart.
+    pub fn default_tool_path(&self) -> String {
+        self.allowed_tools
+            .first()
+            .map(|t| t.path.clone())
+            .unwrap_or_else(|| "tddy-coder".to_string())
+    }
+
     /// Allowed agent ids (`StartSession.agent` / `tddy-coder --agent`) and display labels.
     pub fn allowed_agents(&self) -> &[AllowedAgent] {
         &self.allowed_agents
@@ -507,6 +519,51 @@ fn merge_telegram_env(
         }
     } else if bot_token.is_some() && created_from_env_token {
         tg.enabled = true;
+    }
+}
+
+/// The single source of truth for "what tool should a session run when nothing more specific was
+/// requested" — used by `StartSession`/`ResumeSession`/Telegram workflow spawn alike, so they
+/// can never independently drift on the default (see `resume_session`'s prior bug: it
+/// hardcoded a bare `"tddy-coder"` fallback that only resolves when the binary happens to be on
+/// `PATH`, unlike this method's `allowed_tools`-driven default, e.g. `"target/debug/tddy-coder"`
+/// in dev — a session resumed after its metadata never recorded an explicit `tool` value failed
+/// to spawn with "No such file or directory").
+#[cfg(test)]
+mod default_tool_path_tests {
+    use super::*;
+
+    #[test]
+    fn default_tool_path_uses_the_first_configured_allowed_tool() {
+        // Given — dev.daemon.yaml's real shape: a debug-build tool path configured first
+        let config = DaemonConfig {
+            allowed_tools: vec![AllowedTool {
+                path: "target/debug/tddy-coder".to_string(),
+                label: Some("tddy-coder (debug)".to_string()),
+            }],
+            ..Default::default()
+        };
+
+        // When
+        let default_path = config.default_tool_path();
+
+        // Then
+        assert_eq!(default_path, "target/debug/tddy-coder");
+    }
+
+    #[test]
+    fn default_tool_path_falls_back_to_a_bare_binary_name_when_no_tools_are_configured() {
+        // Given — no allowed_tools configured at all
+        let config = DaemonConfig {
+            allowed_tools: vec![],
+            ..Default::default()
+        };
+
+        // When
+        let default_path = config.default_tool_path();
+
+        // Then
+        assert_eq!(default_path, "tddy-coder");
     }
 }
 

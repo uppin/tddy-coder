@@ -14,8 +14,7 @@ const WORKFLOW_RECIPES = [
   "grill-me",
   "review",
   "merge-pr",
-  "plan-pr-stack",
-  "orchestrate-pr-stack",
+  "pr-stack",
 ] as const;
 
 // ---------------------------------------------------------------------------

@@ -7,7 +7,6 @@
 pub mod codex_oauth_scan;
 pub mod codex_oauth_validate;
 pub mod convert;
-pub mod daemon_service;
 pub mod echo_service;
 pub mod loopback_tunnel_service;
 pub mod observer_service;
@@ -20,8 +19,7 @@ pub mod token_service;
 pub use codex_oauth_scan::{
     CodexOAuthDetected, CodexOAuthPending, CodexOAuthSession, CodexOAuthSessionState,
 };
-pub use convert::{client_message_to_intent, event_to_server_message};
-pub use daemon_service::DaemonService;
+pub use convert::{client_message_to_intent, event_to_server_message, snapshot_replay_messages};
 pub use echo_service::{create_echo_bridge, EchoServiceImpl};
 pub use loopback_tunnel_service::LoopbackTunnelServiceImpl;
 pub use observer_service::PresenterObserverService;
@@ -31,6 +29,7 @@ pub use proto::auth::AuthServiceServer;
 pub use proto::connection::ConnectionServiceServer;
 pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
 pub use proto::reflection::ServerReflectionServer;
+pub use proto::remote::TddyRemoteServer;
 pub use proto::screen_sharing::ScreenSharingServiceServer;
 pub use proto::tasks::TaskServiceServer;
 pub use proto::terminal::TerminalServiceServer;
@@ -38,7 +37,7 @@ pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
 pub use proto::vm::VmServiceServer;
 pub use reflection_service::{reflection_entry_from, ServerReflectionImpl};
-pub use service::TddyRemoteService;
+pub use service::{session_view_adapter_surface, TddyRemoteService};
 pub use tddy_rpc::Status;
 pub use terminal_service::{
     start_virtual_tui_session, TerminalServiceVirtualTui, VirtualTuiSession,
@@ -106,11 +105,12 @@ pub mod proto {
     pub mod reflection {
         include!(concat!(env!("OUT_DIR"), "/grpc.reflection.v1.rs"));
     }
-    /// `TddyRemote` as an `RpcService` (stdio/tddy-rpc transport), reusing the tonic-generated
-    /// message types from `crate::gen` via `extern_path`. Most of remote.proto's ~30 nested
-    /// message types aren't referenced directly by the service methods (only transitively,
-    /// through the already-extern'd `ClientMessage`/`ServerMessage`), so prost regenerates them
-    /// here too as unused duplicates — harmless, but silenced like the other proto modules below.
+    /// `TddyRemote` as an `RpcService` (stdio and LiveKit/`MultiRpcService` transports), reusing
+    /// the tonic-generated message types from `crate::gen` via `extern_path`. Most of
+    /// remote.proto's ~30 nested message types aren't referenced directly by the service methods
+    /// (only transitively, through the already-extern'd `ClientMessage`/`ServerMessage`), so
+    /// prost regenerates them here too as unused duplicates — harmless, but silenced like the
+    /// other proto modules below.
     #[allow(dead_code, unused_imports, unused_variables)]
     pub mod remote {
         include!(concat!(env!("OUT_DIR"), "/rpc_remote/tddy.v1.rs"));

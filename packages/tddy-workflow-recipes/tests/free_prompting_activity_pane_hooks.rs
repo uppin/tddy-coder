@@ -9,7 +9,6 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use tddy_core::presenter::WorkflowEvent;
-use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::ProgressEvent;
 use tddy_workflow_recipes::free_prompting::FreePromptingWorkflowHooks;
 

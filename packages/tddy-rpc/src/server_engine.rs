@@ -91,7 +91,23 @@ impl<S: RpcService> ServerEngine<S> {
         let opens_bidi_session =
             request.call_metadata.is_some() && self.bridge.is_bidi_stream(service, method);
 
+        if request.call_metadata.is_some() {
+            log::info!(
+                "[rpc] engine dispatch service={:?} method={:?} opens_bidi_session={} is_bidi={} end_of_stream={}",
+                service,
+                method,
+                opens_bidi_session,
+                self.bridge.is_bidi_stream(service, method),
+                request.end_of_stream,
+            );
+        }
+
         if opens_bidi_session {
+            log::info!(
+                "[rpc] engine opening bidi session for {}/{}",
+                service,
+                method
+            );
             self.open_bidi_session(peer, request, outgoing).await;
             return;
         }

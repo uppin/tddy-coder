@@ -249,23 +249,9 @@ impl CursorBackend {
             }
         };
 
-        let skip_until_line = if request.session.as_ref().is_some_and(|s| s.is_resume()) {
-            request
-                .conversation_output_path
-                .as_ref()
-                .and_then(|p| std::fs::read_to_string(p).ok())
-                .map(|c| {
-                    c.lines()
-                        .filter(|l| {
-                            let t = l.trim();
-                            !t.is_empty() && !t.contains("\"type\":\"tddy-request\"")
-                        })
-                        .count()
-                })
-                .unwrap_or(0)
-        } else {
-            0
-        };
+        // A resumed `agent` invocation only emits its own new turn's stdout, not a replay of
+        // prior conversation history, so there is nothing to skip when echoing live output.
+        let skip_until_line = 0;
 
         let agent_output = request.agent_output;
         let agent_output_sink = request.agent_output_sink.clone();

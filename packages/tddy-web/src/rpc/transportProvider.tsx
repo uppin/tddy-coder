@@ -58,6 +58,18 @@ export interface LiveKitTransportOptions {
   debug?: boolean;
 }
 
+/** True when the active debug mask enables `tddy:rpc*` — turns on the LiveKit transport's per-RPC
+ *  console logging (publish/unary/stream/response with service/method) so client↔server RPC routing
+ *  is visible. The mask is stored under the `debug`-package key; set via `dev.daemon.yaml` `debug`
+ *  (served at /api/config) or DevTools `localStorage.debug = 'tddy:rpc:*'`. */
+function rpcDebugActive(): boolean {
+  try {
+    return (window.localStorage.getItem("debug") ?? "").includes("tddy:rpc");
+  } catch {
+    return false;
+  }
+}
+
 /** Factory for the production LiveKit transport. */
 function createDefaultLiveKitTransport(
   room: Room,
@@ -68,7 +80,7 @@ function createDefaultLiveKitTransport(
   return createLiveKitTransport({
     room,
     targetIdentity,
-    debug: options?.debug,
+    debug: options?.debug ?? rpcDebugActive(),
     meter: registry?.get(room.name || "livekit"),
   });
 }
@@ -81,6 +93,13 @@ interface RpcTransportContextValue {
   readonly httpTransport: Transport;
   readonly liveKitFactory: (room: Room, targetIdentity: string, options?: LiveKitTransportOptions) => Transport;
   readonly meterRegistry: TrafficMeterRegistry;
+  /**
+   * True when this provider was given an explicit `liveKitFactory` override (the test-double
+   * seam described on `RpcTransportProviderProps.liveKitFactory`). Callers that need a real
+   * connected `Room` to build a transport (the production default does) can use this to tell
+   * "no room yet, but a test double that doesn't care" apart from "no room yet, for real."
+   */
+  readonly liveKitFactoryIsOverridden: boolean;
 }
 
 const RpcTransportContext = createContext<RpcTransportContextValue | null>(null);
@@ -141,6 +160,7 @@ export function RpcTransportProvider({
     httpTransport: httpRef.current,
     liveKitFactory: lkFactory,
     meterRegistry: registry,
+    liveKitFactoryIsOverridden: liveKitFactory !== undefined,
   };
 
   return (
@@ -206,6 +226,22 @@ export function useLiveKitTransportFactory(): (room: Room, targetIdentity: strin
   const ctx = useContext(RpcTransportContext);
   // Fallback (no provider): no meter registry available, so no metering.
   return ctx?.liveKitFactory ?? createDefaultLiveKitTransport;
+}
+
+/**
+ * True when the LiveKit transport factory in scope is a test double (an explicit
+ * `RpcTransportProvider liveKitFactory` override), false for the real production default.
+ *
+ * The production default (`createDefaultLiveKitTransport`) requires a genuinely connected
+ * `Room` and crashes without one; a test double (e.g. one that routes to an in-memory RPC
+ * backend) is free to ignore its `room`/`targetIdentity` arguments entirely. Callers that may
+ * be invoked before a real `Room` exists (see `usePresenterChat`) use this to build a client
+ * via the test double regardless, while still refusing to call the unsafe production default
+ * without a room.
+ */
+export function useLiveKitTransportFactoryIsOverridden(): boolean {
+  const ctx = useContext(RpcTransportContext);
+  return ctx?.liveKitFactoryIsOverridden ?? false;
 }
 
 /**

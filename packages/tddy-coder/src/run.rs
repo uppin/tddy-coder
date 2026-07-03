@@ -658,8 +658,8 @@ pub struct CoderArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`, `plan-pr-stack`, `orchestrate-pr-stack`. Must match [`WorkflowRecipe::name`].
-    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr", "plan-pr-stack", "orchestrate-pr-stack"])]
+    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`, `pr-stack` (legacy aliases `plan-pr-stack`, `orchestrate-pr-stack` still accepted). Must match [`WorkflowRecipe::name`].
+    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr", "pr-stack", "plan-pr-stack", "orchestrate-pr-stack"])]
     pub recipe: Option<String>,
 
     /// Path to the Cursor `agent` CLI (defaults to `agent` on `PATH`, or `TDDY_CURSOR_AGENT` if set).
@@ -861,8 +861,8 @@ pub struct DemoArgs {
     #[arg(long, value_name = "PROJECT_ID")]
     pub project_id: Option<String>,
 
-    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`, `plan-pr-stack`, `orchestrate-pr-stack`.
-    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr", "plan-pr-stack", "orchestrate-pr-stack"])]
+    /// Workflow recipe: `free-prompting` (default when omitted), or `tdd`, `tdd-small`, `bugfix`, `grill-me`, `review`, `merge-pr`, `pr-stack` (legacy aliases `plan-pr-stack`, `orchestrate-pr-stack` still accepted).
+    #[arg(long, value_parser = ["tdd", "tdd-small", "bugfix", "free-prompting", "grill-me", "review", "merge-pr", "pr-stack", "plan-pr-stack", "orchestrate-pr-stack"])]
     pub recipe: Option<String>,
 }
 
@@ -1328,7 +1328,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             project_id: args.project_id.clone().unwrap_or_default(),
             repo_path: Some(output_dir_for_ctx.display().to_string()),
             pid: Some(std::process::id()),
-            tool: Some("tddy-coder".to_string()),
+            tool: std::env::args().next(),
             livekit_room: None,
             previous_session_id: args.stack_base.clone(),
             session_type: None,
@@ -1337,6 +1337,8 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            agent: Some(resolved_agent.clone()),
+            recipe: args.recipe.clone(),
         },
     )
     .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;
@@ -1440,7 +1442,12 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         && args.livekit_room.is_some()
         && args.livekit_identity.is_some();
 
-    let service = tddy_service::DaemonService::new(tddy_data_dir.clone(), backend.clone());
+    // This process is always spawned for one specific, already-created session (`--session-id`,
+    // by `ConnectionService.StartSession`/`run_with_args`, which already wrote `changeset.yaml`
+    // with `recipe` set). The browser's PR-Stack Chat Screen sends `SubmitFeatureInput` as its
+    // first message; the Presenter created below (the single source of truth, bound to this
+    // session) serves the chat stream `tddy.v1.TddyRemote/Stream` over both gRPC and LiveKit via
+    // its `connect_view` `view_factory`.
     #[allow(clippy::type_complexity)]
     let (view_factory, presenter_observer, presenter_intent_tx): (
         Option<Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>>,
@@ -1493,7 +1500,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     .ok()
                     .map(|p| p.display().to_string()),
                 pid: Some(std::process::id()),
-                tool: Some("tddy-coder".to_string()),
+                tool: std::env::args().next(),
                 livekit_room: args.livekit_room.clone(),
                 previous_session_id: args.stack_base.clone(),
                 session_type: None,
@@ -1502,6 +1509,8 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 activity_status: None,
                 hook_token: None,
                 sandbox: None,
+                agent: args.agent.clone(),
+                recipe: args.recipe.clone(),
             },
         )
         .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;
@@ -1576,8 +1585,17 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             .context("bind gRPC port")?;
         log::info!("tddy-coder daemon listening on port {}", port);
 
-        let mut grpc_router = tonic::transport::Server::builder()
-            .add_service(tddy_service::gen::tddy_remote_server::TddyRemoteServer::new(service));
+        // The chat stream (`tddy.v1.TddyRemote/Stream`) is served by the Presenter — the single
+        // source of truth — via its `connect_view` `view_factory`, on both the gRPC port (here)
+        // and LiveKit (livekit_entries below). Present only when a presenter exists (livekit/session
+        // mode); a bare daemon without a presenter simply does not expose the chat stream.
+        let mut grpc_router = tonic::transport::Server::builder().add_optional_service(
+            view_factory.clone().map(|factory| {
+                tddy_service::gen::tddy_remote_server::TddyRemoteServer::new(
+                    tddy_service::TddyRemoteService::with_view_factory(factory),
+                )
+            }),
+        );
         if let (Some(observer), Some(intent_tx_grpc)) = (presenter_observer, presenter_intent_tx) {
             grpc_router = grpc_router.add_service(
                 tddy_service::gen::presenter_observer_server::PresenterObserverServer::new(
@@ -1699,6 +1717,20 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     >::NAME,
                     service: std::sync::Arc::new(tddy_service::LoopbackTunnelServiceServer::new(
                         tddy_service::LoopbackTunnelServiceImpl,
+                    )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
+                },
+                // The PR-Stack Chat Screen reaches the session's workflow through this entry — the
+                // Presenter (single source of truth) exposed via its `connect_view` view-factory,
+                // identical to the interactive TUI's LiveKit surface. Without it, TddyRemote.Stream
+                // requests over the LiveKit data channel have no handler and vanish silently.
+                tddy_rpc::ServiceEntry {
+                    name: tddy_service::TddyRemoteServer::<tddy_service::TddyRemoteService>::NAME,
+                    service: std::sync::Arc::new(tddy_service::TddyRemoteServer::new(
+                        tddy_service::TddyRemoteService::with_view_factory(
+                            view_factory
+                                .clone()
+                                .expect("view_factory present when livekit_enabled"),
+                        ),
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
             ];
@@ -2726,7 +2758,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             let tunnel_server = tddy_service::LoopbackTunnelServiceServer::new(
                 tddy_service::LoopbackTunnelServiceImpl,
             );
-            let mut multi_entries = vec![
+            let multi_entries = vec![
                 tddy_rpc::ServiceEntry {
                     name: "terminal.TerminalService",
                     service: std::sync::Arc::new(terminal_server)
@@ -2745,9 +2777,11 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                         as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
             ];
-            let multi_names: Vec<&str> = multi_entries.iter().map(|e| e.name).collect();
-            multi_entries.push(tddy_service::reflection_entry_from(&multi_names));
-            let multi_service = tddy_rpc::MultiRpcService::new(multi_entries);
+            // Mount the Presenter View-adapter (TddyRemote) onto the LiveKit surface too, not just
+            // the local gRPC port — a browser View reaches the Presenter over LiveKit, and via
+            // connect_view each opened stream replays the current state snapshot.
+            let multi_service =
+                tddy_service::session_view_adapter_surface(multi_entries, view_factory.clone());
             let codex_oauth_watch_for_reconnect = codex_oauth_watch.clone();
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_multi_thread()
@@ -2770,7 +2804,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             });
         } else {
             let token = args.livekit_token.clone().unwrap();
-            let mut livekit_entries2 = vec![
+            let livekit_entries2 = vec![
                 tddy_rpc::ServiceEntry {
                     name: "terminal.TerminalService",
                     service: std::sync::Arc::new(tddy_service::TerminalServiceServer::new(
@@ -2786,9 +2820,11 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
             ];
-            let livekit_names2: Vec<&str> = livekit_entries2.iter().map(|e| e.name).collect();
-            livekit_entries2.push(tddy_service::reflection_entry_from(&livekit_names2));
-            let livekit_multi = tddy_rpc::MultiRpcService::new(livekit_entries2);
+            // Mount the Presenter View-adapter (TddyRemote) onto the LiveKit surface too, not just
+            // the local gRPC port — a browser View reaches the Presenter over LiveKit, and via
+            // connect_view each opened stream replays the current state snapshot.
+            let livekit_multi =
+                tddy_service::session_view_adapter_surface(livekit_entries2, view_factory.clone());
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
@@ -2927,12 +2963,11 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         // `--stdio` dedicates this process's real stdin/stdout to RPC framing (see
         // `tddy_core::stdio_safety`) — serve the same remote-control surface as `--grpc`, but
         // never touch physical fd 1 for TUI rendering (no `run_event_loop`/crossterm here).
-        let handle = tddy_core::PresenterHandle {
-            event_tx: event_tx.clone(),
-            intent_tx: intent_tx.clone(),
-        };
+        // Uses `with_view_factory` (not a raw `PresenterHandle`) so a client that connects after
+        // agent output was already produced still gets a snapshot replay — same architecture as
+        // the gRPC/LiveKit paths above (`connect_view`, the Presenter is the single source of truth).
         let service = tddy_service::proto::remote::TddyRemoteServer::new(
-            tddy_service::TddyRemoteService::new(handle),
+            tddy_service::TddyRemoteService::with_view_factory(view_factory.clone()),
         );
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -3265,7 +3300,7 @@ fn run_plan_bootstrap_in_session_dir(
             project_id: args.project_id.clone().unwrap_or_default(),
             repo_path: Some(output_dir_for_ctx.display().to_string()),
             pid: Some(std::process::id()),
-            tool: Some("tddy-coder".to_string()),
+            tool: std::env::args().next(),
             livekit_room: None,
             previous_session_id: args.stack_base.clone(),
             session_type: None,
@@ -3274,6 +3309,8 @@ fn run_plan_bootstrap_in_session_dir(
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            agent: Some(resolved_agent_for_model.to_string()),
+            recipe: args.recipe.clone(),
         },
     )
     .map_err(|e| anyhow::anyhow!("write session metadata: {}", e))?;

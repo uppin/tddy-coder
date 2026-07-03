@@ -103,6 +103,8 @@ pub async fn start_workspace_session(
         activity_status: None,
         hook_token: None,
         sandbox: None,
+        agent: None,
+        recipe: None,
         specialized_agents: Vec::new(),
     };
     tddy_core::write_session_metadata(&session_dir, &meta)

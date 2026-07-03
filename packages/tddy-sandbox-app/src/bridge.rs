@@ -274,10 +274,7 @@ mod tests {
         let frame = resize_frame_if_changed(current, last_sent);
 
         // Then
-        assert_eq!(
-            frame,
-            Some(Bytes::from_static(b"\x1b]resize;100;30\x07"))
-        );
+        assert_eq!(frame, Some(Bytes::from_static(b"\x1b]resize;100;30\x07")));
     }
 
     /// A change in rows alone (columns unchanged) still counts as a resize — a naive
