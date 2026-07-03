@@ -22,6 +22,8 @@ pub mod session_metadata;
 pub mod source_path;
 pub mod stdio_safety;
 pub mod stream;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod toolcall;
 pub mod workflow;
 pub mod worktree;

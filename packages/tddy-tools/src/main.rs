@@ -36,6 +36,10 @@ enum Subcommand {
     /// Ask clarification questions. Blocks until user answers in TUI.
     Ask(cli::AskArgs),
 
+    /// Transition the workflow state machine to another goal (agent-driven orchestration).
+    /// Relays to tddy-coder; returns the next goal's instructions (or a rejection).
+    Transition(cli::TransitionArgs),
+
     /// Output JSON schema for a goal. Use -o to write to file.
     GetSchema(cli::GetSchemaArgs),
 
@@ -88,6 +92,7 @@ async fn main() -> Result<()> {
     match args.subcommand {
         Some(Subcommand::Submit(s)) => cli::run_submit(s).await?,
         Some(Subcommand::Ask(s)) => cli::run_ask(s).await?,
+        Some(Subcommand::Transition(s)) => cli::run_transition(s).await?,
         Some(Subcommand::GetSchema(s)) => cli::run_get_schema(s)?,
         Some(Subcommand::ListSchemas(s)) => cli::run_list_schemas(s)?,
         Some(Subcommand::SetSessionContext(s)) => cli::run_set_session_context(s)?,

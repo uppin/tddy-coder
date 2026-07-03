@@ -52,6 +52,96 @@ pub trait WorkflowRecipe: Send + Sync {
     /// JSON / tool-submit channel key for this goal (may differ from graph task id, e.g. evaluate vs evaluate-changes).
     fn submit_key(&self, goal_id: &GoalId) -> GoalId;
 
+    /// Instruction text handed back to the agent when it transitions **into** `goal_id`
+    /// (agent-driven orchestration, [`crate::workflow::controller::WorkflowController`]).
+    ///
+    /// In the single-session agent-driven model the agent already holds the earlier chat context
+    /// (PRD, acceptance tests, …), so this returns the *static* per-goal instructions only — the
+    /// same content each goal's `system_prompt()` provides in the engine-driven path. Recipes
+    /// override to return rich per-goal instructions; the default is a generic proceed message so
+    /// recipes not yet migrated to agent-driven mode still behave safely.
+    fn goal_instructions(&self, goal_id: &GoalId) -> String {
+        format!("Proceed with the '{}' goal.", goal_id)
+    }
+
+    /// System prompt for the **agent-driven orchestrator** session (single long-lived chat).
+    ///
+    /// Describes the workflow goals, the `transition` tool contract, and the subagent go/no-go
+    /// protocol, then appends the current goal's instructions. Generic default composed from
+    /// [`goal_ids`](Self::goal_ids), [`start_goal`](Self::start_goal), and
+    /// [`goal_instructions`](Self::goal_instructions); recipes may override to tune wording.
+    fn orchestration_system_prompt(&self, current: &GoalId) -> String {
+        let goals = self
+            .goal_ids()
+            .iter()
+            .map(|g| g.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "You are the orchestrator for the '{name}' workflow. You drive a state machine yourself \
+by calling the `tddy-tools transition` tool — there is no external driver.\n\
+\n\
+Workflow goals: [{goals}]\n\
+You are currently at goal: '{current}'.\n\
+\n\
+Protocol:\n\
+- Work on the current goal. When it is complete, advance by running:\n\
+    tddy-tools transition --to <next-goal>\n\
+  The tool returns the next goal's instructions as JSON (`instructions`). Read them and continue \
+working in THIS same chat — do not start over.\n\
+- Transitions must follow valid edges. If a transition is rejected, the tool's `reason` lists the \
+valid next goals; pick one of those.\n\
+- Subagents: you may spawn a subagent (via the Agent tool) to work a specific goal. Instruct each \
+subagent, when it believes its goal is done, to call:\n\
+    tddy-tools transition --to <goal> --provisional\n\
+  A provisional transition is recorded but NOT committed. You (the orchestrator) MUST review the \
+subagent's work and then make the go/no-go decision: to accept, commit the transition yourself with\n\
+    tddy-tools transition --to <goal>\n\
+  (no --provisional). To reject, do not commit; send the subagent back to fix its work.\n\
+- When the final goal is complete, stop.\n\
+\n\
+--- Current goal ('{current}') instructions ---\n\
+{instructions}",
+            name = self.name(),
+            goals = goals,
+            current = current,
+            instructions = self.goal_instructions(current),
+        )
+    }
+
+    /// Tool/permission hints for the **agent-driven orchestrator** invoke.
+    ///
+    /// One long-lived session performs the work of every goal, so the default unions all goals'
+    /// `allowed_tools`, adds the `Agent` tool (for spawning subagents), and runs with edit
+    /// permission. Recipes may override.
+    fn orchestration_hints(&self, current: &GoalId) -> GoalHints {
+        let mut base = self.goal_hints(current).unwrap_or_else(|| GoalHints {
+            display_name: current.to_string(),
+            permission: PermissionHint::AcceptEdits,
+            allowed_tools: vec![],
+            default_model: None,
+            agent_output: true,
+            agent_cli_plan_mode: false,
+            claude_nonzero_exit_ok_if_structured_response: false,
+        });
+        let mut tools: std::collections::BTreeSet<String> =
+            base.allowed_tools.iter().cloned().collect();
+        for g in self.goal_ids() {
+            if let Some(h) = self.goal_hints(&g) {
+                tools.extend(h.allowed_tools);
+            }
+        }
+        tools.insert("Agent".to_string());
+        base.allowed_tools = tools.into_iter().collect();
+        base.permission = PermissionHint::AcceptEdits;
+        base.agent_output = true;
+        // The orchestrator drives many goals in one session; vendor "plan mode" (single-goal) and
+        // structured-exit handling do not apply.
+        base.agent_cli_plan_mode = false;
+        base.claude_nonzero_exit_ok_if_structured_response = false;
+        base
+    }
+
     fn next_goal_for_state(&self, state: &WorkflowState) -> Option<GoalId>;
 
     /// Like [`next_goal_for_state`](Self::next_goal_for_state) but with full changeset access,

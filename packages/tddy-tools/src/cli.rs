@@ -1,5 +1,5 @@
-//! CLI subcommands: `submit`, `ask`, `get-schema`, `list-schemas`, `set-session-context`,
-//! `persist-changeset-workflow`.
+//! CLI subcommands: `submit`, `ask`, `transition`, `get-schema`, `list-schemas`,
+//! `set-session-context`, `persist-changeset-workflow`.
 //!
 //! Workflow goal names and schema filenames are defined in `packages/tddy-workflow-recipes/goals.json`
 //! (see [`tddy_tools::schema`] and [`tddy_tools::schema_manifest`]).
@@ -45,6 +45,24 @@ pub struct AskArgs {
     /// Questions JSON (alternative to stdin). Format: {"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}
     #[arg(long)]
     pub data: Option<String>,
+}
+
+/// Transition the workflow state machine to another goal (agent-driven orchestration).
+///
+/// The orchestrator agent calls this (without `--provisional`) to commit a transition and receive
+/// the next goal's instructions. Subagents call it **with** `--provisional`: the transition is
+/// recorded but not committed until the orchestrator verifies their work and commits.
+#[derive(Parser)]
+#[command(name = "transition")]
+pub struct TransitionArgs {
+    /// Target goal id to transition into (e.g. `plan`, `red`, `green`).
+    #[arg(long)]
+    pub to: String,
+
+    /// Mark this transition provisional (subagents pass this). Provisional transitions are recorded
+    /// but not committed until the orchestrator commits.
+    #[arg(long, default_value_t = false)]
+    pub provisional: bool,
 }
 
 /// List registered workflow goals / JSON Schemas (machine-readable JSON).
@@ -185,6 +203,14 @@ pub struct AskResponse {
     pub status: String,
     pub answers: Option<String>,
     pub error: Option<String>,
+}
+
+/// Wire format for transition request (sent to socket).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TransitionRequest {
+    pub r#type: String,
+    pub to: String,
+    pub provisional: bool,
 }
 
 /// Exit codes: 0=success, 1=general failure, 2=usage error, 3=validation error
@@ -396,6 +422,58 @@ async fn relay_ask(socket_path: &std::path::Path, questions: &[AskQuestionItem])
         output_error(response.error.as_deref().unwrap_or("ask failed"), 1);
     }
 
+    Ok(())
+}
+
+pub async fn run_transition(args: TransitionArgs) -> Result<()> {
+    if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
+        relay_transition(
+            std::path::Path::new(&socket_path),
+            &args.to,
+            args.provisional,
+        )
+        .await?;
+    } else {
+        let out = serde_json::json!({
+            "status": "error",
+            "message": "TDDY_SOCKET not set; transition not relayed"
+        });
+        println!("{}", serde_json::to_string(&out).unwrap());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn relay_transition(
+    socket_path: &std::path::Path,
+    to: &str,
+    provisional: bool,
+) -> Result<()> {
+    let req = serde_json::to_value(TransitionRequest {
+        r#type: "transition".to_string(),
+        to: to.to_string(),
+        provisional,
+    })?;
+    let response_json = tddy_tools::toolcall_client::dispatch_toolcall(socket_path, req)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
+    // Print the relay's JSON verbatim so the agent reads `instructions` (committed),
+    // the provisional acknowledgement, or `reason` (rejected).
+    println!("{}", serde_json::to_string(&response_json)?);
+    Ok(())
+}
+
+#[cfg(not(unix))]
+async fn relay_transition(
+    _socket_path: &std::path::Path,
+    _to: &str,
+    _provisional: bool,
+) -> Result<()> {
+    let out = serde_json::json!({
+        "status": "error",
+        "message": "Unix socket not available on this platform"
+    });
+    println!("{}", serde_json::to_string(&out).unwrap());
     Ok(())
 }
 
