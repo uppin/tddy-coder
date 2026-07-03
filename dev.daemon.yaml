@@ -40,6 +40,12 @@ daemon_instance_id_append_startup_timestamp: false
 # ./web-dev and open the Vite port (default 5173), not this port — see docs/ft/web/local-web-dev.md.
 web_bundle_path: packages/tddy-web/dist
 
+# tddy-coder config whose `log:` block is passed verbatim to spawned children as their `--config`,
+# so WebRTC/LiveKit chatter is routed to tmp/logs/coder-webrtc at INFO instead of flooding
+# tmp/logs/coder. Relative to the daemon's cwd (repo root). Remove to fall back to the
+# daemon-synthesized minimal child log config.
+coder_config_path: dev.config.yaml
+
 # Browser DEBUG mask exposed at GET /api/config. A `debug`-package namespace mask that turns on scoped
 # `[tddy]` diagnostics in the browser console — handy for chasing terminal garbling / misalignment.
 # Namespaces: tddy:term:write (bytes in), tddy:term:data (keys out), tddy:term:resize (cols/rows),

@@ -59,6 +59,12 @@ pub struct DaemonConfig {
     pub auth_storage: Option<PathBuf>,
     #[serde(default)]
     pub log: Option<LogConfig>,
+    /// Path to a `tddy-coder` config file (e.g. `dev.config.yaml`) whose `log:` block is passed
+    /// verbatim to spawned children as their `--config`, so operators own child log routing (e.g.
+    /// routing `libwebrtc*` / `livekit*` chatter to a separate file at INFO). Relative to the
+    /// daemon's cwd. When unset, the spawner synthesizes a minimal log config from the daemon `log:`.
+    #[serde(default)]
+    pub coder_config_path: Option<PathBuf>,
     #[serde(default)]
     pub users: Vec<UserMapping>,
     #[serde(default)]
@@ -125,6 +131,7 @@ impl Default for DaemonConfig {
             github: None,
             auth_storage: None,
             log: None,
+            coder_config_path: None,
             users: Vec::new(),
             allowed_tools: Vec::new(),
             allowed_agents: Vec::new(),

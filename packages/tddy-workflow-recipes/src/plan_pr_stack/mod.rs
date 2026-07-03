@@ -96,7 +96,49 @@ pub fn validate_stack_plan(plan: &StackPlanOutput) -> Result<(), String> {
         .topo_order()
         .map_err(|err| format!("cycle detected: {err}"))?;
 
+    // 4. Branch-name contract: every PR carries a `branch_suggestion` in `feature/<stack>/<node>`
+    // form, and all PRs share one `feature/<stack>/` namespace so the stack's branches group
+    // together (and "Start session" always has a non-empty new_branch_name). See
+    // docs/ft/coder/pr-stacking.md.
+    let mut stack_namespace: Option<String> = None;
+    for pr in &plan.prs {
+        let branch = pr
+            .branch_suggestion
+            .as_deref()
+            .map(str::trim)
+            .filter(|b| !b.is_empty())
+            .ok_or_else(|| format!("missing branch_suggestion for node {}", pr.node_id))?;
+        let namespace = branch_stack_namespace(branch).ok_or_else(|| {
+            format!(
+                "branch_suggestion {branch:?} for node {} must be in feature/<stack>/<node> form",
+                pr.node_id
+            )
+        })?;
+        match &stack_namespace {
+            None => stack_namespace = Some(namespace),
+            Some(existing) if *existing != namespace => {
+                return Err(format!(
+                    "branches must share one stack namespace: {existing} vs {namespace} (node {})",
+                    pr.node_id
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+
     Ok(())
+}
+
+/// The `feature/<stack>/` namespace of a stacked-PR branch, or `None` when the branch is not in
+/// `feature/<stack>/<node>` form (at least three non-empty `/`-separated segments led by `feature`).
+/// Used to group every PR's branch under one shared stack namespace.
+fn branch_stack_namespace(branch: &str) -> Option<String> {
+    let segments: Vec<&str> = branch.split('/').collect();
+    if segments.len() >= 3 && segments[0] == "feature" && segments.iter().all(|s| !s.is_empty()) {
+        Some(format!("feature/{}", segments[1]))
+    } else {
+        None
+    }
 }
 
 /// **plan-pr-stack** recipe: `analyze-stack` → `write-stack-plan` → `end`.
