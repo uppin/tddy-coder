@@ -396,6 +396,88 @@ impl ConnectionServiceImpl {
     ///
     /// `initial_prompt` — when non-empty, passed as a positional argument to `claude` so it
     /// receives the first user turn on startup (e.g. `claude "build feature X"`).
+    /// Resolve the goal a managed session should resume at: the goal persisted in `changeset.yaml`,
+    /// falling back to the recipe's start goal when no meaningful state is recorded yet (empty or the
+    /// default `Init`). Managed sessions persist a valid goal id on every committed transition.
+    fn managed_resume_goal(
+        session_dir: &Path,
+        recipe: &Arc<dyn tddy_core::backend::WorkflowRecipe>,
+    ) -> tddy_core::backend::GoalId {
+        let persisted = tddy_core::read_changeset(session_dir)
+            .ok()
+            .map(|cs| cs.state.current.into_inner())
+            .unwrap_or_default();
+        let p = persisted.trim();
+        if p.is_empty() || p == "Init" {
+            recipe.start_goal()
+        } else {
+            tddy_core::backend::GoalId::new(p)
+        }
+    }
+
+    /// Build the managed-workflow wiring for a claude-cli session and return the launch inputs: the
+    /// [`ManagedWorkflow`](crate::session_toolcall::ManagedWorkflow) (its listener must be kept alive
+    /// for the session's lifetime), the orchestration-prompt file path to append to claude's system
+    /// prompt, and the per-session env (`TDDY_SOCKET` + a `PATH` that resolves `tddy-tools`) for the
+    /// process that runs `tddy-tools transition`.
+    ///
+    /// `prompt_dir` is where the prompt file is written: the session dir for a non-sandboxed session,
+    /// the jail-visible context dir for a sandboxed one. `resume_at` selects the controller's initial
+    /// goal — `None` for a new session (recipe start goal), `Some` to resume an existing one.
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_managed_workflow(
+        &self,
+        session_id: &str,
+        recipe: Arc<dyn tddy_core::backend::WorkflowRecipe>,
+        session_dir: &Path,
+        worktree_path: &Path,
+        prompt_dir: &Path,
+        tddy_tools_path: &str,
+        resume_at: Option<tddy_core::backend::GoalId>,
+    ) -> Result<ManagedLaunch, Status> {
+        let mw = match resume_at {
+            Some(goal) => crate::session_toolcall::resume_managed_workflow(
+                session_id,
+                recipe,
+                session_dir,
+                worktree_path,
+                &self.tddy_data_dir,
+                &std::env::temp_dir(),
+                goal,
+            ),
+            None => crate::session_toolcall::set_up_managed_workflow(
+                session_id,
+                recipe,
+                session_dir,
+                worktree_path,
+                &self.tddy_data_dir,
+                &std::env::temp_dir(),
+            ),
+        }
+        .map_err(Status::internal)?;
+
+        let prompt_path = prompt_dir.join("orchestration-prompt.txt");
+        std::fs::write(&prompt_path, &mw.orchestration_prompt)
+            .map_err(|e| Status::internal(format!("failed to write orchestration prompt: {e}")))?;
+
+        let mut env: Vec<(String, String)> = vec![(
+            "TDDY_SOCKET".to_string(),
+            mw.listener.socket_path().to_string_lossy().into_owned(),
+        )];
+        if let Some(dir) = std::path::Path::new(tddy_tools_path)
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+        {
+            let existing = std::env::var("PATH").unwrap_or_default();
+            env.push(("PATH".to_string(), format!("{}:{existing}", dir.display())));
+        }
+        Ok(ManagedLaunch {
+            workflow: mw,
+            prompt_file: prompt_path,
+            env,
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn start_claude_cli_session(
         &self,
@@ -411,6 +493,9 @@ impl ConnectionServiceImpl {
         initial_prompt: &str,
         permission_mode: &str,
         stack_parent: Option<&str>,
+        // When `Some`, the session is launched workflow-aware: the recipe's orchestration prompt is
+        // injected and its `transition` tool advances a per-session `WorkflowController`.
+        managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -492,11 +577,20 @@ impl ConnectionServiceImpl {
             selected_branch_to_work_on: resolved_selected_branch,
             ..ChangesetWorkflow::default()
         };
-        let cs = Changeset {
+        let mut cs = Changeset {
             workflow: Some(cs_workflow),
             orchestrator_session_id: stack_parent.map(str::to_string),
+            recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
             ..Changeset::default()
         };
+        // A managed session seeds the recipe's start goal so `changeset.yaml` reflects the workflow
+        // position immediately; the per-session controller advances it from there on `transition`.
+        if let Some(recipe) = &managed_recipe {
+            tddy_core::changeset::update_state(
+                &mut cs,
+                tddy_core::workflow::ids::WorkflowState::new(recipe.start_goal().as_str()),
+            );
+        }
         tddy_core::write_changeset(&session_dir, &cs)
             .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
@@ -593,17 +687,46 @@ impl ConnectionServiceImpl {
                 Some(m.to_string())
             }
         };
+
+        // Managed-workflow wiring: build the per-session controller + toolcall listener, write the
+        // recipe's orchestration prompt to a file `claude` appends to its system prompt, and inject
+        // a per-session TDDY_SOCKET (+ a PATH that resolves tddy-tools) so the agent's host-side
+        // `tddy-tools transition` reaches this session's controller.
+        let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
+        let mut append_system_prompt_file: Option<PathBuf> = None;
+        let mut env_extra: Vec<(String, String)> = Vec::new();
+        if let Some(recipe) = managed_recipe.clone() {
+            let launch = self.prepare_managed_workflow(
+                session_id,
+                recipe,
+                &session_dir,
+                &worktree_path,
+                &session_dir,
+                &tddy_tools_path,
+                None,
+            )?;
+            append_system_prompt_file = Some(launch.prompt_file);
+            env_extra = launch.env;
+            managed = Some(launch.workflow);
+        }
+
         let handle = manager
-            .start(
+            .start_with_options(
                 &session_id_owned,
                 worktree_clone,
                 &model_owned,
                 &binary_owned,
                 initial_prompt_opt.as_deref(),
                 permission_mode_opt.as_deref(),
+                append_system_prompt_file.as_deref(),
+                env_extra,
             )
             .await
             .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {}", e)))?;
+
+        if let Some(mw) = managed {
+            manager.attach_managed_workflow(session_id, mw).await;
+        }
 
         let pid = handle.pid;
 
@@ -627,7 +750,7 @@ impl ConnectionServiceImpl {
             hook_token: Some(hook_token),
             sandbox: None,
             agent: None,
-            recipe: None,
+            recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
             specialized_agents: Vec::new(),
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
@@ -769,6 +892,9 @@ impl ConnectionServiceImpl {
         // from the resolved def.
         _managed_codebase: bool,
         specialized_agents: &[String],
+        // When `Some`, launch workflow-aware: inject the recipe's orchestration prompt and route the
+        // agent's host-side `tddy-tools transition` to a per-session `WorkflowController`.
+        managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -845,11 +971,18 @@ impl ConnectionServiceImpl {
             selected_branch_to_work_on: resolved_selected_branch,
             ..ChangesetWorkflow::default()
         };
-        let cs = Changeset {
+        let mut cs = Changeset {
             workflow: Some(cs_workflow),
             orchestrator_session_id: stack_parent.map(str::to_string),
+            recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
             ..Changeset::default()
         };
+        if let Some(recipe) = &managed_recipe {
+            tddy_core::changeset::update_state(
+                &mut cs,
+                tddy_core::workflow::ids::WorkflowState::new(recipe.start_goal().as_str()),
+            );
+        }
         tddy_core::write_changeset(&session_dir, &cs)
             .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
@@ -924,6 +1057,27 @@ impl ConnectionServiceImpl {
                 .and_then(|c| c.tddy_tools_path.as_deref()),
         );
 
+        // Managed workflow: build the per-session controller + toolcall listener, write the recipe's
+        // orchestration prompt into the jail-visible context dir, and prepare the per-session env
+        // (TDDY_SOCKET + PATH) applied to host-side `tddy-tools transition` (run via the Shell relay).
+        let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
+        let mut append_system_prompt_file: Option<PathBuf> = None;
+        let mut session_env: Vec<(String, String)> = Vec::new();
+        if let Some(recipe) = managed_recipe.clone() {
+            let launch = self.prepare_managed_workflow(
+                session_id,
+                recipe,
+                &session_dir,
+                &worktree_path,
+                &context_dir,
+                &tddy_tools_path,
+                None,
+            )?;
+            append_system_prompt_file = Some(launch.prompt_file);
+            session_env = launch.env;
+            managed = Some(launch.workflow);
+        }
+
         let claude_binary_cfg = self
             .config
             .claude_cli
@@ -966,7 +1120,7 @@ impl ConnectionServiceImpl {
             crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
         let loopback_allow_ports = vec![egress_shim_port];
 
-        let runner_argv = vec![
+        let mut runner_argv = vec![
             sandbox_runner_path,
             "--session-id".into(),
             session_id.to_string(),
@@ -988,6 +1142,10 @@ impl ConnectionServiceImpl {
             egress_shim_port.to_string(),
             "--stdio".into(),
         ];
+        if let Some(prompt_path) = &append_system_prompt_file {
+            runner_argv.push("--append-system-prompt-file".into());
+            runner_argv.push(prompt_path.to_string_lossy().to_string());
+        }
 
         let mut env = crate::sandbox_session::build_sandbox_runner_env(
             &scratch_home,
@@ -1041,6 +1199,7 @@ impl ConnectionServiceImpl {
             stdout_tx.clone(),
             Arc::clone(&capture),
             stdin_rx,
+            Arc::new(session_env),
         )
         .await
         .map_err(Status::internal)?;
@@ -1055,6 +1214,7 @@ impl ConnectionServiceImpl {
                 stdin_tx,
                 ready_marker: ready_marker.clone(),
                 handle,
+                managed_workflow: managed,
             },
         ));
         self.sandbox_manager
@@ -1080,7 +1240,7 @@ impl ConnectionServiceImpl {
             hook_token: None,
             sandbox: Some(true),
             agent: None,
-            recipe: None,
+            recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
             specialized_agents: specialized_agents.to_vec(),
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
@@ -1131,10 +1291,51 @@ impl ConnectionServiceImpl {
         let session_id_owned = session_id.to_string();
         let binary_owned = binary_path.to_string();
 
+        // Re-wire managed-workflow orchestration when resuming a managed session — metadata records a
+        // recipe only for managed sessions. The controller resumes at the goal persisted in
+        // changeset.yaml so the workflow continues from where it left off, not from the start goal.
+        let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
+        let mut append_system_prompt_file: Option<PathBuf> = None;
+        let mut env_extra: Vec<(String, String)> = Vec::new();
+        if let Some(recipe_name) = meta.recipe.as_deref().filter(|s| !s.trim().is_empty()) {
+            let recipe = tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(recipe_name)
+                .map_err(Status::invalid_argument)?;
+            let resume_goal = Self::managed_resume_goal(&session_dir, &recipe);
+            let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
+                self.config
+                    .claude_cli
+                    .as_ref()
+                    .and_then(|c| c.tddy_tools_path.as_deref()),
+            );
+            let launch = self.prepare_managed_workflow(
+                &session_id_owned,
+                recipe,
+                &session_dir,
+                &worktree_path,
+                &session_dir,
+                &tddy_tools_path,
+                Some(resume_goal),
+            )?;
+            append_system_prompt_file = Some(launch.prompt_file);
+            env_extra = launch.env;
+            managed = Some(launch.workflow);
+        }
+
         let handle = manager
-            .resume(&session_id_owned, worktree_path, &model, &binary_owned)
+            .resume_with_options(
+                &session_id_owned,
+                worktree_path,
+                &model,
+                &binary_owned,
+                append_system_prompt_file.as_deref(),
+                env_extra,
+            )
             .await
             .map_err(|e| Status::internal(format!("failed to relaunch claude-cli: {}", e)))?;
+
+        if let Some(mw) = managed {
+            manager.attach_managed_workflow(&session_id_owned, mw).await;
+        }
 
         let pid = handle.pid;
 
@@ -1185,6 +1386,15 @@ impl ConnectionServiceImpl {
             .map(PathBuf::from)
             .ok_or_else(|| Status::internal("sandbox session missing repo_path in metadata"))?;
 
+        // A recipe in metadata marks a managed session; re-wire its workflow on resume.
+        let managed_recipe = match meta.recipe.as_deref().filter(|s| !s.trim().is_empty()) {
+            Some(name) => Some(
+                tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(name)
+                    .map_err(Status::invalid_argument)?,
+            ),
+            None => None,
+        };
+
         let pid = self
             .relaunch_sandboxed_runner(
                 session_id,
@@ -1193,6 +1403,7 @@ impl ConnectionServiceImpl {
                 &model,
                 "auto",
                 &meta.specialized_agents,
+                managed_recipe,
             )
             .await?;
 
@@ -1224,6 +1435,7 @@ impl ConnectionServiceImpl {
         model: &str,
         permission_mode: &str,
         specialized_agents: &[String],
+        managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
     ) -> Result<u32, Status> {
         let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
         let sandbox_root = session_dir.join("sandbox");
@@ -1275,6 +1487,30 @@ impl ConnectionServiceImpl {
                 .as_ref()
                 .and_then(|c| c.tddy_tools_path.as_deref()),
         );
+
+        // Re-wire managed-workflow orchestration on resume of a managed sandboxed session; the
+        // controller resumes at the goal persisted in changeset.yaml. The prompt goes into the
+        // jail-visible context dir and the per-session env carries TDDY_SOCKET for host-side
+        // `tddy-tools transition` (relayed via the Shell tool).
+        let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
+        let mut append_system_prompt_file: Option<PathBuf> = None;
+        let mut session_env: Vec<(String, String)> = Vec::new();
+        if let Some(recipe) = managed_recipe {
+            let resume_goal = Self::managed_resume_goal(session_dir, &recipe);
+            let launch = self.prepare_managed_workflow(
+                session_id,
+                recipe,
+                session_dir,
+                worktree_path,
+                &context_dir,
+                &tddy_tools_path,
+                Some(resume_goal),
+            )?;
+            append_system_prompt_file = Some(launch.prompt_file);
+            session_env = launch.env;
+            managed = Some(launch.workflow);
+        }
+
         let claude_binary_cfg = self
             .config
             .claude_cli
@@ -1310,7 +1546,7 @@ impl ConnectionServiceImpl {
             crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
         let loopback_allow_ports = vec![egress_shim_port];
 
-        let runner_argv = vec![
+        let mut runner_argv = vec![
             sandbox_runner_path,
             "--session-id".into(),
             session_id.to_string(),
@@ -1332,6 +1568,10 @@ impl ConnectionServiceImpl {
             egress_shim_port.to_string(),
             "--stdio".into(),
         ];
+        if let Some(prompt_path) = &append_system_prompt_file {
+            runner_argv.push("--append-system-prompt-file".into());
+            runner_argv.push(prompt_path.to_string_lossy().to_string());
+        }
 
         let mut env = crate::sandbox_session::build_sandbox_runner_env(
             &scratch_home,
@@ -1388,6 +1628,7 @@ impl ConnectionServiceImpl {
             stdout_tx.clone(),
             Arc::clone(&capture),
             stdin_rx,
+            Arc::new(session_env),
         )
         .await
         .map_err(|e| {
@@ -1405,6 +1646,7 @@ impl ConnectionServiceImpl {
                 stdin_tx,
                 ready_marker,
                 handle,
+                managed_workflow: managed,
             },
         ));
         self.sandbox_manager
@@ -1412,6 +1654,16 @@ impl ConnectionServiceImpl {
             .await;
         Ok(pid)
     }
+}
+
+/// Launch inputs for a managed claude-cli session, produced by
+/// [`ConnectionServiceImpl::prepare_managed_workflow`]: the workflow wiring (whose listener must be
+/// kept alive for the session's lifetime), the orchestration-prompt file to append to claude's
+/// system prompt, and the per-session env (`TDDY_SOCKET` + `PATH`) for host-side `tddy-tools`.
+struct ManagedLaunch {
+    workflow: crate::session_toolcall::ManagedWorkflow,
+    prompt_file: PathBuf,
+    env: Vec<(String, String)>,
 }
 
 /// Build the (name, replaced-tools) pairs for every resolved specialized-agent def — each its own
@@ -1829,6 +2081,21 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     Some(t.to_string())
                 }
             };
+            // A managed-codebase claude-cli session with a recipe is launched workflow-aware. An
+            // unknown recipe is a request error (never silently ignored). Non-managed sessions and
+            // managed sessions without a recipe keep the plain launch (managed_recipe = None).
+            let managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>> = if req
+                .managed_codebase
+                && !req.recipe.trim().is_empty()
+            {
+                Some(
+                    tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(req.recipe.trim())
+                        .map_err(Status::invalid_argument)?,
+                )
+            } else {
+                None
+            };
+
             if req.sandbox {
                 return self
                     .start_sandboxed_claude_cli_session(
@@ -1845,6 +2112,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         stack_parent_for_claude_cli.as_deref(),
                         req.managed_codebase,
                         &req.specialized_agents,
+                        managed_recipe,
                     )
                     .await;
             }
@@ -1862,6 +2130,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     req.initial_prompt.trim(),
                     req.permission_mode.trim(),
                     stack_parent_for_claude_cli.as_deref(),
+                    managed_recipe,
                 )
                 .await;
         }

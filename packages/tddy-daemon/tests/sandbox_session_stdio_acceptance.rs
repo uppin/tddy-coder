@@ -157,6 +157,7 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
             stdout_tx,
             capture,
             stdin_rx,
+            Arc::new(Vec::new()),
         ),
     )
     .await

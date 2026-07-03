@@ -27,6 +27,9 @@ pub struct SandboxSessionState {
     pub ready_marker: PathBuf,
     /// Kept so delete/resume can SIGKILL the sandbox-exec tree reliably.
     handle: StdMutex<Option<tddy_sandbox::SandboxHandle>>,
+    /// Managed-workflow wiring (per-session toolcall listener + controller) when this is a managed
+    /// session; kept here so its lifetime is tied to the session and its socket is cleaned up on drop.
+    _managed_workflow: Option<crate::session_toolcall::ManagedWorkflow>,
 }
 
 /// Fields required to register an active sandbox session on the host.
@@ -38,6 +41,7 @@ pub struct SandboxSessionStateInit {
     pub stdin_tx: mpsc::UnboundedSender<Bytes>,
     pub ready_marker: PathBuf,
     pub handle: tddy_sandbox::SandboxHandle,
+    pub managed_workflow: Option<crate::session_toolcall::ManagedWorkflow>,
 }
 
 impl SandboxSessionState {
@@ -50,6 +54,7 @@ impl SandboxSessionState {
             stdin_tx: init.stdin_tx,
             ready_marker: init.ready_marker,
             handle: StdMutex::new(Some(init.handle)),
+            _managed_workflow: init.managed_workflow,
         }
     }
 
@@ -180,6 +185,10 @@ async fn connect_sandbox_client(
 struct DaemonToolHandler {
     worktree: PathBuf,
     task_registry: tddy_task::TaskRegistry,
+    /// Extra env applied to spawned shell commands — for a managed session this carries the
+    /// per-session `TDDY_SOCKET` (+ `PATH`) so host-side `tddy-tools transition` reaches the
+    /// session's `WorkflowController`.
+    session_env: Arc<Vec<(String, String)>>,
 }
 
 #[async_trait]
@@ -190,12 +199,13 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
         tool_name: &str,
         args_json: &str,
     ) -> ExecuteToolResponse {
-        let outcome = tool_engine::execute_tool(
+        let outcome = tool_engine::execute_tool_with_env(
             &self.worktree,
             tool_name,
             args_json,
             &self.task_registry,
             session_id,
+            &self.session_env,
         )
         .await;
         ExecuteToolResponse {
@@ -260,6 +270,7 @@ pub async fn dial_and_bridge(
     stdout_tx: broadcast::Sender<Bytes>,
     capture: Arc<StdMutex<Vec<u8>>>,
     stdin_rx: mpsc::UnboundedReceiver<Bytes>,
+    session_env: Arc<Vec<(String, String)>>,
 ) -> Result<(), String> {
     log::info!(
         target: "tddy_daemon::sandbox_session",
@@ -284,6 +295,7 @@ pub async fn dial_and_bridge(
     let handler = DaemonToolHandler {
         worktree: worktree_path,
         task_registry,
+        session_env,
     };
     tddy_sandbox_runner::run_host_relay(
         stdio_client,
@@ -683,6 +695,7 @@ mod tests {
                 stdout_tx,
                 capture,
                 stdin_rx,
+                Arc::new(Vec::new()),
             ),
         )
         .await

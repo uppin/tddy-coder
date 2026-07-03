@@ -1,7 +1,8 @@
 /**
- * Acceptance: the Claude CLI new-session form gains a collapsible "Managed codebase" section
- * (see docs/ft/coder/specialized-subagents.md) that lets the user attach one or more specialized
- * subagents to the session. Absent for the "tool" session type.
+ * Acceptance: the Claude CLI new-session form's "Managed codebase" control (an explicit checkbox —
+ * see docs/ft/coder/managed-codebase-workflow.md) lets the user attach one or more specialized
+ * subagents to the session. Absent for the "tool" session type. Enabling the checkbox sets the
+ * explicit `managed_codebase` flag (the recipe dimension is covered in CreateSessionManagedWorkflow).
  *
  * Uses the in-memory ConnectRPC backend (not `cy.intercept`) so the test asserts on the typed
  * `StartSession` request the component actually sent — mirrors
@@ -58,25 +59,25 @@ describe("CreateSession managed-codebase specialized-subagent picker", () => {
     byTestId(TEST_IDS.createSessionManagedCodebaseToggle).should("not.exist");
   });
 
-  it("shows a collapsed Managed codebase section for claude-cli sessions", () => {
+  it("shows an unchecked Managed codebase control for claude-cli sessions", () => {
     // Given
     mountCreatePane(aCreateSessionBackend());
 
     // When
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
 
-    // Then — the toggle is present, but the subagent list is not yet expanded
-    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).should("be.visible");
+    // Then — the checkbox is present and unchecked, so the subagent list is not yet shown
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).should("be.visible").and("not.be.checked");
     byTestId(TEST_IDS.createSessionManagedCodebaseSection).should("not.exist");
   });
 
-  it("expanding Managed codebase lists every subagent returned by ListSubagents", () => {
+  it("enabling Managed codebase lists every subagent returned by ListSubagents", () => {
     // Given
     mountCreatePane(aCreateSessionBackend());
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
 
     // When
-    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).click();
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
 
     // Then
     byTestId(TEST_IDS.createSessionManagedCodebaseSection).should("be.visible");
@@ -90,7 +91,7 @@ describe("CreateSession managed-codebase specialized-subagent picker", () => {
     mountCreatePane(backend);
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
     byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
-    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).click();
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
 
     // When
     byTestId(createSessionSubagentCheckbox("fastcontext")).click();

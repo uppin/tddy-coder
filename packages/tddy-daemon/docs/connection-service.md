@@ -92,6 +92,20 @@ A background task monitors the child with `child.wait()`; on exit the entry is r
 
 **`ReportSessionStatus`**: Hook-driven RPC. `tddy-tools session-hook` calls this after mapping a Claude Code lifecycle event to a `SessionActivityStatus`. The handler validates `session_id` (path traversal guard), resolves `sessions_base` from `os_user` directly (no web-token path), reads `.session.yaml`, requires `session_type == "claude-cli"`, constant-time-compares `hook_token`, then calls `update_activity_status(session_dir, status)`. Sessions with `hook_token: None` (e.g. Telegram-started) return `PermissionDenied`. See [claude-cli-session.md](../../../docs/ft/daemon/claude-cli-session.md#session-activity-status-via-per-worktree-hooks) for the full hook flow.
 
+## Managed-codebase workflow (workflow-aware claude-cli)
+
+When `StartSessionRequest.managed_codebase == true` **and** `recipe` is non-empty, a claude-cli session (sandboxed or not) is launched *workflow-aware*: Claude drives and persists its own workflow state. The recipe is resolved once in the `StartSession` dispatch via `tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name` (an unknown name is `INVALID_ARGUMENT`) and threaded into both launch paths. See [managed-codebase-workflow.md](../../../docs/ft/coder/managed-codebase-workflow.md) for the product WHAT.
+
+`ConnectionServiceImpl::prepare_managed_workflow` is the single helper shared by all four sites (start/resume × non-sandboxed/sandboxed). It:
+
+1. Builds the per-session wiring (`session_toolcall::set_up_managed_workflow` for a new session — controller at `recipe.start_goal()`; `resume_managed_workflow` for a resume — controller at the goal persisted in `changeset.yaml`, resolved by `managed_resume_goal`). The `WorkflowController` is registered as the **per-instance** `transition` handler of a per-session toolcall listener (`SessionToolcallListener`, bound on a short out-of-tree socket to satisfy `SUN_LEN`).
+2. Writes the recipe's `orchestration_system_prompt` to `orchestration-prompt.txt` (the session dir for non-sandboxed; the jail-visible context dir for sandboxed) and returns it as `--append-system-prompt-file` for the `claude` argv.
+3. Returns the per-session env (`TDDY_SOCKET` = the listener socket, plus a `PATH` that resolves `tddy-tools`).
+
+For new sessions the changeset is seeded with `recipe.start_goal()` before `write_changeset`, and `recipe` is persisted in `.session.yaml` (the resume signal). The listener/`ManagedWorkflow` is owned by `ClaudeCliSessionManager` (non-sandboxed, dropped when the main terminal exits) or `SandboxSessionState` (sandboxed).
+
+**How `transition` reaches the controller:** `tddy-tools transition` always runs **on the host** — sandboxed sessions relay the agent's `Shell` tool back to the daemon (`tool_engine::tool_shell`, which now runs the command with the per-session `extra_env`), and non-sandboxed sessions inherit the PTY env — so the child `tddy-tools` reads `TDDY_SOCKET` and dispatches over the existing relay to the per-session `ToolcallRpcService::with_transition_handler` in `tddy-core`. The process-global registry (`toolcall/transition.rs`) remains a fallback only for the in-process `tddy-coder`/`agent_session_runner` path; the per-instance handler prevents cross-session bleed under concurrency. Only `transition` is served on this listener (ask/approve use the MCP `approval_prompt` tool + PTY). Live workflow-event streaming to the web client is a follow-up; state is durable in `changeset.yaml`.
+
 ## Sandboxed Claude Code CLI sessions
 
 When `StartSessionRequest.session_type == "claude-cli"` **and** `sandbox == true` on macOS, the daemon uses the sandbox spawn path instead of `ClaudeCliSessionManager::start()`:

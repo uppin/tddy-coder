@@ -148,6 +148,10 @@ pub struct ToolcallRpcService {
     session_dir: Arc<Option<PathBuf>>,
     repo_root: Arc<Option<PathBuf>>,
     tddy_data_dir: Arc<PathBuf>,
+    /// Per-instance `transition` handler. When set, it takes precedence over the process-global
+    /// registry — this is how a daemon serving many concurrent sessions routes each session's
+    /// `transition` to that session's own `WorkflowController` instead of a single shared handler.
+    transition_handler: Option<Arc<dyn crate::toolcall::TransitionHandler>>,
 }
 
 impl ToolcallRpcService {
@@ -157,11 +161,24 @@ impl ToolcallRpcService {
         repo_root: Arc<Option<PathBuf>>,
         tddy_data_dir: Arc<PathBuf>,
     ) -> Self {
+        Self::with_transition_handler(tx, session_dir, repo_root, tddy_data_dir, None)
+    }
+
+    /// Like [`Self::new`], but binds a per-instance `transition` handler that takes precedence over
+    /// the process-global registry (see [`crate::toolcall::transition_handler`]).
+    pub fn with_transition_handler(
+        tx: std::sync::mpsc::SyncSender<ToolCallRequest>,
+        session_dir: Arc<Option<PathBuf>>,
+        repo_root: Arc<Option<PathBuf>>,
+        tddy_data_dir: Arc<PathBuf>,
+        transition_handler: Option<Arc<dyn crate::toolcall::TransitionHandler>>,
+    ) -> Self {
         Self {
             tx,
             session_dir,
             repo_root,
             tddy_data_dir,
+            transition_handler,
         }
     }
 
@@ -199,9 +216,12 @@ impl ToolcallRpcService {
         }
     }
 
-    /// transition: handled directly in the listener (self-contained; talks to the process-global
-    /// [`crate::toolcall::transition_handler`] registered by the agent-driven runner — no presenter
-    /// round-trip needed). Subagent calls carry `parent_tool_use_id`, making them provisional.
+    /// transition: handled directly in the listener (self-contained; no presenter round-trip
+    /// needed). The per-instance [`Self::transition_handler`] takes precedence — for a daemon that
+    /// serves many sessions, each session's listener carries its own `WorkflowController`. When no
+    /// per-instance handler is bound, it falls back to the process-global
+    /// [`crate::toolcall::transition_handler`] registered by the in-process agent-driven runner.
+    /// Subagent calls carry `parent_tool_use_id`, making them provisional.
     fn handle_transition(&self, request: serde_json::Value) -> Result<ToolCallResponse, Status> {
         let wire: TransitionRequestWire = serde_json::from_value(request)
             .map_err(|e| Status::invalid_argument(format!("invalid transition request: {e}")))?;
@@ -210,7 +230,7 @@ impl ToolcallRpcService {
             "[transition] to={} provisional={}",
             wire.to, provisional
         ));
-        let Some(handler) = transition_handler() else {
+        let Some(handler) = self.transition_handler.clone().or_else(transition_handler) else {
             return Ok(ToolCallResponse::TransitionRejected {
                 reason: "no active workflow controller; `transition` is only available in \
                          agent-driven sessions"
@@ -666,6 +686,60 @@ mod tests {
         assert_eq!(v["to"], "red");
 
         clear_transition_handler();
+    }
+
+    /// A per-instance transition handler on the service is used instead of the process-global
+    /// registry — the seam that lets each concurrent daemon session route `transition` to its own
+    /// `WorkflowController` rather than a single shared handler. This test deliberately never touches
+    /// the process-global registry: `handle_transition` short-circuits on the per-instance handler
+    /// (`self.transition_handler…or_else(global)`), so the global is never consulted here and there
+    /// is no race with the sibling test that owns the global registry.
+    #[tokio::test]
+    async fn transition_routes_to_the_per_instance_handler() {
+        use crate::toolcall::{TransitionHandler, TransitionRelayOutcome};
+
+        /// Answers with its own label so the test can tell the per-instance handler was invoked.
+        struct Labelled(&'static str);
+        impl TransitionHandler for Labelled {
+            fn handle_transition(&self, to: &str, _provisional: bool) -> TransitionRelayOutcome {
+                TransitionRelayOutcome::Committed {
+                    instructions: format!("{}:{to}", self.0),
+                }
+            }
+        }
+
+        // Given a service constructed with a per-instance handler via `with_transition_handler`.
+        let (tx, _rx) = std::sync::mpsc::sync_channel(32);
+        let repo_root = tempfile::tempdir().unwrap();
+        let tddy_data_dir =
+            std::env::temp_dir().join(format!("tddy-per-instance-handler-{}", std::process::id()));
+        let service = ToolcallRpcService::with_transition_handler(
+            tx,
+            Arc::new(None),
+            Arc::new(Some(repo_root.path().to_path_buf())),
+            Arc::new(tddy_data_dir),
+            Some(Arc::new(Labelled("per-instance")) as Arc<dyn TransitionHandler>),
+        );
+
+        // When dispatching a transition
+        let req = RpcMessage::new(
+            serde_json::to_vec(&json!({"type":"transition","to":"plan"})).unwrap(),
+            Default::default(),
+        );
+        let RpcResult::Unary(Ok(bytes)) = service
+            .handle_rpc("tddy.toolcall.ToolcallService", "Transition", &req)
+            .await
+        else {
+            panic!("expected unary response");
+        };
+
+        // Then the per-instance handler answered.
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["status"], "ok");
+        assert_eq!(
+            v["instructions"], "per-instance:plan",
+            "the per-instance handler must be used"
+        );
     }
 
     /// **toolcall_rpc_service_returns_an_error_for_an_unknown_method**: an unrecognized method
