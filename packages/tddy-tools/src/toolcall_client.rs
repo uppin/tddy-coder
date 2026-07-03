@@ -41,6 +41,7 @@ fn method_for(request: &serde_json::Value) -> Result<&'static str, String> {
         "invoke-action" => "InvokeAction",
         "build" => "Build",
         "build-list" => "BuildList",
+        "spawn-child" => "SpawnChild",
         other => return Err(format!("unknown toolcall request type: {other}")),
     })
 }

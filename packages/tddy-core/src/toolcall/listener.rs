@@ -4,8 +4,8 @@ use super::build::BuildListQuery;
 use super::{
     build_executor, store_submit_result, transition_handler, ApproveRequestWire, AskRequestWire,
     BuildListRequestWire, BuildOptions, BuildRequestWire, InvokeActionRequestWire,
-    ListActionsRequestWire, SubmitRequestWire, ToolCallRequest, ToolCallResponse,
-    TransitionRelayOutcome, TransitionRequestWire,
+    ListActionsRequestWire, SpawnChildRequestWire, SubmitRequestWire, ToolCallRequest,
+    ToolCallResponse, TransitionRelayOutcome, TransitionRequestWire,
 };
 use crate::session_actions::{
     classify_session_actions_exit_code, derive_repo_key, invoke_action_core, list_action_summaries,
@@ -21,6 +21,17 @@ use tokio::net::UnixListener;
 /// RPC service name this listener hosts over `tddy-stdio` — used only for logging/error context;
 /// a single connection only ever hosts this one service.
 const TOOLCALL_SERVICE_NAME: &str = "tddy.toolcall.ToolcallService";
+
+/// Per-session capability to materialize a planned-PR node into a child coding session.
+///
+/// Bound per instance on the daemon's PR-stack orchestrator listener (mirroring
+/// [`ToolcallRpcService::with_transition_handler`]). Because the socket is per-session, an
+/// orchestrator can only spawn children for its own stack. `spawn_child` returns the new child
+/// session id, or an error message surfaced verbatim to the agent.
+#[async_trait]
+pub trait ChildSpawnHandler: Send + Sync {
+    async fn spawn_child(&self, node_id: &str) -> Result<String, String>;
+}
 
 static TOOLCALL_LOG_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
@@ -152,6 +163,8 @@ pub struct ToolcallRpcService {
     /// registry — this is how a daemon serving many concurrent sessions routes each session's
     /// `transition` to that session's own `WorkflowController` instead of a single shared handler.
     transition_handler: Option<Arc<dyn crate::toolcall::TransitionHandler>>,
+    /// Per-instance `spawn-child` handler. Present only on a PR-stack orchestrator's listener.
+    child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
 }
 
 impl ToolcallRpcService {
@@ -179,7 +192,17 @@ impl ToolcallRpcService {
             repo_root,
             tddy_data_dir,
             transition_handler,
+            child_spawn_handler: None,
         }
+    }
+
+    /// Bind a per-instance `spawn-child` handler (builder-style; keeps existing constructors intact).
+    pub fn with_child_spawn_handler(
+        mut self,
+        child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
+    ) -> Self {
+        self.child_spawn_handler = child_spawn_handler;
+        self
     }
 
     async fn dispatch(&self, method: &str, payload: &[u8]) -> Result<ToolCallResponse, Status> {
@@ -193,6 +216,7 @@ impl ToolcallRpcService {
                 | "Ask"
                 | "Approve"
                 | "Transition"
+                | "SpawnChild"
         ) {
             toolcall_log(&format!("[error] unknown method: {}", method));
             return Err(Status::not_found(format!(
@@ -212,6 +236,7 @@ impl ToolcallRpcService {
             "Ask" => self.handle_ask(request).await,
             "Approve" => self.handle_approve(request).await,
             "Transition" => self.handle_transition(request),
+            "SpawnChild" => self.handle_spawn_child(request).await,
             _ => unreachable!("checked above"),
         }
     }
@@ -247,6 +272,28 @@ impl ToolcallRpcService {
             TransitionRelayOutcome::Rejected { reason } => {
                 ToolCallResponse::TransitionRejected { reason }
             }
+        })
+    }
+
+    /// spawn-child: materialize a planned-PR node into a child session via the per-instance
+    /// [`ChildSpawnHandler`]. Only bound on a PR-stack orchestrator's listener; without a handler
+    /// the verb is rejected rather than silently no-op'ing.
+    async fn handle_spawn_child(
+        &self,
+        request: serde_json::Value,
+    ) -> Result<ToolCallResponse, Status> {
+        let wire: SpawnChildRequestWire = serde_json::from_value(request)
+            .map_err(|e| Status::invalid_argument(format!("invalid spawn-child request: {e}")))?;
+        toolcall_log(&format!("[spawn-child] node_id={}", wire.node_id));
+        let Some(handler) = self.child_spawn_handler.clone() else {
+            return Ok(ToolCallResponse::Error {
+                message: "spawn-child is only available in a PR-stack orchestrator session"
+                    .to_string(),
+            });
+        };
+        Ok(match handler.spawn_child(&wire.node_id).await {
+            Ok(session_id) => ToolCallResponse::SpawnChildOk { session_id },
+            Err(message) => ToolCallResponse::Error { message },
         })
     }
 

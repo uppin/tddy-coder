@@ -46,6 +46,7 @@ fn a_managed_workflow(recipe_name: &str) -> Harness {
         worktree.path(),
         tddy_data.path(),
         socket_dir.path(),
+        None,
     )
     .expect("set_up_managed_workflow must succeed");
 

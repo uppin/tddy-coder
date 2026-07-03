@@ -599,22 +599,23 @@ impl PermissionServer {
     }
 
     #[tool(
-        description = "Start a child coding session for a planned PR node (with the orchestrator as its stack parent)."
+        description = "Start a child coding session for a planned PR node (with the orchestrator as its stack parent). Returns the new child session id."
     )]
-    fn pr_spawn_child(&self, Parameters(p): Parameters<PrSpawnChildInput>) -> String {
-        // TODO(pr-spawn-child): route through the daemon StartSession RPC with stack_parent set to
-        // the orchestrator session. The Connect-RPC StartSession path exists (see remote_cli.rs),
-        // but it is async and its daemon URL/token env (TDDY_REMOTE_DAEMON_URL /
-        // TDDY_REMOTE_SESSION_TOKEN) is not guaranteed for a local managed orchestrator session, so
-        // a correct implementation needs additional relay wiring. Until then, surface an honest
-        // instruction rather than faking a spawn.
-        serde_json::json!({
-            "error": format!(
-                "pr_spawn_child is not yet wired to the daemon; start the child session for node '{}' from the web PR-Stack screen's \"Start session\" button.",
-                p.node_id
-            )
-        })
-        .to_string()
+    async fn pr_spawn_child(&self, Parameters(p): Parameters<PrSpawnChildInput>) -> String {
+        // Relay to the daemon over the per-session TDDY_SOCKET. The daemon resolves the node against
+        // the orchestrator's stack and spawns a child claude-cli session with stack_parent set —
+        // this avoids depending on TDDY_REMOTE_* env (absent for a managed orchestrator).
+        let Some(socket) = permission_relay_socket_path() else {
+            return serde_json::json!({
+                "error": "TDDY_SOCKET is not set; pr_spawn_child requires a managed orchestrator session"
+            })
+            .to_string();
+        };
+        let request = serde_json::json!({ "type": "spawn-child", "node_id": p.node_id });
+        match crate::toolcall_client::dispatch_toolcall(&socket, request).await {
+            Ok(resp) => resp.to_string(),
+            Err(e) => serde_json::json!({ "error": e }).to_string(),
+        }
     }
 }
 

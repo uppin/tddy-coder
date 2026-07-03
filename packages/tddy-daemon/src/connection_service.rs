@@ -458,61 +458,17 @@ impl ConnectionServiceImpl {
         tddy_tools_path: &str,
         resume_at: Option<tddy_core::backend::GoalId>,
     ) -> Result<ManagedLaunch, Status> {
-        let mw = match resume_at {
-            Some(goal) => crate::session_toolcall::resume_managed_workflow(
-                session_id,
-                recipe,
-                session_dir,
-                worktree_path,
-                &self.tddy_data_dir,
-                &std::env::temp_dir(),
-                goal,
-            ),
-            None => crate::session_toolcall::set_up_managed_workflow(
-                session_id,
-                recipe,
-                session_dir,
-                worktree_path,
-                &self.tddy_data_dir,
-                &std::env::temp_dir(),
-            ),
-        }
-        .map_err(Status::internal)?;
-
-        let prompt_path = prompt_dir.join("orchestration-prompt.txt");
-        std::fs::write(&prompt_path, &mw.orchestration_prompt)
-            .map_err(|e| Status::internal(format!("failed to write orchestration prompt: {e}")))?;
-
-        // A managed session's `tddy-tools` MCP process needs these to locate the orchestrator's
-        // changeset (`TDDY_SESSION_DIR`) and run `git` against the repo (`TDDY_REPO_DIR`) — the
-        // PR-management tools read both. The tddy-coder TUI backends set them; the daemon's managed
-        // claude-cli launch must set them here too, or those tools have no session/repo in scope.
-        let mut env: Vec<(String, String)> = vec![
-            (
-                "TDDY_SOCKET".to_string(),
-                mw.listener.socket_path().to_string_lossy().into_owned(),
-            ),
-            (
-                "TDDY_SESSION_DIR".to_string(),
-                session_dir.to_string_lossy().into_owned(),
-            ),
-            (
-                "TDDY_REPO_DIR".to_string(),
-                worktree_path.to_string_lossy().into_owned(),
-            ),
-        ];
-        if let Some(dir) = std::path::Path::new(tddy_tools_path)
-            .parent()
-            .filter(|d| !d.as_os_str().is_empty())
-        {
-            let existing = std::env::var("PATH").unwrap_or_default();
-            env.push(("PATH".to_string(), format!("{}:{existing}", dir.display())));
-        }
-        Ok(ManagedLaunch {
-            workflow: mw,
-            prompt_file: prompt_path,
-            env,
-        })
+        prepare_managed_workflow_inner(
+            &self.tddy_data_dir,
+            session_id,
+            recipe,
+            session_dir,
+            worktree_path,
+            prompt_dir,
+            tddy_tools_path,
+            resume_at,
+            None,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -534,328 +490,391 @@ impl ConnectionServiceImpl {
         // injected and its `transition` tool advances a per-session `WorkflowController`.
         managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        if model.trim().is_empty() {
-            return Err(Status::invalid_argument(
-                "model is required for claude-cli sessions",
-            ));
-        }
-
-        // Require a valid, registered project — claude-cli always runs in a real worktree.
-        let project_id = project_id.trim();
-        if project_id.is_empty() {
-            return Err(Status::invalid_argument(
-                "project_id is required for claude-cli sessions",
-            ));
-        }
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        let project = project_storage::find_project(&projects_dir, project_id)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
-        let repo_root = PathBuf::from(&project.main_repo_path);
-        if !repo_root.exists() {
-            return Err(Status::invalid_argument(
-                "project main repo path does not exist",
-            ));
-        }
-
-        // Create session directory under sessions_base/sessions/<id>/.
-        let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-        std::fs::create_dir_all(&session_dir)
-            .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
-
-        // Build branch intent and write a minimal changeset so the worktree setup fn can read it.
-        let short_id = &session_id[..8.min(session_id.len())];
-        let (intent, resolved_new_branch, resolved_selected_branch) = match branch_worktree_intent
-            .trim()
-        {
-            "new_branch_from_base" => {
-                if new_branch_name.trim().is_empty() {
-                    return Err(Status::invalid_argument(
-                            "new_branch_name is required when branch_worktree_intent is new_branch_from_base",
-                        ));
-                }
-                (
-                    BranchWorktreeIntent::NewBranchFromBase,
-                    Some(new_branch_name.trim().to_string()),
-                    None,
-                )
-            }
-            "work_on_selected_branch" => {
-                if selected_branch_to_work_on.trim().is_empty() {
-                    return Err(Status::invalid_argument(
-                            "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
-                        ));
-                }
-                (
-                    BranchWorktreeIntent::WorkOnSelectedBranch,
-                    None,
-                    Some(selected_branch_to_work_on.trim().to_string()),
-                )
-            }
-            _ => {
-                // Default: create a new branch from the integration base with a generated name.
-                (
-                    BranchWorktreeIntent::NewBranchFromBase,
-                    Some(format!("claude-cli/{}", short_id)),
-                    None,
-                )
-            }
-        };
-
-        let cs_workflow = ChangesetWorkflow {
-            branch_worktree_intent: Some(intent),
-            new_branch_name: resolved_new_branch,
-            selected_integration_base_ref: if selected_integration_base_ref.trim().is_empty() {
-                None
-            } else {
-                Some(selected_integration_base_ref.trim().to_string())
-            },
-            selected_branch_to_work_on: resolved_selected_branch,
-            ..ChangesetWorkflow::default()
-        };
-        let mut cs = Changeset {
-            workflow: Some(cs_workflow),
-            orchestrator_session_id: stack_parent.map(str::to_string),
-            recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-            ..Changeset::default()
-        };
-        // A managed session seeds the recipe's start goal so `changeset.yaml` reflects the workflow
-        // position immediately; the per-session controller advances it from there on `transition`.
-        if let Some(recipe) = &managed_recipe {
-            tddy_core::changeset::update_state(
-                &mut cs,
-                tddy_core::workflow::ids::WorkflowState::new(recipe.start_goal().as_str()),
-            );
-        }
-        tddy_core::write_changeset(&session_dir, &cs)
-            .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
-
-        let chain_base_ref =
-            Self::resolve_chain_base_ref(&sessions_base, stack_parent, &repo_root)?;
-
-        // Create the real git worktree (blocking: involves git fetch + git worktree add).
-        let repo_root_clone = repo_root.clone();
-        let session_dir_clone = session_dir.clone();
-        let timeout = self.config.spawn_worker_request_timeout();
-        let worktree_path = spawn_blocking_with_timeout(
-            timeout,
-            "start_claude_cli_session: create worktree",
-            move || {
-                tddy_core::setup_worktree_for_session_with_optional_chain_base(
-                    &repo_root_clone,
-                    &session_dir_clone,
-                    chain_base_ref.as_deref(),
-                )
-                .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
-            },
-        )
-        .await?;
-
-        let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
-            self.config
-                .claude_cli
+        // A pr-stack orchestrator gets a child-spawn handler bound to its toolcall listener so the
+        // agent's `pr_spawn_child` relay can materialize planned nodes into child sessions.
+        let child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>> =
+            if managed_recipe
                 .as_ref()
-                .and_then(|c| c.tddy_tools_path.as_deref()),
-        );
-
-        // Resolve daemon URL: config → http://127.0.0.1:{web_port}.
-        let daemon_url = self
-            .config
-            .claude_cli
-            .as_ref()
-            .and_then(|c| c.daemon_url.as_deref())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                let port = self.config.listen.web_port.unwrap_or(8899);
-                format!("http://127.0.0.1:{port}")
-            });
-
-        // Generate a per-session hook token and write .claude/settings.local.json into the
-        // worktree. Claude Code reads this file on startup and wires the six lifecycle hooks.
-        // Write failure is warn-and-continue so it never blocks the session from starting.
-        let hook_token = Uuid::new_v4().to_string();
-        let hooks_settings =
-            tddy_core::build_claude_hooks_settings(&tddy_core::HookCommandParams {
-                tddy_tools_path: &tddy_tools_path,
-                daemon_url: &daemon_url,
-                session_id,
-                os_user,
-                hook_token: &hook_token,
-            });
-        let claude_dir = worktree_path.join(".claude");
-        if let Err(e) = std::fs::create_dir_all(&claude_dir).and_then(|_| {
-            serde_json::to_string_pretty(&hooks_settings)
-                .map_err(|e| std::io::Error::other(e.to_string()))
-                .and_then(|json| std::fs::write(claude_dir.join("settings.local.json"), json))
-        }) {
-            log::warn!(
-                "session {session_id}: failed to write .claude/settings.local.json — hooks will not fire: {e}"
-            );
-        }
-
-        // Spawn the claude CLI process in a PTY inside the real worktree.
-        let binary_path = self
-            .config
-            .claude_cli
-            .as_ref()
-            .map(|c| c.binary_path.as_str())
-            .unwrap_or("claude");
-
-        let manager = Arc::clone(&self.claude_cli_manager);
-        let session_id_owned = session_id.to_string();
-        let model_owned = model.to_string();
-        let binary_owned = binary_path.to_string();
-        let worktree_clone = worktree_path.clone();
-
-        let initial_prompt_opt = {
-            let p = initial_prompt.trim();
-            if p.is_empty() {
-                None
-            } else {
-                Some(p.to_string())
-            }
-        };
-        let permission_mode_opt = {
-            let m = permission_mode.trim();
-            if m.is_empty() {
-                None
-            } else {
-                Some(m.to_string())
-            }
-        };
-
-        // Managed-workflow wiring: build the per-session controller + toolcall listener, write the
-        // recipe's orchestration prompt to a file `claude` appends to its system prompt, and inject
-        // a per-session TDDY_SOCKET (+ a PATH that resolves tddy-tools) so the agent's host-side
-        // `tddy-tools transition` reaches this session's controller.
-        let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
-        let mut append_system_prompt_file: Option<PathBuf> = None;
-        let mut env_extra: Vec<(String, String)> = Vec::new();
-        if let Some(recipe) = managed_recipe.clone() {
-            let launch = self.prepare_managed_workflow(
-                session_id,
-                recipe,
-                &session_dir,
-                &worktree_path,
-                &session_dir,
-                &tddy_tools_path,
-                None,
-            )?;
-            append_system_prompt_file = Some(launch.prompt_file);
-            env_extra = launch.env;
-            managed = Some(launch.workflow);
-        }
-
-        let handle = manager
-            .start_with_options(
-                &session_id_owned,
-                worktree_clone,
-                &model_owned,
-                &binary_owned,
-                initial_prompt_opt.as_deref(),
-                permission_mode_opt.as_deref(),
-                append_system_prompt_file.as_deref(),
-                env_extra,
-            )
-            .await
-            .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {}", e)))?;
-
-        if let Some(mw) = managed {
-            manager.attach_managed_workflow(session_id, mw).await;
-        }
-
-        let pid = handle.pid;
-
-        // Write .session.yaml.
-        let now = chrono::Utc::now().to_rfc3339();
-        let meta = tddy_core::SessionMetadata {
-            session_id: session_id.to_string(),
-            project_id: project_id.to_string(),
-            created_at: now.clone(),
-            updated_at: now,
-            status: "active".to_string(),
-            repo_path: Some(worktree_path.to_string_lossy().to_string()),
-            pid: Some(pid),
-            tool: None,
-            livekit_room: None,
-            pending_elicitation: false,
-            previous_session_id: None,
-            session_type: Some("claude-cli".to_string()),
-            model: Some(model.to_string()),
-            activity_status: None,
-            hook_token: Some(hook_token),
-            sandbox: None,
-            agent: None,
-            recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-            specialized_agents: Vec::new(),
-        };
-        tddy_core::write_session_metadata(&session_dir, &meta)
-            .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
-
-        // Optionally expose the PTY via a per-session LiveKit participant so that LiveKit
-        // clients (web UI, pty-relay --livekit-url) can use the same bidi-stream path as
-        // tool sessions. Falls back gracefully: if LiveKit is not configured the session is
-        // still usable via the gRPC connectrpc endpoints.
-        let (lk_room, lk_url, lk_server_identity) = if let Some(lk) =
-            spawner::livekit_creds_from_config(&self.config)
-        {
-            let room_name =
-                spawner::resolve_livekit_room_name(lk.common_room.as_deref(), session_id);
-            let server_identity = spawner::livekit_server_identity_for_session(
-                lk.daemon_instance_id.as_deref(),
-                session_id,
-            );
-            match crate::claude_cli_session::spawn_livekit_bridge(
-                Arc::clone(&handle),
-                &lk.url,
-                &room_name,
-                &lk.api_key,
-                &lk.api_secret,
-                &server_identity,
-            )
-            .await
+                .is_some_and(|r| r.name() == "pr-stack")
             {
-                Ok(()) => {
-                    log::info!(
-                        target: "tddy_daemon::connection_service",
-                        "claude-cli session {}: LiveKit bridge started (identity={})",
-                        session_id,
-                        server_identity
-                    );
-                    (room_name, lk.url.clone(), server_identity)
-                }
-                Err(e) => {
-                    log::warn!(
-                        target: "tddy_daemon::connection_service",
-                        "claude-cli session {}: LiveKit bridge failed ({}); gRPC path still works",
-                        session_id,
-                        e
-                    );
-                    (String::new(), String::new(), String::new())
-                }
-            }
-        } else {
-            (String::new(), String::new(), String::new())
-        };
-
-        log::info!(
-            target: "tddy_daemon::connection_service",
-            "started claude-cli session {} pid={} worktree={} user={}",
+                let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+                Some(Arc::new(StackChildSpawnHandler {
+                    config: self.config.clone(),
+                    tddy_data_dir: self.tddy_data_dir.clone(),
+                    claude_cli_manager: Arc::clone(&self.claude_cli_manager),
+                    os_user: os_user.to_string(),
+                    project_id: project_id.to_string(),
+                    sessions_base: sessions_base.clone(),
+                    orchestrator_session_id: session_id.to_string(),
+                    orchestrator_session_dir: session_dir,
+                }))
+            } else {
+                None
+            };
+        spawn_claude_cli_session_inner(
+            &self.config,
+            &self.tddy_data_dir,
+            &self.claude_cli_manager,
+            os_user,
             session_id,
-            pid,
-            worktree_path.display(),
-            os_user
-        );
+            sessions_base,
+            model,
+            project_id,
+            branch_worktree_intent,
+            new_branch_name,
+            selected_integration_base_ref,
+            selected_branch_to_work_on,
+            initial_prompt,
+            permission_mode,
+            stack_parent,
+            managed_recipe,
+            child_spawn_handler,
+        )
+        .await
+    }
+}
 
-        Ok(Response::new(StartSessionResponse {
-            session_id: session_id.to_string(),
-            livekit_room: lk_room,
-            livekit_url: lk_url,
-            livekit_server_identity: lk_server_identity,
-        }))
+#[allow(clippy::too_many_arguments)]
+async fn spawn_claude_cli_session_inner(
+    config: &DaemonConfig,
+    tddy_data_dir: &Path,
+    claude_cli_manager: &Arc<ClaudeCliSessionManager>,
+    os_user: &str,
+    session_id: &str,
+    sessions_base: PathBuf,
+    model: &str,
+    project_id: &str,
+    branch_worktree_intent: &str,
+    new_branch_name: &str,
+    selected_integration_base_ref: &str,
+    selected_branch_to_work_on: &str,
+    initial_prompt: &str,
+    permission_mode: &str,
+    stack_parent: Option<&str>,
+    managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
+    child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
+) -> Result<Response<StartSessionResponse>, Status> {
+    if model.trim().is_empty() {
+        return Err(Status::invalid_argument(
+            "model is required for claude-cli sessions",
+        ));
     }
 
+    // Require a valid, registered project — claude-cli always runs in a real worktree.
+    let project_id = project_id.trim();
+    if project_id.is_empty() {
+        return Err(Status::invalid_argument(
+            "project_id is required for claude-cli sessions",
+        ));
+    }
+    let projects_dir = projects_path_for_user(os_user, Some(tddy_data_dir))
+        .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+    let project = project_storage::find_project(&projects_dir, project_id)
+        .map_err(|e| Status::internal(e.to_string()))?
+        .ok_or_else(|| Status::not_found("project not found"))?;
+    let repo_root = PathBuf::from(&project.main_repo_path);
+    if !repo_root.exists() {
+        return Err(Status::invalid_argument(
+            "project main repo path does not exist",
+        ));
+    }
+
+    // Create session directory under sessions_base/sessions/<id>/.
+    let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+    std::fs::create_dir_all(&session_dir)
+        .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
+
+    // Build branch intent and write a minimal changeset so the worktree setup fn can read it.
+    let short_id = &session_id[..8.min(session_id.len())];
+    let (intent, resolved_new_branch, resolved_selected_branch) = match branch_worktree_intent
+        .trim()
+    {
+        "new_branch_from_base" => {
+            if new_branch_name.trim().is_empty() {
+                return Err(Status::invalid_argument(
+                            "new_branch_name is required when branch_worktree_intent is new_branch_from_base",
+                        ));
+            }
+            (
+                BranchWorktreeIntent::NewBranchFromBase,
+                Some(new_branch_name.trim().to_string()),
+                None,
+            )
+        }
+        "work_on_selected_branch" => {
+            if selected_branch_to_work_on.trim().is_empty() {
+                return Err(Status::invalid_argument(
+                            "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
+                        ));
+            }
+            (
+                BranchWorktreeIntent::WorkOnSelectedBranch,
+                None,
+                Some(selected_branch_to_work_on.trim().to_string()),
+            )
+        }
+        _ => {
+            // Default: create a new branch from the integration base with a generated name.
+            (
+                BranchWorktreeIntent::NewBranchFromBase,
+                Some(format!("claude-cli/{}", short_id)),
+                None,
+            )
+        }
+    };
+
+    let cs_workflow = ChangesetWorkflow {
+        branch_worktree_intent: Some(intent),
+        new_branch_name: resolved_new_branch,
+        selected_integration_base_ref: if selected_integration_base_ref.trim().is_empty() {
+            None
+        } else {
+            Some(selected_integration_base_ref.trim().to_string())
+        },
+        selected_branch_to_work_on: resolved_selected_branch,
+        ..ChangesetWorkflow::default()
+    };
+    let mut cs = Changeset {
+        workflow: Some(cs_workflow),
+        orchestrator_session_id: stack_parent.map(str::to_string),
+        recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
+        ..Changeset::default()
+    };
+    // A managed session seeds the recipe's start goal so `changeset.yaml` reflects the workflow
+    // position immediately; the per-session controller advances it from there on `transition`.
+    if let Some(recipe) = &managed_recipe {
+        tddy_core::changeset::update_state(
+            &mut cs,
+            tddy_core::workflow::ids::WorkflowState::new(recipe.start_goal().as_str()),
+        );
+    }
+    tddy_core::write_changeset(&session_dir, &cs)
+        .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
+
+    let chain_base_ref =
+        ConnectionServiceImpl::resolve_chain_base_ref(&sessions_base, stack_parent, &repo_root)?;
+
+    // Create the real git worktree (blocking: involves git fetch + git worktree add).
+    let repo_root_clone = repo_root.clone();
+    let session_dir_clone = session_dir.clone();
+    let timeout = config.spawn_worker_request_timeout();
+    let worktree_path = spawn_blocking_with_timeout(
+        timeout,
+        "start_claude_cli_session: create worktree",
+        move || {
+            tddy_core::setup_worktree_for_session_with_optional_chain_base(
+                &repo_root_clone,
+                &session_dir_clone,
+                chain_base_ref.as_deref(),
+            )
+            .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
+        },
+    )
+    .await?;
+
+    let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
+        config
+            .claude_cli
+            .as_ref()
+            .and_then(|c| c.tddy_tools_path.as_deref()),
+    );
+
+    // Resolve daemon URL: config → http://127.0.0.1:{web_port}.
+    let daemon_url = config
+        .claude_cli
+        .as_ref()
+        .and_then(|c| c.daemon_url.as_deref())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            let port = config.listen.web_port.unwrap_or(8899);
+            format!("http://127.0.0.1:{port}")
+        });
+
+    // Generate a per-session hook token and write .claude/settings.local.json into the
+    // worktree. Claude Code reads this file on startup and wires the six lifecycle hooks.
+    // Write failure is warn-and-continue so it never blocks the session from starting.
+    let hook_token = Uuid::new_v4().to_string();
+    let hooks_settings = tddy_core::build_claude_hooks_settings(&tddy_core::HookCommandParams {
+        tddy_tools_path: &tddy_tools_path,
+        daemon_url: &daemon_url,
+        session_id,
+        os_user,
+        hook_token: &hook_token,
+    });
+    let claude_dir = worktree_path.join(".claude");
+    if let Err(e) = std::fs::create_dir_all(&claude_dir).and_then(|_| {
+        serde_json::to_string_pretty(&hooks_settings)
+            .map_err(|e| std::io::Error::other(e.to_string()))
+            .and_then(|json| std::fs::write(claude_dir.join("settings.local.json"), json))
+    }) {
+        log::warn!(
+                "session {session_id}: failed to write .claude/settings.local.json — hooks will not fire: {e}"
+            );
+    }
+
+    // Spawn the claude CLI process in a PTY inside the real worktree.
+    let binary_path = config
+        .claude_cli
+        .as_ref()
+        .map(|c| c.binary_path.as_str())
+        .unwrap_or("claude");
+
+    let manager = Arc::clone(claude_cli_manager);
+    let session_id_owned = session_id.to_string();
+    let model_owned = model.to_string();
+    let binary_owned = binary_path.to_string();
+    let worktree_clone = worktree_path.clone();
+
+    let initial_prompt_opt = {
+        let p = initial_prompt.trim();
+        if p.is_empty() {
+            None
+        } else {
+            Some(p.to_string())
+        }
+    };
+    let permission_mode_opt = {
+        let m = permission_mode.trim();
+        if m.is_empty() {
+            None
+        } else {
+            Some(m.to_string())
+        }
+    };
+
+    // Managed-workflow wiring: build the per-session controller + toolcall listener, write the
+    // recipe's orchestration prompt to a file `claude` appends to its system prompt, and inject
+    // a per-session TDDY_SOCKET (+ a PATH that resolves tddy-tools) so the agent's host-side
+    // `tddy-tools transition` reaches this session's controller.
+    let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
+    let mut append_system_prompt_file: Option<PathBuf> = None;
+    let mut env_extra: Vec<(String, String)> = Vec::new();
+    if let Some(recipe) = managed_recipe.clone() {
+        let launch = prepare_managed_workflow_inner(
+            tddy_data_dir,
+            session_id,
+            recipe,
+            &session_dir,
+            &worktree_path,
+            &session_dir,
+            &tddy_tools_path,
+            None,
+            child_spawn_handler.clone(),
+        )?;
+        append_system_prompt_file = Some(launch.prompt_file);
+        env_extra = launch.env;
+        managed = Some(launch.workflow);
+    }
+
+    let handle = manager
+        .start_with_options(
+            &session_id_owned,
+            worktree_clone,
+            &model_owned,
+            &binary_owned,
+            initial_prompt_opt.as_deref(),
+            permission_mode_opt.as_deref(),
+            append_system_prompt_file.as_deref(),
+            env_extra,
+        )
+        .await
+        .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {}", e)))?;
+
+    if let Some(mw) = managed {
+        manager.attach_managed_workflow(session_id, mw).await;
+    }
+
+    let pid = handle.pid;
+
+    // Write .session.yaml.
+    let now = chrono::Utc::now().to_rfc3339();
+    let meta = tddy_core::SessionMetadata {
+        session_id: session_id.to_string(),
+        project_id: project_id.to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+        status: "active".to_string(),
+        repo_path: Some(worktree_path.to_string_lossy().to_string()),
+        pid: Some(pid),
+        tool: None,
+        livekit_room: None,
+        pending_elicitation: false,
+        previous_session_id: None,
+        session_type: Some("claude-cli".to_string()),
+        model: Some(model.to_string()),
+        activity_status: None,
+        hook_token: Some(hook_token),
+        sandbox: None,
+        agent: None,
+        recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
+        specialized_agents: Vec::new(),
+    };
+    tddy_core::write_session_metadata(&session_dir, &meta)
+        .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
+
+    // Optionally expose the PTY via a per-session LiveKit participant so that LiveKit
+    // clients (web UI, pty-relay --livekit-url) can use the same bidi-stream path as
+    // tool sessions. Falls back gracefully: if LiveKit is not configured the session is
+    // still usable via the gRPC connectrpc endpoints.
+    let (lk_room, lk_url, lk_server_identity) = if let Some(lk) =
+        spawner::livekit_creds_from_config(config)
+    {
+        let room_name = spawner::resolve_livekit_room_name(lk.common_room.as_deref(), session_id);
+        let server_identity = spawner::livekit_server_identity_for_session(
+            lk.daemon_instance_id.as_deref(),
+            session_id,
+        );
+        match crate::claude_cli_session::spawn_livekit_bridge(
+            Arc::clone(&handle),
+            &lk.url,
+            &room_name,
+            &lk.api_key,
+            &lk.api_secret,
+            &server_identity,
+        )
+        .await
+        {
+            Ok(()) => {
+                log::info!(
+                    target: "tddy_daemon::connection_service",
+                    "claude-cli session {}: LiveKit bridge started (identity={})",
+                    session_id,
+                    server_identity
+                );
+                (room_name, lk.url.clone(), server_identity)
+            }
+            Err(e) => {
+                log::warn!(
+                    target: "tddy_daemon::connection_service",
+                    "claude-cli session {}: LiveKit bridge failed ({}); gRPC path still works",
+                    session_id,
+                    e
+                );
+                (String::new(), String::new(), String::new())
+            }
+        }
+    } else {
+        (String::new(), String::new(), String::new())
+    };
+
+    log::info!(
+        target: "tddy_daemon::connection_service",
+        "started claude-cli session {} pid={} worktree={} user={}",
+        session_id,
+        pid,
+        worktree_path.display(),
+        os_user
+    );
+
+    Ok(Response::new(StartSessionResponse {
+        session_id: session_id.to_string(),
+        livekit_room: lk_room,
+        livekit_url: lk_url,
+        livekit_server_identity: lk_server_identity,
+    }))
+}
+
+impl ConnectionServiceImpl {
     /// Resolve `specialized_agents` names against `<tddyhome>/agents` (+ builtins) into their
     /// full defs (see docs/ft/coder/specialized-subagents.md). An unresolvable name is a request
     /// error — the session is never started with a silently-dropped subagent. An empty input
@@ -1701,6 +1720,162 @@ struct ManagedLaunch {
     workflow: crate::session_toolcall::ManagedWorkflow,
     prompt_file: PathBuf,
     env: Vec<(String, String)>,
+}
+
+/// Free-function form of [`ConnectionServiceImpl::prepare_managed_workflow`] so the shared
+/// claude-cli spawn logic ([`spawn_claude_cli_session_inner`]) — which has no `self` — can reuse it.
+/// `child_spawn_handler`, when present, is bound to the managed session's toolcall listener so the
+/// agent's `pr_spawn_child` relay reaches a spawner (used for PR-stack orchestrators).
+#[allow(clippy::too_many_arguments)]
+fn prepare_managed_workflow_inner(
+    tddy_data_dir: &Path,
+    session_id: &str,
+    recipe: Arc<dyn tddy_core::backend::WorkflowRecipe>,
+    session_dir: &Path,
+    worktree_path: &Path,
+    prompt_dir: &Path,
+    tddy_tools_path: &str,
+    resume_at: Option<tddy_core::backend::GoalId>,
+    child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
+) -> Result<ManagedLaunch, Status> {
+    let mw = match resume_at {
+        Some(goal) => crate::session_toolcall::resume_managed_workflow(
+            session_id,
+            recipe,
+            session_dir,
+            worktree_path,
+            tddy_data_dir,
+            &std::env::temp_dir(),
+            goal,
+            child_spawn_handler,
+        ),
+        None => crate::session_toolcall::set_up_managed_workflow(
+            session_id,
+            recipe,
+            session_dir,
+            worktree_path,
+            tddy_data_dir,
+            &std::env::temp_dir(),
+            child_spawn_handler,
+        ),
+    }
+    .map_err(Status::internal)?;
+
+    let prompt_path = prompt_dir.join("orchestration-prompt.txt");
+    std::fs::write(&prompt_path, &mw.orchestration_prompt)
+        .map_err(|e| Status::internal(format!("failed to write orchestration prompt: {e}")))?;
+
+    // A managed session's `tddy-tools` MCP process needs these to locate the orchestrator's
+    // changeset (`TDDY_SESSION_DIR`) and run `git` against the repo (`TDDY_REPO_DIR`) — the
+    // PR-management tools read both. The tddy-coder TUI backends set them; the daemon's managed
+    // claude-cli launch must set them here too, or those tools have no session/repo in scope.
+    let mut env: Vec<(String, String)> = vec![
+        (
+            "TDDY_SOCKET".to_string(),
+            mw.listener.socket_path().to_string_lossy().into_owned(),
+        ),
+        (
+            "TDDY_SESSION_DIR".to_string(),
+            session_dir.to_string_lossy().into_owned(),
+        ),
+        (
+            "TDDY_REPO_DIR".to_string(),
+            worktree_path.to_string_lossy().into_owned(),
+        ),
+    ];
+    if let Some(dir) = std::path::Path::new(tddy_tools_path)
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+    {
+        let existing = std::env::var("PATH").unwrap_or_default();
+        env.push(("PATH".to_string(), format!("{}:{existing}", dir.display())));
+    }
+    Ok(ManagedLaunch {
+        workflow: mw,
+        prompt_file: prompt_path,
+        env,
+    })
+}
+
+/// Per-session [`ChildSpawnHandler`] for a PR-stack orchestrator: materializes a planned-PR node
+/// into a child claude-cli session (with the orchestrator as `stack_parent`), reusing the same
+/// [`spawn_claude_cli_session_inner`] the `StartSession` RPC uses. Bound only to a `pr-stack`
+/// orchestrator's toolcall listener, so it can only spawn children for that orchestrator's stack.
+struct StackChildSpawnHandler {
+    config: DaemonConfig,
+    tddy_data_dir: PathBuf,
+    claude_cli_manager: Arc<ClaudeCliSessionManager>,
+    os_user: String,
+    project_id: String,
+    sessions_base: PathBuf,
+    orchestrator_session_id: String,
+    orchestrator_session_dir: PathBuf,
+}
+
+#[async_trait::async_trait]
+impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
+    async fn spawn_child(&self, node_id: &str) -> Result<String, String> {
+        let changeset = tddy_core::read_changeset(&self.orchestrator_session_dir)
+            .map_err(|e| format!("failed to read orchestrator changeset: {e}"))?;
+        let stack = changeset
+            .stack
+            .ok_or_else(|| "orchestrator changeset has no stack".to_string())?;
+        let node = stack
+            .nodes
+            .iter()
+            .find(|n| n.node_id == node_id)
+            .ok_or_else(|| format!("no planned PR node with id '{node_id}' in the stack"))?;
+        if node.session_id.is_some() {
+            return Err(format!(
+                "node '{node_id}' already has a child session ({})",
+                node.session_id.as_deref().unwrap_or("")
+            ));
+        }
+        let new_branch_name = node
+            .branch
+            .clone()
+            .or_else(|| node.branch_suggestion.clone())
+            .ok_or_else(|| {
+                format!("node '{node_id}' has no branch or branch_suggestion to create")
+            })?;
+        let initial_prompt = if node.description.trim().is_empty() {
+            node.title.clone()
+        } else {
+            format!("{}\n\n{}", node.title, node.description)
+        };
+        // Inherit the orchestrator's model — the daemon has no standalone model default and an
+        // empty model is rejected by the spawn path.
+        let meta = tddy_core::read_session_metadata(&self.orchestrator_session_dir)
+            .map_err(|e| format!("failed to read orchestrator session metadata: {e}"))?;
+        let model = meta.model.clone().unwrap_or_default();
+        if model.trim().is_empty() {
+            return Err("orchestrator session has no model to inherit for the child".to_string());
+        }
+
+        let child_session_id = Uuid::new_v4().to_string();
+        let response = spawn_claude_cli_session_inner(
+            &self.config,
+            &self.tddy_data_dir,
+            &self.claude_cli_manager,
+            &self.os_user,
+            &child_session_id,
+            self.sessions_base.clone(),
+            &model,
+            &self.project_id,
+            "new_branch_from_base",
+            &new_branch_name,
+            "",
+            "",
+            &initial_prompt,
+            "auto",
+            Some(&self.orchestrator_session_id),
+            None,
+            None,
+        )
+        .await
+        .map_err(|status| status.message().to_string())?;
+        Ok(response.into_inner().session_id)
+    }
 }
 
 /// Build the (name, replaced-tools) pairs for every resolved specialized-agent def — each its own
@@ -4865,7 +5040,7 @@ mod add_planned_pr_unit_tests {
         // Given — a plain "tdd" session, not a pr-stack orchestrator
         let temp = tempfile::tempdir().unwrap();
         let service = make_unit_service(temp.path().to_path_buf());
-        let session_dir = unified_session_dir_path(&temp.path().to_path_buf(), "tdd-session-1");
+        let session_dir = unified_session_dir_path(temp.path(), "tdd-session-1");
         write_unit_changeset(&session_dir, Some("tdd"));
 
         // When
@@ -4890,7 +5065,7 @@ mod add_planned_pr_unit_tests {
         // Given
         let temp = tempfile::tempdir().unwrap();
         let service = make_unit_service(temp.path().to_path_buf());
-        let session_dir = unified_session_dir_path(&temp.path().to_path_buf(), "no-recipe-session");
+        let session_dir = unified_session_dir_path(temp.path(), "no-recipe-session");
         write_unit_changeset(&session_dir, None);
 
         // When
@@ -4909,8 +5084,7 @@ mod add_planned_pr_unit_tests {
         // Given
         let temp = tempfile::tempdir().unwrap();
         let service = make_unit_service(temp.path().to_path_buf());
-        let session_dir =
-            unified_session_dir_path(&temp.path().to_path_buf(), "pr-stack-session-1");
+        let session_dir = unified_session_dir_path(temp.path(), "pr-stack-session-1");
         write_unit_changeset(&session_dir, Some("pr-stack"));
 
         // When
@@ -4938,8 +5112,7 @@ mod add_planned_pr_unit_tests {
         // Given
         let temp = tempfile::tempdir().unwrap();
         let service = make_unit_service(temp.path().to_path_buf());
-        let session_dir =
-            unified_session_dir_path(&temp.path().to_path_buf(), "legacy-orchestrator-session");
+        let session_dir = unified_session_dir_path(temp.path(), "legacy-orchestrator-session");
         write_unit_changeset(&session_dir, Some("orchestrate-pr-stack"));
 
         // When
