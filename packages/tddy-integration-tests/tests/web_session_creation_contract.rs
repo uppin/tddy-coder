@@ -96,6 +96,8 @@ async fn session_yaml_and_changeset_yaml_must_be_in_same_directory() {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            agent: None,
+            recipe: None,
         },
     )
     .expect("write .session.yaml");
@@ -213,6 +215,8 @@ async fn changeset_yaml_must_be_written_on_prompt_submission_not_deferred_to_bef
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            agent: None,
+            recipe: None,
         },
     )
     .expect("write .session.yaml");

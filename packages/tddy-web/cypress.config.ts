@@ -5,7 +5,21 @@ import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { execSync, spawn } from "child_process";
+import * as net from "net";
 import { AccessToken } from "livekit-server-sdk";
+
+/** Ask the OS for a free TCP port (bind :0, read it, release). Avoids hardcoded-port collisions. */
+async function getFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.once("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const addr = srv.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      srv.close(() => resolve(port));
+    });
+  });
+}
 import { LivekitDockerTestkit } from "./cypress/support/livekitDockerTestkit.js";
 import { create, toBinary, fromBinary } from "@bufbuild/protobuf";
 import {
@@ -14,6 +28,10 @@ import {
   GetAuthUrlRequestSchema,
   GetAuthUrlResponseSchema,
 } from "./src/gen/auth_pb.js";
+import {
+  StartSessionRequestSchema,
+  StartSessionResponseSchema,
+} from "./src/gen/connection_pb.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -87,6 +105,16 @@ export default defineConfig({
       // ensures they always run (with a container auto-started if not pre-set).
       const livekitWsUrl = await testkit.start();
       config.env = { ...config.env, LIVEKIT_TESTKIT_WS_URL: livekitWsUrl };
+
+      // Headless Electron/Chromium hangs at launch in sandboxed/container environments unless the
+      // OS sandbox and GPU are disabled and /dev/shm is not used. `ELECTRON_EXTRA_LAUNCH_ARGS` does
+      // not apply to Cypress's own browser — flags must be added via this hook.
+      on("before:browser:launch", (browser, launchOptions) => {
+        if (browser.family === "chromium" || browser.name === "electron") {
+          launchOptions.args.push("--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage");
+        }
+        return launchOptions;
+      });
 
       let terminalServerProcess: ReturnType<typeof spawn> | null = null;
       let tddyCoderProcess: ReturnType<typeof spawn> | null = null;
@@ -791,6 +819,185 @@ export default defineConfig({
           const token = (exchangeResp as { sessionToken: string }).sessionToken;
           if (!token) throw new Error("ExchangeCode returned no sessionToken");
           return token;
+        },
+
+        // Start a real tddy-daemon wired to the LiveKit testkit so recipe sessions attach over
+        // LiveKit (connectSession → connected-livekit), which the PR-Stack Chat presenter requires.
+        // Uses agent "stub" (== tddy-demo's backend) for deterministic agent output.
+        async startDaemonForPrStack(): Promise<{
+          baseUrl: string;
+          projectId: string;
+          toolPath: string;
+        }> {
+          const daemonBinPath = getTddyDaemonPath();
+          if (!fs.existsSync(daemonBinPath)) {
+            throw new Error(`tddy-daemon not found at ${daemonBinPath}. Run: cargo build -p tddy-daemon`);
+          }
+          const toolPath = getTddyCoderPath();
+          if (!fs.existsSync(toolPath)) {
+            throw new Error(`tddy-coder not found at ${toolPath}. Run: cargo build -p tddy-coder`);
+          }
+          const webBundlePath = getWebBundlePath();
+          if (!fs.existsSync(webBundlePath)) {
+            throw new Error(`Web bundle not found at ${webBundlePath}. Run: bun run build`);
+          }
+
+          const webPort = await getFreePort();
+          const baseUrl = `http://127.0.0.1:${webPort}`;
+
+          stopDaemon();
+
+          const workDir = path.join(os.tmpdir(), `tddy-e2e-prstack-${Date.now()}`);
+          fs.mkdirSync(workDir, { recursive: true });
+          daemonE2eWorkDir = workDir;
+
+          const bareRepoPath = path.join(workDir, "bare.git");
+          const mainRepoPath = path.join(workDir, "main");
+          execSync(`git init --bare "${bareRepoPath}"`);
+          execSync(`git clone "file://${bareRepoPath}" "${mainRepoPath}"`);
+          execSync(`git -C "${mainRepoPath}" commit --allow-empty -m "e2e init"`, {
+            env: { ...process.env, GIT_AUTHOR_NAME: "e2e", GIT_AUTHOR_EMAIL: "e2e@e2e",
+                   GIT_COMMITTER_NAME: "e2e", GIT_COMMITTER_EMAIL: "e2e@e2e" },
+          });
+          execSync(`git -C "${mainRepoPath}" push origin HEAD:main`);
+
+          const projectsDir = path.join(workDir, "projects");
+          fs.mkdirSync(projectsDir, { recursive: true });
+          const projectId = `e2e-prstack-project`;
+          const projectsYaml =
+            [
+              "projects:",
+              `- project_id: "${projectId}"`,
+              `  name: "E2E PR-Stack Project"`,
+              `  git_url: "file://${bareRepoPath}"`,
+              `  main_repo_path: "${mainRepoPath}"`,
+            ].join("\n") + "\n";
+          fs.writeFileSync(path.join(projectsDir, "projects.yaml"), projectsYaml);
+
+          const osUser = os.userInfo().username;
+          const configContent = [
+            `listen:`,
+            `  web_port: ${webPort}`,
+            `  web_host: 127.0.0.1`,
+            `web_bundle_path: ${webBundlePath}`,
+            `daemon_instance_id: e2e`,
+            `livekit:`,
+            `  url: ${livekitWsUrl}`,
+            `  api_key: ${DEV_API_KEY}`,
+            `  api_secret: ${DEV_API_SECRET}`,
+            `  public_url: ${livekitWsUrl}`,
+            `  common_room: tddy-lobby`,
+            `github:`,
+            `  stub: true`,
+            `  stub_codes: "test-code:testuser"`,
+            `users:`,
+            `  - github_user: "testuser"`,
+            `    os_user: "${osUser}"`,
+            `allowed_agents:`,
+            `  - id: stub`,
+            `    label: "Stub"`,
+            `allowed_tools:`,
+            `  - path: "${toolPath}"`,
+            `    label: "tddy-coder (debug)"`,
+          ].join("\n");
+
+          const configFile = path.join(workDir, "daemon.yaml");
+          fs.writeFileSync(configFile, configContent);
+          daemonConfigPath = configFile;
+
+          const repoRoot = path.resolve(__dirname, "../..");
+          return new Promise((resolve, reject) => {
+            daemonProcess = spawn(daemonBinPath, ["--config", configFile], {
+              stdio: ["ignore", "ignore", "ignore"],
+              cwd: repoRoot,
+              env: { ...process.env, RUST_LOG: "info", TDDY_PROJECTS_DIR: projectsDir },
+            });
+            const timeout = setTimeout(() => {
+              stopDaemon();
+              reject(new Error("tddy-daemon (pr-stack) did not become ready within 20s"));
+            }, 20000);
+            const interval = setInterval(() => {
+              fetch(`${baseUrl}/`)
+                .then((r) => {
+                  if (r.ok) {
+                    clearInterval(interval);
+                    clearTimeout(timeout);
+                    resolve({ baseUrl, projectId, toolPath });
+                  }
+                })
+                .catch(() => {});
+            }, 300);
+            daemonProcess.on("error", (err) => {
+              clearInterval(interval);
+              clearTimeout(timeout);
+              reject(err);
+            });
+          });
+        },
+
+        stopDaemonForPrStack() {
+          stopDaemon();
+          return null;
+        },
+
+        // Start a pr-stack orchestrator session over the daemon via raw Connect-RPC. Deterministic
+        // (no UI create flow). Returns the new session id.
+        async startPrStackSession({
+          baseUrl,
+          sessionToken,
+          projectId,
+          toolPath,
+        }: {
+          baseUrl: string;
+          sessionToken: string;
+          projectId: string;
+          toolPath: string;
+        }): Promise<string> {
+          const body = toBinary(
+            StartSessionRequestSchema,
+            create(StartSessionRequestSchema, {
+              sessionToken,
+              projectId,
+              toolPath,
+              agent: "stub",
+              recipe: "pr-stack",
+              sessionType: "",
+              branchWorktreeIntent: "new_branch_from_base",
+              newBranchName: `e2e-pr-stack-${Date.now()}`,
+            }),
+          );
+          const res = await fetch(`${baseUrl}/rpc/connection.ConnectionService/StartSession`, {
+            method: "POST",
+            headers: { "Content-Type": "application/proto", "Connect-Protocol-Version": "1" },
+            body,
+          });
+          if (!res.ok) {
+            const text = await res.text().catch(() => "(no body)");
+            throw new Error(`StartSession HTTP ${res.status}: ${text}`);
+          }
+          const resp = fromBinary(
+            StartSessionResponseSchema,
+            new Uint8Array(await res.arrayBuffer()),
+          ) as { sessionId: string };
+          if (!resp.sessionId) throw new Error("StartSession returned no sessionId");
+          return resp.sessionId;
+        },
+
+        // Live breadcrumb log written unbuffered to a fixed file so progress is visible during a run
+        // even when Cypress's stdout is block-buffered. Tail /tmp/tddy-e2e-live.log while running.
+        e2elog(msg: string) {
+          const repoRoot = path.resolve(__dirname, "../..");
+          const logPath = path.join(repoRoot, "tmp", "e2e-live.log");
+          try {
+            fs.mkdirSync(path.dirname(logPath), { recursive: true });
+            fs.appendFileSync(logPath, `${new Date().toISOString()} ${msg}\n`);
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.log("[e2e] log-write-failed", String(e));
+          }
+          // eslint-disable-next-line no-console
+          console.log("[e2e]", msg);
+          return null;
         },
       });
 

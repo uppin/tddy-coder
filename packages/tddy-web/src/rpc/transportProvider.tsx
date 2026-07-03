@@ -58,6 +58,18 @@ export interface LiveKitTransportOptions {
   debug?: boolean;
 }
 
+/** True when the active debug mask enables `tddy:rpc*` — turns on the LiveKit transport's per-RPC
+ *  console logging (publish/unary/stream/response with service/method) so client↔server RPC routing
+ *  is visible. The mask is stored under the `debug`-package key; set via `dev.daemon.yaml` `debug`
+ *  (served at /api/config) or DevTools `localStorage.debug = 'tddy:rpc:*'`. */
+function rpcDebugActive(): boolean {
+  try {
+    return (window.localStorage.getItem("debug") ?? "").includes("tddy:rpc");
+  } catch {
+    return false;
+  }
+}
+
 /** Factory for the production LiveKit transport. */
 function createDefaultLiveKitTransport(
   room: Room,
@@ -68,7 +80,7 @@ function createDefaultLiveKitTransport(
   return createLiveKitTransport({
     room,
     targetIdentity,
-    debug: options?.debug,
+    debug: options?.debug ?? rpcDebugActive(),
     meter: registry?.get(room.name || "livekit"),
   });
 }

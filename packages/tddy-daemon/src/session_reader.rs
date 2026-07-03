@@ -115,6 +115,8 @@ mod tests {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            agent: None,
+            recipe: None,
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 

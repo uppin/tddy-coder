@@ -307,6 +307,53 @@ fn process_cursor_stream_concatenates_partial_chunks() {
     );
 }
 
+/// Cursor sometimes re-sends the fully-streamed reply verbatim in the terminal "result" event
+/// (rather than a distinct summary) — the same text already delivered word-by-word via
+/// "assistant" deltas. Reproduces a real pr-stack session: cursor streamed the reply chunk by
+/// chunk, then finished with a `result` field equal to the whole accumulated text.
+fn cursor_duplicate_result_ndjson() -> String {
+    let chunk1 = r#"{"type":"system","subtype":"init","session_id":"cursor-sess"}"#;
+    let chunk2 = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Hello"}]}}"#;
+    let chunk3 =
+        r#"{"type":"assistant","message":{"content":[{"type":"text","text":" world.\n"}]}}"#;
+    let chunk4 = r#"{"type":"result","subtype":"success","result":"Hello world.\n","session_id":"cursor-sess","is_error":false}"#;
+    format!("{}\n{}\n{}\n{}\n", chunk1, chunk2, chunk3, chunk4)
+}
+
+#[test]
+fn process_cursor_stream_does_not_duplicate_a_result_that_repeats_streamed_deltas() {
+    // Given — cursor streams "Hello world.\n" via assistant deltas, then repeats the exact same
+    // text in its terminal "result" event
+    let ndjson = cursor_duplicate_result_ndjson();
+    let cursor = Cursor::new(ndjson);
+    let mut echoed_chunks: Vec<String> = Vec::new();
+
+    // When
+    let result = process_cursor_stream(
+        cursor,
+        |_| {},
+        |chunk: &str| echoed_chunks.push(chunk.to_string()),
+        None,
+        None,
+        0,
+    )
+    .expect("should process");
+
+    // Then — the accumulated result text is not doubled
+    assert_eq!(
+        result.result_text, "Hello world.",
+        "result_text must not repeat the duplicate result echo"
+    );
+    // And — the duplicate full-text echo from the "result" event is not forwarded to the caller
+    // on top of the deltas that already streamed it
+    assert_eq!(
+        echoed_chunks,
+        vec!["Hello".to_string(), " world.\n".to_string()],
+        "the terminal result event must not re-echo text already streamed via assistant deltas, got: {:?}",
+        echoed_chunks
+    );
+}
+
 /// Cursor tool_call events should emit ToolUse with displayable detail (glob pattern, file path).
 fn cursor_tool_calls_with_detail_ndjson() -> String {
     let line1 = r#"{"type":"system","subtype":"init","session_id":"s1"}"#;

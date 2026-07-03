@@ -236,6 +236,89 @@ fn full_workflow_completes_with_stub_backend() {
     );
 }
 
+/// Presenter/RPC-boundary guard: a View (browser PR-Stack chat) that connects to a live presenter
+/// *after* the agent has produced output is replayed that output from the `connect_view` snapshot —
+/// the source of truth the remote `TddyRemote.Stream` serves on open. This passes, proving the
+/// RPC/presenter layer retains and would deliver the transcript; the reported "no agent response"
+/// therefore originates at the web transport (the browser presenter stream never opens for a passive
+/// viewer), not here.
+#[test]
+fn a_view_connecting_after_the_agent_produced_output_sees_it_in_the_snapshot() {
+    use std::sync::mpsc;
+    use tddy_core::ActivityKind;
+
+    // Given — a presenter (stub backend) that ran a workflow to completion, producing agent output
+    let (event_tx, _event_rx) = broadcast::channel(256);
+    let (intent_tx, _intent_rx) = mpsc::channel();
+    let mut presenter = Presenter::new(
+        "stub",
+        "default",
+        Arc::new(TddRecipe),
+        fresh_tddy_home("view-snapshot"),
+    )
+    .with_broadcast(event_tx)
+    .with_intent_sender(intent_tx);
+    let backend = create_stub_backend();
+    let (output_dir, _guard) = common::temp_dir_with_git_repo("presenter-view-snapshot");
+    presenter.handle_intent(UserIntent::SubmitFeatureInput("Build auth".to_string()));
+    presenter.start_workflow(
+        backend,
+        output_dir,
+        None,
+        Some("Build auth".to_string()),
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
+    );
+    let mut iterations = 0;
+    while !presenter.is_done() && iterations < 4000 {
+        presenter.poll_workflow();
+        if matches!(presenter.state().mode, AppMode::DocumentReview { .. }) {
+            presenter.handle_intent(UserIntent::ApproveSessionDocument);
+        } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
+            presenter.handle_intent(UserIntent::AnswerSelect(0));
+        } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
+            presenter.handle_intent(UserIntent::AnswerMultiSelect(vec![0], None));
+        } else if matches!(presenter.state().mode, AppMode::TextInput { .. }) {
+            presenter.handle_intent(UserIntent::AnswerText("test".to_string()));
+        }
+        iterations += 1;
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        presenter.is_done(),
+        "workflow should complete; last mode: {:?}",
+        presenter.state().mode
+    );
+
+    // When — a fresh View connects, as the web does when opening the session
+    let conn = presenter
+        .connect_view()
+        .expect("connect_view requires broadcast + intent sender");
+
+    // Then — the snapshot transcript the View is replayed with contains the agent's output
+    let agent_output: Vec<String> = conn
+        .state_snapshot
+        .activity_log
+        .iter()
+        .filter(|e| matches!(e.kind, ActivityKind::AgentOutput))
+        .map(|e| e.text.clone())
+        .collect();
+    assert!(
+        !agent_output.is_empty(),
+        "a View connecting after the agent produced output must find it in the connect_view \
+         snapshot, but activity_log had no AgentOutput entries; kinds present: {:?}",
+        conn.state_snapshot
+            .activity_log
+            .iter()
+            .map(|e| format!("{:?}", e.kind))
+            .collect::<Vec<_>>()
+    );
+}
+
 /// Baseline: TDD recipe reaches `plan` after the user submits feature text with no initial prompt.
 #[test]
 fn tdd_workflow_starts_plan_after_feature_submit() {

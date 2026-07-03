@@ -15,6 +15,7 @@ use super::github::GithubPrApi;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChildPhase {
     NotSpawned,
+    SpawnRequested,
     Building,
     ReadyForPr,
     PrOpen,
@@ -167,7 +168,7 @@ pub fn effective_base_ref(node_id: &str, views: &[NodeView], default_branch: &st
 
 /// Assemble NodeView list from orchestrator changeset + child changesets + live GitHub.
 pub fn assemble_views(
-    _parent_dir: &Path,
+    parent_dir: &Path,
     sessions_root: &Path,
     stack: &Stack,
     gh: &dyn GithubPrApi,
@@ -203,7 +204,14 @@ pub fn assemble_views(
                 Err(_) => (None, ChildPhase::Building),
             }
         } else {
-            (None, ChildPhase::NotSpawned)
+            let spawn_request_marker = parent_dir
+                .join(".workflow")
+                .join(format!("spawn-request-{node_id}.json"));
+            if spawn_request_marker.exists() {
+                (None, ChildPhase::SpawnRequested)
+            } else {
+                (None, ChildPhase::NotSpawned)
+            }
         };
 
         let pr = if node.session_id.is_some() {
@@ -293,6 +301,26 @@ mod tests {
         assert!(
             matches!(&action, OrchestratorAction::Spawn { node_ids } if node_ids == &["n1".to_string()]),
             "expected Spawn for unspawned root, got: {action:?}"
+        );
+    }
+
+    /// A node with a spawn already in flight (marker file written, daemon hasn't yet created the
+    /// child session and set `session_id`) must not be re-spawned on the next assess tick — that
+    /// produces an unbounded assess→spawn→assess busy-loop (reproduced live: 1,634+ repeated
+    /// spawn-request writes for the same node in under a second, because the same `NotSpawned`
+    /// view kept winning `decide_next_action`'s spawn rule before the async spawn ever completed).
+    #[test]
+    fn decide_next_action_waits_when_a_node_has_a_pending_spawn_request() {
+        let views = vec![node_view(
+            "n1",
+            &[],
+            ChildPhase::SpawnRequested,
+            PrLiveStatus::None,
+        )];
+        let action = decide_next_action(&views, false, &std::collections::HashSet::new());
+        assert!(
+            matches!(action, OrchestratorAction::Wait { .. }),
+            "expected Wait for a node with a spawn request already in flight, got: {action:?}"
         );
     }
 
@@ -586,6 +614,54 @@ mod tests {
             matches!(views[1].child_phase, ChildPhase::NotSpawned),
             "n2 must be NotSpawned (no session_id); got: {:?}",
             views[1].child_phase
+        );
+    }
+
+    /// `assemble_views_marks_spawn_requested_when_a_pending_spawn_request_marker_file_exists` —
+    /// `SpawnTask` writes `.workflow/spawn-request-<node_id>.json` before the daemon has had a
+    /// chance to actually create the child session and set `session_id`. While that marker is
+    /// present, `assemble_views` must report `SpawnRequested` (not `NotSpawned`), so
+    /// `decide_next_action` doesn't re-issue the same spawn on the very next assess tick.
+    #[test]
+    fn assemble_views_marks_spawn_requested_when_a_pending_spawn_request_marker_file_exists() {
+        use tddy_core::changeset::{Stack, StackNode};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let parent_dir = tmp.path();
+        let sessions_root = tmp.path();
+
+        let workflow_dir = parent_dir.join(".workflow");
+        std::fs::create_dir_all(&workflow_dir).unwrap();
+        std::fs::write(
+            workflow_dir.join("spawn-request-n1.json"),
+            r#"{"node_id":"n1"}"#,
+        )
+        .unwrap();
+
+        let stack = Stack {
+            version: 1,
+            nodes: vec![StackNode {
+                node_id: "n1".into(),
+                title: "Root".into(),
+                description: String::new(),
+                branch_suggestion: None,
+                branch: None,
+                session_id: None, // daemon hasn't created the child session yet
+                parents: vec![],
+                pr_status: None,
+                child_state: None,
+            }],
+        };
+        let mock_gh = NoneOpenMockGh;
+
+        let views = assemble_views(parent_dir, sessions_root, &stack, &mock_gh, "master")
+            .expect("assemble_views must not error");
+
+        assert_eq!(views.len(), 1);
+        assert!(
+            matches!(views[0].child_phase, ChildPhase::SpawnRequested),
+            "n1 must be SpawnRequested while its spawn-request marker file exists; got: {:?}",
+            views[0].child_phase
         );
     }
 

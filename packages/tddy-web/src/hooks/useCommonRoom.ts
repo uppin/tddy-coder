@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Room } from "livekit-client";
+import { Room, RoomEvent } from "livekit-client";
 import { TokenService } from "../gen/token_pb";
 import { useHttpClient } from "../rpc/transportProvider";
+import { tddyDebug } from "../lib/debugMask";
+
+const dbg = tddyDebug("tddy:presenter:room");
 
 export type CommonRoomStatus = "idle" | "connecting" | "connected" | "error";
 
@@ -69,12 +72,37 @@ export function useCommonRoom(
 
         const liveRoom = new Room();
         roomRef.current = liveRoom;
+
+        // Diagnostic: log participant churn in this presenter room. Duplicate/departing
+        // participants (multiple browser-* identities, or a `daemon-dev` coder alongside the
+        // per-session `daemon-dev-<id>`) can silently break the presenter stream, whose transport
+        // filters inbound frames by the target participant identity.
+        const logParticipants = (label: string) => {
+          const remotes = Array.from(liveRoom.remoteParticipants.values()).map((p) => p.identity);
+          dbg("%s room=%o self=%o remotes(%d)=%o", label, rn, id, remotes.length, remotes);
+        };
+        liveRoom.on(RoomEvent.ParticipantConnected, (p) => {
+          dbg("participant JOINED identity=%o", p.identity);
+          logParticipants("after-join");
+        });
+        liveRoom.on(RoomEvent.ParticipantDisconnected, (p) => {
+          dbg("participant LEFT identity=%o", p.identity);
+          logParticipants("after-leave");
+        });
+        liveRoom.on(RoomEvent.Disconnected, (reason) => dbg("room DISCONNECTED reason=%o", reason));
+        liveRoom.on(RoomEvent.Reconnecting, () => dbg("room RECONNECTING"));
+        liveRoom.on(RoomEvent.Reconnected, () => {
+          dbg("room RECONNECTED");
+          logParticipants("after-reconnect");
+        });
+
         await liveRoom.connect(u, res.token);
         if (cancelled) {
           liveRoom.disconnect();
           roomRef.current = null;
           return;
         }
+        logParticipants("after-connect");
         setRoom(liveRoom);
         setStatus("connected");
       } catch (e) {

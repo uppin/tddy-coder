@@ -1,5 +1,5 @@
 //! gRPC daemon and CLI share one layout: `{tddy_data_dir_path()}/sessions/<session_id>/`.
-//! `DaemonService` is constructed with the parent of `sessions/` (same value as
+//! Both create session dirs under the parent of `sessions/` (same value as
 //! `tddy_core::output::tddy_data_dir_path()`).
 
 mod common;

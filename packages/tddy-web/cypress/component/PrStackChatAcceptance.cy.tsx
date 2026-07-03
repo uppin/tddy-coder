@@ -83,6 +83,9 @@ function aRecordingChatBackend() {
   const sentIntents: ClientMessage[] = [];
   async function* recordingStream(requests: AsyncIterable<ClientMessage>) {
     for await (const req of requests) {
+      // Ignore the eager stream-open frame (an intent-less ClientMessage the hook enqueues to open
+      // the stream); only the operator's actual intents are under test.
+      if (req.intent.case === undefined) continue;
       sentIntents.push(req);
     }
   }

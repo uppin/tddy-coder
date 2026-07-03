@@ -1,6 +1,9 @@
 //! Conversion between tddy-core types and proto messages.
 
-use tddy_core::{ActivityKind, AppMode, PresenterEvent, UserIntent, WorkflowEvent};
+use tddy_core::{
+    ActivityKind, AppMode, ModeChangedDetails, PresenterEvent, PresenterState, UserIntent,
+    WorkflowEvent,
+};
 
 use crate::gen::{
     app_mode_proto, client_message, server_message, ActivityLogged, AgentOutput, AnswerMultiSelect,
@@ -162,6 +165,30 @@ pub fn event_to_server_message(event: PresenterEvent) -> ServerMessage {
             }
         }
     }
+}
+
+/// Build the ordered `ServerMessage`s a freshly-connected remote View must receive to reconstruct
+/// the Presenter's current state — the event-stream equivalent of the `state_snapshot` the TUI gets
+/// from [`tddy_core::Presenter::connect_view`]. `TddyRemote::stream` replays these on stream open
+/// (before forwarding live events), so a View that connects *after* agent output was produced still
+/// sees the prior goal, mode, and agent output instead of an empty transcript.
+pub fn snapshot_replay_messages(state: &PresenterState) -> Vec<ServerMessage> {
+    let mut events: Vec<PresenterEvent> = Vec::new();
+    if let Some(goal) = &state.current_goal {
+        events.push(PresenterEvent::GoalStarted(goal.clone()));
+    }
+    events.push(PresenterEvent::ModeChanged(ModeChangedDetails {
+        mode: state.mode.clone(),
+        plan_refinement_pending: state.plan_refinement_pending,
+        skills_project_root: state.skills_project_root.clone(),
+    }));
+    for entry in &state.activity_log {
+        events.push(match entry.kind {
+            ActivityKind::AgentOutput => PresenterEvent::AgentOutput(entry.text.clone()),
+            _ => PresenterEvent::ActivityLogged(entry.clone()),
+        });
+    }
+    events.into_iter().map(event_to_server_message).collect()
 }
 
 fn app_mode_to_proto(mode: &AppMode) -> AppModeProto {

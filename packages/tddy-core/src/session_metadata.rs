@@ -47,6 +47,14 @@ pub struct SessionMetadata {
     /// When true, the claude-cli session runs inside a platform sandbox (darwin Seatbelt).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<bool>,
+    /// Coding agent the session was started with (e.g. "cursor", "claude"). Persisted so a resume
+    /// restores the same agent instead of falling back to the default. Absent in legacy files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    /// Workflow recipe the session was started with (e.g. "pr-stack"). Persisted so a resume
+    /// restores the same recipe. Absent in legacy files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<String>,
 }
 
 pub const SESSION_METADATA_FILENAME: &str = ".session.yaml";
@@ -71,6 +79,10 @@ pub struct InitialToolSessionMetadataOpts {
     pub hook_token: Option<String>,
     /// When true, the claude-cli session runs inside a platform sandbox (darwin Seatbelt).
     pub sandbox: Option<bool>,
+    /// Coding agent the session was started with (e.g. "cursor", "claude").
+    pub agent: Option<String>,
+    /// Workflow recipe the session was started with (e.g. "pr-stack").
+    pub recipe: Option<String>,
 }
 
 /// Writes `.session.yaml` for a newly created session directory.
@@ -110,6 +122,8 @@ pub fn write_initial_tool_session_metadata(
         activity_status: opts.activity_status,
         hook_token: opts.hook_token,
         sandbox: opts.sandbox,
+        agent: opts.agent,
+        recipe: opts.recipe,
     };
     write_session_metadata(session_dir, &metadata)
 }
@@ -180,6 +194,8 @@ mod tests {
                 activity_status: None,
                 hook_token: None,
                 sandbox: None,
+                agent: None,
+                recipe: None,
             },
         )
         .unwrap();
@@ -226,6 +242,8 @@ mod tests {
                 activity_status: None,
                 hook_token: None,
                 sandbox: None,
+                agent: None,
+                recipe: None,
             },
         )
         .unwrap();
@@ -264,6 +282,69 @@ status: active
         );
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// A tool session must persist which coding agent and workflow recipe it was started with,
+    /// so a later resume can restore them instead of falling back to the default agent (`claude`).
+    /// This is the root cause behind a resumed `cursor` / `pr-stack` session silently running as
+    /// `claude`: `.session.yaml` never carried the agent/recipe, so resume had nothing to restore.
+    #[test]
+    fn agent_and_recipe_round_trip_through_session_yaml() {
+        // Given a fresh tool session started with the cursor agent on the pr-stack recipe
+        let tmp =
+            std::env::temp_dir().join(format!("tddy-agent-recipe-rt-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let session_dir = tmp.join("sessions").join("019f243a-8e31-7203-81dd-53f5ef8b9352");
+        fs::create_dir_all(&session_dir).unwrap();
+
+        write_initial_tool_session_metadata(
+            &session_dir,
+            InitialToolSessionMetadataOpts {
+                project_id: "proj-prstack".to_string(),
+                agent: Some("cursor".to_string()),
+                recipe: Some("pr-stack".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // When the metadata is read back (as resume does)
+        let read = read_session_metadata(&session_dir).unwrap();
+
+        // Then both the agent and the recipe survive the round-trip
+        assert_eq!(
+            read.agent.as_deref(),
+            Some("cursor"),
+            "agent must survive write/read round-trip so resume restores it"
+        );
+        assert_eq!(
+            read.recipe.as_deref(),
+            Some("pr-stack"),
+            "recipe must survive write/read round-trip so resume restores it"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// A legacy `.session.yaml` written before agent/recipe were persisted must still deserialize,
+    /// with both fields defaulting to `None`.
+    #[test]
+    fn legacy_session_yaml_without_agent_recipe_defaults_to_none() {
+        // Given a legacy metadata file with no agent/recipe keys
+        let yaml = r#"session_id: legacy-sess
+project_id: proj-legacy
+created_at: "2026-01-01T00:00:00Z"
+updated_at: "2026-01-01T00:00:00Z"
+status: active
+"#;
+
+        // When it is deserialized
+        let meta: SessionMetadata =
+            serde_yaml::from_str(yaml).expect("legacy YAML must deserialise");
+
+        // Then agent and recipe default to None
+        assert!(meta.agent.is_none(), "agent must default to None for legacy sessions");
+        assert!(meta.recipe.is_none(), "recipe must default to None for legacy sessions");
     }
 
     /// `activity_status` survives a write/read round-trip through `.session.yaml`.

@@ -37,6 +37,7 @@ impl PrStackHooks {
         self.event_tx.as_ref().map(|tx| {
             let tx = tx.clone();
             AgentOutputSink::new(move |s: &str| {
+                log::info!(target: "bidi_diag", "[DIAG] pr-stack AgentOutputSink fired: chunk len={}", s.len());
                 let _ = tx.send(WorkflowEvent::AgentOutput(s.to_string()));
             })
         })

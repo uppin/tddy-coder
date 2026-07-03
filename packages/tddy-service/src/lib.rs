@@ -7,7 +7,6 @@
 pub mod codex_oauth_scan;
 pub mod codex_oauth_validate;
 pub mod convert;
-pub mod daemon_service;
 pub mod echo_service;
 pub mod loopback_tunnel_service;
 pub mod observer_service;
@@ -20,8 +19,7 @@ pub mod token_service;
 pub use codex_oauth_scan::{
     CodexOAuthDetected, CodexOAuthPending, CodexOAuthSession, CodexOAuthSessionState,
 };
-pub use convert::{client_message_to_intent, event_to_server_message};
-pub use daemon_service::DaemonService;
+pub use convert::{client_message_to_intent, event_to_server_message, snapshot_replay_messages};
 pub use echo_service::{create_echo_bridge, EchoServiceImpl};
 pub use loopback_tunnel_service::LoopbackTunnelServiceImpl;
 pub use observer_service::PresenterObserverService;
@@ -39,7 +37,7 @@ pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
 pub use proto::vm::VmServiceServer;
 pub use reflection_service::{reflection_entry_from, ServerReflectionImpl};
-pub use service::TddyRemoteService;
+pub use service::{session_view_adapter_surface, TddyRemoteService};
 pub use tddy_rpc::Status;
 pub use terminal_service::{
     start_virtual_tui_session, TerminalServiceVirtualTui, VirtualTuiSession,

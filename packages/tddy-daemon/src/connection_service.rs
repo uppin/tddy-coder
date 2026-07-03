@@ -106,6 +106,22 @@ fn resolved_terminal_id(raw: &str) -> &str {
     }
 }
 
+/// Derives the agent and recipe to relaunch a resumed session with, from its persisted
+/// `.session.yaml`. Empty/whitespace-only values are treated as absent (`None`), mirroring the
+/// spawner's trimming, so a legacy session with no persisted agent/recipe restores as `None`.
+pub(crate) fn resume_agent_and_recipe(
+    metadata: &tddy_core::SessionMetadata,
+) -> (Option<String>, Option<String>) {
+    fn non_blank(value: &Option<String>) -> Option<String> {
+        value
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    }
+    (non_blank(&metadata.agent), non_blank(&metadata.recipe))
+}
+
 /// Stream adapter that yields [`SessionTerminalOutput`] from a broadcast receiver.
 ///
 /// Implements [`futures_util::stream::Stream`] so it can be returned from
@@ -609,6 +625,8 @@ impl ConnectionServiceImpl {
             activity_status: None,
             hook_token: Some(hook_token),
             sandbox: None,
+            agent: None,
+            recipe: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
@@ -998,6 +1016,8 @@ impl ConnectionServiceImpl {
             activity_status: None,
             hook_token: None,
             sandbox: Some(true),
+            agent: None,
+            recipe: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
@@ -1951,6 +1971,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let session_id = req.session_id.clone();
         let livekit = livekit.clone();
         let project_id_resume = metadata.project_id.clone();
+        let (resume_agent, resume_recipe) = resume_agent_and_recipe(&metadata);
         let tddy_data_dir_for_spawn = self.tddy_data_dir.clone();
         let timeout = self.config.spawn_worker_request_timeout();
         let daemon_log = self.config.log.clone();
@@ -1971,9 +1992,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         resume_session_id: Some(session_id.as_str()),
                         new_session_id: None,
                         project_id: pid,
-                        agent: None,
+                        agent: resume_agent.as_deref(),
                         mouse: spawn_mouse,
-                        recipe: None,
+                        recipe: resume_recipe.as_deref(),
                         stack_parent: None,
                     },
                     daemon_log.as_ref(),
@@ -1992,9 +2013,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         resume_session_id: Some(session_id.as_str()),
                         new_session_id: None,
                         project_id: pid,
-                        agent: None,
+                        agent: resume_agent.as_deref(),
                         mouse: spawn_mouse,
-                        recipe: None,
+                        recipe: resume_recipe.as_deref(),
                         stack_parent: None,
                     },
                     child_log_level.as_str(),
@@ -3591,6 +3612,8 @@ mod signal_session_unit_tests {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            agent: None,
+            recipe: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -3771,6 +3794,8 @@ mod list_sessions_unit_tests {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            agent: None,
+            recipe: None,
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -3862,6 +3887,8 @@ mod report_session_status_unit_tests {
             activity_status: None,
             hook_token: Some(hook_token.to_string()),
             sandbox: None,
+            agent: None,
+            recipe: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -3958,6 +3985,8 @@ mod report_session_status_unit_tests {
             activity_status: None,
             hook_token: None,
             sandbox: None,
+            agent: None,
+            recipe: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -4006,5 +4035,70 @@ mod report_session_status_unit_tests {
         });
         let err = service.report_session_status(request).await.unwrap_err();
         assert_eq!(err.code, tddy_rpc::Code::InvalidArgument);
+    }
+}
+
+/// Resuming a session must relaunch its child with the *same* coding agent and workflow recipe it
+/// was originally started with — read back from the persisted `.session.yaml`. Before this,
+/// `ResumeSession` hard-coded `agent: None` / `recipe: None`, so tddy-coder fell back to its
+/// default agent (`claude`), turning a resumed `cursor` / `pr-stack` session into a broken
+/// `claude --resume <foreign-id>` run.
+#[cfg(test)]
+mod resume_agent_recipe_restore_tests {
+    use super::resume_agent_and_recipe;
+    use tddy_core::SessionMetadata;
+
+    fn metadata_from_yaml(yaml: &str) -> SessionMetadata {
+        serde_yaml::from_str(yaml).expect("test metadata YAML must deserialize into SessionMetadata")
+    }
+
+    #[test]
+    fn resume_restores_the_sessions_persisted_agent_and_recipe() {
+        // Given a persisted cursor / pr-stack session
+        let metadata = metadata_from_yaml(
+            r#"session_id: 019f243a-8e31-7203-81dd-53f5ef8b9352
+project_id: proj-prstack
+created_at: "2026-07-02T19:07:25Z"
+updated_at: "2026-07-02T19:07:25Z"
+status: active
+agent: cursor
+recipe: pr-stack
+"#,
+        );
+
+        // When the daemon derives the spawn's agent and recipe for a resume
+        let (agent, recipe) = resume_agent_and_recipe(&metadata);
+
+        // Then the child is relaunched with the original agent and recipe, not the default claude
+        assert_eq!(
+            agent.as_deref(),
+            Some("cursor"),
+            "resume must restore the session's original agent, not fall back to default claude"
+        );
+        assert_eq!(
+            recipe.as_deref(),
+            Some("pr-stack"),
+            "resume must restore the session's original recipe"
+        );
+    }
+
+    #[test]
+    fn resume_of_a_legacy_session_without_persisted_agent_yields_none() {
+        // Given a legacy session that predates agent/recipe persistence
+        let metadata = metadata_from_yaml(
+            r#"session_id: legacy-sess
+project_id: proj-legacy
+created_at: "2026-01-01T00:00:00Z"
+updated_at: "2026-01-01T00:00:00Z"
+status: active
+"#,
+        );
+
+        // When the daemon derives the spawn's agent and recipe for a resume
+        let (agent, recipe) = resume_agent_and_recipe(&metadata);
+
+        // Then there is nothing to restore (tddy-coder applies its own resolution downstream)
+        assert!(agent.is_none(), "legacy session has no persisted agent to restore");
+        assert!(recipe.is_none(), "legacy session has no persisted recipe to restore");
     }
 }

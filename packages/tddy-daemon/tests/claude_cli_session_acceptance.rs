@@ -327,6 +327,8 @@ async fn claude_cli_session_enrichment_reads_from_metadata() {
         activity_status: None,
         hook_token: None,
         sandbox: None,
+        agent: None,
+        recipe: None,
     };
     write_session_metadata(&session_dir, &meta).unwrap();
     // No changeset.yaml — intentionally absent to test the claude-cli fallback path.
@@ -412,6 +414,8 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
         activity_status: None,
         hook_token: None,
         sandbox: None,
+        agent: None,
+        recipe: None,
     };
     write_session_metadata(&session_dir, &meta).unwrap();
 

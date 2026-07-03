@@ -241,6 +241,15 @@ export const TEST_IDS = {
   prStackChatError: "pr-stack-chat-error",
   prStackChatConnecting: "pr-stack-chat-connecting",
   prStackChatStatus: "pr-stack-chat-status",
+  prStackChatActivity: "pr-stack-chat-activity",
+
+  // PR-Stack Chat Screen — clarification question elicitation (AppMode::Select / MultiSelect)
+  prStackChatQuestion: "pr-stack-chat-question",
+  prStackChatQuestionHeader: "pr-stack-chat-question-header",
+  prStackChatQuestionText: "pr-stack-chat-question-text",
+  prStackChatQuestionOtherInput: "pr-stack-chat-question-other-input",
+  prStackChatQuestionOtherSubmit: "pr-stack-chat-question-other-submit",
+  prStackChatMultiSelectSubmit: "pr-stack-chat-multiselect-submit",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -447,3 +456,9 @@ export const prStackStatusChip = (nodeId: string) => `pr-stack-status-chip-${nod
 
 /** `[data-testid="pr-stack-chat-message-<index>"]` — a single rendered chat bubble */
 export const prStackChatMessage = (index: number) => `pr-stack-chat-message-${index}`;
+
+/** `[data-testid="pr-stack-chat-option-<index>"]` — a single-select option button */
+export const prStackChatOption = (index: number) => `pr-stack-chat-option-${index}`;
+
+/** `[data-testid="pr-stack-chat-multiselect-option-<index>"]` — a multi-select option checkbox */
+export const prStackChatMultiSelectOption = (index: number) => `pr-stack-chat-multiselect-option-${index}`;

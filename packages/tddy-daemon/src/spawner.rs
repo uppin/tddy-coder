@@ -672,6 +672,14 @@ pub fn spawn_as_user(
         }
     }
 
+    log::info!(
+        "[spawn] child cmd: {} {}",
+        cmd.get_program().to_string_lossy(),
+        cmd.get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
     let mut child = cmd.spawn()?;
     let pid = child.id();
 

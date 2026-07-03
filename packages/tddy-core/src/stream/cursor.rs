@@ -231,7 +231,13 @@ where
                     }
                     session_id = event.session_id.clone();
                 }
-                if !event.result.is_empty() {
+                // Cursor sometimes repeats the fully-streamed reply verbatim in this terminal
+                // "result" field, rather than a distinct summary — the same text already
+                // delivered word-by-word via "assistant" deltas above. Skip the exact duplicate
+                // so callers don't see it echoed twice and `result_text` isn't doubled; a
+                // "result"-only invocation (no prior deltas) still gets its text through normally.
+                let is_duplicate_of_streamed_deltas = event.result.trim() == result_text.trim();
+                if !event.result.is_empty() && !is_duplicate_of_streamed_deltas {
                     result_text.push_str(&event.result);
                     if should_echo {
                         on_raw_output(&event.result);
