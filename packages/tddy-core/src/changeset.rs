@@ -74,6 +74,10 @@ pub struct StackNode {
     /// Coarse mirror of child session WorkflowState for orchestrator dashboards.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_state: Option<WorkflowState>,
+    /// Action-needed signal, orthogonal to `pr_status` (which mirrors GitHub reality).
+    /// Auto-derived from git + GitHub, or set by the agent as an override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub internal_status: Option<PrInternalStatus>,
 }
 
 impl StackNode {
@@ -353,6 +357,19 @@ pub struct GithubPrStatus {
     pub url: Option<String>,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+/// Action-needed signal for a stack node, orthogonal to [`GithubPrStatus`].
+///
+/// `kind` is one of `up-to-date`, `needs-repoint`, `has-conflicts`, `ready-to-merge`,
+/// `blocked`, `merged`. `source` is `derived` (auto-computed from git + GitHub) or `override`
+/// (set by the agent — never clobbered by derivation while the override stands).
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct PrInternalStatus {
+    pub kind: String,
+    #[serde(default)]
+    pub note: Option<String>,
+    pub source: String,
 }
 
 impl Changeset {
@@ -892,6 +909,7 @@ mod stack_tests {
                         error: None,
                     }),
                     child_state: None,
+                    internal_status: None,
                 },
                 StackNode {
                     node_id: "n2".to_string(),
@@ -903,6 +921,7 @@ mod stack_tests {
                     parents: vec!["n1".to_string()],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 },
             ],
         };
@@ -929,6 +948,7 @@ mod stack_tests {
                         error: None,
                     }),
                     child_state: None,
+                    internal_status: None,
                 },
                 StackNode {
                     node_id: "n2".to_string(),
@@ -944,6 +964,7 @@ mod stack_tests {
                         error: None,
                     }),
                     child_state: None,
+                    internal_status: None,
                 },
                 StackNode {
                     node_id: "n3".to_string(),
@@ -955,6 +976,7 @@ mod stack_tests {
                     parents: vec!["n1".to_string(), "n2".to_string()],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 },
             ],
         };
@@ -990,6 +1012,7 @@ mod stack_tests {
                     parents: vec![],
                     pr_status: merged_status(),
                     child_state: None,
+                    internal_status: None,
                 },
                 StackNode {
                     node_id: "n2".to_string(),
@@ -1001,6 +1024,7 @@ mod stack_tests {
                     parents: vec!["n1".to_string()],
                     pr_status: merged_status(),
                     child_state: None,
+                    internal_status: None,
                 },
                 StackNode {
                     node_id: "n3".to_string(),
@@ -1012,6 +1036,7 @@ mod stack_tests {
                     parents: vec!["n2".to_string()],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 },
             ],
         };
@@ -1034,6 +1059,7 @@ mod stack_tests {
                     parents: vec![],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 },
                 StackNode {
                     node_id: "n2".to_string(),
@@ -1045,6 +1071,7 @@ mod stack_tests {
                     parents: vec!["n1".to_string()],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 },
                 StackNode {
                     node_id: "n3".to_string(),
@@ -1056,6 +1083,7 @@ mod stack_tests {
                     parents: vec!["n2".to_string()],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 },
             ],
         };
@@ -1081,6 +1109,7 @@ mod stack_tests {
                     parents: vec!["n2".to_string()],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 },
                 StackNode {
                     node_id: "n2".to_string(),
@@ -1092,6 +1121,7 @@ mod stack_tests {
                     parents: vec!["n1".to_string()],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 },
             ],
         };
@@ -1143,6 +1173,7 @@ mod stack_tests {
                     parents: vec![],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 }],
             }),
             ..Default::default()
@@ -1196,6 +1227,7 @@ mod stack_tests {
                     parents: vec![],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 }],
             }),
             ..Default::default()

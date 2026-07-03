@@ -92,6 +92,7 @@ fn spawn_chain_child_sets_orchestrator_session_id() {
                 parents: vec![],
                 pr_status: None,
                 child_state: None,
+                internal_status: None,
             }],
         }),
         ..Changeset::default()
@@ -146,6 +147,7 @@ fn link_stack_node_sets_session_id_and_branch() {
                 parents: vec![],
                 pr_status: None,
                 child_state: None,
+                internal_status: None,
             }],
         }),
         ..Changeset::default()

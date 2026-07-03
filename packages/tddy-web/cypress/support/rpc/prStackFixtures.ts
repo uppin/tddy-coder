@@ -16,6 +16,7 @@ export interface StackNodeFixture {
   parents?: string[];
   prStatus?: { phase: string; url?: string | null; error?: string | null } | null;
   childState?: string | null;
+  internalStatus?: { kind: string; note?: string | null; source: string } | null;
 }
 
 /** A planned PR node with sensible defaults — override only what a scenario cares about. */
@@ -46,6 +47,7 @@ export function aStackPlanJson(version: number, nodes: StackNodeFixture[]): stri
       parents: n.parents ?? [],
       pr_status: n.prStatus ?? null,
       child_state: n.childState ?? null,
+      internal_status: n.internalStatus ?? null,
     })),
   });
 }

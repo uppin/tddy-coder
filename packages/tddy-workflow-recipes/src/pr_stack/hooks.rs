@@ -259,26 +259,15 @@ fn after_write_stack_plan(
         .get_sync("output")
         .ok_or("write-stack-plan after_task requires output in context")?;
 
-    // On a refinement turn (StackPlanned already reached, i.e. a node may already be
-    // spawned), re-seed via reseed_stack_from_plan_if_unspawned instead of blindly
-    // overwriting — this refuses once any node has a session_id.
-    let already_planned = read_changeset(dir)
-        .map(|cs| cs.stack.is_some())
-        .unwrap_or(false);
-
     let plan: StackPlanOutput = serde_yaml::from_str(&output)
         .map_err(|e| format!("failed to parse stack-plan YAML: {e}"))?;
 
-    // On the first write (not already_planned), only validate here — Changeset.stack
-    // itself is seeded later by `BeginOrchestrateTask` reading stack-plan.yaml back
-    // off disk, so there is exactly one seeding code path regardless of whether the
-    // agent reaches `begin-orchestrate` in this run or a later resumed one.
-    if already_planned {
-        super::reseed_stack_from_plan_if_unspawned(dir, &plan)?;
-    } else {
-        super::super::plan_pr_stack::validate_stack_plan(&plan)
-            .map_err(|e| format!("stack plan validation failed: {e}"))?;
-    }
+    // Seed `Changeset.stack` from the plan on the first write, and re-seed it on every
+    // subsequent refinement turn. `reseed_stack_from_plan_if_unspawned` validates the plan,
+    // populates the stack from an empty/absent one, and refuses to overwrite once any node has
+    // spawned a child session — so the `orchestrate` goal and its `pr_*` tools always operate on
+    // a populated stack.
+    super::reseed_stack_from_plan_if_unspawned(dir, &plan)?;
 
     let yaml =
         serde_yaml::to_string(&plan).map_err(|e| format!("failed to serialize stack-plan: {e}"))?;

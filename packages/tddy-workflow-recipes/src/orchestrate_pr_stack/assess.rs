@@ -625,6 +625,9 @@ mod tests {
         fn disable_auto_merge(&self, _number: u64) -> Result<(), tddy_core::WorkflowError> {
             Ok(())
         }
+        fn close_pr(&self, _number: u64) -> Result<(), tddy_core::WorkflowError> {
+            Ok(())
+        }
     }
 
     struct NoneOpenMockGh;
@@ -658,6 +661,9 @@ mod tests {
         fn disable_auto_merge(&self, _number: u64) -> Result<(), tddy_core::WorkflowError> {
             Ok(())
         }
+        fn close_pr(&self, _number: u64) -> Result<(), tddy_core::WorkflowError> {
+            Ok(())
+        }
     }
 
     /// `assemble_views_marks_notspawned_when_session_id_absent` — when a `StackNode` has
@@ -685,6 +691,7 @@ mod tests {
                     parents: vec![],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 },
                 StackNode {
                     node_id: "n2".into(),
@@ -696,6 +703,7 @@ mod tests {
                     parents: vec!["n1".into()],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 },
             ],
         };
@@ -761,6 +769,7 @@ mod tests {
                 parents: vec![],
                 pr_status: None,
                 child_state: None,
+                internal_status: None,
             }],
         };
         let mock_gh = NoneOpenMockGh;
@@ -807,6 +816,7 @@ mod tests {
                 parents: vec![],
                 pr_status: None,
                 child_state: None,
+                internal_status: None,
             }],
         };
 

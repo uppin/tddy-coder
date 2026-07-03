@@ -59,6 +59,7 @@ pub fn planned_prs_into_stack_nodes(prs: &[PlannedPr]) -> Vec<StackNode> {
             parents: pr.parents.clone(),
             pr_status: None,
             child_state: None,
+            internal_status: None,
         })
         .collect()
 }

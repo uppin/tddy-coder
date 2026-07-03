@@ -69,6 +69,9 @@ impl GithubPrApi for MockGithubPrApi {
     fn disable_auto_merge(&self, _number: u64) -> Result<(), WorkflowError> {
         Ok(())
     }
+    fn close_pr(&self, _number: u64) -> Result<(), WorkflowError> {
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +111,7 @@ fn merge_task_writes_prmerged_journal_then_marks_node_merged() {
                 error: None,
             }),
             child_state: None,
+            internal_status: None,
         }],
     );
     let mock_gh = MockGithubPrApi::new("merge-sha-abc");
@@ -166,6 +170,7 @@ fn repoint_task_repoints_each_dependent_and_clears_journal() {
                     error: None,
                 }),
                 child_state: None,
+                internal_status: None,
             },
             StackNode {
                 node_id: "n2".into(),
@@ -181,6 +186,7 @@ fn repoint_task_repoints_each_dependent_and_clears_journal() {
                     error: None,
                 }),
                 child_state: None,
+                internal_status: None,
             },
             StackNode {
                 node_id: "n3".into(),
@@ -196,6 +202,7 @@ fn repoint_task_repoints_each_dependent_and_clears_journal() {
                     error: None,
                 }),
                 child_state: None,
+                internal_status: None,
             },
         ],
     );

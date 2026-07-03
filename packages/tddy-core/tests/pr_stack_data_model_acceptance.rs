@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use tddy_core::changeset::{
-    read_changeset, write_changeset, Changeset, GithubPrStatus, Stack, StackNode,
+    read_changeset, write_changeset, Changeset, GithubPrStatus, PrInternalStatus, Stack, StackNode,
 };
 
 fn scratch(label: &str) -> PathBuf {
@@ -35,6 +35,7 @@ fn stack_roundtrip_linear_and_dag() {
                 parents: vec![],
                 pr_status: None,
                 child_state: None,
+                internal_status: None,
             },
             StackNode {
                 node_id: "n2".into(),
@@ -46,6 +47,7 @@ fn stack_roundtrip_linear_and_dag() {
                 parents: vec!["n1".into()],
                 pr_status: None,
                 child_state: None,
+                internal_status: None,
             },
             StackNode {
                 node_id: "n3".into(),
@@ -57,6 +59,7 @@ fn stack_roundtrip_linear_and_dag() {
                 parents: vec!["n1".into(), "n2".into()],
                 pr_status: None,
                 child_state: None,
+                internal_status: None,
             },
         ],
     };
@@ -105,6 +108,7 @@ fn effective_base_refs_skips_merged_ancestor() {
                     error: None,
                 }),
                 child_state: None,
+                internal_status: None,
             },
             StackNode {
                 node_id: "n2".into(),
@@ -120,6 +124,7 @@ fn effective_base_refs_skips_merged_ancestor() {
                     error: None,
                 }),
                 child_state: None,
+                internal_status: None,
             },
         ],
     };
@@ -151,6 +156,7 @@ fn topo_order_rejects_cycle() {
                 parents: vec!["n2".into()],
                 pr_status: None,
                 child_state: None,
+                internal_status: None,
             },
             StackNode {
                 node_id: "n2".into(),
@@ -162,6 +168,7 @@ fn topo_order_rejects_cycle() {
                 parents: vec!["n1".into()],
                 pr_status: None,
                 child_state: None,
+                internal_status: None,
             },
         ],
     };
@@ -178,6 +185,111 @@ fn topo_order_rejects_cycle() {
     assert!(
         err_msg.to_lowercase().contains("cycle"),
         "error message must mention cycle; got: {err_msg}"
+    );
+}
+
+#[test]
+fn internal_status_roundtrips_through_changeset_yaml() {
+    // Given — a spawned node whose PR needs repointing (an action-needed signal that is
+    // orthogonal to `pr_status`, which mirrors GitHub reality)
+    let dir = scratch("internal-status");
+    let stack = Stack {
+        version: 1,
+        nodes: vec![StackNode {
+            node_id: "n2".into(),
+            title: "Login API".into(),
+            description: String::new(),
+            branch_suggestion: Some("feature/auth/login-api".into()),
+            branch: Some("feature/auth/login-api".into()),
+            session_id: Some("sid-n2".into()),
+            parents: vec!["n1".into()],
+            pr_status: Some(GithubPrStatus {
+                phase: "open".into(),
+                url: None,
+                error: None,
+            }),
+            child_state: None,
+            internal_status: Some(PrInternalStatus {
+                kind: "needs-repoint".into(),
+                note: Some(
+                    "parent n1 merged; base still points at feature/auth/token-store".into(),
+                ),
+                source: "derived".into(),
+            }),
+        }],
+    };
+    let cs = Changeset {
+        stack: Some(stack),
+        ..Changeset::default()
+    };
+
+    // When
+    write_changeset(&dir, &cs).unwrap();
+    let loaded = read_changeset(&dir).unwrap();
+    let _ = fs::remove_dir_all(&dir);
+
+    // Then
+    let node = loaded
+        .stack
+        .expect("stack must survive roundtrip")
+        .node("n2")
+        .cloned()
+        .expect("n2 must exist");
+    let status = node
+        .internal_status
+        .expect("internal_status must survive the serde roundtrip");
+    assert_eq!(status.kind, "needs-repoint");
+    assert_eq!(
+        status.note.as_deref(),
+        Some("parent n1 merged; base still points at feature/auth/token-store")
+    );
+    assert_eq!(status.source, "derived");
+}
+
+#[test]
+fn a_node_without_internal_status_key_reads_as_none() {
+    // Given — a stack-node YAML written before this field existed (no `internal_status:` key)
+    let dir = scratch("internal-status-legacy");
+    let legacy_yaml = r#"
+name: legacy stack session
+version: 1
+models: {}
+sessions: []
+state:
+  current: StackPlanned
+  updated_at: "2024-01-01T00:00:00Z"
+  history: []
+artifacts: {}
+discovery: null
+stack:
+  version: 1
+  nodes:
+    - node_id: n1
+      title: Add token store
+      description: ""
+      branch_suggestion: feature/auth/token-store
+      branch: null
+      session_id: null
+      parents: []
+      pr_status: null
+      child_state: null
+"#;
+    fs::write(dir.join("changeset.yaml"), legacy_yaml.trim()).unwrap();
+
+    // When
+    let cs = read_changeset(&dir).unwrap();
+    let _ = fs::remove_dir_all(&dir);
+
+    // Then
+    let node = cs
+        .stack
+        .expect("stack present")
+        .node("n1")
+        .cloned()
+        .expect("n1 present");
+    assert!(
+        node.internal_status.is_none(),
+        "a node YAML without internal_status: must deserialize with internal_status = None"
     );
 }
 

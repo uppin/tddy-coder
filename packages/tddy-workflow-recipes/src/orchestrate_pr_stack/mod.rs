@@ -6,6 +6,8 @@ pub mod bridge;
 mod git_ops;
 pub mod github;
 mod hooks;
+mod internal_status;
+mod pr_actions;
 pub mod transient;
 
 pub use actions::{MergeTask, RepointTask, SpawnTask};
@@ -16,6 +18,8 @@ pub use assess::{
 pub use bridge::{execute_stack_merge, execute_stack_repoint, seed_orchestrator_stack_from_plan};
 pub use github::{GithubPrApi, RealGithubPrApi};
 pub use hooks::OrchestratePrStackHooks;
+pub use internal_status::{derive_internal_status, reconcile_internal_status};
+pub use pr_actions::{pr_close_action, pr_merge_action, pr_resolve_conflicts_action};
 pub use transient::{
     recover_in_flight_stack_op, write_stack_op_journal, MergePhase, StackOpJournal,
 };
