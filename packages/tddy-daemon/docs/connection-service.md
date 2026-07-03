@@ -72,7 +72,7 @@ Project rows in **`projects.yaml`** may include optional **`main_branch_ref`** (
 
 ## Multi-host projects
 
-A "host" is a daemon instance; the selectable set is the connected `tddy-daemon` LiveKit participants (`ListEligibleDaemons`, backed by common-room discovery). The same logical project can live on several hosts under **one shared `project_id`**:
+A "host" is a daemon instance; the selectable set is the connected `tddy-daemon` LiveKit participants (`ListEligibleDaemons`, backed by common-room discovery). Discovery classifies each common-room participant and lists **only genuine daemons** — mirroring the web UI's `inferParticipantRole`, a participant with a browser identity (`web-`/`browser-`) or a coder/session identity (`server…`, `daemon-<uuid>`) is excluded even if it publishes advertisement-shaped metadata, and a daemon must publish a valid advertisement (no identity fallback). This keeps coder/session participants out of host selection and out of project fan-out (only daemons own projects). The same logical project can live on several hosts under **one shared `project_id`**:
 
 - **Registry is per-daemon-per-user.** Each host keeps its own `~/.tddy/projects/projects.yaml`; a project "on" multiple hosts is one row per host, all sharing the `project_id`. Aggregated `ListProjects` returns one `ProjectEntry` per (`project_id`, hosting `daemon_instance_id`).
 - **Adding to a host** (`AddProjectToHost`) routes to the target daemon (local, or forwarded over LiveKit) which clones the repo and writes a row reusing the `project_id`. **`project_storage::add_or_get_project`** makes this idempotent (append only when the id is absent; otherwise return the existing row).

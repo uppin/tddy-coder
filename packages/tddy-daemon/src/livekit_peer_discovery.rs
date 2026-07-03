@@ -280,53 +280,59 @@ impl CommonRoomPeerRegistry {
     }
 }
 
+/// Classify a common-room participant, returning an eligible-daemon row **only** when the
+/// participant is a genuine `tddy-daemon` — not a browser or a coder/session participant.
+///
+/// Mirrors the web UI's `inferParticipantRole` (`tddy-web/src/hooks/useRoomParticipants.ts`):
+/// browser identities (`web-`/`browser-`) and coder/session identities (`server`, `server…`,
+/// `daemon-<uuid>…`) are never daemons — even when they publish advertisement-shaped metadata — and
+/// a daemon must publish a valid advertisement (no identity fallback). Only daemons own projects, so
+/// only daemons are eligible hosts for session/project routing and project fan-out.
+fn eligible_daemon_from_participant_fields(
+    identity: &str,
+    metadata: &str,
+    local_instance_id: &str,
+) -> Option<EligibleDaemonInfo> {
+    let id_trim = identity.trim();
+    if id_trim.starts_with("web-") || id_trim.starts_with("browser-") {
+        return None;
+    }
+    // A coder/session participant joins with a `server…` or `daemon-<uuid>` identity; it is never a
+    // host daemon even if its metadata happens to look like an advertisement.
+    if id_trim == "server" || id_trim.starts_with("server") || id_trim.starts_with("daemon-") {
+        return None;
+    }
+    let adv = parse_daemon_advertisement_json(metadata.trim()).ok()?;
+    let instance_id = adv.instance_id.trim().to_string();
+    if instance_id.is_empty() || instance_id == local_instance_id.trim() {
+        return None;
+    }
+    let label = if adv.label.trim().is_empty() {
+        format!("{instance_id} (LiveKit peer)")
+    } else {
+        adv.label.trim().to_string()
+    };
+    Some(EligibleDaemonInfo {
+        instance_id: DaemonInstanceId(instance_id),
+        label,
+    })
+}
+
 fn remote_participant_to_eligible(
     remote: RemoteParticipant,
     local_instance_id: &str,
 ) -> Option<EligibleDaemonInfo> {
     let identity_str = remote.identity().to_string();
     let meta = remote.metadata();
-    let meta_trim = meta.trim();
-    let (instance_id, label) = if !meta_trim.is_empty() {
-        match parse_daemon_advertisement_json(meta_trim) {
-            Ok(a) => (a.instance_id, a.label),
-            Err(e) => {
-                log::debug!(
-                    target: LOG_LIVEKIT_PEER_METADATA,
-                    "peer {} metadata not valid daemon advertisement ({}), falling back to identity",
-                    identity_str,
-                    e
-                );
-                (
-                    identity_str.clone(),
-                    format!("{identity_str} (LiveKit peer)"),
-                )
-            }
-        }
-    } else {
+    let result = eligible_daemon_from_participant_fields(&identity_str, &meta, local_instance_id);
+    if result.is_none() {
         log::debug!(
             target: LOG_LIVEKIT_PEER_METADATA,
-            "peer {} has empty metadata; using LiveKit identity as instance_id",
+            "peer {} is not an eligible daemon (browser/coder identity or no valid daemon advertisement); skipping",
             identity_str
         );
-        (
-            identity_str.clone(),
-            format!("{identity_str} (LiveKit peer)"),
-        )
-    };
-    let instance_id = instance_id.trim().to_string();
-    if instance_id.is_empty() || instance_id == local_instance_id.trim() {
-        return None;
     }
-    let label = if label.trim().is_empty() {
-        format!("{instance_id} (LiveKit peer)")
-    } else {
-        label.trim().to_string()
-    };
-    Some(EligibleDaemonInfo {
-        instance_id: DaemonInstanceId(instance_id),
-        label,
-    })
+    result
 }
 
 fn process_startup_unix_ms_suffix() -> &'static str {
@@ -1062,6 +1068,92 @@ mod tests {
             parse_daemon_advertisement_json(json).expect("parse documented advertisement JSON");
         assert_eq!(got.instance_id, "peer-a");
         assert_eq!(got.label, "Peer A");
+    }
+
+    #[test]
+    fn eligible_daemon_accepts_a_peer_daemon_advertisement() {
+        // Given a genuine peer daemon (unprefixed identity + advertisement metadata)
+        let meta = r#"{"instance_id":"udoo","label":"udoo (this daemon)"}"#;
+
+        // When
+        let got = eligible_daemon_from_participant_fields("udoo", meta, "local-host");
+
+        // Then
+        let got = got.expect("a peer daemon advertisement is eligible");
+        assert_eq!(got.instance_id, DaemonInstanceId("udoo".to_string()));
+        assert_eq!(got.label, "udoo (this daemon)");
+    }
+
+    #[test]
+    fn eligible_daemon_rejects_a_coder_session_participant_even_with_advertisement_metadata() {
+        // Given a coder/session participant (identity `daemon-<uuid>`) that publishes
+        // advertisement-shaped metadata — only real daemons own projects, so it must be excluded.
+        let meta = r#"{"instance_id":"proj-x","label":"proj-x (this daemon)"}"#;
+
+        // When
+        let got = eligible_daemon_from_participant_fields(
+            "daemon-019d7d74-3a7f-7b03-88d2-f50bb7efb2f0",
+            meta,
+            "local-host",
+        );
+
+        // Then
+        assert!(
+            got.is_none(),
+            "a coder-role participant is not an eligible daemon"
+        );
+    }
+
+    #[test]
+    fn eligible_daemon_rejects_a_server_coder_identity() {
+        // Given
+        let got = eligible_daemon_from_participant_fields("server", "", "local-host");
+
+        // Then
+        assert!(
+            got.is_none(),
+            "the coder `server` identity is not an eligible daemon"
+        );
+    }
+
+    #[test]
+    fn eligible_daemon_rejects_a_browser_participant() {
+        // Given
+        let got = eligible_daemon_from_participant_fields("web-u-1-x", "", "local-host");
+
+        // Then
+        assert!(
+            got.is_none(),
+            "a browser participant is not an eligible daemon"
+        );
+    }
+
+    #[test]
+    fn eligible_daemon_rejects_a_participant_without_a_valid_advertisement() {
+        // Given a peer with a plausible-but-unprefixed identity and no advertisement metadata:
+        // there is no identity fallback, so it is not treated as a daemon.
+        let got = eligible_daemon_from_participant_fields("random-peer", "", "local-host");
+
+        // Then
+        assert!(
+            got.is_none(),
+            "a daemon must publish a valid advertisement to be eligible"
+        );
+    }
+
+    #[test]
+    fn eligible_daemon_excludes_the_local_instance() {
+        // Given the local daemon's own advertisement
+        let meta = r#"{"instance_id":"local-host","label":"local-host (this daemon)"}"#;
+
+        // When
+        let got = eligible_daemon_from_participant_fields("local-host", meta, "local-host");
+
+        // Then
+        assert!(
+            got.is_none(),
+            "the local instance is not listed as a remote peer"
+        );
     }
 
     #[test]
