@@ -1,0 +1,14 @@
+# 32K-context variant of the local FastContext model, for the ./claude-sandbox fastcontext subagent.
+#
+# Ollama's OpenAI-compatible endpoint (/v1/chat/completions) cannot set context length per request
+# (by design — see https://github.com/ollama/ollama/pull/6137, closed by maintainers). The supported
+# way to raise it is a Modelfile variant, which the subagent then reaches via `model:` in the
+# sandbox config. Inherits the base model's template, tools, and params; only overrides num_ctx.
+#
+# Build (one-time; re-run after pulling a newer base):
+#   ollama create fastcontext-tools-32k -f fastcontext-tools-32k.Modelfile
+#
+# Then set `model: fastcontext-tools-32k` under the fastcontext subagent in your sandbox config.
+
+FROM fastcontext-tools:latest
+PARAMETER num_ctx 32768

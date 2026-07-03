@@ -16,7 +16,8 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use tddy_discovery::agent_def::SpecializedAgentDef;
 use tddy_discovery::subagent::{
-    CodebaseAccess, PromptOutcome, SubagentConfig, SubagentRegistry, SubagentSession,
+    resolve_replaced_tools_for_defs, CodebaseAccess, PromptOutcome, SubagentConfig,
+    SubagentRegistry, SubagentSession,
 };
 
 /// Unix socket for relaying approval prompts to the tddy-coder TUI. In `cfg(test)` builds this is
@@ -91,7 +92,16 @@ impl PermissionServer {
         // alongside the 3 static tools. Both transport variants use the same static
         // catalog today (see exec_tool_catalog doc comment for why).
         if crate::session_tool_client::detect_session_tool_transport().is_some() {
-            tool_router.merge(dynamic_tool_router(&exec_tool_catalog()));
+            // Server-side enforcement of subagent tool replacement: a tool a configured subagent
+            // declares it `replaces` is delegated to that subagent, so this server must not
+            // advertise it — a direct call must be impossible at the tool server too, not only
+            // gated by Claude's allow/disallow lists. Empty when no subagent replaces anything.
+            let replaced = resolve_replaced_tools_for_defs(&subagents_from_env());
+            let catalog: Vec<RemoteToolDef> = exec_tool_catalog()
+                .into_iter()
+                .filter(|tool| !replaced.contains(&tool.name))
+                .collect();
+            tool_router.merge(dynamic_tool_router(&catalog));
         }
         // Discovery-subagent tools (ACP-shaped: subagent_new_session/prompt/cancel) — merged only
         // when a subagent is actually configured, mirroring the exec-tool merge above.
@@ -1200,6 +1210,90 @@ mod tests {
             parsed["behavior"], "deny",
             "arbitrary Bash commands must be denied, got: {}",
             result
+        );
+    }
+
+    // ─── server-side enforcement of subagent tool replacement ───────────────────────
+    //
+    // Claude's --allowedTools/--disallowedTools gate the main agent, but the MCP server itself
+    // still advertised the full exec catalog. A tool a subagent `replaces` must be unreachable at
+    // the server too: the server must not advertise it, so no client can invoke it directly.
+
+    const IPC_SOCKET_ENV: &str = "TDDY_SANDBOX_TOOL_IPC";
+
+    /// Set the env that makes the server advertise exec tools (a session-tool transport) and wire a
+    /// single subagent whose `replaces` set is `replaced`, run `f`, then restore the env. Serial
+    /// tests only — these vars are process-global.
+    fn with_subagent_replacing<R>(replaced: &[&str], f: impl FnOnce() -> R) -> R {
+        let defs = format!(
+            r#"[{{"name":"fastcontext","model":"m","replaces":[{}]}}]"#,
+            replaced
+                .iter()
+                .map(|t| format!("\"{t}\""))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        std::env::set_var(IPC_SOCKET_ENV, "/tmp/tddy-test-ipc.sock");
+        std::env::set_var("TDDY_SUBAGENT", "fastcontext");
+        std::env::set_var("TDDY_SUBAGENTS_JSON", defs);
+        let result = f();
+        std::env::remove_var(IPC_SOCKET_ENV);
+        std::env::remove_var("TDDY_SUBAGENT");
+        std::env::remove_var("TDDY_SUBAGENTS_JSON");
+        result
+    }
+
+    /// A tool a subagent declares it `replaces` must not appear in the MCP server's advertised tool
+    /// list — the server refuses to serve it, so a direct call is impossible regardless of Claude's
+    /// own allow/disallow lists.
+    #[test]
+    #[serial]
+    fn mcp_server_omits_replaced_exec_tools_from_its_advertised_catalog() {
+        // Given / When
+        let tools = with_subagent_replacing(&["Grep", "Glob", "SemanticSearch"], || {
+            PermissionServer::new().tool_names()
+        });
+
+        // Then
+        for replaced in ["Grep", "Glob", "SemanticSearch"] {
+            assert!(
+                !tools.contains(&replaced.to_string()),
+                "replaced tool {replaced} must not be advertised by the MCP server; got: {tools:?}"
+            );
+        }
+    }
+
+    /// Replacement removes only the replaced tools — every other exec tool the subagent did not
+    /// claim stays advertised.
+    #[test]
+    #[serial]
+    fn mcp_server_keeps_advertising_exec_tools_a_subagent_did_not_replace() {
+        // Given / When
+        let tools = with_subagent_replacing(&["Grep", "Glob", "SemanticSearch"], || {
+            PermissionServer::new().tool_names()
+        });
+
+        // Then
+        for kept in ["Read", "Write", "Shell"] {
+            assert!(
+                tools.contains(&kept.to_string()),
+                "non-replaced tool {kept} must still be advertised; got: {tools:?}"
+            );
+        }
+    }
+
+    /// With a subagent that replaces nothing, the full exec catalog stays advertised — enforcement
+    /// must not gratuitously drop tools.
+    #[test]
+    #[serial]
+    fn mcp_server_advertises_the_full_exec_catalog_when_nothing_is_replaced() {
+        // Given / When
+        let tools = with_subagent_replacing(&[], || PermissionServer::new().tool_names());
+
+        // Then
+        assert!(
+            tools.contains(&"Grep".to_string()),
+            "Grep must be advertised when nothing is replaced; got: {tools:?}"
         );
     }
 }

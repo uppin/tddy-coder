@@ -1,0 +1,57 @@
+# tddy-sandbox-app session config — consumed by ./claude-sandbox (and `tddy-sandbox-app --config`).
+# Schema: packages/tddy-sandbox-app/src/config.rs (SandboxAppConfig). Every field is optional and
+# any equivalent CLI flag overrides the value here. Copy this file and edit as needed.
+
+# Claude model for the in-jail `claude` (default: claude-opus-4-8).
+model: claude-opus-4-8
+
+# Permission mode: auto | bypassPermissions | plan (default: auto).
+permission_mode: auto
+
+# Codebase mode:
+#   managed — the repo is NOT mounted into the jail; Claude reaches it only via mcp__tddy-tools__*
+#             calls relayed on the host (the isolation model ./claude-sandbox is built around).
+#   mounted — the repo is bind-mounted read-write and Claude works on the real tree directly.
+codebase_mode: managed
+
+# Specialized subagents wired into the session. Each entry is a full agent def (same schema as
+# <tddyhome>/agents/*.yaml). Declaring one here both DEFINES and ACTIVATES it, and overrides a
+# builtin of the same name — no --specialized-agent flag or agents dir needed.
+#
+# This points the built-in `fastcontext` role at a local Ollama server (OpenAI-compatible API,
+# reached at {base_url}/v1/chat/completions). In managed mode the subagent's HTTP to localhost is
+# relayed to the host by the egress shim, so it reaches the Ollama server running on your machine.
+#
+# CONTEXT SIZE: Ollama's /v1 endpoint cannot set context length per request (rejected upstream —
+# ollama/ollama#6137), and its 4096 default is too small for repo exploration (the model overruns
+# and loops). Bake the context into a model variant and point `model:` at it — one-time:
+#   ollama create fastcontext-tools-32k -f fastcontext-tools-32k.Modelfile   # PARAMETER num_ctx 32768
+# (fastcontext-tools-32k.Modelfile lives in the repo root; its FROM is your base FastContext model.)
+subagents:
+  - name: fastcontext
+    model: fastcontext-tools-32k
+    base_url: http://localhost:11434
+    # Main-agent tools Claude delegates to this subagent. Each is removed from the main agent
+    # entirely — both Claude's native built-in and the mcp__tddy-tools__* form are hard-disabled
+    # (--disallowedTools), so the only route is delegating to the subagent.
+    replaces: [Grep, Glob, SemanticSearch]
+    # Optional — tools the subagent's own internal loop may call (default: [READ, GLOB, GREP]):
+    # tools: [READ, GLOB, GREP]
+    # Optional — max internal turns before it must answer (default: 10):
+    # max_turns: 10
+    # Optional — a custom system prompt (inline) or a path to one:
+    # system_prompt: "You are a fast codebase explorer."
+    # system_prompt_path: ./prompts/fastcontext.md
+
+# Optional — extra args always forwarded to the in-jail `claude`, before any `-- <args>` given on
+# the ./claude-sandbox command line (a trailing positional prompt from the CLI therefore lands last):
+# claude_args:
+#   - --add-dir
+#   - /some/extra/dir
+
+# Optional — RUST_LOG for the in-jail `tddy-tools --mcp` server. Its logs (including the
+# specialized-subagent HTTP calls to the model server) are persisted to
+#   <session-dir>/egress/tddy-tools.mcp.log      (session-dir printed at startup;
+#                                                 ~/.tddy/sessions/latest symlinks the newest)
+# Default already captures subagent turns; raise it to trace everything:
+# mcp_log_level: "debug,tddy_tools=trace,tddy_discovery=trace"

@@ -10,13 +10,14 @@
 //! ```
 
 mod bridge;
+mod config;
 mod spawn;
 
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use spawn::{resolve_codebase_mode, spawn_claude_sandbox, SpawnParams, SubagentSpawnConfig};
+use spawn::{resolve_codebase_mode, spawn_claude_sandbox, SpawnParams};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_task::TaskRegistry;
 use uuid::Uuid;
@@ -31,13 +32,19 @@ struct Args {
     #[arg(long)]
     repo: PathBuf,
 
+    /// Optional YAML config (schema: `config::SandboxAppConfig`). CLI flags override its values.
+    /// Inline `subagents:` defs let you e.g. point `fastcontext` at a local Ollama server without
+    /// a separate agents dir.
+    #[arg(long, short = 'c')]
+    config: Option<PathBuf>,
+
     /// Base directory for session metadata (default: `$HOME/.tddy`).
     #[arg(long, env = "TDDY_SESSION_BASE")]
     session_base: Option<PathBuf>,
 
-    /// Claude model passed to the in-jail `claude` binary.
-    #[arg(long, default_value = "claude-opus-4-8")]
-    model: String,
+    /// Claude model passed to the in-jail `claude` binary (default: `claude-opus-4-8`).
+    #[arg(long)]
+    model: Option<String>,
 
     /// Claude permission mode (e.g. auto, bypassPermissions, plan).
     #[arg(long)]
@@ -94,9 +101,21 @@ struct Args {
     #[arg(long)]
     agents_dir: Option<PathBuf>,
 
+    /// `RUST_LOG` for the in-jail `tddy-tools --mcp` server; its logs (incl. specialized subagent
+    /// HTTP activity) are persisted to `<session-dir>/egress/tddy-tools.mcp.log`. Overrides the
+    /// config's `mcp_log_level`.
+    #[arg(long)]
+    mcp_log_level: Option<String>,
+
     /// Enable debug logging for tddy sandbox components (HTTP/gRPC frame traces stay quiet).
     #[arg(short, long)]
     verbose: bool,
+
+    /// Args after `--` are forwarded verbatim to the in-jail `claude`, appended after any
+    /// `claude_args` from the config file (a trailing positional prompt therefore lands last).
+    /// E.g. `-- --add-dir /extra "implement the feature"`.
+    #[arg(last = true)]
+    claude_args: Vec<String>,
 }
 
 /// Default `RUST_LOG` when `--verbose` is set and the env var is unset.
@@ -122,6 +141,21 @@ fn default_claude_home_dir() -> PathBuf {
     default_session_base().join("sandbox-claude-home")
 }
 
+/// Repoint `<session-base>/sessions/latest` at `<session_id>` (best-effort; failures are ignored —
+/// it's a convenience pointer for finding the current session's logs, never load-bearing).
+fn update_latest_session_symlink(session_base: &std::path::Path, session_id: &str) {
+    #[cfg(unix)]
+    {
+        let sessions_dir = session_base.join(SESSIONS_SUBDIR);
+        if std::fs::create_dir_all(&sessions_dir).is_err() {
+            return;
+        }
+        let link = sessions_dir.join("latest");
+        let _ = std::fs::remove_file(&link);
+        let _ = std::os::unix::fs::symlink(session_id, &link);
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -130,11 +164,23 @@ async fn main() -> Result<()> {
     }
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
+    // Load the optional YAML config first; every CLI flag below overrides its config counterpart.
+    let cfg = match args.config.as_deref() {
+        Some(path) => config::SandboxAppConfig::load(path)?,
+        None => config::SandboxAppConfig::default(),
+    };
+
     let session_id = Uuid::now_v7().to_string();
-    let session_base = args.session_base.unwrap_or_else(default_session_base);
+    let session_base = args
+        .session_base
+        .or(cfg.session_base)
+        .unwrap_or_else(default_session_base);
     let session_dir = session_base.join(SESSIONS_SUBDIR).join(&session_id);
     eprintln!("session_id={session_id}");
     eprintln!("session_dir={}", session_dir.display());
+    // Best-effort convenience: repoint `<session-base>/sessions/latest` at this session so logs are
+    // easy to find without copying the UUID (`tail -f ~/.tddy/sessions/latest/egress/*.log`).
+    update_latest_session_symlink(&session_base, &session_id);
     eprintln!(
         "logs: {}/spawn.trace.log (host steps), {}/egress/ (in-jail runner after spawn)",
         session_dir.display(),
@@ -144,48 +190,74 @@ async fn main() -> Result<()> {
         eprintln!("verbose logging enabled (RUST_LOG)");
     }
 
-    let claude_home_dir = args.claude_home_dir.unwrap_or_else(default_claude_home_dir);
+    let claude_home_dir = args
+        .claude_home_dir
+        .or(cfg.claude_home_dir)
+        .unwrap_or_else(default_claude_home_dir);
     eprintln!(
         "claude_home_dir={} (persistent across restarts)",
         claude_home_dir.display()
     );
 
-    let managed_codebase =
-        resolve_codebase_mode(args.codebase_mode.as_deref(), args.remote_codebase)
-            .map_err(|e| anyhow::anyhow!(e))?;
+    // `--codebase-mode`/`--remote-codebase` on the CLI win; otherwise fall back to config.
+    let codebase_mode = args.codebase_mode.or(cfg.codebase_mode);
+    let managed_codebase = resolve_codebase_mode(codebase_mode.as_deref(), args.remote_codebase)
+        .map_err(|e| anyhow::anyhow!(e))?;
     if managed_codebase {
         eprintln!(
             "codebase_mode=managed: repo not mounted; Claude reaches it only via mcp__tddy-tools__* calls"
         );
     }
+
     let agents_dir = args
         .agents_dir
+        .or(cfg.agents_dir)
         .unwrap_or_else(|| session_base.join("agents"));
-    let subagent = SubagentSpawnConfig {
-        specialized_agents: args.specialized_agent,
-        agents_dir,
-    };
-    if !subagent.specialized_agents.is_empty() {
+    // Named agents come from the CLI flag and the config list; inline defs come from the config.
+    let mut named_agents = args.specialized_agent;
+    named_agents.extend(cfg.specialized_agents);
+    let specialized_defs =
+        config::resolve_session_agents(&named_agents, &cfg.subagents, &agents_dir)?;
+    if !specialized_defs.is_empty() {
         eprintln!(
             "specialized_agents={}",
-            subagent.specialized_agents.join(",")
+            specialized_defs
+                .iter()
+                .map(|d| d.name.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
         );
     }
+
+    // Config `claude_args` first, then CLI `-- <args>` — a trailing positional prompt lands last.
+    let mut claude_args = cfg.claude_args;
+    claude_args.extend(args.claude_args);
+
+    let model = args
+        .model
+        .or(cfg.model)
+        .unwrap_or_else(|| "claude-opus-4-8".to_string());
+    let permission_mode = args
+        .permission_mode
+        .or(cfg.permission_mode)
+        .unwrap_or_else(|| "auto".to_string());
 
     let spawned = tokio::select! {
         res = spawn_claude_sandbox(SpawnParams {
             repo: args.repo,
             session_id: session_id.clone(),
-            model: args.model,
-            permission_mode: args.permission_mode.unwrap_or_else(|| "auto".to_string()),
-            claude_binary: args.claude_binary,
-            tddy_tools_path: args.tddy_tools_path,
-            sandbox_runner_path: args.sandbox_runner_path,
+            model,
+            permission_mode,
+            claude_binary: args.claude_binary.or(cfg.claude_binary),
+            tddy_tools_path: args.tddy_tools_path.or(cfg.tddy_tools_path),
+            sandbox_runner_path: args.sandbox_runner_path.or(cfg.sandbox_runner_path),
             session_dir: session_dir.clone(),
-            cwd: args.cwd,
+            cwd: args.cwd.or(cfg.cwd),
             claude_home_dir,
             remote_codebase: managed_codebase,
-            subagent,
+            specialized_defs,
+            claude_args,
+            mcp_log_level: args.mcp_log_level.or(cfg.mcp_log_level),
         }) => res?,
         _ = tokio::signal::ctrl_c() => {
             eprintln!("interrupted");
