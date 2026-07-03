@@ -106,6 +106,16 @@ For new sessions the changeset is seeded with `recipe.start_goal()` before `writ
 
 **How `transition` reaches the controller:** `tddy-tools transition` always runs **on the host** — sandboxed sessions relay the agent's `Shell` tool back to the daemon (`tool_engine::tool_shell`, which now runs the command with the per-session `extra_env`), and non-sandboxed sessions inherit the PTY env — so the child `tddy-tools` reads `TDDY_SOCKET` and dispatches over the existing relay to the per-session `ToolcallRpcService::with_transition_handler` in `tddy-core`. The process-global registry (`toolcall/transition.rs`) remains a fallback only for the in-process `tddy-coder`/`agent_session_runner` path; the per-instance handler prevents cross-session bleed under concurrency. Only `transition` is served on this listener (ask/approve use the MCP `approval_prompt` tool + PTY). Live workflow-event streaming to the web client is a follow-up; state is durable in `changeset.yaml`.
 
+`prepare_managed_workflow` also exports **`TDDY_SESSION_DIR`** (the session dir) and **`TDDY_REPO_DIR`** (the worktree) in the per-session env, so a managed session's `tddy-tools` can locate the orchestrator changeset and run `git` against the repo — the PR-stack `pr_*` tools depend on both. (These come from the tddy-coder TUI backends on that path; the daemon-managed path must set them explicitly.)
+
+## PR-stack child-spawn relay
+
+A `pr-stack` orchestrator's agent spawns a planned node's child session from chat via the `pr_spawn_child` MCP tool, which relays a **`spawn-child`** toolcall verb over `TDDY_SOCKET` (request/response, returns the new `session_id`). It is served by a per-session **`StackChildSpawnHandler`** (`connection_service.rs`) bound to the toolcall listener **only** when the session's `managed_recipe.name() == "pr-stack"` (`with_child_spawn_handler` in `session_toolcall.rs`) — so an orchestrator can spawn children only for its own stack (the socket is per-session).
+
+`spawn_child(node_id)` reads the orchestrator's `changeset.yaml` stack, finds the node (rejects an already-spawned node), derives the child's `initial_prompt` (title + description) and `new_branch_name` (node `branch`/`branch_suggestion`), inherits the orchestrator's `SessionMetadata.model` (errors if absent — no guess), then calls the shared **`spawn_claude_cli_session_inner`** with `stack_parent` = orchestrator, `managed_recipe = None`, `branch_worktree_intent = "new_branch_from_base"`. `spawn_claude_cli_session_inner` is the body of `start_claude_cli_session` extracted into a free async fn; the `StartSession` RPC method is now a thin wrapper over it, so the RPC path is unchanged. This is the same effect as the web "Start session" CTA, driven from the orchestrator chat.
+
+> **Runtime verification pending:** the end-to-end spawn (orchestrator → `pr_spawn_child` → relay → `StackChildSpawnHandler` → child session materialized) has compile + unit coverage but no automated integration test; exercise it against a running daemon before relying on it.
+
 ## Sandboxed Claude Code CLI sessions
 
 When `StartSessionRequest.session_type == "claude-cli"` **and** `sandbox == true` on macOS, the daemon uses the sandbox spawn path instead of `ClaudeCliSessionManager::start()`:
