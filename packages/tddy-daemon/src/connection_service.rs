@@ -483,10 +483,24 @@ impl ConnectionServiceImpl {
         std::fs::write(&prompt_path, &mw.orchestration_prompt)
             .map_err(|e| Status::internal(format!("failed to write orchestration prompt: {e}")))?;
 
-        let mut env: Vec<(String, String)> = vec![(
-            "TDDY_SOCKET".to_string(),
-            mw.listener.socket_path().to_string_lossy().into_owned(),
-        )];
+        // A managed session's `tddy-tools` MCP process needs these to locate the orchestrator's
+        // changeset (`TDDY_SESSION_DIR`) and run `git` against the repo (`TDDY_REPO_DIR`) — the
+        // PR-management tools read both. The tddy-coder TUI backends set them; the daemon's managed
+        // claude-cli launch must set them here too, or those tools have no session/repo in scope.
+        let mut env: Vec<(String, String)> = vec![
+            (
+                "TDDY_SOCKET".to_string(),
+                mw.listener.socket_path().to_string_lossy().into_owned(),
+            ),
+            (
+                "TDDY_SESSION_DIR".to_string(),
+                session_dir.to_string_lossy().into_owned(),
+            ),
+            (
+                "TDDY_REPO_DIR".to_string(),
+                worktree_path.to_string_lossy().into_owned(),
+            ),
+        ];
         if let Some(dir) = std::path::Path::new(tddy_tools_path)
             .parent()
             .filter(|d| !d.as_os_str().is_empty())

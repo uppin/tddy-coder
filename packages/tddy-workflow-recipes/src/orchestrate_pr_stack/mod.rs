@@ -41,6 +41,14 @@ pub const STACK_STATUS_MD_BASENAME: &str = "stack-status.md";
 pub const STACK_STATUS_JSON_BASENAME: &str = "stack-status.json";
 
 /// **orchestrate-pr-stack** recipe: assess → spawn/merge/repoint → loop back → end.
+///
+/// Retained but **inert in production**: `recipe_resolve` maps every CLI name
+/// (`pr-stack`/`plan-pr-stack`/`orchestrate-pr-stack`) to [`crate::pr_stack::PrStackRecipe`], so this
+/// engine-driven auto-loop graph is never instantiated live. It is kept because its acceptance tests
+/// (and the `AssessTask`/`SpawnTask`/`MergeTask`/`RepointTask` it wires) exercise the engine-driven
+/// orchestration logic whose helpers — `assemble_views`, `decide_next_action`, `execute_stack_merge`,
+/// `execute_stack_repoint` — are reused by the free-prompting `pr_*` tools. Remove only alongside
+/// that coverage.
 #[derive(Clone, Copy, Default, Debug)]
 pub struct OrchestratePrStackRecipe;
 

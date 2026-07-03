@@ -23,7 +23,7 @@ merge/repoint/GitHub bridge logic is retained but is now tool-invoked, not loop-
 - [x] `pr-stack` recipe graph: `analyze-stack → write-stack-plan → orchestrate` terminal loop; dropped `begin-orchestrate`/`assess`/`spawn`/`merge`/`repoint` from the graph; `orchestrate` goal hint (`AcceptEdits`, PR tools + `Agent`) (`pr_stack/mod.rs`)
 - [x] `PrStackRecipe::next_goal_for_state[_with_changeset]` resumes into `orchestrate` (`pr_stack/mod.rs`)
 - [x] `PrStackRecipe::orchestration_system_prompt` override: chat-oriented `orchestrate` prompt (`pr_stack/mod.rs`)
-- [~] Legacy `OrchestratePrStackRecipe` graph **left intact** (deviation) — it's only reachable via an alias that resolves to `PrStackRecipe`, so its graph is inert in production, and its tests still cover the retained merge/repoint bridge logic. Flagged for review.
+- [x] Legacy `OrchestratePrStackRecipe` graph **resolved by documented retention** — provably inert (no CLI name resolves to it; all resolve to `PrStackRecipe`), retained for its engine-driven-orchestration test coverage of helpers the `pr_*` tools reuse. Documented in a doc comment on the struct and in the PRD "Legacy aliases" note.
 - [x] `close_pr(number)` on `GithubPrApi` trait + `RealGithubPrApi` + test mock (`orchestrate_pr_stack/github.rs`)
 - [x] `derive_internal_status` + `reconcile_internal_status` (override-wins), new `orchestrate_pr_stack/internal_status.rs`
 - [x] `pr_merge_action` / `pr_close_action` / `pr_resolve_conflicts_action`, new `orchestrate_pr_stack/pr_actions.rs`
@@ -43,8 +43,12 @@ Independent diff review + fmt/clippy/test gate. `fmt --check` clean; `clippy -D 
 - **MEDIUM — `pr_resolve_conflicts_action` masked a refused merge as "clean".** Now distinguishes a merge that could not start (dirty tree / bad ref → error) from a genuinely clean merge (`pr_actions.rs`); tool description reframed as detect-only.
 - **LOW — silent `"main"` default-branch fallback.** `default_branch()` now returns an error (surfaced via `refresh_error`) instead of guessing, per CLAUDE.md's no-silent-fallback rule (`server.rs`).
 
+### Post-review addendum (2026-07-03, deeper daemon trace)
+
+- **Runtime env bug (all tools) — FIXED.** A managed orchestrator's `tddy-tools` process is launched by the daemon with only `TDDY_SOCKET` + `PATH` (`prepare_managed_workflow`), never `TDDY_SESSION_DIR`/`TDDY_REPO_DIR` (those come only from the tddy-coder TUI backends). So `orchestrator_dir()`/`repo_slug()` — read by all 7 implemented `pr_*` tools — would fail at runtime in the real managed flow. Fixed: `prepare_managed_workflow` now also sets `TDDY_SESSION_DIR` (session dir) and `TDDY_REPO_DIR` (worktree path). The action-fn tests passed dirs explicitly, so this env path was never runtime-exercised — a daemon integration test is a worthwhile follow-up.
+
 **Follow-ups (deferred, documented):**
-- `pr_spawn_child` daemon `StartSession` relay wiring (`// TODO(pr-spawn-child)`); today returns an honest "use the web Start-session button" error.
+- `pr_spawn_child` daemon relay — **scoped as its own follow-up PR** (larger than first estimated). Preferred design (from a full daemon trace): a new `TDDY_SOCKET` relay verb `spawn-child` → a per-session `ChildSpawnHandler` that calls the shared spawn logic of `start_claude_cli_session` with `stack_parent` = orchestrator. Requires extracting `start_claude_cli_session` (the shared path for *all* claude-cli session creation) into a free async fn, adding the trait + per-session binding in `session_toolcall.rs`, a daemon config claude-cli model default, and making `pr_spawn_child` async. Deferred from this change because it refactors a critical shared spawn path that can only be runtime-verified against a live daemon. Today `pr_spawn_child` returns an honest "use the web Start-session button" error (`// TODO(pr-spawn-child)`).
 - Crash-recovery `recover_in_flight_stack_op` is no longer auto-invoked (was called by the removed `begin-orchestrate`). The tool-driven flow no longer writes `StackOpJournal`, so this is latent; a legacy session mid-merge would strand its journal.
 - `pr_stack/bridge.rs` `BeginOrchestrateTask` is now unwired (retained, `pub`, no warning). Remove or repurpose for managed-path seeding in a follow-up.
 - Legacy `OrchestratePrStackRecipe` graph left intact (inert; reachable only via an alias that resolves to `PrStackRecipe`; its tests still cover the retained merge/repoint bridge).
