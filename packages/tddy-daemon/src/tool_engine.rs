@@ -107,6 +107,8 @@ fn contain_path(worktree_root: &Path, arg_path: &str) -> Result<PathBuf, String>
 struct ShellTaskBody {
     command: String,
     root: PathBuf,
+    /// Extra environment variables set on the spawned shell (in addition to the inherited env).
+    env: Vec<(String, String)>,
 }
 
 #[async_trait]
@@ -116,6 +118,7 @@ impl TaskBody for ShellTaskBody {
             .arg("-c")
             .arg(&self.command)
             .current_dir(&self.root)
+            .envs(self.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .output()
             .await;
 
@@ -175,6 +178,28 @@ pub async fn execute_tool(
     registry: &TaskRegistry,
     session_id: &str,
 ) -> ToolOutcome {
+    execute_tool_with_env(
+        worktree_root,
+        tool_name,
+        args_json,
+        registry,
+        session_id,
+        &[],
+    )
+    .await
+}
+
+/// Like [`execute_tool`], but with extra environment variables applied to spawned shell commands
+/// (e.g. a managed session's per-session `TDDY_SOCKET` + `PATH` so host-side `tddy-tools transition`
+/// reaches the session's `WorkflowController`).
+pub async fn execute_tool_with_env(
+    worktree_root: &Path,
+    tool_name: &str,
+    args_json: &str,
+    registry: &TaskRegistry,
+    session_id: &str,
+    extra_env: &[(String, String)],
+) -> ToolOutcome {
     let args: serde_json::Value = match serde_json::from_str(args_json) {
         Ok(v) => v,
         Err(e) => return ToolOutcome::err(format!("invalid args_json: {e}")),
@@ -183,7 +208,7 @@ pub async fn execute_tool(
     let kind = format!("execute_tool:{tool_name}");
 
     match tool_name {
-        "Shell" => tool_shell(worktree_root, &args, registry, session_id, &kind).await,
+        "Shell" => tool_shell(worktree_root, &args, registry, session_id, &kind, extra_env).await,
         "Await" => tool_await(&args, registry).await,
         _ => {
             // Sync tool — run inline, then register as a terminal task for observability.
@@ -380,6 +405,7 @@ async fn tool_shell(
     registry: &TaskRegistry,
     session_id: &str,
     kind: &str,
+    extra_env: &[(String, String)],
 ) -> ToolOutcome {
     // Shell runs arbitrary commands with the daemon's OS user privileges.
     // Access is controlled by session authentication and worktree containment for file paths.
@@ -403,6 +429,7 @@ async fn tool_shell(
                 ShellTaskBody {
                     command,
                     root: root_owned,
+                    env: extra_env.to_vec(),
                 },
                 kind,
                 session_id,
@@ -425,6 +452,7 @@ async fn tool_shell(
         .arg("-c")
         .arg(&command)
         .current_dir(root)
+        .envs(extra_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .output();
 
     let outcome = match tokio::time::timeout(timeout, fut).await {

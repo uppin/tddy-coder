@@ -13,7 +13,7 @@ pub mod transition;
 pub use build::{
     build_executor, register_build_executor, BuildExecutor, BuildListQuery, BuildOptions,
 };
-pub use listener::{set_toolcall_log_dir, start_toolcall_listener};
+pub use listener::{set_toolcall_log_dir, start_toolcall_listener, ToolcallRpcService};
 pub use transition::{
     clear_transition_handler, register_transition_handler, transition_handler, TransitionHandler,
     TransitionRelayOutcome,
