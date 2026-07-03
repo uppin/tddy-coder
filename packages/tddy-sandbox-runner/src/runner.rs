@@ -227,6 +227,17 @@ pub struct SandboxRunnerArgs {
     /// Repeat the flag once per argv token (`--pty-command=/bin/sh --pty-command=-c …`).
     #[arg(long = "pty-command", allow_hyphen_values = true)]
     pub pty_command: Vec<String>,
+    /// Extra args passed verbatim to the in-jail `claude` invocation, inserted after the fixed
+    /// `--model`/`--session-id`/`--permission-mode` flags and BEFORE the MCP allowlist args (whose
+    /// trailing variadic `--mcp-config` would otherwise swallow a bare positional prompt). Repeat
+    /// once per token (`--claude-arg=--add-dir --claude-arg=/foo`). Ignored in `--pty-command` mode.
+    #[arg(long = "claude-arg", allow_hyphen_values = true)]
+    pub claude_arg: Vec<String>,
+    /// `RUST_LOG` for the in-jail `tddy-tools --mcp` server (whose logs — including specialized
+    /// subagent HTTP activity — are persisted to `<egress-dir>/tddy-tools.mcp.log`). Defaults to a
+    /// level that captures subagent turns. Claude-mode only.
+    #[arg(long)]
+    pub mcp_log_level: Option<String>,
     /// Serve `SandboxService` over stdin/stdout (RPC over stdio, see `tddy-stdio`) instead of
     /// `--grpc-uds`/`--grpc-listen-port`/`--grpc-socket`'s UDS/TCP transport.
     #[arg(long)]
@@ -1154,7 +1165,16 @@ struct SpawnClaudePtyParams<'a> {
     relay: Arc<SandboxSessionRelay>,
     initial_cols: u16,
     initial_rows: u16,
+    /// Extra args appended verbatim after the fixed flags and MCP allowlist args (see
+    /// `SandboxRunnerArgs::claude_arg`).
+    claude_args: &'a [String],
+    /// `RUST_LOG` for the in-jail `tddy-tools --mcp` server (see `SandboxRunnerArgs::mcp_log_level`).
+    mcp_log_level: Option<&'a str>,
 }
+
+/// Default `RUST_LOG` for the in-jail `tddy-tools --mcp` server when `--mcp-log-level` is unset:
+/// captures specialized-subagent turns and HTTP activity so failures land in the persisted log.
+const DEFAULT_MCP_RUST_LOG: &str = "info,tddy_tools=debug,tddy_discovery=debug";
 
 fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
     let SpawnClaudePtyParams {
@@ -1169,6 +1189,8 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
         relay,
         initial_cols,
         initial_rows,
+        claude_args,
+        mcp_log_level,
     } = params;
     let (stdin_tx, stdin_rx) = std::sync::mpsc::channel::<Bytes>();
 
@@ -1182,18 +1204,54 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
     argv.push("--permission-mode".into());
     argv.push(permission_mode.to_string());
 
+    // Caller-supplied pass-through args go here — after our fixed flags but BEFORE the MCP args.
+    // The MCP block ends in `--mcp-config <path>`, and Claude's `--mcp-config` is variadic: a bare
+    // positional (e.g. a trailing prompt) placed after it would be greedily swallowed as another
+    // config path. Bounded by `--permission-mode <mode>` before and `--allowedTools` after, a
+    // positional prompt here stays a positional and extra flags keep their order.
+    if !claude_args.is_empty() {
+        argv.extend(claude_args.iter().cloned());
+        boot_log(
+            "INFO",
+            &format!(
+                "pty: inserted {} pass-through claude arg(s) before MCP args",
+                claude_args.len()
+            ),
+        );
+    }
+
     let scratch_dir = claude_scratch_mcp_dir(context_dir);
     let subagent_enabled = std::env::var("TDDY_SUBAGENT")
         .map(|v| !v.trim().is_empty())
         .unwrap_or(false);
     let replaced_tools = subagent_replaced_tools_from_env();
     let replaced_refs: Vec<&str> = replaced_tools.iter().map(String::as_str).collect();
+
+    // Persist the in-jail MCP server's logs (incl. specialized-subagent HTTP activity) to the
+    // session egress dir, and set its RUST_LOG — so failures like a subagent's model-server error
+    // land on disk instead of vanishing into Claude's captured MCP stderr.
+    let mut mcp_env = std::collections::BTreeMap::new();
+    if let Some(egress_dir) = std::env::var_os("TDDY_SANDBOX_EGRESS_DIR") {
+        if !egress_dir.is_empty() {
+            let log_path = Path::new(&egress_dir).join("tddy-tools.mcp.log");
+            mcp_env.insert(
+                "TDDY_TOOLS_LOG_FILE".to_string(),
+                log_path.to_string_lossy().into_owned(),
+            );
+        }
+    }
+    mcp_env.insert(
+        "RUST_LOG".to_string(),
+        mcp_log_level.unwrap_or(DEFAULT_MCP_RUST_LOG).to_string(),
+    );
+
     append_claude_mcp_args(
         &mut argv,
         &scratch_dir,
         tddy_tools_path,
         subagent_enabled,
         &replaced_refs,
+        &mcp_env,
     )
     .context("append sandbox claude MCP allowlist args")?;
     boot_log(
@@ -1323,6 +1381,15 @@ async fn handle_egress_shim_connection(
         return;
     }
 
+    // Plain-HTTP forward-proxy path: reqwest sends an absolute-form request
+    // (`METHOD http://host:port/path HTTP/1.1`) when HTTP_PROXY points here and the target is
+    // http:// (only https:// uses CONNECT). This is how the specialized subagent's HTTP client
+    // reaches a local model server such as Ollama. Rewrite to origin form and relay to host:port.
+    if let Some((head, host, port)) = rewrite_http_proxy_request(&buf[..n]) {
+        handle_http_forward(stream, relay, host, port, head).await;
+        return;
+    }
+
     if !first.starts_with("GET /probe") {
         let _ = stream
             .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
@@ -1365,48 +1432,13 @@ async fn handle_connect_tunnel(
     host: String,
     port: u16,
 ) {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncWriteExt;
 
-    // The agent's PTY starts before the host dials in; wait for the SessionChannel to attach so an
-    // early CONNECT is relayed rather than hard-failed with 502.
-    if !relay.wait_for_outbound(Duration::from_secs(10)).await {
-        let _ = stream
-            .write_all(
-                b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-            )
-            .await;
-        return;
-    }
-
-    let (tunnel_id, mut in_rx, ack_rx) = relay.register_tunnel();
-    if !relay.push_frame(SessionPayload::TunnelOpen(TunnelOpen {
-        tunnel_id: tunnel_id.clone(),
-        host,
-        port: port as u32,
-    })) {
-        relay.drop_tunnel(&tunnel_id);
-        let _ = stream
-            .write_all(
-                b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-            )
-            .await;
-        return;
-    }
-
-    let opened = match tokio::time::timeout(Duration::from_secs(15), ack_rx).await {
-        Ok(Ok(ack)) => ack.ok,
-        _ => false,
+    let Some((tunnel_id, in_rx)) = open_relay_tunnel(&mut stream, relay, host, port).await else {
+        return; // open_relay_tunnel already wrote a 502 to the client.
     };
-    if !opened {
-        relay.drop_tunnel(&tunnel_id);
-        let _ = stream
-            .write_all(
-                b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-            )
-            .await;
-        return;
-    }
 
+    // CONNECT contract: acknowledge the tunnel, then TLS stays end-to-end (no initial payload).
     if stream
         .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
         .await
@@ -1418,6 +1450,94 @@ async fn handle_connect_tunnel(
             error: String::new(),
         }));
         return;
+    }
+
+    pump_tunnel(stream, relay, tunnel_id, in_rx, None).await;
+}
+
+/// Forward-proxy path for plain-HTTP egress (`METHOD http://host:port/path HTTP/1.1`, absolute
+/// form). Unlike CONNECT there is no `200 Connection Established` — the origin's own response is the
+/// reply — so the already-read, origin-form-rewritten request `head` is delivered as the first
+/// upstream frame and the rest of the request body is then streamed. Used by the specialized
+/// subagent's HTTP client to reach a local model server (e.g. Ollama). The host owns the real
+/// outbound socket, so no jail network rule is needed.
+async fn handle_http_forward(
+    mut stream: tokio::net::TcpStream,
+    relay: &SandboxSessionRelay,
+    host: String,
+    port: u16,
+    head: Vec<u8>,
+) {
+    let Some((tunnel_id, in_rx)) = open_relay_tunnel(&mut stream, relay, host, port).await else {
+        return;
+    };
+    pump_tunnel(stream, relay, tunnel_id, in_rx, Some(head)).await;
+}
+
+/// Open a relayed outbound tunnel to `host:port`: wait for the host to attach, register the tunnel,
+/// push `TunnelOpen`, and await the ack. On any failure a `502 Bad Gateway` is written to `stream`
+/// and `None` is returned (the runner never dials out itself — the host owns the outbound socket).
+async fn open_relay_tunnel(
+    stream: &mut tokio::net::TcpStream,
+    relay: &SandboxSessionRelay,
+    host: String,
+    port: u16,
+) -> Option<(String, tokio::sync::mpsc::UnboundedReceiver<Bytes>)> {
+    use tokio::io::AsyncWriteExt;
+    const BAD_GATEWAY: &[u8] =
+        b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+
+    // The agent's PTY starts before the host dials in; wait for the SessionChannel to attach so an
+    // early request is relayed rather than hard-failed with 502.
+    if !relay.wait_for_outbound(Duration::from_secs(10)).await {
+        let _ = stream.write_all(BAD_GATEWAY).await;
+        return None;
+    }
+
+    let (tunnel_id, in_rx, ack_rx) = relay.register_tunnel();
+    if !relay.push_frame(SessionPayload::TunnelOpen(TunnelOpen {
+        tunnel_id: tunnel_id.clone(),
+        host,
+        port: port as u32,
+    })) {
+        relay.drop_tunnel(&tunnel_id);
+        let _ = stream.write_all(BAD_GATEWAY).await;
+        return None;
+    }
+
+    let opened = matches!(
+        tokio::time::timeout(Duration::from_secs(15), ack_rx).await,
+        Ok(Ok(ack)) if ack.ok
+    );
+    if !opened {
+        relay.drop_tunnel(&tunnel_id);
+        let _ = stream.write_all(BAD_GATEWAY).await;
+        return None;
+    }
+
+    Some((tunnel_id, in_rx))
+}
+
+/// Bidirectional byte pump between the agent socket and an opened relay tunnel. `initial_up`, when
+/// present, is forwarded to the host as the first `TunnelData` — the HTTP-forward path uses it to
+/// deliver the request head it already read off the socket before streaming the remaining bytes.
+async fn pump_tunnel(
+    stream: tokio::net::TcpStream,
+    relay: &SandboxSessionRelay,
+    tunnel_id: String,
+    mut in_rx: tokio::sync::mpsc::UnboundedReceiver<Bytes>,
+    initial_up: Option<Vec<u8>>,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    if let Some(head) = initial_up {
+        if !relay.push_frame(SessionPayload::TunnelData(TunnelData {
+            tunnel_id: tunnel_id.clone(),
+            data: head,
+        })) {
+            relay.drop_tunnel(&tunnel_id);
+            return;
+        }
     }
 
     let (mut read_half, mut write_half) = stream.into_split();
@@ -1458,6 +1578,42 @@ async fn handle_connect_tunnel(
     };
 
     tokio::join!(up, down);
+}
+
+/// Parse an absolute-form HTTP proxy request line (`METHOD scheme://host[:port]/path HTTP/x.y`) out
+/// of the already-read `raw` request bytes and rewrite it to origin form (`METHOD /path HTTP/x.y`),
+/// returning the rewritten bytes together with the target `host` and `port`. Returns `None` when
+/// `raw` is not an absolute-form request (e.g. `CONNECT`, an origin-form probe, or a non-`http://`
+/// target) — those are handled elsewhere. Only the request line is rewritten; headers and any body
+/// bytes already in `raw` are preserved verbatim so the caller can stream the remainder.
+fn rewrite_http_proxy_request(raw: &[u8]) -> Option<(Vec<u8>, String, u16)> {
+    let line_end = raw.windows(2).position(|w| w == b"\r\n")?;
+    let request_line = std::str::from_utf8(&raw[..line_end]).ok()?;
+    let mut parts = request_line.splitn(3, ' ');
+    let method = parts.next()?;
+    let target = parts.next()?;
+    let version = parts.next()?;
+
+    // Only absolute-form http:// targets are forward-proxied here; https:// uses CONNECT.
+    let after_scheme = target.strip_prefix("http://")?;
+    let (authority, path) = match after_scheme.find('/') {
+        Some(idx) => (&after_scheme[..idx], &after_scheme[idx..]),
+        None => (after_scheme, "/"),
+    };
+    if authority.is_empty() {
+        return None;
+    }
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((h, p)) => (h.to_string(), p.parse::<u16>().ok()?),
+        None => (authority.to_string(), 80),
+    };
+    if host.is_empty() {
+        return None;
+    }
+
+    let mut head = format!("{method} {path} {version}\r\n").into_bytes();
+    head.extend_from_slice(&raw[line_end + 2..]);
+    Some((head, host, port))
 }
 
 /// Run the sandbox gRPC server and claude PTY until shutdown.
@@ -1584,6 +1740,8 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
             relay: Arc::clone(&relay),
             initial_cols: args.initial_cols,
             initial_rows: args.initial_rows,
+            claude_args: &args.claude_arg,
+            mcp_log_level: args.mcp_log_level.as_deref(),
         })
         .inspect_err(|e| boot_log_error("spawn_claude_pty", format!("{e:#}")))?;
         boot_log("INFO", "boot: claude pty thread spawned");
@@ -2166,5 +2324,198 @@ mod tests {
         // Then
         assert_eq!(resize, None);
         assert_eq!(remaining.as_ref(), data);
+    }
+
+    // ─── rewrite_http_proxy_request (egress shim plain-HTTP forward proxy) ───────────
+
+    /// An absolute-form POST (what reqwest sends through HTTP_PROXY for an http:// target, e.g. the
+    /// subagent reaching a local Ollama) is rewritten to origin form, and host:port is extracted.
+    /// Headers and any already-read body bytes are preserved verbatim.
+    #[test]
+    fn rewrite_http_proxy_request_rewrites_absolute_post_to_origin_form() {
+        // Given
+        let raw = b"POST http://localhost:11434/v1/chat/completions HTTP/1.1\r\n\
+                    host: localhost:11434\r\ncontent-length: 5\r\n\r\nhello";
+
+        // When
+        let (head, host, port) =
+            rewrite_http_proxy_request(raw).expect("absolute-form request must rewrite");
+
+        // Then
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 11434);
+        assert_eq!(
+            String::from_utf8(head).unwrap(),
+            "POST /v1/chat/completions HTTP/1.1\r\nhost: localhost:11434\r\ncontent-length: 5\r\n\r\nhello",
+            "request-target must become origin-form; headers + body preserved"
+        );
+    }
+
+    /// A target with no explicit port defaults to 80, and a schemeless authority root maps to `/`.
+    #[test]
+    fn rewrite_http_proxy_request_defaults_port_80_and_root_path() {
+        // Given
+        let raw = b"GET http://example.com HTTP/1.1\r\n\r\n";
+
+        // When
+        let (head, host, port) = rewrite_http_proxy_request(raw).expect("must rewrite");
+
+        // Then
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 80);
+        assert_eq!(String::from_utf8(head).unwrap(), "GET / HTTP/1.1\r\n\r\n");
+    }
+
+    /// Non-absolute-form requests are not forward-proxy candidates: a `CONNECT` (handled as a
+    /// tunnel) and an origin-form probe both return `None`.
+    #[test]
+    fn rewrite_http_proxy_request_ignores_connect_and_origin_form() {
+        assert!(
+            rewrite_http_proxy_request(b"CONNECT api.anthropic.com:443 HTTP/1.1\r\n\r\n").is_none()
+        );
+        assert!(rewrite_http_proxy_request(b"GET /probe HTTP/1.1\r\n\r\n").is_none());
+    }
+
+    // ─── egress shim: plain-HTTP forward proxy (end-to-end over a loopback socket) ───
+    //
+    // Regression cover for the subagent → local model server (Ollama) 404: the shim was
+    // CONNECT-only, so a plain-HTTP absolute-form request hit the "everything else → 404" branch.
+
+    use std::sync::Arc;
+
+    /// A minimal stand-in for the host end of the `SessionChannel`: acks every tunnel the shim
+    /// opens, records the bytes the shim relays upstream (jail → host), and — once the request head
+    /// arrives — replies with a canned response and closes the tunnel. Lets a test drive the real
+    /// `handle_egress_shim_connection` over a loopback socket with no real host relay.
+    struct FakeHost {
+        opened: Arc<std::sync::Mutex<Option<(String, u16)>>>,
+        upstream: Arc<std::sync::Mutex<Vec<u8>>>,
+    }
+
+    impl FakeHost {
+        fn attach(relay: Arc<SandboxSessionRelay>, canned_response: Vec<u8>) -> Self {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            relay.set_outbound(tx);
+            let opened = Arc::new(std::sync::Mutex::new(None));
+            let upstream = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let opened_task = Arc::clone(&opened);
+            let upstream_task = Arc::clone(&upstream);
+            tokio::spawn(async move {
+                let mut replied = false;
+                while let Some(Ok(frame)) = rx.recv().await {
+                    match frame.payload {
+                        Some(SessionPayload::TunnelOpen(open)) => {
+                            *opened_task.lock().unwrap() = Some((open.host, open.port as u16));
+                            relay.deliver_tunnel_ack(TunnelOpenAck {
+                                tunnel_id: open.tunnel_id,
+                                ok: true,
+                                error: String::new(),
+                            });
+                        }
+                        Some(SessionPayload::TunnelData(data)) => {
+                            upstream_task.lock().unwrap().extend_from_slice(&data.data);
+                            if !replied {
+                                replied = true;
+                                relay.deliver_tunnel_data(TunnelData {
+                                    tunnel_id: data.tunnel_id.clone(),
+                                    data: canned_response.clone(),
+                                });
+                                relay.deliver_tunnel_close(TunnelClose {
+                                    tunnel_id: data.tunnel_id,
+                                    error: String::new(),
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            });
+            Self { opened, upstream }
+        }
+
+        fn tunnel_target(&self) -> Option<(String, u16)> {
+            self.opened.lock().unwrap().clone()
+        }
+
+        fn upstream_text(&self) -> String {
+            String::from_utf8_lossy(&self.upstream.lock().unwrap()).into_owned()
+        }
+    }
+
+    async fn send_to_shim(port: u16, request: &[u8]) -> Vec<u8> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut client = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect to shim");
+        client.write_all(request).await.expect("send request");
+        let mut response = Vec::new();
+        client
+            .read_to_end(&mut response)
+            .await
+            .expect("read response");
+        response
+    }
+
+    /// A plain-HTTP absolute-form request (what reqwest sends via `HTTP_PROXY` for an http:// target
+    /// — the specialized subagent reaching a local Ollama) is relayed to the target host:port in
+    /// origin form, and the origin's response is returned verbatim — not a shim 404.
+    #[tokio::test]
+    async fn egress_shim_forwards_a_plain_http_request_to_the_relay_tunnel() {
+        // Given
+        let relay = Arc::new(SandboxSessionRelay::default());
+        let canned = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_vec();
+        let host = FakeHost::attach(Arc::clone(&relay), canned.clone());
+        let port = start_egress_shim(Arc::clone(&relay), None)
+            .await
+            .expect("shim binds");
+
+        // When
+        let response = send_to_shim(
+            port,
+            b"POST http://localhost:11434/v1/chat/completions HTTP/1.1\r\ncontent-length: 5\r\n\r\nhello",
+        )
+        .await;
+
+        // Then
+        assert_eq!(
+            host.tunnel_target(),
+            Some(("localhost".to_string(), 11434)),
+            "the shim must open a relay tunnel to the target authority"
+        );
+        let upstream = host.upstream_text();
+        assert!(
+            upstream.starts_with("POST /v1/chat/completions HTTP/1.1"),
+            "the relayed request-target must be rewritten to origin form; got: {upstream:?}"
+        );
+        assert!(
+            upstream.ends_with("hello"),
+            "the request body must be forwarded through the tunnel; got: {upstream:?}"
+        );
+        assert_eq!(
+            response, canned,
+            "the client must receive the origin's response, not a shim 404"
+        );
+    }
+
+    /// An unrecognized request (neither CONNECT, absolute-form http://, nor the probe) still gets a
+    /// 404 — the forward-proxy path must not swallow genuinely unroutable requests.
+    #[tokio::test]
+    async fn egress_shim_still_returns_404_for_an_unrecognized_request() {
+        // Given
+        let relay = Arc::new(SandboxSessionRelay::default());
+        let _host = FakeHost::attach(Arc::clone(&relay), Vec::new());
+        let port = start_egress_shim(Arc::clone(&relay), None)
+            .await
+            .expect("shim binds");
+
+        // When
+        let response = send_to_shim(port, b"GET /nonsense HTTP/1.1\r\n\r\n").await;
+
+        // Then
+        assert!(
+            String::from_utf8_lossy(&response).starts_with("HTTP/1.1 404 Not Found"),
+            "an unrecognized request must 404; got: {:?}",
+            String::from_utf8_lossy(&response)
+        );
     }
 }

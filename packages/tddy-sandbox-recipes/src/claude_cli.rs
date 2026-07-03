@@ -85,8 +85,31 @@ pub fn build_claude_allowlist(subagent_enabled: bool, replaced: &[&str]) -> Vec<
     allowlist
 }
 
-/// Write MCP config registering `tddy-tools --mcp` under a writable scratch directory.
-pub fn write_claude_mcp_config(scratch_dir: &Path, tddy_tools_path: &Path) -> Result<PathBuf> {
+/// `--disallowedTools` entries for sandbox claude: each tool a wired-in subagent `replaced` must be
+/// *unreachable*, not merely absent from the allowlist. Dropping it from `--allowedTools` only
+/// un-pre-approves it — Claude's native built-in (`Grep`/`Glob`/…) and the still-advertised
+/// `mcp__tddy-tools__*` form stay callable via the permission prompt. `--disallowedTools` takes
+/// precedence and removes them outright, so the only route to a replaced tool is the subagent. Both
+/// forms are listed; a name with no native Claude built-in (e.g. `SemanticSearch`) simply has no
+/// native counterpart to match, which is harmless. Empty when nothing is replaced.
+pub fn build_claude_disallowlist(replaced: &[&str]) -> Vec<String> {
+    let mut disallowed = Vec::with_capacity(replaced.len() * 2);
+    for tool in replaced {
+        disallowed.push((*tool).to_string());
+        disallowed.push(format!("mcp__tddy-tools__{tool}"));
+    }
+    disallowed
+}
+
+/// Write MCP config registering `tddy-tools --mcp` under a writable scratch directory. `mcp_env`,
+/// when non-empty, becomes the server's `env` block — the sandbox runner uses it to set
+/// `TDDY_TOOLS_LOG_FILE` (persist the in-jail MCP server's logs) and `RUST_LOG` so the process
+/// Claude spawns is observable.
+pub fn write_claude_mcp_config(
+    scratch_dir: &Path,
+    tddy_tools_path: &Path,
+    mcp_env: &BTreeMap<String, String>,
+) -> Result<PathBuf> {
     std::fs::create_dir_all(scratch_dir).with_context(|| {
         format!(
             "create scratch dir for MCP config: {}",
@@ -94,14 +117,14 @@ pub fn write_claude_mcp_config(scratch_dir: &Path, tddy_tools_path: &Path) -> Re
         )
     })?;
     let path = scratch_dir.join(MCP_CONFIG_FILENAME);
-    let config = serde_json::json!({
-        "mcpServers": {
-            "tddy-tools": {
-                "command": tddy_tools_path.to_string_lossy(),
-                "args": ["--mcp"]
-            }
-        }
+    let mut server = serde_json::json!({
+        "command": tddy_tools_path.to_string_lossy(),
+        "args": ["--mcp"]
     });
+    if !mcp_env.is_empty() {
+        server["env"] = serde_json::json!(mcp_env);
+    }
+    let config = serde_json::json!({ "mcpServers": { "tddy-tools": server } });
     std::fs::write(&path, config.to_string())
         .with_context(|| format!("write MCP config: {}", path.display()))?;
     Ok(path)
@@ -118,10 +141,15 @@ pub fn append_claude_mcp_args(
     tddy_tools_path: &Path,
     subagent_enabled: bool,
     replaced: &[&str],
+    mcp_env: &BTreeMap<String, String>,
 ) -> Result<()> {
-    let mcp_path = write_claude_mcp_config(scratch_dir, tddy_tools_path)?;
+    let mcp_path = write_claude_mcp_config(scratch_dir, tddy_tools_path, mcp_env)?;
     for tool in build_claude_allowlist(subagent_enabled, replaced) {
         argv.push("--allowedTools".into());
+        argv.push(tool);
+    }
+    for tool in build_claude_disallowlist(replaced) {
+        argv.push("--disallowedTools".into());
         argv.push(tool);
     }
     argv.push("--permission-prompt-tool".into());
@@ -302,12 +330,145 @@ mod tests {
     fn write_claude_mcp_config_registers_tddy_tools_mcp_server() {
         let dir = tempfile::tempdir().unwrap();
         let tools = dir.path().join("tddy-tools");
-        let path =
-            write_claude_mcp_config(dir.path(), &tools).expect("write MCP config must succeed");
+        let path = write_claude_mcp_config(dir.path(), &tools, &BTreeMap::new())
+            .expect("write MCP config must succeed");
         let json: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let server = &json["mcpServers"]["tddy-tools"];
         assert_eq!(server["command"].as_str().unwrap(), tools.to_string_lossy());
         assert_eq!(server["args"], serde_json::json!(["--mcp"]));
+        assert!(
+            server.get("env").is_none(),
+            "no env block when mcp_env is empty"
+        );
+    }
+
+    /// A non-empty `mcp_env` is written as the server's `env` block so the in-jail `--mcp` process
+    /// (e.g. its log file + RUST_LOG) is configured by the runner.
+    #[test]
+    fn write_claude_mcp_config_includes_env_block_when_given() {
+        let dir = tempfile::tempdir().unwrap();
+        let tools = dir.path().join("tddy-tools");
+        let mut env = BTreeMap::new();
+        env.insert(
+            "TDDY_TOOLS_LOG_FILE".to_string(),
+            "/egress/tddy-tools.mcp.log".to_string(),
+        );
+        env.insert("RUST_LOG".to_string(), "info".to_string());
+        let path = write_claude_mcp_config(dir.path(), &tools, &env)
+            .expect("write MCP config must succeed");
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let server = &json["mcpServers"]["tddy-tools"];
+        assert_eq!(
+            server["env"]["TDDY_TOOLS_LOG_FILE"].as_str().unwrap(),
+            "/egress/tddy-tools.mcp.log"
+        );
+        assert_eq!(server["env"]["RUST_LOG"].as_str().unwrap(), "info");
+    }
+
+    // ─── replaced tools must be hard-disabled, not merely un-allowlisted ─────────────
+    //
+    // Removing a replaced tool from `--allowedTools` only un-pre-approves it; Claude's native
+    // built-in Grep/Glob and the still-advertised `mcp__tddy-tools__*` form remain reachable via
+    // the permission prompt. A subagent that replaces a tool means a direct call must be
+    // impossible — the only route is delegating to the subagent — so those names must be passed to
+    // Claude's `--disallowedTools`, which takes precedence and removes them from availability.
+
+    /// The tool names Claude is told to hard-disable: the value following each `--disallowedTools`
+    /// token in the built argv.
+    fn disallowed_tools_in(argv: &[String]) -> HashSet<String> {
+        argv.windows(2)
+            .filter(|w| w[0] == "--disallowedTools")
+            .map(|w| w[1].clone())
+            .collect()
+    }
+
+    /// A subagent replacing `Grep`/`Glob` must hard-disable Claude's native built-in Grep/Glob, so
+    /// the agent cannot fall back to them directly instead of delegating to the subagent.
+    /// (`SemanticSearch` has no native Claude built-in — only the MCP form, covered below.)
+    #[test]
+    fn append_claude_mcp_args_hard_disables_the_native_form_of_replaced_tools() {
+        // Given
+        let dir = tempfile::tempdir().unwrap();
+        let tools = dir.path().join("tddy-tools");
+        let mut argv = vec!["claude".to_string()];
+
+        // When
+        append_claude_mcp_args(
+            &mut argv,
+            dir.path(),
+            &tools,
+            true,
+            &["Grep", "Glob", "SemanticSearch"],
+            &BTreeMap::new(),
+        )
+        .expect("append must succeed");
+
+        // Then
+        let disallowed = disallowed_tools_in(&argv);
+        assert!(
+            disallowed.contains("Grep"),
+            "native Grep must be hard-disabled; disallowed set: {disallowed:?}"
+        );
+        assert!(
+            disallowed.contains("Glob"),
+            "native Glob must be hard-disabled; disallowed set: {disallowed:?}"
+        );
+    }
+
+    /// The still-advertised MCP form of every replaced tool must also be hard-disabled — otherwise
+    /// the model could call `mcp__tddy-tools__Grep`/`…SemanticSearch` directly even though they are
+    /// absent from the allowlist.
+    #[test]
+    fn append_claude_mcp_args_hard_disables_the_mcp_form_of_replaced_tools() {
+        // Given
+        let dir = tempfile::tempdir().unwrap();
+        let tools = dir.path().join("tddy-tools");
+        let mut argv = vec!["claude".to_string()];
+
+        // When
+        append_claude_mcp_args(
+            &mut argv,
+            dir.path(),
+            &tools,
+            true,
+            &["Grep", "Glob", "SemanticSearch"],
+            &BTreeMap::new(),
+        )
+        .expect("append must succeed");
+
+        // Then
+        let disallowed = disallowed_tools_in(&argv);
+        for tool in [
+            "mcp__tddy-tools__Grep",
+            "mcp__tddy-tools__Glob",
+            "mcp__tddy-tools__SemanticSearch",
+        ] {
+            assert!(
+                disallowed.contains(tool),
+                "MCP form {tool} must be hard-disabled; disallowed set: {disallowed:?}"
+            );
+        }
+    }
+
+    /// With no replaced tools, nothing is hard-disabled — the disallow list must not gratuitously
+    /// remove tools the agent legitimately uses.
+    #[test]
+    fn append_claude_mcp_args_disables_nothing_when_no_tools_are_replaced() {
+        // Given
+        let dir = tempfile::tempdir().unwrap();
+        let tools = dir.path().join("tddy-tools");
+        let mut argv = vec!["claude".to_string()];
+
+        // When
+        append_claude_mcp_args(&mut argv, dir.path(), &tools, true, &[], &BTreeMap::new())
+            .expect("append must succeed");
+
+        // Then
+        assert!(
+            disallowed_tools_in(&argv).is_empty(),
+            "nothing must be disallowed when nothing is replaced: {argv:?}"
+        );
     }
 }
