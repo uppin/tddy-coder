@@ -62,7 +62,10 @@ impl SessionListStatusDisplay {
 /// Serialize `Changeset.stack` to JSON for the `stack_plan_json` proto field; empty string when
 /// `None` or on serialization failure (logged, never propagated as an error — enrichment is
 /// best-effort display data).
-fn stack_plan_json_for_changeset(changeset: &Changeset) -> String {
+///
+/// `pub(crate)`: also reused by `connection_service::add_planned_pr` to serialize the response's
+/// `stack_plan_json` in the exact wire shape `PrStackScreen` already knows how to parse.
+pub(crate) fn stack_plan_json_for_changeset(changeset: &Changeset) -> String {
     let Some(ref stack) = changeset.stack else {
         return String::new();
     };

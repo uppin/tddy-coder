@@ -189,6 +189,18 @@ A recovery guard at the top of every `assess` entry (`recover_in_flight_stack_op
 
 Once a `pr-stack` session is selected in the session drawer, the main pane opens a dedicated **PR-Stack Chat Screen** instead of the terminal — a chat window backed by a remote Presenter (over the existing `TddyRemote.Stream` RPC) alongside a live list of the planned PRs with a **"Start session"** CTA per unspawned node. Full UI spec: [Session drawer § Per-Workflow Session Views](../web/session-drawer.md#per-workflow-session-views).
 
+### Manually adding a planned PR
+
+Until now the only way to change an orchestrator's planned-PR list was **chat-driven refinement** (§ pr-stack recipe, above): the operator asks the agent to re-plan, the agent re-emits `stack-plan.yaml`, and the host overwrites the whole node list (`reseed_stack_from_plan_if_unspawned`) — a round trip through the LLM, and an all-or-nothing rewrite that's refused once any node has a spawned child session.
+
+The PR-Stack Chat Screen's planned-PR list gains a **direct, deterministic path** that doesn't touch the LLM: a "New planned PR" form lets the operator manually add a single node — title, description, optional branch suggestion, optional child recipe, and a **multi-select ancestor picker** listing the orchestrator's existing planned-PR nodes (its chosen ancestors become the new node's `parents`, i.e. `StackNode.parents` — see [Stack data model](#stack-data-model)).
+
+- **RPC:** `ConnectionService.AddPlannedPr(AddPlannedPrRequest) -> AddPlannedPrResponse` (`connection.proto`). Request carries `session_id` (the orchestrator), `title`, `description`, `branch_suggestion`, `parents` (chosen ancestor node ids), and `child_recipe`. Response carries `stack_plan_json` — the same wire shape as `SessionEntry.stack_plan_json` (field 23) — so the web reuses the existing `parseStackPlan` parser rather than a second message schema.
+- **Semantics:** appends exactly one `StackNode` (`session_id: None`, `pr_status: None` — stays planned, does not spawn a session) to `Changeset.stack` via `update_stack_atomic`. Unlike chat refinement, this **never touches existing nodes** and is not gated on whether other nodes have already spawned — it's additive only. The node id is server-assigned (never client-supplied). Rejects (without writing) when a chosen ancestor doesn't resolve to an existing node id, or when appending would introduce a cycle (checked via `Stack::topo_order`, same guard as the plan-time validator).
+- **UI:** a "+ New planned PR" entry point on the planned-PR list opens the form; ancestors are chosen via checkboxes over the currently-listed nodes (topo order, § Per-workflow session views). On success the list re-renders with the new node included.
+
+Implementation: `tddy_workflow_recipes::pr_stack::add_planned_pr_node` (pure function — read/validate/append/write); daemon handler `ConnectionServiceImpl::add_planned_pr` in `connection_service.rs`.
+
 ### Session drawer: children collapsed under the main stack session
 
 `SessionDrawer` (`packages/tddy-web/src/components/sessions/SessionDrawer.tsx`) renders PR-stack sessions in a collapsible group rather than a flat list.
