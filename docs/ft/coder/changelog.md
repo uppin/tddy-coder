@@ -2,6 +2,12 @@
 
 Release note history for the Coder product area.
 
+## 2026-07-03 — Manually add a planned PR + choose ancestors
+
+- New "+ New planned PR" form on the PR-Stack Chat Screen lets the operator manually add a planned PR node and pick its ancestors via a multi-select checkbox picker over the orchestrator's existing planned-PR nodes — no chat/LLM round trip required
+- New `AddPlannedPr` RPC appends one `StackNode` to a `"pr-stack"` orchestrator's `Changeset.stack`, additive-only (never rewrites existing nodes, unlike the chat-driven plan refinement), server-assigns the node id, and validates ancestors/cycles before writing
+- Feature: [pr-stacking.md § Manually adding a planned PR](pr-stacking.md#manually-adding-a-planned-pr)
+
 ## 2026-07-02 — Subagent-declared tool replacement
 
 - A discovery subagent (FastContext replaces Grep/Glob) can now declare which exec tools it takes over from the main agent — those tools are removed from the sandboxed Claude CLI's allowlist (not just discouraged in the prompt), and the managed-codebase appendix names the subagent that must be used instead
