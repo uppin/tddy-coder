@@ -8,11 +8,16 @@
 
 pub mod build;
 mod listener;
+pub mod transition;
 
 pub use build::{
     build_executor, register_build_executor, BuildExecutor, BuildListQuery, BuildOptions,
 };
 pub use listener::{set_toolcall_log_dir, start_toolcall_listener};
+pub use transition::{
+    clear_transition_handler, register_transition_handler, transition_handler, TransitionHandler,
+    TransitionRelayOutcome,
+};
 
 use std::sync::{Arc, Mutex};
 
@@ -168,6 +173,18 @@ pub enum ToolCallResponse {
     BuildJson {
         value: serde_json::Value,
     },
+    /// Authoritative `transition` committed; carries the next goal's instructions for the agent.
+    TransitionOk {
+        instructions: String,
+    },
+    /// Provisional (subagent) `transition` recorded; the orchestrator must verify and commit.
+    TransitionProvisional {
+        to: String,
+    },
+    /// `transition` refused (illegal edge, no-op, or persistence failure).
+    TransitionRejected {
+        reason: String,
+    },
 }
 
 impl ToolCallResponse {
@@ -205,6 +222,20 @@ impl ToolCallResponse {
                 }
                 value
             }
+            ToolCallResponse::TransitionOk { instructions } => {
+                serde_json::json!({"status":"ok","instructions":instructions})
+            }
+            ToolCallResponse::TransitionProvisional { to } => {
+                serde_json::json!({
+                    "status":"ok",
+                    "provisional":true,
+                    "to":to,
+                    "message":"Provisional transition recorded. The orchestrator must verify your work and commit the transition.",
+                })
+            }
+            ToolCallResponse::TransitionRejected { reason } => {
+                serde_json::json!({"status":"rejected","reason":reason})
+            }
         };
         wire.to_string()
     }
@@ -231,6 +262,31 @@ pub struct ApproveRequestWire {
     pub r#type: String,
     pub tool_name: String,
     pub input: serde_json::Value,
+}
+
+/// Wire format for `transition` request (from tddy-tools, agent-driven orchestration).
+#[derive(Debug, Deserialize)]
+pub struct TransitionRequestWire {
+    pub r#type: String,
+    /// Target goal id to transition into.
+    pub to: String,
+    /// Explicit provisional marker. Subagents are instructed to pass `--provisional` (a Bash
+    /// subprocess cannot see its own `parent_tool_use_id`), which sets this. A provisional
+    /// transition is recorded but not committed until the orchestrator verifies and commits.
+    #[serde(default)]
+    pub provisional: bool,
+    /// Set by Claude on subagent tool calls. Reserved for a future MCP-native transition path
+    /// where the stream carries it automatically; a present value also forces provisional.
+    #[serde(default)]
+    pub parent_tool_use_id: Option<String>,
+}
+
+impl TransitionRequestWire {
+    /// Whether this transition must be treated as provisional (subagent) — explicit flag or a
+    /// present `parent_tool_use_id`.
+    pub fn is_provisional(&self) -> bool {
+        self.provisional || self.parent_tool_use_id.is_some()
+    }
 }
 
 /// Wire format for `list-actions` request (from tddy-tools).

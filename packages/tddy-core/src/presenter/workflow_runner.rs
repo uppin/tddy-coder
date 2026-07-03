@@ -704,6 +704,44 @@ pub fn run_workflow(
     let conversation_output_path =
         crate::resolve_log_defaults(conversation_output_path, debug_output_path, &session_dir);
 
+    // --- Agent-driven selector (additive, opt-in) ---
+    // When opted in (`TDDY_AGENT_DRIVEN`) and the backend supports it, run the entire workflow as a
+    // single agent session that drives transitions itself via `tddy-tools transition` — no per-goal
+    // respawn. Reuses the session bootstrap above (session_dir resolved). Otherwise falls through to
+    // the engine path below (unchanged).
+    if super::agent_driven_enabled() && super::backend_is_agent_driven(backend.as_arc().name()) {
+        let cs = read_changeset(&session_dir).ok();
+        let feature_prompt = initial_prompt_for_ctx
+            .clone()
+            .or_else(|| cs.as_ref().and_then(|c| c.initial_prompt.clone()))
+            .unwrap_or_default();
+        // Resume target: the agent-driven path persists the goal id as the state string, so a
+        // persisted state that names a known goal resumes there; else start from the top.
+        let start_goal = cs
+            .as_ref()
+            .map(|c| c.state.current.as_str().to_string())
+            .filter(|s| recipe.goal_ids().iter().any(|g| g.as_str() == s))
+            .map(crate::backend::GoalId::new)
+            .unwrap_or_else(|| recipe.start_goal());
+        let working_dir = worktree_dir.clone().or_else(|| Some(output_dir.clone()));
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        rt.block_on(super::run_agent_session(super::AgentSessionConfig {
+            recipe: recipe.clone(),
+            backend: backend.clone(),
+            event_tx: event_tx.clone(),
+            session_dir: Some(session_dir.clone()),
+            session_id: session_id.clone(),
+            model: model.clone(),
+            initial_prompt: feature_prompt,
+            working_dir,
+            socket_path: socket_path.clone(),
+            conversation_output_path: conversation_output_path.clone(),
+            debug,
+            start_goal: Some(start_goal),
+        }));
+        return;
+    }
+
     let cs_pre = read_changeset(&session_dir).ok();
     // Use repo_path from changeset for resume from any directory; fall back to resolved output_dir.
     let effective_output_dir = cs_pre

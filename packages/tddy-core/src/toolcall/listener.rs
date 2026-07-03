@@ -2,9 +2,10 @@
 
 use super::build::BuildListQuery;
 use super::{
-    build_executor, store_submit_result, ApproveRequestWire, AskRequestWire, BuildListRequestWire,
-    BuildOptions, BuildRequestWire, InvokeActionRequestWire, ListActionsRequestWire,
-    SubmitRequestWire, ToolCallRequest, ToolCallResponse,
+    build_executor, store_submit_result, transition_handler, ApproveRequestWire, AskRequestWire,
+    BuildListRequestWire, BuildOptions, BuildRequestWire, InvokeActionRequestWire,
+    ListActionsRequestWire, SubmitRequestWire, ToolCallRequest, ToolCallResponse,
+    TransitionRelayOutcome, TransitionRequestWire,
 };
 use crate::session_actions::{
     classify_session_actions_exit_code, derive_repo_key, invoke_action_core, list_action_summaries,
@@ -167,7 +168,14 @@ impl ToolcallRpcService {
     async fn dispatch(&self, method: &str, payload: &[u8]) -> Result<ToolCallResponse, Status> {
         if !matches!(
             method,
-            "Submit" | "ListActions" | "InvokeAction" | "Build" | "BuildList" | "Ask" | "Approve"
+            "Submit"
+                | "ListActions"
+                | "InvokeAction"
+                | "Build"
+                | "BuildList"
+                | "Ask"
+                | "Approve"
+                | "Transition"
         ) {
             toolcall_log(&format!("[error] unknown method: {}", method));
             return Err(Status::not_found(format!(
@@ -186,8 +194,40 @@ impl ToolcallRpcService {
             "BuildList" => Ok(handle_build_request("build-list", request).await),
             "Ask" => self.handle_ask(request).await,
             "Approve" => self.handle_approve(request).await,
+            "Transition" => self.handle_transition(request),
             _ => unreachable!("checked above"),
         }
+    }
+
+    /// transition: handled directly in the listener (self-contained; talks to the process-global
+    /// [`crate::toolcall::transition_handler`] registered by the agent-driven runner — no presenter
+    /// round-trip needed). Subagent calls carry `parent_tool_use_id`, making them provisional.
+    fn handle_transition(&self, request: serde_json::Value) -> Result<ToolCallResponse, Status> {
+        let wire: TransitionRequestWire = serde_json::from_value(request)
+            .map_err(|e| Status::invalid_argument(format!("invalid transition request: {e}")))?;
+        let provisional = wire.is_provisional();
+        toolcall_log(&format!(
+            "[transition] to={} provisional={}",
+            wire.to, provisional
+        ));
+        let Some(handler) = transition_handler() else {
+            return Ok(ToolCallResponse::TransitionRejected {
+                reason: "no active workflow controller; `transition` is only available in \
+                         agent-driven sessions"
+                    .to_string(),
+            });
+        };
+        Ok(match handler.handle_transition(&wire.to, provisional) {
+            TransitionRelayOutcome::Committed { instructions } => {
+                ToolCallResponse::TransitionOk { instructions }
+            }
+            TransitionRelayOutcome::Provisional { to } => {
+                ToolCallResponse::TransitionProvisional { to }
+            }
+            TransitionRelayOutcome::Rejected { reason } => {
+                ToolCallResponse::TransitionRejected { reason }
+            }
+        })
     }
 
     fn handle_submit(&self, request: serde_json::Value) -> Result<ToolCallResponse, Status> {
@@ -547,6 +587,85 @@ mod tests {
         let response: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(response["status"], "ok");
         assert_eq!(response["total"], 0);
+    }
+
+    /// A `transition` request with no registered handler is rejected (not a hard error) so the
+    /// agent gets an actionable message; with a handler registered it routes through and derives
+    /// `provisional` from `parent_tool_use_id`. One test to avoid racing the process-global
+    /// registry across parallel tests.
+    #[tokio::test]
+    async fn toolcall_rpc_service_dispatches_transition_via_registered_handler() {
+        use crate::toolcall::{
+            clear_transition_handler, register_transition_handler, TransitionHandler,
+            TransitionRelayOutcome,
+        };
+
+        struct FakeHandler;
+        impl TransitionHandler for FakeHandler {
+            fn handle_transition(&self, to: &str, provisional: bool) -> TransitionRelayOutcome {
+                if provisional {
+                    TransitionRelayOutcome::Provisional { to: to.to_string() }
+                } else {
+                    TransitionRelayOutcome::Committed {
+                        instructions: format!("do {to}"),
+                    }
+                }
+            }
+        }
+
+        let (service, _rx, _repo_root) = a_toolcall_service();
+
+        // No handler registered yet → rejected with an actionable reason.
+        clear_transition_handler();
+        let req = RpcMessage::new(
+            serde_json::to_vec(&json!({"type":"transition","to":"plan"})).unwrap(),
+            Default::default(),
+        );
+        let RpcResult::Unary(Ok(bytes)) = service
+            .handle_rpc("tddy.toolcall.ToolcallService", "Transition", &req)
+            .await
+        else {
+            panic!("expected unary response");
+        };
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["status"], "rejected");
+
+        // Orchestrator transition (no parent_tool_use_id) → committed with instructions.
+        register_transition_handler(Arc::new(FakeHandler));
+        let req = RpcMessage::new(
+            serde_json::to_vec(&json!({"type":"transition","to":"plan"})).unwrap(),
+            Default::default(),
+        );
+        let RpcResult::Unary(Ok(bytes)) = service
+            .handle_rpc("tddy.toolcall.ToolcallService", "Transition", &req)
+            .await
+        else {
+            panic!("expected unary response");
+        };
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["status"], "ok");
+        assert_eq!(v["instructions"], "do plan");
+
+        // Subagent transition (parent_tool_use_id present) → provisional.
+        let req = RpcMessage::new(
+            serde_json::to_vec(
+                &json!({"type":"transition","to":"red","parent_tool_use_id":"toolu_123"}),
+            )
+            .unwrap(),
+            Default::default(),
+        );
+        let RpcResult::Unary(Ok(bytes)) = service
+            .handle_rpc("tddy.toolcall.ToolcallService", "Transition", &req)
+            .await
+        else {
+            panic!("expected unary response");
+        };
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["status"], "ok");
+        assert_eq!(v["provisional"], true);
+        assert_eq!(v["to"], "red");
+
+        clear_transition_handler();
     }
 
     /// **toolcall_rpc_service_returns_an_error_for_an_unknown_method**: an unrecognized method

@@ -15,6 +15,10 @@ struct QueuedMockResponse {
     result: Result<InvokeResponse, BackendError>,
     /// When true, this invoke does not record output in `submit_channel` (no `tddy-tools submit`).
     suppress_submit_store: bool,
+    /// Transitions the simulated agent performs *during* this invoke, in order, by calling the
+    /// process-global transition handler (as a real agent would via `tddy-tools transition`).
+    /// Each entry is `(target_goal, provisional)`. Used to test agent-driven orchestration.
+    driven_transitions: Vec<(String, bool)>,
 }
 
 /// Mock backend that returns pre-configured responses for testing.
@@ -49,6 +53,32 @@ impl MockBackend {
             .push_back(QueuedMockResponse {
                 result: response,
                 suppress_submit_store: false,
+                driven_transitions: vec![],
+            });
+    }
+
+    /// Push a successful response whose (simulated) agent performs `transitions` during the invoke
+    /// by calling the process-global transition handler — as a real agent would via
+    /// `tddy-tools transition`. Each entry is `(target_goal, provisional)`. Does not store a submit.
+    pub fn push_ok_driving_transitions(
+        &self,
+        output: impl Into<String>,
+        transitions: Vec<(String, bool)>,
+    ) {
+        self.responses
+            .write()
+            .unwrap()
+            .push_back(QueuedMockResponse {
+                result: Ok(InvokeResponse {
+                    output: output.into(),
+                    exit_code: 0,
+                    session_id: None,
+                    questions: vec![],
+                    raw_stream: None,
+                    stderr: None,
+                }),
+                suppress_submit_store: true,
+                driven_transitions: transitions,
             });
     }
 
@@ -80,6 +110,7 @@ impl MockBackend {
                     stderr: None,
                 }),
                 suppress_submit_store: true,
+                driven_transitions: vec![],
             });
     }
 
@@ -136,6 +167,7 @@ impl CodingBackend for MockBackend {
         let QueuedMockResponse {
             result: response,
             suppress_submit_store: suppress_submit,
+            driven_transitions,
         } = self
             .responses
             .write()
@@ -144,7 +176,15 @@ impl CodingBackend for MockBackend {
             .unwrap_or_else(|| QueuedMockResponse {
                 result: Err(BackendError::InvocationFailed("no mock response".into())),
                 suppress_submit_store: false,
+                driven_transitions: vec![],
             });
+
+        // Simulate the agent calling `tddy-tools transition` during the invoke.
+        if let Some(handler) = crate::toolcall::transition_handler() {
+            for (to, provisional) in &driven_transitions {
+                let _ = handler.handle_transition(to, *provisional);
+            }
+        }
 
         let response = response?;
 

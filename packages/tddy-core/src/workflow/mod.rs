@@ -59,6 +59,7 @@ pub mod task {
 }
 pub mod backend_invoke_task;
 
+pub mod controller;
 pub mod engine;
 pub mod goal_conditions;
 

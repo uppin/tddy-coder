@@ -189,6 +189,28 @@ impl WorkflowRecipe for TddRecipe {
         }
     }
 
+    fn goal_instructions(&self, goal_id: &GoalId) -> String {
+        // Agent-driven orchestration: return the same static per-goal instructions the
+        // engine-driven path sets as `system_prompt` in the `before_<goal>` hooks. Dynamic
+        // context (PRD, acceptance tests) is already in the single chat session, so only the
+        // static instruction text is handed back on transition.
+        match goal_id.as_str() {
+            "interview" => interview::system_prompt(),
+            "plan" => planning::system_prompt(),
+            "acceptance-tests" => acceptance_tests::system_prompt(),
+            "red" => red::system_prompt(),
+            // `run_optional_step_x` (demo branch) is not known at transition time; the demo goal
+            // itself carries the demo instructions, so exclude the demo addendum here.
+            "green" => green::system_prompt(false),
+            "demo" => demo::system_prompt(),
+            "evaluate" => evaluate::system_prompt(),
+            "validate" => validate_subagents::system_prompt(),
+            "refactor" => refactor::system_prompt(),
+            "update-docs" => update_docs::system_prompt(),
+            _ => format!("Proceed with the '{}' goal.", goal_id),
+        }
+    }
+
     fn next_goal_for_state(&self, state: &WorkflowState) -> Option<GoalId> {
         self.next_goal_for_state_inner(state)
     }
@@ -346,6 +368,44 @@ mod planning_intent_tests {
             !r.goal_hints(&GoalId::new("interview"))
                 .unwrap()
                 .agent_cli_plan_mode
+        );
+    }
+
+    /// The agent-driven orchestration prompt must describe the transition tool, the subagent
+    /// go/no-go protocol (`--provisional`), list the goals, and embed the current goal's
+    /// instructions — this is how the single-session agent knows how to drive the workflow.
+    #[test]
+    fn orchestration_system_prompt_describes_transition_and_subagent_protocol() {
+        // Given
+        let r = TddRecipe;
+        let current = GoalId::new("interview");
+
+        // When
+        let prompt = r.orchestration_system_prompt(&current);
+
+        // Then
+        assert!(prompt.contains("tddy-tools transition"), "prompt: {prompt}");
+        assert!(prompt.contains("--provisional"), "prompt: {prompt}");
+        assert!(prompt.contains("go/no-go"), "prompt: {prompt}");
+        assert!(prompt.contains("red"), "goals list should include red");
+        assert!(prompt.contains("green"), "goals list should include green");
+        // Embeds the current goal's instructions (same as goal_instructions).
+        assert!(
+            prompt.contains(&r.goal_instructions(&current)),
+            "orchestration prompt must embed current goal instructions"
+        );
+    }
+
+    /// `goal_instructions` returns the per-goal static instructions (the engine path's
+    /// `system_prompt`), not the generic fallback, for a known goal.
+    #[test]
+    fn goal_instructions_returns_per_goal_static_instructions() {
+        let r = TddRecipe;
+        let red = r.goal_instructions(&GoalId::new("red"));
+        assert!(red.contains("Red phase"), "red instructions: {red}");
+        assert!(
+            !red.starts_with("Proceed with"),
+            "should not be the fallback"
         );
     }
 

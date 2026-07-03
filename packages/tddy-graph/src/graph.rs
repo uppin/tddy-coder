@@ -85,6 +85,35 @@ impl Graph {
     pub fn task_ids(&self) -> impl Iterator<Item = &String> {
         self.tasks.keys()
     }
+
+    /// All tasks reachable in one hop from `from`, independent of runtime context.
+    ///
+    /// Unlike [`next_task_id`](Self::next_task_id) (which resolves a single successor given a
+    /// `Context`), this returns *every* possible successor: static edge targets plus **both**
+    /// branches of any conditional edge. Used by agent-driven orchestration
+    /// (`tddy_core::workflow::controller::WorkflowController`) to validate that a requested
+    /// transition follows a legal graph edge, without needing to evaluate conditions. Targets not
+    /// present as tasks are filtered out (mirrors `next_task_id`).
+    pub fn successors(&self, from: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let push = |t: &str, out: &mut Vec<String>| {
+            if self.tasks.contains_key(t) && !out.iter().any(|e| e == t) {
+                out.push(t.to_string());
+            }
+        };
+        for ce in &self.conditional_edges {
+            if ce.from == from {
+                push(&ce.when_true, &mut out);
+                push(&ce.when_false, &mut out);
+            }
+        }
+        for (f, t) in &self.edges {
+            if f == from {
+                push(t, &mut out);
+            }
+        }
+        out
+    }
 }
 
 /// Fluent builder for Graph.

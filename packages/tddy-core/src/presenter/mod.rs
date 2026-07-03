@@ -3,6 +3,7 @@
 mod activity_prompt_log;
 mod agent_activity;
 pub mod agent_output_log_merge;
+pub mod agent_session_runner;
 mod events;
 mod intent;
 mod presenter_events;
@@ -18,6 +19,9 @@ pub use events::WorkflowCompletePayload;
 pub use events::WorkflowEvent;
 
 pub use agent_output_log_merge::AgentOutputActivityLogMerge;
+pub use agent_session_runner::{
+    agent_driven_enabled, backend_is_agent_driven, run_agent_session, AgentSessionConfig,
+};
 pub use intent::UserIntent;
 pub use presenter_events::{ModeChangedDetails, PresenterEvent, PresenterHandle, ViewConnection};
 pub use presenter_impl::{PendingWorkflowStart, Presenter};
