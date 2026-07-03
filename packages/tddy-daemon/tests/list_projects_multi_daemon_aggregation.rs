@@ -119,6 +119,7 @@ async fn list_projects_merges_entries_tagged_with_daemon_instance_id() {
     let response = service
         .list_projects(Request::new(ListProjectsRequest {
             session_token: TEST_TOKEN.to_string(),
+            local_only: false,
         }))
         .await
         .expect("list_projects succeeds");

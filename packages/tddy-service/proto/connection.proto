@@ -11,6 +11,11 @@ service ConnectionService {
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
   rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
+  // Make an existing project available on another host (daemon instance), reusing its project_id.
+  // Routed to the target daemon (local or forwarded over the LiveKit common room) which clones the
+  // repo and registers a projects.yaml row with the same project_id. See
+  // docs/ft/web/projects-screen-multi-host.md.
+  rpc AddProjectToHost(AddProjectToHostRequest) returns (AddProjectToHostResponse);
   rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
   rpc ConnectSession(ConnectSessionRequest) returns (ConnectSessionResponse);
   rpc ResumeSession(ResumeSessionRequest) returns (ResumeSessionResponse);
@@ -140,6 +145,9 @@ message ProjectEntry {
 
 message ListProjectsRequest {
   string session_token = 1;
+  // When true, return only this daemon's local registry rows and skip peer fan-out. Set by the
+  // peer-project aggregation path so a fanned-out ListProjects does not recurse back into peers.
+  bool local_only = 2;
 }
 message ListProjectsResponse {
   repeated ProjectEntry projects = 1;
@@ -154,6 +162,24 @@ message CreateProjectRequest {
   string user_relative_path = 4;
 }
 message CreateProjectResponse {
+  ProjectEntry project = 1;
+}
+
+message AddProjectToHostRequest {
+  string session_token = 1;
+  // Existing logical project id to reuse on the target host.
+  string project_id = 2;
+  string name = 3;
+  string git_url = 4;
+  // Optional integration base ref for the cloned checkout (empty = documented default).
+  string main_branch_ref = 5;
+  // Target daemon instance to add the project to. Empty or matching local instance = add locally.
+  string daemon_instance_id = 6;
+  // Optional clone destination relative to the OS user's home (same semantics as CreateProject).
+  string user_relative_path = 7;
+}
+message AddProjectToHostResponse {
+  // The registry row created (or already present) on the target host.
   ProjectEntry project = 1;
 }
 
