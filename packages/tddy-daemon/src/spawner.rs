@@ -1028,9 +1028,18 @@ mod startup_grace_period_tests {
         }
     }
 
+    /// Returns the path to the `false` binary — `/usr/bin/false` on macOS, `/bin/false` on Linux.
+    fn false_bin() -> &'static str {
+        if cfg!(target_os = "macos") {
+            "/usr/bin/false"
+        } else {
+            "/bin/false"
+        }
+    }
+
     #[test]
     fn spawning_a_binary_that_exits_immediately_returns_an_error_with_its_stderr() {
-        // Given — /bin/false ignores every argument (including the --daemon/--grpc/... flags
+        // Given — `false` ignores every argument (including the --daemon/--grpc/... flags
         // spawn_as_user appends) and exits 1 immediately, simulating a child that crashes on
         // startup (e.g. an unknown --recipe value) rather than becoming a running session
         let tmp = tempfile::tempdir().unwrap();
@@ -1040,7 +1049,7 @@ mod startup_grace_period_tests {
         // When
         let result = spawn_as_user(
             &os_user,
-            "/bin/false",
+            false_bin(),
             tddy_data_dir.path(),
             tmp.path(),
             &a_livekit_creds(),
@@ -1414,16 +1423,18 @@ mod daemon_data_dir_passthrough_tests {
         result.expect("spawn_as_user must succeed");
 
         // Then — resolved against the daemon's own cwd, never against repo_path (which would
-        // silently split session storage between the daemon and the child it spawned)
+        // silently split session storage between the daemon and the child it spawned).
+        // Canonicalize the expected side too: production resolves the daemon's cwd via
+        // `std::env::current_dir()`, which returns the OS-canonicalized path (e.g. macOS
+        // resolves `/tmp` to `/private/tmp`), while `daemon_toolchain_root.path()` here is the
+        // raw, uncanonicalized `tempfile::TempDir` path — both name the same directory.
         let received = recorded_argv_value_after(&argv_file, "--tddy-data-dir")
             .expect("child argv must include --tddy-data-dir");
-        assert_eq!(
-            received,
-            daemon_toolchain_root
-                .path()
-                .join("tmp/.tddy")
-                .to_str()
-                .unwrap()
-        );
+        let expected = daemon_toolchain_root
+            .path()
+            .canonicalize()
+            .expect("canonicalize daemon toolchain root")
+            .join("tmp/.tddy");
+        assert_eq!(received, expected.to_str().unwrap());
     }
 }

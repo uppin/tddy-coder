@@ -1,12 +1,10 @@
-//! Red-phase unit tests for migrating sandbox tool-IPC (`dispatch_via_sandbox_ipc` — an unframed
-//! single-`read()`/`write_all()` JSON-over-Unix-socket protocol, see
-//! `tddy_tools::session_tool_client`) onto `tddy-rpc`/`tddy-stdio`.
+//! Unit tests for the sandbox tool-IPC migration (`dispatch_via_sandbox_ipc` — an unframed
+//! single-`read()`/`write_all()` JSON-over-Unix-socket protocol) onto `tddy-rpc`/`tddy-stdio`.
 //!
-//! Target production API (not yet implemented — these tests define it):
-//! `tddy_tools::session_tool_client::dispatch_via_stdio_rpc(client, tool_name, args) -> String`,
-//! taking an already-connected `Arc<dyn tddy_rpc::RpcClientTransport>` (dependency-injected,
-//! unlike `dispatch_via_sandbox_ipc`'s socket path — this is what makes it testable against an
-//! in-process fixture instead of a real Unix socket / sandbox). It calls
+//! Production API under test: `tddy_tools::session_tool_client::dispatch_via_stdio_rpc(client,
+//! tool_name, args) -> String`, taking an already-connected `Arc<dyn tddy_rpc::RpcClientTransport>`
+//! (dependency-injected, unlike `dispatch_via_sandbox_ipc`'s socket path — this is what makes it
+//! testable against an in-process fixture instead of a real Unix socket / sandbox). It calls
 //! `connection.ConnectionService/ExecuteTool` with the same `ExecuteToolRequest`/
 //! `ExecuteToolResponse` prost messages the existing HTTP path already uses, so a future server
 //! side can host one handler for both transports.
@@ -15,8 +13,6 @@
 //! spawned child process hosting a fake `ConnectionService/ExecuteTool` handler that echoes
 //! `args_json` back as `result_json` — enough to prove a tool call round-trips over the stdio RPC
 //! channel without a real daemon/sandbox.
-//!
-//! See docs/ft/coder/1-WIP/PRD-2026-07-01-stdio-transport-for-grpc-binaries.md (Milestone 4).
 
 use std::sync::Arc;
 
@@ -27,9 +23,11 @@ use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
 /// Bounded safety net around calls otherwise driven entirely by async channels (see fluent-tests
-/// "Testing Async Code"). Generous enough to absorb the fixture process's startup, but still well
-/// under the 1s integration-test ceiling.
-const CALL_TIMEOUT: Duration = Duration::from_millis(500);
+/// "Testing Async Code"). Generous enough to absorb the fixture process's startup even under a
+/// loaded machine (a full `cargo test --workspace` run alongside this one has been observed to
+/// need close to 500ms for the child's first response), but still well under the 1s
+/// integration-test ceiling.
+const CALL_TIMEOUT: Duration = Duration::from_millis(900);
 
 /// The fixture never calls back into this test process — any inbound request here would be a
 /// bug, so it fails loudly rather than silently no-op'ing.
