@@ -5,7 +5,11 @@
 //!
 //! Published with [`livekit::prelude::LocalParticipant::set_metadata`]:
 //! `{"instance_id":"<stable id>","label":"<human-readable>"}`.
-//! When metadata is missing, the LiveKit participant **identity** string is used as `instance_id`.
+//! Only participants that publish a **valid advertisement** are listed as eligible daemons; browser
+//! (`web-`/`browser-`) and coder/session (`server…`, `daemon-<uuid>`) identities are excluded even
+//! when their metadata looks advertisement-shaped (mirrors the web UI's `inferParticipantRole`).
+//! There is no identity fallback — a participant with missing/invalid advertisement metadata is not
+//! treated as a daemon.
 //!
 //! # Trust and security
 //!

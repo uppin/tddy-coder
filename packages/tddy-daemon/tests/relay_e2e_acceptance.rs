@@ -223,12 +223,11 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     let registry = Arc::new(CommonRoomPeerRegistry::new());
     let room_slot = Arc::new(tokio::sync::RwLock::new(None));
     spawn_common_room_discovery_task(config_arc.clone(), registry.clone(), room_slot.clone());
-    let eligible: Arc<dyn EligibleDaemonSource> =
-        Arc::new(LiveKitEligibleDaemonSource::new(
-            config_arc,
-            registry,
-            room_slot.clone(),
-        ));
+    let eligible: Arc<dyn EligibleDaemonSource> = Arc::new(LiveKitEligibleDaemonSource::new(
+        config_arc,
+        registry,
+        room_slot.clone(),
+    ));
     let sessions_a = tempfile::tempdir().unwrap();
     let service_a = ConnectionServiceImpl::new(
         config_a,
