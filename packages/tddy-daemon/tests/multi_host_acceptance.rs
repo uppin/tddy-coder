@@ -38,6 +38,21 @@ fn true_bin() -> &'static str {
     }
 }
 
+/// A script standing in for a `tddy-coder` process that starts up successfully: ignores every
+/// argument `spawn_as_user` appends (`--daemon --grpc ...`) and sleeps well past
+/// `spawn_as_user`'s startup-grace-period check, so routing a `StartSession` to it is reported
+/// as OK rather than "exited immediately after starting" — unlike `true_bin()`, which exits in
+/// ~0ms and would trip that check. Returns the owning `TempDir` alongside the script path so the
+/// caller can keep it alive for the duration of the spawned process.
+fn a_fake_tddy_coder_that_outlives_the_startup_grace_period() -> (tempfile::TempDir, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fake-tddy-coder.sh");
+    std::fs::write(&path, "#!/bin/sh\nsleep 2\n").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (dir, path)
+}
+
 fn write_livekit_daemon_yaml(
     ws_url: &str,
     daemon_instance_id: Option<&str>,
@@ -225,6 +240,8 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
 
     let repo_tmp = tempfile::tempdir().unwrap();
     let repo_path = repo_tmp.path();
+    let (_fake_tddy_coder_dir, fake_tddy_coder_path) =
+        a_fake_tddy_coder_that_outlives_the_startup_grace_period();
     assert!(
         Command::new("git")
             .args(["init", "-q"])
@@ -359,7 +376,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     // When — daemon A routes StartSession to the discovered peer
     let request = Request::new(StartSessionRequest {
         session_token: TEST_TOKEN.to_string(),
-        tool_path: true_bin().to_string(),
+        tool_path: fake_tddy_coder_path.to_str().unwrap().to_string(),
         project_id: REMOTE_ROUTING_PROJECT_ID.to_string(),
         agent: String::new(),
         daemon_instance_id: REMOTE_PEER_INSTANCE_ID.to_string(),
