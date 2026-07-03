@@ -62,6 +62,11 @@ pub struct SpawnRequest {
     /// `log.loggers.default.format` for the child session config.
     #[serde(default = "default_child_log_format")]
     pub child_log_format: String,
+    /// Verbatim `log:` document (from the daemon's `coder_config_path`, e.g. `dev.config.yaml`) used
+    /// as the child's `--config`. When set it owns the child's full log routing; when `None` the
+    /// spawner synthesizes a minimal config from `child_log_level` / `child_log_format`.
+    #[serde(default)]
+    pub coder_log_config_yaml: Option<String>,
 }
 
 fn default_child_log_level() -> String {
@@ -304,6 +309,7 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                     },
                     req.child_log_level.as_str(),
                     req.child_log_format.as_str(),
+                    req.coder_log_config_yaml.as_deref(),
                 );
                 log::info!(
                     "spawn_worker: spawn_as_user returned session_id={}",
@@ -366,6 +372,7 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
 }
 
 /// Build spawn request from connection service args.
+#[allow(clippy::too_many_arguments)] // spawn-time argument bundle mirroring spawn_as_user; a struct would obscure call sites.
 pub fn build_spawn_request(
     os_user: &str,
     tool_path: &str,
@@ -374,6 +381,7 @@ pub fn build_spawn_request(
     livekit: &LiveKitCreds,
     opts: SpawnOptions<'_>,
     daemon_log: Option<&tddy_core::LogConfig>,
+    coder_log_config_yaml: Option<String>,
 ) -> SpawnRequest {
     let (child_log_level, child_log_format) = spawner::child_log_yaml_tuning(daemon_log);
     SpawnRequest {
@@ -395,5 +403,6 @@ pub fn build_spawn_request(
         stack_parent: opts.stack_parent.map(String::from),
         child_log_level,
         child_log_format,
+        coder_log_config_yaml,
     }
 }

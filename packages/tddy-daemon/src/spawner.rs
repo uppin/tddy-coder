@@ -114,6 +114,133 @@ pub fn child_log_yaml_tuning(daemon_log: Option<&LogConfig>) -> (String, String)
     (level, format)
 }
 
+/// Extract the `log:` block from a `tddy-coder` config file (e.g. `dev.config.yaml`, referenced by
+/// the daemon's `coder_config_path`) and re-emit it as a standalone `--config` document for spawned
+/// children. This lets operators own the child's full log routing — loggers, levels, and target
+/// policies (e.g. sending `libwebrtc*` / `livekit*` chatter to a separate file at INFO) — from an
+/// editable config file rather than daemon-synthesized defaults.
+///
+/// Returns `None` when no path is configured, the file can't be read, or it has no `log:` section;
+/// callers then fall back to [`child_log_yaml_tuning`]-based synthesis. The block is passed through
+/// verbatim (as `serde_yaml::Value`) so it doesn't depend on `LogConfig` implementing `Serialize`.
+/// File paths inside it resolve against the child's cwd (the session repo root).
+pub fn coder_log_config_yaml(coder_config_path: Option<&Path>) -> Option<String> {
+    let path = coder_config_path?;
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            log::warn!(
+                "coder_config_path {} set but unreadable ({}); falling back to synthesized child log config",
+                path.display(),
+                e
+            );
+            return None;
+        }
+    };
+    let doc: serde_yaml::Value = match serde_yaml::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!(
+                "coder_config_path {} is not valid YAML ({}); falling back to synthesized child log config",
+                path.display(),
+                e
+            );
+            return None;
+        }
+    };
+    let log = doc.get("log")?.clone();
+    let mut map = serde_yaml::Mapping::new();
+    map.insert(serde_yaml::Value::from("log"), log);
+    match serde_yaml::to_string(&serde_yaml::Value::Mapping(map)) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            log::warn!(
+                "failed to re-serialize log: block from {} ({}); falling back to synthesized child log config",
+                path.display(),
+                e
+            );
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod coder_log_config_yaml_tests {
+    use super::coder_log_config_yaml;
+    use std::io::Write;
+
+    fn write_temp(contents: &str) -> tempfile::TempPath {
+        let mut f = tempfile::NamedTempFile::new().expect("temp file");
+        f.write_all(contents.as_bytes()).expect("write");
+        f.into_temp_path()
+    }
+
+    #[test]
+    fn none_when_no_path_configured() {
+        assert!(coder_log_config_yaml(None).is_none());
+    }
+
+    #[test]
+    fn none_when_file_has_no_log_section() {
+        let path = write_temp("daemon: true\nmouse: true\n");
+        assert!(coder_log_config_yaml(Some(path.as_ref())).is_none());
+    }
+
+    #[test]
+    fn none_when_path_missing() {
+        let missing = std::path::Path::new("/no/such/coder-config-xyz.yaml");
+        assert!(coder_log_config_yaml(Some(missing)).is_none());
+    }
+
+    #[test]
+    fn extracts_only_log_block_and_parses_as_child_config() {
+        // Given a full tddy-coder config (like dev.config.yaml) with unrelated keys plus a log block
+        // that routes libwebrtc* to a separate webrtc logger at INFO.
+        let path = write_temp(
+            r#"daemon: true
+mouse: true
+github:
+  stub: true
+log:
+  loggers:
+    default:
+      output: { file: "tmp/logs/coder" }
+    webrtc:
+      output: { file: "tmp/logs/coder-webrtc" }
+  default:
+    level: debug
+    logger: default
+  policies:
+    - selector: { target: "libwebrtc*" }
+      level: info
+      logger: webrtc
+"#,
+        );
+
+        // When
+        let yaml = coder_log_config_yaml(Some(path.as_ref())).expect("log block extracted");
+
+        // Then — only the log block is emitted (no daemon/github keys leak into the child config)…
+        let doc: serde_yaml::Value = serde_yaml::from_str(&yaml).expect("valid yaml");
+        let map = doc.as_mapping().expect("mapping");
+        assert_eq!(
+            map.len(),
+            1,
+            "child --config must contain only the log: block"
+        );
+        assert!(map.contains_key(serde_yaml::Value::from("log")));
+
+        // …and it round-trips into the real child config type with the webrtc routing intact.
+        let cfg: tddy_coder::config::Config =
+            serde_yaml::from_str(&yaml).expect("parses as tddy-coder Config");
+        let log = cfg.log.expect("log present");
+        assert!(log.loggers.contains_key("webrtc"));
+        assert_eq!(log.policies.len(), 1);
+        assert_eq!(log.policies[0].level, Some(log::LevelFilter::Info));
+        assert_eq!(log.policies[0].logger.as_deref(), Some("webrtc"));
+    }
+}
+
 /// LiveKit credentials to pass to spawned process (url, api_key, api_secret).
 /// Optional `common_room` forces all daemon spawns into one LiveKit room (see [`resolve_livekit_room_name`]).
 #[derive(Debug, Clone)]
@@ -187,6 +314,7 @@ fn create_child_log_config_and_streams(
     session_id: &str,
     child_log_level: &str,
     child_log_format: &str,
+    coder_log_config_yaml: Option<&str>,
 ) -> anyhow::Result<ChildProcessLogFiles> {
     let child_logs_dir = repo_path.join("tmp").join("logs").join("child");
     std::fs::create_dir_all(&child_logs_dir).map_err(|e| {
@@ -207,9 +335,15 @@ fn create_child_log_config_and_streams(
 
     let config_path = child_logs_dir.join(format!("{}.yaml", session_id));
 
-    let format_quoted = yaml_double_quote_scalar(child_log_format);
-    let yaml = format!(
-        r#"log:
+    // When the daemon supplies a coder config's `log:` block (via `coder_config_path`), it fully
+    // owns the child's log routing — write it verbatim. Otherwise synthesize a minimal `default`
+    // logger from the daemon's derived level/format.
+    let yaml = if let Some(coder_log_yaml) = coder_log_config_yaml {
+        coder_log_yaml.to_string()
+    } else {
+        let format_quoted = yaml_double_quote_scalar(child_log_format);
+        format!(
+            r#"log:
   loggers:
     default:
       output: {{ file: "{}" }}
@@ -220,10 +354,11 @@ fn create_child_log_config_and_streams(
   rotation:
     max_rotated: 0
 "#,
-        log_file_abs.display(),
-        format_quoted,
-        child_log_level
-    );
+            log_file_abs.display(),
+            format_quoted,
+            child_log_level
+        )
+    };
 
     std::fs::write(&config_path, yaml).map_err(|e| {
         anyhow::anyhow!(
@@ -458,6 +593,7 @@ pub fn spawn_as_user(
     opts: SpawnOptions<'_>,
     child_log_level: &str,
     child_log_format: &str,
+    coder_log_config_yaml: Option<&str>,
 ) -> anyhow::Result<SpawnResult> {
     use std::os::unix::process::CommandExt;
 
@@ -516,6 +652,7 @@ pub fn spawn_as_user(
         &session_id,
         child_log_level,
         child_log_format,
+        coder_log_config_yaml,
     )?;
 
     let user_cfg = Path::new(&home_dir).join(".tddy").join("config.yaml");
@@ -778,6 +915,7 @@ pub fn spawn_as_user(
     _opts: SpawnOptions<'_>,
     _child_log_level: &str,
     _child_log_format: &str,
+    _coder_log_config_yaml: Option<&str>,
 ) -> anyhow::Result<SpawnResult> {
     anyhow::bail!("spawn_as_user is only supported on Unix")
 }
@@ -1056,6 +1194,7 @@ mod startup_grace_period_tests {
             SpawnOptions::default(),
             "info",
             super::CHILD_LOG_FORMAT_FALLBACK,
+            None,
         );
 
         // Then — a startup crash is reported as an error, not a fake-success SpawnResult
@@ -1094,6 +1233,7 @@ mod startup_grace_period_tests {
             SpawnOptions::default(),
             "info",
             super::CHILD_LOG_FORMAT_FALLBACK,
+            None,
         );
 
         // Then — spawn_as_user does not wait for the child to exit; it only guards against an
@@ -1231,6 +1371,7 @@ mod daemon_toolchain_resolution_tests {
             SpawnOptions::default(),
             "info",
             super::CHILD_LOG_FORMAT_FALLBACK,
+            None,
         );
 
         // Then — it finds and runs the daemon's own toolchain build, even though target_repo
@@ -1384,6 +1525,7 @@ mod daemon_data_dir_passthrough_tests {
             SpawnOptions::default(),
             "info",
             super::CHILD_LOG_FORMAT_FALLBACK,
+            None,
         );
         result.expect("spawn_as_user must succeed");
 
@@ -1419,6 +1561,7 @@ mod daemon_data_dir_passthrough_tests {
             SpawnOptions::default(),
             "info",
             super::CHILD_LOG_FORMAT_FALLBACK,
+            None,
         );
         result.expect("spawn_as_user must succeed");
 

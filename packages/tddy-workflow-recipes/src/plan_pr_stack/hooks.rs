@@ -243,7 +243,7 @@ mod tests {
         ctx.set_sync("session_dir", dir.clone());
         ctx.set_sync(
             "output",
-            "version: 1\nprs:\n  - node_id: n1\n    title: First\n    description: Does x\n    parents: []\n".to_string(),
+            "version: 1\nprs:\n  - node_id: n1\n    title: First\n    description: Does x\n    branch_suggestion: feature/demo/first\n    parents: []\n".to_string(),
         );
         let hooks = PlanPrStackHooks::new(None);
 

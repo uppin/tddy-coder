@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# claude-sandbox — launch a sandboxed Claude Code session against the CURRENT directory as a
+# managed (unmounted) repo, with specialized subagents (e.g. an Ollama-hosted FastContext) wired
+# in from a YAML config. Invokable from any location.
+#
+# Usage:
+#   claude-sandbox [-c CONFIG.yaml] [--release] [--no-build] [extra tddy-sandbox-app flags] \
+#                  [-- <claude args>]
+#
+# Examples:
+#   cd ~/my/project
+#   claude-sandbox -c ~/sandbox-config.yaml
+#   claude-sandbox -c ~/sandbox-config.yaml -- "implement the login form"
+#   claude-sandbox -c ~/sandbox-config.yaml --verbose -- --add-dir /extra
+#
+# The current working directory ($PWD) is passed as --repo: the managed repo the sandbox's
+# mcp__tddy-tools__* calls operate on. A starter config lives at <repo>/sandbox-config.example.yaml.
+# Everything after `--` is forwarded verbatim to the in-jail `claude`.
+set -euo pipefail
+
+# Resolve the tddy-coder repo root from this script's real location (symlink-safe), so the script
+# works when invoked by absolute path or via a PATH symlink from any directory.
+src="${BASH_SOURCE[0]}"
+while [ -h "$src" ]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  [[ $src != /* ]] && src="$dir/$src"
+done
+ROOT="$(cd -P "$(dirname "$src")" && pwd)"
+
+REPO="$PWD"
+CONFIG=""
+PROFILE="debug"
+DO_BUILD=1
+CLAUDE_BIN=""
+APP_ARGS=()
+CLAUDE_ARGS=()
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -c|--config)        CONFIG="$2"; shift 2 ;;
+    --config=*)         CONFIG="${1#*=}"; shift ;;
+    --claude-binary)    CLAUDE_BIN="$2"; shift 2 ;;
+    --claude-binary=*)  CLAUDE_BIN="${1#*=}"; shift ;;
+    --release)          PROFILE="release"; shift ;;
+    --no-build)         DO_BUILD=0; shift ;;
+    -h|--help)          sed -n '2,20p' "$src"; exit 0 ;;
+    --)                 shift; CLAUDE_ARGS=("$@"); break ;;
+    *)                  APP_ARGS+=("$1"); shift ;;
+  esac
+done
+
+# Resolve the REAL `claude` binary as an absolute path — the jail's PATH is only /usr/bin:/bin, so
+# a bare name (or a wrapper shim that re-execs `claude` from PATH, e.g. Superset's ~/.superset/bin
+# wrapper) would fail to resolve inside the jail. Prefer the canonical Claude Code install, then
+# scan PATH skipping known wrapper-shim dirs. Override with --claude-binary.
+resolve_claude() {
+  if [ -x "$HOME/.local/bin/claude" ]; then
+    printf '%s\n' "$HOME/.local/bin/claude"; return 0
+  fi
+  local IFS=: dir
+  for dir in $PATH; do
+    [ -z "$dir" ] && continue
+    dir="${dir%/}"
+    case "$dir" in */.superset/bin|*/.superset-*/bin) continue ;; esac
+    if [ -x "$dir/claude" ] && [ ! -d "$dir/claude" ]; then
+      printf '%s\n' "$dir/claude"; return 0
+    fi
+  done
+  return 1
+}
+
+if [ -z "$CLAUDE_BIN" ]; then
+  CLAUDE_BIN="$(resolve_claude || true)"
+fi
+if [ -z "$CLAUDE_BIN" ]; then
+  echo "claude-sandbox: could not find a real 'claude' binary (checked ~/.local/bin/claude and PATH, skipping wrapper shims). Install Claude Code or pass --claude-binary /path/to/claude." >&2
+  exit 1
+fi
+if [ ! -x "$CLAUDE_BIN" ]; then
+  echo "claude-sandbox: --claude-binary '$CLAUDE_BIN' is not an executable file." >&2
+  exit 1
+fi
+# Make absolute (the app canonicalizes symlinks itself; the jail needs an absolute path).
+CLAUDE_BIN="$(cd "$(dirname "$CLAUDE_BIN")" && pwd -P)/$(basename "$CLAUDE_BIN")"
+echo "=== claude binary: $CLAUDE_BIN ===" >&2
+
+# Build the three binaries that must sit side-by-side in the same target dir: tddy-sandbox-app
+# resolves tddy-tools and tddy-sandbox-runner as siblings of its own executable. nix supplies the
+# toolchain; the built binary runs on the host afterward (so it inherits `claude` on PATH).
+if [ "$DO_BUILD" -eq 1 ]; then
+  echo "=== building tddy-sandbox-app + tddy-tools + tddy-sandbox-runner ($PROFILE) ===" >&2
+  cargo_flags=(--manifest-path "$ROOT/Cargo.toml" -p tddy-sandbox-app -p tddy-tools -p tddy-sandbox-runner)
+  [ "$PROFILE" = "release" ] && cargo_flags+=(--release)
+  nix develop "$ROOT" --profile "$ROOT/.nix-profile" -c cargo build "${cargo_flags[@]}"
+fi
+
+BIN="$ROOT/target/$PROFILE/tddy-sandbox-app"
+if [ ! -x "$BIN" ]; then
+  echo "claude-sandbox: $BIN not found. Run without --no-build first." >&2
+  exit 1
+fi
+
+CMD=("$BIN" --repo "$REPO" --claude-binary "$CLAUDE_BIN")
+[ -n "$CONFIG" ] && CMD+=(--config "$CONFIG")
+CMD+=(${APP_ARGS[@]+"${APP_ARGS[@]}"})
+if [ "${#CLAUDE_ARGS[@]}" -gt 0 ]; then
+  CMD+=(-- "${CLAUDE_ARGS[@]}")
+fi
+
+exec "${CMD[@]}"

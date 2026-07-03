@@ -39,8 +39,15 @@ pub struct SpawnParams {
     /// `mcp__tddy-tools__*` calls, which the host relays against the real `repo` path (see
     /// `bridge::AppToolHandler`). Matches the daemon's sandboxed-session isolation model.
     pub remote_codebase: bool,
-    /// Discovery subagent to wire into the in-jail `tddy-tools --mcp` process, if any.
-    pub subagent: SubagentSpawnConfig,
+    /// Already-resolved specialized-agent defs to wire into the in-jail `tddy-tools --mcp` process
+    /// (see `crate::config::resolve_session_agents`). Empty means no subagent is wired.
+    pub specialized_defs: Vec<tddy_discovery::agent_def::SpecializedAgentDef>,
+    /// Extra args forwarded verbatim to the in-jail `claude` invocation (relayed to
+    /// `tddy-sandbox-runner` as repeated `--claude-arg` tokens).
+    pub claude_args: Vec<String>,
+    /// `RUST_LOG` for the in-jail `tddy-tools --mcp` server (relayed as `--mcp-log-level`); `None`
+    /// lets the runner pick its default.
+    pub mcp_log_level: Option<String>,
 }
 
 /// Resolves the effective codebase mode from `--codebase-mode` and the deprecated
@@ -72,39 +79,6 @@ pub(crate) fn resolve_codebase_mode(
         )),
         None => Ok(remote_codebase_flag),
     }
-}
-
-/// Spawn-time specialized-agent configuration (array model — see
-/// docs/ft/coder/specialized-subagents.md). `specialized_agents` empty means no subagent is wired
-/// into the session.
-#[derive(Default, Clone)]
-pub(crate) struct SubagentSpawnConfig {
-    pub specialized_agents: Vec<String>,
-    /// Directory to resolve named agents from (`<tddyhome>/agents`), in addition to the builtins.
-    pub agents_dir: PathBuf,
-}
-
-/// Resolve `config.specialized_agents` against builtins + `config.agents_dir`. An unresolvable
-/// name is an error. All configuration (model, base_url, max_turns, replaces) comes exclusively
-/// from the resolved def — there is no caller-facing override.
-pub(crate) fn resolve_specialized_agents(
-    config: &SubagentSpawnConfig,
-) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>> {
-    if config.specialized_agents.is_empty() {
-        return Ok(Vec::new());
-    }
-    let resolved = tddy_discovery::agent_def::resolve_agent_defs(&config.agents_dir);
-    let mut selected = Vec::with_capacity(config.specialized_agents.len());
-    for name in &config.specialized_agents {
-        let def = resolved.iter().find(|d| &d.name == name).ok_or_else(|| {
-            anyhow::anyhow!(
-                "specialized agent '{name}' not found (not a builtin and not present under {})",
-                config.agents_dir.display()
-            )
-        })?;
-        selected.push(def.clone());
-    }
-    Ok(selected)
 }
 
 /// Build the (name, replaced-tools) pairs for a session's resolved specialized-agent defs — each
@@ -394,7 +368,7 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         &format!("preparing context from {} …", repo.display()),
     );
     let repo_for_context = repo.clone();
-    let specialized_defs = resolve_specialized_agents(&params.subagent)?;
+    let specialized_defs = params.specialized_defs;
     let replacement_pairs = specialized_agent_replacement_pairs(&specialized_defs);
     let ctx: SandboxContextDir = tokio::task::spawn_blocking(move || {
         let replacement_refs: Vec<Vec<&str>> = replacement_pairs
@@ -465,7 +439,7 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
     // never fires if the user's terminal never actually changes size after attach) to correct it.
     let (initial_rows, initial_cols) = crate::bridge::terminal_size_or_default();
 
-    let runner_argv = vec![
+    let mut runner_argv = vec![
         sandbox_runner_path,
         "--session-id".into(),
         params.session_id.clone(),
@@ -496,6 +470,16 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         "--initial-rows".into(),
         initial_rows.to_string(),
     ];
+    // Forward each caller pass-through arg as a `--claude-arg` token; the runner appends them
+    // verbatim after the fixed flags + MCP allowlist when building the in-jail `claude` argv.
+    for claude_arg in &params.claude_args {
+        runner_argv.push("--claude-arg".into());
+        runner_argv.push(claude_arg.clone());
+    }
+    if let Some(level) = &params.mcp_log_level {
+        runner_argv.push("--mcp-log-level".into());
+        runner_argv.push(level.clone());
+    }
 
     let mut env = build_sandbox_runner_env(
         &scratch_home,
@@ -958,60 +942,6 @@ mod tests {
         assert!(
             result.is_err(),
             "an unrecognized --codebase-mode value must be rejected"
-        );
-    }
-
-    // ─── resolve_specialized_agents ─────────────────────────────────────────────
-
-    fn config_with_names(names: &[&str]) -> SubagentSpawnConfig {
-        SubagentSpawnConfig {
-            specialized_agents: names.iter().map(|s| s.to_string()).collect(),
-            agents_dir: PathBuf::from("/nonexistent-agents-dir-for-tests"),
-        }
-    }
-
-    /// An empty `specialized_agents` list resolves to no defs, not an error.
-    #[test]
-    fn resolve_specialized_agents_returns_empty_for_no_names() {
-        // Given
-        let config = config_with_names(&[]);
-
-        // When
-        let defs = resolve_specialized_agents(&config).expect("empty names must not error");
-
-        // Then
-        assert!(defs.is_empty());
-    }
-
-    /// The always-available builtin `fastcontext` resolves without any `--agents-dir` override.
-    #[test]
-    fn resolve_specialized_agents_resolves_the_builtin_fastcontext_name() {
-        // Given
-        let config = config_with_names(&["fastcontext"]);
-
-        // When
-        let defs = resolve_specialized_agents(&config)
-            .expect("fastcontext must resolve via the builtin def");
-
-        // Then
-        assert_eq!(defs.len(), 1);
-        assert_eq!(defs[0].name, "fastcontext");
-    }
-
-    /// A name that resolves against neither the builtins nor `agents_dir` is a typed error.
-    #[test]
-    fn resolve_specialized_agents_errors_on_unknown_name() {
-        // Given
-        let config = config_with_names(&["ghost-agent"]);
-
-        // When
-        let result = resolve_specialized_agents(&config);
-
-        // Then
-        let err = result.expect_err("an unresolvable name must be rejected");
-        assert!(
-            err.to_string().contains("ghost-agent"),
-            "the error must name the unresolvable agent; got: {err}"
         );
     }
 

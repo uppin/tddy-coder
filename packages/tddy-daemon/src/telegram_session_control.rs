@@ -1019,6 +1019,8 @@ impl TelegramWorkflowSpawn {
             recipe: recipe_for_spawn.as_deref(),
             stack_parent: None,
         };
+        let coder_log_yaml =
+            spawner::coder_log_config_yaml(self.config.coder_config_path.as_deref());
         if let Some(ref client) = self.spawn_client {
             let req = spawn_worker::build_spawn_request(
                 &self.os_user,
@@ -1028,6 +1030,7 @@ impl TelegramWorkflowSpawn {
                 &livekit,
                 opts,
                 self.config.log.as_ref(),
+                coder_log_yaml,
             );
             client.spawn(req)
         } else {
@@ -1042,6 +1045,7 @@ impl TelegramWorkflowSpawn {
                 opts,
                 child_log_level.as_str(),
                 child_log_format.as_str(),
+                coder_log_yaml.as_deref(),
             )
         }
     }

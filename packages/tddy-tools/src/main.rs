@@ -78,10 +78,36 @@ enum Subcommand {
     SessionHook(session_hook::SessionHookArgs),
 }
 
+/// Initialise logging. When `TDDY_TOOLS_LOG_FILE` is set (e.g. by the sandbox runner, which points
+/// it at the session egress dir), env_logger writes to that file — append mode — so an in-jail
+/// `--mcp` server's logs (including specialized-subagent HTTP activity) are persisted where the
+/// host can read them, instead of vanishing into the parent process's captured stderr. Otherwise
+/// logs go to stderr as before. Never panics: a file that can't be opened falls back to stderr.
+fn init_logging() {
+    let mut builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"));
+    if let Some(path) = std::env::var_os("TDDY_TOOLS_LOG_FILE") {
+        if !path.is_empty() {
+            match std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+            {
+                Ok(file) => {
+                    builder.target(env_logger::Target::Pipe(Box::new(file)));
+                }
+                Err(e) => {
+                    eprintln!("tddy-tools: cannot open TDDY_TOOLS_LOG_FILE {path:?}: {e}; logging to stderr");
+                }
+            }
+        }
+    }
+    let _ = builder.try_init();
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
-        .try_init();
+    init_logging();
 
     let args = Args::parse();
 
