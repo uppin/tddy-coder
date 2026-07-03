@@ -19,6 +19,9 @@ use tddy_discovery::subagent::{
     resolve_replaced_tools_for_defs, CodebaseAccess, PromptOutcome, SubagentConfig,
     SubagentRegistry, SubagentSession,
 };
+use tddy_workflow_recipes::orchestrate_pr_stack::{
+    pr_close_action, pr_merge_action, pr_resolve_conflicts_action, GithubPrApi,
+};
 
 /// Unix socket for relaying approval prompts to the tddy-coder TUI. In `cfg(test)` builds this is
 /// disabled unless `TDDY_TOOLS_TEST_ALLOW_SOCKET=1`, so unit tests never hit a live session when
@@ -74,6 +77,69 @@ pub struct GithubUpdatePullRequestToolInput {
     pub title: Option<String>,
     pub body: Option<String>,
     pub draft: Option<bool>,
+}
+
+/// Parameters for a PR-stack tool that acts on one node's open PR by number.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PrNodeRefInput {
+    #[schemars(description = "Stack node id (e.g. \"n1\").")]
+    pub node_id: String,
+    #[schemars(description = "The node's open pull request number.")]
+    pub pull_number: u64,
+}
+
+/// Parameters for [`pr_repoint`](PermissionServer::pr_repoint).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PrRepointInput {
+    #[schemars(description = "The pull request number to repoint.")]
+    pub pull_number: u64,
+    #[schemars(description = "New base branch name (e.g. master, or the next unmerged ancestor).")]
+    pub new_base: String,
+}
+
+/// Parameters for [`pr_resolve_conflicts`](PermissionServer::pr_resolve_conflicts).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PrResolveConflictsInput {
+    #[schemars(description = "Stack node id whose branch is being synced.")]
+    pub node_id: String,
+    #[schemars(description = "Absolute path to the node's git worktree.")]
+    pub worktree_dir: String,
+    #[schemars(description = "Base ref to merge in (e.g. origin/master or an ancestor branch).")]
+    pub base_ref: String,
+}
+
+/// Parameters for [`pr_set_status`](PermissionServer::pr_set_status).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PrSetStatusInput {
+    #[schemars(description = "Stack node id to annotate.")]
+    pub node_id: String,
+    #[schemars(
+        description = "Internal status kind (e.g. blocked, needs-repoint, has-conflicts, ready-to-merge, up-to-date, merged)."
+    )]
+    pub kind: String,
+    #[schemars(description = "Optional free-text note explaining the status.")]
+    pub note: Option<String>,
+}
+
+/// Parameters for [`pr_add_planned`](PermissionServer::pr_add_planned).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PrAddPlannedInput {
+    #[schemars(description = "PR title.")]
+    pub title: String,
+    #[schemars(description = "PR description / body.")]
+    pub description: String,
+    #[schemars(description = "Optional suggested branch name (feature/<stack>/<node>).")]
+    pub branch_suggestion: Option<String>,
+    #[schemars(description = "Parent node ids (chosen ancestors); empty for a root node.")]
+    #[serde(default)]
+    pub parents: Vec<String>,
+}
+
+/// Parameters for [`pr_spawn_child`](PermissionServer::pr_spawn_child).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PrSpawnChildInput {
+    #[schemars(description = "Stack node id to start a child coding session for.")]
+    pub node_id: String,
 }
 
 /// MCP server that handles permission prompts for Claude Code.
@@ -432,6 +498,306 @@ impl PermissionServer {
             }
         }
     }
+
+    #[tool(
+        description = "List every PR node in the orchestrator's stack with its live GitHub state and computed internal status (needs-repoint / has-conflicts / ready-to-merge / merged / up-to-date). Refreshes and persists derived statuses; agent overrides are preserved."
+    )]
+    fn pr_stack_status(&self) -> String {
+        match pr_stack_status_impl() {
+            Ok(v) => v.to_string(),
+            Err(e) => serde_json::json!({ "error": e }).to_string(),
+        }
+    }
+
+    #[tool(description = "Merge a stack node's PR into its base and mark the node merged.")]
+    fn pr_merge(&self, Parameters(p): Parameters<PrNodeRefInput>) -> String {
+        match (orchestrator_dir(), real_gh()) {
+            (Ok(dir), Ok(gh)) => match pr_merge_action(&dir, &gh, &p.node_id, p.pull_number) {
+                Ok(sha) => serde_json::json!({ "merged": true, "sha": sha }).to_string(),
+                Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
+            },
+            (Err(e), _) | (_, Err(e)) => serde_json::json!({ "error": e }).to_string(),
+        }
+    }
+
+    #[tool(description = "Close a stack node's PR without merging and mark the node closed.")]
+    fn pr_close(&self, Parameters(p): Parameters<PrNodeRefInput>) -> String {
+        match (orchestrator_dir(), real_gh()) {
+            (Ok(dir), Ok(gh)) => match pr_close_action(&dir, &gh, &p.node_id, p.pull_number) {
+                Ok(()) => serde_json::json!({ "closed": true }).to_string(),
+                Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
+            },
+            (Err(e), _) | (_, Err(e)) => serde_json::json!({ "error": e }).to_string(),
+        }
+    }
+
+    #[tool(
+        description = "Repoint a PR's base branch (e.g. after an ancestor merges) via the GitHub REST API."
+    )]
+    fn pr_repoint(&self, Parameters(p): Parameters<PrRepointInput>) -> String {
+        match real_gh() {
+            Ok(gh) => match gh.patch_pr_base(p.pull_number, &p.new_base) {
+                Ok(()) => {
+                    serde_json::json!({ "repointed": true, "new_base": p.new_base }).to_string()
+                }
+                Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
+            },
+            Err(e) => serde_json::json!({ "error": e }).to_string(),
+        }
+    }
+
+    #[tool(
+        description = "Detect conflicts between a node's worktree branch and its base and report the conflicting files. Detect-only: resolve the reported files in the worktree yourself (edit, git add, commit the merge), then re-run to confirm none remain. Marks the node has-conflicts while conflicts exist and clears that marker once the branch merges cleanly."
+    )]
+    fn pr_resolve_conflicts(&self, Parameters(p): Parameters<PrResolveConflictsInput>) -> String {
+        match pr_resolve_conflicts_action(std::path::Path::new(&p.worktree_dir), &p.base_ref) {
+            Ok(conflicts) => {
+                if conflicts.is_empty() {
+                    // Clean now — clear the has-conflicts marker so derivation resumes. Leaves any
+                    // other status (e.g. an agent `blocked` override) untouched.
+                    let _ = clear_has_conflicts_status(&p.node_id);
+                } else {
+                    // Sticky (`override`) so a later `pr_stack_status` refresh does not clobber the
+                    // conflict signal with a view-derived status.
+                    let _ = set_internal_status(&p.node_id, "has-conflicts", None, "override");
+                }
+                serde_json::json!({ "conflicts": conflicts }).to_string()
+            }
+            Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
+        }
+    }
+
+    #[tool(
+        description = "Record a manual internal-status override on a node (e.g. blocked) with an optional note. Overrides are not overwritten by automatic derivation."
+    )]
+    fn pr_set_status(&self, Parameters(p): Parameters<PrSetStatusInput>) -> String {
+        match set_internal_status(&p.node_id, &p.kind, p.note.as_deref(), "override") {
+            Ok(()) => serde_json::json!({ "ok": true }).to_string(),
+            Err(e) => serde_json::json!({ "error": e }).to_string(),
+        }
+    }
+
+    #[tool(
+        description = "Add a new planned PR node to the stack, choosing its ancestors from existing node ids. Returns the server-assigned node id."
+    )]
+    fn pr_add_planned(&self, Parameters(p): Parameters<PrAddPlannedInput>) -> String {
+        let dir = match orchestrator_dir() {
+            Ok(d) => d,
+            Err(e) => return serde_json::json!({ "error": e }).to_string(),
+        };
+        let input = tddy_workflow_recipes::pr_stack::AddPlannedPrInput {
+            title: p.title,
+            description: p.description,
+            branch_suggestion: p.branch_suggestion,
+            parents: p.parents,
+            child_recipe: None,
+        };
+        match tddy_workflow_recipes::pr_stack::add_planned_pr_node(&dir, input) {
+            Ok(node) => serde_json::json!({ "node_id": node.node_id }).to_string(),
+            Err(e) => serde_json::json!({ "error": e }).to_string(),
+        }
+    }
+
+    #[tool(
+        description = "Start a child coding session for a planned PR node (with the orchestrator as its stack parent). Returns the new child session id."
+    )]
+    async fn pr_spawn_child(&self, Parameters(p): Parameters<PrSpawnChildInput>) -> String {
+        // Relay to the daemon over the per-session TDDY_SOCKET. The daemon resolves the node against
+        // the orchestrator's stack and spawns a child claude-cli session with stack_parent set —
+        // this avoids depending on TDDY_REMOTE_* env (absent for a managed orchestrator).
+        let Some(socket) = permission_relay_socket_path() else {
+            return serde_json::json!({
+                "error": "TDDY_SOCKET is not set; pr_spawn_child requires a managed orchestrator session"
+            })
+            .to_string();
+        };
+        let request = serde_json::json!({ "type": "spawn-child", "node_id": p.node_id });
+        match crate::toolcall_client::dispatch_toolcall(&socket, request).await {
+            Ok(resp) => resp.to_string(),
+            Err(e) => serde_json::json!({ "error": e }).to_string(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PR-stack tool helpers
+// ---------------------------------------------------------------------------
+
+/// The orchestrator session directory (holds `changeset.yaml` with the stack).
+fn orchestrator_dir() -> Result<PathBuf, String> {
+    std::env::var_os("TDDY_SESSION_DIR")
+        .map(PathBuf::from)
+        .ok_or_else(|| "TDDY_SESSION_DIR not set (no orchestrator session in scope)".to_string())
+}
+
+/// `owner/repo` slug parsed from the repo's `origin` remote.
+fn repo_slug() -> Result<String, String> {
+    let repo = std::env::var_os("TDDY_REPO_DIR")
+        .map(PathBuf::from)
+        .ok_or_else(|| "TDDY_REPO_DIR not set".to_string())?;
+    let out = std::process::Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("git remote get-url origin failed: {e}"))?;
+    let url = String::from_utf8_lossy(&out.stdout);
+    tddy_workflow_recipes::orchestrate_pr_stack::github::owner_repo_from_remote_url(url.trim())
+        .ok_or_else(|| format!("could not parse owner/repo from remote url: {}", url.trim()))
+}
+
+fn real_gh() -> Result<tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi, String> {
+    Ok(tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi::new(repo_slug()?))
+}
+
+/// Default branch of the repo (`origin/HEAD` target). Returns an error rather than guessing a name:
+/// a wrong default silently mis-derives `needs-repoint`, so the caller surfaces the failure instead.
+fn default_branch() -> Result<String, String> {
+    let repo = std::env::var_os("TDDY_REPO_DIR")
+        .map(PathBuf::from)
+        .ok_or_else(|| "TDDY_REPO_DIR not set; cannot resolve the default branch".to_string())?;
+    let out = std::process::Command::new("git")
+        .args(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("git symbolic-ref refs/remotes/origin/HEAD failed to run: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "could not resolve origin/HEAD (run `git remote set-head origin -a`): {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let s = String::from_utf8_lossy(&out.stdout);
+    let name = s.trim().strip_prefix("origin/").unwrap_or(s.trim());
+    if name.is_empty() {
+        return Err("origin/HEAD resolved to an empty branch name".to_string());
+    }
+    Ok(name.to_string())
+}
+
+/// Write one node's `internal_status`, applying the override-wins rule for derived writes.
+fn set_internal_status(
+    node_id: &str,
+    kind: &str,
+    note: Option<&str>,
+    source: &str,
+) -> Result<(), String> {
+    let dir = orchestrator_dir()?;
+    let new_status = tddy_core::changeset::PrInternalStatus {
+        kind: kind.to_string(),
+        note: note.map(|s| s.to_string()),
+        source: source.to_string(),
+    };
+    tddy_core::changeset::update_stack_atomic(&dir, |stack| {
+        if let Some(node) = stack.nodes.iter_mut().find(|n| n.node_id == node_id) {
+            node.internal_status = Some(
+                tddy_workflow_recipes::orchestrate_pr_stack::reconcile_internal_status(
+                    node.internal_status.as_ref(),
+                    new_status.clone(),
+                ),
+            );
+        }
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// Clear a node's `internal_status` only when it is currently `has-conflicts` (so a resolved
+/// conflict stops being sticky and view-derivation resumes). Any other status — including an agent
+/// `blocked` override — is left untouched.
+fn clear_has_conflicts_status(node_id: &str) -> Result<(), String> {
+    let dir = orchestrator_dir()?;
+    tddy_core::changeset::update_stack_atomic(&dir, |stack| {
+        if let Some(node) = stack.nodes.iter_mut().find(|n| n.node_id == node_id) {
+            if node
+                .internal_status
+                .as_ref()
+                .is_some_and(|s| s.kind == "has-conflicts")
+            {
+                node.internal_status = None;
+            }
+        }
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// Read the orchestrator stack, refresh derived internal statuses from live GitHub + child state,
+/// and return the node summaries as JSON. Live refresh failures are surfaced (never hidden).
+fn pr_stack_status_impl() -> Result<serde_json::Value, String> {
+    let dir = orchestrator_dir()?;
+    let changeset =
+        tddy_core::changeset::read_changeset(&dir).map_err(|e| format!("read changeset: {e}"))?;
+    let stack = changeset
+        .stack
+        .clone()
+        .ok_or_else(|| "orchestrator changeset has no stack".to_string())?;
+
+    let refresh_error = refresh_internal_statuses(&dir, &stack).err();
+
+    // Re-read after the possible persist so the response reflects what is on disk.
+    let stack = tddy_core::changeset::read_changeset(&dir)
+        .map_err(|e| format!("re-read changeset: {e}"))?
+        .stack
+        .unwrap_or(stack);
+
+    let nodes: Vec<serde_json::Value> = stack
+        .nodes
+        .iter()
+        .map(|n| {
+            serde_json::json!({
+                "node_id": n.node_id,
+                "title": n.title,
+                "branch": n.branch,
+                "session_id": n.session_id,
+                "pr_status": n.pr_status.as_ref().map(|s| s.phase.clone()),
+                "internal_status": n.internal_status.as_ref().map(|s| serde_json::json!({
+                    "kind": s.kind,
+                    "note": s.note,
+                    "source": s.source,
+                })),
+            })
+        })
+        .collect();
+
+    let mut out = serde_json::json!({ "nodes": nodes });
+    if let Some(err) = refresh_error {
+        out["refresh_error"] = serde_json::Value::String(err);
+    }
+    Ok(out)
+}
+
+/// Assemble live views, derive internal statuses, and persist them (override-wins).
+fn refresh_internal_statuses(
+    dir: &std::path::Path,
+    stack: &tddy_core::changeset::Stack,
+) -> Result<(), String> {
+    let sessions_root = dir
+        .parent()
+        .and_then(|p| p.parent())
+        .ok_or_else(|| "cannot derive sessions root from session dir".to_string())?;
+    let gh = real_gh()?;
+    let default = default_branch()?;
+    let views = tddy_workflow_recipes::orchestrate_pr_stack::assemble_views(
+        dir,
+        sessions_root,
+        stack,
+        &gh,
+        &default,
+    )
+    .map_err(|e| format!("assemble views: {e}"))?;
+    let derived =
+        tddy_workflow_recipes::orchestrate_pr_stack::derive_internal_status(&views, &default);
+    tddy_core::changeset::update_stack_atomic(dir, |s| {
+        for (node_id, d) in &derived {
+            if let Some(node) = s.nodes.iter_mut().find(|n| &n.node_id == node_id) {
+                node.internal_status = Some(
+                    tddy_workflow_recipes::orchestrate_pr_stack::reconcile_internal_status(
+                        node.internal_status.as_ref(),
+                        d.clone(),
+                    ),
+                );
+            }
+        }
+    })
+    .map_err(|e| format!("persist derived statuses: {e}"))
 }
 
 // Explicit `router = self.tool_router` — the default `#[tool_handler]` expansion calls the

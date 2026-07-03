@@ -484,6 +484,10 @@ export const prStackStartSessionBtn = (nodeId: string) => `pr-stack-start-sessio
 /** `[data-testid="pr-stack-status-chip-<nodeId>"]` — status chip for an already-spawned node */
 export const prStackStatusChip = (nodeId: string) => `pr-stack-status-chip-${nodeId}`;
 
+/** `[data-testid="pr-stack-internal-status-badge-<nodeId>"]` — the action-needed internal-status badge */
+export const prStackInternalStatusBadge = (nodeId: string) =>
+  `pr-stack-internal-status-badge-${nodeId}`;
+
 /** `[data-testid="pr-stack-chat-message-<index>"]` — a single rendered chat bubble */
 export const prStackChatMessage = (index: number) => `pr-stack-chat-message-${index}`;
 

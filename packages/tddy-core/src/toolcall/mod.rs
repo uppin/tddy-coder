@@ -13,7 +13,9 @@ pub mod transition;
 pub use build::{
     build_executor, register_build_executor, BuildExecutor, BuildListQuery, BuildOptions,
 };
-pub use listener::{set_toolcall_log_dir, start_toolcall_listener, ToolcallRpcService};
+pub use listener::{
+    set_toolcall_log_dir, start_toolcall_listener, ChildSpawnHandler, ToolcallRpcService,
+};
 pub use transition::{
     clear_transition_handler, register_transition_handler, transition_handler, TransitionHandler,
     TransitionRelayOutcome,
@@ -185,6 +187,10 @@ pub enum ToolCallResponse {
     TransitionRejected {
         reason: String,
     },
+    /// A `spawn-child` relay succeeded; carries the new child session id.
+    SpawnChildOk {
+        session_id: String,
+    },
 }
 
 impl ToolCallResponse {
@@ -235,6 +241,9 @@ impl ToolCallResponse {
             }
             ToolCallResponse::TransitionRejected { reason } => {
                 serde_json::json!({"status":"rejected","reason":reason})
+            }
+            ToolCallResponse::SpawnChildOk { session_id } => {
+                serde_json::json!({"status":"ok","session_id":session_id})
             }
         };
         wire.to_string()
@@ -287,6 +296,14 @@ impl TransitionRequestWire {
     pub fn is_provisional(&self) -> bool {
         self.provisional || self.parent_tool_use_id.is_some()
     }
+}
+
+/// Wire format for `spawn-child` request (from tddy-tools, PR-stack orchestrator).
+#[derive(Debug, Deserialize)]
+pub struct SpawnChildRequestWire {
+    pub r#type: String,
+    /// Planned-PR node id in the orchestrator's stack to materialize into a child session.
+    pub node_id: String,
 }
 
 /// Wire format for `list-actions` request (from tddy-tools).

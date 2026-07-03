@@ -12,6 +12,13 @@ export interface PrStatus {
   error?: string | null;
 }
 
+/** Action-needed signal for a node (needs-repoint, has-conflicts, ready-to-merge, …). */
+export interface PrInternalStatus {
+  kind: string;
+  note: string | null;
+  source: string;
+}
+
 export interface StackNode {
   nodeId: string;
   title: string;
@@ -24,6 +31,7 @@ export interface StackNode {
   childState: string | null;
   /** Recipe the child session should be started with. Defaults to "tdd" when unset by the plan. */
   childRecipe: string;
+  internalStatus: PrInternalStatus | null;
 }
 
 export interface Stack {
@@ -42,6 +50,7 @@ interface WireStackNode {
   pr_status?: PrStatus | null;
   child_state?: string | null;
   child_recipe?: string | null;
+  internal_status?: PrInternalStatus | null;
 }
 
 interface WireStack {
@@ -69,6 +78,7 @@ export function parseStackPlan(stackPlanJson: string | undefined | null): Stack 
     prStatus: n.pr_status ?? null,
     childState: n.child_state ?? null,
     childRecipe: n.child_recipe ?? "tdd",
+    internalStatus: n.internal_status ?? null,
   }));
   return { version: parsed.version ?? 0, nodes };
 }

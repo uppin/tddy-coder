@@ -1,11 +1,13 @@
 # PR stacking
 
 **Product area:** Coder  
-**Updated:** 2026-07-01
+**Updated:** 2026-07-03
 
 ## Summary
 
-PR stacking support adds a **single orchestrating session** — with its own worktree and branch (usually the final PR in the stack) — that both plans and drives a stack of child PR sessions to master. When concurrent PRs exist the stack is a **DAG (directed acyclic graph)** rather than a simple chain.
+PR stacking support adds a **single orchestrating session** — with its own worktree and branch (usually the final PR in the stack) — that plans a stack of child PR sessions and then **operates that stack interactively** with the developer. When concurrent PRs exist the stack is a **DAG (directed acyclic graph)** rather than a simple chain.
+
+> **Updated 2026-07-03 — free-prompting operator loop.** The orchestrator no longer runs an **automatic agentic loop**. Previously, after planning, the `pr-stack` recipe auto-cycled `assess → spawn / merge / repoint` and drove the whole stack to master with no human turn-by-turn. That autopilot is **removed**. Now, once the plan exists, the same orchestrator session drops into an **interactive free-prompting chat** (the `orchestrate` goal): the developer prompts the agent, and the agent manages the stack explicitly through a new set of **PR-management tools** exposed by `tddy-tools` (see [PR-management tools](#pr-management-tools)). Each planned PR also gains an **internal status** — a computed "does this node need action?" signal (e.g. `needs-repoint`, `has-conflicts`, `ready-to-merge`) that is auto-derived from git + GitHub reality but can be overridden/annotated by the agent (see [Internal PR status](#internal-pr-status)). The planning phase (`analyze-stack` → `write-stack-plan`) is unchanged and still automatic; only the *drive* phase becomes operator-driven. The `assess` decision function, merge/repoint bridge, and `GithubPrApi` are retained but are now invoked **on demand by the tools**, not by an autonomous loop.
 
 > **Updated 2026-07-01 — unified `pr-stack` recipe.** The plan phase and the orchestrate phase used to be two separate recipes and two separate sessions (`plan-pr-stack` then a follow-on `orchestrate-pr-stack` session seeded from the first). They are now **one recipe, one session**: `pr-stack` (see [pr-stack recipe](#pr-stack-recipe) below). The legacy CLI names `plan-pr-stack` and `orchestrate-pr-stack` remain accepted as **aliases** that resolve to the same unified recipe — existing scripts, YAML, and `--recipe` invocations keep working. This consolidation is what makes the web UI's [PR-Stack Chat Screen](../web/session-drawer.md#per-workflow-session-views) possible: a single session can show the planned-PR list and let the operator keep refining the plan via chat, without switching sessions to start orchestration.
 
@@ -37,8 +39,9 @@ Each node in the DAG is a `StackNode`:
 | `branch` | Actual branch name once the child worktree exists. |
 | `session_id` | Child session id once the node is materialised. |
 | `parents` | List of parent `node_id` values. Empty list = root node (branches off the stack base). More than one entry = DAG node that integrates multiple unmerged parents. |
-| `pr_status` | Mirrors `GithubPrStatus` (`phase` one of `planned`, `open`, `merged`, `closed`, `error`). |
+| `pr_status` | Mirrors `GithubPrStatus` (`phase` one of `planned`, `open`, `merged`, `closed`, `error`). Reflects **GitHub reality**. |
 | `child_state` | Coarse mirror of the child session's `WorkflowState`. |
+| `internal_status` | Optional `PrInternalStatus` — the **action-needed** signal, orthogonal to `pr_status`. See [Internal PR status](#internal-pr-status). |
 
 **Derived, never persisted:** effective base refs are computed on demand, not stored. The predicate `StackNode::is_skipped()` returns true when `pr_status.phase == "merged"`. Base-ref derivation climbs the `parents` list, skipping merged ancestors, and returns the nearest non-skipped ancestor branches as `origin/<branch>` refs; when all ancestors are merged the node's effective base collapses to the stack bottom (i.e. `origin/main` or equivalent).
 
@@ -74,53 +77,77 @@ Every child session carries:
 
 - **CLI name:** `pr-stack` (canonical). Legacy aliases `plan-pr-stack` and `orchestrate-pr-stack` still resolve to the same recipe (`recipe_resolve.rs`) — see [Legacy aliases](#legacy-aliases) below.
 - **`uses_primary_session_document`:** `false` (no PRD-style document approval gate).
-- **One session, whole lifecycle:** the same session that analyzes the feature and writes the plan also drives it to master — there is no second "orchestrate" session seeded from the first.
-- **Pipeline:** `analyze-stack` → `write-stack-plan` → `begin-orchestrate` → `assess` loop
+- **One session, whole lifecycle:** the same session that analyzes the feature and writes the plan also operates it to master — there is no second "orchestrate" session seeded from the first.
+- **Pipeline:** `analyze-stack` → `write-stack-plan` → `orchestrate` (terminal interactive loop)
   - `analyze-stack` — read-only, `PermissionHint::ReadOnly`, no structured submit. The agent studies the feature description and plans how to split it into a PR stack or DAG.
-  - `write-stack-plan` — the agent emits both plan artifacts via `tddy-tools submit`. No structured JSON goal schema is shared with TDD; the submit carries the YAML plan payload.
-  - `begin-orchestrate` — new host-only bridge task (no agent invocation). Seeds `Changeset.stack` from the just-written `stack-plan.yaml` if not already populated (idempotent — same guard as the old `seed_orchestrator_stack_from_plan`, now running in-session instead of across sessions), replays any in-flight `StackOpJournal` (crash recovery), then proceeds to `assess`.
-  - `assess` / `spawn` / `merge` / `repoint` — the same resumable merge-and-repoint loop described in [Loop shape](#loop-shape) below, unchanged.
+  - `write-stack-plan` — the agent emits both plan artifacts via `tddy-tools submit`. No structured JSON goal schema is shared with TDD; the submit carries the YAML plan payload. Seeding `Changeset.stack` from the written plan happens here / on entry to `orchestrate` (idempotent — same guard as the old `seed_orchestrator_stack_from_plan`).
+  - `orchestrate` — the **free-prompting operator loop**. A single `BackendInvokeTask` goal with **no `end` edge**: `FlowRunner` hits "no successor" and pauses as `WaitingForInput`, keeping the session `Running` for multi-turn chat (identical mechanism to the `free-prompting` recipe). `PermissionHint::AcceptEdits` (the agent edits files during conflict resolution), and its allowed tools are the [PR-management tools](#pr-management-tools) plus `Agent`. There is **no** automatic `assess → spawn / merge / repoint` cycle; the developer prompts the agent, which calls the tools explicitly.
+- **Removed:** the `begin-orchestrate` host bridge task and the `assess` / `spawn` / `merge` / `repoint` graph nodes and edges. The underlying helpers (`assemble_views`, `effective_base_ref`, `execute_stack_merge`, `execute_stack_repoint`, `RealGithubPrApi`, conflict detection) are **kept** — they are now called by the PR-management tools rather than by graph tasks.
 - **Artifacts (manifest):** union of the plan and orchestrate artifacts — `stack_plan → stack-plan.yaml`, `stack_plan_md → pr-stack-plan.md`, `stack_status_md → stack-status.md`, `stack_status_json → stack-status.json`.
 - **`stack-plan.yaml` contract:** a versioned list of PR nodes, each with `node_id`, `title`, `description`, `branch_suggestion`, `parents` (list of `node_id` strings; empty for roots), and optional `child_recipe` (defaults to `tdd`). Multiple entries in `parents` express a genuine DAG dependency. `branch_suggestion` is **required** and must follow the grouped convention `feature/<stack-slug>/<node>` (e.g. `feature/auth/token-store`, `feature/auth/middleware`) — every PR shares one `feature/<stack-slug>/` namespace so the stack's branches group together, and "Start session" always has a concrete branch to create.
 - **Parser types** in `plan_pr_stack/mod.rs` (reused as-is by the unified recipe): `StackPlanOutput { version, prs: Vec<PlannedPr> }`, `PlannedPr { node_id, title, description, branch_suggestion, parents, child_recipe }`, and `planned_prs_into_stack_nodes(prs) -> Vec<StackNode>`. Validation (`validate_stack_plan`): unique `node_id`s, all referenced `parents` resolve, no cycle detected via `Stack::topo_order`, and every `branch_suggestion` is present, in `feature/<stack>/<node>` form, and shares one `feature/<stack>/` namespace.
-- **State table:** `Init | AnalyzeStack → analyze-stack`; `WriteStackPlan → write-stack-plan`; `StackPlanned → assess` (continues into orchestration — **not** a terminal state); loop states (`assess | spawn | merge | repoint | wait`) → `assess`; `done | failed → None`. `status_for_state`: `StackPlanned → "Active"` (changed from the old plan-only recipe's `"Completed"` — the session is not done, it goes on to orchestrate the same stack), `done → "Completed"`, `failed → "Failed"`, else `"Active"`.
+- **State table:** `Init | AnalyzeStack → analyze-stack`; `WriteStackPlan → write-stack-plan`; `StackPlanned → orchestrate` (drops into the interactive loop — **not** a terminal "Completed" state); `orchestrate → orchestrate` (pauses for input each turn); `failed → None`. `next_goal_for_state_with_changeset` still disambiguates a legacy `"Init"` with a populated `Changeset.stack` by resuming into `orchestrate` (previously `assess`). `status_for_state`: `StackPlanned | orchestrate → "Active"`, `failed → "Failed"`, else `"Active"`.
 - **Refining the plan via chat:** `plan_refinement_goal()` returns `write-stack-plan` — the same goal used to author the plan. After the plan exists (state `StackPlanned`), the operator can keep chatting; each refinement turn re-runs `write-stack-plan` on the **same session**, the agent re-emits `stack-plan.yaml`, and the host re-validates and re-seeds `Changeset.stack` (`reseed_stack_from_plan_if_unspawned`) — overwriting `version` + `nodes` wholesale as long as no node has been materialised into a child session yet. Once a node has a `session_id`, further refinement of that node is refused so an in-progress child session is never orphaned. An invalid refinement (cycle, dangling parent) is rejected and the previously-persisted stack is left untouched. On resume/continue, `StackPlanned` moves on into `assess` — refinement is an operator-initiated side path, not the default resume target.
 
-### Loop shape (engine-native)
+### Loop shape (free-prompting)
 
 ```
-assess --GoTo--> spawn        --GoTo("assess")-->
-assess --GoTo--> merge        --GoTo("repoint")--> repoint --GoTo("assess")-->
-assess --GoTo--> end (EndTask)
-assess (Wait)  --> WaitForInput
+analyze-stack --GoTo--> write-stack-plan --GoTo--> orchestrate
+orchestrate (no successor edge) --> WaitForInput   (each turn)
 ```
 
-`FlowRunner` executes one task, persists, and returns — that boundary is also the resumability boundary. The loop is idempotent because `assess` recomputes the full world state from durable inputs on every entry. Working nodes (`spawn`, `merge`, `repoint`) are custom `Task` implementations, not backend invocations — no `tddy-tools submit` is used for this part of the pipeline.
+`FlowRunner` executes one task, persists, and returns. `orchestrate` has **no** outgoing edge, so after each backend turn the runner finds no successor and pauses as `WaitingForInput`, keeping the session `Running` — the developer sends the next prompt, the agent responds and (optionally) calls PR-management tools, and the cycle repeats. This is the same pause-for-input mechanism the `free-prompting` recipe relies on; there is no autonomous merge/repoint cycle.
 
 ### Legacy aliases
 
+> **Note (2026-07-03):** the `OrchestratePrStackRecipe` struct and its engine-driven `assess → spawn/merge/repoint` graph are **retained but inert** — no CLI name resolves to it (all three resolve to `PrStackRecipe`), so it is never instantiated in production. It is deliberately kept for its acceptance-test coverage of the engine-driven orchestration logic whose helpers (`assemble_views`, `decide_next_action`, `execute_stack_merge`, `execute_stack_repoint`) are reused on demand by the free-prompting `pr_*` tools. This is a documented decision, not an oversight; remove it only together with that test coverage.
+
 `plan-pr-stack` and `orchestrate-pr-stack` remain in `approval_policy::supported_workflow_recipe_cli_names()` and both resolve, via `recipe_resolve.rs`, to the same `PrStackRecipe` (i.e. `recipe.name() == "pr-stack"` regardless of which of the three CLI names was used to start the session). A legacy on-disk session created before the consolidation (recipe field still `"plan-pr-stack"` or `"orchestrate-pr-stack"`, state possibly the old orchestrate-only `"Init"` — which never advanced during that recipe's healthy operation) resumes correctly because `PrStackRecipe` overrides a new `WorkflowRecipe::next_goal_for_state_with_changeset` trait method (default: delegates to `next_goal_for_state`, ignoring the changeset) to disambiguate `"Init"` using `Changeset.stack`: a populated stack means orchestration is already under way, so resume goes to `assess`; an empty/absent stack means a genuinely fresh session, so resume goes to `analyze-stack`. `start_goal_for_session_continue` (`tddy-core/src/changeset.rs`) calls the changeset-aware method — the bare `next_goal_for_state` alone cannot make this distinction, since it never sees the changeset.
 
-### `assess` decision algorithm (priority order)
+## PR-management tools
 
-Each tick the orchestrator reads the parent `Changeset.stack`, each child's `changeset.yaml` (authoritative), `artifacts/stack-progress.json`, and live GitHub state via `GithubPrApi`.
+During the `orchestrate` goal the agent has a set of `tddy-tools` MCP tools (names `mcp__tddy-tools__pr_*`) that let it manage the stack explicitly. They are added to the MCP tool router in `tddy-tools` (`server.rs`), advertised automatically via the session's MCP config, and auto-allowed by the permission `decide()` (all `mcp__tddy-tools__*` are allowed without a prompt). Each tool operates on the **orchestrator session's changeset** (located via the existing session-context plumbing; read/write via `changeset::{read_changeset, update_stack_atomic}`) and, where relevant, live GitHub + git.
 
-1. Any node failed or PR unexpectedly closed → `MarkFailed` (pause loop, surface error to operator).
-2. Any node where all dependencies are merged, the PR is open, and its effective base is already the main branch → `Merge` (subject to operator gate, see below).
-3. Any node not yet materialised whose parents are all spawned-or-merged → `Spawn` (bottom-to-top, topological order).
-4. Any node still building or PR queued with nothing else actionable → `Wait` (`WaitForInput`).
-5. All nodes merged → `Done`.
+| Tool | Purpose | Reuses |
+|------|---------|--------|
+| `pr_stack_status` | List every node with its live GitHub state (`PrLiveStatus`) and its computed [internal status](#internal-pr-status); writes derived statuses back to the changeset. | `assemble_views`, `effective_base_ref`, `PrLiveStatus` |
+| `pr_merge` | Merge a node's PR into its base. | `RealGithubPrApi::merge_pr` / `execute_stack_merge` |
+| `pr_repoint` | Repoint a node's PR base branch after an ancestor merges. | `RealGithubPrApi::patch_pr_base` / `execute_stack_repoint`, `effective_base_ref` |
+| `pr_close` | Close a PR without merging. | new `close_pr` helper (`PATCH /pulls/{n}` `{state: "closed"}`) |
+| `pr_resolve_conflicts` | Sync a node's branch with its base, detect conflicts (`git ls-files -u`), and return the conflicted paths so the agent resolves them in the worktree; marks the node `has-conflicts`. | `merge_pr/git_ops.rs::sync_feature_with_origin_main`, `ensure_no_unmerged_paths` |
+| `pr_set_status` | Agent override: set a node's internal status `kind` + `note` with `source = "override"`. | `update_stack_atomic` |
+| `pr_add_planned` | Add/amend a planned PR node mid-flow. | `pr_stack::add_planned_pr_node` |
+| `pr_spawn_child` | Start a child coding session for a node (with `stack_parent` set) — the same effect as the web "Start session" CTA, driven from chat. | `StartSession` daemon path (via the toolcall relay) |
 
-### Operator merge gate
-
-The context flag `orchestrator_autonomous_merge` (persisted under `Changeset.workflow`, rehydrated by `merge_persisted_workflow_into_context`) controls the gate:
-
-- **`false` (default):** before each merge, `assess` returns `WaitForInput` with a prompt asking the operator to approve merging PR #N on branch X. Operator approval sets a one-shot context key `merge_approved_for_node_<id>` and re-runs.
-- **`true`:** `assess` routes directly to the `merge` task without an approval pause.
+Merging and repointing keep their prior crash-safety semantics (`StackOpJournal`, idempotent repoint, `--force-with-lease`), only now they are entered when the agent calls `pr_merge` / `pr_repoint`, not by the loop.
 
 ### GitHub API surface
 
-`GithubPrApi` trait (real implementation + stub for tests): `get_open_pr`, `merge_pr(number)`, `patch_pr_base(number, new_base)`, `create_pr(head, base, title, body)`. Backed by shared curl helpers `curl_github_patch_json` and `curl_github_post_json` in `github_rest_common.rs` (alongside the existing GET and PUT helpers from `merge_pr/github.rs`).
+`GithubPrApi` trait (real implementation + mock transport for tests): `get_open_pr`, `merge_pr(number)`, `patch_pr_base(number, new_base)`, `create_pr(head, base, title, body)`, and the new `close_pr(number)`. Backed by shared curl helpers `curl_github_patch_json`, `curl_github_post_json`, and `curl_github_put_json` in `github_rest_common.rs`.
+
+## Internal PR status
+
+`internal_status: Option<PrInternalStatus>` on `StackNode` is the **action-needed** signal, orthogonal to `pr_status` (which mirrors GitHub reality):
+
+```
+PrInternalStatus { kind: String, note: Option<String>, source: String }
+```
+
+- **`kind`** — one of `up-to-date`, `needs-repoint`, `has-conflicts`, `ready-to-merge`, `blocked`, `merged`.
+- **`note`** — optional free-text annotation (agent context, e.g. "waiting on API design").
+- **`source`** — `derived` (auto-computed) or `override` (agent-set).
+
+**Derivation** (in `pr_stack_status`, from `NodeView` / `PrLiveStatus` / `effective_base_ref`):
+
+1. PR merged → `merged`.
+2. A parent has merged but the node's PR base ≠ its effective base → `needs-repoint`.
+3. Syncing the branch with its base surfaces unmerged paths → `has-conflicts`.
+4. PR open, all deps merged, no conflicts → `ready-to-merge`.
+5. Otherwise → `up-to-date`.
+
+**Override wins:** a node whose `source == "override"` is **not** overwritten by derivation — the agent's manual status (e.g. `blocked` with a note) persists until it clears the override. This is auto-derived + agent override, per the design decision.
+
+`internal_status` is additive (`#[serde(default, skip_serializing_if = "Option::is_none")]`) so old `changeset.yaml` files deserialize with `None`. It rides to the web inside `SessionEntry.stack_plan_json` (no proto change) and renders as a colored badge on each planned-PR row (§ Web UI).
 
 ## Progress tracking contract
 
@@ -145,7 +172,7 @@ After the operator approves (or autonomous mode is enabled) the orchestrator mer
 1. **GitHub base update:** `patch_pr_base(dependent_pr_number, new_base)` where `new_base` is the recomputed effective base (now `main` or the next non-skipped ancestor).
 2. **Git history repoint:** in a dedicated scratch worktree for the dependent branch: `git rebase --onto <new_base> <old_base> <branch>`, then `git push --force-with-lease=<branch>:<expected-sha>`. A `git merge-base` fallback guards against a stale `<old_base>`. `git rerere` is enabled at bootstrap.
 
-Rebase conflicts in v1 are not resolved automatically: the node is marked `Failed`, the loop pauses, and the error (branch + git stderr) is surfaced in `stack-status.md`. Agent-assisted resolution is deferred to a later release.
+Rebase/merge conflicts are surfaced to the agent via `pr_resolve_conflicts`: the tool syncs the branch, detects unmerged paths, marks the node `has-conflicts`, and returns the conflicted file list. The agent then resolves the conflicts directly in the node's worktree (the `orchestrate` goal runs with `AcceptEdits`) and re-runs the tool to confirm a clean tree — replacing the old "mark Failed and pause" behavior.
 
 ## Full DAG handling
 
@@ -187,7 +214,9 @@ A recovery guard at the top of every `assess` entry (`recover_in_flight_stack_op
 
 ### Per-workflow session views: the PR-Stack Chat Screen
 
-Once a `pr-stack` session is selected in the session drawer, the main pane opens a dedicated **PR-Stack Chat Screen** instead of the terminal — a chat window backed by a remote Presenter (over the existing `TddyRemote.Stream` RPC) alongside a live list of the planned PRs with a **"Start session"** CTA per unspawned node. Full UI spec: [Session drawer § Per-Workflow Session Views](../web/session-drawer.md#per-workflow-session-views).
+Once a `pr-stack` session is selected in the session drawer, the main pane opens a dedicated **PR-Stack Chat Screen** instead of the terminal — a chat window backed by a remote Presenter (over the existing `TddyRemote.Stream` RPC) alongside a live list of the planned PRs with a **"Start session"** CTA per unspawned node. This chat *is* the `orchestrate` free-prompting loop: the developer types instructions ("merge n1", "repoint the dependents", "what needs action?") and the agent responds and calls the [PR-management tools](#pr-management-tools). Full UI spec: [Session drawer § Per-Workflow Session Views](../web/session-drawer.md#per-workflow-session-views).
+
+Each planned-PR row (`PlannedPrRow.tsx`) renders an **internal-status badge** next to the existing phase chip, colored by `internal_status.kind` (e.g. amber `needs-repoint`, red `has-conflicts`, green `ready-to-merge`), with `internal_status.note` as hover text. The badge is parsed from the `internal_status` field carried inside `SessionEntry.stack_plan_json` (`stackPlan.ts::parseStackPlan`).
 
 ### Manually adding a planned PR
 

@@ -200,6 +200,7 @@ mod tests {
                         parents: vec![],
                         pr_status: None,
                         child_state: None,
+                        internal_status: None,
                     },
                     StackNode {
                         node_id: "n2".into(),
@@ -211,6 +212,7 @@ mod tests {
                         parents: vec!["n1".into()],
                         pr_status: None,
                         child_state: None,
+                        internal_status: None,
                     },
                 ],
             }),
