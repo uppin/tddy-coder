@@ -125,7 +125,10 @@ impl RpcService for MultiRpcService {
                     service,
                     self.service_names()
                 );
-                RpcResult::Unary(Err(Status::not_found(format!("Unknown service: {}", service))))
+                RpcResult::Unary(Err(Status::not_found(format!(
+                    "Unknown service: {}",
+                    service
+                ))))
             }
         }
     }
@@ -152,7 +155,10 @@ impl RpcService for MultiRpcService {
                     service,
                     self.service_names()
                 );
-                RpcResult::Unary(Err(Status::not_found(format!("Unknown service: {}", service))))
+                RpcResult::Unary(Err(Status::not_found(format!(
+                    "Unknown service: {}",
+                    service
+                ))))
             }
         }
     }
@@ -165,7 +171,11 @@ impl RpcService for MultiRpcService {
     ) -> Result<BidiStreamOutput, Status> {
         match self.find_service(service) {
             Some(s) => {
-                log::info!("[rpc] MultiRpcService.start_bidi_stream dispatch {}/{}", service, method);
+                log::info!(
+                    "[rpc] MultiRpcService.start_bidi_stream dispatch {}/{}",
+                    service,
+                    method
+                );
                 s.start_bidi_stream(service, method, input_rx).await
             }
             None => {

@@ -186,34 +186,36 @@ mod tests {
     #[test]
     fn after_task_writes_stack_status_files_when_stack_present() {
         let dir = tmp_session("status-files");
-        let mut cs = Changeset::default();
-        cs.stack = Some(Stack {
-            version: 1,
-            nodes: vec![
-                StackNode {
-                    node_id: "n1".into(),
-                    title: "Auth store".into(),
-                    description: String::new(),
-                    branch_suggestion: None,
-                    branch: Some("feature/auth-store".into()),
-                    session_id: None,
-                    parents: vec![],
-                    pr_status: None,
-                    child_state: None,
-                },
-                StackNode {
-                    node_id: "n2".into(),
-                    title: "Auth middleware".into(),
-                    description: String::new(),
-                    branch_suggestion: None,
-                    branch: None,
-                    session_id: None,
-                    parents: vec!["n1".into()],
-                    pr_status: None,
-                    child_state: None,
-                },
-            ],
-        });
+        let cs = Changeset {
+            stack: Some(Stack {
+                version: 1,
+                nodes: vec![
+                    StackNode {
+                        node_id: "n1".into(),
+                        title: "Auth store".into(),
+                        description: String::new(),
+                        branch_suggestion: None,
+                        branch: Some("feature/auth-store".into()),
+                        session_id: None,
+                        parents: vec![],
+                        pr_status: None,
+                        child_state: None,
+                    },
+                    StackNode {
+                        node_id: "n2".into(),
+                        title: "Auth middleware".into(),
+                        description: String::new(),
+                        branch_suggestion: None,
+                        branch: None,
+                        session_id: None,
+                        parents: vec!["n1".into()],
+                        pr_status: None,
+                        child_state: None,
+                    },
+                ],
+            }),
+            ..Default::default()
+        };
         write_changeset(&dir, &cs).unwrap();
 
         let ctx = Context::new();

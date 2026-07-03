@@ -72,6 +72,15 @@ pub fn recover_in_flight_stack_op(
     }
 }
 
+/// Delete the journal file (call after a successful complete operation).
+pub fn delete_stack_op_journal(parent_dir: &Path) -> Result<(), std::io::Error> {
+    let path = parent_dir.join(".workflow").join("stack-op.json");
+    if path.exists() {
+        std::fs::remove_file(&path)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,13 +148,4 @@ mod tests {
         let result = recover_in_flight_stack_op(tmp.path()).unwrap();
         assert!(result.is_none());
     }
-}
-
-/// Delete the journal file (call after a successful complete operation).
-pub fn delete_stack_op_journal(parent_dir: &Path) -> Result<(), std::io::Error> {
-    let path = parent_dir.join(".workflow").join("stack-op.json");
-    if path.exists() {
-        std::fs::remove_file(&path)?;
-    }
-    Ok(())
 }

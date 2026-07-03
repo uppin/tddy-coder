@@ -4173,7 +4173,8 @@ mod resume_agent_recipe_restore_tests {
     use tddy_core::SessionMetadata;
 
     fn metadata_from_yaml(yaml: &str) -> SessionMetadata {
-        serde_yaml::from_str(yaml).expect("test metadata YAML must deserialize into SessionMetadata")
+        serde_yaml::from_str(yaml)
+            .expect("test metadata YAML must deserialize into SessionMetadata")
     }
 
     #[test]
@@ -4222,8 +4223,14 @@ status: active
         let (agent, recipe) = resume_agent_and_recipe(&metadata);
 
         // Then there is nothing to restore (tddy-coder applies its own resolution downstream)
-        assert!(agent.is_none(), "legacy session has no persisted agent to restore");
-        assert!(recipe.is_none(), "legacy session has no persisted recipe to restore");
+        assert!(
+            agent.is_none(),
+            "legacy session has no persisted agent to restore"
+        );
+        assert!(
+            recipe.is_none(),
+            "legacy session has no persisted recipe to restore"
+        );
     }
 }
 

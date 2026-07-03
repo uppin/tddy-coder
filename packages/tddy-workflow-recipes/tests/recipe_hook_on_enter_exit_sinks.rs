@@ -128,7 +128,6 @@ fn free_prompting_hooks_on_enter_sets_progress_sink_and_on_exit_clears_it() {
 #[test]
 fn hooks_impl_without_sink_does_not_panic_on_enter_or_exit() {
     use std::error::Error;
-    use tddy_core::workflow::graph::ElicitationEvent;
     use tddy_core::workflow::task::TaskResult;
 
     struct MinimalHooks;

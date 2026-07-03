@@ -932,7 +932,6 @@ fn session_dir_under_sessions_refine_uses_repo_as_working_dir() {
         std::env::temp_dir().join(format!("tddy-plan-refine-sessions-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&sessions_base);
     std::fs::create_dir_all(&sessions_base).expect("create sessions base");
-    let sessions_base_str = sessions_base.to_str().expect("path");
 
     let (repo_dir, _) = common::temp_dir_with_git_repo("plan-refine-repo");
 

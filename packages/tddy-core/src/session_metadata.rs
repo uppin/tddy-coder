@@ -296,10 +296,11 @@ status: active
     #[test]
     fn agent_and_recipe_round_trip_through_session_yaml() {
         // Given a fresh tool session started with the cursor agent on the pr-stack recipe
-        let tmp =
-            std::env::temp_dir().join(format!("tddy-agent-recipe-rt-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("tddy-agent-recipe-rt-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
-        let session_dir = tmp.join("sessions").join("019f243a-8e31-7203-81dd-53f5ef8b9352");
+        let session_dir = tmp
+            .join("sessions")
+            .join("019f243a-8e31-7203-81dd-53f5ef8b9352");
         fs::create_dir_all(&session_dir).unwrap();
 
         write_initial_tool_session_metadata(
@@ -348,8 +349,14 @@ status: active
             serde_yaml::from_str(yaml).expect("legacy YAML must deserialise");
 
         // Then agent and recipe default to None
-        assert!(meta.agent.is_none(), "agent must default to None for legacy sessions");
-        assert!(meta.recipe.is_none(), "recipe must default to None for legacy sessions");
+        assert!(
+            meta.agent.is_none(),
+            "agent must default to None for legacy sessions"
+        );
+        assert!(
+            meta.recipe.is_none(),
+            "recipe must default to None for legacy sessions"
+        );
     }
 
     /// `activity_status` survives a write/read round-trip through `.session.yaml`.
@@ -533,6 +540,8 @@ previous_session_id: {prev}
             activity_status: None,
             hook_token: None,
             sandbox: Some(true),
+            agent: None,
+            recipe: None,
             specialized_agents: vec!["fastcontext".to_string(), "my-linter".to_string()],
         };
         write_session_metadata(&session_dir, &metadata).unwrap();

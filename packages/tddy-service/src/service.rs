@@ -20,6 +20,14 @@ use crate::gen::{
 /// `Presenter::connect_view`.
 type ViewFactory = std::sync::Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>;
 
+/// `open_view`'s result: snapshot messages to replay first, a live event receiver, and the intent
+/// sender for the opened stream.
+type OpenView = (
+    Vec<ServerMessage>,
+    broadcast::Receiver<PresenterEvent>,
+    mpsc::Sender<tddy_core::UserIntent>,
+);
+
 /// How a `TddyRemoteService` reaches the Presenter for an opened stream.
 enum ViewSource {
     /// Raw handle: live events only, no snapshot. For callers/tests without Presenter state access.
@@ -60,16 +68,7 @@ impl TddyRemoteService {
     /// Open a View subscription: `(snapshot messages to replay first, live event receiver, intent
     /// sender)`. For the `connect_view` source the snapshot and subscription come from a single
     /// [`tddy_core::ViewConnection`], so no live event can slip in between them.
-    fn open_view(
-        &self,
-    ) -> Result<
-        (
-            Vec<ServerMessage>,
-            broadcast::Receiver<PresenterEvent>,
-            mpsc::Sender<tddy_core::UserIntent>,
-        ),
-        &'static str,
-    > {
+    fn open_view(&self) -> Result<OpenView, &'static str> {
         match &self.source {
             ViewSource::Handle {
                 event_tx,
@@ -82,7 +81,9 @@ impl TddyRemoteService {
                 Ok((Vec::new(), event_tx.subscribe(), intent_tx.clone()))
             }
             ViewSource::View(view_factory) => {
-                log::info!("[TddyRemote] open_view: View source — calling view_factory (connect_view)");
+                log::info!(
+                    "[TddyRemote] open_view: View source — calling view_factory (connect_view)"
+                );
                 let conn = match view_factory() {
                     Some(c) => c,
                     None => {
@@ -124,7 +125,7 @@ impl TddyRemoteService {
 ///
 /// Callers pass the transport-specific base services already built (terminal, token, tunnel, …)
 /// plus the Presenter's `connect_view` factory; this centralizes mounting the Presenter View-adapter
-/// + a reflection entry so the two transports can never diverge again. Using the factory (rather
+/// and a reflection entry so the two transports can never diverge again. Using the factory (rather
 /// than a raw handle) means each opened stream replays the current state snapshot to the View, like
 /// the TUI.
 pub fn session_view_adapter_surface(
@@ -164,7 +165,10 @@ impl TddyRemoteService {
         ),
         String,
     > {
-        log::info!("[TddyRemote] {} stream() ENTER (before open_view)", transport);
+        log::info!(
+            "[TddyRemote] {} stream() ENTER (before open_view)",
+            transport
+        );
         let (replay, mut event_rx, intent_tx) = self.open_view().map_err(|e| e.to_string())?;
         log::info!(
             "[TddyRemote] {} stream opened; replaying {} snapshot message(s)",
@@ -197,7 +201,10 @@ impl TddyRemoteService {
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
-            log::info!("[TddyRemote] {} stream: outbound forwarder ended", transport);
+            log::info!(
+                "[TddyRemote] {} stream: outbound forwarder ended",
+                transport
+            );
         });
 
         Ok((rx, intent_tx))

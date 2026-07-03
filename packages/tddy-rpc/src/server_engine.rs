@@ -103,7 +103,11 @@ impl<S: RpcService> ServerEngine<S> {
         }
 
         if opens_bidi_session {
-            log::info!("[rpc] engine opening bidi session for {}/{}", service, method);
+            log::info!(
+                "[rpc] engine opening bidi session for {}/{}",
+                service,
+                method
+            );
             self.open_bidi_session(peer, request, outgoing).await;
             return;
         }

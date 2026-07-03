@@ -707,7 +707,8 @@ mod tddy_remote_livekit_acceptance {
             }
         });
 
-        let bridge = tddy_rpc::RpcBridge::new(TddyRemoteServer::new(TddyRemoteService::new(handle)));
+        let bridge =
+            tddy_rpc::RpcBridge::new(TddyRemoteServer::new(TddyRemoteService::new(handle)));
 
         // When — streaming a SubmitFeatureInput intent through the RpcBridge bidi entry point,
         // exactly as a LiveKit MultiRpcService dispatches an incoming data-channel RPC
@@ -824,8 +825,11 @@ mod session_view_adapter_surface_acceptance {
     /// thread — the source of truth a remote View adapter connects to. Returns a clone of the
     /// Presenter's event broadcast sender (so a test can emit a live event), the `connect_view`
     /// factory a session wires its RPC surface to, and a guard that stops the poll loop when dropped.
-    fn a_running_presenter() -> (broadcast::Sender<PresenterEvent>, ViewFactory, PresenterPollGuard)
-    {
+    fn a_running_presenter() -> (
+        broadcast::Sender<PresenterEvent>,
+        ViewFactory,
+        PresenterPollGuard,
+    ) {
         let (event_tx, _) = broadcast::channel(256);
         let event_tx_for_test = event_tx.clone();
         let (intent_tx, intent_rx) = mpsc::channel();
@@ -874,7 +878,10 @@ mod session_view_adapter_surface_acceptance {
         (
             event_tx_for_test,
             view_factory,
-            PresenterPollGuard { shutdown, join: Some(join) },
+            PresenterPollGuard {
+                shutdown,
+                join: Some(join),
+            },
         )
     }
 
@@ -904,9 +911,11 @@ mod session_view_adapter_surface_acceptance {
         let (tx, rx) = tokio_mpsc::channel::<RpcMessage>(64);
         tx.send(RpcMessage {
             payload: ClientMessage {
-                intent: Some(client_message::Intent::SubmitFeatureInput(SubmitFeatureInput {
-                    text: feature.to_string(),
-                })),
+                intent: Some(client_message::Intent::SubmitFeatureInput(
+                    SubmitFeatureInput {
+                        text: feature.to_string(),
+                    },
+                )),
             }
             .encode_to_vec(),
             metadata: RequestMetadata::default(),
@@ -927,23 +936,22 @@ mod session_view_adapter_surface_acceptance {
 
         let mut events = Vec::new();
         for _ in 0..50 {
-            match tokio::time::timeout(Duration::from_millis(200), output_rx.recv()).await {
-                Ok(Some(Ok(bytes))) => {
-                    let msg = ServerMessage::decode(&bytes[..]).expect("decode ServerMessage");
-                    if let Some(event) = msg.event {
-                        events.push(event);
-                        let has_goal = events
-                            .iter()
-                            .any(|e| matches!(e, server_message::Event::GoalStarted(_)));
-                        let has_mode = events
-                            .iter()
-                            .any(|e| matches!(e, server_message::Event::ModeChanged(_)));
-                        if has_goal && has_mode {
-                            break;
-                        }
+            if let Ok(Some(Ok(bytes))) =
+                tokio::time::timeout(Duration::from_millis(200), output_rx.recv()).await
+            {
+                let msg = ServerMessage::decode(&bytes[..]).expect("decode ServerMessage");
+                if let Some(event) = msg.event {
+                    events.push(event);
+                    let has_goal = events
+                        .iter()
+                        .any(|e| matches!(e, server_message::Event::GoalStarted(_)));
+                    let has_mode = events
+                        .iter()
+                        .any(|e| matches!(e, server_message::Event::ModeChanged(_)));
+                    if has_goal && has_mode {
+                        break;
                     }
                 }
-                _ => {}
             }
         }
         events
@@ -1162,7 +1170,6 @@ mod snapshot_replay_acceptance {
         );
     }
 }
-
 
 /// RPC Playground reflection acceptance tests.
 ///

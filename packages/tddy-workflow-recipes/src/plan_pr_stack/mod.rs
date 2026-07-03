@@ -229,13 +229,35 @@ impl WorkflowRecipe for PlanPrStackRecipe {
     }
 }
 
+impl SessionArtifactManifest for PlanPrStackRecipe {
+    fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
+        &[
+            ("stack_plan", STACK_PLAN_BASENAME),
+            ("stack_plan_md", PR_STACK_PLAN_MD_BASENAME),
+        ]
+    }
+
+    fn default_artifacts(&self) -> BTreeMap<String, String> {
+        let mut a = BTreeMap::new();
+        a.insert("stack_plan".to_string(), STACK_PLAN_BASENAME.to_string());
+        a.insert(
+            "stack_plan_md".to_string(),
+            PR_STACK_PLAN_MD_BASENAME.to_string(),
+        );
+        a
+    }
+
+    fn primary_document_basename(&self) -> Option<String> {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn parser_happy_path_three_node_dag() {
-        use tddy_core::StackNode;
         let plan = StackPlanOutput {
             version: 1,
             prs: vec![
@@ -390,28 +412,5 @@ mod tests {
         assert!(n.branch.is_none());
         assert!(n.pr_status.is_none());
         assert!(n.child_state.is_none());
-    }
-}
-
-impl SessionArtifactManifest for PlanPrStackRecipe {
-    fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
-        &[
-            ("stack_plan", STACK_PLAN_BASENAME),
-            ("stack_plan_md", PR_STACK_PLAN_MD_BASENAME),
-        ]
-    }
-
-    fn default_artifacts(&self) -> BTreeMap<String, String> {
-        let mut a = BTreeMap::new();
-        a.insert("stack_plan".to_string(), STACK_PLAN_BASENAME.to_string());
-        a.insert(
-            "stack_plan_md".to_string(),
-            PR_STACK_PLAN_MD_BASENAME.to_string(),
-        );
-        a
-    }
-
-    fn primary_document_basename(&self) -> Option<String> {
-        None
     }
 }
