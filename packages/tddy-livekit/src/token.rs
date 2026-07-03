@@ -79,7 +79,7 @@ impl TokenGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::test_util::{a_token_generator, a_token_generator_with_ttl};
+    use crate::test_util::{a_token_generator, a_token_generator_with_ttl};
 
     #[test]
     fn token_generator_generates_valid_jwt() {

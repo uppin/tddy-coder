@@ -48,6 +48,7 @@ import { Button } from "./components/ui/button";
 import { ConnectionScreen } from "./components/ConnectionScreen";
 import { WorktreesAppPage } from "./components/worktrees/WorktreesAppPage";
 import { VmsAppPage } from "./components/vms/VmsAppPage";
+import { ProjectsAppPage } from "./components/projects/ProjectsAppPage";
 import { TasksDrawerScreen } from "./components/tasks/TasksDrawerScreen";
 import { RpcPlaygroundAppPage } from "./rpc-playground/RpcPlaygroundAppPage";
 import { SessionsDrawerScreen } from "./components/sessions/SessionsDrawerScreen";
@@ -55,6 +56,7 @@ import {
   isRpcPlaygroundPath,
   isTasksPath,
   isVmsPath,
+  isProjectsPath,
   isSessionsDrawerPath,
   parseTerminalSessionIdFromPathname,
 } from "./routing/appRoutes";
@@ -426,6 +428,12 @@ export function App() {
           <TasksDrawerScreen />
         ) : isVmsPath(path) ? (
           <VmsAppPage onNavigate={navigate} />
+        ) : isProjectsPath(path) ? (
+          <ProjectsAppPage
+            livekitUrl={appConfig.livekitUrl}
+            commonRoom={appConfig.commonRoom}
+            onNavigate={navigate}
+          />
         ) : path === "/worktrees" ? (
           <WorktreesAppPage onNavigate={navigate} />
         ) : isSessionsDrawerPath(path) ? (

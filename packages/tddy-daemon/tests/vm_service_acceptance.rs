@@ -1,6 +1,7 @@
 //! VM service acceptance tests — drives VmService through RpcBridge with mock backend.
 
 use prost::Message;
+use serial_test::serial;
 use std::sync::Arc;
 use tddy_rpc::{Code, RequestMetadata, ResponseBody, RpcBridge, RpcMessage};
 use tddy_service::proto::vm::{
@@ -13,6 +14,31 @@ use tddy_task::TaskRegistry;
 use tddy_vm::service::{SessionUserResolver, VmServiceImpl};
 use tddy_vm::{MockVm, VmManager};
 use tempfile::tempdir;
+
+/// RAII guard: removes `BUILDROOT_DIR` from the environment for the duration of a test so
+/// `BuildVmImage` takes the fast-fail path these tests assert on. The project's own `nix
+/// develop` shell exports `BUILDROOT_DIR` (for `tddy-build-buildroot`'s production use), so
+/// without this guard these tests would attempt a real (multi-minute, network-dependent)
+/// buildroot build instead of hitting `STAGE_ERROR` immediately. Restores the previous value
+/// (if any) on drop; pair with `#[serial]` since it mutates process-global state.
+struct BuildrootDirGuard(Option<String>);
+
+impl BuildrootDirGuard {
+    fn unset() -> Self {
+        let previous = std::env::var("BUILDROOT_DIR").ok();
+        std::env::remove_var("BUILDROOT_DIR");
+        Self(previous)
+    }
+}
+
+impl Drop for BuildrootDirGuard {
+    fn drop(&mut self) {
+        match &self.0 {
+            Some(value) => std::env::set_var("BUILDROOT_DIR", value),
+            None => std::env::remove_var("BUILDROOT_DIR"),
+        }
+    }
+}
 
 const GOOD_TOKEN: &str = "valid-token";
 const BAD_TOKEN: &str = "bogus-token";
@@ -255,8 +281,10 @@ async fn call_stream<Req: Message, Resp: Message + Default>(
 }
 
 #[tokio::test]
+#[serial]
 async fn build_vm_image_streams_progress_messages() {
     // BuildVmImage must return a server stream ending with a Done or Error message.
+    let _buildroot_guard = BuildrootDirGuard::unset();
     let _dir = tempdir().unwrap();
     let manager = Arc::new(VmManager::new(
         &_dir.path().join("vms.json"),
@@ -395,8 +423,10 @@ async fn list_vm_images_with_invalid_token_returns_unauthenticated() {
 /// VmBuildTaskBody adapter was introduced. A STAGE_ERROR is acceptable in the test environment
 /// (BUILDROOT_DIR is not set), but the stream must not be empty and must be reachable.
 #[tokio::test]
+#[serial]
 async fn build_vm_image_adapter_still_delivers_progress_messages() {
     // Given — VmService backed by a shared TaskRegistry (mirrors the daemon setup)
+    let _buildroot_guard = BuildrootDirGuard::unset();
     let _dir = tempdir().unwrap();
     let registry = TaskRegistry::new();
     let manager = Arc::new(VmManager::new(
@@ -438,8 +468,10 @@ async fn build_vm_image_adapter_still_delivers_progress_messages() {
 /// Uses a simulated long build: since BUILDROOT_DIR is not set the body exits quickly with Failed,
 /// so we instead verify that CancelTask is accepted on a live task spawned with the same body type.
 #[tokio::test]
+#[serial]
 async fn vm_build_task_appears_in_registry_after_build_call() {
     // Given — VmService sharing a TaskRegistry with a TaskService observer
+    let _buildroot_guard = BuildrootDirGuard::unset();
     let _dir = tempdir().unwrap();
     let registry = TaskRegistry::new();
     let manager = Arc::new(VmManager::new(

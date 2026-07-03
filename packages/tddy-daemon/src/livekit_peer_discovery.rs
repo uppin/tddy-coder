@@ -5,7 +5,11 @@
 //!
 //! Published with [`livekit::prelude::LocalParticipant::set_metadata`]:
 //! `{"instance_id":"<stable id>","label":"<human-readable>"}`.
-//! When metadata is missing, the LiveKit participant **identity** string is used as `instance_id`.
+//! Only participants that publish a **valid advertisement** are listed as eligible daemons; browser
+//! (`web-`/`browser-`) and coder/session (`server…`, `daemon-<uuid>`) identities are excluded even
+//! when their metadata looks advertisement-shaped (mirrors the web UI's `inferParticipantRole`).
+//! There is no identity fallback — a participant with missing/invalid advertisement metadata is not
+//! treated as a daemon.
 //!
 //! # Trust and security
 //!
@@ -74,7 +78,10 @@ use livekit::prelude::{
 use livekit::DisconnectReason;
 use prost::Message;
 use serde::Deserialize;
-use tddy_service::proto::connection::{StartSessionRequest, StartSessionResponse};
+use tddy_service::proto::connection::{
+    AddProjectToHostRequest, AddProjectToHostResponse, ListProjectsRequest, ListProjectsResponse,
+    ProjectEntry as ProtoProjectEntry, StartSessionRequest, StartSessionResponse,
+};
 
 use crate::config::DaemonConfig;
 use crate::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
@@ -277,53 +284,59 @@ impl CommonRoomPeerRegistry {
     }
 }
 
+/// Classify a common-room participant, returning an eligible-daemon row **only** when the
+/// participant is a genuine `tddy-daemon` — not a browser or a coder/session participant.
+///
+/// Mirrors the web UI's `inferParticipantRole` (`tddy-web/src/hooks/useRoomParticipants.ts`):
+/// browser identities (`web-`/`browser-`) and coder/session identities (`server`, `server…`,
+/// `daemon-<uuid>…`) are never daemons — even when they publish advertisement-shaped metadata — and
+/// a daemon must publish a valid advertisement (no identity fallback). Only daemons own projects, so
+/// only daemons are eligible hosts for session/project routing and project fan-out.
+fn eligible_daemon_from_participant_fields(
+    identity: &str,
+    metadata: &str,
+    local_instance_id: &str,
+) -> Option<EligibleDaemonInfo> {
+    let id_trim = identity.trim();
+    if id_trim.starts_with("web-") || id_trim.starts_with("browser-") {
+        return None;
+    }
+    // A coder/session participant joins with a `server…` or `daemon-<uuid>` identity; it is never a
+    // host daemon even if its metadata happens to look like an advertisement.
+    if id_trim == "server" || id_trim.starts_with("server") || id_trim.starts_with("daemon-") {
+        return None;
+    }
+    let adv = parse_daemon_advertisement_json(metadata.trim()).ok()?;
+    let instance_id = adv.instance_id.trim().to_string();
+    if instance_id.is_empty() || instance_id == local_instance_id.trim() {
+        return None;
+    }
+    let label = if adv.label.trim().is_empty() {
+        format!("{instance_id} (LiveKit peer)")
+    } else {
+        adv.label.trim().to_string()
+    };
+    Some(EligibleDaemonInfo {
+        instance_id: DaemonInstanceId(instance_id),
+        label,
+    })
+}
+
 fn remote_participant_to_eligible(
     remote: RemoteParticipant,
     local_instance_id: &str,
 ) -> Option<EligibleDaemonInfo> {
     let identity_str = remote.identity().to_string();
     let meta = remote.metadata();
-    let meta_trim = meta.trim();
-    let (instance_id, label) = if !meta_trim.is_empty() {
-        match parse_daemon_advertisement_json(meta_trim) {
-            Ok(a) => (a.instance_id, a.label),
-            Err(e) => {
-                log::debug!(
-                    target: LOG_LIVEKIT_PEER_METADATA,
-                    "peer {} metadata not valid daemon advertisement ({}), falling back to identity",
-                    identity_str,
-                    e
-                );
-                (
-                    identity_str.clone(),
-                    format!("{identity_str} (LiveKit peer)"),
-                )
-            }
-        }
-    } else {
+    let result = eligible_daemon_from_participant_fields(&identity_str, &meta, local_instance_id);
+    if result.is_none() {
         log::debug!(
             target: LOG_LIVEKIT_PEER_METADATA,
-            "peer {} has empty metadata; using LiveKit identity as instance_id",
+            "peer {} is not an eligible daemon (browser/coder identity or no valid daemon advertisement); skipping",
             identity_str
         );
-        (
-            identity_str.clone(),
-            format!("{identity_str} (LiveKit peer)"),
-        )
-    };
-    let instance_id = instance_id.trim().to_string();
-    if instance_id.is_empty() || instance_id == local_instance_id.trim() {
-        return None;
     }
-    let label = if label.trim().is_empty() {
-        format!("{instance_id} (LiveKit peer)")
-    } else {
-        label.trim().to_string()
-    };
-    Some(EligibleDaemonInfo {
-        instance_id: DaemonInstanceId(instance_id),
-        label,
-    })
+    result
 }
 
 fn process_startup_unix_ms_suffix() -> &'static str {
@@ -359,11 +372,20 @@ pub fn local_instance_id_for_config(config: &DaemonConfig) -> String {
 pub struct LiveKitEligibleDaemonSource {
     config: Arc<DaemonConfig>,
     registry: Arc<CommonRoomPeerRegistry>,
+    room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
 }
 
 impl LiveKitEligibleDaemonSource {
-    pub fn new(config: Arc<DaemonConfig>, registry: Arc<CommonRoomPeerRegistry>) -> Self {
-        Self { config, registry }
+    pub fn new(
+        config: Arc<DaemonConfig>,
+        registry: Arc<CommonRoomPeerRegistry>,
+        room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    ) -> Self {
+        Self {
+            config,
+            registry,
+            room_slot,
+        }
     }
 
     fn local_row(&self) -> EligibleDaemonInfo {
@@ -392,6 +414,65 @@ impl EligibleDaemonSource for LiveKitEligibleDaemonSource {
                 e
             );
             vec![self.local_row()]
+        })
+    }
+
+    /// Fan out to each discovered peer's `ListProjects` (with `local_only = true` to avoid recursive
+    /// fan-out) and tag every returned row with that peer's instance id. Unreachable peers are
+    /// logged and skipped so aggregation degrades to whatever rows could be gathered.
+    fn peer_project_entries(&self, session_token: &str) -> Vec<ProtoProjectEntry> {
+        let remotes = self.registry.snapshot_remotes();
+        if remotes.is_empty() {
+            return Vec::new();
+        }
+        // Bridge this sync trait method to the async LiveKit forwarder on the daemon's
+        // multi-threaded Tokio runtime; when no runtime is present, skip fan-out gracefully.
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            log::warn!("peer_project_entries: no Tokio runtime available; skipping peer fan-out");
+            return Vec::new();
+        };
+        let room_slot = self.room_slot.clone();
+        let session_token = session_token.to_string();
+        tokio::task::block_in_place(move || {
+            handle.block_on(async move {
+                let mut out = Vec::new();
+                for remote in remotes {
+                    let peer_id = remote.instance_id.0.clone();
+                    let req = ListProjectsRequest {
+                        session_token: session_token.clone(),
+                        local_only: true,
+                    };
+                    match forward_to_peer(
+                        &room_slot,
+                        &peer_id,
+                        "connection.ConnectionService",
+                        "ListProjects",
+                        req.encode_to_vec(),
+                    )
+                    .await
+                    {
+                        Ok(bytes) => match ListProjectsResponse::decode(bytes.as_slice()) {
+                            Ok(resp) => {
+                                for mut p in resp.projects {
+                                    p.daemon_instance_id = peer_id.clone();
+                                    out.push(p);
+                                }
+                            }
+                            Err(e) => log::warn!(
+                                "peer_project_entries: decode ListProjectsResponse from peer {} failed: {}",
+                                peer_id,
+                                e
+                            ),
+                        },
+                        Err(e) => log::warn!(
+                            "peer_project_entries: forward ListProjects to peer {} failed: {}",
+                            peer_id,
+                            e
+                        ),
+                    }
+                }
+                out
+            })
         })
     }
 }
@@ -958,6 +1039,27 @@ pub async fn forward_start_session_via_livekit(
         .map_err(|e| tddy_rpc::Status::internal(format!("decode StartSessionResponse: {e}")))
 }
 
+/// Forward **AddProjectToHost** to another daemon in the common room via LiveKit data-channel RPC.
+///
+/// Thin encode/decode wrapper around [`forward_to_peer`].
+pub async fn forward_add_project_to_host_via_livekit(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &AddProjectToHostRequest,
+) -> Result<AddProjectToHostResponse, tddy_rpc::Status> {
+    let body = request.encode_to_vec();
+    let out = forward_to_peer(
+        room_slot,
+        peer_instance_id,
+        "connection.ConnectionService",
+        "AddProjectToHost",
+        body,
+    )
+    .await?;
+    AddProjectToHostResponse::decode(out.as_slice())
+        .map_err(|e| tddy_rpc::Status::internal(format!("decode AddProjectToHostResponse: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -970,6 +1072,92 @@ mod tests {
             parse_daemon_advertisement_json(json).expect("parse documented advertisement JSON");
         assert_eq!(got.instance_id, "peer-a");
         assert_eq!(got.label, "Peer A");
+    }
+
+    #[test]
+    fn eligible_daemon_accepts_a_peer_daemon_advertisement() {
+        // Given a genuine peer daemon (unprefixed identity + advertisement metadata)
+        let meta = r#"{"instance_id":"udoo","label":"udoo (this daemon)"}"#;
+
+        // When
+        let got = eligible_daemon_from_participant_fields("udoo", meta, "local-host");
+
+        // Then
+        let got = got.expect("a peer daemon advertisement is eligible");
+        assert_eq!(got.instance_id, DaemonInstanceId("udoo".to_string()));
+        assert_eq!(got.label, "udoo (this daemon)");
+    }
+
+    #[test]
+    fn eligible_daemon_rejects_a_coder_session_participant_even_with_advertisement_metadata() {
+        // Given a coder/session participant (identity `daemon-<uuid>`) that publishes
+        // advertisement-shaped metadata — only real daemons own projects, so it must be excluded.
+        let meta = r#"{"instance_id":"proj-x","label":"proj-x (this daemon)"}"#;
+
+        // When
+        let got = eligible_daemon_from_participant_fields(
+            "daemon-019d7d74-3a7f-7b03-88d2-f50bb7efb2f0",
+            meta,
+            "local-host",
+        );
+
+        // Then
+        assert!(
+            got.is_none(),
+            "a coder-role participant is not an eligible daemon"
+        );
+    }
+
+    #[test]
+    fn eligible_daemon_rejects_a_server_coder_identity() {
+        // Given
+        let got = eligible_daemon_from_participant_fields("server", "", "local-host");
+
+        // Then
+        assert!(
+            got.is_none(),
+            "the coder `server` identity is not an eligible daemon"
+        );
+    }
+
+    #[test]
+    fn eligible_daemon_rejects_a_browser_participant() {
+        // Given
+        let got = eligible_daemon_from_participant_fields("web-u-1-x", "", "local-host");
+
+        // Then
+        assert!(
+            got.is_none(),
+            "a browser participant is not an eligible daemon"
+        );
+    }
+
+    #[test]
+    fn eligible_daemon_rejects_a_participant_without_a_valid_advertisement() {
+        // Given a peer with a plausible-but-unprefixed identity and no advertisement metadata:
+        // there is no identity fallback, so it is not treated as a daemon.
+        let got = eligible_daemon_from_participant_fields("random-peer", "", "local-host");
+
+        // Then
+        assert!(
+            got.is_none(),
+            "a daemon must publish a valid advertisement to be eligible"
+        );
+    }
+
+    #[test]
+    fn eligible_daemon_excludes_the_local_instance() {
+        // Given the local daemon's own advertisement
+        let meta = r#"{"instance_id":"local-host","label":"local-host (this daemon)"}"#;
+
+        // When
+        let got = eligible_daemon_from_participant_fields("local-host", meta, "local-host");
+
+        // Then
+        assert!(
+            got.is_none(),
+            "the local instance is not listed as a remote peer"
+        );
     }
 
     #[test]
@@ -1014,7 +1202,8 @@ mod tests {
     fn livekit_eligible_daemon_source_lists_at_least_local_row() {
         let config = Arc::new(DaemonConfig::default());
         let registry = Arc::new(CommonRoomPeerRegistry::new());
-        let src = LiveKitEligibleDaemonSource::new(config, registry);
+        let room_slot = Arc::new(tokio::sync::RwLock::new(None));
+        let src = LiveKitEligibleDaemonSource::new(config, registry, room_slot);
         let list = src.list_eligible_daemons();
         assert!(
             !list.is_empty(),

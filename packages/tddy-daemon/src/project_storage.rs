@@ -71,6 +71,27 @@ pub fn add_project(projects_dir: &Path, project: ProjectData) -> anyhow::Result<
     write_projects(projects_dir, &projects)
 }
 
+/// Append `project` only if its `project_id` is not already registered.
+///
+/// Returns `(row, created)`: when the id already exists, the existing row is returned unchanged and
+/// `created` is `false` (no write). Otherwise the project is appended (validated like
+/// [`add_project`]) and returned with `created = true`. Idempotency primitive for adding a project
+/// to a host with a reused `project_id`.
+pub fn add_or_get_project(
+    projects_dir: &Path,
+    project: ProjectData,
+) -> anyhow::Result<(ProjectData, bool)> {
+    if let Some(existing) = find_project(projects_dir, &project.project_id)? {
+        log::info!(
+            "add_or_get_project: project_id={} already present, returning existing row",
+            existing.project_id
+        );
+        return Ok((existing, false));
+    }
+    add_project(projects_dir, project.clone())?;
+    Ok((project, true))
+}
+
 /// Find project by id.
 pub fn find_project(projects_dir: &Path, project_id: &str) -> anyhow::Result<Option<ProjectData>> {
     let projects = read_projects(projects_dir)?;

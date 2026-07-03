@@ -32,4 +32,3 @@ futures-util = "0.3"
 tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 tddy-tools = { path = "../tddy-tools" }
-tddy-demo-tui = { path = "../tddy-demo-tui" }

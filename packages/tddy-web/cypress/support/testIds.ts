@@ -265,6 +265,16 @@ export const TEST_IDS = {
   prStackAddPlannedPrSubmitBtn: "pr-stack-add-planned-pr-submit-btn",
   prStackAddPlannedPrCancelBtn: "pr-stack-add-planned-pr-cancel-btn",
   prStackAddPlannedPrError: "pr-stack-add-planned-pr-error",
+
+  // Projects screen (/projects)
+  projectsScreen: "projects-screen",
+  projectsList: "projects-list",
+  projectsCreateProjectToggle: "projects-create-project-toggle",
+  projectsCreateProjectForm: "projects-create-project-form",
+  projectsNewProjectName: "projects-new-project-name",
+  projectsNewProjectGitUrl: "projects-new-project-git-url",
+  projectsNewProjectUserRelativePath: "projects-new-project-user-relative-path",
+  projectsCreateProjectSubmit: "projects-create-project-submit",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -486,3 +496,26 @@ export const prStackChatMultiSelectOption = (index: number) => `pr-stack-chat-mu
 /** `[data-testid="pr-stack-add-planned-pr-ancestor-<nodeId>"]` — an ancestor checkbox in the "New planned PR" form */
 export const prStackAddPlannedPrAncestorCheckbox = (nodeId: string) =>
   `pr-stack-add-planned-pr-ancestor-${nodeId}`;
+
+// ---------------------------------------------------------------------------
+// Projects screen dynamic helpers
+// ---------------------------------------------------------------------------
+
+/** `[data-testid="project-card-<projectId>"]` — one card per logical project (may span hosts) */
+export const projectCard = (projectId: string) => `project-card-${projectId}`;
+
+/** `[data-testid="project-host-row-<projectId>-<daemonInstanceId>"]` — one row per hosting daemon */
+export const projectHostRow = (projectId: string, daemonInstanceId: string) =>
+  `project-host-row-${projectId}-${daemonInstanceId}`;
+
+/** `[data-testid="project-add-to-host-toggle-<projectId>"]` — opens the add-to-host control */
+export const projectAddToHostToggle = (projectId: string) =>
+  `project-add-to-host-toggle-${projectId}`;
+
+/** `[data-testid="project-add-to-host-select-<projectId>"]` — target-host `<select>` */
+export const projectAddToHostSelect = (projectId: string) =>
+  `project-add-to-host-select-${projectId}`;
+
+/** `[data-testid="project-add-to-host-submit-<projectId>"]` — submits the add-to-host action */
+export const projectAddToHostSubmit = (projectId: string) =>
+  `project-add-to-host-submit-${projectId}`;

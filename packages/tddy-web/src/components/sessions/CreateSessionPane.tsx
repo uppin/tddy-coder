@@ -71,15 +71,11 @@ export function CreateSessionPane({
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [subagents, setSubagents] = useState<SubagentInfo[]>([]);
   const [selectedSubagents, setSelectedSubagents] = useState<string[]>([]);
-  const [managedCodebaseExpanded, setManagedCodebaseExpanded] = useState(false);
+  const [managedCodebase, setManagedCodebase] = useState(false);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Managed codebase is implied by having at least one specialized subagent selected — see
-  // docs/ft/coder/specialized-subagents.md.
-  const managedCodebase = selectedSubagents.length > 0;
 
   const toggleSubagent = (name: string) => {
     setSelectedSubagents((prev) =>
@@ -225,7 +221,7 @@ export function CreateSessionPane({
           ...commonParams,
           toolPath: "",
           agent: "",
-          recipe: "",
+          recipe: managedCodebase ? recipe : "",
           stackParent,
           sessionType: "claude-cli",
           model,
@@ -233,7 +229,9 @@ export function CreateSessionPane({
           initialPrompt,
           sandbox,
           managedCodebase,
-          specializedAgents: selectedSubagents,
+          // Only send subagents when managed codebase is enabled — the picker is hidden otherwise,
+          // so a selection made before unchecking the toggle must not leak into the request.
+          specializedAgents: managedCodebase ? selectedSubagents : [],
         });
       }
       onCreated(res.sessionId);
@@ -418,42 +416,66 @@ export function CreateSessionPane({
             />
           </div>
 
-          {/* Managed codebase — specialized subagents (see docs/ft/coder/specialized-subagents.md) */}
+          {/* Managed codebase — an explicit toggle that, when on, makes the session workflow-aware
+              (recipe picker) and lets the user attach specialized subagents.
+              See docs/ft/coder/managed-codebase-workflow.md. */}
           <div>
-            <button
-              type="button"
-              data-testid="create-session-managed-codebase-toggle"
-              onClick={() => setManagedCodebaseExpanded((prev) => !prev)}
-              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-              aria-expanded={managedCodebaseExpanded}
-            >
-              <span>{managedCodebaseExpanded ? "▾" : "▸"}</span>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                data-testid="create-session-managed-codebase-toggle"
+                type="checkbox"
+                className="h-4 w-4 rounded border-input"
+                checked={managedCodebase}
+                onChange={(e) => setManagedCodebase(e.target.checked)}
+              />
               Managed codebase
-            </button>
-            {managedCodebaseExpanded && (
-              <div
-                data-testid="create-session-managed-codebase-section"
-                className="mt-2 space-y-1 pl-4"
-              >
-                {subagents.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No specialized subagents available</p>
-                ) : (
-                  subagents.map((sa) => (
-                    <label
-                      key={sa.name}
-                      className="flex items-center gap-2 text-sm text-muted-foreground"
-                    >
-                      <input
-                        data-testid={`create-session-subagent-checkbox-${sa.name}`}
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-input"
-                        checked={selectedSubagents.includes(sa.name)}
-                        onChange={() => toggleSubagent(sa.name)}
-                      />
-                      {sa.label || sa.name}
-                    </label>
-                  ))
-                )}
+            </label>
+            {managedCodebase && (
+              <div className="mt-2 space-y-3 pl-4">
+                <div>
+                  <label className={labelClass} htmlFor="create-session-recipe">
+                    Recipe
+                  </label>
+                  <select
+                    id="create-session-recipe"
+                    data-testid="create-session-recipe-select"
+                    className={inputClass}
+                    value={recipe}
+                    onChange={(e) => setRecipe(e.target.value)}
+                  >
+                    {WORKFLOW_RECIPES.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div
+                  data-testid="create-session-managed-codebase-section"
+                  className="space-y-1"
+                >
+                  {subagents.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No specialized subagents available
+                    </p>
+                  ) : (
+                    subagents.map((sa) => (
+                      <label
+                        key={sa.name}
+                        className="flex items-center gap-2 text-sm text-muted-foreground"
+                      >
+                        <input
+                          data-testid={`create-session-subagent-checkbox-${sa.name}`}
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-input"
+                          checked={selectedSubagents.includes(sa.name)}
+                          onChange={() => toggleSubagent(sa.name)}
+                        />
+                        {sa.label || sa.name}
+                      </label>
+                    ))
+                  )}
+                </div>
               </div>
             )}
           </div>

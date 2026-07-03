@@ -260,3 +260,132 @@ fully migrated onto the array model.
   subagents at all today — see `docs/dev/TODO.md`).
 - Per-tool replacement policies beyond a flat replaced-set (e.g. partial replacement of `Grep` for
   some file types only).
+
+## Standalone launcher (`./claude-sandbox`)
+
+A one-command launcher wraps `tddy-sandbox-app` for the common case of running a sandboxed Claude
+Code session against the **current directory as a managed (unmounted) repo**, with specialized
+subagents wired in from a single YAML config. It lives at the tddy-coder repo root as
+`./claude-sandbox` and is invokable from any CWD (symlink-safe root resolution).
+
+```bash
+cd ~/my/project
+claude-sandbox -c ~/sandbox-config.yaml -- "implement the login form"
+```
+
+### What the launcher does
+
+- Resolves the tddy-coder repo root from its own real location (symlink-safe), so it works whether
+  invoked by absolute path or via a PATH symlink from any directory.
+- Passes `$PWD` as `--repo` (the managed repo the sandbox's `mcp__tddy-tools__*` calls operate on).
+- Resolves the host `claude` binary to an absolute path — the jail's `PATH` is only
+  `/usr/bin:/bin`, so a bare name (or a wrapper shim that re-execs `claude` from `PATH`, e.g.
+  Superset's `~/.superset/bin/claude`) would fail to resolve inside the jail. `resolve_claude()`
+  prefers `~/.local/bin/claude`, then scans `PATH` skipping `*/.superset*/bin` dirs; override with
+  `--claude-binary /path/to/claude`.
+- Builds `tddy-sandbox-app` + `tddy-tools` + `tddy-sandbox-runner` via
+  `nix develop "$ROOT" --profile "$ROOT/.nix-profile" -c cargo build` into one target dir (they
+  must sit as siblings — `tddy-sandbox-app` resolves the other two as siblings of its own
+  executable). `--release` switches to the release profile; `--no-build` skips the build step.
+- Execs the built `tddy-sandbox-app` binary on the host so it inherits `claude` on `PATH`.
+
+### Flags
+
+| Flag | Purpose |
+|------|---------|
+| `-c` / `--config <yaml>` | `SandboxAppConfig` YAML (see below); CLI flags override config values |
+| `--release` | Build with the release profile (default: debug) |
+| `--no-build` | Skip the cargo build step (assumes binaries already built) |
+| `--claude-binary <path>` | Override the `claude` binary resolution |
+| Any other flag | Forwarded to `tddy-sandbox-app` |
+| `-- <args>` | Forwarded verbatim to the in-jail `claude` (after fixed flags + MCP allowlist, before the MCP args — a trailing positional prompt therefore lands last) |
+
+### YAML config (`sandbox-config.example.yaml`)
+
+A starter config lives at the repo root. Schema: `packages/tddy-sandbox-app/src/config.rs`
+(`SandboxAppConfig`, `deny_unknown_fields`). Every field is optional; equivalent CLI flags override
+config values. The config carries:
+
+- `model`, `permission_mode`, `codebase_mode` (`managed` | `mounted`).
+- `subagents:` — a list of full inline `SpecializedAgentDef`s (same schema as
+  `<tddyhome>/agents/*.yaml`). Declaring one here **both defines and activates** it and overrides a
+  same-named builtin, so e.g. `fastcontext` can be re-pointed at a local Ollama server
+  (`base_url: http://localhost:11434`) with no `--specialized-agent` flag and no agents dir.
+- `claude_args:` — extra args always forwarded to the in-jail `claude` (before any `-- <args>` from
+  the command line).
+- `mcp_log_level:` — `RUST_LOG` for the in-jail `tddy-tools --mcp` server (see "Observability"
+  below).
+
+`tddy-sandbox-app`'s `config::resolve_session_agents` merges named + inline + `agents_dir` defs;
+`--model` is optional (defaults after config merge).
+
+### Egress: plain-HTTP forward proxy
+
+The sandbox egress shim was originally CONNECT/HTTPS-only, so the subagent's plain-HTTP
+`POST http://localhost:11434/...` (absolute-form via `HTTP_PROXY`) hit the shim's "everything else
+→ 404" branch. The shim now also supports a **forward-proxy path**:
+`rewrite_http_proxy_request` rewrites absolute-form → origin-form and extracts host:port;
+`handle_http_forward` opens a relay tunnel (the host owns the outbound socket — no jail net rule
+needed) and streams. The CONNECT handler was refactored to share `open_relay_tunnel` +
+`pump_tunnel`. As a result, `base_url: http://localhost:11434` works as-is — in managed mode the
+subagent's HTTP to `localhost` is relayed to the host by the egress shim (the same mechanism the
+default FastContext `:30000` endpoint already relies on).
+
+### Context size for Ollama-hosted models
+
+Ollama's `/v1/chat/completions` endpoint **cannot set `num_ctx` per request** (rejected upstream —
+ollama/ollama#6137); its 4096 default is too small for repo exploration (the model overruns and
+loops). The Ollama-recommended route is a Modelfile variant that bakes the context length into a
+named model: `fastcontext-tools-32k.Modelfile` (`FROM fastcontext-tools:latest` +
+`PARAMETER num_ctx 32768`) → `ollama create fastcontext-tools-32k`. Point the config's `model:` at
+the variant. No code change — the sandbox config's existing `model:` field is the knob.
+
+### Observability: persisted MCP/subagent logs
+
+`write_claude_mcp_config` writes an `env` block for the `tddy-tools --mcp` server; the runner sets
+`TDDY_TOOLS_LOG_FILE` → `<session-dir>/egress/tddy-tools.mcp.log` and `RUST_LOG` (default
+`info,tddy_tools=debug,tddy_discovery=debug`, override via `mcp_log_level` config / `--mcp-log-level`
+CLI / runner `--mcp-log-level`). `tddy-tools`' `init_logging()` honors `TDDY_TOOLS_LOG_FILE` (append;
+falls back to stderr). The app also maintains a `<session-base>/sessions/latest` symlink to the
+newest session dir.
+
+Per-turn subagent logging (`tddy-discovery::subagent`, target `tddy_discovery::subagent`) logs each
+turn: request (model, message/tool counts), completion (elapsed, `finish_reason`, content length,
+tool-call count), and errors. Combined with the runner's `TDDY_TOOLS_LOG_FILE` wiring, fastcontext's
+behavior lands in `<session>/egress/tddy-tools.mcp.log` instead of being invisible.
+
+### Replaced-tool enforcement (defense-in-depth)
+
+Dropping a replaced tool from `--allowedTools` only un-pre-approves it — Claude's native built-in
+(`Grep`/`Glob`) and the still-advertised `mcp__tddy-tools__*` form remained reachable via the
+permission prompt. Enforcement is now layered:
+
+1. **`--disallowedTools`** (`tddy-sandbox-recipes/src/claude_cli.rs`): `append_claude_mcp_args` also
+   emits `--disallowedTools <native>` + `--disallowedTools mcp__tddy-tools__<tool>` for each replaced
+   tool, so they are unreachable. The builtin `fastcontext` def's `replaces` includes `SemanticSearch`
+   (delegated to fastcontext / disabled for the main agent).
+2. **Server-side enforcement** (`tddy-tools` `PermissionServer::new()` in `server.rs`): filters the
+   advertised exec catalog by the replaced set
+   (`resolve_replaced_tools_for_defs(&subagents_from_env())`) before merging it into the tool router,
+   so a replaced tool is not advertised and cannot be invoked at the server — independent of Claude's
+   allow/disallow lists. The subagent's own READ/GLOB/GREP loop is a separate in-process path
+   (unaffected), so delegation still works.
+
+### Runner `--claude-arg` pass-through
+
+`tddy-sandbox-runner` gained a repeated `--claude-arg` (`allow_hyphen_values`), appended verbatim to
+the in-jail `claude` argv **after the fixed flags and before the MCP args** (the MCP block's trailing
+`--mcp-config` is variadic and would otherwise swallow a trailing positional prompt). Ignored in
+`--pty-command` mode. `SpawnParams` now carries resolved `specialized_defs` + `claude_args` (replaces
+the old `SubagentSpawnConfig`; resolution moved to `config.rs`).
+
+### Deferred (Phase 2)
+
+- **Integration/acceptance test** exercising a full sandboxed launch with an inline Ollama def — the
+  launcher was verified by a manual full-launch smoke test (config loads → `codebase_mode=managed` →
+  inline `fastcontext` activated, end-to-end through a real macOS Seatbelt jail), but the interactive
+  terminal-attach path was not exercised in CI and no automated regression test exists. Tracked in
+  `docs/dev/TODO.md`.
+- A **dedicated feature doc file** for the launcher is not split out separately; this section is the
+  home for that knowledge. If it outgrows this file it can be lifted into its own
+  `docs/ft/coder/claude-sandbox-launcher.md` later.

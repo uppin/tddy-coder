@@ -4,6 +4,13 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-03 — Dedicated Projects screen + multi-host projects
+
+- New `/projects` screen (nav menu item) lists projects grouped by project, showing every host a project lives on.
+- "Add to host" adds an existing project to another connected daemon, reusing its project id; target hosts come from the connected daemon participants.
+- Create-project moved from the old sessions view to the new screen; the sessions view's per-project session list is unchanged.
+- See [projects-screen-multi-host.md](projects-screen-multi-host.md).
+
 ## 2026-07-01 — PR stack parent picker for Claude CLI sessions
 
 - Claude CLI sessions can now be placed in a PR stack by selecting a parent in the new-session form, with git-base chaining automatically applied (child worktree branches off the parent's branch)

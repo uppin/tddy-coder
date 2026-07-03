@@ -369,6 +369,12 @@ async fn send_turn_and_check_final_answer(
     tools: Vec<crate::openai::ToolDefinition>,
     error_context: &str,
 ) -> Result<TurnStep, SubagentError> {
+    let message_count = messages.len();
+    let tool_count = tools.len();
+    log::info!(
+        target: "tddy_discovery::subagent",
+        "{error_context}: model={model} sending turn ({message_count} messages, {tool_count} tools)"
+    );
     let request = ChatCompletionRequest {
         model: model.to_string(),
         messages: messages.clone(),
@@ -376,16 +382,31 @@ async fn send_turn_and_check_final_answer(
         tool_choice: serde_json::json!("auto"),
         temperature: 0.0,
     };
-    let response = client
-        .complete(request)
-        .await
-        .map_err(|e| SubagentError(format!("{error_context}: {e}")))?;
-    let message = response
-        .choices
-        .into_iter()
-        .next()
-        .ok_or_else(|| SubagentError("no choices in response".to_string()))?
-        .message;
+    let started = std::time::Instant::now();
+    let response = client.complete(request).await.map_err(|e| {
+        log::warn!(
+            target: "tddy_discovery::subagent",
+            "{error_context}: model={model} request failed after {:.1?}: {e}",
+            started.elapsed()
+        );
+        SubagentError(format!("{error_context}: {e}"))
+    })?;
+    let elapsed = started.elapsed();
+    let choice = response.choices.into_iter().next().ok_or_else(|| {
+        log::warn!(
+            target: "tddy_discovery::subagent",
+            "{error_context}: model={model} returned no choices after {elapsed:.1?}"
+        );
+        SubagentError("no choices in response".to_string())
+    })?;
+    let message = choice.message;
+    log::info!(
+        target: "tddy_discovery::subagent",
+        "{error_context}: model={model} turn completed in {elapsed:.1?} (finish_reason={:?}, content={} chars, tool_calls={})",
+        choice.finish_reason.as_deref().unwrap_or("<none>"),
+        message.content.as_deref().map(str::len).unwrap_or(0),
+        message.tool_calls.as_ref().map(Vec::len).unwrap_or(0),
+    );
 
     if let Some(answer) = message
         .content

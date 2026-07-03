@@ -1,0 +1,51 @@
+import { describe, expect, it } from "bun:test";
+import { aDaemonAdvertisementMeta } from "../test-utils";
+import { daemonHostsFromParticipants } from "./participantRole";
+
+describe("daemonHostsFromParticipants", () => {
+  it("keeps only daemon-role participants and reads instance id + label from the advertisement", () => {
+    // Given a mix of a genuine daemon, a coder session, and this browser
+    const participants = [
+      { identity: "udoo", metadata: aDaemonAdvertisementMeta({ instanceId: "udoo", label: "udoo (this daemon)" }) },
+      { identity: "daemon-019d7d74-3a7f-7b03-88d2-f50bb7efb2f0", metadata: "" },
+      { identity: "web-u-1-x", metadata: "" },
+    ];
+
+    // When
+    const hosts = daemonHostsFromParticipants(participants);
+
+    // Then
+    expect(hosts).toEqual([{ instanceId: "udoo", label: "udoo (this daemon)" }]);
+  });
+
+  it("excludes a coder session even when it publishes advertisement-shaped metadata", () => {
+    // Given a coder session (daemon-<uuid> identity) whose metadata looks like an advertisement
+    const participants = [
+      {
+        identity: "daemon-019d7d74-3a7f-7b03-88d2-f50bb7efb2f0",
+        metadata: aDaemonAdvertisementMeta({ instanceId: "proj-x", label: "proj-x (this daemon)" }),
+      },
+    ];
+
+    // When
+    const hosts = daemonHostsFromParticipants(participants);
+
+    // Then
+    expect(hosts).toEqual([]);
+  });
+
+  it("deduplicates daemons by instance id, preserving first-seen order", () => {
+    // Given the same daemon advertised twice plus a second daemon
+    const participants = [
+      { identity: "udoo", metadata: aDaemonAdvertisementMeta({ instanceId: "udoo", label: "udoo (this daemon)" }) },
+      { identity: "udoo", metadata: aDaemonAdvertisementMeta({ instanceId: "udoo", label: "udoo (this daemon)" }) },
+      { identity: "srv2", metadata: aDaemonAdvertisementMeta({ instanceId: "srv2", label: "srv2 (this daemon)" }) },
+    ];
+
+    // When
+    const hosts = daemonHostsFromParticipants(participants);
+
+    // Then
+    expect(hosts.map((h) => h.instanceId)).toEqual(["udoo", "srv2"]);
+  });
+});

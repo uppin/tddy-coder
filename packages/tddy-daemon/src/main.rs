@@ -370,7 +370,7 @@ fn main() -> anyhow::Result<()> {
                     Some(tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles {
                         eligible_daemon_source: Arc::new(
                             tddy_daemon::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
-                                config_arc.clone(), registry,
+                                config_arc.clone(), registry, room_slot.clone(),
                             ),
                         )
                             as Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource>,

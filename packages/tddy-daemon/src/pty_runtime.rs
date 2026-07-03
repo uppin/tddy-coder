@@ -26,6 +26,8 @@ pub struct PtySpawnSpec {
     pub session_id: String,
     pub terminal_id: String,
     pub kind: String,
+    /// Extra environment variables set on the spawned process (in addition to the inherited env).
+    pub env: Vec<(String, String)>,
 }
 
 /// Ready signal emitted once the PTY is open and the child has been spawned.
@@ -226,6 +228,9 @@ fn open_pty_and_pump(
     cmd.cwd(&spec.worktree_path);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    for (key, value) in &spec.env {
+        cmd.env(key, value);
+    }
 
     let child = pair
         .slave
