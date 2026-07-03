@@ -142,15 +142,6 @@ function clampOverlayPanePosition(
   };
 }
 
-const inputStyle = {
-  display: "block",
-  width: "100%",
-  marginBottom: 12,
-  padding: 8,
-  fontSize: 14,
-  boxSizing: "border-box" as const,
-};
-
 const labelStyle = { display: "block", marginBottom: 4, fontWeight: 500 };
 
 
@@ -1244,10 +1235,6 @@ export function ConnectionScreen({
     {},
   );
   const [workflowFilesSessionId, setWorkflowFilesSessionId] = useState<string | null>(null);
-  const [createProjectOpen, setCreateProjectOpen] = useState(false);
-  const [newProjectName, setNewProjectName] = useState("");
-  const [newProjectGitUrl, setNewProjectGitUrl] = useState("");
-  const [newProjectUserRelativePath, setNewProjectUserRelativePath] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const effectiveAgents: AgentInfo[] = useMemo(() => {
@@ -1721,27 +1708,6 @@ export function ConnectionScreen({
     }
   };
 
-  const handleCreateProject = async () => {
-    if (!sessionToken || !newProjectName.trim() || !newProjectGitUrl.trim()) return;
-    setError(null);
-    try {
-      await client.createProject({
-        sessionToken,
-        name: newProjectName.trim(),
-        gitUrl: newProjectGitUrl.trim(),
-        userRelativePath: newProjectUserRelativePath.trim(),
-      });
-      const res = await client.listProjects({ sessionToken });
-      setProjects(res.projects);
-      setNewProjectName("");
-      setNewProjectGitUrl("");
-      setNewProjectUserRelativePath("");
-      setCreateProjectOpen(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create project");
-    }
-  };
-
   const handleConnectSession = async (sessionId: string) => {
     if (!sessionToken) return;
     if (sessionAttachments.has(sessionId)) {
@@ -2041,74 +2007,6 @@ export function ConnectionScreen({
             roomStatus={presenceStatus}
             connectionError={presenceError}
           />
-        </div>
-      )}
-
-      <div className="my-4">
-        <Button
-          type="button"
-          variant="outline"
-          data-testid="toggle-create-project"
-          onClick={() => setCreateProjectOpen((o) => !o)}
-        >
-          {createProjectOpen ? "Hide" : "Create project"}
-        </Button>
-      </div>
-
-      {createProjectOpen && (
-        <div
-          data-testid="create-project-form"
-          style={{
-            border: "1px solid #ccc",
-            borderRadius: 4,
-            padding: 12,
-            marginBottom: 16,
-          }}
-        >
-          <label style={labelStyle} htmlFor="new-project-name">
-            Project name
-          </label>
-          <input
-            id="new-project-name"
-            data-testid="new-project-name"
-            type="text"
-            placeholder="my-app"
-            value={newProjectName}
-            onChange={(e) => setNewProjectName(e.target.value)}
-            style={inputStyle}
-          />
-          <label style={labelStyle} htmlFor="new-project-git-url">
-            Git URL
-          </label>
-          <input
-            id="new-project-git-url"
-            data-testid="new-project-git-url"
-            type="text"
-            placeholder="https://github.com/org/repo.git"
-            value={newProjectGitUrl}
-            onChange={(e) => setNewProjectGitUrl(e.target.value)}
-            style={inputStyle}
-          />
-          <label style={labelStyle} htmlFor="new-project-user-relative-path">
-            Path under home (optional)
-          </label>
-          <input
-            id="new-project-user-relative-path"
-            data-testid="new-project-user-relative-path"
-            type="text"
-            placeholder="e.g. Code/my-app or ~/Code/my-app — leave empty for default clone path"
-            value={newProjectUserRelativePath}
-            onChange={(e) => setNewProjectUserRelativePath(e.target.value)}
-            style={inputStyle}
-          />
-          <Button
-            type="button"
-            data-testid="create-project-submit"
-            onClick={handleCreateProject}
-            disabled={!newProjectName.trim() || !newProjectGitUrl.trim()}
-          >
-            Create
-          </Button>
         </div>
       )}
 

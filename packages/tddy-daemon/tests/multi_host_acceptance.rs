@@ -333,7 +333,11 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         room_slot.clone(),
     );
     let eligible: Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource> = Arc::new(
-        tddy_daemon::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(config_arc, registry),
+        tddy_daemon::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
+            config_arc,
+            registry,
+            room_slot.clone(),
+        ),
     );
     let service_a = ConnectionServiceImpl::new(
         config_a,

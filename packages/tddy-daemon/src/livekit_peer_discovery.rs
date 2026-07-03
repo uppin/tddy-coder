@@ -74,7 +74,10 @@ use livekit::prelude::{
 use livekit::DisconnectReason;
 use prost::Message;
 use serde::Deserialize;
-use tddy_service::proto::connection::{StartSessionRequest, StartSessionResponse};
+use tddy_service::proto::connection::{
+    AddProjectToHostRequest, AddProjectToHostResponse, ListProjectsRequest, ListProjectsResponse,
+    ProjectEntry as ProtoProjectEntry, StartSessionRequest, StartSessionResponse,
+};
 
 use crate::config::DaemonConfig;
 use crate::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
@@ -359,11 +362,20 @@ pub fn local_instance_id_for_config(config: &DaemonConfig) -> String {
 pub struct LiveKitEligibleDaemonSource {
     config: Arc<DaemonConfig>,
     registry: Arc<CommonRoomPeerRegistry>,
+    room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
 }
 
 impl LiveKitEligibleDaemonSource {
-    pub fn new(config: Arc<DaemonConfig>, registry: Arc<CommonRoomPeerRegistry>) -> Self {
-        Self { config, registry }
+    pub fn new(
+        config: Arc<DaemonConfig>,
+        registry: Arc<CommonRoomPeerRegistry>,
+        room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    ) -> Self {
+        Self {
+            config,
+            registry,
+            room_slot,
+        }
     }
 
     fn local_row(&self) -> EligibleDaemonInfo {
@@ -392,6 +404,65 @@ impl EligibleDaemonSource for LiveKitEligibleDaemonSource {
                 e
             );
             vec![self.local_row()]
+        })
+    }
+
+    /// Fan out to each discovered peer's `ListProjects` (with `local_only = true` to avoid recursive
+    /// fan-out) and tag every returned row with that peer's instance id. Unreachable peers are
+    /// logged and skipped so aggregation degrades to whatever rows could be gathered.
+    fn peer_project_entries(&self, session_token: &str) -> Vec<ProtoProjectEntry> {
+        let remotes = self.registry.snapshot_remotes();
+        if remotes.is_empty() {
+            return Vec::new();
+        }
+        // Bridge this sync trait method to the async LiveKit forwarder on the daemon's
+        // multi-threaded Tokio runtime; when no runtime is present, skip fan-out gracefully.
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            log::warn!("peer_project_entries: no Tokio runtime available; skipping peer fan-out");
+            return Vec::new();
+        };
+        let room_slot = self.room_slot.clone();
+        let session_token = session_token.to_string();
+        tokio::task::block_in_place(move || {
+            handle.block_on(async move {
+                let mut out = Vec::new();
+                for remote in remotes {
+                    let peer_id = remote.instance_id.0.clone();
+                    let req = ListProjectsRequest {
+                        session_token: session_token.clone(),
+                        local_only: true,
+                    };
+                    match forward_to_peer(
+                        &room_slot,
+                        &peer_id,
+                        "connection.ConnectionService",
+                        "ListProjects",
+                        req.encode_to_vec(),
+                    )
+                    .await
+                    {
+                        Ok(bytes) => match ListProjectsResponse::decode(bytes.as_slice()) {
+                            Ok(resp) => {
+                                for mut p in resp.projects {
+                                    p.daemon_instance_id = peer_id.clone();
+                                    out.push(p);
+                                }
+                            }
+                            Err(e) => log::warn!(
+                                "peer_project_entries: decode ListProjectsResponse from peer {} failed: {}",
+                                peer_id,
+                                e
+                            ),
+                        },
+                        Err(e) => log::warn!(
+                            "peer_project_entries: forward ListProjects to peer {} failed: {}",
+                            peer_id,
+                            e
+                        ),
+                    }
+                }
+                out
+            })
         })
     }
 }
@@ -958,6 +1029,27 @@ pub async fn forward_start_session_via_livekit(
         .map_err(|e| tddy_rpc::Status::internal(format!("decode StartSessionResponse: {e}")))
 }
 
+/// Forward **AddProjectToHost** to another daemon in the common room via LiveKit data-channel RPC.
+///
+/// Thin encode/decode wrapper around [`forward_to_peer`].
+pub async fn forward_add_project_to_host_via_livekit(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &AddProjectToHostRequest,
+) -> Result<AddProjectToHostResponse, tddy_rpc::Status> {
+    let body = request.encode_to_vec();
+    let out = forward_to_peer(
+        room_slot,
+        peer_instance_id,
+        "connection.ConnectionService",
+        "AddProjectToHost",
+        body,
+    )
+    .await?;
+    AddProjectToHostResponse::decode(out.as_slice())
+        .map_err(|e| tddy_rpc::Status::internal(format!("decode AddProjectToHostResponse: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1014,7 +1106,8 @@ mod tests {
     fn livekit_eligible_daemon_source_lists_at_least_local_row() {
         let config = Arc::new(DaemonConfig::default());
         let registry = Arc::new(CommonRoomPeerRegistry::new());
-        let src = LiveKitEligibleDaemonSource::new(config, registry);
+        let room_slot = Arc::new(tokio::sync::RwLock::new(None));
+        let src = LiveKitEligibleDaemonSource::new(config, registry, room_slot);
         let list = src.list_eligible_daemons();
         assert!(
             !list.is_empty(),
