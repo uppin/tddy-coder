@@ -7,7 +7,7 @@
 //! The acceptance tests use `/bin/cat` as the stub binary; for production, `claude` is used.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -146,6 +146,10 @@ type TerminalIndex = Arc<RwLock<HashMap<String, HashMap<String, TerminalEntry>>>
 /// Per-session control leases: `session_id → ControlLeaseInfo`.
 type ControlRegistry = Arc<RwLock<HashMap<String, ControlLeaseInfo>>>;
 
+/// Per-session managed-workflow wiring (kept alive for the session's lifetime): `session_id → ManagedWorkflow`.
+type ManagedWorkflowRegistry =
+    Arc<RwLock<HashMap<String, crate::session_toolcall::ManagedWorkflow>>>;
+
 /// Manages PTY session tools via the shared [`TaskRegistry`] and per-session control leases.
 pub struct ClaudeCliSessionManager {
     task_registry: TaskRegistry,
@@ -156,6 +160,9 @@ pub struct ClaudeCliSessionManager {
     control: ControlRegistry,
     /// Fan-out channel for control-change events. Subscribers call [`Self::subscribe_control`].
     control_tx: broadcast::Sender<ControlChangeEvent>,
+    /// Managed-workflow wiring per session — its toolcall listener + controller must outlive the
+    /// spawned process, so the manager owns it and drops it when the main terminal exits.
+    managed_workflows: ManagedWorkflowRegistry,
 }
 
 impl Default for ClaudeCliSessionManager {
@@ -179,7 +186,22 @@ impl ClaudeCliSessionManager {
             terminals: Arc::new(RwLock::new(HashMap::new())),
             control: Arc::new(RwLock::new(HashMap::new())),
             control_tx,
+            managed_workflows: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Attach a session's [`ManagedWorkflow`](crate::session_toolcall::ManagedWorkflow) so its
+    /// toolcall listener + controller stay alive for the session's lifetime. Dropped when the
+    /// session's main terminal exits (see `spawn_terminal_cleanup`).
+    pub async fn attach_managed_workflow(
+        &self,
+        session_id: &str,
+        managed: crate::session_toolcall::ManagedWorkflow,
+    ) {
+        self.managed_workflows
+            .write()
+            .await
+            .insert(session_id.to_string(), managed);
     }
 
     /// Shared task registry — PTY tools and fast tools use the same instance.
@@ -196,6 +218,10 @@ impl ClaudeCliSessionManager {
     /// when non-empty (trimmed); an empty/whitespace prompt is treated as absent so the
     /// process is started interactively without an injected first turn.
     /// `permission_mode` defaults to `"auto"` when `None` or empty/whitespace.
+    ///
+    /// A managed workflow's `--append-system-prompt-file` is inserted by
+    /// [`Self::start_with_options`] (before any positional prompt), not here, so this pure builder
+    /// stays focused on the base argv.
     pub fn build_claude_argv(
         binary_path: &str,
         model: &str,
@@ -247,13 +273,62 @@ impl ClaudeCliSessionManager {
         initial_prompt: Option<&str>,
         permission_mode: Option<&str>,
     ) -> anyhow::Result<Arc<PtyHandle>> {
-        let argv = Self::build_claude_argv(
+        self.start_with_options(
+            session_id,
+            worktree_path,
+            model,
+            binary_path,
+            initial_prompt,
+            permission_mode,
+            None,
+            Vec::new(),
+        )
+        .await
+    }
+
+    /// Like [`Self::start`], plus managed-workflow launch options.
+    ///
+    /// `append_system_prompt_file` — when `Some`, inserted as `--append-system-prompt-file <path>`
+    /// (before any positional prompt) so `claude` appends that file to its system prompt (a managed
+    /// workflow's orchestration prompt).
+    ///
+    /// `env` — extra environment variables set on the spawned process (e.g. a managed session's
+    /// per-session `TDDY_SOCKET` and a `PATH` that resolves `tddy-tools`).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn start_with_options(
+        &self,
+        session_id: &str,
+        worktree_path: PathBuf,
+        model: &str,
+        binary_path: &str,
+        initial_prompt: Option<&str>,
+        permission_mode: Option<&str>,
+        append_system_prompt_file: Option<&Path>,
+        env: Vec<(String, String)>,
+    ) -> anyhow::Result<Arc<PtyHandle>> {
+        let mut argv = Self::build_claude_argv(
             binary_path,
             model,
             session_id,
             initial_prompt,
             permission_mode,
         );
+        if let Some(path) = append_system_prompt_file {
+            // Insert before a trailing positional prompt (if any) so the flag precedes the prompt.
+            let has_positional_prompt = initial_prompt.is_some_and(|p| !p.trim().is_empty());
+            let insert_at = if has_positional_prompt {
+                argv.len() - 1
+            } else {
+                argv.len()
+            };
+            argv.splice(
+                insert_at..insert_at,
+                [
+                    "--append-system-prompt-file".to_string(),
+                    path.to_string_lossy().into_owned(),
+                ],
+            );
+        }
         self.spawn_tool(
             session_id,
             MAIN_TERMINAL_ID,
@@ -261,6 +336,7 @@ impl ClaudeCliSessionManager {
             worktree_path,
             model,
             argv,
+            env,
         )
         .await
     }
@@ -269,6 +345,7 @@ impl ClaudeCliSessionManager {
     ///
     /// Shared by [`start`](Self::start) (the `claude` tool) and
     /// [`start_terminal`](Self::start_terminal) (Bash tools).
+    #[allow(clippy::too_many_arguments)]
     async fn spawn_tool(
         &self,
         session_id: &str,
@@ -277,6 +354,7 @@ impl ClaudeCliSessionManager {
         worktree_path: PathBuf,
         model: &str,
         argv: Vec<String>,
+        env: Vec<(String, String)>,
     ) -> anyhow::Result<Arc<PtyHandle>> {
         let (ready_tx, ready_rx) = oneshot::channel();
         let spec = PtySpawnSpec {
@@ -285,6 +363,7 @@ impl ClaudeCliSessionManager {
             session_id: session_id.to_string(),
             terminal_id: terminal_id.to_string(),
             kind: kind.to_string(),
+            env,
         };
 
         let task = PtyRuntime::spawn(&self.task_registry, &self.pty_registry, spec, ready_tx).await;
@@ -377,6 +456,7 @@ impl ClaudeCliSessionManager {
 
     fn spawn_terminal_cleanup(&self, session_id: String, terminal_id: String, task_id: TaskId) {
         let terminals = Arc::clone(&self.terminals);
+        let managed_workflows = Arc::clone(&self.managed_workflows);
         let task_registry = self.task_registry.clone();
         tokio::spawn(async move {
             let task = match task_registry.get(&task_id).await {
@@ -403,6 +483,11 @@ impl ClaudeCliSessionManager {
                 if tools.is_empty() {
                     reg.remove(&session_id);
                 }
+            }
+            // The main claude terminal exiting ends the session — drop its managed workflow so the
+            // per-session toolcall listener socket is cleaned up.
+            if terminal_id == MAIN_TERMINAL_ID {
+                managed_workflows.write().await.remove(&session_id);
             }
         });
     }
@@ -438,7 +523,7 @@ impl ClaudeCliSessionManager {
         .map(Arc::new)
     }
 
-    /// Resume (relaunch) an existing session by spawning a new process in the same worktree.
+    /// Resume (relaunch) an existing plain session by spawning a new process in the same worktree.
     ///
     /// Always passes `initial_prompt = None`: a resumed session continues via `--session-id`
     /// and must not replay the original prompt (that would inject a duplicate user turn).
@@ -449,10 +534,41 @@ impl ClaudeCliSessionManager {
         model: &str,
         binary_path: &str,
     ) -> anyhow::Result<Arc<PtyHandle>> {
-        // Start a fresh process in the same worktree; never replay the initial prompt on resume,
-        // and never carry over a prior permission_mode (resume always uses the default "auto").
-        self.start(session_id, worktree_path, model, binary_path, None, None)
-            .await
+        self.resume_with_options(
+            session_id,
+            worktree_path,
+            model,
+            binary_path,
+            None,
+            Vec::new(),
+        )
+        .await
+    }
+
+    /// Resume with managed-workflow options: like [`Self::resume`] but re-wires the orchestration
+    /// prompt (`append_system_prompt_file`) and per-session env (`TDDY_SOCKET` + `PATH`) so a resumed
+    /// managed session stays workflow-aware. Never replays the initial prompt and never carries over
+    /// a prior permission mode (resume uses the default "auto").
+    pub async fn resume_with_options(
+        &self,
+        session_id: &str,
+        worktree_path: PathBuf,
+        model: &str,
+        binary_path: &str,
+        append_system_prompt_file: Option<&Path>,
+        env: Vec<(String, String)>,
+    ) -> anyhow::Result<Arc<PtyHandle>> {
+        self.start_with_options(
+            session_id,
+            worktree_path,
+            model,
+            binary_path,
+            None,
+            None,
+            append_system_prompt_file,
+            env,
+        )
+        .await
     }
 
     /// Look up the **main** (`claude`) terminal of a session by id.
@@ -473,8 +589,16 @@ impl ClaudeCliSessionManager {
     ) -> anyhow::Result<Arc<PtyHandle>> {
         let terminal_id = uuid::Uuid::now_v7().to_string();
         let argv = vec![shell_path.to_string()];
-        self.spawn_tool(session_id, &terminal_id, "bash", worktree_path, "", argv)
-            .await
+        self.spawn_tool(
+            session_id,
+            &terminal_id,
+            "bash",
+            worktree_path,
+            "",
+            argv,
+            Vec::new(),
+        )
+        .await
     }
 
     /// Look up a specific tool of a session by `terminal_id` (use `MAIN_TERMINAL_ID` for the

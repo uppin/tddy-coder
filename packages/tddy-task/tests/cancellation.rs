@@ -7,14 +7,11 @@
 
 #![cfg(unix)]
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use serial_test::serial;
-use tddy_task::{
-    ChannelKind, TaskBody, TaskChannel, TaskContext, TaskId, TaskRegistry, TaskStatus,
-};
+use tddy_task::{TaskBody, TaskContext, TaskRegistry, TaskStatus};
 use tokio::process::Command;
 
 /// Verify that a given PID is no longer alive using `kill -0`.

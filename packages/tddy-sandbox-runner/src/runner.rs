@@ -212,6 +212,11 @@ pub struct SandboxRunnerArgs {
     pub ready_marker: PathBuf,
     #[arg(long, default_value = "auto")]
     pub permission_mode: String,
+    /// When set, pass `--append-system-prompt-file <path>` to the jailed `claude` (a managed
+    /// workflow's orchestration prompt). The path must be readable inside the jail (e.g. under the
+    /// context dir).
+    #[arg(long)]
+    pub append_system_prompt_file: Option<PathBuf>,
     /// When set, bind sandbox gRPC on this loopback port (required inside Seatbelt).
     #[arg(long)]
     pub grpc_listen_port: Option<u16>,
@@ -1159,6 +1164,9 @@ struct SpawnClaudePtyParams<'a> {
     claude_binary: &'a str,
     model: &'a str,
     permission_mode: &'a str,
+    /// When set, passed to `claude` as `--append-system-prompt-file <path>` (must be readable in
+    /// the jail).
+    append_system_prompt_file: Option<&'a Path>,
     session_id: &'a str,
     tddy_tools_path: &'a Path,
     egress_shim: &'a str,
@@ -1183,6 +1191,7 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
         claude_binary,
         model,
         permission_mode,
+        append_system_prompt_file,
         session_id,
         tddy_tools_path,
         egress_shim,
@@ -1203,6 +1212,10 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
     argv.push(session_id.to_string());
     argv.push("--permission-mode".into());
     argv.push(permission_mode.to_string());
+    if let Some(path) = append_system_prompt_file {
+        argv.push("--append-system-prompt-file".into());
+        argv.push(path.to_string_lossy().into_owned());
+    }
 
     // Caller-supplied pass-through args go here — after our fixed flags but BEFORE the MCP args.
     // The MCP block ends in `--mcp-config <path>`, and Claude's `--mcp-config` is variadic: a bare
@@ -1734,6 +1747,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
             claude_binary: &args.claude_binary,
             model: &args.model,
             permission_mode: &args.permission_mode,
+            append_system_prompt_file: args.append_system_prompt_file.as_deref(),
             session_id: &args.session_id,
             tddy_tools_path,
             egress_shim: &egress_shim,

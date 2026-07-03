@@ -48,6 +48,10 @@ service ConnectionService {
   // streams ownership changes so a displaced screen can render the "Claim terminal" CTA.
   rpc ClaimTerminalControl(ClaimTerminalControlRequest) returns (ClaimTerminalControlResponse);
   rpc WatchTerminalControl(WatchTerminalControlRequest) returns (stream TerminalControlEvent);
+  // PR-Stack Chat Screen: manually append a planned PR to an orchestrator session's stack,
+  // choosing its ancestors (parent node ids) from the already-planned nodes. See
+  // docs/ft/coder/pr-stacking.md § Manually adding a planned PR.
+  rpc AddPlannedPr(AddPlannedPrRequest) returns (AddPlannedPrResponse);
 }
 
 message ListToolsRequest {}
@@ -570,4 +574,27 @@ message TerminalControlEvent {
   string holder_screen_id   = 1;
   // True if the subscribing screen is the current controller (its token matches the lease).
   bool   you_are_controller = 2;
+}
+
+// --- PR-Stack Chat Screen: manually adding a planned PR ---
+
+message AddPlannedPrRequest {
+  string session_token = 1;
+  // The "pr-stack" orchestrator session whose Changeset.stack the new node is appended to.
+  string session_id = 2;
+  string title = 3;
+  string description = 4;
+  // Optional; empty string = none.
+  string branch_suggestion = 5;
+  // Ancestor node ids (StackNode.parents) chosen from the orchestrator's existing planned PRs.
+  // Empty = root node (branches off the stack base).
+  repeated string parents = 6;
+  // Optional workflow recipe for the eventual child session (e.g. "tdd"). Empty = default ("tdd").
+  string child_recipe = 7;
+}
+
+message AddPlannedPrResponse {
+  // Updated JSON-serialized `Stack`, same wire shape as `SessionEntry.stack_plan_json` (field 23)
+  // — callers re-use the existing `parseStackPlan` parser rather than a second message schema.
+  string stack_plan_json = 1;
 }

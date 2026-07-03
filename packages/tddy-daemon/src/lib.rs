@@ -22,6 +22,7 @@ pub mod server;
 pub mod session_deletion;
 pub mod session_list_enrichment;
 pub mod session_reader;
+pub mod session_toolcall;
 pub mod session_workflow_files;
 pub mod spawn_worker;
 pub mod spawner;

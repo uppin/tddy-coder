@@ -12,6 +12,19 @@ Release note history for the Coder product area.
 - 32K Ollama context via `fastcontext-tools-32k.Modelfile` (`PARAMETER num_ctx 32768`) — Ollama's `/v1` endpoint cannot set `num_ctx` per request (ollama/ollama#6137), so the context length is baked into a named model variant the config's `model:` points at
 - **Deferred (Phase 2, tracked in `docs/dev/TODO.md`)**: no automated integration/acceptance test drives a full sandboxed launch with an inline Ollama def — the launcher was verified by a manual full-launch smoke test (config loads → `codebase_mode=managed` → inline `fastcontext` activated, end-to-end through a real macOS Seatbelt jail), but the interactive terminal-attach path was not exercised in CI
 - Feature: [managed-codebase-subagents.md § Standalone launcher](managed-codebase-subagents.md#standalone-launcher-claude-sandbox)
+## 2026-07-03 — Managed codebase workflow (workflow-aware Claude CLI)
+
+- New-session "Managed codebase" is now an explicit checkbox for claude-cli sessions that, when enabled, reveals both a workflow-recipe picker and the specialized-subagents multi-select (previously recipe selection was tool-only and "managed" was implied by picking ≥1 subagent)
+- A managed claude-cli session (sandboxed or not) is launched *workflow-aware*: the daemon injects the recipe's orchestration system prompt (`--append-system-prompt-file`) and wires the `transition` tool to a per-session `WorkflowController`, so Claude advances and persists its own workflow state in `changeset.yaml`
+- `transition` is relayed on the host over the existing `TDDY_SOCKET` protocol (no `tddy-tools`/proto changes); the transition handler became per-instance so concurrent managed sessions never cross-route
+- Resume of a managed session re-wires the workflow and resumes at the persisted goal (not the start goal)
+- An unknown recipe on a managed claude-cli session is rejected with `INVALID_ARGUMENT`
+- Feature: [managed-codebase-workflow.md](managed-codebase-workflow.md)
+## 2026-07-03 — Manually add a planned PR + choose ancestors
+
+- New "+ New planned PR" form on the PR-Stack Chat Screen lets the operator manually add a planned PR node and pick its ancestors via a multi-select checkbox picker over the orchestrator's existing planned-PR nodes — no chat/LLM round trip required
+- New `AddPlannedPr` RPC appends one `StackNode` to a `"pr-stack"` orchestrator's `Changeset.stack`, additive-only (never rewrites existing nodes, unlike the chat-driven plan refinement), server-assigns the node id, and validates ancestors/cycles before writing
+- Feature: [pr-stacking.md § Manually adding a planned PR](pr-stacking.md#manually-adding-a-planned-pr)
 
 ## 2026-07-02 — Subagent-declared tool replacement
 
