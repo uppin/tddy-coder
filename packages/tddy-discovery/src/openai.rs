@@ -182,13 +182,27 @@ impl OpenAiClient {
             "{}/v1/chat/completions",
             self.base_url.trim_end_matches('/')
         );
+        // Full request transcript (prompt, tool results, tool schemas) — enable with
+        // `--mcp-log-level debug` (RUST_LOG `tddy_discovery::openai=debug`) to capture exactly what
+        // is sent to the model; Ollama's own logs record only token counts/timings, not content.
+        if log::log_enabled!(log::Level::Debug) {
+            log::debug!(
+                target: "tddy_discovery::openai",
+                "chat request → {url}: {}",
+                serde_json::to_string(&request).unwrap_or_else(|e| format!("<unserializable: {e}>"))
+            );
+        }
         let response = self.http.post(&url).json(&request).send().await?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+        let status = response.status();
+        // Read the body as text once, so we can log the full response transcript and still parse it
+        // (and surface the body on both HTTP errors and parse failures).
+        let body = response.text().await?;
+        if !status.is_success() {
             return Err(format!("OpenAI API error {status}: {body}").into());
         }
-        let parsed: ChatCompletionResponse = response.json().await?;
+        log::debug!(target: "tddy_discovery::openai", "chat response ← {url} [{status}]: {body}");
+        let parsed: ChatCompletionResponse = serde_json::from_str(&body)
+            .map_err(|e| format!("parse chat completion response: {e}; body: {body}"))?;
         Ok(parsed)
     }
 }

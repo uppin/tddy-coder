@@ -13,11 +13,11 @@ use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id
 use tddy_core::{BranchWorktreeIntent, Changeset, ChangesetWorkflow};
 use tddy_rpc::{Request, Response, Status, Streaming};
 use tddy_service::proto::connection::{
-    AddPlannedPrRequest, AddPlannedPrResponse, AgentInfo, ClaimTerminalControlRequest,
-    ClaimTerminalControlResponse, ConnectSessionRequest, ConnectSessionResponse,
-    ConnectionService as ConnectionServiceTrait, CreateProjectRequest, CreateProjectResponse,
-    DeleteSessionRequest, DeleteSessionResponse, EligibleDaemonEntry, ListAgentsRequest,
-    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
+    AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest, AddProjectToHostResponse,
+    AgentInfo, ClaimTerminalControlRequest, ClaimTerminalControlResponse, ConnectSessionRequest,
+    ConnectSessionResponse, ConnectionService as ConnectionServiceTrait, CreateProjectRequest,
+    CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse, EligibleDaemonEntry,
+    ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
     ListProjectsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
     ListSessionsRequest, ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse,
@@ -2096,12 +2096,18 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             entries.len(),
             local_daemon_id
         );
-        let merged = merge_listed_projects_with_peers(
-            &*self.eligible_daemon_source,
-            &req.session_token,
-            entries,
-        );
-        Ok(Response::new(ListProjectsResponse { projects: merged }))
+        // `local_only` returns just this daemon's rows and skips peer fan-out, breaking the
+        // recursion when a peer aggregation call fans out back into `ListProjects`.
+        let projects = if req.local_only {
+            entries
+        } else {
+            merge_listed_projects_with_peers(
+                &*self.eligible_daemon_source,
+                &req.session_token,
+                entries,
+            )
+        };
+        Ok(Response::new(ListProjectsResponse { projects }))
     }
 
     async fn create_project(
@@ -2185,6 +2191,154 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         Ok(Response::new(CreateProjectResponse {
             project: Some(entry),
+        }))
+    }
+
+    async fn add_project_to_host(
+        &self,
+        request: Request<AddProjectToHostRequest>,
+    ) -> Result<Response<AddProjectToHostResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let project_id = req.project_id.trim();
+        if project_id.is_empty() {
+            return Err(Status::invalid_argument("project_id is required"));
+        }
+        let name = req.name.trim();
+        if name.is_empty() {
+            return Err(Status::invalid_argument("project name is required"));
+        }
+        if name.contains('/') || name.contains("..") {
+            return Err(Status::invalid_argument("invalid project name"));
+        }
+        let git_url = req.git_url.trim();
+        if git_url.is_empty() {
+            return Err(Status::invalid_argument("git_url is required"));
+        }
+
+        // Route to the requested host: local (empty / matching id) or forward to a peer daemon.
+        let requested_daemon = req.daemon_instance_id.trim();
+        let local_id = local_instance_id_for_config(&self.config);
+        let eligible_ids: Vec<String> = self
+            .eligible_daemon_source
+            .list_eligible_daemons()
+            .iter()
+            .map(|e| e.instance_id.0.clone())
+            .collect();
+        let route = crate::livekit_peer_discovery::classify_peer_route(
+            &local_id,
+            requested_daemon,
+            &eligible_ids,
+        )
+        .map_err(|msg| {
+            log::info!("AddProjectToHost: rejected daemon routing: {}", msg);
+            Status::failed_precondition(msg)
+        })?;
+
+        if let crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id } = route {
+            log::info!(
+                "AddProjectToHost: forwarding RPC to remote daemon_instance_id={}",
+                peer_instance_id
+            );
+            let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
+                Status::failed_precondition(
+                    "cannot forward AddProjectToHost: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
+                )
+            })?;
+            let inner = crate::livekit_peer_discovery::forward_add_project_to_host_via_livekit(
+                slot,
+                &peer_instance_id,
+                &req,
+            )
+            .await?;
+            return Ok(Response::new(inner));
+        }
+
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+
+        // Idempotent: if this host already registers the project_id, return it without re-cloning.
+        if let Some(existing) = project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+        {
+            log::info!(
+                "AddProjectToHost: project_id={} already present on this host, returning existing row",
+                project_id
+            );
+            return Ok(Response::new(AddProjectToHostResponse {
+                project: Some(ProtoProjectEntry {
+                    project_id: existing.project_id,
+                    name: existing.name,
+                    git_url: existing.git_url,
+                    main_repo_path: existing.main_repo_path,
+                    daemon_instance_id: local_id,
+                }),
+            }));
+        }
+
+        let user_rel = req.user_relative_path.trim();
+        let destination = if !user_rel.is_empty() {
+            project_path_under_home_from_user_relative(os_user, user_rel)
+                .map_err(Status::invalid_argument)?
+        } else {
+            let base = repos_base_for_user(os_user, self.config.repos_base_path_or_default())
+                .ok_or_else(|| Status::internal("could not resolve repos base path"))?;
+            base.join(name)
+        };
+        let spawn_client = self.spawn_client.clone();
+        let os_user_owned = os_user.to_string();
+        let git_url_owned = git_url.to_string();
+        let dest_path = destination.clone();
+        let timeout = self.config.spawn_worker_request_timeout();
+
+        spawn_blocking_with_timeout(timeout, "add_project_to_host: clone_repo", move || {
+            if let Some(ref client) = spawn_client {
+                client.clone_repo(spawn_worker::CloneRequest {
+                    os_user: os_user_owned,
+                    git_url: git_url_owned,
+                    destination: dest_path.display().to_string(),
+                })
+            } else {
+                spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
+            }
+        })
+        .await?;
+
+        let main_repo_path = destination
+            .canonicalize()
+            .unwrap_or(destination)
+            .display()
+            .to_string();
+
+        let main_branch_ref = {
+            let r = req.main_branch_ref.trim();
+            (!r.is_empty()).then(|| r.to_string())
+        };
+        let project = ProjectData {
+            project_id: project_id.to_string(),
+            name: name.to_string(),
+            git_url: git_url.to_string(),
+            main_repo_path,
+            main_branch_ref,
+            host_repo_paths: std::collections::HashMap::new(),
+        };
+        let (stored, _created) = project_storage::add_or_get_project(&projects_dir, project)
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(AddProjectToHostResponse {
+            project: Some(ProtoProjectEntry {
+                project_id: stored.project_id,
+                name: stored.name,
+                git_url: stored.git_url,
+                main_repo_path: stored.main_repo_path,
+                daemon_instance_id: local_id,
+            }),
         }))
     }
 
