@@ -84,6 +84,8 @@ pub struct DaemonConfig {
     pub spawn_worker_request_timeout_secs: u64,
     /// Stable id for this daemon in a shared LiveKit room (multi-host). When set, spawned tools
     /// and ConnectSession use `daemon-{instance_id}-{session_id}` as LiveKit server identity.
+    /// Overridable at startup via the `TDDY_DAEMON_INSTANCE_ID` env var (see `apply_env_overrides`
+    /// in `main.rs`); falls back to the machine short hostname when neither is set.
     #[serde(default)]
     pub daemon_instance_id: Option<String>,
     /// When true, append `-<unix_ms>` once per process to the resolved instance id (YAML override
