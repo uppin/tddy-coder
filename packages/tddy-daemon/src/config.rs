@@ -1,6 +1,6 @@
 //! Daemon configuration — users, tools, LiveKit, GitHub, etc.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use tddy_core::LogConfig;
@@ -245,11 +245,120 @@ fn default_claude_cli_binary_path() -> String {
     "claude".to_string()
 }
 
+/// Environment variable that overrides the resolved `claude` binary path (highest priority).
+/// The escape hatch for when host auto-resolution picks the wrong binary.
+pub const CLAUDE_BINARY_ENV: &str = "TDDY_CLAUDE_BINARY";
+
+/// A wrapper-shim `bin` directory whose `claude` merely re-execs the real binary from `$PATH`
+/// (e.g. Superset's `~/.superset/bin`). Such a shim can't resolve inside the jail — its `PATH` is
+/// only `/usr/bin:/bin` — so host resolution must skip these dirs. See the `claude-sandbox` script.
+fn is_wrapper_shim_dir(dir: &Path) -> bool {
+    let ends_with_bin = dir.file_name().is_some_and(|n| n == "bin");
+    ends_with_bin
+        && dir.components().any(|c| match c {
+            std::path::Component::Normal(n) => n.to_string_lossy().starts_with(".superset"),
+            _ => false,
+        })
+}
+
+#[cfg(unix)]
+fn is_executable_file(p: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(p: &Path) -> bool {
+    p.is_file()
+}
+
+/// Locate the real host `claude` as an absolute path: prefer `~/.local/bin/claude` (the canonical
+/// Claude Code install), then scan `$PATH` skipping wrapper-shim dirs. `None` if none is found.
+fn find_real_claude_on_host() -> Option<PathBuf> {
+    if let Some(home) = std::env::var_os("HOME") {
+        let candidate = PathBuf::from(home).join(".local/bin/claude");
+        if is_executable_file(&candidate) {
+            return Some(candidate);
+        }
+    }
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .filter(|d| !d.as_os_str().is_empty() && !is_wrapper_shim_dir(d))
+        .map(|d| d.join("claude"))
+        .find(|c| is_executable_file(c))
+}
+
+/// Whether the `claude` binary is taken from an explicit override or must be auto-resolved.
+enum ClaudeBinaryChoice {
+    /// Use this value as-is (an env override or an explicit config path).
+    Explicit(String),
+    /// No explicit path given — resolve the real `claude` from the host.
+    Auto,
+}
+
+/// Decide from the env override and configured value alone (no filesystem access, so it is
+/// unit-testable): a non-empty env override wins; otherwise a configured value naming a path
+/// (contains `/`) is explicit; a bare name means "auto-resolve".
+fn choose_claude_binary(env_override: Option<&str>, configured: &str) -> ClaudeBinaryChoice {
+    if let Some(env) = env_override.map(str::trim).filter(|s| !s.is_empty()) {
+        return ClaudeBinaryChoice::Explicit(env.to_string());
+    }
+    if configured.contains('/') {
+        return ClaudeBinaryChoice::Explicit(configured.to_string());
+    }
+    ClaudeBinaryChoice::Auto
+}
+
+/// Canonicalize a value that names a path (contains `/`); return a bare name unchanged. The SBPL
+/// allow-list is built from canonical (symlink-resolved) parent dirs, so a symlinked spelling would
+/// be denied at exec time.
+fn canonicalize_if_path(p: &str) -> String {
+    if p.contains('/') {
+        std::fs::canonicalize(p)
+            .map(|c| c.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| p.to_string())
+    } else {
+        p.to_string()
+    }
+}
+
+/// Resolve the `claude` binary the sandbox runner will exec, as an absolute path when possible.
+///
+/// Resolution order (first match wins):
+/// 1. `TDDY_CLAUDE_BINARY` env var, when set and non-empty ([`CLAUDE_BINARY_ENV`]).
+/// 2. `claude_cli.binary_path` in the daemon config, when it names a path (contains `/`).
+/// 3. Auto-resolution of the real host `claude`: `~/.local/bin/claude`, then `$PATH` (skipping
+///    wrapper-shim dirs like Superset's `~/.superset/bin`, which can't resolve inside the jail).
+/// 4. Fallback: the configured value as-is (bare name, default `"claude"`).
+///
+/// A bare name must never reach the runner in normal operation: `binary_exec_reads` would take its
+/// empty parent (`Path::parent` of `"claude"` is `Some("")`) and emit `(subpath "")`, which macOS
+/// `sandbox-exec` rejects. Steps 1–3 produce an absolute path; step 4 is a last resort.
+pub fn resolve_claude_binary_path(config: &DaemonConfig) -> String {
+    let configured = config
+        .claude_cli
+        .as_ref()
+        .map(|c| c.binary_path.as_str())
+        .unwrap_or("claude");
+    let env_override = std::env::var(CLAUDE_BINARY_ENV).ok();
+    match choose_claude_binary(env_override.as_deref(), configured) {
+        ClaudeBinaryChoice::Explicit(p) => canonicalize_if_path(&p),
+        ClaudeBinaryChoice::Auto => match find_real_claude_on_host() {
+            Some(real) => canonicalize_if_path(&real.to_string_lossy()),
+            None => configured.to_string(),
+        },
+    }
+}
+
 /// Claude Code CLI session configuration. Loaded from daemon YAML under `claude_cli:`.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClaudeCliConfig {
-    /// Path to the `claude` binary. Defaults to "claude" (resolved from PATH).
+    /// Path to the `claude` binary. A path (contains `/`) is used verbatim; a bare name (default
+    /// `"claude"`) triggers host auto-resolution — see [`resolve_claude_binary_path`]. Override
+    /// with the `TDDY_CLAUDE_BINARY` env var when resolution picks the wrong binary.
     #[serde(default = "default_claude_cli_binary_path")]
     pub binary_path: String,
     /// Absolute path to the `tddy-tools` binary for per-worktree hook commands.
@@ -261,6 +370,111 @@ pub struct ClaudeCliConfig {
     /// When absent, defaults to `http://127.0.0.1:{web_port}` derived from the listen config.
     #[serde(default)]
     pub daemon_url: Option<String>,
+    /// Persistent jail `$HOME` reused across sandboxed claude-cli sessions so auth (refreshed OAuth
+    /// tokens), session history, and settings survive between sessions. Absent → default
+    /// `$HOME/.tddy/sandbox-claude-home`. Override with the `TDDY_SANDBOX_CLAUDE_HOME` env var. A
+    /// single daemon-wide home — see [`resolve_claude_home_dir`].
+    #[serde(default)]
+    pub claude_home_dir: Option<PathBuf>,
+}
+
+/// Environment variable overriding the persistent sandbox claude `$HOME`.
+pub const CLAUDE_HOME_ENV: &str = "TDDY_SANDBOX_CLAUDE_HOME";
+
+/// Resolve the single daemon-wide persistent jail `$HOME` for sandboxed claude-cli sessions.
+///
+/// Resolution order (first match wins):
+/// 1. `TDDY_SANDBOX_CLAUDE_HOME` env var (if set and non-empty).
+/// 2. `claude_cli.claude_home_dir` in the daemon config.
+/// 3. Default `$HOME/.tddy/sandbox-claude-home`.
+///
+/// The dir is reused across sessions and mounted read-write into the jail, so credentials/history
+/// persist. It is deliberately separate from the daemon user's real `~/.claude`.
+pub fn resolve_claude_home_dir(config: &DaemonConfig) -> PathBuf {
+    if let Some(env) = std::env::var_os(CLAUDE_HOME_ENV).filter(|v| !v.is_empty()) {
+        return PathBuf::from(env);
+    }
+    if let Some(dir) = config
+        .claude_cli
+        .as_ref()
+        .and_then(|c| c.claude_home_dir.as_ref())
+    {
+        return dir.clone();
+    }
+    let base = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    base.join(".tddy").join("sandbox-claude-home")
+}
+
+/// Environment variable naming the shared sandbox config file explicitly (highest priority).
+pub const SANDBOX_CONFIG_ENV: &str = "TDDY_SANDBOX_CONFIG";
+
+/// Basename (no extension) of the shared claude-sandbox config file. The per-OS variant inserts the
+/// OS token: `claude-sandbox.<os>.yaml`; the generic form is `claude-sandbox.yaml`.
+pub const SANDBOX_CONFIG_BASENAME: &str = "claude-sandbox";
+
+/// OS token used in per-OS config filenames (e.g. `claude-sandbox.darwin.yaml`).
+///
+/// Uses the repo's convention — `"darwin"` for macOS (matching the `tddy-sandbox-darwin` crate),
+/// `"linux"` for Linux — rather than Rust's `std::env::consts::OS` (`"macos"`). A per-OS file is
+/// host-neutral: the same `claude-sandbox.darwin.yaml` works on any macOS host.
+pub fn sandbox_config_os_token() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "darwin"
+    }
+    #[cfg(target_os = "linux")]
+    {
+        "linux"
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        std::env::consts::OS
+    }
+}
+
+/// Resolve which shared claude-sandbox config file the daemon should load, searching `base_dir`.
+///
+/// Order (first existing wins):
+/// 1. `TDDY_SANDBOX_CONFIG` env — an explicit path, used as-is when it exists.
+/// 2. Per-OS `<base>/claude-sandbox.<os>.yaml` (e.g. `claude-sandbox.darwin.yaml`) — committed per
+///    platform, host-neutral within that OS.
+/// 3. Generic `<base>/claude-sandbox.yaml`.
+///
+/// `None` → no file found; the daemon falls back to built-in defaults (zero-config still works).
+pub fn resolve_sandbox_config_path(base_dir: &Path) -> Option<PathBuf> {
+    resolve_sandbox_config_path_with(
+        base_dir,
+        sandbox_config_os_token(),
+        std::env::var(SANDBOX_CONFIG_ENV).ok().as_deref(),
+        |p| p.is_file(),
+    )
+}
+
+/// Pure core of [`resolve_sandbox_config_path`] — env override, OS token, and an existence probe
+/// are all injected so the precedence is unit-testable without touching the real filesystem/env.
+fn resolve_sandbox_config_path_with(
+    base_dir: &Path,
+    os_token: &str,
+    env_override: Option<&str>,
+    exists: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    if let Some(env) = env_override.map(str::trim).filter(|s| !s.is_empty()) {
+        let p = PathBuf::from(env);
+        if exists(&p) {
+            return Some(p);
+        }
+    }
+    let per_os = base_dir.join(format!("{SANDBOX_CONFIG_BASENAME}.{os_token}.yaml"));
+    if exists(&per_os) {
+        return Some(per_os);
+    }
+    let generic = base_dir.join(format!("{SANDBOX_CONFIG_BASENAME}.yaml"));
+    if exists(&generic) {
+        return Some(generic);
+    }
+    None
 }
 
 #[derive(Debug, Default, Clone, serde::Deserialize)]
@@ -762,6 +976,138 @@ claude_cli:
             Some("/usr/local/bin/tddy-tools")
         );
         assert_eq!(cli.daemon_url.as_deref(), Some("http://127.0.0.1:9000"));
+    }
+
+    /// A non-empty env override always wins, even over an explicit config path.
+    #[test]
+    fn env_override_wins_over_configured_path() {
+        assert!(matches!(
+            choose_claude_binary(Some("/opt/claude"), "/usr/local/bin/claude"),
+            ClaudeBinaryChoice::Explicit(p) if p == "/opt/claude"
+        ));
+    }
+
+    /// A blank/whitespace env override is ignored (falls through to config/auto).
+    #[test]
+    fn blank_env_override_is_ignored() {
+        assert!(matches!(
+            choose_claude_binary(Some("   "), "claude"),
+            ClaudeBinaryChoice::Auto
+        ));
+    }
+
+    /// A configured value naming a path is explicit; a bare name auto-resolves from the host.
+    #[test]
+    fn configured_path_is_explicit_but_bare_name_auto_resolves() {
+        assert!(matches!(
+            choose_claude_binary(None, "/usr/local/bin/claude"),
+            ClaudeBinaryChoice::Explicit(_)
+        ));
+        assert!(matches!(
+            choose_claude_binary(None, "claude"),
+            ClaudeBinaryChoice::Auto
+        ));
+    }
+
+    /// `claude_home_dir` round-trips from YAML, and a configured value is what the resolver returns
+    /// (when the `TDDY_SANDBOX_CLAUDE_HOME` env override is not set, the normal case in tests).
+    #[test]
+    fn claude_home_dir_parses_and_resolves_from_config() {
+        let yaml = "
+users:
+  - github_user: u
+    os_user: u
+claude_cli:
+  binary_path: claude
+  claude_home_dir: /custom/claude-home
+";
+        let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
+        assert_eq!(
+            c.claude_cli.as_ref().unwrap().claude_home_dir.as_deref(),
+            Some(Path::new("/custom/claude-home"))
+        );
+        if std::env::var_os(CLAUDE_HOME_ENV).is_none() {
+            assert_eq!(
+                resolve_claude_home_dir(&c),
+                PathBuf::from("/custom/claude-home"),
+                "a configured claude_home_dir must be returned when the env override is unset"
+            );
+        }
+    }
+
+    /// With no `claude_cli` section the resolver falls back to `$HOME/.tddy/sandbox-claude-home`.
+    #[test]
+    fn claude_home_dir_defaults_under_tddy_when_unconfigured() {
+        if std::env::var_os(CLAUDE_HOME_ENV).is_some() {
+            return; // env override in effect; default path not exercised
+        }
+        let c = DaemonConfig::default();
+        let resolved = resolve_claude_home_dir(&c);
+        assert!(
+            resolved.ends_with(".tddy/sandbox-claude-home"),
+            "default home must be under ~/.tddy: {}",
+            resolved.display()
+        );
+    }
+
+    /// The per-OS config file wins over the generic one when both are present.
+    #[test]
+    fn per_os_sandbox_config_takes_precedence_over_generic() {
+        let base = Path::new("/cfg");
+        // Both present → per-OS wins.
+        let got = resolve_sandbox_config_path_with(base, "darwin", None, |p| {
+            p == Path::new("/cfg/claude-sandbox.darwin.yaml")
+                || p == Path::new("/cfg/claude-sandbox.yaml")
+        });
+        assert_eq!(got, Some(PathBuf::from("/cfg/claude-sandbox.darwin.yaml")));
+        // Only generic present → generic.
+        let got = resolve_sandbox_config_path_with(base, "darwin", None, |p| {
+            p == Path::new("/cfg/claude-sandbox.yaml")
+        });
+        assert_eq!(got, Some(PathBuf::from("/cfg/claude-sandbox.yaml")));
+    }
+
+    /// The env override wins when it points at an existing file; a missing env target is skipped in
+    /// favour of the per-OS/generic search. Absent everything → `None` (defaults).
+    #[test]
+    fn sandbox_config_env_override_and_absence() {
+        let base = Path::new("/cfg");
+        // Env points at an existing file → used as-is.
+        let got =
+            resolve_sandbox_config_path_with(base, "darwin", Some("/explicit/cfg.yaml"), |p| {
+                p == Path::new("/explicit/cfg.yaml")
+            });
+        assert_eq!(got, Some(PathBuf::from("/explicit/cfg.yaml")));
+        // Env set but missing → falls through to the per-OS file.
+        let got =
+            resolve_sandbox_config_path_with(base, "darwin", Some("/explicit/missing.yaml"), |p| {
+                p == Path::new("/cfg/claude-sandbox.darwin.yaml")
+            });
+        assert_eq!(got, Some(PathBuf::from("/cfg/claude-sandbox.darwin.yaml")));
+        // Nothing exists → None.
+        let got = resolve_sandbox_config_path_with(base, "darwin", None, |_| false);
+        assert_eq!(got, None);
+    }
+
+    /// On macOS the OS token is the repo's `"darwin"` (not Rust's `"macos"`).
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn os_token_is_darwin_on_macos() {
+        assert_eq!(sandbox_config_os_token(), "darwin");
+    }
+
+    /// Wrapper-shim `bin` dirs (Superset) are recognised so PATH resolution skips them; real
+    /// install dirs are not.
+    #[test]
+    fn recognises_wrapper_shim_dirs() {
+        assert!(is_wrapper_shim_dir(Path::new("/Users/x/.superset/bin")));
+        assert!(is_wrapper_shim_dir(Path::new(
+            "/Users/x/.superset-worktrees/proj/bin"
+        )));
+        assert!(!is_wrapper_shim_dir(Path::new("/Users/x/.local/bin")));
+        assert!(!is_wrapper_shim_dir(Path::new("/usr/bin")));
+        // Only the `bin` leaf under a `.superset*` component counts.
+        assert!(!is_wrapper_shim_dir(Path::new("/Users/x/.superset/lib")));
     }
 }
 

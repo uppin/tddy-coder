@@ -12,6 +12,109 @@ pub fn process_claude_exec_reads(claude_binary: &Path) -> Vec<tddy_sandbox::Read
     process_exec_reads(claude_binary)
 }
 
+/// Seed `claude_home_dir/.claude/.credentials.json` from the real host `~/.claude` once, so a
+/// **persistent** jail home can authenticate on its first run. Never overwrites an existing file —
+/// the jail may have since refreshed its own token, and the host copy must not clobber it on later
+/// restarts. This is the persistent-home counterpart to [`claude_credentials_copies`] (which
+/// re-copies every session and is only correct for an ephemeral per-session home).
+pub fn seed_claude_credentials(claude_home_dir: &Path) -> Result<()> {
+    let dest_dir = claude_home_dir.join(".claude");
+    std::fs::create_dir_all(&dest_dir)
+        .with_context(|| format!("create persistent claude home {}", dest_dir.display()))?;
+    let dest = dest_dir.join(".credentials.json");
+    if dest.exists() {
+        return Ok(());
+    }
+    let Some(host_home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return Ok(());
+    };
+    let src = host_home.join(".claude").join(".credentials.json");
+    if !src.is_file() {
+        return Ok(());
+    }
+    std::fs::copy(&src, &dest)
+        .with_context(|| format!("seed credentials {} -> {}", src.display(), dest.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+/// Mirror the host's self-managed install layout
+/// (`$HOME/.local/bin/claude` -> `$HOME/.local/share/claude/versions/<version>` -> real binary)
+/// inside the persistent jail home, so Claude's own startup self-check — which looks for itself
+/// at `$HOME/.local/bin/claude` — finds a consistent install instead of warning "missing or
+/// broken — run claude install to repair". The actually-exec'd binary stays the resolved
+/// `claude_binary` path passed to the runner; these are just symlinks pointing at the same file.
+#[cfg(unix)]
+pub fn seed_claude_local_install(claude_home_dir: &Path, claude_binary: &str) -> Result<()> {
+    use std::os::unix::fs::symlink;
+
+    let real_bin = Path::new(claude_binary);
+    let local_bin_dir = claude_home_dir.join(".local").join("bin");
+    std::fs::create_dir_all(&local_bin_dir)
+        .with_context(|| format!("create {}", local_bin_dir.display()))?;
+    let local_bin_claude = local_bin_dir.join("claude");
+
+    // Detect the installer's `.../versions/<version>/<real binary>` shape and mirror it so a
+    // version-manifest check (if any) also finds a matching entry; otherwise fall back to a flat
+    // symlink straight at the resolved binary.
+    let link_target = if is_versioned_install_layout(real_bin) {
+        mirror_versioned_symlink(claude_home_dir, real_bin)?
+    } else {
+        real_bin.to_path_buf()
+    };
+
+    let _ = std::fs::remove_file(&local_bin_claude);
+    symlink(&link_target, &local_bin_claude).with_context(|| {
+        format!(
+            "symlink {} -> {}",
+            local_bin_claude.display(),
+            link_target.display()
+        )
+    })?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn is_versioned_install_layout(real_bin: &Path) -> bool {
+    real_bin
+        .parent()
+        .and_then(|p| p.file_name())
+        .is_some_and(|n| n == "versions")
+}
+
+/// Mirror `real_bin` (`.../versions/<version>/<binary>`) under
+/// `claude_home_dir/.local/share/claude/versions/<version>`, returning the mirrored symlink path.
+#[cfg(unix)]
+fn mirror_versioned_symlink(claude_home_dir: &Path, real_bin: &Path) -> Result<PathBuf> {
+    use std::os::unix::fs::symlink;
+
+    let version = real_bin
+        .file_name()
+        .map(|n| n.to_owned())
+        .context("versioned claude binary has no file name")?;
+    let versions_dir = claude_home_dir
+        .join(".local")
+        .join("share")
+        .join("claude")
+        .join("versions");
+    std::fs::create_dir_all(&versions_dir)
+        .with_context(|| format!("create {}", versions_dir.display()))?;
+    let versioned_link = versions_dir.join(&version);
+    let _ = std::fs::remove_file(&versioned_link);
+    symlink(real_bin, &versioned_link).with_context(|| {
+        format!(
+            "symlink {} -> {}",
+            versioned_link.display(),
+            real_bin.display()
+        )
+    })?;
+    Ok(versioned_link)
+}
+
 /// Credentials copied into the jail HOME for Claude — `.credentials.json` only.
 pub fn claude_credentials_copies(host_home: &Path, scratch_home: &Path) -> Vec<CopySpec> {
     vec![CopySpec {
@@ -302,6 +405,25 @@ mod tests {
                     && r.reason == ReadReason::DyldRoot
             }),
             "claude reads must include the dyld root literal: {reads:?}"
+        );
+    }
+
+    /// `seed_claude_credentials` never overwrites an existing dest — a persistent jail that has
+    /// refreshed its own OAuth token must not be clobbered by the (possibly stale) host copy on a
+    /// later restart. This no-clobber guarantee is what makes auth *persist* across sessions.
+    #[test]
+    fn seed_claude_credentials_does_not_overwrite_an_existing_token() {
+        let home = tempfile::tempdir().unwrap();
+        let dest = home.path().join(".claude").join(".credentials.json");
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        std::fs::write(&dest, "JAIL-REFRESHED-TOKEN").unwrap();
+
+        seed_claude_credentials(home.path()).expect("seed must succeed");
+
+        assert_eq!(
+            std::fs::read_to_string(&dest).unwrap(),
+            "JAIL-REFRESHED-TOKEN",
+            "an existing jail token must survive seeding"
         );
     }
 

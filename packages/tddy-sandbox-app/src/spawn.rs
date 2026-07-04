@@ -505,6 +505,9 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         loopback_allow_ports,
         ipc_socket: Some(tool_ipc_socket),
         mounts: build_sandbox_mounts(params.remote_codebase, &repo, &scratch_home),
+        // Preserve prior behavior (build_sandbox_plan used to hardcode $HOME): the recipe's
+        // per-session credential copy stays enabled for the app path.
+        host_home: std::env::var_os("HOME").map(PathBuf::from),
     })
     .map_err(|e| {
         let logs = tddy_sandbox::format_egress_logs(&egress_dir);

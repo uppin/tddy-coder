@@ -77,7 +77,11 @@ pub fn system_baseline_reads() -> Vec<ReadSpec> {
 #[cfg(target_os = "macos")]
 pub fn binary_exec_reads(binary: &Path) -> Vec<ReadSpec> {
     let mut reads = Vec::new();
-    if let Some(parent) = binary.parent() {
+    // `Path::new("claude").parent()` is `Some("")`, not `None`, for a bare binary name (no
+    // directory component). An empty subpath must never become a grant: macOS `sandbox-exec`
+    // rejects `(subpath "")`, and in the builder an empty enclosing subpath shadows every other
+    // read in the allow-list. Skip it — callers should pass an absolute path.
+    if let Some(parent) = binary.parent().filter(|p| !p.as_os_str().is_empty()) {
         reads.push(ReadSpec::subpath(parent, ReadReason::BinaryDeps).executable());
     }
     if let Ok(output) = std::process::Command::new("otool")
@@ -105,6 +109,7 @@ pub fn binary_exec_reads(binary: &Path) -> Vec<ReadSpec> {
 pub fn binary_exec_reads(binary: &Path) -> Vec<ReadSpec> {
     binary
         .parent()
+        .filter(|p| !p.as_os_str().is_empty())
         .map(|parent| vec![ReadSpec::subpath(parent, ReadReason::BinaryDeps).executable()])
         .unwrap_or_default()
 }
@@ -149,4 +154,21 @@ pub fn detect_toolchain_reads() -> Vec<ReadSpec> {
 #[cfg(not(target_os = "macos"))]
 pub fn detect_toolchain_reads() -> Vec<ReadSpec> {
     Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A bare binary name has an *empty* parent path — `Path::parent` returns `Some("")`, not
+    /// `None`. That empty subpath must never become a read grant: macOS `sandbox-exec` rejects
+    /// `(subpath "")`, and in the builder it would shadow every other read in the allow-list.
+    #[test]
+    fn binary_exec_reads_skips_the_empty_parent_of_a_bare_binary_name() {
+        let reads = binary_exec_reads(std::path::Path::new("claude"));
+        assert!(
+            reads.iter().all(|r| !r.host.as_os_str().is_empty()),
+            "a bare binary name must not yield an empty-host read: {reads:?}"
+        );
+    }
 }

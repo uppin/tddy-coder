@@ -91,9 +91,13 @@ telegram:
 # users need that dir on PATH or `spawn_path_extra` in `~/.tddy/config.yaml`.
 # Overrides: `TDDY_CODEX_ACP_CLI`, `--codex-acp-cli-path`, or YAML from `-c` / `sessions/<id>/coder-config.yaml`.
 # Enables the "Claude Code CLI" session type in ConnectionScreen (spawns `claude` CLI in a PTY).
-# binary_path defaults to "claude" (resolved from PATH).
-claude_cli:
-  binary_path: claude
+# binary_path: a path (contains '/') is used verbatim; a bare name like "claude" (default) is
+# auto-resolved to the real host binary — ~/.local/bin/claude, then $PATH skipping wrapper-shim dirs
+# (e.g. Superset's ~/.superset/bin, which can't resolve inside the sandbox). Override the resolution
+# with the TDDY_CLAUDE_BINARY env var, or by setting an absolute binary_path here.
+# Commented out: with the section absent, binary_path defaults to "claude" and is auto-resolved.
+# claude_cli:
+#   binary_path: claude
 
 # Git behavior for the daemon's remote fetches (resolving/updating integration bases on StartSession).
 # ssh_command overrides GIT_SSH_COMMAND for those fetches ONLY — it is not exported to the process

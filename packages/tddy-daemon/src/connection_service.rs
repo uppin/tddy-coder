@@ -1157,7 +1157,8 @@ impl ConnectionServiceImpl {
         let sandbox_root = std::fs::canonicalize(&sandbox_root).unwrap_or(sandbox_root);
         let egress_dir = std::fs::canonicalize(&egress_dir).unwrap_or(egress_dir);
         let scratch_dir = sandbox_root.join(".work");
-        let scratch_home = scratch_dir.join("home");
+        // scratch_home (jail $HOME) is the persistent daemon-wide claude home, resolved and mounted
+        // below — not a per-session dir — so auth/history persist across sessions.
         let scratch_tmp = scratch_dir.join("tmp");
         let context_dir = sandbox_root.join("context");
 
@@ -1209,12 +1210,6 @@ impl ConnectionServiceImpl {
             managed = Some(launch.workflow);
         }
 
-        let claude_binary_cfg = self
-            .config
-            .claude_cli
-            .as_ref()
-            .map(|c| c.binary_path.as_str())
-            .unwrap_or("claude");
         // Canonicalize the binary paths the runner will exec: the SBPL allow-list is built
         // from the canonical (symlink-resolved) parent dirs, so a symlinked spelling (e.g. a
         // binary under /tmp -> /private/tmp) would be denied at exec time ("doesn't exist /
@@ -1231,8 +1226,17 @@ impl ConnectionServiceImpl {
         let tddy_tools_path = canonicalize_exec(&tddy_tools_path);
         let sandbox_runner_path =
             canonicalize_exec(&crate::sandbox_session::resolve_sandbox_runner_path());
-        let claude_binary = canonicalize_exec(claude_binary_cfg);
+        // Resolve the real `claude` to an absolute path (skipping wrapper shims). Overridable via
+        // TDDY_CLAUDE_BINARY or `claude_cli.binary_path`. A bare name would give binary_exec_reads
+        // an empty parent → `(subpath "")` → macOS sandbox-exec rejects the profile.
+        let claude_binary = crate::config::resolve_claude_binary_path(&self.config);
         let claude_binary = claude_binary.as_str();
+
+        // Persistent daemon-wide jail $HOME: reused across sessions and mounted read-write below, so
+        // refreshed OAuth tokens, session history, and settings survive. Seeded non-clobbering.
+        let claude_home_dir = crate::config::resolve_claude_home_dir(&self.config);
+        let scratch_home =
+            crate::sandbox_session::prepare_persistent_claude_home(&claude_home_dir, claude_binary);
 
         // The tool-IPC AF_UNIX socket must fit within SUN_LEN (104 bytes on macOS); the
         // canonical session dir is far too deep, so use a short out-of-tree path that the
@@ -1299,7 +1303,11 @@ impl ConnectionServiceImpl {
                 env,
                 loopback_allow_ports,
                 ipc_socket: Some(tool_ipc_socket.clone()),
-                mounts: vec![],
+                // Mount the persistent jail $HOME read-write so it survives the session.
+                mounts: vec![tddy_sandbox::MountSpec::read_write(scratch_home.clone())],
+                // Persistent home is seeded separately (non-clobbering); disable the recipe's
+                // per-session credential copy so it can't overwrite a refreshed jail token.
+                host_home: None,
             },
         )
         .map_err(|e| {
@@ -1583,7 +1591,8 @@ impl ConnectionServiceImpl {
         let sandbox_root = std::fs::canonicalize(&sandbox_root).unwrap_or(sandbox_root);
         let egress_dir = std::fs::canonicalize(&egress_dir).unwrap_or(egress_dir);
         let scratch_dir = sandbox_root.join(".work");
-        let scratch_home = scratch_dir.join("home");
+        // scratch_home (jail $HOME) is the persistent daemon-wide claude home, resolved and mounted
+        // below — not a per-session dir — so auth/history persist across sessions.
         let scratch_tmp = scratch_dir.join("tmp");
         let context_dir = sandbox_root.join("context");
 
@@ -1642,12 +1651,6 @@ impl ConnectionServiceImpl {
             managed = Some(launch.workflow);
         }
 
-        let claude_binary_cfg = self
-            .config
-            .claude_cli
-            .as_ref()
-            .map(|c| c.binary_path.as_str())
-            .unwrap_or("claude");
         let canonicalize_exec = |p: &str| -> String {
             if p.contains('/') {
                 std::fs::canonicalize(p)
@@ -1660,7 +1663,17 @@ impl ConnectionServiceImpl {
         let tddy_tools_path = canonicalize_exec(&tddy_tools_path);
         let sandbox_runner_path =
             canonicalize_exec(&crate::sandbox_session::resolve_sandbox_runner_path());
-        let claude_binary = canonicalize_exec(claude_binary_cfg);
+        // See the sibling call site above: resolve the real `claude` (overridable via
+        // TDDY_CLAUDE_BINARY / `claude_cli.binary_path`); a bare name breaks the sandbox profile.
+        let claude_binary = crate::config::resolve_claude_binary_path(&self.config);
+
+        // Persistent daemon-wide jail $HOME (see sibling site above): mounted read-write, seeded
+        // non-clobbering, so auth/history persist across sessions.
+        let claude_home_dir = crate::config::resolve_claude_home_dir(&self.config);
+        let scratch_home = crate::sandbox_session::prepare_persistent_claude_home(
+            &claude_home_dir,
+            &claude_binary,
+        );
 
         let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(session_id);
         let ready_marker = sandbox_root.join("sandbox.ready");
@@ -1725,7 +1738,11 @@ impl ConnectionServiceImpl {
                 env,
                 loopback_allow_ports,
                 ipc_socket: Some(tool_ipc_socket.clone()),
-                mounts: vec![],
+                // Mount the persistent jail $HOME read-write so it survives the session.
+                mounts: vec![tddy_sandbox::MountSpec::read_write(scratch_home.clone())],
+                // Persistent home is seeded separately (non-clobbering); disable the recipe's
+                // per-session credential copy so it can't overwrite a refreshed jail token.
+                host_home: None,
             },
         )
         .map_err(|e| {
