@@ -1,10 +1,11 @@
 //! Build AuthService from daemon config.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use tddy_github::{AuthServiceImpl, GitHubUser, RealGitHubProvider, StubGitHubProvider};
+use tddy_github::{
+    AuthServiceImpl, GitHubOAuthProvider, RealGitHubProvider, SessionTokenSigner,
+    StubGitHubProvider,
+};
 use tddy_rpc::ServiceEntry;
 use tddy_service::AuthServiceServer;
 
@@ -17,26 +18,16 @@ pub struct AuthBuildResult {
     pub user_resolver: Option<SessionUserResolver>,
 }
 
-/// Resolve the path where auth sessions are persisted across daemon restarts.
-///
-/// Honors the config-only tddy-home principle: the file lives under the daemon's resolved
-/// `tddy_data_dir` (config → profile default → `$HOME/.tddy`), not a statically-derived
-/// `$HOME/.tddy` that would ignore `DaemonConfig::tddy_data_dir`.
-fn auth_session_persist_path(tddy_data_dir: &std::path::Path) -> PathBuf {
-    tddy_data_dir.join("auth-sessions.json")
-}
-
 /// Build RPC entries for AuthService when GitHub is configured.
 /// Returns entries and a user resolver for ConnectionService.
 ///
-/// `tddy_data_dir` is the daemon's resolved tddy home (see `main.rs`), the single source of
-/// truth for where persistent session state — including auth sessions — is stored.
-pub fn build_auth_entries(
-    config: &DaemonConfig,
-    web_host: &str,
-    web_port: u16,
-    tddy_data_dir: &std::path::Path,
-) -> AuthBuildResult {
+/// Session tokens are stateless, HMAC-signed tokens (see `tddy_github::session_token`) keyed on
+/// the shared `livekit.api_secret`, so a token minted by one daemon is verifiable by every daemon
+/// that holds the same secret. When no secret is configured the daemon still starts, but auth is
+/// non-functional: minting fails and the resolver rejects every token.
+///
+/// Signed tokens are stateless, so no session state is persisted — hence no data-dir argument.
+pub fn build_auth_entries(config: &DaemonConfig, web_host: &str, web_port: u16) -> AuthBuildResult {
     let github = match &config.github {
         Some(g) => g,
         None => {
@@ -47,11 +38,11 @@ pub fn build_auth_entries(
         }
     };
 
-    let sessions = Arc::new(Mutex::new(HashMap::<String, GitHubUser>::new()));
-    let sessions_for_resolver = Arc::clone(&sessions);
-
-    // Persist session tokens under the resolved tddy home so they survive daemon restarts.
-    let persist_path = auth_session_persist_path(tddy_data_dir);
+    // The one secret every daemon in a deployment shares (it also signs LiveKit room JWTs).
+    let signing_secret = config.livekit.as_ref().and_then(|lk| lk.api_secret.clone());
+    let signer = signing_secret
+        .as_deref()
+        .map(|s| SessionTokenSigner::new(s.as_bytes()));
 
     let auth_entry = if github.stub.unwrap_or(false) {
         let client_id = github.client_id.as_deref().unwrap_or("stub-client-id");
@@ -61,41 +52,16 @@ pub fn build_auth_entries(
             .unwrap_or_else(|| format!("http://{}:{}/auth/callback", web_host, web_port));
         let stub = StubGitHubProvider::new_with_callback(&callback_url, client_id);
         if let Some(ref codes) = github.stub_codes {
-            for mapping in codes.split(',') {
-                let parts: Vec<&str> = mapping.splitn(2, ':').collect();
-                if parts.len() == 2 {
-                    stub.register_code(
-                        parts[0],
-                        tddy_github::GitHubUser {
-                            id: 1,
-                            login: parts[1].to_string(),
-                            avatar_url: format!("https://github.com/{}.png", parts[1]),
-                            name: parts[1].to_string(),
-                        },
-                    );
-                }
-            }
+            register_stub_codes(&stub, codes);
         }
-        let auth_service_impl =
-            AuthServiceImpl::new_with_sessions_persisted(stub, sessions, persist_path.clone());
-        let auth_server = AuthServiceServer::new(auth_service_impl);
-        ServiceEntry {
-            name: "auth.AuthService",
-            service: Arc::new(auth_server) as Arc<dyn tddy_rpc::RpcService>,
-        }
+        auth_service_entry(stub, signer.clone())
     } else if let (Some(id), Some(secret)) = (&github.client_id, &github.client_secret) {
         let redirect_uri = github
             .redirect_uri
             .clone()
             .unwrap_or_else(|| format!("http://{}:{}/auth/callback", web_host, web_port));
         let real = RealGitHubProvider::new(id, secret, &redirect_uri);
-        let auth_service_impl =
-            AuthServiceImpl::new_with_sessions_persisted(real, sessions, persist_path);
-        let auth_server = AuthServiceServer::new(auth_service_impl);
-        ServiceEntry {
-            name: "auth.AuthService",
-            service: Arc::new(auth_server) as Arc<dyn tddy_rpc::RpcService>,
-        }
+        auth_service_entry(real, signer.clone())
     } else {
         return AuthBuildResult {
             entries: vec![],
@@ -103,16 +69,135 @@ pub fn build_auth_entries(
         };
     };
 
-    let user_resolver: SessionUserResolver = Arc::new(move |token| {
-        sessions_for_resolver
-            .lock()
-            .unwrap()
-            .get(token)
-            .map(|u| u.login.clone())
-    });
+    // Verify the token's signature/expiry and extract the login. With no signer, every token is
+    // rejected (returns `None`), so all token-gated RPCs are unauthenticated.
+    let user_resolver: SessionUserResolver = match signer {
+        Some(signer) => Arc::new(move |token: &str| signer.verify(token).ok().map(|c| c.login)),
+        None => Arc::new(|_: &str| None),
+    };
 
     AuthBuildResult {
         entries: vec![auth_entry],
         user_resolver: Some(user_resolver),
+    }
+}
+
+/// Register `code:login` mappings (from `github.stub_codes`, comma-separated) on the stub provider
+/// so tests/dev can complete the OAuth exchange without a real GitHub app. Malformed entries are
+/// skipped.
+fn register_stub_codes(stub: &StubGitHubProvider, codes: &str) {
+    for mapping in codes.split(',') {
+        let parts: Vec<&str> = mapping.splitn(2, ':').collect();
+        if parts.len() == 2 {
+            stub.register_code(
+                parts[0],
+                tddy_github::GitHubUser {
+                    id: 1,
+                    login: parts[1].to_string(),
+                    avatar_url: format!("https://github.com/{}.png", parts[1]),
+                    name: parts[1].to_string(),
+                },
+            );
+        }
+    }
+}
+
+/// Wrap an OAuth provider in an `auth.AuthService` RPC entry. When a signer is present, tokens are
+/// stateless HMAC-signed tokens; otherwise the service cannot mint and every token is rejected.
+fn auth_service_entry<P: GitHubOAuthProvider>(
+    provider: P,
+    signer: Option<SessionTokenSigner>,
+) -> ServiceEntry {
+    let server = match signer {
+        Some(signer) => AuthServiceServer::new(AuthServiceImpl::new_signed(provider, signer)),
+        None => AuthServiceServer::new(AuthServiceImpl::new(provider)),
+    };
+    ServiceEntry {
+        name: "auth.AuthService",
+        service: Arc::new(server) as Arc<dyn tddy_rpc::RpcService>,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A daemon config with GitHub auth enabled and, when `api_secret` is `Some`, a LiveKit
+    /// secret used to sign/verify session tokens.
+    fn a_config(api_secret: Option<&str>) -> (DaemonConfig, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let livekit = match api_secret {
+            Some(s) => format!("livekit:\n  api_secret: \"{s}\"\n"),
+            None => String::new(),
+        };
+        let yaml = format!(
+            "users:\n  - github_user: \"u\"\n    os_user: \"u\"\ngithub:\n  stub: true\n{livekit}"
+        );
+        let path = dir.path().join("config.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        (DaemonConfig::load(&path).unwrap(), dir)
+    }
+
+    fn a_github_user(login: &str) -> tddy_github::GitHubUser {
+        tddy_github::GitHubUser {
+            id: 1,
+            login: login.to_string(),
+            avatar_url: String::new(),
+            name: login.to_string(),
+        }
+    }
+
+    #[test]
+    fn the_resolver_accepts_a_token_signed_with_the_configured_secret() {
+        // Given auth wired with a shared signing secret
+        let (config, _dir) = a_config(Some("shared-secret"));
+        let resolver = build_auth_entries(&config, "127.0.0.1", 0)
+            .user_resolver
+            .expect("auth should produce a resolver");
+        // and a token minted with that same secret
+        let token = tddy_github::SessionTokenSigner::new(b"shared-secret")
+            .mint(&a_github_user("u"), tddy_github::SESSION_TOKEN_TTL);
+
+        // When the resolver resolves it
+        let login = (resolver)(&token);
+
+        // Then it maps to the token's GitHub login
+        assert_eq!(login.as_deref(), Some("u"));
+    }
+
+    #[test]
+    fn the_resolver_rejects_a_token_signed_with_a_foreign_secret() {
+        // Given auth wired with one signing secret
+        let (config, _dir) = a_config(Some("this-daemons-secret"));
+        let resolver = build_auth_entries(&config, "127.0.0.1", 0)
+            .user_resolver
+            .expect("auth should produce a resolver");
+        // and a token minted with a different secret
+        let token = tddy_github::SessionTokenSigner::new(b"some-other-secret")
+            .mint(&a_github_user("u"), tddy_github::SESSION_TOKEN_TTL);
+
+        // When the resolver resolves it
+        let login = (resolver)(&token);
+
+        // Then it is rejected
+        assert_eq!(login, None);
+    }
+
+    #[test]
+    fn the_resolver_rejects_every_token_when_no_secret_is_configured() {
+        // Given auth wired without a signing secret
+        let (config, _dir) = a_config(None);
+        let resolver = build_auth_entries(&config, "127.0.0.1", 0)
+            .user_resolver
+            .expect("auth should produce a resolver");
+        // and any signed token
+        let token = tddy_github::SessionTokenSigner::new(b"some-secret")
+            .mint(&a_github_user("u"), tddy_github::SESSION_TOKEN_TTL);
+
+        // When the resolver resolves it
+        let login = (resolver)(&token);
+
+        // Then no token can be authenticated — there is no secret to verify against
+        assert_eq!(login, None);
     }
 }

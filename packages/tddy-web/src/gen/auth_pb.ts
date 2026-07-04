@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file auth.proto.
  */
 export const file_auth: GenFile = /*@__PURE__*/
-  fileDesc("CgphdXRoLnByb3RvEgRhdXRoIhMKEUdldEF1dGhVcmxSZXF1ZXN0IjoKEkdldEF1dGhVcmxSZXNwb25zZRIVCg1hdXRob3JpemVfdXJsGAEgASgJEg0KBXN0YXRlGAIgASgJIjIKE0V4Y2hhbmdlQ29kZVJlcXVlc3QSDAoEY29kZRgBIAEoCRINCgVzdGF0ZRgCIAEoCSJNChRFeGNoYW5nZUNvZGVSZXNwb25zZRIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEh4KBHVzZXIYAiABKAsyEC5hdXRoLkdpdEh1YlVzZXIiLQoUR2V0QXV0aFN0YXR1c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJOChVHZXRBdXRoU3RhdHVzUmVzcG9uc2USFQoNYXV0aGVudGljYXRlZBgBIAEoCBIeCgR1c2VyGAIgASgLMhAuYXV0aC5HaXRIdWJVc2VyIiYKDUxvZ291dFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSIQCg5Mb2dvdXRSZXNwb25zZSJJCgpHaXRIdWJVc2VyEg0KBWxvZ2luGAEgASgJEhIKCmF2YXRhcl91cmwYAiABKAkSDAoEbmFtZRgDIAEoCRIKCgJpZBgEIAEoBDKUAgoLQXV0aFNlcnZpY2USPwoKR2V0QXV0aFVybBIXLmF1dGguR2V0QXV0aFVybFJlcXVlc3QaGC5hdXRoLkdldEF1dGhVcmxSZXNwb25zZRJFCgxFeGNoYW5nZUNvZGUSGS5hdXRoLkV4Y2hhbmdlQ29kZVJlcXVlc3QaGi5hdXRoLkV4Y2hhbmdlQ29kZVJlc3BvbnNlEkgKDUdldEF1dGhTdGF0dXMSGi5hdXRoLkdldEF1dGhTdGF0dXNSZXF1ZXN0GhsuYXV0aC5HZXRBdXRoU3RhdHVzUmVzcG9uc2USMwoGTG9nb3V0EhMuYXV0aC5Mb2dvdXRSZXF1ZXN0GhQuYXV0aC5Mb2dvdXRSZXNwb25zZWIGcHJvdG8z");
+  fileDesc("CgphdXRoLnByb3RvEgRhdXRoIhMKEUdldEF1dGhVcmxSZXF1ZXN0IjoKEkdldEF1dGhVcmxSZXNwb25zZRIVCg1hdXRob3JpemVfdXJsGAEgASgJEg0KBXN0YXRlGAIgASgJIjIKE0V4Y2hhbmdlQ29kZVJlcXVlc3QSDAoEY29kZRgBIAEoCRINCgVzdGF0ZRgCIAEoCSJNChRFeGNoYW5nZUNvZGVSZXNwb25zZRIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEh4KBHVzZXIYAiABKAsyEC5hdXRoLkdpdEh1YlVzZXIiLQoUR2V0QXV0aFN0YXR1c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJOChVHZXRBdXRoU3RhdHVzUmVzcG9uc2USFQoNYXV0aGVudGljYXRlZBgBIAEoCBIeCgR1c2VyGAIgASgLMhAuYXV0aC5HaXRIdWJVc2VyIi4KFVJlZnJlc2hTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIk8KFlJlZnJlc2hTZXNzaW9uUmVzcG9uc2USFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIeCgR1c2VyGAIgASgLMhAuYXV0aC5HaXRIdWJVc2VyIiYKDUxvZ291dFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSIQCg5Mb2dvdXRSZXNwb25zZSJJCgpHaXRIdWJVc2VyEg0KBWxvZ2luGAEgASgJEhIKCmF2YXRhcl91cmwYAiABKAkSDAoEbmFtZRgDIAEoCRIKCgJpZBgEIAEoBDLhAgoLQXV0aFNlcnZpY2USPwoKR2V0QXV0aFVybBIXLmF1dGguR2V0QXV0aFVybFJlcXVlc3QaGC5hdXRoLkdldEF1dGhVcmxSZXNwb25zZRJFCgxFeGNoYW5nZUNvZGUSGS5hdXRoLkV4Y2hhbmdlQ29kZVJlcXVlc3QaGi5hdXRoLkV4Y2hhbmdlQ29kZVJlc3BvbnNlEkgKDUdldEF1dGhTdGF0dXMSGi5hdXRoLkdldEF1dGhTdGF0dXNSZXF1ZXN0GhsuYXV0aC5HZXRBdXRoU3RhdHVzUmVzcG9uc2USSwoOUmVmcmVzaFNlc3Npb24SGy5hdXRoLlJlZnJlc2hTZXNzaW9uUmVxdWVzdBocLmF1dGguUmVmcmVzaFNlc3Npb25SZXNwb25zZRIzCgZMb2dvdXQSEy5hdXRoLkxvZ291dFJlcXVlc3QaFC5hdXRoLkxvZ291dFJlc3BvbnNlYgZwcm90bzM");
 
 /**
  * @generated from message auth.GetAuthUrlRequest
@@ -131,6 +131,45 @@ export const GetAuthStatusResponseSchema: GenMessage<GetAuthStatusResponse> = /*
   messageDesc(file_auth, 5);
 
 /**
+ * @generated from message auth.RefreshSessionRequest
+ */
+export type RefreshSessionRequest = Message<"auth.RefreshSessionRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+};
+
+/**
+ * Describes the message auth.RefreshSessionRequest.
+ * Use `create(RefreshSessionRequestSchema)` to create a new message.
+ */
+export const RefreshSessionRequestSchema: GenMessage<RefreshSessionRequest> = /*@__PURE__*/
+  messageDesc(file_auth, 6);
+
+/**
+ * @generated from message auth.RefreshSessionResponse
+ */
+export type RefreshSessionResponse = Message<"auth.RefreshSessionResponse"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: auth.GitHubUser user = 2;
+   */
+  user?: GitHubUser;
+};
+
+/**
+ * Describes the message auth.RefreshSessionResponse.
+ * Use `create(RefreshSessionResponseSchema)` to create a new message.
+ */
+export const RefreshSessionResponseSchema: GenMessage<RefreshSessionResponse> = /*@__PURE__*/
+  messageDesc(file_auth, 7);
+
+/**
  * @generated from message auth.LogoutRequest
  */
 export type LogoutRequest = Message<"auth.LogoutRequest"> & {
@@ -145,7 +184,7 @@ export type LogoutRequest = Message<"auth.LogoutRequest"> & {
  * Use `create(LogoutRequestSchema)` to create a new message.
  */
 export const LogoutRequestSchema: GenMessage<LogoutRequest> = /*@__PURE__*/
-  messageDesc(file_auth, 6);
+  messageDesc(file_auth, 8);
 
 /**
  * @generated from message auth.LogoutResponse
@@ -158,7 +197,7 @@ export type LogoutResponse = Message<"auth.LogoutResponse"> & {
  * Use `create(LogoutResponseSchema)` to create a new message.
  */
 export const LogoutResponseSchema: GenMessage<LogoutResponse> = /*@__PURE__*/
-  messageDesc(file_auth, 7);
+  messageDesc(file_auth, 9);
 
 /**
  * @generated from message auth.GitHubUser
@@ -190,7 +229,7 @@ export type GitHubUser = Message<"auth.GitHubUser"> & {
  * Use `create(GitHubUserSchema)` to create a new message.
  */
 export const GitHubUserSchema: GenMessage<GitHubUser> = /*@__PURE__*/
-  messageDesc(file_auth, 8);
+  messageDesc(file_auth, 10);
 
 /**
  * @generated from service auth.AuthService
@@ -219,6 +258,17 @@ export const AuthService: GenService<{
     methodKind: "unary";
     input: typeof GetAuthStatusRequestSchema;
     output: typeof GetAuthStatusResponseSchema;
+  },
+  /**
+   * Re-mint a fresh session token from a currently-valid one. The web client calls this on a
+   * timer (well before expiry) to keep an active session alive; an expired token is rejected.
+   *
+   * @generated from rpc auth.AuthService.RefreshSession
+   */
+  refreshSession: {
+    methodKind: "unary";
+    input: typeof RefreshSessionRequestSchema;
+    output: typeof RefreshSessionResponseSchema;
   },
   /**
    * @generated from rpc auth.AuthService.Logout
