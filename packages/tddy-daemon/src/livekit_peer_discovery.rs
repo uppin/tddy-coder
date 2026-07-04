@@ -398,6 +398,7 @@ impl LiveKitEligibleDaemonSource {
     }
 }
 
+#[async_trait::async_trait]
 impl EligibleDaemonSource for LiveKitEligibleDaemonSource {
     fn list_eligible_daemons(&self) -> Vec<EligibleDaemonInfo> {
         let local = self.local_row();
@@ -420,51 +421,40 @@ impl EligibleDaemonSource for LiveKitEligibleDaemonSource {
     /// Fan out to each discovered peer's `ListProjects` (with `local_only = true` to avoid recursive
     /// fan-out) and tag every returned row with that peer's instance id. Unreachable peers are
     /// logged and skipped so aggregation degrades to whatever rows could be gathered.
-    fn peer_project_entries(&self, session_token: &str) -> Vec<ProtoProjectEntry> {
+    async fn peer_project_entries(&self, session_token: &str) -> Vec<ProtoProjectEntry> {
         let remotes = self.registry.snapshot_remotes();
         if remotes.is_empty() {
             return Vec::new();
         }
-        // Bridge this sync trait method to the async LiveKit forwarder on the daemon's
-        // multi-threaded Tokio runtime; when no runtime is present, skip fan-out gracefully.
-        let Ok(handle) = tokio::runtime::Handle::try_current() else {
-            log::warn!("peer_project_entries: no Tokio runtime available; skipping peer fan-out");
-            return Vec::new();
-        };
         let room_slot = self.room_slot.clone();
         let session_token = session_token.to_string();
         let peer_ids: Vec<String> = remotes.into_iter().map(|r| r.instance_id.0).collect();
-        tokio::task::block_in_place(move || {
-            handle.block_on(aggregate_peer_project_entries(
-                peer_ids,
-                PEER_PROJECT_FANOUT_TIMEOUT,
-                move |peer_id| {
-                    let room_slot = room_slot.clone();
-                    let session_token = session_token.clone();
-                    async move {
-                        let req = ListProjectsRequest {
-                            session_token,
-                            local_only: true,
-                        };
-                        let bytes = forward_to_peer(
-                            &room_slot,
-                            &peer_id,
-                            "connection.ConnectionService",
-                            "ListProjects",
-                            req.encode_to_vec(),
-                        )
-                        .await?;
-                        ListProjectsResponse::decode(bytes.as_slice())
-                            .map(|resp| resp.projects)
-                            .map_err(|e| {
-                                tddy_rpc::Status::internal(format!(
-                                    "decode ListProjectsResponse from peer {peer_id}: {e}"
-                                ))
-                            })
-                    }
-                },
-            ))
+        aggregate_peer_project_entries(peer_ids, PEER_PROJECT_FANOUT_TIMEOUT, move |peer_id| {
+            let room_slot = room_slot.clone();
+            let session_token = session_token.clone();
+            async move {
+                let req = ListProjectsRequest {
+                    session_token,
+                    local_only: true,
+                };
+                let bytes = forward_to_peer(
+                    &room_slot,
+                    &peer_id,
+                    "connection.ConnectionService",
+                    "ListProjects",
+                    req.encode_to_vec(),
+                )
+                .await?;
+                ListProjectsResponse::decode(bytes.as_slice())
+                    .map(|resp| resp.projects)
+                    .map_err(|e| {
+                        tddy_rpc::Status::internal(format!(
+                            "decode ListProjectsResponse from peer {peer_id}: {e}"
+                        ))
+                    })
+            }
         })
+        .await
     }
 }
 
@@ -487,28 +477,44 @@ where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = Result<Vec<ProtoProjectEntry>, tddy_rpc::Status>>,
 {
-    let mut out = Vec::new();
-    for peer_id in peer_ids {
-        match tokio::time::timeout(per_peer_timeout, forward(peer_id.clone())).await {
-            Ok(Ok(rows)) => {
-                for mut p in rows {
-                    p.daemon_instance_id = peer_id.clone();
-                    out.push(p);
+    // Fan out to every peer concurrently so the aggregate is bounded by the slowest responsive
+    // peer (or `per_peer_timeout`), not the serial sum across peers. Each peer's rows are tagged
+    // with its instance id; a peer that errors or times out contributes nothing.
+    let per_peer = peer_ids.into_iter().map(|peer_id| {
+        let fut = forward(peer_id.clone());
+        async move {
+            match tokio::time::timeout(per_peer_timeout, fut).await {
+                Ok(Ok(rows)) => rows
+                    .into_iter()
+                    .map(|mut p| {
+                        p.daemon_instance_id = peer_id.clone();
+                        p
+                    })
+                    .collect(),
+                Ok(Err(e)) => {
+                    log::warn!(
+                        "aggregate_peer_project_entries: forward ListProjects to peer {} failed: {}",
+                        peer_id,
+                        e
+                    );
+                    Vec::new()
+                }
+                Err(_elapsed) => {
+                    log::warn!(
+                        "aggregate_peer_project_entries: peer {} did not respond within {:?}; skipping",
+                        peer_id,
+                        per_peer_timeout
+                    );
+                    Vec::new()
                 }
             }
-            Ok(Err(e)) => log::warn!(
-                "aggregate_peer_project_entries: forward ListProjects to peer {} failed: {}",
-                peer_id,
-                e
-            ),
-            Err(_elapsed) => log::warn!(
-                "aggregate_peer_project_entries: peer {} did not respond within {:?}; skipping",
-                peer_id,
-                per_peer_timeout
-            ),
         }
-    }
-    out
+    });
+    futures_util::future::join_all(per_peer)
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 /// Spawn a background task that joins `livekit.common_room`, publishes metadata, and keeps
@@ -1050,7 +1056,8 @@ pub async fn forward_to_peer(
     // Draw the client from the room's shared factory: one request-id registry and one response
     // loop for the whole common-room connection, regardless of how many peers we forward to or how
     // often. Building a client per call (as this once did) leaked a `subscribe()` loop each time.
-    let client = tddy_livekit::LiveKitRpcClientFactory::for_room(room_arc).client(peer_id.to_string());
+    let client =
+        tddy_livekit::LiveKitRpcClientFactory::for_room(room_arc).client(peer_id.to_string());
     client.call_unary(service, method, body).await
 }
 

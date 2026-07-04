@@ -24,6 +24,7 @@ const PEER_MARKER: &str = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
 /// Contributes peer `ListProjects` rows so the merge path has something to include.
 struct PeerProjectsSource;
 
+#[async_trait::async_trait]
 impl EligibleDaemonSource for PeerProjectsSource {
     fn list_eligible_daemons(&self) -> Vec<EligibleDaemonInfo> {
         vec![EligibleDaemonInfo {
@@ -32,7 +33,7 @@ impl EligibleDaemonSource for PeerProjectsSource {
         }]
     }
 
-    fn peer_project_entries(&self, session_token: &str) -> Vec<ProtoProjectEntry> {
+    async fn peer_project_entries(&self, session_token: &str) -> Vec<ProtoProjectEntry> {
         if session_token != TEST_TOKEN {
             return vec![];
         }

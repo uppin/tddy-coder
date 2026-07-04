@@ -1895,12 +1895,12 @@ fn subagent_replacement_pairs(
 }
 
 /// Merge local `ListProjects` rows with [`EligibleDaemonSource::peer_project_entries`].
-fn merge_listed_projects_with_peers(
+async fn merge_listed_projects_with_peers(
     eligible: &dyn EligibleDaemonSource,
     session_token: &str,
     local: Vec<ProtoProjectEntry>,
 ) -> Vec<ProtoProjectEntry> {
-    let peer_rows = eligible.peer_project_entries(session_token);
+    let peer_rows = eligible.peer_project_entries(session_token).await;
     log::debug!(
         target: "tddy_daemon::connection_service",
         "merge_listed_projects_with_peers: local_rows={} peer_rows={} (session_token len={})",
@@ -2106,6 +2106,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 &req.session_token,
                 entries,
             )
+            .await
         };
         Ok(Response::new(ListProjectsResponse { projects }))
     }

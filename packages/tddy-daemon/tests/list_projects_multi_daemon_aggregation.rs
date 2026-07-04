@@ -66,6 +66,7 @@ fn test_service(
 /// Drives `peer_project_entries` so merge produces two rows for the same `project_id`.
 struct TestPeerProjectsSource;
 
+#[async_trait::async_trait]
 impl EligibleDaemonSource for TestPeerProjectsSource {
     fn list_eligible_daemons(&self) -> Vec<EligibleDaemonInfo> {
         vec![
@@ -80,7 +81,7 @@ impl EligibleDaemonSource for TestPeerProjectsSource {
         ]
     }
 
-    fn peer_project_entries(&self, session_token: &str) -> Vec<ProtoProjectEntry> {
+    async fn peer_project_entries(&self, session_token: &str) -> Vec<ProtoProjectEntry> {
         if session_token != TEST_TOKEN {
             return vec![];
         }
