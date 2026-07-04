@@ -410,11 +410,15 @@ pub fn resolve_claude_home_dir(config: &DaemonConfig) -> PathBuf {
 /// Environment variable naming the shared sandbox config file explicitly (highest priority).
 pub const SANDBOX_CONFIG_ENV: &str = "TDDY_SANDBOX_CONFIG";
 
-/// OS token used in per-OS sandbox config filenames (e.g. `sandbox-config.darwin.yaml`).
+/// Basename (no extension) of the shared claude-sandbox config file. The per-OS variant inserts the
+/// OS token: `claude-sandbox.<os>.yaml`; the generic form is `claude-sandbox.yaml`.
+pub const SANDBOX_CONFIG_BASENAME: &str = "claude-sandbox";
+
+/// OS token used in per-OS config filenames (e.g. `claude-sandbox.darwin.yaml`).
 ///
 /// Uses the repo's convention — `"darwin"` for macOS (matching the `tddy-sandbox-darwin` crate),
 /// `"linux"` for Linux — rather than Rust's `std::env::consts::OS` (`"macos"`). A per-OS file is
-/// host-neutral: the same `sandbox-config.darwin.yaml` works on any macOS host.
+/// host-neutral: the same `claude-sandbox.darwin.yaml` works on any macOS host.
 pub fn sandbox_config_os_token() -> &'static str {
     #[cfg(target_os = "macos")]
     {
@@ -430,13 +434,13 @@ pub fn sandbox_config_os_token() -> &'static str {
     }
 }
 
-/// Resolve which shared sandbox config file the daemon should load, searching `base_dir`.
+/// Resolve which shared claude-sandbox config file the daemon should load, searching `base_dir`.
 ///
 /// Order (first existing wins):
 /// 1. `TDDY_SANDBOX_CONFIG` env — an explicit path, used as-is when it exists.
-/// 2. Per-OS `<base>/sandbox-config.<os>.yaml` (e.g. `sandbox-config.darwin.yaml`) — committed per
+/// 2. Per-OS `<base>/claude-sandbox.<os>.yaml` (e.g. `claude-sandbox.darwin.yaml`) — committed per
 ///    platform, host-neutral within that OS.
-/// 3. Generic `<base>/sandbox-config.yaml`.
+/// 3. Generic `<base>/claude-sandbox.yaml`.
 ///
 /// `None` → no file found; the daemon falls back to built-in defaults (zero-config still works).
 pub fn resolve_sandbox_config_path(base_dir: &Path) -> Option<PathBuf> {
@@ -462,11 +466,11 @@ fn resolve_sandbox_config_path_with(
             return Some(p);
         }
     }
-    let per_os = base_dir.join(format!("sandbox-config.{os_token}.yaml"));
+    let per_os = base_dir.join(format!("{SANDBOX_CONFIG_BASENAME}.{os_token}.yaml"));
     if exists(&per_os) {
         return Some(per_os);
     }
-    let generic = base_dir.join("sandbox-config.yaml");
+    let generic = base_dir.join(format!("{SANDBOX_CONFIG_BASENAME}.yaml"));
     if exists(&generic) {
         return Some(generic);
     }
@@ -1052,15 +1056,15 @@ claude_cli:
         let base = Path::new("/cfg");
         // Both present → per-OS wins.
         let got = resolve_sandbox_config_path_with(base, "darwin", None, |p| {
-            p == Path::new("/cfg/sandbox-config.darwin.yaml")
-                || p == Path::new("/cfg/sandbox-config.yaml")
+            p == Path::new("/cfg/claude-sandbox.darwin.yaml")
+                || p == Path::new("/cfg/claude-sandbox.yaml")
         });
-        assert_eq!(got, Some(PathBuf::from("/cfg/sandbox-config.darwin.yaml")));
+        assert_eq!(got, Some(PathBuf::from("/cfg/claude-sandbox.darwin.yaml")));
         // Only generic present → generic.
         let got = resolve_sandbox_config_path_with(base, "darwin", None, |p| {
-            p == Path::new("/cfg/sandbox-config.yaml")
+            p == Path::new("/cfg/claude-sandbox.yaml")
         });
-        assert_eq!(got, Some(PathBuf::from("/cfg/sandbox-config.yaml")));
+        assert_eq!(got, Some(PathBuf::from("/cfg/claude-sandbox.yaml")));
     }
 
     /// The env override wins when it points at an existing file; a missing env target is skipped in
@@ -1069,21 +1073,17 @@ claude_cli:
     fn sandbox_config_env_override_and_absence() {
         let base = Path::new("/cfg");
         // Env points at an existing file → used as-is.
-        let got = resolve_sandbox_config_path_with(
-            base,
-            "darwin",
-            Some("/explicit/cfg.yaml"),
-            |p| p == Path::new("/explicit/cfg.yaml"),
-        );
+        let got =
+            resolve_sandbox_config_path_with(base, "darwin", Some("/explicit/cfg.yaml"), |p| {
+                p == Path::new("/explicit/cfg.yaml")
+            });
         assert_eq!(got, Some(PathBuf::from("/explicit/cfg.yaml")));
         // Env set but missing → falls through to the per-OS file.
-        let got = resolve_sandbox_config_path_with(
-            base,
-            "darwin",
-            Some("/explicit/missing.yaml"),
-            |p| p == Path::new("/cfg/sandbox-config.darwin.yaml"),
-        );
-        assert_eq!(got, Some(PathBuf::from("/cfg/sandbox-config.darwin.yaml")));
+        let got =
+            resolve_sandbox_config_path_with(base, "darwin", Some("/explicit/missing.yaml"), |p| {
+                p == Path::new("/cfg/claude-sandbox.darwin.yaml")
+            });
+        assert_eq!(got, Some(PathBuf::from("/cfg/claude-sandbox.darwin.yaml")));
         // Nothing exists → None.
         let got = resolve_sandbox_config_path_with(base, "darwin", None, |_| false);
         assert_eq!(got, None);

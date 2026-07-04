@@ -591,7 +591,8 @@ pub fn prepare_persistent_claude_home(claude_home_dir: &Path, claude_binary: &st
         );
     }
     #[cfg(unix)]
-    if let Err(e) = tddy_sandbox_recipes::seed_claude_local_install(claude_home_dir, claude_binary) {
+    if let Err(e) = tddy_sandbox_recipes::seed_claude_local_install(claude_home_dir, claude_binary)
+    {
         log::warn!(
             "persistent claude home {}: install mirror failed: {e}",
             claude_home_dir.display()
