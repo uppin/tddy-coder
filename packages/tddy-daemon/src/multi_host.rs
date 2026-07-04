@@ -14,12 +14,16 @@ pub struct EligibleDaemonInfo {
 }
 
 /// Source of eligible daemons for explicit selection before StartSession / ConnectSession / ResumeSession.
+#[async_trait::async_trait]
 pub trait EligibleDaemonSource: Send + Sync {
     fn list_eligible_daemons(&self) -> Vec<EligibleDaemonInfo>;
 
     /// Extra `ListProjects` rows from peer daemons (each row must set `daemon_instance_id`).
     /// Default: none. Live discovery / gRPC fan-out implementations override this.
-    fn peer_project_entries(&self, _session_token: &str) -> Vec<ProjectEntry> {
+    ///
+    /// Async so the RPC handler awaits the peer fan-out directly on its runtime — no worker
+    /// thread is parked bridging a sync trait method to async RPC calls.
+    async fn peer_project_entries(&self, _session_token: &str) -> Vec<ProjectEntry> {
         Vec::new()
     }
 }
