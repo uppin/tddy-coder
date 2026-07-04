@@ -890,12 +890,25 @@ impl ConnectionServiceImpl {
         let repos_base_dir = repos_base_for_user(os_user, self.config.repos_base_path_or_default())
             .ok_or_else(|| Status::internal("could not resolve repos base path"))?;
         let spawn_client = self.spawn_client.clone();
-        let eligible = self.eligible_daemon_source.clone();
         let os_user_owned = os_user.to_string();
         let projects_dir_owned = projects_dir.to_path_buf();
         let project_id_owned = project_id.to_string();
-        let session_token_owned = session_token.to_string();
         let timeout = self.config.spawn_worker_request_timeout();
+
+        // Peer discovery is an async RPC fan-out; resolve it here rather than inside the blocking
+        // clone task. It is only needed when the project is not registered on this host — a
+        // locally-registered project clones from its stored `git_url` with no peer lookup — so the
+        // fan-out is skipped entirely in that case.
+        let registered_locally = project_storage::find_project(projects_dir, project_id)
+            .map_err(|e| Status::internal(format!("read project registry: {e}")))?
+            .is_some();
+        let peer_entries = if registered_locally {
+            Vec::new()
+        } else {
+            self.eligible_daemon_source
+                .peer_project_entries(session_token)
+                .await
+        };
 
         let handle = tokio::task::spawn_blocking(move || {
             let cloner = |git_url: &str, dest: &Path| -> Result<(), String> {
@@ -912,11 +925,10 @@ impl ConnectionServiceImpl {
                 }
             };
             let peer_lookup = |id: &str| {
-                eligible
-                    .peer_project_entries(&session_token_owned)
-                    .into_iter()
+                peer_entries
+                    .iter()
                     .find(|p| p.project_id == id)
-                    .map(|p| (p.name, p.git_url))
+                    .map(|p| (p.name.clone(), p.git_url.clone()))
             };
             crate::project_provision::ensure_project_available_locally(
                 &projects_dir_owned,
