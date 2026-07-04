@@ -357,12 +357,18 @@ before dependents):
 
 ### Start session CTA
 
-Clicking "Start session" on an unspawned node issues the existing `ConnectionService.StartSession`
-RPC (no new RPC surface — `recipe` and `stack_parent` were already added for the
-[parent picker](#pr-stack-parent-picker) in #246):
+Clicking "Start session" on an unspawned node opens the shared **`CreateSessionDialog`** — the
+same `CreateSessionPane` form the sessions drawer uses — **pre-filled** from the node and its
+orchestrator, so the operator can review and adjust before spawning:
 
-- `recipe` = the node's `child_recipe` from the plan (defaults to `"tdd"`).
-- `stack_parent` = this orchestrator session's id.
+- `projectId` and host (`daemonInstanceId`) come from the orchestrator session.
+- `stackParent` = this orchestrator session's id; `sessionType` = `"claude-cli"`.
+- Branch mode = `new_branch_from_base`, `newBranchName` = the node's `branch ?? branchSuggestion`.
+- Initial prompt = the node's title + description.
+
+Submitting issues the existing `ConnectionService.StartSession` RPC (no new RPC surface — `recipe`
+and `stack_parent` were already added for the [parent picker](#pr-stack-parent-picker) in #246) and
+fires `onChildSessionStarted` so the drawer optimistically shows the child row.
 
 The daemon's existing chain-base-ref resolution (`resolve_chain_integration_base_ref_from_parent_session`)
 derives the child's base branch from the node's *parents* in the stack — `origin/<parent-branch>`

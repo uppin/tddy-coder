@@ -3,6 +3,10 @@
     "defaultMode": "acceptEdits",
     "allow": [
       "Bash",
+      "Bash(./dev*)",
+      "Bash(./test*)",
+      "Bash(./verify*)",
+      "Bash(./release*)",
       "Glob",
       "Grep"
     ],

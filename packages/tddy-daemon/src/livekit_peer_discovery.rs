@@ -111,12 +111,19 @@ pub struct LiveKitDiscoveryHandles {
 pub struct DaemonAdvertisement {
     pub instance_id: String,
     pub label: String,
+    /// The daemon's base clone location (`repos_base_path`, home-relative, e.g. `repos`), surfaced
+    /// so the web Projects screen can show where a project would be cloned on this host. Empty when
+    /// the daemon does not advertise one (older daemons / legacy advertisements).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub repos_base_path: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct DaemonAdvertisementWire {
     instance_id: String,
     label: String,
+    #[serde(default)]
+    repos_base_path: String,
 }
 
 /// Parse and normalize a daemon advertisement JSON string from the discovery transport.
@@ -128,13 +135,18 @@ pub fn parse_daemon_advertisement_json(input: &str) -> Result<DaemonAdvertisemen
     let w: DaemonAdvertisementWire = serde_json::from_str(trimmed).map_err(|e| e.to_string())?;
     let instance_id = w.instance_id.trim().to_string();
     let label = w.label.trim().to_string();
+    let repos_base_path = w.repos_base_path.trim().to_string();
     if instance_id.is_empty() {
         return Err("advertisement instance_id is empty".to_string());
     }
     if label.is_empty() {
         return Err("advertisement label is empty".to_string());
     }
-    Ok(DaemonAdvertisement { instance_id, label })
+    Ok(DaemonAdvertisement {
+        instance_id,
+        label,
+        repos_base_path,
+    })
 }
 
 /// Merge the local row with discovered peers: **local first**, no duplicate `instance_id`, non-empty ids/labels.
@@ -613,6 +625,7 @@ async fn connect_common_room_publish_metadata(
     url: &str,
     token: &str,
     local_id: &str,
+    repos_base_path: &str,
 ) -> anyhow::Result<(
     Arc<Room>,
     tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
@@ -632,6 +645,7 @@ async fn connect_common_room_publish_metadata(
     let adv = DaemonAdvertisement {
         instance_id: local_id.to_string(),
         label: format!("{local_id} (this daemon)"),
+        repos_base_path: repos_base_path.to_string(),
     };
     let meta_json = serde_json::to_string(&adv)?;
     let meta_len = meta_json.len();
@@ -997,8 +1011,10 @@ async fn common_room_discovery_cycle(
         local_id,
         url.len()
     );
+    let repos_base_path = config.repos_base_path_or_default().to_string();
     let (room, events, event_buffer, daemon_adv_metadata) =
-        connect_common_room_publish_metadata(&room_name, &url, &token, &local_id).await?;
+        connect_common_room_publish_metadata(&room_name, &url, &token, &local_id, &repos_base_path)
+            .await?;
     {
         let mut g = room_slot.write().await;
         *g = Some(room.clone());
@@ -1116,6 +1132,31 @@ mod tests {
             parse_daemon_advertisement_json(json).expect("parse documented advertisement JSON");
         assert_eq!(got.instance_id, "peer-a");
         assert_eq!(got.label, "Peer A");
+        assert_eq!(
+            got.repos_base_path, "",
+            "an advertisement without repos_base_path parses to an empty base path"
+        );
+    }
+
+    #[test]
+    fn daemon_advertisement_round_trips_the_repos_base_path() {
+        // Given a daemon advertising its base clone location
+        let adv = DaemonAdvertisement {
+            instance_id: "peer-a".to_string(),
+            label: "peer-a (this daemon)".to_string(),
+            repos_base_path: "repos".to_string(),
+        };
+
+        // When it is serialized to the wire and parsed back
+        let json = serde_json::to_string(&adv).expect("serialize advertisement");
+        let got = parse_daemon_advertisement_json(&json).expect("parse advertisement JSON");
+
+        // Then the base clone location survives the round trip under the `repos_base_path` key
+        assert!(
+            json.contains("\"repos_base_path\":\"repos\""),
+            "advertisement JSON must carry the repos_base_path key: {json}"
+        );
+        assert_eq!(got.repos_base_path, "repos");
     }
 
     #[test]

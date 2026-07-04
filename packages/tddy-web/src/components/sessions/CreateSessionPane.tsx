@@ -4,6 +4,7 @@ import type { Client } from "@connectrpc/connect";
 import type { AgentInfo, ConnectionService, ProjectEntry, SessionEntry, SubagentInfo, ToolInfo } from "../../gen/connection_pb";
 import { CLAUDE_CLI_MODELS } from "../../constants/claudeCliModels";
 import { prStackOrchestrators } from "../../utils/stackParents";
+import { useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { Button } from "../ui/button";
 
 const WORKFLOW_RECIPES = [
@@ -23,15 +24,34 @@ const WORKFLOW_RECIPES = [
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
+type SessionType = "tool" | "claude-cli";
+type BranchIntent = "new_branch_from_base" | "work_on_selected_branch";
+
+/**
+ * Optional pre-fill for the form's fields. Used when the pane is opened from a context that already
+ * knows what the session should look like (e.g. the PR-stack "Start session" flow pre-fills the
+ * branch, prompt, and stack parent). Any field left unset keeps the form's own default.
+ */
+export type CreateSessionInitialValues = Partial<{
+  sessionType: SessionType;
+  projectId: string;
+  recipe: string;
+  model: string;
+  permissionMode: string;
+  stackParent: string;
+  branchIntent: BranchIntent;
+  newBranchName: string;
+  initialPrompt: string;
+  daemonInstanceId: string;
+}>;
+
 export interface CreateSessionPaneProps {
   client: ConnectionClient;
   sessionToken: string;
   onCancel: () => void;
   onCreated: (sessionId: string) => void;
+  initialValues?: CreateSessionInitialValues;
 }
-
-type SessionType = "tool" | "claude-cli";
-type BranchIntent = "new_branch_from_base" | "work_on_selected_branch";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -51,20 +71,33 @@ export function CreateSessionPane({
   sessionToken,
   onCancel,
   onCreated,
+  initialValues,
 }: CreateSessionPaneProps) {
-  const [sessionType, setSessionType] = useState<SessionType>("tool");
-  const [projectId, setProjectId] = useState("");
+  const daemons = useDaemons();
+  const { selectedInstanceId } = useSelectedDaemon();
+
+  const [sessionType, setSessionType] = useState<SessionType>(initialValues?.sessionType ?? "tool");
+  const [projectId, setProjectId] = useState(initialValues?.projectId ?? "");
   const [agent, setAgent] = useState("");
-  const [recipe, setRecipe] = useState("tdd");
-  const [stackParent, setStackParent] = useState("");
+  const [recipe, setRecipe] = useState(initialValues?.recipe ?? "tdd");
+  const [stackParent, setStackParent] = useState(initialValues?.stackParent ?? "");
   const [toolPath, setToolPath] = useState("");
-  const [model, setModel] = useState(CLAUDE_CLI_MODELS[0]?.id ?? "");
-  const [permissionMode, setPermissionMode] = useState("auto");
+  const [model, setModel] = useState(initialValues?.model ?? CLAUDE_CLI_MODELS[0]?.id ?? "");
+  const [permissionMode, setPermissionMode] = useState(initialValues?.permissionMode ?? "auto");
   const [sandbox, setSandbox] = useState(false);
-  const [initialPrompt, setInitialPrompt] = useState("");
-  const [branchIntent, setBranchIntent] = useState<BranchIntent>("new_branch_from_base");
-  const [newBranchName, setNewBranchName] = useState("");
+  const [initialPrompt, setInitialPrompt] = useState(initialValues?.initialPrompt ?? "");
+  const [branchIntent, setBranchIntent] = useState<BranchIntent>(
+    initialValues?.branchIntent ?? "new_branch_from_base",
+  );
+  const [newBranchName, setNewBranchName] = useState(initialValues?.newBranchName ?? "");
   const [selectedBranchToWorkOn, setSelectedBranchToWorkOn] = useState("");
+  // Which daemon/host runs the session. Defaults to the pre-filled host, else the selected daemon,
+  // else empty (which the daemon treats as "run locally on the connected daemon"). An empty
+  // pre-filled host falls through to the selected daemon so the Host <select>'s displayed option
+  // matches the value it will submit.
+  const [daemonInstanceId, setDaemonInstanceId] = useState(
+    initialValues?.daemonInstanceId || selectedInstanceId || "",
+  );
 
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -157,7 +190,7 @@ export function CreateSessionPane({
     if (!projectId || branchIntent !== "work_on_selected_branch") return;
     let cancelled = false;
     client
-      .listProjectBranches({ sessionToken, projectId, daemonInstanceId: "" })
+      .listProjectBranches({ sessionToken, projectId, daemonInstanceId })
       .then((resp) => {
         if (!cancelled) {
           setRemoteBranches(resp.branches);
@@ -174,7 +207,7 @@ export function CreateSessionPane({
     return () => {
       cancelled = true;
     };
-  }, [client, sessionToken, projectId, branchIntent]);
+  }, [client, sessionToken, projectId, branchIntent, daemonInstanceId]);
 
   const isSubmitEnabled = (() => {
     if (submitting) return false;
@@ -200,7 +233,7 @@ export function CreateSessionPane({
         newBranchName,
         selectedIntegrationBaseRef: "",
         selectedBranchToWorkOn,
-        daemonInstanceId: "",
+        daemonInstanceId,
       };
       let res: { sessionId: string };
       if (sessionType === "tool") {
@@ -279,6 +312,28 @@ export function CreateSessionPane({
           Claude CLI
         </button>
       </div>
+
+      {/* Host — which daemon runs the session. Only shown when the common room advertises daemons. */}
+      {daemons.length > 0 && (
+        <div>
+          <label className={labelClass} htmlFor="create-session-host">
+            Host
+          </label>
+          <select
+            id="create-session-host"
+            data-testid="create-session-host-select"
+            className={inputClass}
+            value={daemonInstanceId}
+            onChange={(e) => setDaemonInstanceId(e.target.value)}
+          >
+            {daemons.map((d) => (
+              <option key={d.instanceId} value={d.instanceId}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Project */}
       <div>

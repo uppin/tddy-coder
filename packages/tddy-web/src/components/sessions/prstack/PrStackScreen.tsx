@@ -8,7 +8,8 @@ import { PlannedPrList } from "./PlannedPrList";
 import { AddPlannedPrForm, type AddPlannedPrFormSubmission } from "./AddPlannedPrForm";
 import { PrStackChat } from "./PrStackChat";
 import { parseStackPlan, type StackNode } from "./stackPlan";
-import { CLAUDE_CLI_MODELS } from "../../../constants/claudeCliModels";
+import { CreateSessionDialog } from "../CreateSessionDialog";
+import type { CreateSessionInitialValues } from "../CreateSessionPane";
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
@@ -64,51 +65,46 @@ export function PrStackScreen({
     () => parseStackPlan(stackPlanOverride ?? session.stackPlanJson),
     [stackPlanOverride, session.stackPlanJson],
   );
-  const [startingNodeId, setStartingNodeId] = useState<string | null>(null);
-  const [startError, setStartError] = useState<string | null>(null);
+  const [startSessionNode, setStartSessionNode] = useState<StackNode | null>(null);
   const [isAddingPlannedPr, setIsAddingPlannedPr] = useState(false);
 
-  const handleStartSession = async (node: StackNode) => {
+  // Opening "Start session" no longer spawns the child directly — it opens the shared creation
+  // form pre-filled from the planned node, so the operator can review/adjust before spawning.
+  const handleStartSession = (node: StackNode) => {
+    // The dialog is only rendered when a daemon client is available; without one, opening it
+    // would leave the row in its "starting" state with no dialog to clear it.
     if (!client) return;
-    setStartingNodeId(node.nodeId);
-    setStartError(null);
-    try {
-      // Planned-PR sessions default to a Claude Code CLI session for now. The daemon dispatches on
-      // `sessionType === "claude-cli"` and ignores toolPath/agent/recipe for that path, so those
-      // stay empty — but it *requires* a model and uses `permissionMode`. `stackParent` still chains
-      // the child's worktree onto the orchestrator's branch (see start_claude_cli_session).
-      const res = await client.startSession({
-        sessionToken,
+    setStartSessionNode(node);
+  };
+
+  // Planned-PR sessions default to a Claude Code CLI session, stack-parented to this orchestrator so
+  // the child's worktree chains onto its branch, and pre-fill the planned branch and title/description.
+  const startSessionInitialValues: CreateSessionInitialValues | undefined = startSessionNode
+    ? {
         projectId: session.projectId,
-        toolPath: "",
-        agent: "",
-        recipe: "",
+        daemonInstanceId: session.daemonInstanceId,
         stackParent: session.sessionId,
         sessionType: "claude-cli",
-        model: CLAUDE_CLI_MODELS[0]?.id ?? "",
-        permissionMode: "auto",
-        initialPrompt: [node.title, node.description].filter(Boolean).join("\n\n"),
-        sandbox: false,
-        branchWorktreeIntent: "new_branch_from_base",
-        // The planned branch (feature/<stack>/<node>, pre-filled by the pr-stack agent) — the daemon
-        // requires a non-empty new_branch_name for new_branch_from_base. Prefer an already-created
-        // branch, else the plan's suggestion.
-        newBranchName: node.branch ?? node.branchSuggestion ?? "",
-        selectedIntegrationBaseRef: "",
-        selectedBranchToWorkOn: "",
-        daemonInstanceId: session.daemonInstanceId,
-      });
-      onChildSessionStarted?.({
-        sessionId: res.sessionId,
-        recipe: node.childRecipe,
-        orchestratorSessionId: session.sessionId,
-        projectId: session.projectId,
-      });
-    } catch (err) {
-      setStartError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setStartingNodeId(null);
-    }
+        branchIntent: "new_branch_from_base",
+        // The planned branch (feature/<stack>/<node>, pre-filled by the pr-stack agent). Prefer an
+        // already-created branch, else the plan's suggestion.
+        newBranchName: startSessionNode.branch ?? startSessionNode.branchSuggestion ?? "",
+        initialPrompt: [startSessionNode.title, startSessionNode.description]
+          .filter(Boolean)
+          .join("\n\n"),
+      }
+    : undefined;
+
+  const handleChildSessionCreated = (sessionId: string) => {
+    const node = startSessionNode;
+    setStartSessionNode(null);
+    if (!node) return;
+    onChildSessionStarted?.({
+      sessionId,
+      recipe: node.childRecipe,
+      orchestratorSessionId: session.sessionId,
+      projectId: session.projectId,
+    });
   };
 
   const handleAddPlannedPr = async (input: AddPlannedPrFormSubmission) => {
@@ -129,11 +125,6 @@ export function PrStackScreen({
   return (
     <div data-testid="pr-stack-screen" className="flex-1 min-h-0 flex overflow-hidden">
       <div className="w-1/2 min-w-0 border-r border-border flex flex-col overflow-hidden">
-        {startError && (
-          <p className="text-xs text-destructive px-3 pt-2" role="alert">
-            {startError}
-          </p>
-        )}
         <div className="flex-shrink-0 flex justify-end p-3 pb-0">
           <Button
             data-testid="pr-stack-add-planned-pr-btn"
@@ -154,7 +145,7 @@ export function PrStackScreen({
         <PlannedPrList
           nodes={stack.nodes}
           onStartSession={handleStartSession}
-          startingNodeId={startingNodeId}
+          startingNodeId={startSessionNode?.nodeId ?? null}
         />
       </div>
       <div className="w-1/2 min-w-0 flex flex-col overflow-hidden">
@@ -166,6 +157,16 @@ export function PrStackScreen({
           roomError={roomError}
         />
       </div>
+      {client && (
+        <CreateSessionDialog
+          open={startSessionNode !== null}
+          client={client}
+          sessionToken={sessionToken}
+          initialValues={startSessionInitialValues}
+          onClose={() => setStartSessionNode(null)}
+          onCreated={handleChildSessionCreated}
+        />
+      )}
     </div>
   );
 }

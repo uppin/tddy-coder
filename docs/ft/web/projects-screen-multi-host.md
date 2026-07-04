@@ -43,10 +43,16 @@ as the sessions views still use them.
 - Request carries `session_token`, the existing `project_id`, `name`, `git_url`,
   optional `main_branch_ref`, the target `daemon_instance_id`, and an optional
   `user_relative_path` for the per-host checkout location.
-- The daemon receiving the RPC routes by target host, reusing the same
-  routing/forwarding path as **`StartSession`**: if the target is a **peer**, the RPC
-  is forwarded over the LiveKit common room to that daemon; if the target is
-  **local**, it is handled locally.
+- The web addresses the **chosen target host directly** over the LiveKit common room
+  (a client built for `daemon-<instanceId>` via the transport factory), rather than
+  routing the RPC through the currently-selected daemon and relying on a second forward
+  hop. The daemon still supports peer forwarding for other callers, but the web no longer
+  double-hops. List/create RPCs continue to use the selected-daemon client.
+- The add-to-host control exposes an **optional clone-location input** ("path relative to
+  home"); its value is sent as `user_relative_path`. When left blank the target host's
+  default base (`repos_base_path`, e.g. `~/repos/<name>`) is used. Each host row shows the
+  host's advertised **base clone location**, sourced from the daemon's common-room
+  advertisement (`repos_base_path`).
 - The handling daemon **clones the repo** to the destination and writes a
   `projects.yaml` row with the **given `project_id`** (not a freshly minted UUID),
   tagging the returned `ProjectEntry` with that daemon's `daemon_instance_id`.
@@ -65,6 +71,23 @@ discovered peer's **`ListProjects`** (with **`local_only = true`** to prevent re
 fan-out) and tags returned rows with the peer's `daemon_instance_id`. A new
 **`local_only`** flag on **`ListProjectsRequest`** returns only the local registry's rows
 and skips the merge.
+
+## Auto-provisioning on session start
+
+Starting a session on a host that does not yet have the project's working copy no longer
+fails. In **`StartSession`**, once the peer route resolves to **local**, the daemon runs
+`project_provision::ensure_project_available_locally` before dispatching by session type:
+
+- If the project is registered locally and its checkout exists on disk, it is used as-is.
+- If registered but the checkout is missing, it is re-cloned from the stored `git_url`.
+- If not registered locally, the daemon peer-discovers `(name, git_url)` (the same
+  `EligibleDaemonSource` fan-out used by aggregated **`ListProjects`**), clones into the
+  host's base location (`repos_base_path`/`<name>`), and registers it via
+  `add_or_get_project` — reusing the logical `project_id`.
+- If the project is unknown locally and on every peer, the start fails with `not_found`.
+
+Clone failures surface as errors (no silent fallback). This makes "run this session over
+there" work without a manual **Add to host** step first.
 
 ## Trust model
 
