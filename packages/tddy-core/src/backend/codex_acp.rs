@@ -29,6 +29,9 @@ enum CodexAcpCommand {
         request: InvokeRequest,
         response_tx: oneshot::Sender<Result<InvokeResponse, BackendError>>,
     },
+    ListModels {
+        response_tx: oneshot::Sender<Result<super::BackendModels, BackendError>>,
+    },
     #[allow(dead_code)]
     Shutdown,
 }
@@ -161,8 +164,14 @@ fn run_codex_acp_worker(
             Ok(c) => c,
             Err(e) => {
                 while let Some(cmd) = cmd_rx.recv().await {
-                    if let CodexAcpCommand::Prompt { response_tx, .. } = cmd {
-                        let _ = response_tx.send(Err(e.clone()));
+                    match cmd {
+                        CodexAcpCommand::Prompt { response_tx, .. } => {
+                            let _ = response_tx.send(Err(e.clone()));
+                        }
+                        CodexAcpCommand::ListModels { response_tx } => {
+                            let _ = response_tx.send(Err(e.clone()));
+                        }
+                        CodexAcpCommand::Shutdown => {}
                     }
                 }
                 return;
@@ -353,6 +362,31 @@ fn run_codex_acp_worker(
                         }
                     }
                 }
+                CodexAcpCommand::ListModels { response_tx } => {
+                    if !initialized {
+                        let init_req = acp::InitializeRequest::new(acp::ProtocolVersion::V1)
+                            .client_info(
+                                acp::Implementation::new("tddy-coder", env!("CARGO_PKG_VERSION"))
+                                    .title("TDDY Coder"),
+                            );
+                        if let Err(e) = conn.initialize(init_req).await {
+                            let _ = response_tx.send(Err(BackendError::InvocationFailed(format!(
+                                "ACP initialize failed: {e}"
+                            ))));
+                            continue;
+                        }
+                        initialized = true;
+                    }
+                    let cwd = std::env::current_dir().unwrap_or_default();
+                    let new_req = acp::NewSessionRequest::new(cwd);
+                    let result = match conn.new_session(new_req).await {
+                        Ok(r) => super::acp_models_from_session_state(r.models.as_ref()),
+                        Err(e) => Err(BackendError::InvocationFailed(format!(
+                            "ACP new_session failed: {e}"
+                        ))),
+                    };
+                    let _ = response_tx.send(result);
+                }
                 CodexAcpCommand::Shutdown => break,
             }
         }
@@ -484,6 +518,19 @@ impl super::CodingBackend for CodexAcpBackend {
 
     fn name(&self) -> &str {
         "codex-acp"
+    }
+
+    async fn list_models(&self) -> Result<super::BackendModels, BackendError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.cmd_tx
+            .send(CodexAcpCommand::ListModels { response_tx })
+            .await
+            .map_err(|_| {
+                BackendError::InvocationFailed("Codex ACP worker channel closed".to_string())
+            })?;
+        response_rx.await.map_err(|_| {
+            BackendError::InvocationFailed("Codex ACP worker dropped response".to_string())
+        })?
     }
 }
 

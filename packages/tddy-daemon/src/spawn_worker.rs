@@ -56,6 +56,9 @@ pub struct SpawnRequest {
     /// Back-reference to the orchestrating PR-stack session. Passed as `--stack-parent <id>`.
     #[serde(default)]
     pub stack_parent: Option<String>,
+    /// Passed to spawned `tddy-coder` as `--model` when set (tool-session model selection).
+    #[serde(default)]
+    pub model: Option<String>,
     /// `log.default.level` for the child's `--config` (from daemon YAML `log:`, e.g. `dev.desktop.yaml`).
     #[serde(default = "default_child_log_level")]
     pub child_log_level: String,
@@ -306,6 +309,7 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                         mouse: req.mouse,
                         recipe: req.recipe.as_deref(),
                         stack_parent: req.stack_parent.as_deref(),
+                        model: req.model.as_deref(),
                     },
                     req.child_log_level.as_str(),
                     req.child_log_format.as_str(),
@@ -401,8 +405,49 @@ pub fn build_spawn_request(
         daemon_instance_id: livekit.daemon_instance_id.clone(),
         recipe: opts.recipe.map(String::from),
         stack_parent: opts.stack_parent.map(String::from),
+        model: opts.model.map(String::from),
         child_log_level,
         child_log_format,
         coder_log_config_yaml,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn a_livekit() -> LiveKitCreds {
+        LiveKitCreds {
+            url: "ws://localhost:7880".to_string(),
+            api_key: "key".to_string(),
+            api_secret: "secret".to_string(),
+            common_room: None,
+            daemon_instance_id: None,
+        }
+    }
+
+    #[test]
+    fn build_spawn_request_carries_the_model_through_to_the_spawn_request() {
+        // Given — a tool spawn whose selected model is opus
+        let livekit = a_livekit();
+        let opts = SpawnOptions {
+            model: Some("opus"),
+            ..Default::default()
+        };
+
+        // When
+        let req = build_spawn_request(
+            "dev",
+            "/usr/bin/tddy-coder",
+            Path::new("/data"),
+            Path::new("/repo"),
+            &livekit,
+            opts,
+            None,
+            None,
+        );
+
+        // Then — the model rides along so the worker can pass `--model opus`
+        assert_eq!(req.model.as_deref(), Some("opus"));
     }
 }

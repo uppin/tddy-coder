@@ -96,6 +96,81 @@ impl super::CodingBackend for CursorBackend {
     fn name(&self) -> &str {
         "cursor"
     }
+
+    async fn list_models(&self) -> Result<super::BackendModels, BackendError> {
+        let self_clone = self.clone();
+        tokio::task::spawn_blocking(move || self_clone.list_models_sync())
+            .await
+            .map_err(|e| BackendError::InvocationFailed(e.to_string()))?
+    }
+}
+
+impl CursorBackend {
+    /// Enumerate the account's models by running `<binary> --list-models` and parsing its catalog.
+    fn list_models_sync(&self) -> Result<super::BackendModels, BackendError> {
+        let output = Command::new(&self.binary_path)
+            .arg("--list-models")
+            .env("PATH", super::path_with_exe_dir())
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    BackendError::BinaryNotFound(self.binary_path.to_string_lossy().to_string())
+                } else {
+                    BackendError::InvocationFailed(format!("agent --list-models failed: {e}"))
+                }
+            })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(BackendError::InvocationFailed(format!(
+                "agent --list-models exited with {}: {}",
+                output.status,
+                stderr.trim()
+            )));
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let models = parse_cursor_model_list(&stdout);
+        if models.models.is_empty() {
+            return Err(BackendError::InvocationFailed(
+                "agent --list-models returned no models".to_string(),
+            ));
+        }
+        Ok(models)
+    }
+}
+
+/// Parse the stdout of `agent --list-models` into a [`BackendModels`] catalog.
+///
+/// Each catalog line is `"<id> - <label>"`; a header line and blanks are ignored, and the entry
+/// tagged `"(current, default)"` becomes `default_model` with the marker stripped from its label.
+pub(crate) fn parse_cursor_model_list(stdout: &str) -> super::BackendModels {
+    const DEFAULT_MARKER: &str = "(current, default)";
+    let mut models = Vec::new();
+    let mut default_model: Option<String> = None;
+    for line in stdout.lines() {
+        let line = line.trim();
+        let Some((id, label)) = line.split_once(" - ") else {
+            // Header ("Available models") and blank lines carry no " - " separator.
+            continue;
+        };
+        let id = id.trim().to_string();
+        let label = label.trim();
+        let (label, is_default) = match label.strip_suffix(DEFAULT_MARKER) {
+            Some(stripped) => (stripped.trim_end().to_string(), true),
+            None => (label.to_string(), false),
+        };
+        if is_default {
+            default_model = Some(id.clone());
+        }
+        models.push(super::BackendModel::new(id, label));
+    }
+    let default_model = default_model
+        .or_else(|| models.first().map(|m| m.id.clone()))
+        .unwrap_or_default();
+    super::BackendModels {
+        models,
+        default_model,
+    }
 }
 
 /// Builds argv for `cursor agent` (excluding the binary path). Used by [`CursorBackend::invoke_sync`] and tests.
@@ -412,8 +487,45 @@ impl CursorBackend {
 #[cfg(test)]
 mod tests {
     use super::build_cursor_cli_args;
+    use super::parse_cursor_model_list;
     use super::CursorBackend;
     use crate::backend::{GoalHints, GoalId, InvokeRequest, PermissionHint, SessionMode};
+
+    const LIST_MODELS_STDOUT: &str = "Available models\n\
+        \n\
+        auto - Auto\n\
+        gpt-5.2 - GPT-5.2\n\
+        composer-2.5 - Composer 2.5 (current, default)\n";
+
+    #[test]
+    fn parses_list_models_output_into_id_and_label_pairs() {
+        // When
+        let catalog = parse_cursor_model_list(LIST_MODELS_STDOUT);
+
+        // Then — the header/blank lines are ignored and each entry is split on " - "
+        let pairs: Vec<(&str, &str)> = catalog
+            .models
+            .iter()
+            .map(|m| (m.id.as_str(), m.label.as_str()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("auto", "Auto"),
+                ("gpt-5.2", "GPT-5.2"),
+                ("composer-2.5", "Composer 2.5"),
+            ]
+        );
+    }
+
+    #[test]
+    fn treats_the_current_default_entry_as_the_default_model() {
+        // When
+        let catalog = parse_cursor_model_list(LIST_MODELS_STDOUT);
+
+        // Then — the "(current, default)" marker selects the default and is stripped from the label
+        assert_eq!(catalog.default_model, "composer-2.5");
+    }
 
     /// Matches the default TDD recipe plan-goal hints (planning workflow → `--plan` on Cursor).
     fn hints_tdd_plan_goal() -> GoalHints {

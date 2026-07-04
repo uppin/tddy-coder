@@ -5,6 +5,11 @@ package connection;
 service ConnectionService {
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
   rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  // Models selectable for a given agent (or the "claude-cli" pseudo-agent). Enumerated from the
+  // underlying agent command where possible (cursor --list-models, ACP available_models), else a
+  // curated tddy-core list. Probes the agent subprocess, so it is called on demand per selected
+  // agent — not folded into the cheap ListAgents. See docs/ft/web/tool-session-model-selection.md.
+  rpc ListAgentModels(ListAgentModelsRequest) returns (ListAgentModelsResponse);
   // Specialized subagents (YAML-defined; see docs/ft/coder/specialized-subagents.md) available to
   // wire into a managed-codebase session — builtin defs plus <tddyhome>/agents/*.yaml.
   rpc ListSubagents(ListSubagentsRequest) returns (ListSubagentsResponse);
@@ -74,6 +79,25 @@ message ListAgentsResponse {
 }
 message AgentInfo {
   string id = 1;
+  string label = 2;
+}
+
+message ListAgentModelsRequest {
+  string session_token = 1;
+  // Agent id ("claude", "cursor", "codex-acp", …) or the pseudo-agent "claude-cli".
+  string agent = 2;
+  // Optional daemon instance to run the probe on (multi-host). Empty = local.
+  string daemon_instance_id = 3;
+}
+message ListAgentModelsResponse {
+  repeated ModelInfo models = 1;
+  // Id (within `models`) to preselect — the backend's current/default model.
+  string default_model = 2;
+}
+message ModelInfo {
+  // Value passed as --model (e.g. "gpt-5.2", "opus", "claude-opus-4-8").
+  string id = 1;
+  // Human-readable label (e.g. "GPT-5.2", "Claude Opus 4.8").
   string label = 2;
 }
 

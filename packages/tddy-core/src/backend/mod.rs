@@ -61,6 +61,10 @@ impl CodingBackend for SharedBackend {
     fn action_invoke_cache_eligible(&self) -> bool {
         self.0.action_invoke_cache_eligible()
     }
+
+    async fn list_models(&self) -> Result<BackendModels, BackendError> {
+        self.0.list_models().await
+    }
 }
 
 impl SharedBackend {
@@ -123,6 +127,17 @@ impl CodingBackend for AnyBackend {
             AnyBackend::Codex(b) => b.action_invoke_cache_eligible(),
             AnyBackend::CodexAcp(b) => b.action_invoke_cache_eligible(),
             AnyBackend::Stub(b) => b.action_invoke_cache_eligible(),
+        }
+    }
+
+    async fn list_models(&self) -> Result<BackendModels, BackendError> {
+        match self {
+            AnyBackend::Claude(b) => b.list_models().await,
+            AnyBackend::ClaudeAcp(b) => b.list_models().await,
+            AnyBackend::Cursor(b) => b.list_models().await,
+            AnyBackend::Codex(b) => b.list_models().await,
+            AnyBackend::CodexAcp(b) => b.list_models().await,
+            AnyBackend::Stub(b) => b.list_models().await,
         }
     }
 }
@@ -564,6 +579,95 @@ pub fn default_model_for_agent(agent: &str) -> &'static str {
     }
 }
 
+/// A model a backend can run with, for UI selection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendModel {
+    /// Value passed to the backend as `--model` (e.g. `"opus"`, `"gpt-5.2"`, `"claude-opus-4-8"`).
+    pub id: String,
+    /// Human-readable label (e.g. `"Claude Opus"`, `"GPT-5.2"`).
+    pub label: String,
+}
+
+impl BackendModel {
+    #[must_use]
+    pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+        }
+    }
+}
+
+/// A backend's selectable models plus the id to preselect (its current/default model).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BackendModels {
+    pub models: Vec<BackendModel>,
+    pub default_model: String,
+}
+
+/// Curated model list for backends whose command cannot enumerate models (`claude`, `codex`).
+/// Single source of truth for those catalogs; kept in sync with [`default_model_for_agent`].
+#[must_use]
+pub fn curated_models_for_agent(agent: &str) -> BackendModels {
+    let (models, default_model): (&[(&str, &str)], &str) = match agent {
+        "codex" | "codex-acp" => (&[("gpt-5", "GPT-5")], "gpt-5"),
+        "cursor" => (&[("composer-2.5", "Composer 2.5")], "composer-2.5"),
+        "stub" => (&[("stub", "Stub")], "stub"),
+        _ => (
+            &[
+                ("opus", "Claude Opus"),
+                ("sonnet", "Claude Sonnet"),
+                ("haiku", "Claude Haiku"),
+            ],
+            "opus",
+        ),
+    };
+    BackendModels {
+        models: models
+            .iter()
+            .map(|(id, label)| BackendModel::new(*id, *label))
+            .collect(),
+        default_model: default_model.to_string(),
+    }
+}
+
+/// Curated model catalog for the `claude-cli` session type (full Claude ids passed to `claude
+/// --model`). Single source of truth (replaces the web `CLAUDE_CLI_MODELS` constant).
+#[must_use]
+pub fn claude_cli_models() -> BackendModels {
+    BackendModels {
+        models: vec![
+            BackendModel::new("claude-opus-4-8", "Claude Opus 4.8"),
+            BackendModel::new("claude-sonnet-4-6", "Claude Sonnet 4.6"),
+            BackendModel::new("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
+        ],
+        default_model: "claude-opus-4-8".to_string(),
+    }
+}
+
+/// Map an ACP agent's advertised [`agent_client_protocol::SessionModelState`] into [`BackendModels`].
+/// Errors when the agent advertised no models (an unavailable backend must not look available).
+pub fn acp_models_from_session_state(
+    state: Option<&agent_client_protocol::SessionModelState>,
+) -> Result<BackendModels, BackendError> {
+    let state = state.ok_or_else(|| {
+        BackendError::InvocationFailed("agent advertised no session model state".to_string())
+    })?;
+    if state.available_models.is_empty() {
+        return Err(BackendError::InvocationFailed(
+            "agent advertised no available models".to_string(),
+        ));
+    }
+    Ok(BackendModels {
+        models: state
+            .available_models
+            .iter()
+            .map(|m| BackendModel::new(m.model_id.to_string(), m.name.clone()))
+            .collect(),
+        default_model: state.current_model_id.to_string(),
+    })
+}
+
 /// Index into [`backend_selection_question`] options for a given agent name.
 #[must_use]
 pub fn preselected_index_for_agent(agent: &str) -> usize {
@@ -612,6 +716,13 @@ pub trait CodingBackend: Send + Sync {
     fn action_invoke_cache_eligible(&self) -> bool {
         true
     }
+
+    /// Enumerate the models this backend can run with, for UI selection. The default returns the
+    /// curated catalog for the backend's [`CodingBackend::name`]; backends whose command can
+    /// enumerate its own models (cursor, ACP) override this to query the agent at runtime.
+    async fn list_models(&self) -> Result<BackendModels, BackendError> {
+        Ok(curated_models_for_agent(self.name()))
+    }
 }
 
 #[cfg(test)]
@@ -641,6 +752,75 @@ mod tests {
         set_child_pid(99999);
         clear_child_pid();
         assert_eq!(get_child_pid(), 0);
+    }
+
+    fn ids(models: &BackendModels) -> Vec<&str> {
+        models.models.iter().map(|m| m.id.as_str()).collect()
+    }
+
+    #[test]
+    fn curated_claude_models_offer_opus_sonnet_and_haiku_defaulting_to_opus() {
+        // When
+        let catalog = curated_models_for_agent("claude");
+
+        // Then
+        assert_eq!(ids(&catalog), vec!["opus", "sonnet", "haiku"]);
+        assert_eq!(catalog.default_model, "opus");
+    }
+
+    #[test]
+    fn curated_codex_models_offer_gpt5_defaulting_to_gpt5() {
+        // When
+        let catalog = curated_models_for_agent("codex");
+
+        // Then
+        assert_eq!(ids(&catalog), vec!["gpt-5"]);
+        assert_eq!(catalog.default_model, "gpt-5");
+    }
+
+    #[test]
+    fn claude_cli_models_offer_the_full_claude_ids_defaulting_to_opus_4_8() {
+        // When
+        let catalog = claude_cli_models();
+
+        // Then
+        assert_eq!(
+            ids(&catalog),
+            vec![
+                "claude-opus-4-8",
+                "claude-sonnet-4-6",
+                "claude-haiku-4-5-20251001"
+            ]
+        );
+        assert_eq!(catalog.default_model, "claude-opus-4-8");
+    }
+
+    #[test]
+    fn acp_session_state_maps_available_models_with_the_current_one_as_default() {
+        // Given — the agent advertises two models and names the current one
+        use agent_client_protocol::{ModelInfo, SessionModelState};
+        let state = SessionModelState::new(
+            "gpt-5.2",
+            vec![
+                ModelInfo::new("auto", "Auto"),
+                ModelInfo::new("gpt-5.2", "GPT-5.2"),
+            ],
+        );
+
+        // When
+        let catalog = acp_models_from_session_state(Some(&state)).expect("should map models");
+
+        // Then
+        assert_eq!(ids(&catalog), vec!["auto", "gpt-5.2"]);
+        assert_eq!(catalog.default_model, "gpt-5.2");
+    }
+
+    #[test]
+    fn acp_enumeration_errors_when_the_agent_advertises_no_models() {
+        // When / Then — no SessionModelState at all is an error, not an empty list
+        let result = acp_models_from_session_state(None);
+
+        assert!(matches!(result, Err(BackendError::InvocationFailed(_))));
     }
 
     #[test]

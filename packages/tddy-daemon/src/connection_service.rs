@@ -17,12 +17,13 @@ use tddy_service::proto::connection::{
     AgentInfo, ClaimTerminalControlRequest, ClaimTerminalControlResponse, ConnectSessionRequest,
     ConnectSessionResponse, ConnectionService as ConnectionServiceTrait, CreateProjectRequest,
     CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse, EligibleDaemonEntry,
-    ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
-    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
-    ListSessionsRequest, ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse,
-    ListTerminalSessionsRequest, ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
-    ListWorktreesForProjectRequest, ListWorktreesForProjectResponse,
+    ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse,
+    ListEligibleDaemonsRequest, ListEligibleDaemonsResponse, ListProjectBranchesRequest,
+    ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
+    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
+    ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
+    ListWorktreesForProjectRequest, ListWorktreesForProjectResponse, ModelInfo,
     ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
     ReadSessionWorkflowFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
     ReportSessionStatusRequest, ReportSessionStatusResponse, ResumeSessionRequest,
@@ -297,6 +298,18 @@ pub struct ConnectionServiceImpl {
 }
 
 impl ConnectionServiceImpl {
+    /// Resolve the `tddy-tools` binary as a sibling of the configured tool (`tddy-coder`) path, so
+    /// an installed deployment and a dev `target/debug` tree both find the co-located binary. Falls
+    /// back to a bare `tddy-tools` (PATH lookup) when the tool path has no directory component.
+    fn resolve_tddy_tools_path(&self) -> PathBuf {
+        let base = self.config.default_tool_path();
+        let base = Path::new(&base);
+        match base.parent().filter(|p| !p.as_os_str().is_empty()) {
+            Some(dir) => dir.join("tddy-tools"),
+            None => PathBuf::from("tddy-tools"),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: DaemonConfig,
@@ -2056,6 +2069,72 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(ListAgentsResponse { agents }))
     }
 
+    /// Enumerate the models an agent supports by shelling out to `tddy-tools list-models` as the
+    /// caller's OS user. Results are cached per (agent, daemon) for a short TTL. A failed probe is
+    /// surfaced as an RPC error — never masked with a fallback catalog.
+    ///
+    /// Runs the probe on the local daemon; `daemon_instance_id` participates only in the cache key
+    /// (cross-daemon forwarding is not wired here — the web fetches models from the daemon it is
+    /// already connected to).
+    async fn list_agent_models(
+        &self,
+        request: Request<ListAgentModelsRequest>,
+    ) -> Result<Response<ListAgentModelsResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?
+            .to_string();
+
+        let agent = req.agent.trim().to_string();
+        if agent.is_empty() {
+            return Err(Status::invalid_argument("agent is required"));
+        }
+
+        // Key by OS user: cursor / ACP catalogs (and the "current, default" model) are
+        // account-specific, so one user's list must never be served to another from the cache.
+        let cache_key = format!(
+            "{}\u{1f}{}\u{1f}{}",
+            os_user,
+            req.daemon_instance_id.trim(),
+            agent
+        );
+        if let Ok(cache) = agent_models_cache().lock() {
+            if let Some((cached_at, resp)) = cache.get(&cache_key) {
+                if cached_at.elapsed() < AGENT_MODELS_CACHE_TTL {
+                    return Ok(Response::new(resp.clone()));
+                }
+            }
+        }
+
+        let tools_path = self.resolve_tddy_tools_path();
+        let agent_for_probe = agent.clone();
+        let probe = tokio::task::spawn_blocking(move || {
+            spawner::run_capture_as_user(
+                &os_user,
+                &tools_path,
+                &[
+                    "list-models".to_string(),
+                    "--agent".to_string(),
+                    agent_for_probe,
+                ],
+            )
+        })
+        .await
+        .map_err(|e| Status::internal(format!("model probe join error: {e}")))?
+        .map_err(|e| Status::failed_precondition(format!("model probe failed: {e}")))?;
+
+        let resp = parse_agent_models_json(&probe)?;
+
+        if let Ok(mut cache) = agent_models_cache().lock() {
+            cache.insert(cache_key, (std::time::Instant::now(), resp.clone()));
+        }
+        Ok(Response::new(resp))
+    }
+
     /// Resolved specialized-agent defs (builtin + `<tddyhome>/agents/*.yaml` — see
     /// docs/ft/coder/specialized-subagents.md) available to wire into a managed-codebase session.
     async fn list_subagents(
@@ -2677,6 +2756,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 Some(t.to_string())
             }
         };
+        let model_for_spawn: Option<String> = {
+            let t = req.model.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        };
         let timeout = self.config.spawn_worker_request_timeout();
         let daemon_log = self.config.log.clone();
         let coder_config_path = self.config.coder_config_path.clone();
@@ -2689,6 +2776,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             let agent = agent_for_spawn.as_deref();
             let recipe = recipe_for_spawn.as_deref();
             let stack_parent = stack_parent_for_spawn.as_deref();
+            let model = model_for_spawn.as_deref();
             let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
             if let Some(ref client) = spawn_client {
                 let spawn_req = spawn_worker::build_spawn_request(
@@ -2705,6 +2793,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         mouse: spawn_mouse,
                         recipe,
                         stack_parent,
+                        model,
                     },
                     daemon_log.as_ref(),
                     coder_log_yaml,
@@ -2727,6 +2816,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         mouse: spawn_mouse,
                         recipe,
                         stack_parent,
+                        model,
                     },
                     child_log_level.as_str(),
                     child_log_format.as_str(),
@@ -2880,6 +2970,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         mouse: spawn_mouse,
                         recipe: resume_recipe.as_deref(),
                         stack_parent: None,
+                        model: None,
                     },
                     daemon_log.as_ref(),
                     coder_log_yaml,
@@ -2902,6 +2993,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         mouse: spawn_mouse,
                         recipe: resume_recipe.as_deref(),
                         stack_parent: None,
+                        model: None,
                     },
                     child_log_level.as_str(),
                     child_log_format.as_str(),
@@ -4520,6 +4612,52 @@ fn map_remove_worktree_error(e: RemoveWorktreeError) -> Status {
     }
 }
 
+/// TTL for the per-(agent, daemon) model-probe cache. A probe spawns a subprocess and may hit the
+/// network, so results are cached briefly to avoid re-probing on every agent toggle in the UI.
+const AGENT_MODELS_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
+#[allow(clippy::type_complexity)]
+static AGENT_MODELS_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<
+        std::collections::HashMap<String, (std::time::Instant, ListAgentModelsResponse)>,
+    >,
+> = std::sync::OnceLock::new();
+
+fn agent_models_cache() -> &'static std::sync::Mutex<
+    std::collections::HashMap<String, (std::time::Instant, ListAgentModelsResponse)>,
+> {
+    AGENT_MODELS_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Parse the JSON stdout of `tddy-tools list-models --agent <id>`
+/// (`{"models":[{"id":..,"label":..}],"default_model":".."}`) into a `ListAgentModelsResponse`.
+/// Malformed output is a hard error — a failed probe must not look like an empty catalog.
+fn parse_agent_models_json(stdout: &str) -> Result<ListAgentModelsResponse, Status> {
+    #[derive(serde::Deserialize)]
+    struct ModelJson {
+        id: String,
+        label: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct ModelsJson {
+        models: Vec<ModelJson>,
+        default_model: String,
+    }
+    let parsed: ModelsJson = serde_json::from_str(stdout.trim())
+        .map_err(|e| Status::internal(format!("failed to parse list-models output: {e}")))?;
+    Ok(ListAgentModelsResponse {
+        models: parsed
+            .models
+            .into_iter()
+            .map(|m| ModelInfo {
+                id: m.id,
+                label: m.label,
+            })
+            .collect(),
+        default_model: parsed.default_model,
+    })
+}
+
 #[cfg(test)]
 mod signal_session_unit_tests {
     use super::*;
@@ -5582,5 +5720,31 @@ mod cross_daemon_session_token_acceptance_tests {
         // Then the peer rejects it as an invalid session
         let err = result.expect_err("a token signed with a foreign secret must be rejected");
         assert_eq!(err.code, tddy_rpc::Code::Unauthenticated);
+    }
+}
+
+#[cfg(test)]
+mod list_agent_models_parse_tests {
+    use super::parse_agent_models_json;
+
+    #[test]
+    fn reads_the_models_and_default_from_the_tools_json() {
+        // Given — the JSON contract emitted by `tddy-tools list-models`
+        let stdout = r#"{"models":[{"id":"opus","label":"Claude Opus"},{"id":"sonnet","label":"Claude Sonnet"}],"default_model":"opus"}"#;
+
+        // When
+        let resp = parse_agent_models_json(stdout).expect("well-formed catalog should parse");
+
+        // Then
+        assert_eq!(resp.default_model, "opus");
+        let ids: Vec<&str> = resp.models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["opus", "sonnet"]);
+        assert_eq!(resp.models[0].label, "Claude Opus");
+    }
+
+    #[test]
+    fn errors_on_malformed_probe_output() {
+        // When / Then — garbage is a hard error, never an empty catalog
+        assert!(parse_agent_models_json("not json at all").is_err());
     }
 }

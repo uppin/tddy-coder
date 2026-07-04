@@ -410,6 +410,8 @@ pub struct SpawnOptions<'a> {
     pub recipe: Option<&'a str>,
     /// Back-reference to the orchestrating PR-stack session. Passed as `--stack-parent <id>`.
     pub stack_parent: Option<&'a str>,
+    /// Model for tool-session model selection. Passed to spawned `tddy-coder` as `--model` when set.
+    pub model: Option<&'a str>,
 }
 
 /// Merge the daemon process `PATH` with an optional prefix (from the target user's `~/.tddy/config.yaml`).
@@ -581,6 +583,99 @@ pub fn clone_as_user(_os_user: &str, _git_url: &str, _destination: &Path) -> any
     anyhow::bail!("clone_as_user is only supported on Unix")
 }
 
+/// Run `program args...` as the target OS user and capture stdout. Errors (including non-zero
+/// exit) carry stderr so a failing probe surfaces the underlying cause rather than an empty result.
+#[cfg(unix)]
+pub fn run_capture_as_user(
+    os_user: &str,
+    program: &Path,
+    args: &[String],
+) -> anyhow::Result<String> {
+    use std::os::unix::process::CommandExt;
+
+    let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
+    let mut buf = vec![0u8; 16384];
+    let mut result = std::ptr::null_mut();
+    let ret = unsafe {
+        libc::getpwnam_r(
+            std::ffi::CString::new(os_user)
+                .map_err(|e| anyhow::anyhow!("invalid username: {}", e))?
+                .as_ptr(),
+            passwd.as_mut_ptr(),
+            buf.as_mut_ptr() as *mut libc::c_char,
+            buf.len(),
+            &mut result,
+        )
+    };
+    if ret != 0 || result.is_null() {
+        anyhow::bail!("user '{}' not found", os_user);
+    }
+    let passwd = unsafe { &*result };
+    let uid = passwd.pw_uid;
+    let gid = passwd.pw_gid;
+    if passwd.pw_dir.is_null() || passwd.pw_name.is_null() {
+        anyhow::bail!("user '{}' has no home/pw_name", os_user);
+    }
+    let pw_name = unsafe { std::ffi::CStr::from_ptr(passwd.pw_name).to_owned() };
+    let home_dir = unsafe { std::ffi::CStr::from_ptr(passwd.pw_dir) }
+        .to_string_lossy()
+        .into_owned();
+    let same_user = uid == unsafe { libc::getuid() } && gid == unsafe { libc::getgid() };
+
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args)
+        // Run from the target user's home: the daemon's own cwd may be unreadable after setuid, and
+        // the ACP probe path opens a session against the current directory.
+        .current_dir(&home_dir)
+        .env("HOME", &home_dir)
+        .env("PATH", merge_spawn_child_path(None))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    if !same_user {
+        let home_dir_pre = home_dir.clone();
+        unsafe {
+            cmd.pre_exec(move || {
+                std::env::set_var("HOME", &home_dir_pre);
+                if libc::setgid(gid) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::initgroups(pw_name.as_ptr(), gid as _) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::setuid(uid) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+
+    let output = cmd
+        .output()
+        .map_err(|e| anyhow::anyhow!("{}: {}", program.display(), e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!(
+            "{} exited with {}: {}",
+            program.display(),
+            output.status,
+            stderr.trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[cfg(not(unix))]
+pub fn run_capture_as_user(
+    _os_user: &str,
+    _program: &Path,
+    _args: &[String],
+) -> anyhow::Result<String> {
+    anyhow::bail!("run_capture_as_user is only supported on Unix")
+}
+
 /// Spawn a tddy-* process as the given OS user.
 #[cfg(unix)]
 #[allow(clippy::too_many_arguments)] // os_user/tool_path/tddy_data_dir/repo_path/livekit/opts/log level+format; a struct would obscure call sites for a spawn-time argument bundle.
@@ -730,6 +825,14 @@ pub fn spawn_as_user(
         if !r.is_empty() {
             log::debug!("spawner: passing --recipe {}", r);
             cmd.arg("--recipe").arg(r);
+        }
+    }
+
+    if let Some(m) = opts.model {
+        let m = m.trim();
+        if !m.is_empty() {
+            log::debug!("spawner: passing --model {}", m);
+            cmd.arg("--model").arg(m);
         }
     }
 
