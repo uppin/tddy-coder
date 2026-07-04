@@ -78,6 +78,18 @@ A "host" is a daemon instance; the selectable set is the connected `tddy-daemon`
 - **Adding to a host** (`AddProjectToHost`) routes to the target daemon (local, or forwarded over LiveKit) which clones the repo and writes a row reusing the `project_id`. **`project_storage::add_or_get_project`** makes this idempotent (append only when the id is absent; otherwise return the existing row).
 - **Cross-host visibility** relies on `peer_project_entries` fanning out to peers' `ListProjects` with **`local_only = true`** — the flag is what stops a fanned-out call from recursing back into peers. The fan-out bridges the sync trait method to the async LiveKit forwarder via `block_in_place` + `Handle::block_on` (valid on the daemon's multi-threaded runtime).
 - `ProjectData.host_repo_paths` / `project_storage::main_repo_path_for_host` resolve the per-host checkout path for a shared `project_id`.
+- **Each daemon advertises its base clone location** (`repos_base_path`) on the `DaemonAdvertisement` published to the common room (`livekit_peer_discovery.rs`, populated from `config.repos_base_path_or_default()`, parsed back by `parse_daemon_advertisement_json`). The web reads the same `repos_base_path` JSON key into `DaemonHost.reposBasePath`.
+
+### Auto-provisioning on session start
+
+`StartSession` no longer requires the project to already be checked out on the target host. Once the peer route resolves to **local**, `ensure_project_available_for_start` runs `project_provision::ensure_project_available_locally` before dispatching by session type (so all four start paths — tool, claude-cli, sandboxed claude-cli, workspace — provision uniformly):
+
+- Registered + checkout on disk ⇒ used as-is (no clone, no fan-out).
+- Registered but checkout missing ⇒ re-cloned from the stored `git_url`.
+- Not registered locally ⇒ peer-discovers `(name, git_url)` via `EligibleDaemonSource::peer_project_entries` (the same fan-out as aggregated `ListProjects`), clones into `repos_base_for_user(os_user, repos_base_path)/<name>`, and registers it via `add_or_get_project` (reusing the logical `project_id`).
+- Unknown locally and on every peer ⇒ `NotFound`.
+
+The helper takes injected `cloner` + `peer_lookup` closures for testability; the RPC wires the real cloner (`SpawnClient::clone_repo` when a spawn worker is configured, else `spawner::clone_as_user`, mirroring `AddProjectToHost`) and runs the blocking clone via `spawn_blocking` + `timeout`. Clone failures surface as errors (no masking); `NotFound` is preserved (not flattened to `internal`).
 
 See [projects-screen-multi-host.md](../../../docs/ft/web/projects-screen-multi-host.md).
 
