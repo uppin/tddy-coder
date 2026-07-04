@@ -26,10 +26,14 @@ use crate::project_storage::{self, ProjectData};
 ///
 /// `cloner(git_url, dest)` performs (or fakes) the clone; it must be idempotent for an existing
 /// `dest`. `peer_lookup(project_id)` returns `(name, git_url)` for a project known only on a peer.
+///
+/// `repos_base_dir` is required only for the peer-provisioned clone (case 3); a locally-registered
+/// project (cases 1–2) never consults it, so callers that cannot resolve a base path may pass
+/// `None` and it only surfaces as an error when a peer clone actually needs it.
 pub fn ensure_project_available_locally<C, P>(
     projects_dir: &Path,
     project_id: &str,
-    repos_base_dir: &Path,
+    repos_base_dir: Option<&Path>,
     cloner: C,
     peer_lookup: P,
 ) -> Result<ProjectData, Status>
@@ -53,6 +57,8 @@ where
             "project not found locally or on any peer: {project_id}"
         ))
     })?;
+    let repos_base_dir =
+        repos_base_dir.ok_or_else(|| Status::internal("could not resolve repos base path"))?;
     let dest = repos_base_dir.join(&name);
     clone_into(&cloner, &git_url, &dest)?;
     let (project, _created) = project_storage::add_or_get_project(
@@ -150,7 +156,7 @@ mod tests {
         let project = ensure_project_available_locally(
             &projects_dir,
             "p-alpha",
-            &repos_base,
+            Some(repos_base.as_path()),
             cloner.clone_fn(),
             no_peer,
         )
@@ -185,7 +191,7 @@ mod tests {
         let project = ensure_project_available_locally(
             &projects_dir,
             "p-beta",
-            &repos_base,
+            Some(repos_base.as_path()),
             cloner.clone_fn(),
             peer,
         )
@@ -221,7 +227,7 @@ mod tests {
         let err = ensure_project_available_locally(
             &projects_dir,
             "p-unknown",
-            &repos_base,
+            Some(repos_base.as_path()),
             cloner.clone_fn(),
             no_peer,
         )
@@ -232,6 +238,43 @@ mod tests {
         assert!(
             cloner.calls().is_empty(),
             "must not clone an unknown project"
+        );
+    }
+
+    #[test]
+    fn errors_when_a_peer_provisioned_clone_has_no_base_path() {
+        // Given an empty local registry and a peer that knows the project, but no resolvable base
+        let temp = tempfile::tempdir().unwrap();
+        let projects_dir = temp.path().join("projects");
+        std::fs::create_dir_all(&projects_dir).unwrap();
+        let cloner = RecordingCloner::new();
+        let peer = |_: &str| {
+            Some((
+                "delta".to_string(),
+                "https://example.com/delta.git".to_string(),
+            ))
+        };
+
+        // When the project must be cloned from a peer but no base path is available
+        let err = ensure_project_available_locally(
+            &projects_dir,
+            "p-delta",
+            None,
+            cloner.clone_fn(),
+            peer,
+        )
+        .expect_err("expected an error when the clone base path cannot be resolved");
+
+        // Then it reports the missing base path and does not clone
+        assert_eq!(err.code, tddy_rpc::Code::Internal);
+        assert!(
+            err.message.contains("repos base path"),
+            "message was '{}'",
+            err.message
+        );
+        assert!(
+            cloner.calls().is_empty(),
+            "must not clone without a base path"
         );
     }
 
@@ -255,7 +298,7 @@ mod tests {
         let project = ensure_project_available_locally(
             &projects_dir,
             "p-gamma",
-            &repos_base,
+            Some(repos_base.as_path()),
             cloner.clone_fn(),
             no_peer,
         )

@@ -2,6 +2,11 @@
 //!
 //! macOS-only integration tests use Seatbelt + `tddy-tools sandbox-runner`.
 //! Non-darwin platforms get `failed_precondition` without fallback.
+//!
+//! Several imports and helpers here are consumed only by the `#[cfg(target_os = "macos")]`
+//! Seatbelt tests, so they read as unused when building for other targets. Relax those lints
+//! file-wide rather than scatter per-item `cfg_attr`s across a platform-multiplexed test file.
+#![allow(dead_code, unused_imports)]
 
 use std::path::PathBuf;
 use std::sync::Arc;

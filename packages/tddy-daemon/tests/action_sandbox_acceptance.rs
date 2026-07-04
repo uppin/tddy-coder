@@ -1,6 +1,12 @@
 //! Acceptance tests for sandboxed actions via `actions.ActionService`.
 //!
 //! Sandboxed actions use platform `spawn_plan` with egress-log or runner PTY bridging.
+//!
+//! Several imports and helpers here are consumed only by platform-gated tests
+//! (`#[cfg(target_os = "macos")]` / `#[cfg(target_os = "linux")]`), so they read as unused when
+//! building for other targets. Relax those lints file-wide rather than scatter per-item
+//! `cfg_attr`s across a platform-multiplexed test file.
+#![allow(dead_code, unused_imports)]
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

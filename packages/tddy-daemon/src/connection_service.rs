@@ -887,8 +887,10 @@ impl ConnectionServiceImpl {
         project_id: &str,
         session_token: &str,
     ) -> Result<project_storage::ProjectData, Status> {
-        let repos_base_dir = repos_base_for_user(os_user, self.config.repos_base_path_or_default())
-            .ok_or_else(|| Status::internal("could not resolve repos base path"))?;
+        // Resolved lazily: only a peer-provisioned clone needs a base path. A locally-registered
+        // project (the common case) never consults it, so a `None` here must not fail the start —
+        // it only surfaces as an error if `ensure_project_available_locally` actually needs it.
+        let repos_base_dir = repos_base_for_user(os_user, self.config.repos_base_path_or_default());
         let spawn_client = self.spawn_client.clone();
         let os_user_owned = os_user.to_string();
         let projects_dir_owned = projects_dir.to_path_buf();
@@ -933,7 +935,7 @@ impl ConnectionServiceImpl {
             crate::project_provision::ensure_project_available_locally(
                 &projects_dir_owned,
                 &project_id_owned,
-                &repos_base_dir,
+                repos_base_dir.as_deref(),
                 cloner,
                 peer_lookup,
             )
@@ -2483,6 +2485,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 return Ok(Response::new(inner));
             }
             crate::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
+        }
+
+        // Validate cheap, session-type-specific inputs before the (potentially expensive) project
+        // auto-provision below: claude-cli always requires a model, so reject an empty one up front
+        // — a bad request should fail fast with INVALID_ARGUMENT, not a project NotFound. The
+        // per-session-type handlers re-check as defense-in-depth (and for the resume/child paths).
+        if req.session_type.trim() == "claude-cli" && req.model.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "model is required for claude-cli sessions",
+            ));
         }
 
         // Auto-provision the project's working copy on this host before dispatching to any session
