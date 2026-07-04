@@ -181,3 +181,26 @@ describe("LiveKitTransport meter option", () => {
     }).not.toThrow();
   });
 });
+
+describe("LiveKitTransport unary — empty successful responses", () => {
+  it("resolves (does not throw) when the response carries a valid, empty (zero-byte) protobuf message", async () => {
+    // Given — a real RpcResponse whose responseMessage is exactly what a message with every field
+    // at its default (e.g. `ListSessionsResponse{ sessions: [] }`) serializes to: zero bytes. This
+    // is a normal, successful protobuf encoding, not a missing/malformed response.
+    let capturedRequestId = 0;
+    const fakeRoom = makeFakeRoom((payload) => {
+      capturedRequestId = fromBinary(RpcRequestSchema, payload).requestId;
+    });
+    const transport = new LiveKitTransport({ room: fakeRoom as any, targetIdentity: "server" } as any);
+
+    // When
+    const callPromise = transport.unary(FAKE_METHOD, undefined, undefined, undefined, {});
+    await Promise.resolve();
+    const responsePayload = makeResponsePayload(capturedRequestId, new Uint8Array(0));
+    fakeRoom._emit(RoomEvent.DataReceived, responsePayload, { identity: "server" }, "tddy-rpc");
+
+    // Then
+    const result = await callPromise;
+    expect(result.message).toBeDefined();
+  });
+});

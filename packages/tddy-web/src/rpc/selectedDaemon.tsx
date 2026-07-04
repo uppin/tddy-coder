@@ -138,6 +138,13 @@ function useCommonRoomDaemons(
  * recomputed whenever `daemons` changes (so a selection whose daemon left the common room falls
  * back to the serving daemon / first available daemon instead of pointing at a dead peer), and
  * persisted to `sessionStorage` on explicit selection.
+ *
+ * An empty `daemons` list is treated as "no information yet" rather than "no daemons exist" and
+ * never clears an existing selection: the common room's connection is not always up (the initial
+ * connect, or a transient disconnect/reconnect — see `useCommonRoom`) and `daemons` is briefly
+ * empty in both cases. Resetting the selection during that gap would flash the UI to "nothing
+ * selected" and null out every `useDaemonClient` consumer's RPC client, even though the daemon is
+ * still there and about to reappear.
  */
 function useSelectedDaemonState(
   daemons: DaemonHost[],
@@ -152,6 +159,7 @@ function useSelectedDaemonState(
   );
 
   useEffect(() => {
+    if (daemons.length === 0) return;
     setSelectedInstanceId((current) =>
       resolveSelectedDaemonInstanceId({ daemons, servingInstanceId, storedInstanceId: current }),
     );
