@@ -9,7 +9,8 @@ export type SessionWorkflowFilesModalProps = {
   onClose: () => void;
   sessionId: string;
   sessionToken: string | null;
-  client: Client<typeof ConnectionService>;
+  /** `null` until a daemon is selected and the shared common-room connection is up (`useDaemonClient`). */
+  client: Client<typeof ConnectionService> | null;
 };
 
 /**
@@ -41,7 +42,7 @@ export function SessionWorkflowFilesModal({
   }, [open]);
 
   useEffect(() => {
-    if (!open || !sessionToken || !sessionId.trim()) {
+    if (!open || !sessionToken || !sessionId.trim() || !client) {
       return;
     }
     let cancelled = false;
@@ -73,7 +74,7 @@ export function SessionWorkflowFilesModal({
 
   const loadContent = useCallback(
     async (basename: string) => {
-      if (!sessionToken || !basename.trim() || !sessionId.trim()) return;
+      if (!sessionToken || !basename.trim() || !sessionId.trim() || !client) return;
       if (loadedRef.current.has(basename)) return;
       loadedRef.current.add(basename);
       try {

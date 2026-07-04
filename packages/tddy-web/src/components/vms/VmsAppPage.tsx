@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { VmService, type VmInfo, type VmImageInfo } from "../../gen/vm_pb";
 import { useAuth } from "../../hooks/useAuth";
-import { useHttpClient } from "../../rpc/transportProvider";
+import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { DaemonNavMenu } from "../shell/DaemonNavMenu";
+import { DaemonSelectorConnected } from "../shell/DaemonSelector";
 import { UserAvatar } from "../UserAvatar";
 import { VmsScreen, type VmRow } from "./VmsScreen";
 import { DefineVmPanel } from "./DefineVmPanel";
@@ -33,7 +34,7 @@ function rowFromRpc(vm: VmInfo): VmRow {
 
 export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { user, logout, sessionToken } = useAuth();
-  const client = useHttpClient(VmService);
+  const client = useDaemonClient(VmService);
 
   const [rows, setRows] = useState<VmRow[]>([]);
   const [building, setBuilding] = useState(false);
@@ -42,7 +43,7 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
   const [buildLog, setBuildLog] = useState<string[]>([]);
 
   const loadVms = useCallback(() => {
-    if (!sessionToken) return;
+    if (!sessionToken || !client) return;
     client
       .listVms({ sessionToken })
       .then((res) => setRows(res.vms.map(rowFromRpc)))
@@ -50,7 +51,7 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
   }, [client, sessionToken]);
 
   const loadImages = useCallback(() => {
-    if (!sessionToken) return;
+    if (!sessionToken || !client) return;
     client
       .listVmImages({ sessionToken })
       .then((res) => {
@@ -68,7 +69,7 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
   const handleBuild = useCallback(
     (spec: string) => {
       console.log("[VmsAppPage] handleBuild called, sessionToken=", sessionToken ? "present" : "missing", "spec length=", spec.length);
-      if (!sessionToken) return;
+      if (!sessionToken || !client) return;
       loadImages(); // refresh on start so any pre-existing images are visible
       setBuilding(true);
       setBuildError("");
@@ -111,7 +112,7 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
 
   const handleDefineVm = useCallback(
     (name: string, imagePath: string) => {
-      if (!sessionToken) return;
+      if (!sessionToken || !client) return;
       client
         .defineVm({
           sessionToken,
@@ -131,7 +132,7 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
 
   const handleStart = useCallback(
     (name: string) => {
-      if (!sessionToken) return;
+      if (!sessionToken || !client) return;
       client
         .startVm({ sessionToken, name })
         .then(() => loadVms())
@@ -142,7 +143,7 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
 
   const handleStop = useCallback(
     (name: string) => {
-      if (!sessionToken) return;
+      if (!sessionToken || !client) return;
       client
         .stopVm({ sessionToken, name })
         .then(() => loadVms())
@@ -153,7 +154,7 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
 
   const handleRemove = useCallback(
     (name: string) => {
-      if (!sessionToken) return;
+      if (!sessionToken || !client) return;
       client
         .removeVm({ sessionToken, name })
         .then(() => loadVms())
@@ -167,6 +168,7 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
       <div className="flex items-center gap-3 mb-6">
         <DaemonNavMenu onNavigate={onNavigate} />
         <h1 className="text-xl font-bold flex-1">VMs</h1>
+        <DaemonSelectorConnected />
         {user ? <UserAvatar user={user} onLogout={logout} /> : null}
       </div>
 

@@ -9,6 +9,7 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { VncService } from "../../src/gen/vnc_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -52,7 +53,7 @@ it("shows a VNC tab in the inspector tab strip alongside Details and Tools", () 
     .onUnary(VncService.method.listVncTargets, () => ({ targets: [] }));
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
   page.inspectorDrawer().should("have.attr", "data-state", "open");
 
@@ -72,7 +73,7 @@ it("renders the VNC tab panel and hides the metadata panel when the VNC tab is c
     .onUnary(VncService.method.listVncTargets, () => ({ targets: [] }));
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
   page.inspectorVncTab().click();
 
@@ -91,7 +92,7 @@ it("shows an empty target list and an Add form when no VNC targets are configure
     .onUnary(VncService.method.listVncTargets, () => ({ targets: [] }));
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
   page.inspectorVncTab().click();
 
@@ -115,7 +116,7 @@ it("calls AddVncTarget with correct fields when the form is submitted without a 
     }));
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
   page.inspectorVncTab().click();
   page.vncAddLabel().type("Dev VM");
@@ -148,7 +149,7 @@ it("shows the passphrase dialog before adding a target that has a password", () 
     }));
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
   page.inspectorVncTab().click();
   page.vncAddLabel().type("Secure VM");

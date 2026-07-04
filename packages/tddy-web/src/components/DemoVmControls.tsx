@@ -3,7 +3,7 @@ import {
   ConnectionService,
   DemoVmState,
 } from "../gen/connection_pb";
-import { useHttpClient } from "../rpc/transportProvider";
+import { useDaemonClient } from "../rpc/selectedDaemon";
 import { Button } from "@/components/ui/button";
 
 type VmStatus = {
@@ -26,9 +26,10 @@ export function DemoVmControls({
   const [status, setStatus] = useState<VmStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const client = useHttpClient(ConnectionService);
+  const client = useDaemonClient(ConnectionService);
 
   const fetchStatus = useCallback(async () => {
+    if (!client) return;
     try {
       const res = await client.getDemoVmStatus({ sessionToken, sessionId });
       setStatus({
@@ -50,6 +51,7 @@ export function DemoVmControls({
   }, [fetchStatus]);
 
   const handleLaunch = async () => {
+    if (!client) return;
     setBusy(true);
     try {
       await client.startDemoVm({ sessionToken, sessionId });
@@ -62,6 +64,7 @@ export function DemoVmControls({
   };
 
   const handleStop = async () => {
+    if (!client) return;
     setBusy(true);
     try {
       await client.stopDemoVm({ sessionToken, sessionId });

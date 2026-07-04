@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from "react";
 import { TaskService, TaskStatusProto, type TaskInfo } from "../../gen/tasks_pb";
-import { useHttpClient } from "../../rpc/transportProvider";
+import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { Button } from "../ui/button";
 
 function statusDotColor(status: TaskStatusProto): string {
@@ -34,11 +34,12 @@ interface TaskDrawerItemProps {
 
 export function TaskDrawerItem({ task, isSelected, onClick, sessionToken }: TaskDrawerItemProps) {
   const [cancelling, setCancelling] = useState(false);
-  const client = useHttpClient(TaskService);
+  const client = useDaemonClient(TaskService);
 
   const handleCancel = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
+      if (!client) return;
       setCancelling(true);
       client
         .cancelTask({ sessionToken, taskId: task.taskId, daemonInstanceId: "" })

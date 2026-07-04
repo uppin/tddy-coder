@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import type { Client } from "@connectrpc/connect";
 import { ConnectionService } from "../../gen/connection_pb";
-import { useHttpClient } from "../../rpc/transportProvider";
+import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { getScreenId } from "../../lib/screenId";
 import {
   type TerminalControlState,
@@ -60,7 +60,9 @@ export function useTerminalControl(
   sessionId: string | null,
   sessionToken: string,
 ): UseTerminalControlResult {
-  const client = useHttpClient(ConnectionService);
+  // ConnectionService is daemon-level RPC — routed to the currently selected daemon (see
+  // `SelectedDaemonProvider`). `null` until a daemon is selected / the room is connected.
+  const client = useDaemonClient(ConnectionService);
   const [controlState, setControlState] = useState<TerminalControlState>(
     initialTerminalControlState,
   );
@@ -69,7 +71,7 @@ export function useTerminalControl(
 
   // On session attach: claim control (steal=false) then subscribe to lease changes.
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || !client) return;
     const abortController = new AbortController();
 
     void runControlSession(
@@ -88,7 +90,7 @@ export function useTerminalControl(
   }, [sessionId, sessionToken, client, screenId]);
 
   const claim = useCallback(async () => {
-    if (!sessionId) return;
+    if (!sessionId || !client) return;
     try {
       const resp = await client.claimTerminalControl({
         sessionToken,

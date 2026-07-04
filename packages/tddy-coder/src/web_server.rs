@@ -35,6 +35,13 @@ pub struct ClientConfig {
     /// the web app enables scoped `[tddy]` diagnostics from this. None = off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub debug: Option<String>,
+    /// The serving daemon's own instance id (`livekit_peer_discovery::local_instance_id_for_config`).
+    /// Every daemon's own LiveKit advertisement self-labels `"{id} (this daemon)"` from its own
+    /// perspective, so the web cannot otherwise tell which common-room daemon actually served this
+    /// bundle; the daemon selector uses this to default its selection and to show "(this daemon)"
+    /// next to the correct entry. `None` for the standalone (non-daemon) tddy-coder web server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daemon_instance_id: Option<String>,
 }
 
 /// Serve static files from `bundle_path` on the given `host` and `port`.
@@ -119,6 +126,7 @@ mod tests {
             daemon_mode: None,
             allowed_agents: vec![],
             debug: None,
+            daemon_instance_id: None,
         }
     }
 
@@ -141,6 +149,31 @@ mod tests {
         assert_eq!(
             json.get("debug").and_then(|v| v.as_str()),
             Some("tddy:term:*")
+        );
+    }
+
+    /// The serving daemon's own instance id — needed so the web can default the daemon selector
+    /// to the daemon that actually served this bundle (every daemon's advertisement self-labels
+    /// "(this daemon)" from its own perspective, so the web cannot infer this any other way).
+    #[test]
+    fn daemon_instance_id_is_omitted_from_api_config_when_none() {
+        let json = serde_json::to_value(empty_config()).expect("serialize");
+        assert!(
+            json.get("daemon_instance_id").is_none(),
+            "daemon_instance_id must be skipped when None: {json}"
+        );
+    }
+
+    #[test]
+    fn daemon_instance_id_is_serialized_when_set() {
+        let cfg = ClientConfig {
+            daemon_instance_id: Some("udoo".to_string()),
+            ..empty_config()
+        };
+        let json = serde_json::to_value(cfg).expect("serialize");
+        assert_eq!(
+            json.get("daemon_instance_id").and_then(|v| v.as_str()),
+            Some("udoo")
         );
     }
 }

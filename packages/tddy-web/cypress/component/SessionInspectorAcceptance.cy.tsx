@@ -1,19 +1,15 @@
+/**
+ * `ConnectionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
+ * common-room LiveKit connection — see `aConnectionServiceBackend` (in-memory fake) and
+ * `SelectedDaemonProvider` (via `withSelectedDaemon`).
+ */
+
 import React from "react";
-import { fromBinary } from "@bufbuild/protobuf";
-import {
-  ResumeSessionRequestSchema,
-  Signal,
-  SignalSessionRequestSchema,
-} from "../../src/gen/connection_pb";
+import { ConnectionService, Signal } from "../../src/gen/connection_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import {
-  interceptConnectionRpcs,
-  interceptConnectSession,
-  interceptDeleteSession,
-  interceptResumeSession,
-  interceptSignalSession,
-} from "../support/rpc/connectionRpcs";
-import { decodeProtoRequestBody } from "../support/rpc/protoRpc";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
 // ---------------------------------------------------------------------------
@@ -83,12 +79,13 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("hides the inspector by default when a connected session is selected", () => {
     // Given
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
-    interceptConnectSession({ livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" });
+    const backend = aConnectionServiceBackend({
+      sessions: [CONNECTED_SESSION_A],
+      connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
+    });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION_A.sessionId).click();
 
     // Then
@@ -102,12 +99,13 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("opens the inspector as an overlay when the toggle is clicked, leaving the terminal visible", () => {
     // Given
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
-    interceptConnectSession({ livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" });
+    const backend = aConnectionServiceBackend({
+      sessions: [CONNECTED_SESSION_A],
+      connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
+    });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION_A.sessionId).click();
     sessionsDrawerPage.inspectorToggle().click();
 
@@ -122,11 +120,10 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("opens the inspector by default when a disconnected session is selected", () => {
     // Given
-    interceptConnectionRpcs([DISCONNECTED_SESSION]);
+    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
 
     // Then
@@ -140,11 +137,10 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("expands the inspector to fill the content area when expand is clicked, and restores on restore click", () => {
     // Given
-    interceptConnectionRpcs([DISCONNECTED_SESSION]);
+    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
     sessionsDrawerPage.inspectorExpand().click();
@@ -165,11 +161,10 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("closes the inspector when the close button is clicked", () => {
     // Given
-    interceptConnectionRpcs([DISCONNECTED_SESSION]);
+    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
     sessionsDrawerPage.inspectorClose().click();
@@ -184,11 +179,10 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("renders tool, session type, updated, and previousSessionId in the inspector metadata when set", () => {
     // Given
-    interceptConnectionRpcs([SESSION_WITH_NEW_FIELDS]);
+    const backend = aConnectionServiceBackend({ sessions: [SESSION_WITH_NEW_FIELDS] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(SESSION_WITH_NEW_FIELDS.sessionId).click();
 
     // Then
@@ -206,22 +200,18 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("calls ResumeSession with the disconnected session id when Resume is clicked in the inspector", () => {
     // Given
-    interceptConnectionRpcs([DISCONNECTED_SESSION]);
-    interceptResumeSession(DISCONNECTED_SESSION.sessionId);
+    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
     sessionsDrawerPage.inspectorResumeBtn(DISCONNECTED_SESSION.sessionId).click();
 
     // Then
-    cy.wait("@resumeSession").then((interception) => {
-      const decoded = fromBinary(
-        ResumeSessionRequestSchema,
-        decodeProtoRequestBody(interception.request.body),
-      );
-      expect(decoded.sessionId).to.equal(DISCONNECTED_SESSION.sessionId);
+    cy.wrap(backend).should((b) => {
+      const calls = b.callsTo(ConnectionService.method.resumeSession);
+      expect(calls).to.have.length(1);
+      expect(calls[0].sessionId).to.equal(DISCONNECTED_SESSION.sessionId);
     });
   });
 
@@ -231,28 +221,25 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("requires a confirm click before calling DeleteSession when Delete is clicked in the inspector", () => {
     // Given
-    const capturedIds: string[] = [];
-    interceptConnectionRpcs([DISCONNECTED_SESSION]);
-    interceptDeleteSession(capturedIds);
+    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
 
     // First click — shows confirm button, does NOT call delete yet
     sessionsDrawerPage.inspectorDeleteBtn(DISCONNECTED_SESSION.sessionId).click();
     sessionsDrawerPage.inspectorDeleteConfirm(DISCONNECTED_SESSION.sessionId).should("be.visible");
-    cy.then(() => expect(capturedIds).to.have.length(0));
+    cy.wrap(backend).should((b) => {
+      expect(b.deletedSessionIds).to.have.length(0);
+    });
 
     // Second click — confirm — calls DeleteSession
     sessionsDrawerPage.inspectorDeleteConfirm(DISCONNECTED_SESSION.sessionId).click();
 
     // Then
-    cy.wait("@deleteSession");
-    cy.then(() => {
-      expect(capturedIds).to.have.length(1);
-      expect(capturedIds[0]).to.equal(DISCONNECTED_SESSION.sessionId);
+    cy.wrap(backend).should((b) => {
+      expect(b.deletedSessionIds).to.deep.equal([DISCONNECTED_SESSION.sessionId]);
     });
   });
 
@@ -262,26 +249,21 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("calls SignalSession with SIGTERM when Terminate is clicked in the inspector for an active session", () => {
     // Given
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
-    interceptConnectSession({ livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" });
-    interceptSignalSession();
+    const backend = aConnectionServiceBackend({
+      sessions: [CONNECTED_SESSION_A],
+      connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
+    });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION_A.sessionId).click();
     sessionsDrawerPage.inspectorToggle().click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
     sessionsDrawerPage.inspectorTerminateBtn(CONNECTED_SESSION_A.sessionId).click();
 
     // Then
-    cy.wait("@signalSession").then((interception) => {
-      const decoded = fromBinary(
-        SignalSessionRequestSchema,
-        decodeProtoRequestBody(interception.request.body),
-      );
-      expect(decoded.sessionId).to.equal(CONNECTED_SESSION_A.sessionId);
-      expect(decoded.signal).to.equal(Signal.SIGTERM);
+    cy.wrap(backend).should((b) => {
+      expect(b.signalCalls).to.deep.equal([{ sessionId: CONNECTED_SESSION_A.sessionId, signal: Signal.SIGTERM }]);
     });
   });
 
@@ -294,11 +276,10 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("shows Details and Tools tabs; Details is selected by default and metadata is visible", () => {
     // Given — a disconnected session so the inspector opens automatically
-    interceptConnectionRpcs([DISCONNECTED_SESSION]);
+    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
 
@@ -313,11 +294,10 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
   it("switches to the Tools tab and reveals the tools panel; switching back restores the metadata panel", () => {
     // Given
-    interceptConnectionRpcs([DISCONNECTED_SESSION]);
+    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
 
@@ -351,17 +331,14 @@ describe("SessionInspectorAcceptance — attachment-driven auto-open/close", () 
 
   it("closes the inspector when a session becomes connected", () => {
     // Given — disconnected session selected; inspector starts open
-    interceptConnectionRpcs([DISCONNECTED_SESSION]);
-    interceptResumeSession(DISCONNECTED_SESSION.sessionId);
+    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
 
     // When — user resumes the session (triggers attachment → connected-livekit)
     sessionsDrawerPage.inspectorResumeBtn(DISCONNECTED_SESSION.sessionId).click();
-    cy.wait("@resumeSession");
 
     // Then — inspector closes to reveal the terminal
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "closed");
@@ -369,13 +346,13 @@ describe("SessionInspectorAcceptance — attachment-driven auto-open/close", () 
 
   it("opens the inspector when a connected session attachment becomes idle", () => {
     // Given — connected session selected; also list a disconnected session to switch to
-    interceptConnectionRpcs([CONNECTED_SESSION_A, DISCONNECTED_SESSION]);
-    interceptConnectSession({ livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" });
+    const backend = aConnectionServiceBackend({
+      sessions: [CONNECTED_SESSION_A, DISCONNECTED_SESSION],
+      connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
+    });
 
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION_A.sessionId).click();
-    cy.wait("@connectSession");
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "closed");
 
     // When — simulate session going idle by selecting a disconnected session then reselecting

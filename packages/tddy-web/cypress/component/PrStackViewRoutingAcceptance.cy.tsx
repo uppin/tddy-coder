@@ -10,6 +10,7 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
@@ -66,7 +67,7 @@ it("opens the PR-Stack Chat Screen instead of the terminal for a pr-stack sessio
   const backend = aSessionsDrawerBackend([PR_STACK_SESSION, TDD_SESSION]);
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // Then
@@ -79,7 +80,7 @@ it("keeps the terminal placeholder for a session whose recipe is not pr-stack", 
   const backend = aSessionsDrawerBackend([PR_STACK_SESSION, TDD_SESSION]);
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(TDD_SESSION.sessionId).click();
 
   // Then — the PR-Stack Chat Screen must not render for a non-pr-stack recipe; the existing

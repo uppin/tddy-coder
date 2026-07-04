@@ -1134,6 +1134,8 @@ fn build_client_config(args: &Args) -> crate::web_server::ClientConfig {
         allowed_agents: vec![],
         // The standalone tddy-coder web server has no daemon DEBUG mask; daemon sets this (server.rs).
         debug: None,
+        // The standalone tddy-coder web server is not a tddy-daemon common-room participant.
+        daemon_instance_id: None,
     }
 }
 

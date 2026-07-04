@@ -8,8 +8,9 @@ import {
 import { GitHubLoginButton } from "../GitHubLoginButton";
 import { UserAvatar } from "../UserAvatar";
 import { DaemonNavMenu } from "../shell/DaemonNavMenu";
+import { DaemonSelectorConnected } from "../shell/DaemonSelector";
 import { useAuth } from "../../hooks/useAuth";
-import { useHttpClient } from "../../rpc/transportProvider";
+import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { WorktreesScreen, type WorktreesScreenMockRow } from "./WorktreesScreen";
 import { Button } from "@/components/ui/button";
 
@@ -55,7 +56,7 @@ export function WorktreesAppPage({
   onNavigate: (path: string) => void;
 }) {
   const { user, isAuthenticated, login, logout, sessionToken } = useAuth();
-  const client = useHttpClient(ConnectionService);
+  const client = useDaemonClient(ConnectionService);
 
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [daemons, setDaemons] = useState<EligibleDaemonEntry[]>([]);
@@ -67,7 +68,7 @@ export function WorktreesAppPage({
   const [loadingRefresh, setLoadingRefresh] = useState(false);
 
   const loadProjectsAndDaemons = useCallback(() => {
-    if (!sessionToken) return;
+    if (!sessionToken || !client) return;
     client
       .listProjects({ sessionToken })
       .then((res) => setProjects(res.projects))
@@ -107,7 +108,7 @@ export function WorktreesAppPage({
 
   const fetchWorktrees = useCallback(
     async (refresh: boolean) => {
-      if (!sessionToken || !projectId.trim()) {
+      if (!sessionToken || !projectId.trim() || !client) {
         setRows([]);
         return;
       }
@@ -141,7 +142,7 @@ export function WorktreesAppPage({
   }, [sessionToken, projectId, fetchWorktrees]);
 
   const handleDelete = async (path: string) => {
-    if (!sessionToken || !projectId.trim()) return;
+    if (!sessionToken || !projectId.trim() || !client) return;
     setError(null);
     try {
       await client.removeWorktree({
@@ -180,7 +181,10 @@ export function WorktreesAppPage({
           <DaemonNavMenu onNavigate={onNavigate} />
           <h1 className="text-2xl font-semibold">Worktrees</h1>
         </div>
-        {user ? <UserAvatar user={user} onLogout={logout} /> : null}
+        <div className="flex items-center gap-3">
+          <DaemonSelectorConnected />
+          {user ? <UserAvatar user={user} onLogout={logout} /> : null}
+        </div>
       </div>
 
       <p className="mt-4 max-w-2xl text-sm text-muted-foreground">

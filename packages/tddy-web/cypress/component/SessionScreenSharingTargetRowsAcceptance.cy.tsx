@@ -10,6 +10,7 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { Protocol, ScreenSharingService } from "../../src/gen/screen_sharing_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/screenSharingBackend";
@@ -57,7 +58,7 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 function openScreenSharingTab(backend: ReturnType<typeof aSessionsDrawerBackend>) {
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
   page.inspectorScreenSharingTab().click();
 }

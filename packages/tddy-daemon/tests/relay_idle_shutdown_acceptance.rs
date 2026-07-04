@@ -29,6 +29,7 @@ async fn run_server_exits_cleanly_when_external_shutdown_channel_fires() {
         vec![],
         None,
         None,
+        "test-instance".to_string(), // serving daemon instance id (relay mode has no real one)
         vec![],
         None, // web_debug mask
         None,
@@ -64,6 +65,7 @@ async fn run_server_with_no_external_shutdown_compiles_and_accepts_none() {
         vec![],
         None,
         None,
+        "test-instance".to_string(), // serving daemon instance id (relay mode has no real one)
         vec![],
         None, // web_debug mask
         None,

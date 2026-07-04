@@ -9,6 +9,7 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { VncService } from "../../src/gen/vnc_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -49,7 +50,7 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 function openVncTab(backend: ReturnType<typeof aSessionsDrawerBackend>) {
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
   page.inspectorVncTab().click();
 }

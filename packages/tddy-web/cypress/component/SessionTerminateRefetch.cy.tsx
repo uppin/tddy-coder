@@ -11,14 +11,19 @@
  * `console.debug`, never refetching the list. The row kept showing `isActive: true`
  * and the "Terminate" button never went away, making a session that had, in fact,
  * already ended look like clicking Terminate "did nothing".
+ *
+ * `ConnectionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
+ * common-room LiveKit connection — see `aConnectionServiceBackend` (in-memory fake) and
+ * `SelectedDaemonProvider` (via `withSelectedDaemon`).
  */
 
 import React from "react";
-import { fromBinary } from "@bufbuild/protobuf";
+import { ConnectError, Code } from "@connectrpc/connect";
+import { ConnectionService, Signal } from "../../src/gen/connection_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { SignalSessionRequestSchema, Signal } from "../../src/gen/connection_pb";
-import { interceptConnectionRpcs, interceptConnectSession } from "../support/rpc/connectionRpcs";
-import { decodeProtoRequestBody, toArrayBuffer } from "../support/rpc/protoRpc";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import { aConnectionServiceBackend, type ConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
 // ---------------------------------------------------------------------------
@@ -38,34 +43,8 @@ const CONNECTED_SESSION = {
   pendingElicitation: false,
 };
 
-const OK_SIGNAL_SESSION_BODY = toArrayBuffer(new Uint8Array());
-
-/**
- * Intercepts SignalSession and flips `onSignalReceived` synchronously inside the request
- * handler — i.e. exactly when the app's own request actually lands, not on a separate,
- * loosely-synchronized `cy.wait().then()` in the test. `listSessionsFactory` closures read
- * this flag, so the *next* ListSessions response is guaranteed to reflect the signal having
- * been sent, with no race between the test's bookkeeping and the app's own refetch.
- */
-function interceptSignalSessionAnd(succeeds: boolean, onSignalReceived: () => void): void {
-  const alias = succeeds ? "signalSession" : "signalSessionError";
-  cy.intercept("POST", "**/rpc/connection.ConnectionService/SignalSession", (req) => {
-    onSignalReceived();
-    if (succeeds) {
-      req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: OK_SIGNAL_SESSION_BODY });
-    } else {
-      req.reply({
-        statusCode: 412,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: "failed_precondition", message: "Process not alive" }),
-      });
-    }
-  }).as(alias);
-}
-
-function mountAndSelect() {
-  cy.mount(<SessionsDrawerScreen />);
-  cy.wait("@listSessions");
+function mountAndSelect(backend: ConnectionServiceBackend) {
+  mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(CONNECTED_SESSION.sessionId).click();
   sessionsDrawerPage.inspectorToggle().click();
   sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
@@ -87,25 +66,27 @@ describe("SessionsDrawerScreen — Terminate refetches the session list", () => 
     // Given — the session starts active; ListSessions reports it inactive once SignalSession
     // has actually been received by the daemon.
     let terminated = false;
-    interceptConnectionRpcs([CONNECTED_SESSION], {
+    const backend = aConnectionServiceBackend({
       listSessionsFactory: () => [{ ...CONNECTED_SESSION, isActive: !terminated }],
-    });
-    interceptConnectSession({ livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" });
-    interceptSignalSessionAnd(true, () => {
+      connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
+    }).onUnary(ConnectionService.method.signalSession, async () => {
+      // Flip synchronously inside the request handler — exactly when the app's own request
+      // actually lands — so the *next* ListSessions response is guaranteed to reflect it.
       terminated = true;
+      return {};
     });
-    mountAndSelect();
+    mountAndSelect(backend);
 
     // When — Terminate is clicked and SignalSession succeeds
     sessionsDrawerPage.inspectorTerminateBtn(CONNECTED_SESSION.sessionId).click();
-    cy.wait("@signalSession").then((interception) => {
-      const decoded = fromBinary(SignalSessionRequestSchema, decodeProtoRequestBody(interception.request.body));
-      expect(decoded.sessionId).to.equal(CONNECTED_SESSION.sessionId);
-      expect(decoded.signal).to.equal(Signal.SIGTERM);
+    cy.wrap(backend).should((b) => {
+      const calls = b.callsTo(ConnectionService.method.signalSession);
+      expect(calls).to.have.length(1);
+      expect(calls[0].sessionId).to.equal(CONNECTED_SESSION.sessionId);
+      expect(calls[0].signal).to.equal(Signal.SIGTERM);
     });
 
     // Then — the list is refetched, and the now-inactive row no longer offers Terminate
-    cy.wait("@listSessions");
     sessionsDrawerPage.inspectorTerminateBtn(CONNECTED_SESSION.sessionId).should("not.exist");
   });
 
@@ -115,21 +96,20 @@ describe("SessionsDrawerScreen — Terminate refetches the session list", () => 
     // once the process is confirmed dead — the same daemon-side check that makes SignalSession
     // itself fail with "process is not alive").
     let sessionEnded = false;
-    interceptConnectionRpcs([CONNECTED_SESSION], {
+    const backend = aConnectionServiceBackend({
       listSessionsFactory: () => [{ ...CONNECTED_SESSION, isActive: !sessionEnded }],
-    });
-    interceptConnectSession({ livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" });
-    interceptSignalSessionAnd(false, () => {
+      connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
+    }).onUnary(ConnectionService.method.signalSession, async () => {
       sessionEnded = true;
+      throw new ConnectError("Process not alive", Code.FailedPrecondition);
     });
-    mountAndSelect();
+    mountAndSelect(backend);
 
     // When — Terminate is clicked but SignalSession fails ("process is not alive")
     sessionsDrawerPage.inspectorTerminateBtn(CONNECTED_SESSION.sessionId).click();
-    cy.wait("@signalSessionError");
-
-    // Then — the list is refetched despite the failure
-    cy.wait("@listSessions");
+    cy.wrap(backend).should((b) => {
+      expect(b.callsTo(ConnectionService.method.signalSession)).to.have.length(1);
+    });
 
     // Then — the row now reflects the session as inactive, so Terminate is gone
     sessionsDrawerPage.inspectorTerminateBtn(CONNECTED_SESSION.sessionId).should("not.exist");

@@ -1,16 +1,18 @@
 /**
  * Acceptance tests for the Create New Session flow in the sessions drawer.
  *
- * All tests mount SessionsDrawerScreen and exercise the full flow via intercepted RPCs.
+ * `ConnectionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
+ * common-room LiveKit connection — see `aConnectionServiceBackend` (in-memory fake) and
+ * `SelectedDaemonProvider` (via `withSelectedDaemon`). All tests mount SessionsDrawerScreen
+ * and exercise the full flow via the in-memory backend.
  */
 import React from "react";
+import { ConnectError, Code } from "@connectrpc/connect";
+import { ConnectionService } from "../../src/gen/connection_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import {
-  interceptConnectionRpcs,
-  interceptConnectSession,
-  interceptListProjectBranches,
-  interceptStartSession,
-} from "../support/rpc/connectionRpcs";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { TEST_IDS, byTestId } from "../support/testIds";
 import { CLAUDE_CLI_MODELS } from "../../src/constants/claudeCliModels";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
@@ -63,10 +65,9 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("shows a '+ New session' button in the sessions drawer header", () => {
-    interceptConnectionRpcs([CONNECTED_SESSION]);
+    const backend = aConnectionServiceBackend({ sessions: [CONNECTED_SESSION] });
 
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     byTestId(TEST_IDS.sessionsDrawer).within(() => {
       byTestId(TEST_IDS.sessionsDrawerNewBtn).should("be.visible");
@@ -78,10 +79,9 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("clicking '+ New session' shows the create form in the main pane with the drawer still visible", () => {
-    interceptConnectionRpcs([CONNECTED_SESSION]);
+    const backend = aConnectionServiceBackend({ sessions: [CONNECTED_SESSION] });
 
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
 
@@ -96,10 +96,9 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("switching to Claude CLI hides Agent/Recipe and shows Model/Permission/Prompt", () => {
-    interceptConnectionRpcs([]);
+    const backend = aConnectionServiceBackend({ sessions: [] });
 
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
 
@@ -131,18 +130,17 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("populates the project dropdown from the ListProjects RPC response", () => {
-    interceptConnectionRpcs([], {
+    const backend = aConnectionServiceBackend({
+      sessions: [],
       projectsOverride: [
         { projectId: "proj-alpha", name: "Alpha Project", mainRepoPath: "/home/dev/alpha" },
         { projectId: "proj-beta", name: "Beta Project", mainRepoPath: "/home/dev/beta" },
       ],
     });
 
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
-    cy.wait("@listProjects");
 
     byTestId(TEST_IDS.createSessionProjectSelect).within(() => {
       cy.get("option").should("contain.text", "Alpha Project");
@@ -155,18 +153,17 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("populates the agent dropdown from the ListAgents RPC response", () => {
-    interceptConnectionRpcs([], {
+    const backend = aConnectionServiceBackend({
+      sessions: [],
       agents: [
         { id: "claude", label: "Claude (opus)" },
         { id: "codex", label: "Codex" },
       ],
     });
 
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
-    cy.wait("@listAgents");
 
     byTestId(TEST_IDS.createSessionAgentSelect).within(() => {
       cy.get("option").should("contain.text", "Claude (opus)");
@@ -179,10 +176,9 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("shows all CLAUDE_CLI_MODELS in the model dropdown when session type is Claude CLI", () => {
-    interceptConnectionRpcs([]);
+    const backend = aConnectionServiceBackend({ sessions: [] });
 
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
@@ -199,15 +195,11 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("Create button is disabled until required fields are filled (tool session)", () => {
-    interceptConnectionRpcs([], {
-      projectsOverride: [],
-    });
+    const backend = aConnectionServiceBackend({ sessions: [], projectsOverride: [] });
 
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
-    cy.wait("@listProjects");
 
     // No projects available → create button disabled
     byTestId(TEST_IDS.createSessionSubmitBtn).should("be.disabled");
@@ -218,10 +210,9 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("shows the new branch name input when branch mode is 'new branch from base'", () => {
-    interceptConnectionRpcs([]);
+    const backend = aConnectionServiceBackend({ sessions: [] });
 
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
 
@@ -237,21 +228,18 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("shows a branch selector when branch mode is 'work on existing branch'", () => {
-    interceptConnectionRpcs([], {
+    const backend = aConnectionServiceBackend({
+      sessions: [],
       projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
+      projectBranches: ["origin/main", "origin/feature-x"],
     });
-    interceptListProjectBranches(["origin/main", "origin/feature-x"]);
 
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
-    cy.wait("@listProjects");
 
     byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
     byTestId(TEST_IDS.createSessionBranchIntentSelect).select("work_on_selected_branch");
-
-    cy.wait("@listProjectBranches");
 
     byTestId(TEST_IDS.createSessionBranchToWorkOnSelect).should("be.visible");
     byTestId(TEST_IDS.createSessionBranchToWorkOnSelect).within(() => {
@@ -266,10 +254,9 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("clicking Cancel dismisses the create form and restores the main pane placeholder", () => {
-    interceptConnectionRpcs([]);
+    const backend = aConnectionServiceBackend({ sessions: [] });
 
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
     byTestId(TEST_IDS.createSessionPane).should("be.visible");
@@ -285,27 +272,27 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("submitting the form calls StartSession and auto-attaches to the new session", () => {
-    interceptConnectionRpcs([], {
+    const backend = aConnectionServiceBackend({
+      sessions: [],
       projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
       agents: [{ id: "claude", label: "Claude (opus)" }],
+      startSession: {
+        sessionId: NEW_SESSION_ID,
+        livekitRoom: `room-${NEW_SESSION_ID}`,
+        livekitUrl: "ws://127.0.0.1:7880",
+        livekitServerIdentity: "server-new",
+      },
+      connectSession: { livekitRoom: `room-${NEW_SESSION_ID}` },
     });
-    interceptStartSession(NEW_SESSION_ID);
-    interceptConnectSession({ livekitRoom: `room-${NEW_SESSION_ID}` });
 
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
-    cy.wait("@listProjects");
-    cy.wait("@listAgents");
 
     byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
     byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
 
     byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
-
-    cy.wait("@startSession");
-    cy.wait("@connectSession");
 
     // Form dismissed after success
     byTestId(TEST_IDS.createSessionPane).should("not.exist");
@@ -319,26 +306,22 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   // -------------------------------------------------------------------------
 
   it("shows an error message when StartSession RPC fails and keeps the form open", () => {
-    interceptConnectionRpcs([], {
+    const backend = aConnectionServiceBackend({
+      sessions: [],
       projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
       agents: [{ id: "claude", label: "Claude (opus)" }],
+    }).onUnary(ConnectionService.method.startSession, async () => {
+      throw new ConnectError("internal error", Code.Internal);
     });
-    cy.intercept("POST", "**/rpc/connection.ConnectionService/StartSession", (req) => {
-      req.reply({ statusCode: 500, body: "internal error" });
-    }).as("startSessionFail");
 
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
-    cy.wait("@listProjects");
-    cy.wait("@listAgents");
 
     byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
     byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
 
     byTestId(TEST_IDS.createSessionSubmitBtn).click();
-    cy.wait("@startSessionFail");
 
     byTestId(TEST_IDS.createSessionError).should("be.visible");
     // Form remains open
@@ -368,33 +351,31 @@ describe("CreateSession acceptance — post-creation list refresh", () => {
   it("re-fetches the sessions list after creation so the new session appears in the drawer", () => {
     // Given — first listSessions returns empty; second returns the newly-created session
     let callCount = 0;
-    interceptConnectionRpcs([], {
+    const backend = aConnectionServiceBackend({
       projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
       agents: [{ id: "claude", label: "Claude (opus)" }],
       listSessionsFactory: () => {
         callCount++;
         return callCount > 1 ? [NEW_SESSION_FIXTURE] : [];
       },
+      startSession: {
+        sessionId: NEW_SESSION_ID,
+        livekitRoom: `room-${NEW_SESSION_ID}`,
+        livekitUrl: "ws://127.0.0.1:7880",
+        livekitServerIdentity: "server-new",
+      },
+      connectSession: { livekitRoom: `room-${NEW_SESSION_ID}` },
     });
-    interceptStartSession(NEW_SESSION_ID);
-    interceptConnectSession({ livekitRoom: `room-${NEW_SESSION_ID}` });
 
     // When — mount, create a session
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions"); // 1st call on mount
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
-    cy.wait("@listProjects");
-    cy.wait("@listAgents");
     byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
     byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
     byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
-    cy.wait("@startSession");
 
-    // Then — a second listSessions call must be made after creation (fix triggers this)
-    cy.wait("@listSessions"); // 2nd call — times out without the fix
-
-    // And the new session appears in the drawer
+    // Then — the new session appears in the drawer once the post-creation refetch lands
     sessionsDrawerPage.drawerItem(NEW_SESSION_ID).should("exist");
   });
 
@@ -406,29 +387,29 @@ describe("CreateSession acceptance — post-creation list refresh", () => {
   it("shows the new session's terminal in the detail pane rather than the empty placeholder", () => {
     // Given — same two-phase list setup
     let callCount = 0;
-    interceptConnectionRpcs([], {
+    const backend = aConnectionServiceBackend({
       projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
       agents: [{ id: "claude", label: "Claude (opus)" }],
       listSessionsFactory: () => {
         callCount++;
         return callCount > 1 ? [NEW_SESSION_FIXTURE] : [];
       },
+      startSession: {
+        sessionId: NEW_SESSION_ID,
+        livekitRoom: `room-${NEW_SESSION_ID}`,
+        livekitUrl: "ws://127.0.0.1:7880",
+        livekitServerIdentity: "server-new",
+      },
+      connectSession: { livekitRoom: `room-${NEW_SESSION_ID}` },
     });
-    interceptStartSession(NEW_SESSION_ID);
-    interceptConnectSession({ livekitRoom: `room-${NEW_SESSION_ID}` });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
-    cy.wait("@listProjects");
-    cy.wait("@listAgents");
     byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
     byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
     byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
-    cy.wait("@startSession");
-    cy.wait("@listSessions"); // wait for post-creation re-fetch
 
     // Then — empty placeholder is gone
     cy.contains("Select a session").should("not.exist");

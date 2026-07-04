@@ -12,11 +12,17 @@
  *
  * After the GREEN phase the failing assertion in each test will be:
  *   `sessionsDrawerPage.detailPane().find(strip)` → not.exist
+ *
+ * `ConnectionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
+ * common-room LiveKit connection — see `aConnectionServiceBackend` (in-memory fake) and
+ * `SelectedDaemonProvider` (via `withSelectedDaemon`).
  */
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { interceptConnectionRpcs, interceptConnectSession } from "../support/rpc/connectionRpcs";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import { aConnectionServiceBackend, type ConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
@@ -40,14 +46,18 @@ const CONNECTED_SESSION = {
 // ---------------------------------------------------------------------------
 
 describe("StatusBar — rendered as top toolbar, outside sessions-detail-pane", () => {
+  let backend: ConnectionServiceBackend;
+
   beforeEach(() => {
     cy.viewport(1280, 800); // desktop: session list defaults open so drawer items are clickable
     cy.clearLocalStorage();
     cy.clearAllSessionStorage();
     window.localStorage.setItem("tddy_session_token", "fake-token");
-    interceptConnectionRpcs([CONNECTED_SESSION]);
-    // Use a LiveKit session to avoid GrpcSessionTerminal streaming RPCs in tests
-    interceptConnectSession({ livekitRoom: "room-topbar-001", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" });
+    backend = aConnectionServiceBackend({
+      sessions: [CONNECTED_SESSION],
+      // Use a LiveKit session to avoid GrpcSessionTerminal streaming RPCs in tests
+      connectSession: { livekitRoom: "room-topbar-001", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -55,10 +65,8 @@ describe("StatusBar — rendered as top toolbar, outside sessions-detail-pane", 
   // -------------------------------------------------------------------------
 
   it("renders the traffic strip somewhere in the sessions screen when session is connected", () => {
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION.sessionId).click();
-    cy.wait("@connectSession");
 
     byTestId(TEST_IDS.sessionTrafficStrip).should("exist");
   });
@@ -71,10 +79,8 @@ describe("StatusBar — rendered as top toolbar, outside sessions-detail-pane", 
   // -------------------------------------------------------------------------
 
   it("does NOT render the traffic strip inside sessions-detail-pane", () => {
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION.sessionId).click();
-    cy.wait("@connectSession");
 
     // Strip must exist somewhere in the screen...
     byTestId(TEST_IDS.sessionTrafficStrip).should("exist");
@@ -96,10 +102,8 @@ describe("StatusBar — rendered as top toolbar, outside sessions-detail-pane", 
   // -------------------------------------------------------------------------
 
   it("places the traffic strip before sessions-detail-pane in DOM order as a sibling, not a descendant", () => {
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION.sessionId).click();
-    cy.wait("@connectSession");
 
     // Wait for the strip to be present before doing the DOM comparison
     byTestId(TEST_IDS.sessionTrafficStrip).should("exist");
@@ -133,10 +137,8 @@ describe("StatusBar — rendered as top toolbar, outside sessions-detail-pane", 
   // -------------------------------------------------------------------------
 
   it("remains outside sessions-detail-pane when the inspector is expanded to full screen", () => {
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION.sessionId).click();
-    cy.wait("@connectSession");
 
     // Wait for the attachment useEffect to settle (connected → inspector auto-closes)
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "closed");

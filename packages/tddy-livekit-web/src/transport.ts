@@ -250,10 +250,11 @@ export class LiveKitTransport implements Transport {
         throw rpcErrorToConnectError(response.error);
       }
 
-      if (!response.responseMessage || response.responseMessage.length === 0) {
-        throw new Error(`[LiveKitTransport] No response message for request_id=${requestId}`);
-      }
-
+      // `responseMessage` is a non-optional proto3 `bytes` field — it decodes to an empty
+      // `Uint8Array`, never `undefined`, whether the server genuinely sent zero bytes or omitted
+      // the field entirely. A zero-length payload is exactly how protobuf serializes a message
+      // whose every field is at its default (e.g. `ListSessionsResponse{ sessions: [] }`), so it
+      // must decode as a normal successful response, not be rejected as "missing."
       const outputMessage = fromBinary(method.output as any, response.responseMessage);
 
       if (this.debug) {

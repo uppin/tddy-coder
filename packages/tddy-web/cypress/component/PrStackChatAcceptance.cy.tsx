@@ -10,6 +10,7 @@
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { PrStackChat } from "../../src/components/sessions/prstack/PrStackChat";
 import { TddyRemote, ServerMessageSchema, type ClientMessage } from "../../src/gen/tddy/v1/remote_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -68,7 +69,7 @@ it("renders an agent output event from the presenter stream as a chat bubble", (
   });
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, chatBackend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), chatBackend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // Then
@@ -103,7 +104,7 @@ it("sends a SubmitFeatureInput intent for the first message on a fresh session",
   const { backend, sentIntents } = aRecordingChatBackend();
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
   prStackScreenPage.sendChatMessage("Split the auth feature into a PR stack.");
 
@@ -119,7 +120,7 @@ it("sends a SubmitFeatureInput intent for the first message on a fresh session",
 it("sends a QueuePrompt intent for a message sent after the workflow has already started", () => {
   // Given — the first message already started the workflow (SubmitFeatureInput)
   const { backend, sentIntents } = aRecordingChatBackend();
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
   prStackScreenPage.sendChatMessage("Split the auth feature into a PR stack.");
 

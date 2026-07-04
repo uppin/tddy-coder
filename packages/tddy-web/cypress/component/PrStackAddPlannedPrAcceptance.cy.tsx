@@ -9,6 +9,7 @@
 import React from "react";
 import { Code } from "@connectrpc/connect";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { ConnectionService } from "../../src/gen/connection_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -50,7 +51,7 @@ function openPrStackScreen(session: ReturnType<typeof anOrchestratorSession>) {
       ]),
     }),
   );
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(session.sessionId).click();
   return backend;
 }
@@ -227,7 +228,7 @@ it("shows an inline error and keeps the form open when AddPlannedPr fails", () =
     Code.InvalidArgument,
     "dangling parent ref",
   );
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
 
   // When

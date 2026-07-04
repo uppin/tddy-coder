@@ -9,10 +9,11 @@ import {
 import { GitHubLoginButton } from "../components/GitHubLoginButton";
 import { UserAvatar } from "../components/UserAvatar";
 import { DaemonNavMenu } from "../components/shell/DaemonNavMenu";
+import { DaemonSelectorConnected } from "../components/shell/DaemonSelector";
 import { useAuth } from "../hooks/useAuth";
-import { useCommonRoom } from "../hooks/useCommonRoom";
 import { useRoomParticipants } from "../hooks/useRoomParticipants";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
+import { useSelectedDaemon } from "../rpc/selectedDaemon";
 import { buildRegistry, findMethod } from "./registry";
 import { invokeRpc, type InvokeResult } from "./invoke";
 import {
@@ -63,14 +64,15 @@ function servicesFromRegistry(
  *
  * All RPCs (reflection + invocation) go over the existing LiveKit data channel —
  * no HTTP Connect transport is used, so every streaming method kind works.
+ *
+ * Shares the common-room connection owned by `SelectedDaemonProvider` (see `../rpc/selectedDaemon`)
+ * rather than opening its own — this screen needs the *full* participant list (any "coder"
+ * session, not just daemon-role participants), so it reads `room` from the shared context and
+ * runs its own {@link useRoomParticipants} over it.
  */
 export function RpcPlaygroundAppPage({
-  livekitUrl,
-  commonRoom,
   onNavigate,
 }: {
-  livekitUrl?: string;
-  commonRoom?: string;
   onNavigate: (path: string) => void;
 }) {
   const { user, isAuthenticated, login, logout, sessionToken } = useAuth();
@@ -79,12 +81,7 @@ export function RpcPlaygroundAppPage({
     [user],
   );
 
-  const { room } = useCommonRoom(
-    livekitUrl,
-    commonRoom,
-    isAuthenticated ? identity : undefined,
-  );
-
+  const { room } = useSelectedDaemon();
   const allParticipants = useRoomParticipants(room);
 
   const [selectedParticipantId, setSelectedParticipantId] = useState<
@@ -223,7 +220,10 @@ export function RpcPlaygroundAppPage({
         <div className="flex min-w-0 flex-wrap items-center gap-3">
           <DaemonNavMenu onNavigate={onNavigate} />
         </div>
-        {user ? <UserAvatar user={user} onLogout={logout} /> : null}
+        <div className="flex items-center gap-3">
+          <DaemonSelectorConnected />
+          {user ? <UserAvatar user={user} onLogout={logout} /> : null}
+        </div>
       </div>
       {error ? (
         <p

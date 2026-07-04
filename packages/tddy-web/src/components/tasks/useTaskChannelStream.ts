@@ -1,19 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { TaskService } from "../../gen/tasks_pb";
-import { useHttpClient } from "../../rpc/transportProvider";
+import { useDaemonClient } from "../../rpc/selectedDaemon";
 
 export function useTaskChannelStream(
   sessionToken: string,
   taskId: string | null,
   channelId: string | null
 ) {
-  const client = useHttpClient(TaskService);
+  const client = useDaemonClient(TaskService);
   const [output, setOutput] = useState<string>("");
   const abortRef = useRef<AbortController | null>(null);
   const decoderRef = useRef(new TextDecoder());
 
   useEffect(() => {
-    if (!taskId || channelId === null) {
+    if (!taskId || channelId === null || !client) {
       setOutput("");
       return;
     }

@@ -24,6 +24,7 @@ pub async fn run_server(
     rpc_entries: Vec<tddy_rpc::ServiceEntry>,
     livekit_url: Option<String>,
     common_room: Option<String>,
+    daemon_instance_id: String,
     allowed_agents: Vec<ClientAllowedAgent>,
     debug: Option<String>,
     lifecycle_telegram: Option<(DaemonConfig, Arc<dyn TelegramSender + Send + Sync>)>,
@@ -49,6 +50,7 @@ pub async fn run_server(
         daemon_mode: Some(true),
         allowed_agents,
         debug,
+        daemon_instance_id: Some(daemon_instance_id),
     };
 
     let shutdown_copy = lifecycle_telegram.clone();

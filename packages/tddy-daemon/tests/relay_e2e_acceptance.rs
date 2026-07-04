@@ -103,6 +103,7 @@ async fn relay_idle_monitor_triggers_server_shutdown() {
         vec![],
         None,
         None,
+        "test-instance".to_string(), // serving daemon instance id (relay mode has no real one)
         vec![],
         None, // web_debug mask
         None,

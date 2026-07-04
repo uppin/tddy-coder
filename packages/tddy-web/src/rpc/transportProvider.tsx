@@ -40,9 +40,11 @@ import { createTrafficInterceptor } from "./httpTrafficInterceptor";
 
 /**
  * Factory for the production HTTP transport (binary Connect protocol, same-origin /rpc).
- * When a registry is provided, attaches a traffic-metering interceptor.
+ * When a registry is provided, attaches a traffic-metering interceptor. Exported so a test can
+ * point a `liveKitFactory` override at the same HTTP transport its `cy.intercept`s already expect,
+ * without needing a real (or fully faked) LiveKit data-channel connection.
  */
-function createDefaultHttpTransport(registry?: TrafficMeterRegistry): Transport {
+export function createDefaultHttpTransport(registry?: TrafficMeterRegistry): Transport {
   const interceptors = registry ? [createTrafficInterceptor(registry.get("http"))] : [];
   return createConnectTransport({
     baseUrl:

@@ -4,6 +4,8 @@ import { ConnectionService, SessionEntrySchema, type SessionEntry } from "../../
 import { TokenService } from "../../gen/token_pb";
 import { sortSessionsByCreation } from "../../utils/sessionSort";
 import { useHttpClient } from "../../rpc/transportProvider";
+import { useDaemonClient } from "../../rpc/selectedDaemon";
+import { DaemonSelectorConnected } from "../shell/DaemonSelector";
 import { TooltipProvider } from "../ui/tooltip";
 import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
@@ -28,7 +30,13 @@ export function SessionsDrawerScreen() {
       ? (window.localStorage.getItem("tddy_session_token") ?? "")
       : "";
 
-  const client = useHttpClient(ConnectionService);
+  // ConnectionService is daemon-level RPC — routed over the shared common-room LiveKit
+  // connection to whichever daemon is currently selected (see `SelectedDaemonProvider`).
+  // `null` until a daemon is selected / the room is connected; every call site below guards.
+  const client = useDaemonClient(ConnectionService);
+  // TokenService issues this session's own browser LiveKit-join token — it must stay HTTP to the
+  // serving daemon (you cannot fetch a LiveKit-join token *over* LiveKit), per the PRD's bootstrap
+  // exception. Do not migrate this to useDaemonClient.
   const tokenClient = useHttpClient(TokenService);
 
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
@@ -62,6 +70,7 @@ export function SessionsDrawerScreen() {
 
   // Fetch sessions on mount
   useEffect(() => {
+    if (!client) return;
     let cancelled = false;
     client
       .listSessions({ sessionToken })
@@ -111,7 +120,7 @@ export function SessionsDrawerScreen() {
         ? "open"
         : "closed",
     );
-    if (session.isActive) {
+    if (session.isActive && client) {
       connectSession(selectedSessionId, sessionToken, client).catch((err) => {
         console.debug("[SessionsDrawerScreen] deep-link connectSession error", err);
       });
@@ -163,7 +172,7 @@ export function SessionsDrawerScreen() {
     // Track auto-open so we know whether a subsequent connect should auto-close
     inspectorAutoOpenRef.current = willOpen;
     setInspectorState(willOpen ? "open" : "closed");
-    if (session?.isActive) {
+    if (session?.isActive && client) {
       connectSession(sessionId, sessionToken, client).catch((err) => {
         console.debug("[SessionsDrawerScreen] connectSession error", err);
       });
@@ -171,18 +180,21 @@ export function SessionsDrawerScreen() {
   };
 
   const handleResume = (sessionId: string) => {
+    if (!client) return;
     resumeSession(sessionId, sessionToken, client).catch((err) => {
       console.debug("[SessionsDrawerScreen] resumeSession error", err);
     });
   };
 
   const handleDelete = (sessionId: string) => {
+    if (!client) return;
     deleteSession(sessionId, sessionToken, client).catch((err) => {
       console.debug("[SessionsDrawerScreen] deleteSession error", err);
     });
   };
 
   const refreshSessions = () => {
+    if (!client) return;
     client
       .listSessions({ sessionToken })
       .then((resp) => {
@@ -226,6 +238,7 @@ export function SessionsDrawerScreen() {
   };
 
   const handleTerminate = (sessionId: string) => {
+    if (!client) return;
     signalSession(sessionId, Signal.SIGTERM, sessionToken, client)
       .catch((err) => {
         // Common cause: the session already ended (e.g. process exited on its own) before this
@@ -260,6 +273,7 @@ export function SessionsDrawerScreen() {
     setMode("list");
     setSelectedSessionId(sessionId);
     window.location.hash = sessionsDrawerPathForSession(sessionId);
+    if (!client) return;
     connectSession(sessionId, sessionToken, client).catch((err) => {
       console.debug("[SessionsDrawerScreen] connectSession after create error", err);
     });
@@ -283,7 +297,14 @@ export function SessionsDrawerScreen() {
         // browser chrome, which pushes the bottom keyboard bar off the visible screen.
         className="flex flex-col h-[100dvh] w-full overflow-hidden font-sans text-foreground"
       >
-        <StatusBar attachment={attachment} />
+        <div className="flex items-center flex-shrink-0">
+          <div className="flex-1 min-w-0">
+            <StatusBar attachment={attachment} />
+          </div>
+          <div className="flex items-center px-2 border-b border-border">
+            <DaemonSelectorConnected />
+          </div>
+        </div>
         <div className="flex flex-1 min-h-0 overflow-hidden relative">
           {isMobile && !sessionListOpen && (
             <button
@@ -318,7 +339,7 @@ export function SessionsDrawerScreen() {
             onDelete={handleDelete}
             onTerminate={handleTerminate}
             isCreating={mode === "creating"}
-            client={client}
+            client={client ?? undefined}
             tokenClient={tokenClient}
             sessionToken={sessionToken}
             onCancelCreate={handleCancelCreate}

@@ -1,13 +1,15 @@
+/**
+ * `ConnectionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
+ * common-room LiveKit connection — see `aConnectionServiceBackend` (in-memory fake) and
+ * `SelectedDaemonProvider` (via `withSelectedDaemon`).
+ */
+
 import React from "react";
-import { fromBinary } from "@bufbuild/protobuf";
-import { ResumeSessionRequestSchema } from "../../src/gen/connection_pb";
+import { ConnectionService } from "../../src/gen/connection_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import {
-  interceptConnectionRpcs,
-  interceptConnectSession,
-  interceptResumeSession,
-} from "../support/rpc/connectionRpcs";
-import { decodeProtoRequestBody } from "../support/rpc/protoRpc";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
 // ---------------------------------------------------------------------------
@@ -114,14 +116,16 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
   it("lists sessions in newest-first creation order regardless of active status", () => {
     // Given — three sessions delivered out-of-order by the API; oldest is active, newest is inactive
-    interceptConnectionRpcs([DISCONNECTED_SESSION, CONNECTED_SESSION_A, SESSION_WITH_GOAL_FALLBACK]);
+    const backend = aConnectionServiceBackend({
+      sessions: [DISCONNECTED_SESSION, CONNECTED_SESSION_A, SESSION_WITH_GOAL_FALLBACK],
+    });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     // Then — drawer items appear newest-first by createdAt
     sessionsDrawerPage.drawer().within(() => {
+      cy.get("button[data-testid^='sessions-drawer-item-']").should("have.length", 3);
       cy.get("button[data-testid^='sessions-drawer-item-']").then(($items) => {
         const ids = [...$items].map((el) => el.getAttribute("data-testid")!.replace("sessions-drawer-item-", ""));
         expect(ids[0]).to.equal(CONNECTED_SESSION_A.sessionId);
@@ -137,11 +141,10 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
   it("shows the worktree basename as the label when repoPath is non-empty", () => {
     // Given
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
+    const backend = aConnectionServiceBackend({ sessions: [CONNECTED_SESSION_A] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     // Then — label = basename of /home/dev/my-feature-branch
     sessionsDrawerPage.drawerItemLabel(CONNECTED_SESSION_A.sessionId)
@@ -150,11 +153,10 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
   it("shows workflowGoal as the label when repoPath is empty", () => {
     // Given
-    interceptConnectionRpcs([SESSION_WITH_GOAL_FALLBACK]);
+    const backend = aConnectionServiceBackend({ sessions: [SESSION_WITH_GOAL_FALLBACK] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     // Then
     sessionsDrawerPage.drawerItemLabel(SESSION_WITH_GOAL_FALLBACK.sessionId)
@@ -163,11 +165,10 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
   it("shows the first 8 characters of sessionId as the label when both repoPath and workflowGoal are empty", () => {
     // Given — SESSION_WITH_ID_FALLBACK has sessionId starting with "deadbeef"
-    interceptConnectionRpcs([SESSION_WITH_ID_FALLBACK]);
+    const backend = aConnectionServiceBackend({ sessions: [SESSION_WITH_ID_FALLBACK] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     // Then
     sessionsDrawerPage.drawerItemLabel(SESSION_WITH_ID_FALLBACK.sessionId)
@@ -180,11 +181,10 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
   it("marks an active session's status indicator as connected", () => {
     // Given
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
+    const backend = aConnectionServiceBackend({ sessions: [CONNECTED_SESSION_A] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     // Then
     sessionsDrawerPage.drawerItemStatus(CONNECTED_SESSION_A.sessionId)
@@ -193,11 +193,10 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
   it("marks an inactive session's status indicator as disconnected", () => {
     // Given
-    interceptConnectionRpcs([DISCONNECTED_SESSION]);
+    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     // Then
     sessionsDrawerPage.drawerItemStatus(DISCONNECTED_SESSION.sessionId)
@@ -206,11 +205,10 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
   it("marks a pending-elicitation session's status indicator as needs-input", () => {
     // Given
-    interceptConnectionRpcs([SESSION_NEEDS_INPUT]);
+    const backend = aConnectionServiceBackend({ sessions: [SESSION_NEEDS_INPUT] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     // Then
     sessionsDrawerPage.drawerItemStatus(SESSION_NEEDS_INPUT.sessionId)
@@ -223,11 +221,10 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
   it("reveals the full session id in a tooltip when the drawer item is hovered", () => {
     // Given
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
+    const backend = aConnectionServiceBackend({ sessions: [CONNECTED_SESSION_A] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION_A.sessionId).focus();
 
     // Then — tooltip content shows the full session id
@@ -242,12 +239,13 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
   it("opens the terminal container in the detail pane when a connected session is clicked", () => {
     // Given
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
-    interceptConnectSession({ livekitRoom: "room-session-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" });
+    const backend = aConnectionServiceBackend({
+      sessions: [CONNECTED_SESSION_A],
+      connectSession: { livekitRoom: "room-session-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
+    });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION_A.sessionId).click();
 
     // Then — terminal container appears; Resume button is absent
@@ -261,11 +259,10 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
   it("opens the inspector with metadata and controls when a disconnected session is clicked", () => {
     // Given
-    interceptConnectionRpcs([DISCONNECTED_SESSION]);
+    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
 
     // Then — inspector opens with metadata and resume button; terminal container absent
@@ -281,22 +278,18 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
   it("calls ResumeSession with the disconnected session id when Resume is clicked", () => {
     // Given
-    interceptConnectionRpcs([DISCONNECTED_SESSION]);
-    interceptResumeSession(DISCONNECTED_SESSION.sessionId);
+    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
     sessionsDrawerPage.inspectorResumeBtn(DISCONNECTED_SESSION.sessionId).click();
 
     // Then — verify the request was made with the correct session id
-    cy.wait("@resumeSession").then((interception) => {
-      const decoded = fromBinary(
-        ResumeSessionRequestSchema,
-        decodeProtoRequestBody(interception.request.body),
-      );
-      expect(decoded.sessionId).to.equal(DISCONNECTED_SESSION.sessionId);
+    cy.wrap(backend).should((b) => {
+      const calls = b.callsTo(ConnectionService.method.resumeSession);
+      expect(calls).to.have.length(1);
+      expect(calls[0].sessionId).to.equal(DISCONNECTED_SESSION.sessionId);
     });
   });
 
@@ -306,12 +299,13 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
   it("switches the detail pane to the second session when it is selected, with no terminal from the first session visible", () => {
     // Given — two connected sessions
-    interceptConnectionRpcs([CONNECTED_SESSION_A, CONNECTED_SESSION_B]);
-    interceptConnectSession({ livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" });
+    const backend = aConnectionServiceBackend({
+      sessions: [CONNECTED_SESSION_A, CONNECTED_SESSION_B],
+      connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
+    });
 
     // When — select session A first
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION_A.sessionId).click();
     sessionsDrawerPage.detailTerminalContainer().should("exist");
 
@@ -352,12 +346,13 @@ describe("SessionsDrawerAcceptance — URL deep-link pre-selection", () => {
   it("auto-selects the active session from the URL hash when the screen mounts", () => {
     // Given — hash is set BEFORE the component mounts
     window.location.hash = `/sessions/${CONNECTED_SESSION_A.sessionId}`;
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
-    interceptConnectSession({ livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" });
+    const backend = aConnectionServiceBackend({
+      sessions: [CONNECTED_SESSION_A],
+      connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
+    });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     // Then — the session from the hash is marked as selected
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION_A.sessionId)
@@ -371,13 +366,13 @@ describe("SessionsDrawerAcceptance — URL deep-link pre-selection", () => {
   it("auto-connects to the active session identified in the URL hash on mount", () => {
     // Given
     window.location.hash = `/sessions/${CONNECTED_SESSION_A.sessionId}`;
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
-    interceptConnectSession({ livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" });
+    const backend = aConnectionServiceBackend({
+      sessions: [CONNECTED_SESSION_A],
+      connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
+    });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
-    cy.wait("@connectSession");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     // Then — terminal container is visible (auto-connected)
     sessionsDrawerPage.detailTerminalContainer().should("exist");
@@ -390,11 +385,10 @@ describe("SessionsDrawerAcceptance — URL deep-link pre-selection", () => {
   it("selects an inactive session from the URL hash and shows session controls, not the empty placeholder", () => {
     // Given
     window.location.hash = `/sessions/${DISCONNECTED_SESSION.sessionId}`;
-    interceptConnectionRpcs([DISCONNECTED_SESSION]);
+    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     // Then — the drawer item is selected
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId)
@@ -419,11 +413,10 @@ describe("SessionsDrawerAcceptance — drawer open/close toggle", () => {
 
   it("shows a close button in the drawer header that collapses the drawer", () => {
     // Given
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
+    const backend = aConnectionServiceBackend({ sessions: [CONNECTED_SESSION_A] });
 
     // When
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     // Then — close button exists while drawer is open
     sessionsDrawerPage.drawerCloseBtn().should("exist");
@@ -438,9 +431,8 @@ describe("SessionsDrawerAcceptance — drawer open/close toggle", () => {
 
   it("shows an open button in strip mode that re-expands the drawer", () => {
     // Given — drawer already closed
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    const backend = aConnectionServiceBackend({ sessions: [CONNECTED_SESSION_A] });
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerCloseBtn().click();
     sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "closed");
 
@@ -456,11 +448,10 @@ describe("SessionsDrawerAcceptance — drawer open/close toggle", () => {
   it("defaults the session list to closed on a mobile-width viewport", () => {
     // Given — a mobile viewport (narrower than the md breakpoint)
     cy.viewport(375, 667);
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
+    const backend = aConnectionServiceBackend({ sessions: [CONNECTED_SESSION_A] });
 
     // When — the screen mounts
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     // Then — the session list starts collapsed so it does not cover the main pane
     sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "closed");
@@ -469,9 +460,8 @@ describe("SessionsDrawerAcceptance — drawer open/close toggle", () => {
   it("shows a floating overlay open control on a mobile viewport when the list is collapsed", () => {
     // Given — a mobile viewport where the session list starts collapsed
     cy.viewport(375, 667);
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    const backend = aConnectionServiceBackend({ sessions: [CONNECTED_SESSION_A] });
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "closed");
 
     // Then — a floating overlay control to open the list is visible
@@ -481,9 +471,8 @@ describe("SessionsDrawerAcceptance — drawer open/close toggle", () => {
   it("expands the session list when the overlay open control is tapped on mobile", () => {
     // Given — a mobile viewport with the session list collapsed
     cy.viewport(375, 667);
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    const backend = aConnectionServiceBackend({ sessions: [CONNECTED_SESSION_A] });
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     // When — the user taps the floating overlay open control
     sessionsDrawerPage.drawerOpenOverlayBtn().click();
@@ -497,9 +486,8 @@ describe("SessionsDrawerAcceptance — drawer open/close toggle", () => {
   it("opens the session list as a full-width overlay on mobile, without resizing the detail pane", () => {
     // Given — a mobile viewport with the list collapsed
     cy.viewport(375, 667);
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    const backend = aConnectionServiceBackend({ sessions: [CONNECTED_SESSION_A] });
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     // When — the user opens the list
     sessionsDrawerPage.drawerOpenOverlayBtn().click();
@@ -516,14 +504,15 @@ describe("SessionsDrawerAcceptance — drawer open/close toggle", () => {
   it("closes the session list after selecting a session on a mobile viewport", () => {
     // Given — a mobile viewport with the list opened over the terminal
     cy.viewport(375, 667);
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
-    interceptConnectSession({
-      livekitRoom: "room-session-a",
-      livekitUrl: "ws://127.0.0.1:7880",
-      livekitServerIdentity: "server",
+    const backend = aConnectionServiceBackend({
+      sessions: [CONNECTED_SESSION_A],
+      connectSession: {
+        livekitRoom: "room-session-a",
+        livekitUrl: "ws://127.0.0.1:7880",
+        livekitServerIdentity: "server",
+      },
     });
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerOpenOverlayBtn().click();
     sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "open");
 
@@ -536,9 +525,8 @@ describe("SessionsDrawerAcceptance — drawer open/close toggle", () => {
 
   it("does not show the floating overlay open control on a desktop viewport", () => {
     // Given — a desktop viewport where the session list is open by default
-    interceptConnectionRpcs([CONNECTED_SESSION_A]);
-    cy.mount(<SessionsDrawerScreen />);
-    cy.wait("@listSessions");
+    const backend = aConnectionServiceBackend({ sessions: [CONNECTED_SESSION_A] });
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
 
     // Then — the desktop strip handles opening; no floating overlay control is rendered
     sessionsDrawerPage.drawerOpenOverlayBtn().should("not.exist");

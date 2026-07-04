@@ -266,6 +266,9 @@ export const TEST_IDS = {
   prStackAddPlannedPrCancelBtn: "pr-stack-add-planned-pr-cancel-btn",
   prStackAddPlannedPrError: "pr-stack-add-planned-pr-error",
 
+  // Daemon selector (top-right strip on daemon-mode screens)
+  daemonSelectorTrigger: "daemon-selector-trigger",
+
   // Projects screen (/projects)
   projectsScreen: "projects-screen",
   projectsList: "projects-list",
@@ -523,3 +526,10 @@ export const projectAddToHostSelect = (projectId: string) =>
 /** `[data-testid="project-add-to-host-submit-<projectId>"]` — submits the add-to-host action */
 export const projectAddToHostSubmit = (projectId: string) =>
   `project-add-to-host-submit-${projectId}`;
+
+// ---------------------------------------------------------------------------
+// Daemon selector dynamic helpers
+// ---------------------------------------------------------------------------
+
+/** `[data-testid="daemon-selector-option-<instanceId>"]` — one option in the daemon selector */
+export const daemonSelectorOption = (instanceId: string) => `daemon-selector-option-${instanceId}`;

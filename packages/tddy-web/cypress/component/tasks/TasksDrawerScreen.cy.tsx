@@ -1,26 +1,26 @@
 /**
  * Acceptance tests for the TasksDrawerScreen — real-time tasks list with channel output.
  *
- * All RPC calls are intercepted at the HTTP layer.
+ * `TaskService` is daemon-level RPC (`useDaemonClient`), routed over the shared common-room
+ * LiveKit connection — see `aTaskServiceBackend` (in-memory fake) and `SelectedDaemonProvider`.
  * All auth is bypassed by pre-seeding localStorage with a fake session token.
  */
 
 import React from "react";
+import { Room } from "livekit-client";
 import { TaskStatusProto } from "../../../src/gen/tasks_pb";
 import { TasksDrawerScreen } from "../../../src/components/tasks/TasksDrawerScreen";
-import {
-  aTaskInfo,
-  interceptCancelTask,
-  interceptWatchTask,
-  interceptWatchTaskList,
-  liveTaskUpdated,
-  snapshotTaskAdded,
-} from "../../support/rpc/taskRpcs";
+import type { DaemonHost } from "../../../src/lib/participantRole";
+import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
+import { aTaskInfo, aTaskServiceBackend, liveTaskUpdated, snapshotTaskAdded } from "../../support/rpc/taskRpcs";
+import { mountWithRecordingLiveKitRpc } from "../../support/rpc/recordingLiveKitRpc";
 import { tasksDrawerPage } from "../../support/pages/tasksDrawerPage";
 
 // ---------------------------------------------------------------------------
-// Task constants used across specs
+// Fixtures
 // ---------------------------------------------------------------------------
+
+const DAEMON: DaemonHost = { instanceId: "udoo", label: "udoo (this daemon)" };
 
 const RUNNING_TASK = aTaskInfo({
   taskId: "task-running-0000-0000-0000-000000000001",
@@ -40,12 +40,15 @@ const COMPLETED_TASK = aTaskInfo({
   ],
 });
 
-const PENDING_TASK = aTaskInfo({
-  taskId: "task-pending-000-0000-0000-0000-000000000003",
-  kind: "vm_build",
-  status: TaskStatusProto.TASK_STATUS_PENDING,
-  channels: [{ channelId: "0", name: "combined" }],
-});
+/** Mounts `TasksDrawerScreen` with a single-daemon shared context routed to `backend`. */
+function mountTasksDrawerScreen(backend: ReturnType<typeof aTaskServiceBackend>) {
+  mountWithRecordingLiveKitRpc(
+    <SelectedDaemonProvider room={new Room()} daemons={[DAEMON]}>
+      <TasksDrawerScreen />
+    </SelectedDaemonProvider>,
+    backend,
+  );
+}
 
 // ---------------------------------------------------------------------------
 
@@ -62,12 +65,12 @@ describe("TasksDrawerScreen — real-time task list and channel output", () => {
 
   it("renders task list from WatchTaskList snapshot events", () => {
     // Given — two tasks in the initial snapshot
-    interceptWatchTaskList([snapshotTaskAdded(RUNNING_TASK), snapshotTaskAdded(COMPLETED_TASK)]);
-    interceptWatchTask("0", "");
+    const backend = aTaskServiceBackend({
+      watchTaskListEvents: [snapshotTaskAdded(RUNNING_TASK), snapshotTaskAdded(COMPLETED_TASK)],
+    });
 
     // When
-    cy.mount(<TasksDrawerScreen />);
-    cy.wait("@watchTaskList");
+    mountTasksDrawerScreen(backend);
 
     // Then — both tasks appear in the drawer
     tasksDrawerPage.drawerItem(RUNNING_TASK.taskId).should("exist");
@@ -80,12 +83,10 @@ describe("TasksDrawerScreen — real-time task list and channel output", () => {
 
   it("task row shows running status indicator and kind text", () => {
     // Given
-    interceptWatchTaskList([snapshotTaskAdded(RUNNING_TASK)]);
-    interceptWatchTask("0", "");
+    const backend = aTaskServiceBackend({ watchTaskListEvents: [snapshotTaskAdded(RUNNING_TASK)] });
 
     // When
-    cy.mount(<TasksDrawerScreen />);
-    cy.wait("@watchTaskList");
+    mountTasksDrawerScreen(backend);
 
     // Then — status dot present, kind text visible
     tasksDrawerPage.drawerItemStatus(RUNNING_TASK.taskId).should("exist");
@@ -98,12 +99,13 @@ describe("TasksDrawerScreen — real-time task list and channel output", () => {
 
   it("clicking a task opens the output pane", () => {
     // Given
-    interceptWatchTaskList([snapshotTaskAdded(RUNNING_TASK)]);
-    interceptWatchTask("0", "hello from shell");
+    const backend = aTaskServiceBackend({
+      watchTaskListEvents: [snapshotTaskAdded(RUNNING_TASK)],
+      watchTaskOutput: "hello from shell",
+    });
 
     // When
-    cy.mount(<TasksDrawerScreen />);
-    cy.wait("@watchTaskList");
+    mountTasksDrawerScreen(backend);
 
     // Then — output pane not visible before click
     tasksDrawerPage.outputPane().should("not.exist");
@@ -122,12 +124,13 @@ describe("TasksDrawerScreen — real-time task list and channel output", () => {
 
   it("output pane shows channel tabs for a multi-channel task", () => {
     // Given — completed task with stdout + stderr channels
-    interceptWatchTaskList([snapshotTaskAdded(COMPLETED_TASK)]);
-    interceptWatchTask("0", "some stdout");
+    const backend = aTaskServiceBackend({
+      watchTaskListEvents: [snapshotTaskAdded(COMPLETED_TASK)],
+      watchTaskOutput: "some stdout",
+    });
 
     // When
-    cy.mount(<TasksDrawerScreen />);
-    cy.wait("@watchTaskList");
+    mountTasksDrawerScreen(backend);
     tasksDrawerPage.drawerItem(COMPLETED_TASK.taskId).click();
 
     // Then — tabs for both channels are present
@@ -141,14 +144,14 @@ describe("TasksDrawerScreen — real-time task list and channel output", () => {
 
   it("channel output area shows bytes streamed from WatchTask", () => {
     // Given
-    interceptWatchTaskList([snapshotTaskAdded(RUNNING_TASK)]);
-    interceptWatchTask("0", "hello from shell\n");
+    const backend = aTaskServiceBackend({
+      watchTaskListEvents: [snapshotTaskAdded(RUNNING_TASK)],
+      watchTaskOutput: "hello from shell\n",
+    });
 
     // When
-    cy.mount(<TasksDrawerScreen />);
-    cy.wait("@watchTaskList");
+    mountTasksDrawerScreen(backend);
     tasksDrawerPage.drawerItem(RUNNING_TASK.taskId).click();
-    cy.wait("@watchTask");
 
     // Then — output text appears in the channel output area
     tasksDrawerPage
@@ -161,14 +164,11 @@ describe("TasksDrawerScreen — real-time task list and channel output", () => {
   // -------------------------------------------------------------------------
 
   it("cancel button in task row calls CancelTask and reflects cancelling state", () => {
-    // Given — a running task with a cancel intercept
-    interceptWatchTaskList([snapshotTaskAdded(RUNNING_TASK)]);
-    interceptWatchTask("0", "");
-    interceptCancelTask();
+    // Given — a running task
+    const backend = aTaskServiceBackend({ watchTaskListEvents: [snapshotTaskAdded(RUNNING_TASK)] });
 
     // When
-    cy.mount(<TasksDrawerScreen />);
-    cy.wait("@watchTaskList");
+    mountTasksDrawerScreen(backend);
 
     // Then — cancel button is present for running task
     tasksDrawerPage.drawerItemCancel(RUNNING_TASK.taskId).should("exist");
@@ -176,10 +176,10 @@ describe("TasksDrawerScreen — real-time task list and channel output", () => {
     // When — click cancel
     tasksDrawerPage.drawerItemCancel(RUNNING_TASK.taskId).click();
 
-    // Then — cancel RPC was called
-    cy.wait("@cancelTask");
-
-    // And — button shows cancelling state (disabled or label change)
+    // Then — cancel RPC was called, and the button shows cancelling state (disabled)
+    cy.wrap(backend).should((b) => {
+      expect(b.cancelTaskCalls).to.deep.equal([{ taskId: RUNNING_TASK.taskId }]);
+    });
     tasksDrawerPage
       .drawerItemCancel(RUNNING_TASK.taskId)
       .should("have.attr", "disabled");
@@ -196,15 +196,12 @@ describe("TasksDrawerScreen — real-time task list and channel output", () => {
       status: TaskStatusProto.TASK_STATUS_COMPLETED,
       exitCode: 0,
     });
-    interceptWatchTaskList([
-      snapshotTaskAdded(RUNNING_TASK),
-      liveTaskUpdated(completedVersion),
-    ]);
-    interceptWatchTask("0", "");
+    const backend = aTaskServiceBackend({
+      watchTaskListEvents: [snapshotTaskAdded(RUNNING_TASK), liveTaskUpdated(completedVersion)],
+    });
 
     // When
-    cy.mount(<TasksDrawerScreen />);
-    cy.wait("@watchTaskList");
+    mountTasksDrawerScreen(backend);
 
     // Then — after the updated event, the task row reflects completed status
     // (the status dot or text should update without a new WatchTaskList call)
