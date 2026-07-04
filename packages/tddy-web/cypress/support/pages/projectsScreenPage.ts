@@ -12,6 +12,8 @@ import {
   projectAddToHostToggle,
   projectAddToHostSelect,
   projectAddToHostSubmit,
+  projectAddToHostUserRelativePath,
+  projectHostBaseLocation,
   TEST_IDS,
 } from "../testIds";
 
@@ -75,6 +77,23 @@ export const projectsScreenPage = {
     byTestId(projectAddToHostSelect(projectId)).select(daemonInstanceId);
     byTestId(projectAddToHostSubmit(projectId)).click();
   },
+
+  /** The optional clone-location input inside the add-to-host control. */
+  addToHostUserRelativePathInput: (
+    projectId: string,
+    options?: Parameters<typeof cy.get>[1],
+  ) => byTestId(projectAddToHostUserRelativePath(projectId), { timeout: 5000, ...options }),
+
+  /** Select a target host, type a clone-location relative path, and submit the add-to-host action. */
+  addProjectToHostWithLocation(projectId: string, daemonInstanceId: string, relativePath: string) {
+    byTestId(projectAddToHostSelect(projectId)).select(daemonInstanceId);
+    byTestId(projectAddToHostUserRelativePath(projectId)).clear().type(relativePath);
+    byTestId(projectAddToHostSubmit(projectId)).click();
+  },
+
+  /** A host's advertised base clone location (`repos_base_path`) rendered in the Projects screen. */
+  hostBaseLocation: (daemonInstanceId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(projectHostBaseLocation(daemonInstanceId), { timeout: 5000, ...options }),
 
   // ---------------------------------------------------------------------------
   // Create project

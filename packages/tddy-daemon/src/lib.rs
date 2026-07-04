@@ -14,6 +14,7 @@ pub mod livekit_peer_discovery;
 pub mod multi_host;
 mod oauth_loopback_tunnel;
 pub mod presenter_intent_client;
+pub mod project_provision;
 pub mod project_storage;
 pub mod pty_registry;
 pub mod pty_runtime;

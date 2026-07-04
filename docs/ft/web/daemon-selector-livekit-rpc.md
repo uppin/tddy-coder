@@ -84,7 +84,15 @@ now exposes as `daemon_instance_id`.
   defaults to the serving daemon.
 - The **Projects** screen host picker ("Add to host") is migrated to source its daemon list from
   the same shared common-room context as the selector, instead of opening its own separate common-
-  room connection (today `ProjectsAppPage` calls `useCommonRoom` independently).
+  room connection (today `ProjectsAppPage` calls `useCommonRoom` independently). Add-to-host also
+  addresses the chosen target host **directly** (a client for `daemon-{targetInstanceId}` via
+  `useDaemonClientFor` / the transport factory) rather than double-hopping through the selected
+  daemon.
+- **Session creation** (`CreateSessionPane`, used by the sessions drawer and the PR-stack
+  `CreateSessionDialog`) gains a **Host** `<select>` sourced from the same shared daemon list. It
+  is shown only when the common room advertises at least one daemon (so single-daemon / no-provider
+  usage is unchanged), defaults to the selected daemon, and threads the chosen `daemonInstanceId`
+  into `StartSession` and `ListProjectBranches`.
 
 ## Trust model
 

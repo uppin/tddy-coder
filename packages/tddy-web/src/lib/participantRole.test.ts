@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { aDaemonAdvertisementMeta } from "../test-utils";
-import { daemonHostsFromParticipants, daemonRpcIdentity } from "./participantRole";
+import { daemonHostsFromParticipants, daemonRpcIdentity, parseDaemonAdvertisement } from "./participantRole";
 
 describe("daemonHostsFromParticipants", () => {
   it("keeps only daemon-role participants and reads instance id + label from the advertisement", () => {
@@ -47,6 +47,30 @@ describe("daemonHostsFromParticipants", () => {
 
     // Then
     expect(hosts.map((h) => h.instanceId)).toEqual(["udoo", "srv2"]);
+  });
+});
+
+describe("parseDaemonAdvertisement", () => {
+  it("extracts the advertised base clone location as reposBasePath", () => {
+    // Given a daemon advertisement that includes its repos_base_path
+    const meta = '{"instance_id":"h1","label":"h1 (this daemon)","repos_base_path":"repos"}';
+
+    // When
+    const host = parseDaemonAdvertisement(meta);
+
+    // Then
+    expect(host).toEqual({ instanceId: "h1", label: "h1 (this daemon)", reposBasePath: "repos" });
+  });
+
+  it("omits reposBasePath when the advertisement does not carry one", () => {
+    // Given an advertisement from an older daemon with no repos_base_path
+    const meta = '{"instance_id":"h1","label":"h1 (this daemon)"}';
+
+    // When
+    const host = parseDaemonAdvertisement(meta);
+
+    // Then
+    expect(host).toEqual({ instanceId: "h1", label: "h1 (this daemon)" });
   });
 });
 

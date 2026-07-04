@@ -17,6 +17,7 @@ export interface ProjectsScreenProps {
     name: string;
     gitUrl: string;
     daemonInstanceId: string;
+    userRelativePath: string;
   }) => void;
 }
 
@@ -148,9 +149,14 @@ function ProjectCard({
     () => daemons.filter((d) => !hostingIds.has(d.instanceId)),
     [daemons, hostingIds],
   );
+  const baseLocationByHost = useMemo(
+    () => new Map(daemons.map((d) => [d.instanceId, d.reposBasePath])),
+    [daemons],
+  );
 
   const [addOpen, setAddOpen] = useState(false);
   const [selectedHost, setSelectedHost] = useState("");
+  const [userRelativePath, setUserRelativePath] = useState("");
 
   // Default the selection to the first available target once the control opens.
   const effectiveSelection =
@@ -165,16 +171,27 @@ function ProjectCard({
       <div className="mb-3 text-sm text-muted-foreground">{group.gitUrl}</div>
 
       <div className="flex flex-col gap-1">
-        {group.hosts.map((host) => (
-          <div
-            key={host.daemonInstanceId}
-            data-testid={`project-host-row-${group.projectId}-${host.daemonInstanceId}`}
-            className="flex items-center gap-2 text-sm"
-          >
-            <span className="font-medium">{host.daemonInstanceId}</span>
-            <span className="text-muted-foreground">{host.mainRepoPath}</span>
-          </div>
-        ))}
+        {group.hosts.map((host) => {
+          const baseLocation = baseLocationByHost.get(host.daemonInstanceId);
+          return (
+            <div
+              key={host.daemonInstanceId}
+              data-testid={`project-host-row-${group.projectId}-${host.daemonInstanceId}`}
+              className="flex items-center gap-2 text-sm"
+            >
+              <span className="font-medium">{host.daemonInstanceId}</span>
+              <span className="text-muted-foreground">{host.mainRepoPath}</span>
+              {baseLocation ? (
+                <span
+                  data-testid={`project-host-base-location-${host.daemonInstanceId}`}
+                  className="text-muted-foreground"
+                >
+                  base: {baseLocation}
+                </span>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
 
       <div className="mt-3">
@@ -201,6 +218,17 @@ function ProjectCard({
                 </option>
               ))}
             </select>
+            <input
+              data-testid={`project-add-to-host-user-relative-path-${group.projectId}`}
+              placeholder={
+                baseLocationByHost.get(effectiveSelection)
+                  ? `Path relative to home (default ${baseLocationByHost.get(effectiveSelection)})`
+                  : "Path relative to home (optional)"
+              }
+              value={userRelativePath}
+              onChange={(e) => setUserRelativePath(e.target.value)}
+              className="rounded border border-border px-2 py-1"
+            />
             <button
               type="button"
               data-testid={`project-add-to-host-submit-${group.projectId}`}
@@ -211,6 +239,7 @@ function ProjectCard({
                   name: group.name,
                   gitUrl: group.gitUrl,
                   daemonInstanceId: effectiveSelection,
+                  userRelativePath: userRelativePath.trim(),
                 })
               }
             >

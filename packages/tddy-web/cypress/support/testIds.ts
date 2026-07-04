@@ -134,6 +134,11 @@ export const TEST_IDS = {
   // Sessions drawer — create session
   sessionsDrawerNewBtn: "sessions-drawer-new-btn",
   createSessionPane: "create-session-pane",
+  /** Host <select> — which daemon/host runs the session (multi-daemon). Rendered only when the
+   *  common room advertises at least one daemon. */
+  createSessionHostSelect: "create-session-host-select",
+  /** Overlay dialog wrapping CreateSessionPane, used by the PR-stack "Start session" flow. */
+  createSessionDialog: "create-session-dialog",
   createSessionTypeToolBtn: "create-session-type-tool",
   createSessionTypeClaudeCliBtn: "create-session-type-claude-cli",
   createSessionProjectSelect: "create-session-project-select",
@@ -526,6 +531,16 @@ export const projectAddToHostSelect = (projectId: string) =>
 /** `[data-testid="project-add-to-host-submit-<projectId>"]` — submits the add-to-host action */
 export const projectAddToHostSubmit = (projectId: string) =>
   `project-add-to-host-submit-${projectId}`;
+
+/** `[data-testid="project-add-to-host-user-relative-path-<projectId>"]` — optional clone-location
+ *  input in the add-to-host control (path relative to the target host's home). */
+export const projectAddToHostUserRelativePath = (projectId: string) =>
+  `project-add-to-host-user-relative-path-${projectId}`;
+
+/** `[data-testid="project-host-base-location-<daemonInstanceId>"]` — a daemon's advertised base
+ *  clone location (repos_base_path), surfaced in the Projects screen. */
+export const projectHostBaseLocation = (daemonInstanceId: string) =>
+  `project-host-base-location-${daemonInstanceId}`;
 
 // ---------------------------------------------------------------------------
 // Daemon selector dynamic helpers

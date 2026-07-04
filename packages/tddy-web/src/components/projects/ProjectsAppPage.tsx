@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Client } from "@connectrpc/connect";
+import { createClient, type Client } from "@connectrpc/connect";
 import { ConnectionService, type ProjectEntry } from "../../gen/connection_pb";
 import { useAuth } from "../../hooks/useAuth";
-import { useDaemonClient, useDaemons } from "../../rpc/selectedDaemon";
+import { useDaemonClient, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
+import { useLiveKitTransportFactory } from "../../rpc/transportProvider";
+import { daemonRpcIdentity } from "../../lib/participantRole";
 import { DaemonSelectorConnected } from "../shell/DaemonSelector";
 import { DaemonNavMenu } from "../shell/DaemonNavMenu";
 import { UserAvatar } from "../UserAvatar";
@@ -14,11 +16,17 @@ const screenShellClassName =
 const POLL_INTERVAL_MS = 5000;
 
 /**
- * Polls the project registry and wires create-project + add-to-host RPCs over the given
- * daemon-level `ConnectionService` client (`null` until a daemon is selected — every call site
- * skips rather than throwing or faking success; see `useDaemonClient`'s contract).
+ * Polls the project registry over the selected-daemon `client` (list/create), and wires the
+ * add-to-host RPC over a client addressed to the **chosen target host** (`clientForHost`) so the
+ * request reaches that daemon directly rather than double-hopping through the selected daemon.
+ * Every call site skips when its client is `null` (no daemon selected / room not connected) rather
+ * than throwing or faking success; see `useDaemonClient`'s contract.
  */
-function useProjectsRpc(client: Client<typeof ConnectionService> | null, sessionToken: string) {
+function useProjectsRpc(
+  client: Client<typeof ConnectionService> | null,
+  clientForHost: (instanceId: string) => Client<typeof ConnectionService> | null,
+  sessionToken: string,
+) {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
 
   const loadProjects = useCallback(() => {
@@ -47,14 +55,21 @@ function useProjectsRpc(client: Client<typeof ConnectionService> | null, session
   );
 
   const addProjectToHost = useCallback(
-    (input: { projectId: string; name: string; gitUrl: string; daemonInstanceId: string }) => {
-      if (!client) return;
-      client
-        .addProjectToHost({ sessionToken, mainBranchRef: "", userRelativePath: "", ...input })
+    (input: {
+      projectId: string;
+      name: string;
+      gitUrl: string;
+      daemonInstanceId: string;
+      userRelativePath: string;
+    }) => {
+      const target = clientForHost(input.daemonInstanceId);
+      if (!target) return;
+      target
+        .addProjectToHost({ sessionToken, mainBranchRef: "", ...input })
         .then(() => loadProjects())
         .catch(() => {});
     },
-    [client, sessionToken, loadProjects],
+    [clientForHost, sessionToken, loadProjects],
   );
 
   return { projects, createProject, addProjectToHost };
@@ -77,7 +92,23 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
       : "";
   const client = useDaemonClient(ConnectionService);
   const daemons = useDaemons();
-  const { projects, createProject, addProjectToHost } = useProjectsRpc(client, sessionToken);
+  const { room } = useSelectedDaemon();
+  const liveKitFactory = useLiveKitTransportFactory();
+  // Address the chosen target host directly (`daemon-{instanceId}`) over the shared common-room
+  // connection — the target is only known when the operator submits, so the client is built here
+  // from the room + transport factory rather than a render-time `useDaemonClientFor` hook.
+  const clientForHost = useCallback(
+    (instanceId: string): Client<typeof ConnectionService> | null =>
+      room
+        ? createClient(ConnectionService, liveKitFactory(room, daemonRpcIdentity(instanceId)))
+        : null,
+    [room, liveKitFactory],
+  );
+  const { projects, createProject, addProjectToHost } = useProjectsRpc(
+    client,
+    clientForHost,
+    sessionToken,
+  );
 
   return (
     <div className={screenShellClassName}>

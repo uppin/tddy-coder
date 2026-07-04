@@ -233,15 +233,26 @@ export function useDaemons(): DaemonHost[] {
 }
 
 /**
+ * Build and memoize a ConnectRPC client for a daemon-level service, targeting a specific daemon's
+ * RPC-server identity (`daemon-{instanceId}`) over the shared common-room LiveKit connection.
+ * Returns `null` until the room is connected and `instanceId` is set — callers must guard call
+ * sites. Use this to address a daemon other than the currently selected one (e.g. adding a project
+ * to a chosen host); {@link useDaemonClient} is the selected-daemon convenience over it.
+ */
+export function useDaemonClientFor<S extends DescService>(
+  service: S,
+  instanceId: string | null,
+): Client<S> | null {
+  const { room } = useSelectedDaemon();
+  return useLiveKitClient(service, room, instanceId ? daemonRpcIdentity(instanceId) : null);
+}
+
+/**
  * Build and memoize a ConnectRPC client for a daemon-level service, targeting the currently
  * selected daemon's RPC-server identity over the shared common-room LiveKit connection. Returns
  * `null` until a daemon is selected and the room is connected — callers must guard call sites.
  */
 export function useDaemonClient<S extends DescService>(service: S): Client<S> | null {
-  const { room, selectedInstanceId } = useSelectedDaemon();
-  return useLiveKitClient(
-    service,
-    room,
-    selectedInstanceId ? daemonRpcIdentity(selectedInstanceId) : null,
-  );
+  const { selectedInstanceId } = useSelectedDaemon();
+  return useDaemonClientFor(service, selectedInstanceId);
 }

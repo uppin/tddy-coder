@@ -18,7 +18,9 @@ import { ProjectsScreen } from "../../src/components/projects/ProjectsScreen";
 import { ConnectionService, type ProjectEntry } from "../../src/gen/connection_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
+import { daemonRpcIdentity } from "../../src/lib/participantRole";
 import { mountWithRpc } from "../support/rpc/inMemory";
+import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { projectsScreenPage } from "../support/pages/projectsScreenPage";
 
 // ---------------------------------------------------------------------------
@@ -169,4 +171,75 @@ it("offers only hosts that do not already host the project as add-to-host target
 
   // Then — only the remote host (not the already-hosting local host) is selectable
   projectsScreenPage.addToHostOptionValues("proj-alpha").should("deep.equal", [REMOTE_HOST]);
+});
+
+// ---------------------------------------------------------------------------
+// Add to host — routing directly to the chosen host, clone location, base location
+// ---------------------------------------------------------------------------
+
+it("sends the add-to-host RPC directly to the chosen host's daemon", () => {
+  // Given a project that lives only on the local host, with a remote host also available. The
+  // selected daemon (which serves the screen) is the local host.
+  const backend = aProjectsBackend([
+    aProject({ projectId: "proj-alpha", daemonInstanceId: LOCAL_HOST }),
+  ]).onUnary(ConnectionService.method.addProjectToHost, () => ({
+    project: aProject({ projectId: "proj-alpha", daemonInstanceId: REMOTE_HOST }),
+  }));
+
+  // When — the recording transport captures the RPC-server identity every LiveKit client is built for
+  const { targets } = mountWithRecordingLiveKitRpc(mountProjectsAppPage(cy.stub()), backend);
+  projectsScreenPage.openAddToHost("proj-alpha");
+  projectsScreenPage.addProjectToHost("proj-alpha", REMOTE_HOST);
+
+  // Then — the add-to-host RPC is addressed to the chosen host's own RPC identity
+  // (daemon-server-2), not only the selected local daemon it double-hops through today.
+  cy.wrap(null).should(() => {
+    expect(targets).to.include(daemonRpcIdentity(REMOTE_HOST));
+    const calls = backend.callsTo(ConnectionService.method.addProjectToHost);
+    expect(calls).to.have.length(1);
+    expect(calls[0].daemonInstanceId).to.equal(REMOTE_HOST);
+  });
+});
+
+it("adds the project to the chosen host at the entered clone location", () => {
+  // Given a project on the local host and a remote host available as a target
+  const onAddProjectToHost = cy.stub().as("addProjectToHost");
+  cy.mount(
+    <ProjectsScreen
+      projects={[aProject({ projectId: "proj-alpha", daemonInstanceId: LOCAL_HOST })]}
+      daemons={DAEMON_HOSTS}
+      onCreateProject={cy.stub()}
+      onAddProjectToHost={onAddProjectToHost}
+    />,
+  );
+
+  // When
+  projectsScreenPage.openAddToHost("proj-alpha");
+  projectsScreenPage.addProjectToHostWithLocation("proj-alpha", REMOTE_HOST, "work/alpha");
+
+  // Then — the chosen clone location travels with the add-to-host request as userRelativePath
+  cy.get("@addProjectToHost").should("have.been.calledWithMatch", {
+    projectId: "proj-alpha",
+    daemonInstanceId: REMOTE_HOST,
+    userRelativePath: "work/alpha",
+  });
+});
+
+it("shows the base clone location advertised by a hosting daemon", () => {
+  // Given the local host advertises its base clone location
+  const daemonsWithBase: DaemonHost[] = [
+    { instanceId: LOCAL_HOST, label: "workstation-1 (this daemon)", reposBasePath: "repos" },
+    { instanceId: REMOTE_HOST, label: "server-2 (this daemon)", reposBasePath: "srv/git" },
+  ];
+  cy.mount(
+    <ProjectsScreen
+      projects={[aProject({ projectId: "proj-alpha", daemonInstanceId: LOCAL_HOST })]}
+      daemons={daemonsWithBase}
+      onCreateProject={cy.stub()}
+      onAddProjectToHost={cy.stub()}
+    />,
+  );
+
+  // Then — the hosting daemon's base location is surfaced on its host row
+  projectsScreenPage.hostBaseLocation(LOCAL_HOST).should("contain.text", "repos");
 });

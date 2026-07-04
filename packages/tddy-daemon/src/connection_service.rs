@@ -875,6 +875,67 @@ async fn spawn_claude_cli_session_inner(
 }
 
 impl ConnectionServiceImpl {
+    /// Ensure the project's working copy exists on this (local) host before a session starts,
+    /// auto-cloning it when missing: from the local registry's `git_url` if the project is already
+    /// registered here, otherwise from a peer daemon that hosts it (reusing the logical
+    /// `project_id`). The blocking clone runs off the async runtime; a project unknown locally and
+    /// on every peer surfaces as `NotFound`.
+    async fn ensure_project_available_for_start(
+        &self,
+        os_user: &str,
+        projects_dir: &Path,
+        project_id: &str,
+        session_token: &str,
+    ) -> Result<project_storage::ProjectData, Status> {
+        let repos_base_dir = repos_base_for_user(os_user, self.config.repos_base_path_or_default())
+            .ok_or_else(|| Status::internal("could not resolve repos base path"))?;
+        let spawn_client = self.spawn_client.clone();
+        let eligible = self.eligible_daemon_source.clone();
+        let os_user_owned = os_user.to_string();
+        let projects_dir_owned = projects_dir.to_path_buf();
+        let project_id_owned = project_id.to_string();
+        let session_token_owned = session_token.to_string();
+        let timeout = self.config.spawn_worker_request_timeout();
+
+        let handle = tokio::task::spawn_blocking(move || {
+            let cloner = |git_url: &str, dest: &Path| -> Result<(), String> {
+                if let Some(ref client) = spawn_client {
+                    client
+                        .clone_repo(spawn_worker::CloneRequest {
+                            os_user: os_user_owned.clone(),
+                            git_url: git_url.to_string(),
+                            destination: dest.display().to_string(),
+                        })
+                        .map_err(|e| e.to_string())
+                } else {
+                    spawner::clone_as_user(&os_user_owned, git_url, dest).map_err(|e| e.to_string())
+                }
+            };
+            let peer_lookup = |id: &str| {
+                eligible
+                    .peer_project_entries(&session_token_owned)
+                    .into_iter()
+                    .find(|p| p.project_id == id)
+                    .map(|p| (p.name, p.git_url))
+            };
+            crate::project_provision::ensure_project_available_locally(
+                &projects_dir_owned,
+                &project_id_owned,
+                &repos_base_dir,
+                cloner,
+                peer_lookup,
+            )
+        });
+
+        match tokio::time::timeout(timeout, handle).await {
+            Ok(Ok(res)) => res,
+            Ok(Err(join_err)) => Err(Status::internal(join_err.to_string())),
+            Err(_elapsed) => Err(Status::deadline_exceeded(
+                "ensure_project_available_for_start: clone timed out",
+            )),
+        }
+    }
+
     /// Resolve `specialized_agents` names against `<tddyhome>/agents` (+ builtins) into their
     /// full defs (see docs/ft/coder/specialized-subagents.md). An unresolvable name is a request
     /// error — the session is never started with a silently-dropped subagent. An empty input
@@ -2409,6 +2470,25 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 return Ok(Response::new(inner));
             }
             crate::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
+        }
+
+        // Auto-provision the project's working copy on this host before dispatching to any session
+        // type: if the project isn't cloned here yet (registered-but-missing, or known only on a
+        // peer), clone it into the host's base location so the session can start on a host that
+        // doesn't have the project yet. A truly unknown project surfaces as NotFound.
+        {
+            let project_id = req.project_id.trim();
+            if !project_id.is_empty() {
+                let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+                    .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+                self.ensure_project_available_for_start(
+                    os_user,
+                    &projects_dir,
+                    project_id,
+                    &req.session_token,
+                )
+                .await?;
+            }
         }
 
         // --- workspace branch: no LiveKit, no PTY; resolves project, creates a git worktree ---

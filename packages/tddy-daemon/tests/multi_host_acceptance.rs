@@ -312,6 +312,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     let adv = DaemonAdvertisement {
         instance_id: REMOTE_PEER_INSTANCE_ID.to_string(),
         label: format!("{REMOTE_PEER_INSTANCE_ID} (this daemon)"),
+        repos_base_path: String::new(),
     };
     participant
         .room()

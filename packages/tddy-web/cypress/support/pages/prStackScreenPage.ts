@@ -229,4 +229,28 @@ export const prStackScreenPage = {
     prStackScreenPage.typeOtherText(text);
     byTestId(TEST_IDS.prStackChatQuestionOtherSubmit).click();
   },
+
+  // ---------------------------------------------------------------------------
+  // Session-creation dialog (opened by the "Start session" CTA)
+  // ---------------------------------------------------------------------------
+
+  /** The overlay dialog wrapping the reused `CreateSessionPane`. */
+  createSessionDialog: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionDialog, { timeout: 5000, ...options }),
+
+  /** The reused `CreateSessionPane` rendered inside the dialog. */
+  createSessionPaneInDialog: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionPane, { timeout: 5000, ...options }),
+
+  /** The dialog's new-branch-name input (pre-filled from the planned PR's branch). */
+  dialogNewBranchNameInput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionNewBranchNameInput, { timeout: 5000, ...options }),
+
+  /** The dialog's initial-prompt textarea (pre-filled from the planned PR's title + description). */
+  dialogInitialPromptInput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionInitialPromptInput, { timeout: 5000, ...options }),
+
+  /** The dialog's Create button. */
+  dialogSubmitBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionSubmitBtn, { timeout: 5000, ...options }),
 };

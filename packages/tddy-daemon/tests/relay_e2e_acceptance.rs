@@ -208,6 +208,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     let adv = DaemonAdvertisement {
         instance_id: RELAY_PEER_ID.to_string(),
         label: format!("{RELAY_PEER_ID} (remote peer)"),
+        repos_base_path: String::new(),
     };
     participant_b
         .room()
