@@ -17,7 +17,9 @@ use std::sync::{Arc, Mutex};
 
 use tddy_core::backend::{CodingBackend, GoalId, WorkflowRecipe};
 use tddy_core::presenter::WorkflowEvent;
-use tddy_core::toolcall::{ToolCallRequest, ToolcallRpcService, TransitionHandler};
+use tddy_core::toolcall::{
+    ChildSpawnHandler, ToolCallRequest, ToolcallRpcService, TransitionHandler,
+};
 use tddy_core::workflow::controller::WorkflowController;
 use tddy_core::StubBackend;
 use tokio::net::UnixListener;
@@ -68,6 +70,7 @@ pub struct ManagedWorkflow {
 ///
 /// `socket_dir` must be a short directory (the AF_UNIX path is bound on the host and must satisfy
 /// the platform's `SUN_LEN` limit — the session dir is too deep, so callers pass a short location).
+#[allow(clippy::too_many_arguments)]
 pub fn start_session_toolcall_listener(
     session_id: &str,
     socket_dir: &Path,
@@ -75,6 +78,7 @@ pub fn start_session_toolcall_listener(
     worktree_root: PathBuf,
     tddy_data_dir: PathBuf,
     controller: Arc<WorkflowController>,
+    child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
 ) -> std::io::Result<SessionToolcallListener> {
     let socket_path = socket_dir.join(format!("tddy-wf-{session_id}.sock"));
     let _ = std::fs::remove_file(&socket_path);
@@ -98,7 +102,8 @@ pub fn start_session_toolcall_listener(
                 Arc::clone(&repo_root),
                 Arc::clone(&tddy_data_dir),
                 Some(Arc::clone(&handler)),
-            );
+            )
+            .with_child_spawn_handler(child_spawn_handler.clone());
             let (reader, writer) = stream.into_split();
             let (_client, endpoint) =
                 tddy_stdio::StdioEndpoint::from_duplex(reader, writer, service);
@@ -117,6 +122,7 @@ pub fn start_session_toolcall_listener(
 /// the recipe's start goal, the per-session toolcall listener bound to it, the recipe's orchestration
 /// prompt, and an event drain. Does **not** seed `changeset.yaml` — the caller writes the changeset
 /// (seeding the start goal) before/after this so the controller can persist transitions into it.
+#[allow(clippy::too_many_arguments)]
 pub fn set_up_managed_workflow(
     session_id: &str,
     recipe: Arc<dyn WorkflowRecipe>,
@@ -124,6 +130,7 @@ pub fn set_up_managed_workflow(
     worktree_root: &Path,
     tddy_data_dir: &Path,
     socket_dir: &Path,
+    child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
 ) -> Result<ManagedWorkflow, String> {
     let start = recipe.start_goal();
     build_managed_workflow(
@@ -134,6 +141,7 @@ pub fn set_up_managed_workflow(
         tddy_data_dir,
         socket_dir,
         start,
+        child_spawn_handler,
     )
 }
 
@@ -141,6 +149,7 @@ pub fn set_up_managed_workflow(
 /// [`set_up_managed_workflow`] except the controller resumes at `resume_at` (the goal persisted in
 /// `changeset.yaml`) rather than the recipe's start goal, so `transition` validation continues from
 /// the session's actual position instead of restarting the workflow.
+#[allow(clippy::too_many_arguments)]
 pub fn resume_managed_workflow(
     session_id: &str,
     recipe: Arc<dyn WorkflowRecipe>,
@@ -149,6 +158,7 @@ pub fn resume_managed_workflow(
     tddy_data_dir: &Path,
     socket_dir: &Path,
     resume_at: GoalId,
+    child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
 ) -> Result<ManagedWorkflow, String> {
     build_managed_workflow(
         session_id,
@@ -158,6 +168,7 @@ pub fn resume_managed_workflow(
         tddy_data_dir,
         socket_dir,
         resume_at,
+        child_spawn_handler,
     )
 }
 
@@ -172,6 +183,7 @@ fn build_managed_workflow(
     tddy_data_dir: &Path,
     socket_dir: &Path,
     start: GoalId,
+    child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
 ) -> Result<ManagedWorkflow, String> {
     // The controller only reads the graph's topology (`successors`); tasks are never executed, so a
     // stub backend is sufficient for graph construction.
@@ -195,6 +207,7 @@ fn build_managed_workflow(
         worktree_root.to_path_buf(),
         tddy_data_dir.to_path_buf(),
         controller.clone(),
+        child_spawn_handler,
     )
     .map_err(|e| format!("failed to start session toolcall listener: {e}"))?;
 

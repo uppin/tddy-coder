@@ -10,6 +10,7 @@ import {
   prStackPlannedPrRow,
   prStackStartSessionBtn,
   prStackStatusChip,
+  prStackInternalStatusBadge,
   prStackChatMessage,
   prStackChatOption,
   prStackChatMultiSelectOption,
@@ -54,6 +55,10 @@ export const prStackScreenPage = {
   /** The status chip on an already-spawned planned-PR row. */
   statusChip: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(prStackStatusChip(nodeId), { timeout: 5000, ...options }),
+
+  /** The action-needed internal-status badge on a planned-PR row (e.g. "needs-repoint"). */
+  internalStatusBadge: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackInternalStatusBadge(nodeId), { timeout: 5000, ...options }),
 
   // ---------------------------------------------------------------------------
   // Manually adding a planned PR (deterministic, non-chat path)

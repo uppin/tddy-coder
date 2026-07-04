@@ -31,6 +31,9 @@ pub trait GithubPrApi: Send + Sync {
 
     /// Disable auto-merge on a PR (e.g. after repoint to avoid premature merge).
     fn disable_auto_merge(&self, number: u64) -> Result<(), tddy_core::WorkflowError>;
+
+    /// Close a PR without merging (PATCH `{"state":"closed"}`).
+    fn close_pr(&self, number: u64) -> Result<(), tddy_core::WorkflowError>;
 }
 
 /// Real implementation using GitHub REST API via `curl`.
@@ -52,12 +55,14 @@ mod tests {
 
     struct MockGithubPrApi {
         get_open_pr_calls: Mutex<Vec<String>>,
+        close_pr_calls: Mutex<Vec<u64>>,
     }
 
     impl MockGithubPrApi {
         fn new() -> Self {
             Self {
                 get_open_pr_calls: Mutex::new(vec![]),
+                close_pr_calls: Mutex::new(vec![]),
             }
         }
     }
@@ -100,6 +105,23 @@ mod tests {
         fn disable_auto_merge(&self, _number: u64) -> Result<(), tddy_core::WorkflowError> {
             Ok(())
         }
+        fn close_pr(&self, number: u64) -> Result<(), tddy_core::WorkflowError> {
+            self.close_pr_calls.lock().unwrap().push(number);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn github_mock_records_close_pr_call() {
+        // Given
+        let mock = MockGithubPrApi::new();
+        let api: &dyn GithubPrApi = &mock;
+
+        // When — close PR #7 without merging
+        api.close_pr(7).unwrap();
+
+        // Then
+        assert_eq!(mock.close_pr_calls.lock().unwrap().as_slice(), &[7]);
     }
 
     #[test]
@@ -186,6 +208,35 @@ mod real_impl_tests {
         assert!(
             result.is_err(),
             "get_open_pr must return Err when no GitHub token is set; got: {result:?}"
+        );
+    }
+
+    /// `real_github_close_pr_errors_without_token` — `close_pr` must fail closed when no GitHub
+    /// token is configured, never issuing a curl PATCH with an empty Authorization header.
+    #[test]
+    fn real_github_close_pr_errors_without_token() {
+        let token_backup = (
+            std::env::var("GITHUB_TOKEN").ok(),
+            std::env::var("GH_TOKEN").ok(),
+        );
+        unsafe {
+            std::env::remove_var("GITHUB_TOKEN");
+            std::env::remove_var("GH_TOKEN");
+        }
+
+        let api = RealGithubPrApi::new("owner/repo");
+        let result = api.close_pr(7);
+
+        if let Some(t) = token_backup.0 {
+            unsafe { std::env::set_var("GITHUB_TOKEN", t) };
+        }
+        if let Some(t) = token_backup.1 {
+            unsafe { std::env::set_var("GH_TOKEN", t) };
+        }
+
+        assert!(
+            result.is_err(),
+            "close_pr must return Err when no GitHub token is set; got: {result:?}"
         );
     }
 }
@@ -301,6 +352,16 @@ impl GithubPrApi for RealGithubPrApi {
             &format!("pulls/{number}"),
             &body,
         );
+        Ok(())
+    }
+
+    fn close_pr(&self, number: u64) -> Result<(), tddy_core::WorkflowError> {
+        let body = serde_json::json!({ "state": "closed" }).to_string();
+        crate::github_rest_common::curl_github_patch_json(
+            &self.repo,
+            &format!("pulls/{number}"),
+            &body,
+        )?;
         Ok(())
     }
 }

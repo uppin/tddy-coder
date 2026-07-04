@@ -55,8 +55,8 @@ pub use changeset::{
     GithubPrStatus, QuestionOptionForQa, SessionEntry, StateTransition,
 };
 pub use changeset::{
-    link_stack_node_to_child_session, sync_stack_node_from_child, update_stack_atomic, Stack,
-    StackNode,
+    link_stack_node_to_child_session, sync_stack_node_from_child, update_stack_atomic,
+    PrInternalStatus, Stack, StackNode,
 };
 pub use claude_hooks::{build_claude_hooks_settings, HookCommandParams};
 pub use elapsed_format::format_elapsed_compact;

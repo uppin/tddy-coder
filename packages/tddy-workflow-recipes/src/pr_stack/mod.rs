@@ -1,15 +1,16 @@
 //! **pr-stack** workflow: unified PR-stack planning + orchestration recipe.
 //!
 //! Consolidates the two-session `plan-pr-stack` + `orchestrate-pr-stack` flow into a single
-//! session/recipe: `analyze-stack` → `write-stack-plan` → `begin-orchestrate` → `assess` loop
-//! (`assess` → `{spawn|merge|end}`, `spawn` → `assess`, `merge` → `repoint`, `repoint` → `assess`,
-//! matching [`crate::orchestrate_pr_stack::OrchestratePrStackRecipe::build_graph`] exactly for the
-//! loop portion). The legacy CLI names `"plan-pr-stack"` and `"orchestrate-pr-stack"` remain
-//! accepted as aliases that resolve to this recipe (see `recipe_resolve.rs`).
+//! session/recipe: `analyze-stack` → `write-stack-plan` → `orchestrate`. `orchestrate` is a single
+//! interactive goal with no successor edge — the session pauses for input after each turn and the
+//! developer drives the stack by hand through the PR-management tools (there is no autonomous
+//! assess/spawn/merge/repoint cycle). The legacy CLI names `"plan-pr-stack"` and
+//! `"orchestrate-pr-stack"` remain accepted as aliases that resolve to this recipe (see
+//! `recipe_resolve.rs`).
 //!
 //! After the plan exists (state `StackPlanned`), the session can be re-entered into
 //! [`WorkflowRecipe::plan_refinement_goal`] (`write-stack-plan`) for chat-driven refinement —
-//! the same session, not a new one — before continuing into `assess` on resume.
+//! the same session, not a new one — before continuing into `orchestrate` on resume.
 //!
 //! PRD: `docs/ft/coder/pr-stacking.md`. Changeset: `docs/dev/1-WIP/pr-stack-workflow-views.md`.
 
@@ -29,16 +30,48 @@ use tddy_core::workflow::graph::{Graph, GraphBuilder};
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::recipe::{WorkflowEventSender, WorkflowRecipe};
-use tddy_core::workflow::task::{BackendInvokeTask, EndTask};
+use tddy_core::workflow::task::BackendInvokeTask;
 
-use crate::orchestrate_pr_stack::{
-    AssessTask, MergeTask, RepointTask, SpawnTask, STACK_STATUS_JSON_BASENAME,
-    STACK_STATUS_MD_BASENAME,
-};
+use crate::orchestrate_pr_stack::{STACK_STATUS_JSON_BASENAME, STACK_STATUS_MD_BASENAME};
 use crate::plan_pr_stack::{StackPlanOutput, PR_STACK_PLAN_MD_BASENAME, STACK_PLAN_BASENAME};
 use crate::SessionArtifactManifest;
 
-/// **pr-stack** recipe: `analyze-stack` → `write-stack-plan` → `begin-orchestrate` → `assess` loop.
+/// MCP tool names the orchestrator agent uses to manage the stack during the `orchestrate` goal.
+pub const PR_STACK_TOOL_NAMES: &[&str] = &[
+    "mcp__tddy-tools__pr_stack_status",
+    "mcp__tddy-tools__pr_merge",
+    "mcp__tddy-tools__pr_repoint",
+    "mcp__tddy-tools__pr_close",
+    "mcp__tddy-tools__pr_resolve_conflicts",
+    "mcp__tddy-tools__pr_set_status",
+    "mcp__tddy-tools__pr_add_planned",
+    "mcp__tddy-tools__pr_spawn_child",
+];
+
+/// System prompt for the interactive `orchestrate` goal. Unlike the default orchestration prompt,
+/// it does NOT tell the agent to self-advance a state machine — the developer drives, turn by turn.
+const PR_STACK_ORCHESTRATE_PROMPT: &str = "\
+You are operating a stack of pull requests together with the developer. The plan is written and \
+the stack nodes exist. This is an interactive chat: respond to each of the developer's prompts and \
+manage the stack on request. Do NOT loop autonomously and do NOT try to advance a state machine — \
+wait for the developer's instructions each turn.\n\
+\n\
+You have these tools to manage the stack:\n\
+- pr_stack_status — list every PR node with its live GitHub state and computed internal status \
+(needs-repoint / has-conflicts / ready-to-merge / merged / up-to-date). Run this to see what needs \
+action.\n\
+- pr_merge — merge a node's PR into its base.\n\
+- pr_repoint — repoint a node's PR base branch after an ancestor merges.\n\
+- pr_close — close a PR without merging.\n\
+- pr_resolve_conflicts — sync a node's branch with its base and report conflicting files; then \
+resolve them in the worktree and re-run to confirm a clean tree.\n\
+- pr_set_status — record a manual internal-status override with a note (e.g. blocked).\n\
+- pr_add_planned — add a new planned PR node to the stack.\n\
+- pr_spawn_child — start a child coding session for a planned node.\n\
+\n\
+When unsure what to do next, run pr_stack_status and report the state to the developer.";
+
+/// **pr-stack** recipe: `analyze-stack` → `write-stack-plan` → `orchestrate` (interactive loop).
 #[derive(Clone, Copy, Default, Debug)]
 pub struct PrStackRecipe;
 
@@ -58,35 +91,26 @@ impl WorkflowRecipe for PrStackRecipe {
         let write_plan = Arc::new(BackendInvokeTask::from_recipe(
             "write-stack-plan",
             GoalId::new("write-stack-plan"),
+            recipe.clone(),
+            backend.clone(),
+        ));
+        // `orchestrate` is a single interactive goal with NO outgoing edge: `FlowRunner` finds no
+        // successor after each backend turn and pauses as `WaitingForInput`, keeping the session
+        // `Running` for a multi-turn operator chat. The developer drives the stack by hand through
+        // the PR-management tools — there is no autonomous assess/spawn/merge/repoint cycle.
+        let orchestrate = Arc::new(BackendInvokeTask::from_recipe(
+            "orchestrate",
+            GoalId::new("orchestrate"),
             recipe,
             backend,
         ));
-        let begin_orchestrate = Arc::new(BeginOrchestrateTask::new());
-        let assess = Arc::new(AssessTask::new());
-        let spawn = Arc::new(SpawnTask::new());
-        let merge = Arc::new(MergeTask::new());
-        let repoint = Arc::new(RepointTask::new());
-        let end = Arc::new(EndTask::new("end"));
 
         GraphBuilder::new("pr_stack")
             .add_task(analyze)
             .add_task(write_plan)
-            .add_task(begin_orchestrate)
-            .add_task(assess)
-            .add_task(spawn)
-            .add_task(merge)
-            .add_task(repoint)
-            .add_task(end)
+            .add_task(orchestrate)
             .add_edge("analyze-stack", "write-stack-plan")
-            .add_edge("write-stack-plan", "begin-orchestrate")
-            .add_edge("begin-orchestrate", "assess")
-            .add_edge("assess", "spawn")
-            .add_edge("assess", "merge")
-            .add_edge("assess", "repoint")
-            .add_edge("assess", "end")
-            .add_edge("spawn", "assess")
-            .add_edge("merge", "repoint")
-            .add_edge("repoint", "assess")
+            .add_edge("write-stack-plan", "orchestrate")
             .build()
     }
 
@@ -114,12 +138,17 @@ impl WorkflowRecipe for PrStackRecipe {
                 agent_cli_plan_mode: false,
                 claude_nonzero_exit_ok_if_structured_response: true,
             }),
-            "assess" => Some(GoalHints {
-                display_name: "Assess stack".to_string(),
-                permission: PermissionHint::ReadOnly,
-                allowed_tools: vec![],
+            "orchestrate" => Some(GoalHints {
+                display_name: "Orchestrate stack".to_string(),
+                // The agent edits files when resolving conflicts, so it needs write access.
+                permission: PermissionHint::AcceptEdits,
+                allowed_tools: PR_STACK_TOOL_NAMES
+                    .iter()
+                    .map(|s| s.to_string())
+                    .chain(std::iter::once("Agent".to_string()))
+                    .collect(),
                 default_model: None,
-                agent_output: false,
+                agent_output: true,
                 agent_cli_plan_mode: false,
                 claude_nonzero_exit_ok_if_structured_response: false,
             }),
@@ -131,7 +160,7 @@ impl WorkflowRecipe for PrStackRecipe {
         vec![
             GoalId::new("analyze-stack"),
             GoalId::new("write-stack-plan"),
-            GoalId::new("assess"),
+            GoalId::new("orchestrate"),
         ]
     }
 
@@ -144,7 +173,8 @@ impl WorkflowRecipe for PrStackRecipe {
             "Init" | "AnalyzeStack" => Some(GoalId::new("analyze-stack")),
             "WriteStackPlan" => Some(GoalId::new("write-stack-plan")),
             "done" | "Done" | "failed" | "Failed" => None,
-            _ => Some(GoalId::new("assess")),
+            // Any planned/mid-flight state drops into the interactive orchestrate loop.
+            _ => Some(GoalId::new("orchestrate")),
         }
     }
 
@@ -165,10 +195,22 @@ impl WorkflowRecipe for PrStackRecipe {
                 .as_ref()
                 .is_some_and(|s| !s.nodes.is_empty());
             if stack_in_progress {
-                return Some(GoalId::new("assess"));
+                return Some(GoalId::new("orchestrate"));
             }
         }
         self.next_goal_for_state(state)
+    }
+
+    fn orchestration_system_prompt(&self, current: &GoalId) -> String {
+        match current.as_str() {
+            "orchestrate" => PR_STACK_ORCHESTRATE_PROMPT.to_string(),
+            other => format!(
+                "You are working the '{other}' goal of the pr-stack workflow. Study the feature and \
+                 write the PR-stack plan (stack-plan.yaml) via `tddy-tools submit`. Once the plan is \
+                 written the session moves on to the interactive orchestrate phase, where you and \
+                 the developer manage the stack together."
+            ),
+        }
     }
 
     fn status_for_state(&self, state: &WorkflowState) -> &'static str {
@@ -342,6 +384,7 @@ pub fn add_planned_pr_node(
         parents: input.parents,
         pr_status: None,
         child_state: None,
+        internal_status: None,
     };
 
     // Defense-in-depth cycle check: parents are restricted to pre-existing node ids above, so an
@@ -444,7 +487,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn resuming_a_planned_stack_continues_into_the_assess_loop() {
+    fn resuming_a_planned_stack_continues_into_the_orchestrate_loop() {
         // Given — the plan exists and the session was closed/reopened
         let recipe = PrStackRecipe;
         let state = WorkflowState::new("StackPlanned");
@@ -455,18 +498,16 @@ mod tests {
         // Then
         assert_eq!(
             next.map(|g| g.as_str().to_string()),
-            Some("assess".to_string())
+            Some("orchestrate".to_string())
         );
     }
 
     #[rstest]
-    #[case::assess("assess")]
-    #[case::spawn("spawn")]
-    #[case::merge("merge")]
-    #[case::repoint("repoint")]
-    #[case::wait("wait")]
-    fn every_non_terminal_orchestrate_loop_state_resumes_at_assess(#[case] state_name: &str) {
-        // Given
+    #[case::stack_planned("StackPlanned")]
+    #[case::legacy_assess("assess")]
+    #[case::legacy_wait("wait")]
+    fn every_non_terminal_state_resumes_into_the_orchestrate_loop(#[case] state_name: &str) {
+        // Given — including legacy persisted loop-state names from the removed auto-loop
         let recipe = PrStackRecipe;
         let state = WorkflowState::new(state_name);
 
@@ -476,8 +517,8 @@ mod tests {
         // Then
         assert_eq!(
             next.map(|g| g.as_str().to_string()),
-            Some("assess".to_string()),
-            "state {state_name} should resume at assess"
+            Some("orchestrate".to_string()),
+            "state {state_name} should resume at orchestrate"
         );
     }
 
@@ -503,7 +544,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn a_legacy_orchestrator_session_stuck_at_init_with_a_populated_stack_resumes_into_assess() {
+    fn a_legacy_orchestrator_session_stuck_at_init_with_a_populated_stack_resumes_into_orchestrate()
+    {
         // Given — an old orchestrate-pr-stack session whose state never left "Init" but whose
         // stack already has nodes (orchestration is mid-flight)
         let recipe = PrStackRecipe;
@@ -521,6 +563,7 @@ mod tests {
                     parents: vec![],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 }],
             }),
             ..Changeset::default()
@@ -532,7 +575,7 @@ mod tests {
         // Then — continues orchestrating, does not restart planning
         assert_eq!(
             next.map(|g| g.as_str().to_string()),
-            Some("assess".to_string())
+            Some("orchestrate".to_string())
         );
     }
 
@@ -571,6 +614,7 @@ mod tests {
                     parents: vec![],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 }],
             }),
             ..Changeset::default()
@@ -580,7 +624,7 @@ mod tests {
         let goal = tddy_core::changeset::start_goal_for_session_continue(&recipe, &changeset);
 
         // Then
-        assert_eq!(goal.as_str(), "assess");
+        assert_eq!(goal.as_str(), "orchestrate");
     }
 
     // -----------------------------------------------------------------------
@@ -627,18 +671,18 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // build_graph — bridge edge from the plan phase into the orchestrate loop
+    // build_graph — plan phase flows into the terminal interactive orchestrate goal
     // -----------------------------------------------------------------------
 
     #[test]
-    fn graph_bridges_the_plan_phase_into_the_orchestrate_loop_in_one_session() {
+    fn graph_flows_plan_phase_into_a_terminal_orchestrate_goal() {
         // Given
         let backend = Arc::new(StubBackend::new());
         let recipe = PrStackRecipe;
         let graph = recipe.build_graph(backend);
         let ctx = Context::new();
 
-        // When / Then — one session walks plan -> bridge -> loop without a second recipe
+        // When / Then — one session walks analyze -> write-plan -> orchestrate, then pauses
         assert_eq!(
             graph.next_task_id("analyze-stack", &ctx),
             Some("write-stack-plan".to_string()),
@@ -646,29 +690,29 @@ mod tests {
         );
         assert_eq!(
             graph.next_task_id("write-stack-plan", &ctx),
-            Some("begin-orchestrate".to_string()),
-            "edge write-stack-plan -> begin-orchestrate (the new bridge)"
+            Some("orchestrate".to_string()),
+            "edge write-stack-plan -> orchestrate"
         );
         assert_eq!(
-            graph.next_task_id("begin-orchestrate", &ctx),
-            Some("assess".to_string()),
-            "edge begin-orchestrate -> assess"
+            graph.next_task_id("orchestrate", &ctx),
+            None,
+            "orchestrate is terminal (no successor) so FlowRunner pauses for input"
         );
-        assert_eq!(
-            graph.next_task_id("spawn", &ctx),
-            Some("assess".to_string()),
-            "edge spawn -> assess (loop back, same as orchestrate-pr-stack)"
-        );
-        assert_eq!(
-            graph.next_task_id("merge", &ctx),
-            Some("repoint".to_string()),
-            "edge merge -> repoint (same as orchestrate-pr-stack)"
-        );
-        assert_eq!(
-            graph.next_task_id("repoint", &ctx),
-            Some("assess".to_string()),
-            "edge repoint -> assess (loop back, same as orchestrate-pr-stack)"
-        );
+    }
+
+    #[test]
+    fn graph_has_no_autonomous_loop_tasks() {
+        // Given
+        let backend = Arc::new(StubBackend::new());
+        let graph = PrStackRecipe.build_graph(backend);
+
+        // Then — the removed auto-loop tasks are gone
+        for removed in ["begin-orchestrate", "assess", "spawn", "merge", "repoint"] {
+            assert!(
+                graph.get_task(removed).is_none(),
+                "auto-loop task '{removed}' must be removed from the pr-stack graph"
+            );
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -718,6 +762,7 @@ mod tests {
                     parents: vec![],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 }],
             }),
             ..Changeset::default()
@@ -753,6 +798,7 @@ mod tests {
                     parents: vec![],
                     pr_status: None,
                     child_state: None,
+                    internal_status: None,
                 }],
             }),
             ..Changeset::default()
@@ -796,6 +842,7 @@ mod tests {
                         error: None,
                     }),
                     child_state: None,
+                    internal_status: None,
                 }],
             }),
             ..Changeset::default()
@@ -859,6 +906,7 @@ mod tests {
             parents: parents.into_iter().map(str::to_string).collect(),
             pr_status: None,
             child_state: None,
+            internal_status: None,
         }
     }
 
