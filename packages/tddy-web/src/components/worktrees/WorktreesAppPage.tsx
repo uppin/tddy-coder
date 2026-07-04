@@ -9,7 +9,7 @@ import { GitHubLoginButton } from "../GitHubLoginButton";
 import { UserAvatar } from "../UserAvatar";
 import { DaemonNavMenu } from "../shell/DaemonNavMenu";
 import { DaemonSelectorConnected } from "../shell/DaemonSelector";
-import { useAuth } from "../../hooks/useAuth";
+import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { WorktreesScreen, type WorktreesScreenMockRow } from "./WorktreesScreen";
 import { Button } from "@/components/ui/button";
@@ -55,7 +55,7 @@ export function WorktreesAppPage({
 }: {
   onNavigate: (path: string) => void;
 }) {
-  const { user, isAuthenticated, login, logout, sessionToken } = useAuth();
+  const { user, isAuthenticated, login, logout, sessionToken } = useAuthContext();
   const client = useDaemonClient(ConnectionService);
 
   const [projects, setProjects] = useState<ProjectEntry[]>([]);

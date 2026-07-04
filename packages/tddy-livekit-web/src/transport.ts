@@ -100,7 +100,7 @@ export class RoomRpcRegistry {
       }
     } catch (e) {
       if (this.debug) {
-        console.log(`[RoomRpcRegistry] decode error:`, e);
+        console.debug(`[RoomRpcRegistry] decode error:`, e);
       }
     }
   }
@@ -198,7 +198,7 @@ export class LiveKitTransport implements Transport {
         // A frame from a participant other than our target is silently ignored — log it, since a
         // mismatched/churned presenter identity is an easy-to-miss cause of a stalled stream.
         if (this.debug) {
-          console.log(
+          console.debug(
             `[LiveKitTransport] dropped frame from identity=${participant.identity} (target=${this.targetIdentity}) bytes=${payload.length}`
           );
         }
@@ -212,7 +212,7 @@ export class LiveKitTransport implements Transport {
         const requestId = response.requestId;
 
         if (this.debug) {
-          console.log(
+          console.debug(
             `[LiveKitTransport] response request_id=${requestId} endOfStream=${response.endOfStream} error=${response.error ? response.error.message : "none"}`
           );
         }
@@ -225,7 +225,7 @@ export class LiveKitTransport implements Transport {
           } else {
             if (response.responseMessage && response.responseMessage.length > 0) {
               if (this.debug) {
-                console.log(
+                console.debug(
                   `[LiveKitTransport] stream chunk request_id=${requestId} bytes=${response.responseMessage.length} endOfStream=${response.endOfStream}`
                 );
               }
@@ -233,7 +233,7 @@ export class LiveKitTransport implements Transport {
             }
             if (response.endOfStream) {
               if (this.debug) {
-                console.log(
+                console.debug(
                   `[LiveKitTransport] stream ended request_id=${requestId}`
                 );
               }
@@ -250,14 +250,14 @@ export class LiveKitTransport implements Transport {
         }
       } catch (e) {
         if (this.debug) {
-          console.log(`[LiveKitTransport] decode error:`, e);
+          console.debug(`[LiveKitTransport] decode error:`, e);
         }
       }
     };
 
     this.room.on(RoomEvent.DataReceived, this.listener as any);
     if (this.debug) {
-      console.log(
+      console.debug(
         `[LiveKitTransport] created, listening for DataReceived topic=${RPC_TOPIC} target=${this.targetIdentity}`
       );
     }
@@ -271,7 +271,7 @@ export class LiveKitTransport implements Transport {
     const payload = toBinary(RpcRequestSchema, request as any);
     this.meter?.record("out", payload.length);
     if (this.debug) {
-      console.log(
+      console.debug(
         `[LiveKitTransport] publish request_id=${request.requestId} bytes=${payload.length} target=${this.targetIdentity}`
       );
     }
@@ -294,7 +294,7 @@ export class LiveKitTransport implements Transport {
     const methodName = (method as any).name ?? "unknown";
 
     if (this.debug) {
-      console.log(`[LiveKitTransport] unary request_id=${requestId} ${service}/${methodName}`);
+      console.debug(`[LiveKitTransport] unary request_id=${requestId} ${service}/${methodName}`);
     }
 
     const inputMessage = create(method.input as any, input);
@@ -320,7 +320,7 @@ export class LiveKitTransport implements Transport {
     if (_signal?.aborted) {
       const err = new Error("cancelled");
       if (this.debug) {
-        console.log(`[LiveKitTransport] error request_id=${requestId} cancelled`);
+        console.debug(`[LiveKitTransport] error request_id=${requestId} cancelled`);
       }
       this.pendingUnary.delete(requestId);
       throw err;
@@ -331,7 +331,7 @@ export class LiveKitTransport implements Transport {
       if (pending) {
         this.pendingUnary.delete(requestId);
         if (this.debug) {
-          console.log(`[LiveKitTransport] error request_id=${requestId} cancelled`);
+          console.debug(`[LiveKitTransport] error request_id=${requestId} cancelled`);
         }
         pending.reject(new Error("cancelled"));
       }
@@ -356,7 +356,7 @@ export class LiveKitTransport implements Transport {
       const outputMessage = fromBinary(method.output as any, response.responseMessage);
 
       if (this.debug) {
-        console.log(`[LiveKitTransport] unary response request_id=${requestId} message=${JSON.stringify((outputMessage as any)?.message ?? outputMessage)}`);
+        console.debug(`[LiveKitTransport] unary response request_id=${requestId} message=${JSON.stringify((outputMessage as any)?.message ?? outputMessage)}`);
       }
 
       return {
@@ -408,7 +408,7 @@ export class LiveKitTransport implements Transport {
     const methodName = (method as any).name ?? "unknown";
 
     if (this.debug) {
-      console.log(`[LiveKitTransport] client_streaming request_id=${requestId} ${service}/${methodName}`);
+      console.debug(`[LiveKitTransport] client_streaming request_id=${requestId} ${service}/${methodName}`);
     }
 
     const responsePromise = new Promise<RpcResponse>((resolve, reject) => {
@@ -481,7 +481,7 @@ export class LiveKitTransport implements Transport {
     const methodName = (method as any).name ?? "unknown";
 
     if (this.debug) {
-      console.log(`[LiveKitTransport] server_streaming request_id=${requestId} ${service}/${methodName}`);
+      console.debug(`[LiveKitTransport] server_streaming request_id=${requestId} ${service}/${methodName}`);
     }
 
     const responseQueue = new AsyncQueue<Uint8Array>();
@@ -537,7 +537,7 @@ export class LiveKitTransport implements Transport {
     const methodName = (method as any).name ?? "unknown";
 
     if (this.debug) {
-      console.log(`[LiveKitTransport] bidi_streaming request_id=${requestId} ${service}/${methodName}`);
+      console.debug(`[LiveKitTransport] bidi_streaming request_id=${requestId} ${service}/${methodName}`);
     }
 
     const responseQueue = new AsyncQueue<Uint8Array>();

@@ -11,6 +11,7 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { AuthProvider } from "../../src/hooks/authProvider";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
@@ -39,7 +40,12 @@ function anOrchestratorSession(stackPlanJson: string) {
 
 function openPrStackScreen(session: ReturnType<typeof anOrchestratorSession>) {
   const backend = aSessionsDrawerBackend([session]);
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(
+    <AuthProvider>
+      <SessionsDrawerScreen />
+    </AuthProvider>,
+    backend,
+  );
   sessionsDrawerPage.drawerItem(session.sessionId).click();
 }
 

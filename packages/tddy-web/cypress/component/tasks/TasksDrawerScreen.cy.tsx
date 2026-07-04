@@ -12,6 +12,7 @@ import { TaskStatusProto } from "../../../src/gen/tasks_pb";
 import { TasksDrawerScreen } from "../../../src/components/tasks/TasksDrawerScreen";
 import type { DaemonHost } from "../../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
+import { AuthProvider } from "../../../src/hooks/authProvider";
 import { aTaskInfo, aTaskServiceBackend, liveTaskUpdated, snapshotTaskAdded } from "../../support/rpc/taskRpcs";
 import { mountWithRecordingLiveKitRpc } from "../../support/rpc/recordingLiveKitRpc";
 import { tasksDrawerPage } from "../../support/pages/tasksDrawerPage";
@@ -43,9 +44,11 @@ const COMPLETED_TASK = aTaskInfo({
 /** Mounts `TasksDrawerScreen` with a single-daemon shared context routed to `backend`. */
 function mountTasksDrawerScreen(backend: ReturnType<typeof aTaskServiceBackend>) {
   mountWithRecordingLiveKitRpc(
-    <SelectedDaemonProvider room={new Room()} daemons={[DAEMON]}>
-      <TasksDrawerScreen />
-    </SelectedDaemonProvider>,
+    <AuthProvider>
+      <SelectedDaemonProvider room={new Room()} daemons={[DAEMON]}>
+        <TasksDrawerScreen />
+      </SelectedDaemonProvider>
+    </AuthProvider>,
     backend,
   );
 }

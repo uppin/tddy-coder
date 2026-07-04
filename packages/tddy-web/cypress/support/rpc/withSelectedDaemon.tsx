@@ -18,21 +18,28 @@ import React from "react";
 import { Room } from "livekit-client";
 import type { DaemonHost } from "../../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
+import { AuthProvider } from "../../../src/hooks/authProvider";
 
 /** Default single-daemon fixture — matches the "one local daemon" shape used across other tests. */
 export const DEFAULT_TEST_DAEMON: DaemonHost = { instanceId: "local", label: "local (this daemon)" };
 
 /**
  * Wrap `children` in a `SelectedDaemonProvider` pre-seeded with `daemons` (default: a single
- * fixture daemon) and a fresh `Room` — enough for `useDaemonClient` to resolve non-null.
+ * fixture daemon) and a fresh `Room` — enough for `useDaemonClient` to resolve non-null. Also
+ * provides `AuthProvider`, since every real daemon-mode screen (`SessionsDrawerScreen`,
+ * `WorktreesAppPage`, etc.) reads its session token via `useAuthContext()`. Callers that already
+ * wrap their tree in an explicit `AuthProvider` (e.g. to assert on its own refresh behavior) simply
+ * get a redundant, harmless nested provider — the nearest one wins for context reads.
  */
 export function withSelectedDaemon(
   children: React.ReactNode,
   daemons: DaemonHost[] = [DEFAULT_TEST_DAEMON],
 ): React.ReactElement {
   return (
-    <SelectedDaemonProvider room={new Room()} daemons={daemons}>
-      {children}
-    </SelectedDaemonProvider>
+    <AuthProvider>
+      <SelectedDaemonProvider room={new Room()} daemons={daemons}>
+        {children}
+      </SelectedDaemonProvider>
+    </AuthProvider>
   );
 }

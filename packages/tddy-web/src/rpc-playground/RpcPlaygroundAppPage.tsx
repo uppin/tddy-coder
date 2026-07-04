@@ -10,7 +10,7 @@ import { GitHubLoginButton } from "../components/GitHubLoginButton";
 import { UserAvatar } from "../components/UserAvatar";
 import { DaemonNavMenu } from "../components/shell/DaemonNavMenu";
 import { DaemonSelectorConnected } from "../components/shell/DaemonSelector";
-import { useAuth } from "../hooks/useAuth";
+import { useAuthContext } from "../hooks/authProvider";
 import { useRoomParticipants } from "../hooks/useRoomParticipants";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
 import { useSelectedDaemon } from "../rpc/selectedDaemon";
@@ -75,7 +75,7 @@ export function RpcPlaygroundAppPage({
 }: {
   onNavigate: (path: string) => void;
 }) {
-  const { user, isAuthenticated, login, logout, sessionToken } = useAuth();
+  const { user, isAuthenticated, login, logout, sessionToken } = useAuthContext();
   const identity = useMemo(
     () => (user ? presenceIdentityForUser(user.login) : undefined),
     [user],

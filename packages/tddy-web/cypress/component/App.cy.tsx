@@ -1,5 +1,6 @@
 import React from "react";
 import { App } from "../../src/index";
+import { AuthProvider } from "../../src/hooks/authProvider";
 import {
   anAuthStatusAuthenticated,
   anAuthStatusUnauthenticated,
@@ -32,7 +33,7 @@ describe("App", () => {
     }).as("getAuthStatus");
 
     // When
-    cy.mount(<App />);
+    cy.mount(<AuthProvider><App /></AuthProvider>);
 
     // Then
     byTestId(TEST_IDS.githubLoginButton, { timeout: 5000 }).should("exist");
@@ -48,7 +49,7 @@ describe("App", () => {
     }).as("getAuthStatus");
 
     // When
-    cy.mount(<App />);
+    cy.mount(<AuthProvider><App /></AuthProvider>);
     cy.wait("@getAuthStatus");
 
     // Then
@@ -77,7 +78,7 @@ describe("App", () => {
     }).as("refreshToken");
 
     // When — mount and submit the connection form
-    cy.mount(<App />);
+    cy.mount(<AuthProvider><App /></AuthProvider>);
     cy.wait("@getAuthStatus");
     cy.get("#livekit-url", { timeout: 5000 }).type("ws://localhost:7880");
     byTestId(TEST_IDS.livekitIdentity).type("client");
@@ -127,7 +128,7 @@ describe("App", () => {
     }).as("refreshToken");
 
     // When — mount and submit the connection form
-    cy.mount(<App />);
+    cy.mount(<AuthProvider><App /></AuthProvider>);
     cy.wait("@getAuthStatus");
     cy.get("#livekit-url", { timeout: 5000 }).type("ws://localhost:7880");
     byTestId(TEST_IDS.livekitIdentity).type("client");

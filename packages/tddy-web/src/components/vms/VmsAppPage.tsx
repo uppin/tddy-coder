@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { VmService, type VmInfo, type VmImageInfo } from "../../gen/vm_pb";
-import { useAuth } from "../../hooks/useAuth";
+import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { DaemonNavMenu } from "../shell/DaemonNavMenu";
 import { DaemonSelectorConnected } from "../shell/DaemonSelector";
@@ -33,7 +33,7 @@ function rowFromRpc(vm: VmInfo): VmRow {
 }
 
 export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const { user, logout, sessionToken } = useAuth();
+  const { user, logout, sessionToken } = useAuthContext();
   const client = useDaemonClient(VmService);
 
   const [rows, setRows] = useState<VmRow[]>([]);

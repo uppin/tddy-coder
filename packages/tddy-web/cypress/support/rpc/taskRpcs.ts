@@ -9,6 +9,7 @@
 
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { AuthService } from "../../../src/gen/auth_pb";
 import {
   CancelTaskResponseSchema,
   TaskChannelInfoSchema,
@@ -21,6 +22,7 @@ import {
   type TaskInfo,
   type TaskListEvent,
 } from "../../../src/gen/tasks_pb";
+import { aGitHubUser } from "./responses";
 
 // ---------------------------------------------------------------------------
 // TaskInfo factory
@@ -94,23 +96,27 @@ export function aTaskServiceBackend(options: {
   watchTaskOutput?: string;
 }): InMemoryRpcBackend & { cancelTaskCalls: { taskId: string }[] } {
   const cancelTaskCalls: { taskId: string }[] = [];
-  const backend = anInMemoryRpcBackend().implement(TaskService, {
-    watchTaskList: async function* () {
-      for (const event of options.watchTaskListEvents) yield event;
-    },
-    watchTask: async function* (req) {
-      if (options.watchTaskOutput === undefined) return;
-      yield create(TaskOutputEventSchema, {
-        channelId: req.channelId,
-        data: new TextEncoder().encode(options.watchTaskOutput),
-        isReplay: true,
-        status: TaskStatusProto.TASK_STATUS_COMPLETED,
-      });
-    },
-    cancelTask: async (req) => {
-      cancelTaskCalls.push({ taskId: req.taskId });
-      return create(CancelTaskResponseSchema, { ok: true, message: "" });
-    },
-  });
+  const backend = anInMemoryRpcBackend()
+    .implement(AuthService, {
+      getAuthStatus: async () => ({ authenticated: true, user: aGitHubUser() }),
+    })
+    .implement(TaskService, {
+      watchTaskList: async function* () {
+        for (const event of options.watchTaskListEvents) yield event;
+      },
+      watchTask: async function* (req) {
+        if (options.watchTaskOutput === undefined) return;
+        yield create(TaskOutputEventSchema, {
+          channelId: req.channelId,
+          data: new TextEncoder().encode(options.watchTaskOutput),
+          isReplay: true,
+          status: TaskStatusProto.TASK_STATUS_COMPLETED,
+        });
+      },
+      cancelTask: async (req) => {
+        cancelTaskCalls.push({ taskId: req.taskId });
+        return create(CancelTaskResponseSchema, { ok: true, message: "" });
+      },
+    });
   return Object.assign(backend, { cancelTaskCalls });
 }

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { createRoot } from "react-dom/client";
 import type { Room } from "livekit-client";
 import { RpcTransportProvider, useHttpClient } from "./rpc/transportProvider";
+import { AuthProvider, useAuthContext } from "./hooks/authProvider";
 import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
 import type { DaemonHost } from "./lib/participantRole";
 import { GhosttyTerminalLiveKit } from "./components/GhosttyTerminalLiveKit";
@@ -41,7 +42,6 @@ function HmrOverlay() {
 
 import { applyDebugMaskFromConfig, applyDebugMaskFromUrl } from "./lib/debugMask";
 import { TokenService } from "./gen/token_pb";
-import { useAuth } from "./hooks/useAuth";
 import { useVisualViewport } from "./hooks/useVisualViewport";
 import { useIsMobile } from "./hooks/useIsMobile";
 import { GitHubLoginButton } from "./components/GitHubLoginButton";
@@ -226,7 +226,7 @@ function ConnectedTerminal({
 }
 
 function ConnectionForm() {
-  const { user, isAuthenticated, login, logout, error: authError } = useAuth();
+  const { user, isAuthenticated, login, logout, error: authError } = useAuthContext();
   const [url, setUrl] = useState("");
   const [identity, setIdentity] = useState("");
   const [roomName, setRoomName] = useState("terminal-e2e");
@@ -384,7 +384,7 @@ export interface AppProps {
 
 export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
   const [path, navigate] = usePathname();
-  const { isAuthenticated, isLoading: authLoading, login, error: authError } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, login, error: authError } = useAuthContext();
   const [appConfig, setAppConfig] = useState<{
     daemonMode: boolean | null;
     livekitUrl?: string;
@@ -482,7 +482,9 @@ const root = document.getElementById("root");
 if (root) {
   createRoot(root).render(
     <RpcTransportProvider>
-      <App />
+      <AuthProvider>
+        <App />
+      </AuthProvider>
     </RpcTransportProvider>,
   );
 }

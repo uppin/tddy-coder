@@ -5,6 +5,7 @@ import { ConnectionScreen } from "../../src/components/ConnectionScreen";
 import { ConnectionService, Signal } from "../../src/gen/connection_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
+import { AuthProvider } from "../../src/hooks/authProvider";
 import {
   aConnectionServiceBackend,
   connectionServiceProjectIdCollisionScenario,
@@ -43,9 +44,11 @@ function mountConnectionScreen(
 ): ConnectionServiceBackend {
   const backend = aConnectionServiceBackend(scenario);
   mountWithRecordingLiveKitRpc(
-    <SelectedDaemonProvider room={new Room()} daemons={daemonHostsFrom(scenario.daemons)}>
-      <ConnectionScreen {...props} />
-    </SelectedDaemonProvider>,
+    <AuthProvider>
+      <SelectedDaemonProvider room={new Room()} daemons={daemonHostsFrom(scenario.daemons)}>
+        <ConnectionScreen {...props} />
+      </SelectedDaemonProvider>
+    </AuthProvider>,
     backend,
   );
   return backend;

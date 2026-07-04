@@ -23,7 +23,7 @@ import {
 import { GhosttyTerminalLiveKit } from "./GhosttyTerminalLiveKit";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
 import { ParticipantList } from "./ParticipantList";
-import { useAuth } from "../hooks/useAuth";
+import { useAuthContext } from "../hooks/authProvider";
 import { useHttpClient } from "../rpc/transportProvider";
 import { useDaemonClient } from "../rpc/selectedDaemon";
 import { useCommonRoom } from "../hooks/useCommonRoom";
@@ -1225,7 +1225,7 @@ export function ConnectionScreen({
   /** Client-side navigation (daemon shell: Sessions ↔ Worktrees). */
   onNavigate?: (path: string) => void;
 } = {}) {
-  const { user, isAuthenticated, isLoading, login, logout, sessionToken } = useAuth();
+  const { user, isAuthenticated, isLoading, login, logout, sessionToken } = useAuthContext();
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [daemons, setDaemons] = useState<EligibleDaemonEntry[]>([]);

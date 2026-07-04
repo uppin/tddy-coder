@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient, type Client } from "@connectrpc/connect";
 import { ConnectionService, type ProjectEntry } from "../../gen/connection_pb";
-import { useAuth } from "../../hooks/useAuth";
+import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useLiveKitTransportFactory } from "../../rpc/transportProvider";
 import { daemonRpcIdentity } from "../../lib/participantRole";
@@ -83,13 +83,7 @@ function useProjectsRpc(
  * daemons own projects, so coder/browser participants are never offered as hosts.
  */
 export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const { user, logout } = useAuth();
-  // Read the token directly (like SessionsDrawerScreen) so project RPCs fire independent of the
-  // auth-status round-trip.
-  const sessionToken =
-    typeof window !== "undefined"
-      ? (window.localStorage.getItem("tddy_session_token") ?? "")
-      : "";
+  const { user, logout, sessionToken } = useAuthContext();
   const client = useDaemonClient(ConnectionService);
   const daemons = useDaemons();
   const { room } = useSelectedDaemon();
@@ -107,7 +101,7 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
   const { projects, createProject, addProjectToHost } = useProjectsRpc(
     client,
     clientForHost,
-    sessionToken,
+    sessionToken ?? "",
   );
 
   return (
