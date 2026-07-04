@@ -122,6 +122,10 @@ fn main() -> anyhow::Result<()> {
     // Apply env overrides (e.g. from .env loaded by web-dev)
     apply_env_overrides(&mut config);
 
+    // Scope git's ssh command to this daemon — applied to remote fetches only, without polluting the
+    // process environment or global git config. See DaemonConfig::git / GitConfig::ssh_command.
+    tddy_core::set_git_ssh_command(config.git.as_ref().and_then(|g| g.ssh_command.clone()));
+
     // Resolve the tddy home data directory: config is the single source of truth.
     let tddy_data_dir: PathBuf = config
         .tddy_data_dir

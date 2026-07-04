@@ -44,6 +44,21 @@ impl Default for RelayConfig {
     }
 }
 
+/// Git behavior for daemon-side operations that contact a remote (fetching integration bases).
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GitConfig {
+    /// Overrides `GIT_SSH_COMMAND` for the daemon's `git fetch` calls only — it is not exported to
+    /// the process environment or to spawned children. Point git at an ssh binary that can
+    /// authenticate non-interactively; e.g. on macOS the system ssh has Keychain support that the
+    /// Nix-provided ssh lacks: `/usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=10`. When unset, git
+    /// inherits the ambient environment. Regardless of this value, daemon remote fetches run with
+    /// stdin closed and `GIT_TERMINAL_PROMPT=0`, so a missing key/passphrase fails fast instead of
+    /// hanging the daemon on a prompt it can never answer.
+    #[serde(default)]
+    pub ssh_command: Option<String>,
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DaemonConfig {
@@ -115,6 +130,9 @@ pub struct DaemonConfig {
     /// Screen-sharing bridge binary configuration (VNC + RDP paths).
     #[serde(default)]
     pub screen_sharing: Option<ScreenSharingConfig>,
+    /// Git behavior for daemon-side remote operations (see `GitConfig`).
+    #[serde(default)]
+    pub git: Option<GitConfig>,
 
     /// Browser DEBUG mask exposed to tddy-web via `GET /api/config` (`debug` field). A `debug`-package
     /// namespace mask (e.g. `tddy:term:*`, or `tddy:term:write,tddy:term:resize`) that enables scoped
@@ -148,6 +166,7 @@ impl Default for DaemonConfig {
             relay: None,
             tddy_data_dir: None,
             screen_sharing: None,
+            git: None,
             debug: None,
         }
     }
@@ -777,5 +796,51 @@ users:
 ";
         let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
         assert_eq!(c.debug.as_deref(), Some("tddy:term:*"));
+    }
+}
+
+#[cfg(test)]
+mod git_config_tests {
+    use super::*;
+
+    #[test]
+    fn git_ssh_command_absent_is_none() {
+        let yaml = "
+users:
+  - github_user: u
+    os_user: u
+";
+        let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
+        assert!(c.git.is_none(), "git section must be absent by default");
+    }
+
+    #[test]
+    fn git_ssh_command_parses_from_yaml() {
+        let yaml = "
+git:
+  ssh_command: \"/usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=10\"
+users:
+  - github_user: u
+    os_user: u
+";
+        let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
+        let git = c.git.as_ref().expect("git section must be present");
+        assert_eq!(
+            git.ssh_command.as_deref(),
+            Some("/usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=10")
+        );
+    }
+
+    #[test]
+    fn git_section_present_but_ssh_command_absent_is_none() {
+        let yaml = "
+git: {}
+users:
+  - github_user: u
+    os_user: u
+";
+        let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
+        let git = c.git.as_ref().expect("git section must be present");
+        assert!(git.ssh_command.is_none());
     }
 }

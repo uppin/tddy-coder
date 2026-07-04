@@ -95,6 +95,15 @@ telegram:
 claude_cli:
   binary_path: claude
 
+# Git behavior for the daemon's remote fetches (resolving/updating integration bases on StartSession).
+# ssh_command overrides GIT_SSH_COMMAND for those fetches ONLY — it is not exported to the process
+# environment or to spawned children. On macOS, ./web-dev runs the daemon under the Nix shell, whose
+# ssh lacks macOS Keychain support and hangs forever on a passphrase prompt for a Keychain-stored key.
+# Pointing git at the system ssh restores Keychain auth; BatchMode/ConnectTimeout guarantee a fast
+# failure instead of a hang. Remove or comment out if your key is loaded in a plain ssh-agent.
+git:
+  ssh_command: "/usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=10"
+
 allowed_agents:
   - id: claude
     label: "Claude (opus)"
