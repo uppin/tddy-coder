@@ -134,6 +134,16 @@ async fn join_second_daemon_participant(livekit: &LiveKitTestkit) -> Room {
     let (room, _events) = Room::connect(&url, &token, RoomOptions::default())
         .await
         .expect("peer daemon joins common_room");
+    // A real `tddy-daemon` peer publishes a daemon advertisement (`set_metadata`); eligibility has
+    // no identity fallback, so without it the local daemon never lists this peer. Best-effort:
+    // `set_metadata` can report a timeout in livekit 0.7.x even after the value propagates.
+    let advertisement =
+        format!(r#"{{"instance_id":"{PEER_INSTANCE_ID}","label":"{PEER_INSTANCE_ID} peer daemon"}}"#);
+    let _ = tokio::time::timeout(
+        Duration::from_secs(10),
+        room.local_participant().set_metadata(advertisement),
+    )
+    .await;
     room
 }
 

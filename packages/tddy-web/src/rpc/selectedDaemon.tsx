@@ -13,6 +13,7 @@
 
 import {
   createContext,
+  Fragment,
   useCallback,
   useContext,
   useEffect,
@@ -193,8 +194,15 @@ export function SelectedDaemonProvider({
     [room, daemons, selectedInstanceId, servingInstanceId, selectDaemon],
   );
 
+  // Give the screen subtree a fresh lifecycle whenever the selected daemon changes: keying the
+  // children by `selectedInstanceId` remounts them, so each daemon-mode screen resets its transient
+  // state (selected session, open inspector, live terminal attachment, create/VM/task UI) and
+  // re-runs its data fetches against the newly selected daemon — a full reload, not just a refetch.
+  // The provider itself stays mounted above the key, so the shared common-room connection persists.
   return (
-    <SelectedDaemonContext.Provider value={value}>{children}</SelectedDaemonContext.Provider>
+    <SelectedDaemonContext.Provider value={value}>
+      <Fragment key={selectedInstanceId ?? "__no-daemon__"}>{children}</Fragment>
+    </SelectedDaemonContext.Provider>
   );
 }
 

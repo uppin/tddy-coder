@@ -39,6 +39,82 @@ function generateRequestId(): number {
   return nextRequestId++;
 }
 
+/**
+ * Shared per-room RPC state: one `DataReceived` listener, one request-id counter (scoped to this
+ * connection, starting at 1), and the pending-call maps every transport vended for the room uses.
+ * A browser holds one common-room connection but talks to several daemons; routing all of them
+ * through one registry means a single listener (not one per client), a single id space (so a
+ * response id maps to exactly one pending call regardless of which daemon replied — no sender
+ * filter needed), and no cross-talk between clients. Mirrors the Rust `LiveKitRpcClientFactory`.
+ */
+export class RoomRpcRegistry {
+  readonly pendingUnary = new Map<
+    number,
+    { resolve: (value: RpcResponse) => void; reject: (err: Error) => void }
+  >();
+  readonly pendingStreams = new Map<number, AsyncQueue<Uint8Array>>();
+  private nextId = 1;
+  private listener:
+    | ((payload: Uint8Array, participant?: unknown, kind?: unknown, topic?: string) => void)
+    | null = null;
+
+  constructor(
+    private readonly room: Room,
+    private readonly debug = false,
+  ) {
+    this.listener = (payload: Uint8Array, _participant?: unknown, _kind?: unknown, topic?: string) => {
+      if (topic !== RPC_TOPIC) return;
+      this.route(payload as Uint8Array);
+    };
+    this.room.on(RoomEvent.DataReceived, this.listener as any);
+  }
+
+  allocateRequestId(): number {
+    return this.nextId++;
+  }
+
+  private route(payload: Uint8Array): void {
+    try {
+      const response = fromBinary(RpcResponseSchema, payload) as RpcResponse;
+      const requestId = response.requestId;
+      const streamQueue = this.pendingStreams.get(requestId);
+      if (streamQueue) {
+        if (response.error) {
+          streamQueue.fail(rpcErrorToConnectError(response.error));
+          this.pendingStreams.delete(requestId);
+        } else {
+          if (response.responseMessage && response.responseMessage.length > 0) {
+            streamQueue.enqueue(response.responseMessage);
+          }
+          if (response.endOfStream) {
+            streamQueue.close();
+            this.pendingStreams.delete(requestId);
+          }
+        }
+        return;
+      }
+      const pending = this.pendingUnary.get(requestId);
+      if (pending) {
+        this.pendingUnary.delete(requestId);
+        pending.resolve(response);
+      }
+    } catch (e) {
+      if (this.debug) {
+        console.log(`[RoomRpcRegistry] decode error:`, e);
+      }
+    }
+  }
+
+  dispose(): void {
+    if (this.listener) {
+      this.room.off(RoomEvent.DataReceived, this.listener as any);
+      this.listener = null;
+    }
+    this.pendingUnary.clear();
+    this.pendingStreams.clear();
+  }
+}
+
 function headersToMetadata(headers?: HeadersInit): { values: Record<string, string> } {
   const values: Record<string, string> = {};
   if (headers) {
@@ -73,6 +149,13 @@ export interface LiveKitTransportOptions {
   debug?: boolean;
   /** Optional traffic meter for recording inbound/outbound payload bytes. */
   meter?: { record(dir: "in" | "out", bytes: number): void };
+  /**
+   * Shared per-room registry (from {@link LiveKitTransportFactory}). When provided, this transport
+   * routes correlation through it — one listener and one request-id space shared with every other
+   * transport on the room — instead of installing its own listener and using the module-global
+   * counter. Omit for a standalone transport.
+   */
+  registry?: RoomRpcRegistry;
 }
 
 export class LiveKitTransport implements Transport {
@@ -86,12 +169,23 @@ export class LiveKitTransport implements Transport {
   private pendingStreams = new Map<number, AsyncQueue<Uint8Array>>();
   private listener: ((payload: Uint8Array, participant?: { identity: string }, topic?: string) => void) | null = null;
   private meter: { record(dir: "in" | "out", bytes: number): void } | undefined;
+  private registry: RoomRpcRegistry | undefined;
 
   constructor(options: LiveKitTransportOptions) {
     this.room = options.room;
     this.targetIdentity = options.targetIdentity;
     this.debug = options.debug ?? false;
     this.meter = options.meter;
+    this.registry = options.registry;
+
+    // Shared-registry mode: correlation (one listener, one request-id space, one set of pending
+    // maps) is owned by the registry and shared with every other transport on the room. Reuse its
+    // maps and install no listener of our own.
+    if (this.registry) {
+      this.pendingUnary = this.registry.pendingUnary;
+      this.pendingStreams = this.registry.pendingStreams;
+      return;
+    }
 
     this.listener = (
       payload: Uint8Array,
@@ -169,6 +263,10 @@ export class LiveKitTransport implements Transport {
     }
   }
 
+  private allocateRequestId(): number {
+    return this.registry ? this.registry.allocateRequestId() : generateRequestId();
+  }
+
   private publishRequest(request: RpcRequest): void {
     const payload = toBinary(RpcRequestSchema, request as any);
     this.meter?.record("out", payload.length);
@@ -191,7 +289,7 @@ export class LiveKitTransport implements Transport {
     header: HeadersInit | undefined,
     input: MessageInitShape<I>
   ): Promise<UnaryResponse<I, O>> {
-    const requestId = generateRequestId();
+    const requestId = this.allocateRequestId();
     const service = (method as any).parent?.typeName ?? "unknown";
     const methodName = (method as any).name ?? "unknown";
 
@@ -305,7 +403,7 @@ export class LiveKitTransport implements Transport {
     input: AsyncIterable<MessageInitShape<I>>,
     _signal: AbortSignal | undefined
   ): Promise<StreamResponse<I, O>> {
-    const requestId = generateRequestId();
+    const requestId = this.allocateRequestId();
     const service = (method as any).parent?.typeName ?? "unknown";
     const methodName = (method as any).name ?? "unknown";
 
@@ -378,7 +476,7 @@ export class LiveKitTransport implements Transport {
     input: AsyncIterable<MessageInitShape<I>>,
     _signal: AbortSignal | undefined
   ): Promise<StreamResponse<I, O>> {
-    const requestId = generateRequestId();
+    const requestId = this.allocateRequestId();
     const service = (method as any).parent?.typeName ?? "unknown";
     const methodName = (method as any).name ?? "unknown";
 
@@ -434,7 +532,7 @@ export class LiveKitTransport implements Transport {
     input: AsyncIterable<MessageInitShape<I>>,
     _signal: AbortSignal | undefined
   ): Promise<StreamResponse<I, O>> {
-    const requestId = generateRequestId();
+    const requestId = this.allocateRequestId();
     const service = (method as any).parent?.typeName ?? "unknown";
     const methodName = (method as any).name ?? "unknown";
 
@@ -499,11 +597,58 @@ export class LiveKitTransport implements Transport {
       this.room.off(RoomEvent.DataReceived, this.listener as any);
       this.listener = null;
     }
-    this.pendingUnary.clear();
-    this.pendingStreams.clear();
+    // In shared-registry mode the listener and pending maps belong to the registry (shared with
+    // sibling transports); only a standalone transport tears them down here.
+    if (!this.registry) {
+      this.pendingUnary.clear();
+      this.pendingStreams.clear();
+    }
   }
 }
 
 export function createLiveKitTransport(options: LiveKitTransportOptions): Transport {
   return new LiveKitTransport(options);
+}
+
+/**
+ * Singleton-per-room factory for ConnectRPC-over-LiveKit transports. All transports vended for a
+ * given room share one {@link RoomRpcRegistry} — one `DataReceived` listener and one per-connection
+ * request-id space — so a browser talking to several daemons over its single common-room connection
+ * never leaks a listener per client nor crosses responses between targets. Mirrors the Rust
+ * `LiveKitRpcClientFactory`.
+ */
+export class LiveKitTransportFactory {
+  private static readonly byRoom = new WeakMap<Room, LiveKitTransportFactory>();
+
+  private readonly registry: RoomRpcRegistry;
+
+  private constructor(
+    private readonly room: Room,
+    private readonly debug: boolean,
+  ) {
+    this.registry = new RoomRpcRegistry(room, debug);
+  }
+
+  /** The factory for `room`, created once and reused for every later call with the same room. */
+  static forRoom(room: Room, debug = false): LiveKitTransportFactory {
+    const existing = LiveKitTransportFactory.byRoom.get(room);
+    if (existing) return existing;
+    const created = new LiveKitTransportFactory(room, debug);
+    LiveKitTransportFactory.byRoom.set(room, created);
+    return created;
+  }
+
+  /** Vend a transport that sends to `targetIdentity` over the room's shared registry. */
+  transport(
+    targetIdentity: string,
+    options?: { meter?: { record(dir: "in" | "out", bytes: number): void } },
+  ): Transport {
+    return new LiveKitTransport({
+      room: this.room,
+      targetIdentity,
+      debug: this.debug,
+      meter: options?.meter,
+      registry: this.registry,
+    });
+  }
 }
