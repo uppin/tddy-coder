@@ -5,6 +5,7 @@ import { TokenService } from "../../gen/token_pb";
 import { sortSessionsByCreation } from "../../utils/sessionSort";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
+import { useAuthContext } from "../../hooks/authProvider";
 import { DaemonSelectorConnected } from "../shell/DaemonSelector";
 import { TooltipProvider } from "../ui/tooltip";
 import { SessionDrawer } from "./SessionDrawer";
@@ -25,10 +26,8 @@ import { PanelLeftOpen } from "lucide-react";
 // ---------------------------------------------------------------------------
 
 export function SessionsDrawerScreen() {
-  const sessionToken =
-    typeof window !== "undefined"
-      ? (window.localStorage.getItem("tddy_session_token") ?? "")
-      : "";
+  const { sessionToken: authSessionToken } = useAuthContext();
+  const sessionToken = authSessionToken ?? "";
 
   // ConnectionService is daemon-level RPC — routed over the shared common-room LiveKit
   // connection to whichever daemon is currently selected (see `SelectedDaemonProvider`).

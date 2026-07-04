@@ -1,13 +1,12 @@
 import React, { useState } from "react";
+import { useAuthContext } from "../../hooks/authProvider";
 import { TaskDrawer } from "./TaskDrawer";
 import { TaskOutputPane } from "./TaskOutputPane";
 import { useTaskListStream } from "./useTaskListStream";
 
 export function TasksDrawerScreen() {
-  const sessionToken =
-    typeof window !== "undefined"
-      ? (window.localStorage.getItem("tddy_session_token") ?? "")
-      : "";
+  const { sessionToken: authSessionToken } = useAuthContext();
+  const sessionToken = authSessionToken ?? "";
 
   const { tasks } = useTaskListStream(sessionToken);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);

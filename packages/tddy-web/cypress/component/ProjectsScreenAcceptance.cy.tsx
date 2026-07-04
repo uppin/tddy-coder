@@ -18,6 +18,7 @@ import { ProjectsScreen } from "../../src/components/projects/ProjectsScreen";
 import { ConnectionService, type ProjectEntry } from "../../src/gen/connection_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
+import { AuthProvider } from "../../src/hooks/authProvider";
 import { daemonRpcIdentity } from "../../src/lib/participantRole";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
@@ -71,9 +72,11 @@ function aProjectsBackend(projects: ProjectEntry[]): InMemoryRpcBackend {
  */
 function mountProjectsAppPage(onNavigate: (path: string) => void) {
   return (
-    <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
-      <ProjectsAppPage onNavigate={onNavigate} />
-    </SelectedDaemonProvider>
+    <AuthProvider>
+      <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
+        <ProjectsAppPage onNavigate={onNavigate} />
+      </SelectedDaemonProvider>
+    </AuthProvider>
   );
 }
 

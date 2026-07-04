@@ -19,7 +19,8 @@
   "dependencies": {
     "livekit-client": "^2.17.0",
     "@bufbuild/protobuf": "^2.2.0",
-    "@connectrpc/connect": "^2.0.0"
+    "@connectrpc/connect": "^2.0.0",
+    "debug": "^4.4.3"
   },
   "devDependencies": {
     "@bufbuild/buf": "^1.50.0",

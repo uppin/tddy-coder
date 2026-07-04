@@ -19,7 +19,9 @@
  */
 
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { AuthService } from "../../../src/gen/auth_pb";
 import { ConnectionService, type SessionEntry } from "../../../src/gen/connection_pb";
+import { aGitHubUser } from "./responses";
 
 // ---------------------------------------------------------------------------
 // Builder
@@ -33,5 +35,6 @@ export function aSessionsDrawerBackend(
   sessions: Partial<SessionEntry>[],
 ): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
+    .onUnary(AuthService.method.getAuthStatus, () => ({ authenticated: true, user: aGitHubUser() }))
     .onUnary(ConnectionService.method.listSessions, () => ({ sessions }));
 }

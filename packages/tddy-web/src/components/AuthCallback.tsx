@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { useAuth, OAUTH_RETURN_TO_KEY } from "../hooks/useAuth";
+import { OAUTH_RETURN_TO_KEY } from "../hooks/useAuth";
+import { useAuthContext } from "../hooks/authProvider";
 
 export function AuthCallback() {
-  const { handleCallback, isAuthenticated, error } = useAuth();
+  const { handleCallback, isAuthenticated, error } = useAuthContext();
   const [processing, setProcessing] = useState(true);
 
   useEffect(() => {

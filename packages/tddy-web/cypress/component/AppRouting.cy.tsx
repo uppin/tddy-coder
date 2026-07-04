@@ -4,6 +4,7 @@ import { App } from "../../src/index";
 import { TERMINAL_SESSION_ROUTE_PREFIX } from "../../src/routing/appRoutes";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { RpcTransportProvider, createDefaultHttpTransport } from "../../src/rpc/transportProvider";
+import { AuthProvider } from "../../src/hooks/authProvider";
 import {
   interceptConnectionRpcs,
   interceptConnectSession,
@@ -21,7 +22,9 @@ const DAEMON: DaemonHost = { instanceId: "udoo", label: "udoo (this daemon)" };
 function mountApp() {
   cy.mount(
     <RpcTransportProvider liveKitFactory={() => createDefaultHttpTransport()}>
-      <App testDaemonRoom={new Room()} testDaemonHosts={[DAEMON]} />
+      <AuthProvider>
+        <App testDaemonRoom={new Room()} testDaemonHosts={[DAEMON]} />
+      </AuthProvider>
     </RpcTransportProvider>,
   );
 }

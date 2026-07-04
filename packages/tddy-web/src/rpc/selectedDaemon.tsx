@@ -115,6 +115,14 @@ function useCommonRoomDaemons(
   roomOverride: Room | null | undefined,
   daemonsOverride: DaemonHost[] | undefined,
 ): { room: Room | null; daemons: DaemonHost[] } {
+  // TODO: migrate to `useAuthContext()` once every `withSelectedDaemon`-based test provides an
+  // `AuthProvider` ancestor. Left on the standalone `useAuth()` hook deliberately for now: this
+  // component is mounted once for the whole daemon-mode session (it wraps, and is never remounted
+  // by, the `key={selectedInstanceId}` boundary below), so it isn't subject to the remount-destroys-
+  // the-refresh-timer bug that motivated `AuthProvider` — it only needs `user`/`isAuthenticated` to
+  // derive a LiveKit presence identity, not a coordinated session token. Migrating it purely for
+  // consistency would force every `withSelectedDaemon`/`SelectedDaemonProvider`-based Cypress test
+  // across the suite to add an `AuthProvider` wrapper, which is out of scope for this fix.
   const { user, isAuthenticated } = useAuth();
   const identity = useMemo(
     () => (user ? presenceIdentityForUser(user.login) : undefined),
