@@ -96,11 +96,21 @@ pub fn discovery_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "READ".to_string(),
-                description: "Read a file and return its contents with line numbers.".to_string(),
+                description: "Read a file and return its contents with line numbers. Long files \
+                    are truncated to a line cap; page through them with offset/limit."
+                    .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "File path to read." }
+                        "path": { "type": "string", "description": "File path to read." },
+                        "offset": {
+                            "type": "integer",
+                            "description": "0-based line to start reading from (default 0)."
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of lines to return."
+                        }
                     },
                     "required": ["path"]
                 }),
