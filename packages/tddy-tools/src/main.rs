@@ -76,6 +76,10 @@ enum Subcommand {
     /// Report granular session activity status to the daemon (invoked by Claude Code hooks).
     /// Reads hook event JSON from stdin; fails quietly — always exits 0.
     SessionHook(session_hook::SessionHookArgs),
+
+    /// Enumerate the models an agent supports (JSON on stdout). Queries the underlying agent
+    /// command where possible (cursor `--list-models`, ACP `available_models`), else a curated list.
+    ListModels(tddy_tools::list_models::ListModelsArgs),
 }
 
 /// Initialise logging. When `TDDY_TOOLS_LOG_FILE` is set (e.g. by the sandbox runner, which points
@@ -130,6 +134,7 @@ async fn main() -> Result<()> {
         Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(*s).await?,
         Some(Subcommand::Remote(s)) => remote_cli::run_remote(s).await?,
         Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,
+        Some(Subcommand::ListModels(s)) => tddy_tools::list_models::run_list_models(&s).await?,
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");
             std::process::exit(2);

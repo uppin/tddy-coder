@@ -13,6 +13,8 @@ import {
   AgentInfoSchema,
   ConnectSessionResponseSchema,
   EligibleDaemonEntrySchema,
+  ListAgentModelsResponseSchema,
+  ModelInfoSchema,
   ListAgentsResponseSchema,
   ListEligibleDaemonsResponseSchema,
   ListProjectBranchesResponseSchema,
@@ -165,6 +167,19 @@ export function listAgents(agents: Partial<AgentInfo>[]): Uint8Array {
           ...a,
         }),
       ),
+    }),
+  );
+}
+
+export function listAgentModels(
+  models: { id: string; label: string }[],
+  defaultModel: string,
+): Uint8Array {
+  return toBinary(
+    ListAgentModelsResponseSchema,
+    create(ListAgentModelsResponseSchema, {
+      models: models.map((m) => create(ModelInfoSchema, m)),
+      defaultModel,
     }),
   );
 }

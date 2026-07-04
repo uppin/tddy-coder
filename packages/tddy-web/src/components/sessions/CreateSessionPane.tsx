@@ -2,10 +2,13 @@ import React, { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
 import type { AgentInfo, ConnectionService, ProjectEntry, SessionEntry, SubagentInfo, ToolInfo } from "../../gen/connection_pb";
-import { CLAUDE_CLI_MODELS } from "../../constants/claudeCliModels";
 import { prStackOrchestrators } from "../../utils/stackParents";
 import { useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
+import { useAgentModels } from "../../rpc/useAgentModels";
 import { Button } from "../ui/button";
+
+/** Pseudo-agent key used to fetch the claude-cli session type's model catalog. */
+const CLAUDE_CLI_AGENT = "claude-cli";
 
 const WORKFLOW_RECIPES = [
   "tdd",
@@ -82,7 +85,7 @@ export function CreateSessionPane({
   const [recipe, setRecipe] = useState(initialValues?.recipe ?? "tdd");
   const [stackParent, setStackParent] = useState(initialValues?.stackParent ?? "");
   const [toolPath, setToolPath] = useState("");
-  const [model, setModel] = useState(initialValues?.model ?? CLAUDE_CLI_MODELS[0]?.id ?? "");
+  const [model, setModel] = useState(initialValues?.model ?? "");
   const [permissionMode, setPermissionMode] = useState(initialValues?.permissionMode ?? "auto");
   const [sandbox, setSandbox] = useState(false);
   const [initialPrompt, setInitialPrompt] = useState(initialValues?.initialPrompt ?? "");
@@ -109,6 +112,17 @@ export function CreateSessionPane({
   const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The model catalog is enumerated per selected backend: the chosen agent for tool sessions, and
+  // the "claude-cli" pseudo-agent for the Claude CLI session type.
+  const modelAgentKey = sessionType === "claude-cli" ? CLAUDE_CLI_AGENT : agent;
+  const agentModels = useAgentModels(client, sessionToken, modelAgentKey, daemonInstanceId);
+
+  // Reset the model selection to the backend's advertised default whenever the catalog changes
+  // (agent switch, session-type switch). Empty while loading or on a failed probe.
+  useEffect(() => {
+    setModel(agentModels.defaultModel);
+  }, [agentModels.defaultModel]);
 
   const toggleSubagent = (name: string) => {
     setSelectedSubagents((prev) =>
@@ -211,8 +225,10 @@ export function CreateSessionPane({
 
   const isSubmitEnabled = (() => {
     if (submitting) return false;
+    // A model is always required and comes from the daemon-advertised catalog; a failed/loading
+    // probe leaves `model` empty, which disables Create (no fallback).
     if (sessionType === "tool") {
-      return Boolean(projectId && agent && toolPath);
+      return Boolean(projectId && agent && toolPath && model);
     }
     return Boolean(projectId && model);
   })();
@@ -244,7 +260,7 @@ export function CreateSessionPane({
           recipe,
           stackParent,
           sessionType: "",
-          model: "",
+          model,
           permissionMode: "",
           initialPrompt: "",
           sandbox: false,
@@ -275,6 +291,40 @@ export function CreateSessionPane({
       setSubmitting(false);
     }
   };
+
+  // Model selector — shared by both session types, populated from the daemon-advertised catalog for
+  // the current backend. While the probe is in flight it shows a loading line; a failed probe shows
+  // an inline error and renders no select (so `model` stays empty and Create is disabled).
+  const modelField = (
+    <div>
+      <label className={labelClass} htmlFor="create-session-model">
+        Model
+      </label>
+      {agentModels.loading ? (
+        <p data-testid="create-session-model-loading" className="text-sm text-muted-foreground">
+          Loading models…
+        </p>
+      ) : agentModels.error !== null ? (
+        <p data-testid="create-session-model-error" className="text-sm text-destructive">
+          {agentModels.error}
+        </p>
+      ) : (
+        <select
+          id="create-session-model"
+          data-testid="create-session-model-select"
+          className={inputClass}
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+        >
+          {agentModels.models.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
 
   return (
     <div
@@ -399,30 +449,14 @@ export function CreateSessionPane({
             </select>
           </div>
 
+          {modelField}
         </>
       )}
 
       {/* Claude CLI session fields */}
       {sessionType === "claude-cli" && (
         <>
-          <div>
-            <label className={labelClass} htmlFor="create-session-model">
-              Model
-            </label>
-            <select
-              id="create-session-model"
-              data-testid="create-session-model-select"
-              className={inputClass}
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-            >
-              {CLAUDE_CLI_MODELS.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          {modelField}
 
           <div>
             <label className={labelClass} htmlFor="create-session-permission-mode">

@@ -1,12 +1,10 @@
 /**
  * Claude Code CLI model list and session type helpers.
  *
- * PRD: docs/ft/daemon/claude-cli-session.md
- *
- * `CLAUDE_CLI_MODELS` enumerates the Claude model identifiers that the daemon
- * can pass as `--model` when spawning a `claude` CLI subprocess.  Each entry
- * has an `id` (the value sent in the `StartSession` RPC) and a human-readable
- * `label` for display in the UI.
+ * `CreateSessionPane` no longer uses `CLAUDE_CLI_MODELS`: it sources the claude-cli catalog from the
+ * daemon via the `ListAgentModels` RPC (agent `"claude-cli"`, backed by tddy-core). See
+ * docs/ft/web/tool-session-model-selection.md. `CLAUDE_CLI_MODELS` is retained only for the legacy
+ * `ConnectionScreen` inline form, which is out of scope for that change.
  */
 
 export interface ClaudeCliModel {
@@ -16,7 +14,7 @@ export interface ClaudeCliModel {
   label: string;
 }
 
-/** Ordered list of Claude CLI models available for selection. */
+/** Ordered list of Claude CLI models available for selection (legacy ConnectionScreen only). */
 export const CLAUDE_CLI_MODELS: ClaudeCliModel[] = [
   { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
   { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },

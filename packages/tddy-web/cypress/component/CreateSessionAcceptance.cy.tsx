@@ -122,7 +122,8 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
     byTestId(TEST_IDS.createSessionTypeToolBtn).click();
 
     byTestId(TEST_IDS.createSessionAgentSelect).should("be.visible");
-    byTestId(TEST_IDS.createSessionModelSelect).should("not.exist");
+    // The model select is shared by both session types (daemon-advertised catalog).
+    byTestId(TEST_IDS.createSessionModelSelect).should("be.visible");
   });
 
   // -------------------------------------------------------------------------
