@@ -1,107 +1,161 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { AuthService } from "../gen/auth_pb";
 import type { GitHubUser } from "../gen/auth_pb";
-import { useHttpClient } from "../rpc/transportProvider";
+import { useHttpClient, useAuthTokenGate } from "../rpc/transportProvider";
+import { createSessionTokenStore, type TokenStorage } from "../rpc/sessionTokenStore";
 
-const SESSION_TOKEN_KEY = "tddy_session_token";
+/** Short-lived access token used to authenticate RPCs. */
+const ACCESS_TOKEN_KEY = "tddy_session_token";
+/** Long-lived refresh token used only to mint fresh access tokens. */
+const REFRESH_TOKEN_KEY = "tddy_refresh_token";
 const OAUTH_STATE_KEY = "tddy_oauth_state";
 export const OAUTH_RETURN_TO_KEY = "tddy_oauth_return_to";
-
-/** Session tokens are short-lived (5 min); refresh comfortably ahead of expiry. */
-const SESSION_REFRESH_INTERVAL_MS = 4 * 60 * 1000;
 
 export interface AuthState {
   user: GitHubUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
-  /** Session token for RPC calls (when authenticated). */
+  /** Access token for RPC calls (when authenticated). */
   sessionToken: string | null;
+  /** True while the session store is minting a fresh access token from the refresh token. */
+  isRefreshing: boolean;
+}
+
+const LOGGED_OUT: AuthState = {
+  user: null,
+  isAuthenticated: false,
+  isLoading: false,
+  error: null,
+  sessionToken: null,
+  isRefreshing: false,
+};
+
+/** `localStorage`-backed persistence for the access + refresh token pair. */
+function localStorageTokenStorage(): TokenStorage {
+  return {
+    getAccess: () => localStorage.getItem(ACCESS_TOKEN_KEY),
+    getRefresh: () => localStorage.getItem(REFRESH_TOKEN_KEY),
+    set: (access, refresh) => {
+      localStorage.setItem(ACCESS_TOKEN_KEY, access);
+      localStorage.setItem(REFRESH_TOKEN_KEY, refresh);
+    },
+    clear: () => {
+      localStorage.removeItem(ACCESS_TOKEN_KEY);
+      localStorage.removeItem(REFRESH_TOKEN_KEY);
+    },
+  };
 }
 
 export function useAuth() {
   const client = useHttpClient(AuthService);
-  const [state, setState] = useState<AuthState>({
-    user: null,
-    isAuthenticated: false,
-    isLoading: true,
-    error: null,
-    sessionToken: null,
-  });
+  const authTokenGate = useAuthTokenGate();
+  const [state, setState] = useState<AuthState>({ ...LOGGED_OUT, isLoading: true });
 
-  // On mount: check stored session
+  // One stable storage instance for this hook's lifetime.
+  const storageRef = useRef<TokenStorage | null>(null);
+  storageRef.current ??= localStorageTokenStorage();
+  const storage = storageRef.current;
+
+  // The single session-token store. Owns the access+refresh pair, decides when to refresh, and
+  // performs the refresh single-flight. Rebuilt only if the auth client changes.
+  const store = useMemo(
+    () =>
+      createSessionTokenStore({
+        authClient: client,
+        storage,
+        onLoggedOut: () => setState(LOGGED_OUT),
+        onRefreshingChange: (refreshing) => setState((s) => ({ ...s, isRefreshing: refreshing })),
+        onAccessTokenChange: (accessToken) => setState((s) => ({ ...s, sessionToken: accessToken })),
+      }),
+    [client, storage],
+  );
+
+  // Wire the transport's auth gate to this store, so every RPC issued through the shared transport
+  // carries a request-time-fresh access token (refreshing single-flight when it has lapsed).
   useEffect(() => {
-    const token = localStorage.getItem(SESSION_TOKEN_KEY);
-    if (!token) {
-      setState((s) => ({ ...s, isLoading: false }));
+    authTokenGate.current = () => store.ensureFreshAccessToken();
+    return () => {
+      authTokenGate.current = null;
+    };
+  }, [authTokenGate, store]);
+
+  // On mount: resolve a live session from the stored tokens. A stored access token is validated
+  // as-is first; only if it is rejected (e.g. expired after a long sleep) and a refresh token
+  // exists is a fresh access token minted from it. Just a rejected refresh logs the user out.
+  useEffect(() => {
+    if (!storage.getAccess() && !storage.getRefresh()) {
+      setState(LOGGED_OUT);
       return;
     }
-    client
-      .getAuthStatus({ sessionToken: token })
-      .then((res) => {
-        if (res.authenticated && res.user) {
-          setState({
-            user: res.user,
-            isAuthenticated: true,
-            isLoading: false,
-            error: null,
-            sessionToken: token,
-          });
-        } else {
-          localStorage.removeItem(SESSION_TOKEN_KEY);
-          setState({ user: null, isAuthenticated: false, isLoading: false, error: null, sessionToken: null });
+    let cancelled = false;
+
+    const establishSession = async (): Promise<{ token: string; user: GitHubUser }> => {
+      const access = storage.getAccess();
+      if (access) {
+        const status = await client.getAuthStatus({ sessionToken: access });
+        if (status.authenticated && status.user) {
+          // The transport's auth gate may have refreshed the token mid-call (an expired token is
+          // re-minted on the way out), so report the authoritative stored token, not the local one.
+          return { token: storage.getAccess() ?? access, user: status.user };
         }
+      }
+      if (storage.getRefresh()) {
+        const token = await store.ensureFreshAccessToken();
+        if (token) {
+          const status = await client.getAuthStatus({ sessionToken: token });
+          if (status.authenticated && status.user) {
+            return { token, user: status.user };
+          }
+        }
+      }
+      throw new Error("no valid session");
+    };
+
+    establishSession()
+      .then(({ token, user }) => {
+        if (cancelled) return;
+        setState({
+          user,
+          isAuthenticated: true,
+          isLoading: false,
+          error: null,
+          sessionToken: token,
+          isRefreshing: false,
+        });
       })
       .catch(() => {
-        localStorage.removeItem(SESSION_TOKEN_KEY);
-        setState({ user: null, isAuthenticated: false, isLoading: false, error: null, sessionToken: null });
+        // A rejected refresh already cleared storage via the store; clear defensively for the
+        // "stored access token no longer valid and no refresh token" path too.
+        if (cancelled) return;
+        storage.clear();
+        setState(LOGGED_OUT);
       });
-  }, [client]);
+    return () => {
+      cancelled = true;
+    };
+  }, [client, store, storage]);
 
-  // While authenticated, refresh the short-lived session token ahead of expiry. Re-runs whenever
-  // the token changes (including after a refresh), so the timer restarts from each new token.
-  useEffect(() => {
-    const token = state.sessionToken;
-    if (!token) {
-      return;
-    }
-    const id = setInterval(() => {
-      client
-        .refreshSession({ sessionToken: token })
-        .then((res) => {
-          localStorage.setItem(SESSION_TOKEN_KEY, res.sessionToken);
-          setState((s) => ({
-            ...s,
-            user: res.user ?? s.user,
-            isAuthenticated: true,
-            sessionToken: res.sessionToken,
-          }));
-        })
-        .catch(() => {
-          localStorage.removeItem(SESSION_TOKEN_KEY);
-          setState({ user: null, isAuthenticated: false, isLoading: false, error: null, sessionToken: null });
-        });
-    }, SESSION_REFRESH_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [client, state.sessionToken]);
-
-  const login = useCallback(async (returnTo?: string) => {
-    try {
-      const res = await client.getAuthUrl({});
-      sessionStorage.setItem(OAUTH_STATE_KEY, res.state);
-      if (returnTo && returnTo !== "/") {
-        sessionStorage.setItem(OAUTH_RETURN_TO_KEY, returnTo);
-      } else {
-        sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
+  const login = useCallback(
+    async (returnTo?: string) => {
+      try {
+        const res = await client.getAuthUrl({});
+        sessionStorage.setItem(OAUTH_STATE_KEY, res.state);
+        if (returnTo && returnTo !== "/") {
+          sessionStorage.setItem(OAUTH_RETURN_TO_KEY, returnTo);
+        } else {
+          sessionStorage.removeItem(OAUTH_RETURN_TO_KEY);
+        }
+        window.location.href = res.authorizeUrl;
+      } catch (e) {
+        setState((s) => ({
+          ...s,
+          error: e instanceof Error ? e.message : "Failed to get auth URL",
+        }));
       }
-      window.location.href = res.authorizeUrl;
-    } catch (e) {
-      setState((s) => ({
-        ...s,
-        error: e instanceof Error ? e.message : "Failed to get auth URL",
-      }));
-    }
-  }, [client]);
+    },
+    [client],
+  );
 
   const handleCallback = useCallback(
     async (code: string, state: string) => {
@@ -113,39 +167,38 @@ export function useAuth() {
       sessionStorage.removeItem(OAUTH_STATE_KEY);
       try {
         const res = await client.exchangeCode({ code, state });
-        localStorage.setItem(SESSION_TOKEN_KEY, res.sessionToken);
+        storage.set(res.sessionToken, res.refreshToken);
         setState({
           user: res.user ?? null,
           isAuthenticated: true,
           isLoading: false,
           error: null,
           sessionToken: res.sessionToken,
+          isRefreshing: false,
         });
       } catch (e) {
+        storage.clear();
         setState({
-          user: null,
-          isAuthenticated: false,
-          isLoading: false,
+          ...LOGGED_OUT,
           error: e instanceof Error ? e.message : "Code exchange failed",
-          sessionToken: null,
         });
       }
     },
-    [client],
+    [client, storage],
   );
 
   const logout = useCallback(async () => {
-    const token = localStorage.getItem(SESSION_TOKEN_KEY);
+    const token = storage.getAccess();
     if (token) {
       try {
         await client.logout({ sessionToken: token });
       } catch {
-        // Ignore logout errors
+        // Ignore logout errors — the client discards its tokens regardless.
       }
     }
-    localStorage.removeItem(SESSION_TOKEN_KEY);
-    setState({ user: null, isAuthenticated: false, isLoading: false, error: null, sessionToken: null });
-  }, [client]);
+    storage.clear();
+    setState(LOGGED_OUT);
+  }, [client, storage]);
 
   return { ...state, login, handleCallback, logout };
 }

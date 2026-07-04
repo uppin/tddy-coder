@@ -33,6 +33,15 @@ import { createLiveKitTransport } from "tddy-livekit-web";
 import type { Room } from "livekit-client";
 import { TrafficMeterRegistry } from "./trafficMeter";
 import { createTrafficInterceptor } from "./httpTrafficInterceptor";
+import { createAuthGateInterceptor } from "./authGateInterceptor";
+
+/**
+ * Settable holder for the app's access-token resolver. The production transport's auth-gate
+ * interceptor consults `current` per request; `AuthProvider` installs the real single-flight
+ * resolver once mounted. While `current` is `null` (before mount, or with no auth provider), the
+ * gate injects nothing and leaves each request's own `sessionToken` untouched.
+ */
+export type AuthTokenGate = { current: (() => Promise<string | null>) | null };
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -44,8 +53,21 @@ import { createTrafficInterceptor } from "./httpTrafficInterceptor";
  * point a `liveKitFactory` override at the same HTTP transport its `cy.intercept`s already expect,
  * without needing a real (or fully faked) LiveKit data-channel connection.
  */
-export function createDefaultHttpTransport(registry?: TrafficMeterRegistry): Transport {
+export function createDefaultHttpTransport(
+  registry?: TrafficMeterRegistry,
+  authTokenGate?: AuthTokenGate,
+): Transport {
   const interceptors = registry ? [createTrafficInterceptor(registry.get("http"))] : [];
+  if (authTokenGate) {
+    // Gate every RPC behind a request-time-fresh access token; a `null` resolver (no auth provider
+    // yet) leaves the request's own token in place. Runs outermost so recorded/sent bytes reflect
+    // the refreshed token.
+    interceptors.unshift(
+      createAuthGateInterceptor(() =>
+        authTokenGate.current ? authTokenGate.current() : Promise.resolve(null),
+      ),
+    );
+  }
   return createConnectTransport({
     baseUrl:
       typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
@@ -102,6 +124,12 @@ interface RpcTransportContextValue {
    * "no room yet, but a test double that doesn't care" apart from "no room yet, for real."
    */
   readonly liveKitFactoryIsOverridden: boolean;
+  /**
+   * The auth-token gate the HTTP transport's interceptor consults. `AuthProvider` sets its
+   * `current` to the shared session store's `ensureFreshAccessToken`, so every RPC issued through
+   * this provider's transport carries a request-time-fresh access token.
+   */
+  readonly authTokenGate: AuthTokenGate;
 }
 
 const RpcTransportContext = createContext<RpcTransportContextValue | null>(null);
@@ -143,6 +171,10 @@ export function RpcTransportProvider({
   const registryRef = useRef<TrafficMeterRegistry | null>(null);
   registryRef.current ??= new TrafficMeterRegistry();
 
+  // The auth-token gate is stable for the provider's lifetime; AuthProvider fills in `current`.
+  const authTokenGateRef = useRef<AuthTokenGate | null>(null);
+  authTokenGateRef.current ??= { current: null };
+
   // Stable references — avoid rebuilding the context object on every render
   // when props haven't changed (the defaults are module-level constants).
   const httpRef = useRef<Transport | null>(null);
@@ -150,8 +182,9 @@ export function RpcTransportProvider({
     // Caller supplied an explicit transport — use it directly.
     httpRef.current = httpTransport;
   } else if (httpRef.current === null) {
-    // First render without an explicit transport — create the default once, with metering.
-    httpRef.current = createDefaultHttpTransport(registryRef.current);
+    // First render without an explicit transport — create the default once, with metering and the
+    // auth gate.
+    httpRef.current = createDefaultHttpTransport(registryRef.current, authTokenGateRef.current);
   }
 
   const registry = registryRef.current;
@@ -163,6 +196,7 @@ export function RpcTransportProvider({
     liveKitFactory: lkFactory,
     meterRegistry: registry,
     liveKitFactoryIsOverridden: liveKitFactory !== undefined,
+    authTokenGate: authTokenGateRef.current,
   };
 
   return (
@@ -183,6 +217,18 @@ export function RpcTransportProvider({
  */
 export function useTrafficMeterRegistry(): TrafficMeterRegistry | null {
   return useContext(RpcTransportContext)?.meterRegistry ?? null;
+}
+
+/** Fallback gate for components rendered without a provider — its resolver is never installed. */
+const NO_PROVIDER_AUTH_GATE: AuthTokenGate = { current: null };
+
+/**
+ * Return the auth-token gate for this context. `AuthProvider` sets `gate.current` to the shared
+ * session store's `ensureFreshAccessToken`, wiring the HTTP transport's gate interceptor to the
+ * live token. When no `RpcTransportProvider` wraps this component, an inert gate is returned.
+ */
+export function useAuthTokenGate(): AuthTokenGate {
+  return useContext(RpcTransportContext)?.authTokenGate ?? NO_PROVIDER_AUTH_GATE;
 }
 
 /**

@@ -29,8 +29,28 @@ const TAG_LEN: usize = 32;
 /// valid for this window.
 pub const SESSION_TOKEN_TTL: Duration = Duration::from_secs(5 * 60);
 
-/// The verified contents of a session token — the GitHub identity plus issue/expiry times
-/// (Unix seconds).
+/// Lifetime of a freshly minted refresh token. Long by design and slid forward on every refresh:
+/// an actively-used session never has to re-login, while a device untouched for this long does.
+/// The refresh token is never sent on normal RPCs — it is used only to mint access tokens.
+pub const REFRESH_TOKEN_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// Which credential a token is: a short-lived [`TokenKind::Access`] token that authenticates
+/// RPCs, or a long-lived [`TokenKind::Refresh`] token that only mints access tokens. Enforcing
+/// the kind keeps the two roles strictly separate — an access token cannot mint, and a refresh
+/// token cannot authenticate an RPC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TokenKind {
+    /// Short-lived credential presented on every RPC. The default for a payload with no `kind`
+    /// field, so tokens minted before the kind claim existed still verify as access tokens.
+    #[default]
+    Access,
+    /// Long-lived credential presented only to `RefreshSession` to mint access tokens.
+    Refresh,
+}
+
+/// The verified contents of a session token — the GitHub identity, the token kind, plus
+/// issue/expiry times (Unix seconds).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionClaims {
     pub id: u64,
@@ -39,6 +59,9 @@ pub struct SessionClaims {
     pub name: String,
     pub iat: u64,
     pub exp: u64,
+    /// Access vs. refresh. Absent in legacy payloads, which default to [`TokenKind::Access`].
+    #[serde(default)]
+    pub kind: TokenKind,
 }
 
 /// Why a session token failed verification.
@@ -80,16 +103,49 @@ impl SessionTokenSigner {
         }
     }
 
-    /// Mint a token for `user` valid for `ttl` from now.
-    pub fn mint(&self, user: &GitHubUser, ttl: Duration) -> String {
-        self.mint_with_issued_at(user, SystemTime::now(), ttl)
+    /// Mint an access token for `user` valid for [`SESSION_TOKEN_TTL`] from now.
+    pub fn mint_access(&self, user: &GitHubUser) -> String {
+        self.mint_kind_with_issued_at(
+            user,
+            TokenKind::Access,
+            SystemTime::now(),
+            SESSION_TOKEN_TTL,
+        )
     }
 
-    /// Mint a token whose issue time is `issued_at` (expiry = `issued_at + ttl`). The clock seam
-    /// lets tests produce already-expired tokens deterministically without sleeping.
+    /// Mint a refresh token for `user` valid for [`REFRESH_TOKEN_TTL`] from now.
+    pub fn mint_refresh(&self, user: &GitHubUser) -> String {
+        self.mint_kind_with_issued_at(
+            user,
+            TokenKind::Refresh,
+            SystemTime::now(),
+            REFRESH_TOKEN_TTL,
+        )
+    }
+
+    /// Mint an access token for `user` valid for `ttl` from now.
+    pub fn mint(&self, user: &GitHubUser, ttl: Duration) -> String {
+        self.mint_kind_with_issued_at(user, TokenKind::Access, SystemTime::now(), ttl)
+    }
+
+    /// Mint an access token whose issue time is `issued_at` (expiry = `issued_at + ttl`). The clock
+    /// seam lets tests produce already-expired tokens deterministically without sleeping.
     pub fn mint_with_issued_at(
         &self,
         user: &GitHubUser,
+        issued_at: SystemTime,
+        ttl: Duration,
+    ) -> String {
+        self.mint_kind_with_issued_at(user, TokenKind::Access, issued_at, ttl)
+    }
+
+    /// Mint a token of `kind` whose issue time is `issued_at` (expiry = `issued_at + ttl`). The
+    /// general seam behind the access/refresh helpers; the clock argument lets tests mint
+    /// already-expired tokens of either kind without sleeping.
+    pub fn mint_kind_with_issued_at(
+        &self,
+        user: &GitHubUser,
+        kind: TokenKind,
         issued_at: SystemTime,
         ttl: Duration,
     ) -> String {
@@ -101,6 +157,7 @@ impl SessionTokenSigner {
             name: user.name.clone(),
             iat,
             exp: iat.saturating_add(ttl.as_secs()),
+            kind,
         };
         // Serialization of a plain struct of owned primitives cannot fail.
         let payload_json = serde_json::to_vec(&claims).expect("SessionClaims serializes");
@@ -251,6 +308,49 @@ mod tests {
             signer.verify("v1.onlyonesegment").unwrap_err(),
             SessionTokenError::Malformed
         );
+    }
+
+    #[test]
+    fn a_minted_access_token_carries_the_access_kind() {
+        // Given a signer
+        let signer = SessionTokenSigner::new(b"shared-secret");
+
+        // When an access token is minted and verified
+        let token = signer.mint_access(&a_github_user());
+        let claims = signer.verify(&token).expect("access token verifies");
+
+        // Then it is tagged as an access-kind token with the short access lifetime
+        assert_eq!(claims.kind, TokenKind::Access);
+        assert_eq!(claims.exp - claims.iat, SESSION_TOKEN_TTL.as_secs());
+    }
+
+    #[test]
+    fn a_minted_refresh_token_carries_the_refresh_kind_and_a_seven_day_lifetime() {
+        // Given a signer
+        let signer = SessionTokenSigner::new(b"shared-secret");
+
+        // When a refresh token is minted and verified
+        let token = signer.mint_refresh(&a_github_user());
+        let claims = signer.verify(&token).expect("refresh token verifies");
+
+        // Then it is tagged as a refresh-kind token with the 7-day lifetime
+        assert_eq!(claims.kind, TokenKind::Refresh);
+        assert_eq!(REFRESH_TOKEN_TTL, Duration::from_secs(7 * 24 * 60 * 60));
+        assert_eq!(claims.exp - claims.iat, REFRESH_TOKEN_TTL.as_secs());
+    }
+
+    #[test]
+    fn a_legacy_payload_without_a_kind_field_verifies_as_an_access_token() {
+        // Given a token payload minted before the `kind` claim existed (no `kind` field)
+        let legacy_json =
+            r#"{"id":42,"login":"octocat","avatar_url":"a","name":"n","iat":0,"exp":9999999999}"#;
+
+        // When it is deserialized into the current claims shape
+        let claims: SessionClaims =
+            serde_json::from_str(legacy_json).expect("legacy payload deserializes");
+
+        // Then it defaults to an access-kind token, so tokens already in browsers keep working
+        assert_eq!(claims.kind, TokenKind::Access);
     }
 
     #[test]

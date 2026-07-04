@@ -6,8 +6,9 @@ service AuthService {
   rpc GetAuthUrl(GetAuthUrlRequest) returns (GetAuthUrlResponse);
   rpc ExchangeCode(ExchangeCodeRequest) returns (ExchangeCodeResponse);
   rpc GetAuthStatus(GetAuthStatusRequest) returns (GetAuthStatusResponse);
-  // Re-mint a fresh session token from a currently-valid one. The web client calls this on a
-  // timer (well before expiry) to keep an active session alive; an expired token is rejected.
+  // Mint a fresh short-lived access token (and a slid refresh token) from a currently-valid,
+  // long-lived refresh token. The web client calls this when its access token is near/at expiry
+  // to keep the session alive without re-login; an expired or non-refresh token is rejected.
   rpc RefreshSession(RefreshSessionRequest) returns (RefreshSessionResponse);
   rpc Logout(LogoutRequest) returns (LogoutResponse);
 }
@@ -23,8 +24,11 @@ message ExchangeCodeRequest {
   string state = 2;
 }
 message ExchangeCodeResponse {
+  // Short-lived access token used to authenticate RPCs.
   string session_token = 1;
   GitHubUser user = 2;
+  // Long-lived refresh token used only to mint fresh access tokens (never sent on normal RPCs).
+  string refresh_token = 3;
 }
 
 message GetAuthStatusRequest {
@@ -36,11 +40,15 @@ message GetAuthStatusResponse {
 }
 
 message RefreshSessionRequest {
-  string session_token = 1;
+  // Long-lived refresh token presented to mint a fresh access token.
+  string refresh_token = 1;
 }
 message RefreshSessionResponse {
+  // Freshly minted short-lived access token.
   string session_token = 1;
   GitHubUser user = 2;
+  // Freshly minted refresh token (sliding window) that replaces the presented one.
+  string refresh_token = 3;
 }
 
 message LogoutRequest {
