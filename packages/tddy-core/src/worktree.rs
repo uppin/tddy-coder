@@ -4,7 +4,8 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 use crate::branch_worktree_intent;
 use crate::changeset::{read_changeset, write_changeset, BranchWorktreeIntent};
@@ -14,6 +15,33 @@ use crate::changeset::{read_changeset, write_changeset, BranchWorktreeIntent};
 ///
 /// This matches the historical hardcoded contract (`origin/master`) before per-project base refs.
 pub const DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF: &str = "origin/master";
+
+/// Optional `GIT_SSH_COMMAND` applied to git subprocesses that contact a remote. Set once at daemon
+/// startup from `DaemonConfig::git.ssh_command`. `None` (the default) inherits the ambient
+/// environment, preserving prior behavior for the CLI and tests.
+static GIT_SSH_COMMAND: OnceLock<Option<String>> = OnceLock::new();
+
+/// Configure the `GIT_SSH_COMMAND` used for git operations that reach a remote (fetch). Intended to
+/// be called once during daemon startup; subsequent calls are ignored. Passing `None` is a no-op
+/// that leaves the ambient environment in effect.
+pub fn set_git_ssh_command(cmd: Option<String>) {
+    let _ = GIT_SSH_COMMAND.set(cmd);
+}
+
+/// Builds a `git` command for an operation that contacts a remote (fetch). Applies the configured
+/// `GIT_SSH_COMMAND` (if any) and hardens the process against interactive hangs: stdin is closed and
+/// `GIT_TERMINAL_PROMPT=0` is set, so a missing key/passphrase or credential prompt fails fast
+/// instead of blocking forever — a headless daemon has no TTY to answer such a prompt.
+fn git_remote_command(repo_root: &Path) -> Command {
+    let mut cmd = Command::new("git");
+    cmd.current_dir(repo_root)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null());
+    if let Some(Some(ssh)) = GIT_SSH_COMMAND.get() {
+        cmd.env("GIT_SSH_COMMAND", ssh);
+    }
+    cmd
+}
 
 /// Validates a per-project integration base ref: a single remote-tracking ref `origin/<branch>` with
 /// no shell metacharacters or extra git arguments.
@@ -105,9 +133,8 @@ fn fetch_chain_pr_integration_base(
         repo_root.display(),
         integration_base_ref
     );
-    let output = Command::new("git")
+    let output = git_remote_command(repo_root)
         .args(["fetch", "origin", branch_path])
-        .current_dir(repo_root)
         .output()
         .map_err(|e| format!("git fetch origin {}: {}", branch_path, e))?;
 
@@ -170,9 +197,8 @@ pub fn fetch_integration_base(repo_root: &Path, integration_base_ref: &str) -> R
         repo_root.display(),
         integration_base_ref
     );
-    let output = Command::new("git")
+    let output = git_remote_command(repo_root)
         .args(["fetch", "origin", branch])
-        .current_dir(repo_root)
         .output()
         .map_err(|e| format!("git fetch origin {}: {}", branch, e))?;
 
@@ -773,9 +799,8 @@ pub fn resolve_default_integration_base_ref(repo_root: &Path) -> Result<String, 
         "resolve_default_integration_base_ref: fetching origin repo={}",
         repo_root.display()
     );
-    let fetch_out = Command::new("git")
+    let fetch_out = git_remote_command(repo_root)
         .args(["fetch", "origin"])
-        .current_dir(repo_root)
         .output()
         .map_err(|e| format!("git fetch origin: {}", e))?;
     if !fetch_out.status.success() {
