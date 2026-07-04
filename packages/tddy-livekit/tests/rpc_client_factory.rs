@@ -48,7 +48,11 @@ async fn wait_for_participant(
     Ok(())
 }
 
-async fn connect_echo_peer(livekit: &LiveKitTestkit, room_name: &str, identity: &str) -> Result<()> {
+async fn connect_echo_peer(
+    livekit: &LiveKitTestkit,
+    room_name: &str,
+    identity: &str,
+) -> Result<()> {
     let peer = LiveKitParticipant::connect(
         &livekit.get_ws_url(),
         &livekit.generate_token(room_name, identity)?,
@@ -87,7 +91,10 @@ async fn checked_echo(client: &RpcClient, message: String) -> Result<()> {
 }
 
 /// Connect a caller room with two echo peers (B, C) present, returning the caller's shared room.
-async fn caller_room_with_two_peers(livekit: &LiveKitTestkit, room_name: &str) -> Result<Arc<Room>> {
+async fn caller_room_with_two_peers(
+    livekit: &LiveKitTestkit,
+    room_name: &str,
+) -> Result<Arc<Room>> {
     connect_echo_peer(livekit, room_name, B_IDENTITY).await?;
     connect_echo_peer(livekit, room_name, C_IDENTITY).await?;
     let (room, mut events) = Room::connect(
