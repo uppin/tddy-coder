@@ -132,16 +132,40 @@ impl CodebaseAccess {
         Ok(value)
     }
 
+    /// Read a file with the default line cap and no explicit window — a thin alias for
+    /// `read_window(path, None, None)`.
     pub async fn read(&self, path: &str) -> Result<serde_json::Value, SubagentError> {
+        self.read_window(path, None, None).await
+    }
+
+    /// Read a line window of a file, bounding how much content flows back into the model's context.
+    ///
+    /// `offset` is a 0-based starting line (default 0); `limit` is the maximum number of lines
+    /// (default [`DEFAULT_READ_LINE_CAP`]). The result carries `truncated` (true when more lines
+    /// follow the returned window) and `total_lines` (the file's true length) so the model can page
+    /// with a follow-up `offset` instead of blindly re-reading. An un-windowed read of a file within
+    /// the cap returns its bytes verbatim.
+    pub async fn read_window(
+        &self,
+        path: &str,
+        offset: Option<u64>,
+        limit: Option<u64>,
+    ) -> Result<serde_json::Value, SubagentError> {
         match self {
             CodebaseAccess::Local => {
                 let content = std::fs::read_to_string(path)
                     .map_err(|e| SubagentError(format!("READ {path}: {e}")))?;
-                Ok(serde_json::json!({ "content": content }))
+                Ok(window_content(&content, offset, limit))
             }
             CodebaseAccess::Managed(dispatch) => {
-                let result =
-                    dispatch("Read".to_string(), serde_json::json!({ "path": path })).await;
+                let mut args = serde_json::json!({ "path": path });
+                if let Some(offset) = offset {
+                    args["offset"] = serde_json::json!(offset);
+                }
+                if let Some(limit) = limit {
+                    args["limit"] = serde_json::json!(limit);
+                }
+                let result = dispatch("Read".to_string(), args).await;
                 Self::parse_dispatch_result(&result)
             }
         }
@@ -203,6 +227,38 @@ impl CodebaseAccess {
             }
         }
     }
+}
+
+/// Default number of lines a single un-windowed READ returns before truncating. Bounds how much
+/// file content a subagent can pull into the model's context in one tool call.
+const DEFAULT_READ_LINE_CAP: usize = 200;
+
+/// Apply a line window to file `content`, returning `{content, truncated, total_lines}`.
+///
+/// `offset` (default 0) and `limit` (default [`DEFAULT_READ_LINE_CAP`]) select the returned lines.
+/// When the whole file fits in the window (offset 0, all lines within `limit`), the original bytes
+/// are returned verbatim so callers see the file exactly as-is; otherwise the selected lines are
+/// re-joined with `\n`. `truncated` is true when lines follow the returned window.
+fn window_content(content: &str, offset: Option<u64>, limit: Option<u64>) -> serde_json::Value {
+    let lines: Vec<&str> = content.lines().collect();
+    let total_lines = lines.len();
+    let start = (offset.unwrap_or(0) as usize).min(total_lines);
+    let max_lines = limit.map(|l| l as usize).unwrap_or(DEFAULT_READ_LINE_CAP);
+    let end = start.saturating_add(max_lines).min(total_lines);
+    let truncated = end < total_lines;
+
+    // Whole file within the window: return the bytes verbatim (preserves trailing newline etc.).
+    let windowed = if start == 0 && !truncated {
+        content.to_string()
+    } else {
+        lines[start..end].join("\n")
+    };
+
+    serde_json::json!({
+        "content": windowed,
+        "truncated": truncated,
+        "total_lines": total_lines,
+    })
 }
 
 fn grep_file(re: &Regex, path: &str, matches: &mut Vec<serde_json::Value>) {
@@ -336,7 +392,9 @@ async fn dispatch_tool_call(access: &CodebaseAccess, tool_call: &ToolCall) -> St
     let result = match tool_call.function.name.as_str() {
         "READ" => {
             let path = args["path"].as_str().unwrap_or("");
-            access.read(path).await
+            let offset = args["offset"].as_u64();
+            let limit = args["limit"].as_u64();
+            access.read_window(path, offset, limit).await
         }
         "GLOB" => {
             let pattern = args["pattern"].as_str().unwrap_or("");
@@ -513,9 +571,47 @@ impl SubagentSession for FastContextSession {
             }
         }
 
+        self.synthesize_findings().await
+    }
+}
+
+impl FastContextSession {
+    /// The search budget is exhausted without a `<final_answer>`. Rather than discard everything
+    /// gathered so far and return empty content, spend one final turn — with no tools, so the model
+    /// cannot keep searching — asking it to summarize its findings. Always yields
+    /// `StopReason::MaxTurnRequests`, but with the synthesized prose as content.
+    async fn synthesize_findings(&mut self) -> Result<PromptOutcome, SubagentError> {
+        self.messages.push(ChatMessage::user(
+            "You have reached your search budget and may not call any more tools. \
+             Summarize your findings now from what you have already read, citing the specific \
+             file:line locations you found."
+                .to_string(),
+        ));
+
+        let message = match send_turn_and_check_final_answer(
+            &self.client,
+            &self.model,
+            &mut self.messages,
+            Vec::new(),
+            "FastContextSession synthesis",
+        )
+        .await?
+        {
+            TurnStep::FinalAnswer(outcome) => {
+                return Ok(PromptOutcome {
+                    stop_reason: StopReason::MaxTurnRequests,
+                    content: outcome.content,
+                })
+            }
+            TurnStep::Continue(message) => message,
+        };
+
+        let content = message.content.clone().unwrap_or_default();
+        self.messages
+            .push(ChatMessage::assistant(message.content.clone(), None));
         Ok(PromptOutcome {
             stop_reason: StopReason::MaxTurnRequests,
-            content: Vec::new(),
+            content: vec![ContentBlock::text(content)],
         })
     }
 }

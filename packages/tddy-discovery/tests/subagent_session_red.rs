@@ -222,7 +222,7 @@ async fn fast_context_session_prompt_returns_max_turn_requests_when_turn_budget_
     let calls = server.received_requests().await.unwrap();
     assert_eq!(
         calls.len(),
-        3,
-        "exactly max_turns model calls must be made for this single prompt() call"
+        4,
+        "max_turns search calls plus one forced synthesis turn must be made for this prompt() call"
     );
 }
