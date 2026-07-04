@@ -131,6 +131,7 @@ async fn round_trips_an_echo_over_stdio_through_a_real_seatbelt_jail() {
         loopback_allow_ports: vec![shim_port],
         ipc_socket: None,
         mounts: vec![],
+        host_home: None,
     })
     .expect("spawn sandbox-runner");
 
@@ -279,6 +280,7 @@ async fn dispatches_a_tool_call_through_run_host_relay_over_stdio_through_a_real
         loopback_allow_ports: vec![shim_port],
         ipc_socket: None,
         mounts: vec![],
+        host_home: None,
     })
     .expect("spawn sandbox-runner");
 

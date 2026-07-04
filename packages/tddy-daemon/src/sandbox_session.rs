@@ -543,9 +543,13 @@ pub struct SandboxRunnerSpawn {
     pub env: std::collections::BTreeMap<String, String>,
     pub loopback_allow_ports: Vec<u16>,
     pub ipc_socket: Option<PathBuf>,
-    /// Host directories made available inside the jail (e.g. the project repo). Empty for the
-    /// daemon's remote-codebase sessions.
+    /// Host directories made available inside the jail (e.g. the project repo, or the persistent
+    /// claude home). Empty for the daemon's remote-codebase sessions.
     pub mounts: Vec<MountSpec>,
+    /// Host `$HOME` used by the recipe to auto-copy `.claude/.credentials.json` into the jail each
+    /// session. `None` disables that per-session copy — required when a **persistent** claude home
+    /// is mounted and seeded separately (a re-copy would clobber the jail's refreshed OAuth token).
+    pub host_home: Option<PathBuf>,
 }
 
 /// Assemble the explicit [`SandboxPlan`] for a runner spawn via `tddy-sandbox-recipes`.
@@ -564,8 +568,38 @@ pub fn build_sandbox_plan(params: SandboxRunnerSpawn) -> Result<SandboxPlan, San
         ipc_socket: params.ipc_socket,
         mounts: params.mounts,
         recipe: None,
-        host_home: std::env::var_os("HOME").map(PathBuf::from),
+        host_home: params.host_home,
     })
+}
+
+/// Prepare the single daemon-wide persistent jail `$HOME`: ensure it exists, seed
+/// `.claude/.credentials.json` once (non-clobbering — a refreshed jail token survives), and mirror
+/// the claude install so the in-jail startup self-check passes. Returns the canonical home path to
+/// use as HOME and as the read-write mount. Best-effort: failures are logged, not fatal — a session
+/// can still run (at worst it re-authenticates or emits an install self-check warning).
+pub fn prepare_persistent_claude_home(claude_home_dir: &Path, claude_binary: &str) -> PathBuf {
+    if let Err(e) = std::fs::create_dir_all(claude_home_dir) {
+        log::warn!(
+            "persistent claude home {}: create failed: {e}",
+            claude_home_dir.display()
+        );
+    }
+    if let Err(e) = tddy_sandbox_recipes::seed_claude_credentials(claude_home_dir) {
+        log::warn!(
+            "persistent claude home {}: credential seed failed: {e}",
+            claude_home_dir.display()
+        );
+    }
+    #[cfg(unix)]
+    if let Err(e) = tddy_sandbox_recipes::seed_claude_local_install(claude_home_dir, claude_binary) {
+        log::warn!(
+            "persistent claude home {}: install mirror failed: {e}",
+            claude_home_dir.display()
+        );
+    }
+    #[cfg(not(unix))]
+    let _ = claude_binary; // install mirror is unix-only
+    std::fs::canonicalize(claude_home_dir).unwrap_or_else(|_| claude_home_dir.to_path_buf())
 }
 
 /// When set to `qemu`, [`spawn_sandbox_runner`] and [`crate::sandbox_action::spawn_confined_plan`]

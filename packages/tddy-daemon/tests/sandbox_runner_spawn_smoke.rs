@@ -111,6 +111,7 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
         loopback_allow_ports,
         ipc_socket: None,
         mounts: vec![],
+        host_home: None,
     })
     .expect("spawn sandbox-runner");
 
@@ -207,6 +208,7 @@ async fn generic_pty_runner_writes_ready_marker_inside_seatbelt() {
         loopback_allow_ports: vec![grpc_port, shim_port],
         ipc_socket: None,
         mounts: vec![],
+        host_home: None,
     })
     .expect("spawn generic pty sandbox-runner");
 
@@ -303,6 +305,7 @@ async fn generic_pty_host_relay_streams_command_output() {
         loopback_allow_ports: vec![grpc_port, shim_port],
         ipc_socket: None,
         mounts: vec![],
+        host_home: None,
     })
     .expect("spawn generic pty sandbox-runner");
 

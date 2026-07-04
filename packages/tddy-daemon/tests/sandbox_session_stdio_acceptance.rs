@@ -124,6 +124,7 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
         loopback_allow_ports: vec![shim_port],
         ipc_socket: None,
         mounts: vec![],
+        host_home: None,
     })
     .expect("spawn sandbox-runner");
 

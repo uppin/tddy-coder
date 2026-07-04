@@ -11,8 +11,10 @@ pub mod plan;
 pub use claude_cli::{
     append_claude_mcp_args, build_claude_allowlist, claude_credentials_copies,
     claude_interactive_policy, claude_runner_env_overlay, claude_scratch_mcp_dir,
-    process_claude_exec_reads, write_claude_mcp_config,
+    process_claude_exec_reads, seed_claude_credentials, write_claude_mcp_config,
 };
+#[cfg(unix)]
+pub use claude_cli::seed_claude_local_install;
 pub use plan::{
     build_process_plan, build_runner_plan, detect_recipe_from_argv, recipe_from_name,
     shell_interactive_policy, ProcessPlanRequest, RunnerPlanRequest, SandboxRecipe,

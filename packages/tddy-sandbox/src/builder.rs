@@ -410,6 +410,11 @@ impl SandboxBuilder {
             }
         }
 
+        // An empty host would render as `(subpath "")` / `(literal "")`: macOS `sandbox-exec`
+        // rejects it, and as an enclosing subpath it starts-with (shadows) every other read below.
+        // Never let one through. Regex grants carry a placeholder host ("/") and are exempt.
+        deduped.retain(|r| matches!(r.kind, ReadKind::Regex(_)) || !r.host.as_os_str().is_empty());
+
         // Drop reads fully contained by an enclosing `Subpath` grant (regex grants never shadow and
         // are never shadowed — their `host` is a placeholder).
         let enclosing: Vec<PathBuf> = deduped
@@ -571,6 +576,35 @@ mod tests {
         assert_eq!(
             plan.reads,
             vec![ReadSpec::subpath("/usr/lib", ReadReason::SystemLibs)]
+        );
+    }
+
+    /// An empty-host read (e.g. from a bare binary name whose parent path is "") must never survive
+    /// into the plan: it renders as `(subpath "")` — rejected by macOS `sandbox-exec` — and, as an
+    /// enclosing subpath, would shadow every other read in the allow-list (every path starts with
+    /// "").
+    #[test]
+    fn drops_an_empty_host_read_and_does_not_let_it_shadow_others() {
+        // Given — a real read plus a bogus empty-host exec subpath (as binary_exec_reads once emitted)
+        let builder = a_builder()
+            .read(ReadSpec::subpath("/usr/lib", ReadReason::SystemLibs))
+            .read(ReadSpec::subpath("", ReadReason::BinaryDeps).executable());
+
+        // When
+        let plan = builder.build().expect("plan must build");
+
+        // Then — the empty-host read is gone and the real read was not shadowed away
+        assert!(
+            plan.reads.iter().all(|r| !r.host.as_os_str().is_empty()),
+            "empty-host read must be dropped: {:?}",
+            plan.reads
+        );
+        assert!(
+            plan.reads
+                .iter()
+                .any(|r| r.host == std::path::Path::new("/usr/lib")),
+            "the real read must survive: {:?}",
+            plan.reads
         );
     }
 
