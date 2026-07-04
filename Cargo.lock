@@ -8846,6 +8846,8 @@ name = "tddy-github"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
+ "hmac 0.12.1",
  "log",
  "pretty_assertions",
  "prost 0.13.5",
@@ -8853,6 +8855,8 @@ dependencies = [
  "rstest 0.24.0",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "subtle",
  "tddy-rpc",
  "tddy-service",
  "tempfile",

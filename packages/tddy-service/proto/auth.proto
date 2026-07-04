@@ -6,6 +6,9 @@ service AuthService {
   rpc GetAuthUrl(GetAuthUrlRequest) returns (GetAuthUrlResponse);
   rpc ExchangeCode(ExchangeCodeRequest) returns (ExchangeCodeResponse);
   rpc GetAuthStatus(GetAuthStatusRequest) returns (GetAuthStatusResponse);
+  // Re-mint a fresh session token from a currently-valid one. The web client calls this on a
+  // timer (well before expiry) to keep an active session alive; an expired token is rejected.
+  rpc RefreshSession(RefreshSessionRequest) returns (RefreshSessionResponse);
   rpc Logout(LogoutRequest) returns (LogoutResponse);
 }
 
@@ -29,6 +32,14 @@ message GetAuthStatusRequest {
 }
 message GetAuthStatusResponse {
   bool authenticated = 1;
+  GitHubUser user = 2;
+}
+
+message RefreshSessionRequest {
+  string session_token = 1;
+}
+message RefreshSessionResponse {
+  string session_token = 1;
   GitHubUser user = 2;
 }
 

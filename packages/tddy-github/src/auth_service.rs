@@ -1,9 +1,6 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use uuid::Uuid;
 
 use tddy_rpc::{Request, Response, Status};
 
@@ -12,7 +9,8 @@ use crate::provider::{GitHubOAuthProvider, GitHubUser};
 use tddy_service::proto::auth::{
     AuthService as AuthServiceTrait, ExchangeCodeRequest, ExchangeCodeResponse,
     GetAuthStatusRequest, GetAuthStatusResponse, GetAuthUrlRequest, GetAuthUrlResponse,
-    GitHubUser as ProtoGitHubUser, LogoutRequest, LogoutResponse,
+    GitHubUser as ProtoGitHubUser, LogoutRequest, LogoutResponse, RefreshSessionRequest,
+    RefreshSessionResponse,
 };
 
 fn to_proto_user(user: &GitHubUser) -> ProtoGitHubUser {
@@ -24,132 +22,42 @@ fn to_proto_user(user: &GitHubUser) -> ProtoGitHubUser {
     }
 }
 
-/// Auth service implementation. Delegates OAuth to a GitHubOAuthProvider
-/// and manages sessions in memory, optionally persisting them to disk.
+fn proto_user_from_claims(claims: &crate::session_token::SessionClaims) -> ProtoGitHubUser {
+    ProtoGitHubUser {
+        id: claims.id,
+        login: claims.login.clone(),
+        avatar_url: claims.avatar_url.clone(),
+        name: claims.name.clone(),
+    }
+}
+
+/// Auth service implementation. Delegates OAuth to a GitHubOAuthProvider and issues stateless,
+/// HMAC-signed session tokens (see [`crate::session_token`]). No session state is kept
+/// server-side, so a token is verifiable by any daemon holding the same signing secret.
 pub struct AuthServiceImpl<P: GitHubOAuthProvider> {
     provider: Arc<P>,
-    sessions: Arc<Mutex<HashMap<String, GitHubUser>>>,
-    /// When set, the session store is loaded from this file on construction and
-    /// written back after every `exchange_code` / `logout`.
-    persist_path: Option<PathBuf>,
+    /// When set, session tokens are stateless HMAC-signed tokens (mint/verify). When `None`,
+    /// authentication is non-functional: minting fails and every token is rejected.
+    signer: Option<crate::session_token::SessionTokenSigner>,
 }
 
 impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
+    /// Create without a signer. Authentication is non-functional — minting fails and every token
+    /// is rejected — used when no shared signing secret is configured.
     pub fn new(provider: P) -> Self {
         Self {
             provider: Arc::new(provider),
-            sessions: Arc::new(Mutex::new(HashMap::new())),
-            persist_path: None,
+            signer: None,
         }
     }
 
-    /// Create with a shared session store. Use when ConnectionService needs to resolve session tokens.
-    pub fn new_with_sessions(
-        provider: P,
-        sessions: Arc<Mutex<HashMap<String, GitHubUser>>>,
-    ) -> Self {
+    /// Create with a stateless HMAC session-token signer. Tokens are self-describing and
+    /// verifiable by any daemon holding the same secret — no shared/persisted session store.
+    pub fn new_signed(provider: P, signer: crate::session_token::SessionTokenSigner) -> Self {
         Self {
             provider: Arc::new(provider),
-            sessions,
-            persist_path: None,
+            signer: Some(signer),
         }
-    }
-
-    /// Create with a shared session store and a disk-persistence path.
-    ///
-    /// If `path` already exists its contents are loaded into `sessions` immediately so that
-    /// tokens issued before the previous daemon restart are still valid. The file is written
-    /// (atomically via a sibling `.tmp` file) after every `exchange_code` and `logout`.
-    /// Disk errors are logged-and-continued — they never fail an RPC.
-    pub fn new_with_sessions_persisted(
-        provider: P,
-        sessions: Arc<Mutex<HashMap<String, GitHubUser>>>,
-        path: PathBuf,
-    ) -> Self {
-        // Load previously-persisted sessions so tokens survive a daemon restart.
-        if path.exists() {
-            match std::fs::read_to_string(&path)
-                .map_err(|e| format!("{e}"))
-                .and_then(|s| {
-                    serde_json::from_str::<HashMap<String, GitHubUser>>(&s)
-                        .map_err(|e| format!("{e}"))
-                }) {
-                Ok(loaded) => {
-                    log::info!(
-                        "auth: loaded {} persisted session(s) from {}",
-                        loaded.len(),
-                        path.display()
-                    );
-                    *sessions.lock().unwrap() = loaded;
-                }
-                Err(e) => {
-                    log::warn!(
-                        "auth: could not load persisted sessions from {}: {}",
-                        path.display(),
-                        e
-                    );
-                }
-            }
-        }
-        Self {
-            provider: Arc::new(provider),
-            sessions,
-            persist_path: Some(path),
-        }
-    }
-
-    /// Persist the current session store to disk. Errors are logged, never propagated.
-    fn persist(&self) {
-        let Some(ref path) = self.persist_path else {
-            return;
-        };
-        let snapshot: HashMap<String, GitHubUser> = self.sessions.lock().unwrap().clone();
-        let json = match serde_json::to_string_pretty(&snapshot) {
-            Ok(j) => j,
-            Err(e) => {
-                log::warn!("auth: failed to serialize sessions: {e}");
-                return;
-            }
-        };
-        // Atomic write: write to a sibling `.tmp` file then rename.
-        let tmp = path.with_extension("json.tmp");
-        if let Some(parent) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                log::warn!(
-                    "auth: could not create parent dir {}: {e}",
-                    parent.display()
-                );
-                return;
-            }
-        }
-        if let Err(e) = std::fs::write(&tmp, &json) {
-            log::warn!(
-                "auth: failed to write tmp sessions file {}: {e}",
-                tmp.display()
-            );
-            return;
-        }
-        if let Err(e) = std::fs::rename(&tmp, path) {
-            log::warn!(
-                "auth: failed to rename {} -> {}: {e}",
-                tmp.display(),
-                path.display()
-            );
-        }
-    }
-
-    /// Get the GitHub user login for a session token. Used by ConnectionService for user mapping.
-    pub fn get_user_login(&self, session_token: &str) -> Option<String> {
-        self.sessions
-            .lock()
-            .unwrap()
-            .get(session_token)
-            .map(|u| u.login.clone())
-    }
-
-    /// Get a shared reference to the sessions store for use by ConnectionService.
-    pub fn sessions(&self) -> Arc<Mutex<HashMap<String, GitHubUser>>> {
-        Arc::clone(&self.sessions)
     }
 }
 
@@ -177,14 +85,16 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
             .await
             .map_err(Status::internal)?;
 
-        let session_token = Uuid::new_v4().to_string();
         let proto_user = to_proto_user(&user);
 
-        self.sessions
-            .lock()
-            .unwrap()
-            .insert(session_token.clone(), user);
-        self.persist();
+        // Signed mode: return a stateless token verifiable by any daemon holding the same secret.
+        // No server-side session state is kept.
+        let Some(ref signer) = self.signer else {
+            return Err(Status::failed_precondition(
+                "session token signing is not configured",
+            ));
+        };
+        let session_token = signer.mint(&user, crate::session_token::SESSION_TOKEN_TTL);
 
         Ok(Response::new(ExchangeCodeResponse {
             session_token,
@@ -197,26 +107,56 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
         request: Request<GetAuthStatusRequest>,
     ) -> Result<Response<GetAuthStatusResponse>, Status> {
         let req = request.into_inner();
-        let sessions = self.sessions.lock().unwrap();
-        match sessions.get(&req.session_token) {
-            Some(user) => Ok(Response::new(GetAuthStatusResponse {
+        let claims = self
+            .signer
+            .as_ref()
+            .and_then(|signer| signer.verify(&req.session_token).ok());
+        Ok(Response::new(match claims {
+            Some(claims) => GetAuthStatusResponse {
                 authenticated: true,
-                user: Some(to_proto_user(user)),
-            })),
-            None => Ok(Response::new(GetAuthStatusResponse {
+                user: Some(proto_user_from_claims(&claims)),
+            },
+            None => GetAuthStatusResponse {
                 authenticated: false,
                 user: None,
-            })),
-        }
+            },
+        }))
+    }
+
+    async fn refresh_session(
+        &self,
+        request: Request<RefreshSessionRequest>,
+    ) -> Result<Response<RefreshSessionResponse>, Status> {
+        let req = request.into_inner();
+        let Some(ref signer) = self.signer else {
+            return Err(Status::failed_precondition(
+                "session token signing is not configured",
+            ));
+        };
+        // Only a currently-valid token can be refreshed; an expired/forged one forces re-login.
+        let claims = signer
+            .verify(&req.session_token)
+            .map_err(|e| Status::unauthenticated(e.to_string()))?;
+        let user = GitHubUser {
+            id: claims.id,
+            login: claims.login,
+            avatar_url: claims.avatar_url,
+            name: claims.name,
+        };
+        let session_token = signer.mint(&user, crate::session_token::SESSION_TOKEN_TTL);
+        Ok(Response::new(RefreshSessionResponse {
+            session_token,
+            user: Some(to_proto_user(&user)),
+        }))
     }
 
     async fn logout(
         &self,
         request: Request<LogoutRequest>,
     ) -> Result<Response<LogoutResponse>, Status> {
-        let req = request.into_inner();
-        self.sessions.lock().unwrap().remove(&req.session_token);
-        self.persist();
+        // Signed session tokens are stateless — logout is client-side (the client discards its
+        // token). There is nothing to invalidate server-side.
+        let _ = request.into_inner();
         Ok(Response::new(LogoutResponse {}))
     }
 }
@@ -240,123 +180,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn full_auth_flow_via_rpc() {
-        // Given an auth service wired to a stub provider with a pre-registered code
-        let (stub, user) = setup();
-        stub.register_code("test-code", user);
-        let service = AuthServiceImpl::new(stub);
-        let server = AuthServiceServer::new(service);
-        let bridge = RpcBridge::new(server);
-
-        // When executing the full OAuth flow: GetAuthUrl → ExchangeCode → GetAuthStatus → Logout → GetAuthStatus
-
-        // 1. GetAuthUrl
-        let get_url_req = GetAuthUrlRequest {};
-        let msg = tddy_rpc::RpcMessage {
-            payload: prost::Message::encode_to_vec(&get_url_req),
-            metadata: Default::default(),
-        };
-        let resp = bridge
-            .handle_messages("auth.AuthService", "GetAuthUrl", &[msg])
-            .await
-            .expect("GetAuthUrl should succeed");
-        let chunks = match resp {
-            tddy_rpc::ResponseBody::Complete(c) => c,
-            _ => panic!("expected Complete"),
-        };
-        let auth_url_resp = <GetAuthUrlResponse as prost::Message>::decode(&chunks[0][..]).unwrap();
-        assert!(auth_url_resp
-            .authorize_url
-            .contains("client_id=test-client-id"));
-        let state = auth_url_resp.state;
-
-        // 2. ExchangeCode
-        let exchange_req = ExchangeCodeRequest {
-            code: "test-code".to_string(),
-            state: state.clone(),
-        };
-        let msg = tddy_rpc::RpcMessage {
-            payload: prost::Message::encode_to_vec(&exchange_req),
-            metadata: Default::default(),
-        };
-        let resp = bridge
-            .handle_messages("auth.AuthService", "ExchangeCode", &[msg])
-            .await
-            .expect("ExchangeCode should succeed");
-        let chunks = match resp {
-            tddy_rpc::ResponseBody::Complete(c) => c,
-            _ => panic!("expected Complete"),
-        };
-        let exchange_resp =
-            <ExchangeCodeResponse as prost::Message>::decode(&chunks[0][..]).unwrap();
-        assert!(!exchange_resp.session_token.is_empty());
-        assert_eq!(exchange_resp.user.as_ref().unwrap().login, "testuser");
-        let session_token = exchange_resp.session_token;
-
-        // 3. GetAuthStatus (authenticated)
-        let status_req = GetAuthStatusRequest {
-            session_token: session_token.clone(),
-        };
-        let msg = tddy_rpc::RpcMessage {
-            payload: prost::Message::encode_to_vec(&status_req),
-            metadata: Default::default(),
-        };
-        let resp = bridge
-            .handle_messages("auth.AuthService", "GetAuthStatus", &[msg])
-            .await
-            .expect("GetAuthStatus should succeed");
-        let chunks = match resp {
-            tddy_rpc::ResponseBody::Complete(c) => c,
-            _ => panic!("expected Complete"),
-        };
-        let status_resp =
-            <GetAuthStatusResponse as prost::Message>::decode(&chunks[0][..]).unwrap();
-        assert!(status_resp.authenticated);
-        assert_eq!(status_resp.user.as_ref().unwrap().login, "testuser");
-
-        // 4. Logout
-        let logout_req = LogoutRequest {
-            session_token: session_token.clone(),
-        };
-        let msg = tddy_rpc::RpcMessage {
-            payload: prost::Message::encode_to_vec(&logout_req),
-            metadata: Default::default(),
-        };
-        bridge
-            .handle_messages("auth.AuthService", "Logout", &[msg])
-            .await
-            .expect("Logout should succeed");
-
-        // 5. GetAuthStatus (no longer authenticated)
-        let status_req = GetAuthStatusRequest { session_token };
-        let msg = tddy_rpc::RpcMessage {
-            payload: prost::Message::encode_to_vec(&status_req),
-            metadata: Default::default(),
-        };
-        let resp = bridge
-            .handle_messages("auth.AuthService", "GetAuthStatus", &[msg])
-            .await
-            .expect("GetAuthStatus after logout should succeed");
-        let chunks = match resp {
-            tddy_rpc::ResponseBody::Complete(c) => c,
-            _ => panic!("expected Complete"),
-        };
-        // Then after logout the session is no longer authenticated
-        let status_resp =
-            <GetAuthStatusResponse as prost::Message>::decode(&chunks[0][..]).unwrap();
-        assert!(!status_resp.authenticated);
-        assert!(status_resp.user.is_none());
-    }
-
-    #[tokio::test]
     async fn get_auth_status_with_invalid_session() {
-        // Given an auth service with no active sessions
+        // Given an auth service with no signing secret configured
         let (stub, _) = setup();
         let service = AuthServiceImpl::new(stub);
         let server = AuthServiceServer::new(service);
         let bridge = RpcBridge::new(server);
 
-        // When checking status for a non-existent session token
+        // When checking status for an unverifiable session token
         let req = GetAuthStatusRequest {
             session_token: "nonexistent-token".to_string(),
         };
@@ -380,7 +211,7 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // Persistence — session tokens survive a daemon restart (disk round-trip)
+    // Shared RPC step helpers
     // -------------------------------------------------------------------------
 
     /// Exchange a code and return the session token (shared test step).
@@ -434,112 +265,170 @@ mod tests {
         (r.authenticated, r.user.map(|u| u.login))
     }
 
-    fn persisted_bridge(
+    // -------------------------------------------------------------------------
+    // Cross-daemon session tokens — a token minted by one daemon is verifiable by another that
+    // shares the signing secret, with no shared or persisted session store.
+    // -------------------------------------------------------------------------
+
+    fn signed_bridge(
         code: &str,
-        path: std::path::PathBuf,
+        secret: &[u8],
     ) -> RpcBridge<AuthServiceServer<AuthServiceImpl<StubGitHubProvider>>> {
         let (stub, user) = setup();
         stub.register_code(code, user);
-        let sessions = Arc::new(Mutex::new(HashMap::new()));
-        let service = AuthServiceImpl::new_with_sessions_persisted(stub, sessions, path);
+        let signer = crate::session_token::SessionTokenSigner::new(secret);
+        let service = AuthServiceImpl::new_signed(stub, signer);
         RpcBridge::new(AuthServiceServer::new(service))
     }
 
-    #[tokio::test]
-    async fn session_survives_daemon_restart() {
-        // Given — first "daemon" run: exchange a code, which persists to disk
-        let dir = tempfile::tempdir().expect("tempdir");
-        let persist_path = dir.path().join("auth-sessions.json");
-
-        let bridge1 = persisted_bridge("persist-code", persist_path.clone());
-
-        // Obtain a valid state token via GetAuthUrl
-        let url_req = GetAuthUrlRequest {};
+    async fn do_get_auth_url_state(
+        bridge: &RpcBridge<AuthServiceServer<AuthServiceImpl<StubGitHubProvider>>>,
+    ) -> String {
         let msg = tddy_rpc::RpcMessage {
-            payload: prost::Message::encode_to_vec(&url_req),
-            metadata: Default::default(),
-        };
-        let resp = bridge1
-            .handle_messages("auth.AuthService", "GetAuthUrl", &[msg])
-            .await
-            .unwrap();
-        let chunks = match resp {
-            tddy_rpc::ResponseBody::Complete(c) => c,
-            _ => panic!(),
-        };
-        let auth_url_resp = <GetAuthUrlResponse as prost::Message>::decode(&chunks[0][..]).unwrap();
-
-        let token = do_exchange(&bridge1, "persist-code", &auth_url_resp.state).await;
-        assert!(!token.is_empty(), "should have received a session token");
-
-        let (auth, _login) = do_get_status(&bridge1, &token).await;
-        assert!(auth, "should be authenticated on first service");
-
-        // When — "daemon restarts": drop the first service, build a new one from the same persist file
-        drop(bridge1);
-
-        // New service: no code registered, just loads the file
-        let (stub2, _) = setup();
-        let sessions2 = Arc::new(Mutex::new(HashMap::new()));
-        let service2 = AuthServiceImpl::new_with_sessions_persisted(stub2, sessions2, persist_path);
-        let bridge2 = RpcBridge::new(AuthServiceServer::new(service2));
-
-        // Then — the old token is still valid after the "restart"
-        let (auth2, login2) = do_get_status(&bridge2, &token).await;
-        assert!(auth2, "session token should survive a daemon restart");
-        assert_eq!(login2.as_deref(), Some("testuser"));
-    }
-
-    #[tokio::test]
-    async fn logout_removes_session_from_disk() {
-        // Given — a persisted session
-        let dir = tempfile::tempdir().expect("tempdir");
-        let persist_path = dir.path().join("auth-sessions.json");
-
-        let bridge = persisted_bridge("logout-code", persist_path.clone());
-
-        let url_req = GetAuthUrlRequest {};
-        let msg = tddy_rpc::RpcMessage {
-            payload: prost::Message::encode_to_vec(&url_req),
+            payload: prost::Message::encode_to_vec(&GetAuthUrlRequest {}),
             metadata: Default::default(),
         };
         let resp = bridge
             .handle_messages("auth.AuthService", "GetAuthUrl", &[msg])
             .await
-            .unwrap();
+            .expect("GetAuthUrl should succeed");
         let chunks = match resp {
             tddy_rpc::ResponseBody::Complete(c) => c,
-            _ => panic!(),
+            _ => panic!("expected Complete"),
         };
-        let auth_url_resp = <GetAuthUrlResponse as prost::Message>::decode(&chunks[0][..]).unwrap();
+        <GetAuthUrlResponse as prost::Message>::decode(&chunks[0][..])
+            .unwrap()
+            .state
+    }
 
-        let token = do_exchange(&bridge, "logout-code", &auth_url_resp.state).await;
+    #[tokio::test]
+    async fn a_token_minted_by_one_daemon_is_authenticated_by_another_sharing_the_secret() {
+        // Given one daemon that mints a session token through the GitHub login flow
+        let secret = b"shared-livekit-api-secret";
+        let serving = signed_bridge("login-code", secret);
+        let state = do_get_auth_url_state(&serving).await;
+        let token = do_exchange(&serving, "login-code", &state).await;
 
-        // When — logout
-        let logout_req = LogoutRequest {
-            session_token: token.clone(),
+        // When a *different* daemon — its own service, no shared session store, same secret —
+        // checks that token
+        let (peer_stub, _) = setup();
+        let peer = RpcBridge::new(AuthServiceServer::new(AuthServiceImpl::new_signed(
+            peer_stub,
+            crate::session_token::SessionTokenSigner::new(secret),
+        )));
+        let (authenticated, login) = do_get_status(&peer, &token).await;
+
+        // Then the peer authenticates it from the signature alone — no lookup, no shared state
+        assert!(
+            authenticated,
+            "peer daemon should accept a token minted by another daemon with the same secret"
+        );
+        assert_eq!(login.as_deref(), Some("testuser"));
+    }
+
+    // -------------------------------------------------------------------------
+    // Signed-token minting, refresh, and the "no signer configured" guard.
+    // -------------------------------------------------------------------------
+
+    use crate::session_token::{SessionTokenSigner, SESSION_TOKEN_TTL};
+    use std::time::{Duration, SystemTime};
+
+    #[tokio::test]
+    async fn exchange_code_returns_a_signed_token_rather_than_an_opaque_uuid() {
+        // Given a signed auth service
+        let bridge = signed_bridge("login-code", b"shared-secret");
+        let state = do_get_auth_url_state(&bridge).await;
+
+        // When a code is exchanged
+        let token = do_exchange(&bridge, "login-code", &state).await;
+
+        // Then the returned token is a signed, self-describing token, not a bare UUID
+        assert!(
+            token.starts_with("v1."),
+            "expected a signed token, got '{token}'"
+        );
+    }
+
+    #[tokio::test]
+    async fn exchange_code_fails_when_no_signer_is_configured() {
+        // Given an auth service with no signing secret
+        let (stub, user) = setup();
+        stub.register_code("login-code", user);
+        let bridge = RpcBridge::new(AuthServiceServer::new(AuthServiceImpl::new(stub)));
+        let state = do_get_auth_url_state(&bridge).await;
+
+        // When a code is exchanged
+        let exchange_req = ExchangeCodeRequest {
+            code: "login-code".to_string(),
+            state,
         };
         let msg = tddy_rpc::RpcMessage {
-            payload: prost::Message::encode_to_vec(&logout_req),
+            payload: prost::Message::encode_to_vec(&exchange_req),
             metadata: Default::default(),
         };
-        bridge
-            .handle_messages("auth.AuthService", "Logout", &[msg])
-            .await
-            .expect("logout should succeed");
+        let result = bridge
+            .handle_messages("auth.AuthService", "ExchangeCode", &[msg])
+            .await;
 
-        // Then — a new "daemon" (fresh service loading the same file) no longer recognises the token
-        drop(bridge);
-
-        let (stub2, _) = setup();
-        let sessions2 = Arc::new(Mutex::new(HashMap::new()));
-        let service2 = AuthServiceImpl::new_with_sessions_persisted(stub2, sessions2, persist_path);
-        let bridge2 = RpcBridge::new(AuthServiceServer::new(service2));
-
-        let (auth_after, _) = do_get_status(&bridge2, &token).await;
+        // Then it is rejected — there is no secret to mint a verifiable token with
         assert!(
-            !auth_after,
-            "logged-out session should not be valid after restart"
+            result.is_err(),
+            "exchange must fail without a configured signer"
         );
+    }
+
+    #[tokio::test]
+    async fn refresh_session_returns_a_token_that_expires_later_than_the_original() {
+        // Given a signed service and a still-valid token issued a minute ago
+        let secret = b"shared-secret";
+        let (stub, user) = setup();
+        let service = AuthServiceImpl::new_signed(stub, SessionTokenSigner::new(secret));
+        let signer = SessionTokenSigner::new(secret);
+        let issued_at = SystemTime::now() - Duration::from_secs(60);
+        let token = signer.mint_with_issued_at(&user, issued_at, SESSION_TOKEN_TTL);
+
+        // When the session is refreshed
+        let refreshed = service
+            .refresh_session(Request::new(RefreshSessionRequest {
+                session_token: token.clone(),
+            }))
+            .await
+            .expect("refresh of a valid token should succeed")
+            .into_inner();
+
+        // Then the new token is for the same user and expires later than the original
+        let old_exp = signer.verify(&token).expect("original valid").exp;
+        let new_exp = signer
+            .verify(&refreshed.session_token)
+            .expect("refreshed valid")
+            .exp;
+        assert!(
+            new_exp > old_exp,
+            "refreshed token should expire later (old={old_exp}, new={new_exp})"
+        );
+        assert_eq!(refreshed.user.expect("user").login, "testuser");
+    }
+
+    #[tokio::test]
+    async fn refresh_session_rejects_an_expired_token() {
+        // Given a signed service and a token that expired ten minutes ago
+        let secret = b"shared-secret";
+        let (stub, user) = setup();
+        let service = AuthServiceImpl::new_signed(stub, SessionTokenSigner::new(secret));
+        let expired = SessionTokenSigner::new(secret).mint_with_issued_at(
+            &user,
+            SystemTime::now() - Duration::from_secs(600),
+            Duration::from_secs(300),
+        );
+
+        // When a refresh is attempted
+        let result = service
+            .refresh_session(Request::new(RefreshSessionRequest {
+                session_token: expired,
+            }))
+            .await;
+
+        // Then it is rejected
+        assert!(result.is_err(), "refresh must reject an expired token");
     }
 }

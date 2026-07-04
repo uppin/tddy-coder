@@ -7,6 +7,9 @@ const SESSION_TOKEN_KEY = "tddy_session_token";
 const OAUTH_STATE_KEY = "tddy_oauth_state";
 export const OAUTH_RETURN_TO_KEY = "tddy_oauth_return_to";
 
+/** Session tokens are short-lived (5 min); refresh comfortably ahead of expiry. */
+const SESSION_REFRESH_INTERVAL_MS = 4 * 60 * 1000;
+
 export interface AuthState {
   user: GitHubUser | null;
   isAuthenticated: boolean;
@@ -54,6 +57,33 @@ export function useAuth() {
         setState({ user: null, isAuthenticated: false, isLoading: false, error: null, sessionToken: null });
       });
   }, [client]);
+
+  // While authenticated, refresh the short-lived session token ahead of expiry. Re-runs whenever
+  // the token changes (including after a refresh), so the timer restarts from each new token.
+  useEffect(() => {
+    const token = state.sessionToken;
+    if (!token) {
+      return;
+    }
+    const id = setInterval(() => {
+      client
+        .refreshSession({ sessionToken: token })
+        .then((res) => {
+          localStorage.setItem(SESSION_TOKEN_KEY, res.sessionToken);
+          setState((s) => ({
+            ...s,
+            user: res.user ?? s.user,
+            isAuthenticated: true,
+            sessionToken: res.sessionToken,
+          }));
+        })
+        .catch(() => {
+          localStorage.removeItem(SESSION_TOKEN_KEY);
+          setState({ user: null, isAuthenticated: false, isLoading: false, error: null, sessionToken: null });
+        });
+    }, SESSION_REFRESH_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [client, state.sessionToken]);
 
   const login = useCallback(async (returnTo?: string) => {
     try {

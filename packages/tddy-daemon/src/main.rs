@@ -163,8 +163,7 @@ fn main() -> anyhow::Result<()> {
             })
             .collect();
 
-    let auth_result =
-        tddy_daemon::auth::build_auth_entries(&config, host.as_str(), port, &tddy_data_dir);
+    let auth_result = tddy_daemon::auth::build_auth_entries(&config, host.as_str(), port);
     let mut rpc_entries = auth_result.entries;
 
     if let Some(ref lk) = config.livekit {
