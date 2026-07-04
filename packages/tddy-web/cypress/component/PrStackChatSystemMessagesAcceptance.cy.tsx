@@ -18,6 +18,7 @@
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { TddyRemote, ServerMessageSchema, type ClientMessage, type ServerMessage } from "../../src/gen/tddy/v1/remote_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -101,7 +102,7 @@ it("renders a goalStarted event as a goal bubble labeled with the goal name", ()
   const { backend } = aScriptedSystemMessageBackend([goalStartedMessage("analyze-stack")]);
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // Then
@@ -116,7 +117,7 @@ it("renders a non-UserPrompt activityLogged event as an activity bubble with its
   ]);
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // Then
@@ -136,7 +137,7 @@ it("does not render a duplicate bubble for a UserPrompt-kind activityLogged even
       ? activityLoggedMessage("Queued: Split this into three PRs.", "UserPrompt")
       : undefined,
   );
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // When

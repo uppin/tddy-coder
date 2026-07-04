@@ -15,6 +15,7 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { TddyRemote } from "../../src/gen/tddy/v1/remote_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -69,7 +70,7 @@ it("opens the inspector as an overlay for a pr-stack session, leaving the PR-Sta
 
   // When — PR_STACK_SESSION is disconnected (isActive: false), which auto-opens the inspector
   // on selection (see SessionInspectorAcceptance AC3) — no toggle click needed
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // Then — the drawer is present and open, and the pr-stack screen (the "terminal replacement")

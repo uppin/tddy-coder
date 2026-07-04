@@ -15,6 +15,7 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { PrStackChat } from "../../src/components/sessions/prstack/PrStackChat";
 import { TddyRemote, type ClientMessage } from "../../src/gen/tddy/v1/remote_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -100,7 +101,7 @@ it("adds the operator's own sent message to the transcript immediately", () => {
   });
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
   prStackScreenPage.sendChatMessage("Split the auth feature into a PR stack.");
 

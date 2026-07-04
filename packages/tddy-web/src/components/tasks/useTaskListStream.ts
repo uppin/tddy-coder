@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { TaskService, type TaskInfo } from "../../gen/tasks_pb";
-import { useHttpClient } from "../../rpc/transportProvider";
+import { useDaemonClient } from "../../rpc/selectedDaemon";
+
+/** Floor applied to every reconnect, including a clean stream end, so a stream that keeps ending
+ * immediately (e.g. no live updates pending) can never spin the client or hammer the daemon. */
+const MIN_RECONNECT_DELAY_MS = 250;
 
 export function useTaskListStream(sessionToken: string) {
-  const client = useHttpClient(TaskService);
+  const client = useDaemonClient(TaskService);
   const [tasks, setTasks] = useState<Map<string, TaskInfo>>(new Map());
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    if (!client) return;
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -44,12 +49,13 @@ export function useTaskListStream(sessionToken: string) {
               });
             }
           }
-          // Stream ended cleanly — reconnect immediately to stay live.
-          retryDelay = 0;
+          // Stream ended cleanly — reconnect to stay live, but never faster than the floor.
+          retryDelay = MIN_RECONNECT_DELAY_MS;
         } catch (e) {
           if (e instanceof DOMException && e.name === "AbortError") break;
           console.debug("[useTaskListStream] error, reconnecting:", e);
-          retryDelay = retryDelay === 0 ? 1000 : Math.min(retryDelay * 2, 30000);
+          retryDelay =
+            retryDelay === 0 ? MIN_RECONNECT_DELAY_MS * 4 : Math.min(retryDelay * 2, 30000);
         }
       }
     })();

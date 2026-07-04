@@ -1,7 +1,10 @@
 import "./index.css";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
+import type { Room } from "livekit-client";
 import { RpcTransportProvider, useHttpClient } from "./rpc/transportProvider";
+import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
+import type { DaemonHost } from "./lib/participantRole";
 import { GhosttyTerminalLiveKit } from "./components/GhosttyTerminalLiveKit";
 import { ConnectionTerminalChrome } from "./components/connection/ConnectionTerminalChrome";
 import { BUILD_ID } from "./buildId";
@@ -366,13 +369,27 @@ function DaemonLoginScreen({ path, login, authError }: { path: string; login: (r
   );
 }
 
-export function App() {
+/**
+ * Test-injection seam for `SelectedDaemonProvider`'s `room`/`daemons` overrides (mirrors
+ * `RpcTransportProvider`'s `httpTransport`/`liveKitFactory` props) — `App` is the sole production
+ * caller that constructs `SelectedDaemonProvider`, and does so only after its own async
+ * `/api/config` fetch resolves, so a component test mounting `<App />` directly has no outer point
+ * to inject a fake common-room connection unless `App` forwards these through itself. Both default
+ * to `undefined`, so real usage (which never sets them) is unaffected.
+ */
+export interface AppProps {
+  testDaemonRoom?: Room | null;
+  testDaemonHosts?: DaemonHost[];
+}
+
+export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
   const [path, navigate] = usePathname();
   const { isAuthenticated, isLoading: authLoading, login, error: authError } = useAuth();
   const [appConfig, setAppConfig] = useState<{
     daemonMode: boolean | null;
     livekitUrl?: string;
     commonRoom?: string;
+    daemonInstanceId?: string;
     allowedAgents?: { id: string; label: string }[];
   }>({ daemonMode: null });
 
@@ -384,6 +401,7 @@ export function App() {
           daemon_mode?: boolean;
           livekit_url?: string;
           common_room?: string;
+          daemon_instance_id?: string;
           allowed_agents?: { id: string; label: string }[];
           debug?: string;
         } | null) => {
@@ -392,6 +410,7 @@ export function App() {
             daemonMode: config?.daemon_mode ?? false,
             livekitUrl: config?.livekit_url,
             commonRoom: config?.common_room,
+            daemonInstanceId: config?.daemon_instance_id,
             allowedAgents: config?.allowed_agents,
           });
         }
@@ -418,33 +437,35 @@ export function App() {
       ) : daemonMode === true ? (
         !isAuthenticated ? (
           <DaemonLoginScreen path={path} login={login} authError={authError} />
-        ) : isRpcPlaygroundPath(path) ? (
-          <RpcPlaygroundAppPage
-            livekitUrl={appConfig.livekitUrl}
-            commonRoom={appConfig.commonRoom}
-            onNavigate={navigate}
-          />
-        ) : isTasksPath(path) ? (
-          <TasksDrawerScreen />
-        ) : isVmsPath(path) ? (
-          <VmsAppPage onNavigate={navigate} />
-        ) : isProjectsPath(path) ? (
-          <ProjectsAppPage
-            livekitUrl={appConfig.livekitUrl}
-            commonRoom={appConfig.commonRoom}
-            onNavigate={navigate}
-          />
-        ) : path === "/worktrees" ? (
-          <WorktreesAppPage onNavigate={navigate} />
-        ) : isSessionsDrawerPath(path) ? (
-          <SessionsDrawerScreen />
         ) : (
-          <ConnectionScreen
+          <SelectedDaemonProvider
             livekitUrl={appConfig.livekitUrl}
             commonRoom={appConfig.commonRoom}
-            allowedAgentsFromConfig={appConfig.allowedAgents}
-            onNavigate={navigate}
-          />
+            servingInstanceId={appConfig.daemonInstanceId}
+            room={testDaemonRoom}
+            daemons={testDaemonHosts}
+          >
+            {isRpcPlaygroundPath(path) ? (
+              <RpcPlaygroundAppPage onNavigate={navigate} />
+            ) : isTasksPath(path) ? (
+              <TasksDrawerScreen />
+            ) : isVmsPath(path) ? (
+              <VmsAppPage onNavigate={navigate} />
+            ) : isProjectsPath(path) ? (
+              <ProjectsAppPage onNavigate={navigate} />
+            ) : path === "/worktrees" ? (
+              <WorktreesAppPage onNavigate={navigate} />
+            ) : isSessionsDrawerPath(path) ? (
+              <SessionsDrawerScreen />
+            ) : (
+              <ConnectionScreen
+                livekitUrl={appConfig.livekitUrl}
+                commonRoom={appConfig.commonRoom}
+                allowedAgentsFromConfig={appConfig.allowedAgents}
+                onNavigate={navigate}
+              />
+            )}
+          </SelectedDaemonProvider>
         )
       ) : (
         <ConnectionForm />

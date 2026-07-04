@@ -11,11 +11,13 @@
  */
 
 import React from "react";
+import { Room } from "livekit-client";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ProjectsAppPage } from "../../src/components/projects/ProjectsAppPage";
 import { ProjectsScreen } from "../../src/components/projects/ProjectsScreen";
 import { ConnectionService, type ProjectEntry } from "../../src/gen/connection_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
+import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { projectsScreenPage } from "../support/pages/projectsScreenPage";
 
@@ -59,6 +61,20 @@ function aProjectsBackend(projects: ProjectEntry[]): InMemoryRpcBackend {
     });
 }
 
+/**
+ * `ProjectsAppPage` now reads its daemon list and RPC client from the shared
+ * `SelectedDaemonProvider` context (see `DaemonSelectedRpcRoutingAcceptance.cy.tsx`) instead of
+ * opening its own common-room connection — these container tests only care about the RPC-wiring
+ * behavior, so a fixed single-host context is enough to get a non-null `useDaemonClient`.
+ */
+function mountProjectsAppPage(onNavigate: (path: string) => void) {
+  return (
+    <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
+      <ProjectsAppPage onNavigate={onNavigate} />
+    </SelectedDaemonProvider>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
@@ -82,7 +98,7 @@ it("renders a project present on two hosts as one card with a row per host", () 
   ]);
 
   // When
-  mountWithRpc(<ProjectsAppPage onNavigate={cy.stub()} />, backend);
+  mountWithRpc(mountProjectsAppPage(cy.stub()), backend);
 
   // Then
   projectsScreenPage.card("proj-alpha").should("exist");
@@ -96,7 +112,7 @@ it("creates a project from the screen and shows it after the list refreshes", ()
   const backend = aProjectsBackend([]);
 
   // When
-  mountWithRpc(<ProjectsAppPage onNavigate={cy.stub()} />, backend);
+  mountWithRpc(mountProjectsAppPage(cy.stub()), backend);
   projectsScreenPage.openCreateProjectForm();
   projectsScreenPage.fillAndSubmitCreateProjectForm({
     name: "beta",

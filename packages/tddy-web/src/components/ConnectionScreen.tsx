@@ -25,10 +25,12 @@ import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome"
 import { ParticipantList } from "./ParticipantList";
 import { useAuth } from "../hooks/useAuth";
 import { useHttpClient } from "../rpc/transportProvider";
+import { useDaemonClient } from "../rpc/selectedDaemon";
 import { useCommonRoom } from "../hooks/useCommonRoom";
 import { useRoomParticipants } from "../hooks/useRoomParticipants";
 import { GitHubLoginButton } from "./GitHubLoginButton";
 import { UserAvatar } from "./UserAvatar";
+import { DaemonSelectorConnected } from "./shell/DaemonSelector";
 import { BUILD_ID } from "../buildId";
 import { useVisualViewport } from "../hooks/useVisualViewport";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -216,7 +218,8 @@ function ProjectSessionOptions({
   form: ProjectSessionForm;
   onChange: (patch: Partial<ProjectSessionForm>) => void;
   startSessionButton: ReactNode;
-  client: ConnectionClient;
+  /** `null` until a daemon is selected and the shared common-room connection is up (`useDaemonClient`). */
+  client: ConnectionClient | null;
   sessionToken: string | null;
   projectId: string;
 }) {
@@ -240,7 +243,7 @@ function ProjectSessionOptions({
   const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
   useEffect(() => {
-    if (form.sessionType !== "claude-cli" || !sessionToken || !projectId) return;
+    if (form.sessionType !== "claude-cli" || !sessionToken || !projectId || !client) return;
     let cancelled = false;
     setBranchesLoading(true);
     client.listProjectBranches({ sessionToken, projectId, daemonInstanceId: "" })
@@ -1257,7 +1260,7 @@ export function ConnectionScreen({
   const [terminalOverlayMinimized, setTerminalOverlayMinimized] = useState(false);
   const terminalDeepLinkSeqRef = useRef(0);
   const sessionsEverLoadedRef = useRef(false);
-  const client = useHttpClient(ConnectionService);
+  const client = useDaemonClient(ConnectionService);
 
   const navigatePath = useCallback(
     (path: string, mode: "push" | "replace") => {
@@ -1347,7 +1350,7 @@ export function ConnectionScreen({
   );
 
   const loadSessions = useCallback(() => {
-    if (!sessionToken) return;
+    if (!sessionToken || !client) return;
     client
       .listSessions({ sessionToken })
       .then((res) => {
@@ -1365,7 +1368,7 @@ export function ConnectionScreen({
   }, [client, sessionToken]);
 
   useEffect(() => {
-    if (!sessionToken || !isAuthenticated) {
+    if (!sessionToken || !isAuthenticated || !client) {
       setLoading(false);
       return;
     }
@@ -1527,7 +1530,7 @@ export function ConnectionScreen({
   }, [routePath, sessions, sessionsListHydrated, isAuthenticated, sessionToken, sessionAttachments]);
 
   useEffect(() => {
-    if (!sessionsListHydrated || !isAuthenticated || !sessionToken || terminalRouteUnknown) {
+    if (!sessionsListHydrated || !isAuthenticated || !sessionToken || terminalRouteUnknown || !client) {
       return;
     }
     const id = parseTerminalSessionIdFromPathname(routePath);
@@ -1659,7 +1662,7 @@ export function ConnectionScreen({
     const form =
       projectForms[rowKey] ?? defaultProjectSessionForm(tools, effectiveAgents, daemons);
     const projectId = project.projectId.trim();
-    if (!sessionToken || !projectId) return;
+    if (!sessionToken || !projectId || !client) return;
     // For claude-cli sessions, only model is needed (no toolPath/agent required).
     if (form.sessionType !== "claude-cli" && (!form.toolPath || !form.agent)) return;
     setError(null);
@@ -1709,7 +1712,7 @@ export function ConnectionScreen({
   };
 
   const handleConnectSession = async (sessionId: string) => {
-    if (!sessionToken) return;
+    if (!sessionToken || !client) return;
     if (sessionAttachments.has(sessionId)) {
       console.debug("[ConnectionScreen] connectSession: already attached, focusing", { sessionId });
       navigatePath(terminalPathForSessionId(sessionId), "replace");
@@ -1745,7 +1748,7 @@ export function ConnectionScreen({
   };
 
   const handleResumeSession = async (sessionId: string) => {
-    if (!sessionToken) return;
+    if (!sessionToken || !client) return;
     if (sessionAttachments.has(sessionId)) {
       console.debug("[ConnectionScreen] resumeSession: already attached, focusing", { sessionId });
       navigatePath(terminalPathForSessionId(sessionId), "replace");
@@ -1787,7 +1790,7 @@ export function ConnectionScreen({
   };
 
   const handleSignalSession = async (sessionId: string, signal: Signal) => {
-    if (!sessionToken) return;
+    if (!sessionToken || !client) return;
     setError(null);
     try {
       await client.signalSession({ sessionToken, sessionId, signal });
@@ -1797,7 +1800,7 @@ export function ConnectionScreen({
   };
 
   const handleDeleteSession = async (sessionId: string) => {
-    if (!sessionToken) return;
+    if (!sessionToken || !client) return;
     if (
       !window.confirm(
         "Delete this session? If the tool process is still running, it will be stopped first, then on-disk session data will be removed. This cannot be undone."
@@ -1819,7 +1822,7 @@ export function ConnectionScreen({
 
   const handleBulkDeleteSelectedSessions = useCallback(
     async (tableKey: string, selectedIds: string[]) => {
-      if (!sessionToken || selectedIds.length === 0) {
+      if (!sessionToken || !client || selectedIds.length === 0) {
         if (import.meta.env.DEV) {
           console.debug("[ConnectionScreen] bulk delete skipped", {
             tableKey,
@@ -1966,7 +1969,10 @@ export function ConnectionScreen({
           {onNavigate ? <DaemonNavMenu onNavigate={onNavigate} /> : null}
           <h1 className="text-2xl font-semibold">tddy-web</h1>
         </div>
-        {user ? <UserAvatar user={user} onLogout={logout} /> : null}
+        <div className="flex items-center gap-3">
+          <DaemonSelectorConnected />
+          {user ? <UserAvatar user={user} onLogout={logout} /> : null}
+        </div>
       </div>
       <h2 className="mt-6 text-lg font-medium">Start or connect to a session</h2>
 

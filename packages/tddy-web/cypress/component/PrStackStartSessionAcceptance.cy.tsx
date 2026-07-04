@@ -11,6 +11,7 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { ConnectionService } from "../../src/gen/connection_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -70,7 +71,7 @@ it("starts a stack-parented Claude CLI child session when Start session is click
   );
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
   prStackScreenPage.startSessionBtn("n1").click();
 
@@ -103,7 +104,7 @@ it("starts a planned PR with its planned branch as new_branch_name", () => {
   );
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
   prStackScreenPage.startSessionBtn("n1").click();
 
@@ -129,7 +130,7 @@ it("navigates to the newly spawned child session after Start session succeeds", 
   );
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
   prStackScreenPage.startSessionBtn("n1").click();
 

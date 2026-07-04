@@ -604,6 +604,8 @@ fn main() -> anyhow::Result<()> {
             }
         });
 
+        let daemon_instance_id =
+            tddy_daemon::livekit_peer_discovery::local_instance_id_for_config(&config);
         let res = tddy_daemon::server::run_server(
             host.as_str(),
             port,
@@ -611,6 +613,7 @@ fn main() -> anyhow::Result<()> {
             rpc_entries,
             livekit_url,
             common_room,
+            daemon_instance_id,
             allowed_agents,
             web_debug,
             lifecycle_telegram,

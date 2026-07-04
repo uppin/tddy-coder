@@ -12,6 +12,7 @@
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { TddyRemote, ServerMessageSchema } from "../../src/gen/tddy/v1/remote_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
@@ -72,7 +73,7 @@ it("merges streamed agent tokens into a single chat bubble with no per-token lin
   });
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // Then — exactly one agent bubble holding the full sentence (tokens accumulated, not one-per-line)

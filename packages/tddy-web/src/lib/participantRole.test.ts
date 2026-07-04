@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { aDaemonAdvertisementMeta } from "../test-utils";
-import { daemonHostsFromParticipants } from "./participantRole";
+import { daemonHostsFromParticipants, daemonRpcIdentity } from "./participantRole";
 
 describe("daemonHostsFromParticipants", () => {
   it("keeps only daemon-role participants and reads instance id + label from the advertisement", () => {
@@ -47,5 +47,20 @@ describe("daemonHostsFromParticipants", () => {
 
     // Then
     expect(hosts.map((h) => h.instanceId)).toEqual(["udoo", "srv2"]);
+  });
+});
+
+describe("daemonRpcIdentity", () => {
+  it("prefixes the instance id with 'daemon-' to form the RPC-server identity", () => {
+    // Given / When / Then — a daemon's discovery identity ("udoo") is distinct from the
+    // participant that actually serves RPC ("daemon-udoo"); see `main.rs`'s `rpc_identity`.
+    expect(daemonRpcIdentity("udoo")).toBe("daemon-udoo");
+  });
+
+  it("always applies the prefix, even for an instance id that already starts with 'daemon-'", () => {
+    // Given / When / Then — instance ids are opaque strings chosen by config/hostname; one that
+    // happens to start with "daemon-" itself must still get the prefix applied, not be treated
+    // as already-prefixed
+    expect(daemonRpcIdentity("daemon-worker-3")).toBe("daemon-daemon-worker-3");
   });
 });

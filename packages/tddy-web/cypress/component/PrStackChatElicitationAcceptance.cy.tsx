@@ -19,6 +19,7 @@
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import {
   TddyRemote,
   ServerMessageSchema,
@@ -156,7 +157,7 @@ it("renders the clarification question's header, text, and options when the pres
   const { backend } = aScriptedQuestionBackend(selectModeMessage(aClarificationQuestion()));
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // Then
@@ -173,7 +174,7 @@ it("hides the free-text chat input while a select question is pending", () => {
   // Given / When — this is the exact bug: typing here would send QueuePrompt, which the
   // presenter drains into an inbox instead of answering the pending question
   const { backend } = aScriptedQuestionBackend(selectModeMessage(aClarificationQuestion()));
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // Then
@@ -190,7 +191,7 @@ it("sends an AnswerSelect intent with the chosen option's index when an option i
   const { backend, sentIntents } = aScriptedQuestionBackend(
     selectModeMessage(aClarificationQuestion()),
   );
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // When
@@ -207,7 +208,7 @@ it("sends an AnswerSelect intent with the chosen option's index when an option i
 it("echoes the chosen option's label as a user chat bubble after answering a select question", () => {
   // Given
   const { backend } = aScriptedQuestionBackend(selectModeMessage(aClarificationQuestion()));
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // When
@@ -223,7 +224,7 @@ it("restores the free-text chat input after the workflow resumes running followi
     selectModeMessage(aClarificationQuestion()),
     (intent) => (intent.intent.case === "answerSelect" ? runningModeMessage() : undefined),
   );
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // When
@@ -243,7 +244,7 @@ it("renders an Other input for a select question that allows a custom answer", (
   const { backend } = aScriptedQuestionBackend(
     selectModeMessage(aClarificationQuestion({ allowOther: true })),
   );
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // Then
@@ -255,7 +256,7 @@ it("does not render an Other input for a select question that disallows a custom
   const { backend } = aScriptedQuestionBackend(
     selectModeMessage(aClarificationQuestion({ allowOther: false })),
   );
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // Then
@@ -267,7 +268,7 @@ it("sends an AnswerOther intent with the typed text when a custom answer is subm
   const { backend, sentIntents } = aScriptedQuestionBackend(
     selectModeMessage(aClarificationQuestion({ allowOther: true })),
   );
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // When
@@ -300,7 +301,7 @@ it("renders the header, text, and a checkbox per option for a multi-select clari
   const { backend } = aScriptedQuestionBackend(multiSelectModeMessage(question));
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // Then
@@ -324,7 +325,7 @@ it("sends an AnswerMultiSelect intent with all checked indices when Submit is cl
     multiSelect: true,
   });
   const { backend, sentIntents } = aScriptedQuestionBackend(multiSelectModeMessage(question));
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // When — check the first and third options, leave the second unchecked
@@ -352,7 +353,7 @@ it("includes the typed Other text in the AnswerMultiSelect intent when submitted
     allowOther: true,
   });
   const { backend, sentIntents } = aScriptedQuestionBackend(multiSelectModeMessage(question));
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // When
@@ -373,7 +374,7 @@ it("does not render an Other input for a multi-select question that disallows a 
   // Given / When
   const question = aClarificationQuestion({ multiSelect: true, allowOther: false });
   const { backend } = aScriptedQuestionBackend(multiSelectModeMessage(question));
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
   // Then

@@ -9,6 +9,7 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { Protocol, ScreenSharingService } from "../../src/gen/screen_sharing_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/screenSharingBackend";
@@ -52,7 +53,7 @@ it("shows a Screen Sharing tab in the inspector tab strip alongside Details and 
     .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] as never[] }));
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
   page.inspectorDrawer().should("have.attr", "data-state", "open");
 
@@ -72,7 +73,7 @@ it("renders the Screen Sharing tab panel when the Screen Sharing tab is clicked"
     .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] as never[] }));
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
   page.inspectorScreenSharingTab().click();
 
@@ -91,7 +92,7 @@ it("shows an empty target list and an Add form with protocol selector when no ta
     .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] as never[] }));
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
   page.inspectorScreenSharingTab().click();
 
@@ -113,7 +114,7 @@ it("selecting VNC protocol defaults the port to 5900", () => {
     .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] as never[] }));
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
   page.inspectorScreenSharingTab().click();
   page.screenSharingAddProtocol().select("VNC");
@@ -136,7 +137,7 @@ it("selecting RDP protocol defaults the port to 3389", () => {
     .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] as never[] }));
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
   page.inspectorScreenSharingTab().click();
   page.screenSharingAddProtocol().select("RDP");
@@ -169,7 +170,7 @@ it("submitting VNC target calls AddTarget with protocol VNC and correct fields",
     }));
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
   page.inspectorScreenSharingTab().click();
   page.screenSharingAddLabel().type("VNC Dev VM");
@@ -209,7 +210,7 @@ it("submitting RDP target calls AddTarget with protocol RDP and correct fields",
     }));
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
   page.inspectorScreenSharingTab().click();
   page.screenSharingAddLabel().type("Windows Server");
@@ -250,7 +251,7 @@ it("shows the passphrase dialog before adding a target that has a password", () 
     }));
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
   page.inspectorScreenSharingTab().click();
   page.screenSharingAddLabel().type("Secure VM");

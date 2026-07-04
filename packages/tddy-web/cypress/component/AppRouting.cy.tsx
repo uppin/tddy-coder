@@ -1,12 +1,30 @@
 import React from "react";
+import { Room } from "livekit-client";
 import { App } from "../../src/index";
 import { TERMINAL_SESSION_ROUTE_PREFIX } from "../../src/routing/appRoutes";
+import type { DaemonHost } from "../../src/lib/participantRole";
+import { RpcTransportProvider, createDefaultHttpTransport } from "../../src/rpc/transportProvider";
 import {
   interceptConnectionRpcs,
   interceptConnectSession,
   interceptTokenForPresence,
 } from "../support/rpc/connectionRpcs";
 import { connectionPage } from "../support/pages/connectionPage";
+
+// `ConnectionScreen`'s session-list RPCs are daemon-level (`useDaemonClient`), routed over the
+// shared common-room LiveKit connection — `App` has no real common room to join here (this test
+// only intercepts HTTP), so a fake room/daemon is injected via `App`'s test-only seam, and the
+// LiveKit factory is pointed at the same HTTP transport this file's `cy.intercept`s already expect
+// (a real, unconnected `Room`'s data channel would otherwise error when actually used).
+const DAEMON: DaemonHost = { instanceId: "udoo", label: "udoo (this daemon)" };
+
+function mountApp() {
+  cy.mount(
+    <RpcTransportProvider liveKitFactory={() => createDefaultHttpTransport()}>
+      <App testDaemonRoom={new Room()} testDaemonHosts={[DAEMON]} />
+    </RpcTransportProvider>,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Test fixtures (session / project data — test data, not infrastructure)
@@ -67,7 +85,7 @@ describe("App routing (daemon mode, acceptance)", () => {
     });
 
     // When — mount, wait for session list, then click Connect
-    cy.mount(<App />);
+    mountApp();
     waitForDaemonSessionShell();
     cy.wait("@getAuthStatus");
     connectionPage.connectBtn(ACTIVE_SESSION.sessionId, { timeout: 8000 }).click();
@@ -92,7 +110,7 @@ describe("App routing (daemon mode, acceptance)", () => {
     cy.window().then((win) => {
       win.location.hash = "/";
     });
-    cy.mount(<App />);
+    mountApp();
     waitForDaemonSessionShell();
     cy.wait("@getAuthStatus");
     connectionPage.connectBtn(ACTIVE_SESSION.sessionId, { timeout: 8000 }).click();
@@ -122,7 +140,7 @@ describe("App routing (daemon mode, acceptance)", () => {
     });
 
     // When — mount
-    cy.mount(<App />);
+    mountApp();
     waitForDaemonSessionShell();
     cy.wait("@getAuthStatus");
 

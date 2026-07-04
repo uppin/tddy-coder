@@ -29,6 +29,7 @@ import { ConnectError, Code } from "@connectrpc/connect";
 import { Room } from "livekit-client";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { PrStackChat } from "../../src/components/sessions/prstack/PrStackChat";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
 import {
@@ -201,7 +202,7 @@ it("shows an inline error when the presenter stream fails after the workflow was
   });
 
   // When
-  mountWithRpc(<SessionsDrawerScreen />, backend);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
   prStackScreenPage.chatMessage(0).should("exist");
 

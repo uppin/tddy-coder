@@ -78,3 +78,13 @@ export function daemonHostsFromParticipants(
   }
   return hosts;
 }
+
+/**
+ * A daemon joins the common room as two participants: its discovery identity (the bare
+ * instance id, what {@link daemonHostsFromParticipants} lists) and its RPC-server identity,
+ * `daemon-{instanceId}` — see `tddy-daemon`'s `main.rs` (`rpc_identity = format!("daemon-{local_id}")`).
+ * Daemon-level RPC must address the latter.
+ */
+export function daemonRpcIdentity(instanceId: string): string {
+  return `daemon-${instanceId}`;
+}
