@@ -78,6 +78,12 @@ function buildList(room: Room): RoomParticipant[] {
 
 /**
  * Tracks all participants in a LiveKit room (local + remote), updating on join/leave/metadata.
+ *
+ * A LiveKit auto-reconnect (network blip, LiveKit restart, dev-server churn) keeps the same `Room`
+ * object — `useCommonRoom` never re-runs, so this effect doesn't either — and re-delivers the
+ * existing peer roster as a batch on `RoomEvent.Reconnected` rather than as per-participant
+ * `ParticipantConnected` events. Re-syncing on that event is what keeps consumers (e.g. the daemon
+ * selector) from going and staying empty after a reconnect.
  */
 export function useRoomParticipants(room: Room | null): RoomParticipant[] {
   const [participants, setParticipants] = useState<RoomParticipant[]>([]);
@@ -96,11 +102,13 @@ export function useRoomParticipants(room: Room | null): RoomParticipant[] {
     room.on(RoomEvent.ParticipantConnected, sync);
     room.on(RoomEvent.ParticipantDisconnected, sync);
     room.on(RoomEvent.ParticipantMetadataChanged, sync);
+    room.on(RoomEvent.Reconnected, sync);
 
     return () => {
       room.off(RoomEvent.ParticipantConnected, sync);
       room.off(RoomEvent.ParticipantDisconnected, sync);
       room.off(RoomEvent.ParticipantMetadataChanged, sync);
+      room.off(RoomEvent.Reconnected, sync);
     };
   }, [room]);
 

@@ -433,48 +433,82 @@ impl EligibleDaemonSource for LiveKitEligibleDaemonSource {
         };
         let room_slot = self.room_slot.clone();
         let session_token = session_token.to_string();
+        let peer_ids: Vec<String> = remotes.into_iter().map(|r| r.instance_id.0).collect();
         tokio::task::block_in_place(move || {
-            handle.block_on(async move {
-                let mut out = Vec::new();
-                for remote in remotes {
-                    let peer_id = remote.instance_id.0.clone();
-                    let req = ListProjectsRequest {
-                        session_token: session_token.clone(),
-                        local_only: true,
-                    };
-                    match forward_to_peer(
-                        &room_slot,
-                        &peer_id,
-                        "connection.ConnectionService",
-                        "ListProjects",
-                        req.encode_to_vec(),
-                    )
-                    .await
-                    {
-                        Ok(bytes) => match ListProjectsResponse::decode(bytes.as_slice()) {
-                            Ok(resp) => {
-                                for mut p in resp.projects {
-                                    p.daemon_instance_id = peer_id.clone();
-                                    out.push(p);
-                                }
-                            }
-                            Err(e) => log::warn!(
-                                "peer_project_entries: decode ListProjectsResponse from peer {} failed: {}",
-                                peer_id,
-                                e
-                            ),
-                        },
-                        Err(e) => log::warn!(
-                            "peer_project_entries: forward ListProjects to peer {} failed: {}",
-                            peer_id,
-                            e
-                        ),
+            handle.block_on(aggregate_peer_project_entries(
+                peer_ids,
+                PEER_PROJECT_FANOUT_TIMEOUT,
+                move |peer_id| {
+                    let room_slot = room_slot.clone();
+                    let session_token = session_token.clone();
+                    async move {
+                        let req = ListProjectsRequest {
+                            session_token,
+                            local_only: true,
+                        };
+                        let bytes = forward_to_peer(
+                            &room_slot,
+                            &peer_id,
+                            "connection.ConnectionService",
+                            "ListProjects",
+                            req.encode_to_vec(),
+                        )
+                        .await?;
+                        ListProjectsResponse::decode(bytes.as_slice())
+                            .map(|resp| resp.projects)
+                            .map_err(|e| {
+                                tddy_rpc::Status::internal(format!(
+                                    "decode ListProjectsResponse from peer {peer_id}: {e}"
+                                ))
+                            })
                     }
-                }
-                out
-            })
+                },
+            ))
         })
     }
+}
+
+/// Per-peer timeout for the [`aggregate_peer_project_entries`] fan-out. A peer whose RPC endpoint
+/// has gone (its unprefixed discovery identity can still linger in the common room after
+/// `daemon-<id>` times out) never answers a forwarded `ListProjects`; without this bound one such
+/// peer blocks the whole aggregated response and the project list never loads on any daemon.
+pub const PEER_PROJECT_FANOUT_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Aggregate project rows across `peer_ids`, bounding each peer's `forward` by `per_peer_timeout`.
+/// Rows from a responsive peer are tagged with that peer's instance id; a peer that times out or
+/// errors is logged and skipped, so aggregation returns whatever the responsive peers provided
+/// rather than blocking on a dead one. `forward` yields a single peer's project rows.
+pub async fn aggregate_peer_project_entries<F, Fut>(
+    peer_ids: Vec<String>,
+    per_peer_timeout: Duration,
+    forward: F,
+) -> Vec<ProtoProjectEntry>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<ProtoProjectEntry>, tddy_rpc::Status>>,
+{
+    let mut out = Vec::new();
+    for peer_id in peer_ids {
+        match tokio::time::timeout(per_peer_timeout, forward(peer_id.clone())).await {
+            Ok(Ok(rows)) => {
+                for mut p in rows {
+                    p.daemon_instance_id = peer_id.clone();
+                    out.push(p);
+                }
+            }
+            Ok(Err(e)) => log::warn!(
+                "aggregate_peer_project_entries: forward ListProjects to peer {} failed: {}",
+                peer_id,
+                e
+            ),
+            Err(_elapsed) => log::warn!(
+                "aggregate_peer_project_entries: peer {} did not respond within {:?}; skipping",
+                peer_id,
+                per_peer_timeout
+            ),
+        }
+    }
+    out
 }
 
 /// Spawn a background task that joins `livekit.common_room`, publishes metadata, and keeps
@@ -1008,13 +1042,15 @@ pub async fn forward_to_peer(
         )
     })?;
     log::debug!(
-        "forward_to_peer: peer_id={} service={} method={} (new Room::subscribe + RpcClient)",
+        "forward_to_peer: peer_id={} service={} method={} (shared per-room RpcClient factory)",
         peer_id,
         service,
         method
     );
-    let rpc_events = room_arc.subscribe();
-    let client = tddy_livekit::RpcClient::new_shared(room_arc, peer_id.to_string(), rpc_events);
+    // Draw the client from the room's shared factory: one request-id registry and one response
+    // loop for the whole common-room connection, regardless of how many peers we forward to or how
+    // often. Building a client per call (as this once did) leaked a `subscribe()` loop each time.
+    let client = tddy_livekit::LiveKitRpcClientFactory::for_room(room_arc).client(peer_id.to_string());
     client.call_unary(service, method, body).await
 }
 
@@ -1064,6 +1100,7 @@ pub async fn forward_add_project_to_host_via_livekit(
 mod tests {
     use super::*;
     use crate::multi_host::DaemonInstanceId;
+    use std::time::Duration;
 
     #[test]
     fn parse_daemon_advertisement_accepts_documented_json_shape() {
@@ -1242,5 +1279,77 @@ mod tests {
         assert_eq!(a, b);
         let suffix = a.strip_prefix("my-daemon-").expect("prefix");
         assert!(suffix.chars().all(|c| c.is_ascii_digit()));
+    }
+
+    // -----------------------------------------------------------------------
+    // Peer project aggregation must degrade gracefully around an unreachable peer.
+    //
+    // A peer whose discovery identity lingers in the room after its RPC endpoint has gone (observed
+    // live: `daemon-mac` disconnected on ConnectionTimeout while `mac` reconnected) accepts a
+    // forwarded `ListProjects` that never gets answered. Without a per-peer bound the fan-out blocks
+    // the whole `ListProjects` response, so no project list loads on any daemon. Aggregation must
+    // bound each peer and skip the ones that time out or error, returning the responsive rows.
+    // -----------------------------------------------------------------------
+
+    fn a_project_entry(project_id: &str) -> ProtoProjectEntry {
+        ProtoProjectEntry {
+            project_id: project_id.to_string(),
+            name: "Test Project".to_string(),
+            git_url: String::new(),
+            main_repo_path: "/repo".to_string(),
+            daemon_instance_id: String::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn aggregation_skips_a_peer_that_never_responds_and_returns_the_responsive_peer() {
+        // Given — "mac" never answers within the per-peer timeout; "laptop" returns one project
+        let forward = |peer_id: String| async move {
+            if peer_id == "mac" {
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+            }
+            Ok(vec![a_project_entry(&format!("proj-on-{peer_id}"))])
+        };
+
+        // When — aggregating with a short per-peer timeout (outer guard: the call must not block)
+        let rows = tokio::time::timeout(
+            Duration::from_secs(5),
+            aggregate_peer_project_entries(
+                vec!["mac".to_string(), "laptop".to_string()],
+                Duration::from_millis(50),
+                forward,
+            ),
+        )
+        .await
+        .expect("aggregation must not block on an unresponsive peer");
+
+        // Then — the hung peer is skipped; the responsive peer's row is present, tagged with its id
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].project_id, "proj-on-laptop");
+        assert_eq!(rows[0].daemon_instance_id, "laptop");
+    }
+
+    #[tokio::test]
+    async fn aggregation_skips_a_peer_whose_forward_returns_an_error() {
+        // Given — "mac" errors; "laptop" returns one project
+        let forward = |peer_id: String| async move {
+            if peer_id == "mac" {
+                return Err(tddy_rpc::Status::failed_precondition("peer offline"));
+            }
+            Ok(vec![a_project_entry(&format!("proj-on-{peer_id}"))])
+        };
+
+        // When
+        let rows = aggregate_peer_project_entries(
+            vec!["mac".to_string(), "laptop".to_string()],
+            Duration::from_secs(5),
+            forward,
+        )
+        .await;
+
+        // Then — the erroring peer contributes nothing; the responsive peer's row remains
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].project_id, "proj-on-laptop");
+        assert_eq!(rows[0].daemon_instance_id, "laptop");
     }
 }

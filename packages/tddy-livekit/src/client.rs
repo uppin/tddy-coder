@@ -51,9 +51,16 @@ impl RpcClient {
         target_identity: impl Into<ParticipantIdentity>,
         mut events: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
     ) -> Self {
+        let target_identity = target_identity.into();
         let local_identity = room.local_participant().identity().to_string();
         let engine = Arc::new(ClientEngine::new(local_identity));
         let engine_for_task = engine.clone();
+        // Only responses published by *this* client's target participant are ours. Several
+        // `RpcClient`s can share one room (a daemon forwarding to multiple peers, a browser talking
+        // to multiple daemons), and each `ClientEngine` numbers request ids from 1 independently —
+        // so without filtering by sender, a sibling client's response carrying a colliding request
+        // id would resolve the wrong pending call, crossing responses between peers.
+        let target_for_task = target_identity.clone();
 
         tokio::spawn(async move {
             log::debug!("RpcClient: background event loop started");
@@ -62,10 +69,17 @@ impl RpcClient {
                     payload,
                     topic,
                     kind: _,
-                    participant: _,
+                    participant,
                 } = event
                 {
                     if topic.as_deref() != Some(RPC_TOPIC) {
+                        continue;
+                    }
+                    let from_target = match &participant {
+                        Some(p) => p.identity() == target_for_task,
+                        None => false,
+                    };
+                    if !from_target {
                         continue;
                     }
                     let payload =
@@ -92,7 +106,23 @@ impl RpcClient {
 
         Self {
             room,
-            target_identity: target_identity.into(),
+            target_identity,
+            engine,
+        }
+    }
+
+    /// Build a client over a **shared** room + [`ClientEngine`], without spawning its own response
+    /// loop. Used by [`crate::client_factory::LiveKitRpcClientFactory`], which owns the single
+    /// response loop and request-id registry for a room and vends one of these per target — so
+    /// every client on that room shares one id space and one `subscribe()` loop.
+    pub(crate) fn from_shared_engine(
+        room: Arc<Room>,
+        target_identity: ParticipantIdentity,
+        engine: Arc<ClientEngine>,
+    ) -> Self {
+        Self {
+            room,
+            target_identity,
             engine,
         }
     }

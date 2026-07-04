@@ -31,4 +31,14 @@ export const daemonSelectorPage = {
     daemonSelectorPage.open();
     byTestId(daemonSelectorOption(instanceId)).click();
   },
+
+  /** Asserts the trigger currently shows the given daemon label as the active selection. */
+  expectShowsSelected(label: string) {
+    daemonSelectorPage.trigger().should("contain.text", label);
+  },
+
+  /** Asserts the selector has no daemon selected — the "Select daemon" placeholder is shown. */
+  expectEmpty() {
+    daemonSelectorPage.trigger().should("contain.text", "Select daemon");
+  },
 };

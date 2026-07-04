@@ -14,11 +14,18 @@ use crate::status::{Code, Status};
 type PendingUnary = HashMap<i32, oneshot::Sender<Result<Vec<u8>, Status>>>;
 type PendingStreams = HashMap<i32, mpsc::Sender<Result<Vec<u8>, Status>>>;
 
+/// Request ids are allocated **process-globally**, not per engine. Several `ClientEngine`s can
+/// share one transport's inbound stream — e.g. multiple `RpcClient`s on one LiveKit room, even
+/// several targeting the same peer (`forward_to_peer` builds one per call). Every client sees that
+/// stream's responses, so a per-engine counter (each starting at 1) would hand out colliding ids
+/// and one engine's response would resolve another's pending call. A global counter keeps every
+/// in-flight request id unique across the process, so a response matches only the call that owns it.
+static NEXT_REQUEST_ID: AtomicI32 = AtomicI32::new(1);
+
 /// Correlates outgoing requests with their responses by `request_id`. Owns no transport —
 /// callers hand it decoded envelopes and get back handles to await/stream from.
 pub struct ClientEngine {
     local_identity: String,
-    next_request_id: AtomicI32,
     pending_unary: Mutex<PendingUnary>,
     pending_streams: Mutex<PendingStreams>,
 }
@@ -27,7 +34,6 @@ impl ClientEngine {
     pub fn new(local_identity: impl Into<String>) -> Self {
         Self {
             local_identity: local_identity.into(),
-            next_request_id: AtomicI32::new(1),
             pending_unary: Mutex::new(HashMap::new()),
             pending_streams: Mutex::new(HashMap::new()),
         }
@@ -38,7 +44,7 @@ impl ClientEngine {
     }
 
     fn next_id(&self) -> i32 {
-        self.next_request_id.fetch_add(1, Ordering::SeqCst)
+        NEXT_REQUEST_ID.fetch_add(1, Ordering::SeqCst)
     }
 
     /// Register a pending unary call and return its request id and resolver.
