@@ -3,6 +3,17 @@
     "defaultMode": "acceptEdits",
     "allow": [
       "Bash",
+      "Bash(./dev*)",
+      "Bash(./test*)",
+      "Bash(./verify*)",
+      "Bash(./release*)",
+      "Bash(cargo test*)",
+      "Bash(cargo build*)",
+      "Bash(cargo clippy*)",
+      "Bash(cargo fmt*)",
+      "Bash(bun test*)",
+      "Bash(bun run*)",
+      "Bash(bunx cypress*)",
       "Glob",
       "Grep"
     ],
