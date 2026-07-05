@@ -149,6 +149,8 @@ export const TEST_IDS = {
   /** Parent-picker <select> — lists sessions that act as orchestrators; tool sessions only. */
   createSessionStackParentSelect: "create-session-stack-parent-select",
   createSessionModelSelect: "create-session-model-select",
+  /** Inline error shown when the model probe (ListAgentModels) fails for the selected agent. */
+  createSessionModelError: "create-session-model-error",
   createSessionPermissionModeSelect: "create-session-permission-mode-select",
   createSessionSandboxToggle: "create-session-sandbox-toggle",
   /** Collapsible "Managed codebase" section header — claude-cli sessions only. See

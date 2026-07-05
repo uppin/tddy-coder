@@ -69,6 +69,10 @@ function aPrStackModalBackend() {
   return aSessionsDrawerBackend([ORCHESTRATOR_SESSION])
     .onUnary(ConnectionService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(ConnectionService.method.listAgents, () => ({ agents: [{ id: "claude", label: "Claude" }] }))
+    .onUnary(ConnectionService.method.listAgentModels, () => ({
+      models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
+      defaultModel: "claude-opus-4-8",
+    }))
     .onUnary(ConnectionService.method.listTools, () => ({ tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }] }))
     .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: [] }))
     .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches: [] }))

@@ -38,6 +38,10 @@ const DAEMON_HOSTS: DaemonHost[] = [
 function aCreateSessionBackend(): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
     .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
+    .onUnary(ConnectionService.method.listAgentModels, () => ({
+      models: [{ id: "claude-opus-4-8", label: "Claude Opus 4.8" }],
+      defaultModel: "claude-opus-4-8",
+    }))
     .onUnary(ConnectionService.method.listProjects, () => ({
       projects: [{ projectId: "proj-1", name: "Test Project", mainRepoPath: "/repo" }],
     }))

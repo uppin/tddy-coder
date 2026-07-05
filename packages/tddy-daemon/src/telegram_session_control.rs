@@ -1018,6 +1018,7 @@ impl TelegramWorkflowSpawn {
             mouse: spawn_mouse,
             recipe: recipe_for_spawn.as_deref(),
             stack_parent: None,
+            model: None,
         };
         let coder_log_yaml =
             spawner::coder_log_config_yaml(self.config.coder_config_path.as_deref());

@@ -20,6 +20,7 @@ import {
   interceptStartSession,
 } from "../support/rpc/connectionRpcs";
 import {
+  listAgentModels,
   listAgents,
   listProjects,
   listSessions,
@@ -27,7 +28,14 @@ import {
 } from "../support/rpc/responses";
 import { toArrayBuffer, decodeProtoRequestBody } from "../support/rpc/protoRpc";
 import { TEST_IDS, byTestId } from "../support/testIds";
-import { CLAUDE_CLI_MODELS } from "../../src/constants/claudeCliModels";
+
+/** Model catalog the daemon advertises for the baseline agent (mirrors the curated Claude set). */
+const AGENT_MODELS = [
+  { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
+  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+];
+const DEFAULT_MODEL = "claude-opus-4-8";
 
 // ---------------------------------------------------------------------------
 // Test client (uses cy.intercept network layer)
@@ -64,6 +72,11 @@ function interceptBaseline() {
   cy.intercept("POST", "**/rpc/connection.ConnectionService/ListTools", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: toolsBody });
   }).as("listTools");
+
+  const modelsBody = toArrayBuffer(listAgentModels(AGENT_MODELS, DEFAULT_MODEL));
+  cy.intercept("POST", "**/rpc/connection.ConnectionService/ListAgentModels", (req) => {
+    req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: modelsBody });
+  }).as("listAgentModels");
 }
 
 // ---------------------------------------------------------------------------
@@ -113,11 +126,18 @@ describe("CreateSessionPane — tool session fields (default)", () => {
     byTestId(TEST_IDS.createSessionRecipeSelect).should("be.visible");
   });
 
-  it("does not show model, permission mode, or initial prompt for tool session type", () => {
+  it("shows a model select for tool session type sourced from the daemon", () => {
+    mountCreateSessionPane();
+    cy.wait(["@listProjects", "@listAgents", "@listTools", "@listAgentModels"]);
+
+    byTestId(TEST_IDS.createSessionModelSelect).should("be.visible");
+    byTestId(TEST_IDS.createSessionModelSelect).should("have.value", DEFAULT_MODEL);
+  });
+
+  it("does not show permission mode or initial prompt for tool session type", () => {
     mountCreateSessionPane();
     cy.wait(["@listProjects", "@listAgents", "@listTools"]);
 
-    byTestId(TEST_IDS.createSessionModelSelect).should("not.exist");
     byTestId(TEST_IDS.createSessionPermissionModeSelect).should("not.exist");
     byTestId(TEST_IDS.createSessionInitialPromptInput).should("not.exist");
   });
@@ -149,14 +169,15 @@ describe("CreateSessionPane — claude-cli session fields", () => {
     byTestId(TEST_IDS.createSessionRecipeSelect).should("not.exist");
   });
 
-  it("model dropdown contains all CLAUDE_CLI_MODELS options", () => {
+  it("model dropdown for claude-cli lists the daemon-advertised models", () => {
     mountCreateSessionPane();
     cy.wait(["@listProjects", "@listAgents", "@listTools"]);
 
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+    cy.wait("@listAgentModels");
 
     byTestId(TEST_IDS.createSessionModelSelect).within(() => {
-      CLAUDE_CLI_MODELS.forEach((m) => {
+      AGENT_MODELS.forEach((m) => {
         cy.get("option").should("contain.text", m.label);
       });
     });
@@ -219,7 +240,7 @@ describe("CreateSessionPane — create button enabled state", () => {
 
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
     byTestId(TEST_IDS.createSessionProjectSelect).select("proj-test");
-    // Model is pre-selected (first CLAUDE_CLI_MODELS entry) — button should be enabled
+    // Model defaults to the daemon-advertised default once the probe resolves — button enables.
 
     byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled");
   });
@@ -290,7 +311,7 @@ describe("CreateSessionPane — submit behaviour", () => {
       expect(req.recipe).to.equal("tdd");
       expect(req.toolPath).to.equal(TEST_TOOL_PATH);
       expect(req.sessionType).to.equal("");
-      expect(req.model).to.equal("");
+      expect(req.model).to.equal(DEFAULT_MODEL);
     });
 
     cy.get("@onCreated").should("have.been.calledWith", "new-session-tool-0001");
