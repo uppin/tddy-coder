@@ -2,6 +2,10 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-05 — Cursor Agent CLI session
+
+- **`session_type = "cursor-cli"`** — web **Create session** pane, RPC start/resume/connect, gRPC terminal I/O (same path as claude-cli), per-worktree **`.cursor/hooks.json`** → `ReportSessionStatus`, curated model catalog via **`ListAgentModels("cursor-cli")`**, Telegram **`/start-cursor`**. Sandbox and **`WaitingForInput`** are out of scope for v1. Feature: [cursor-cli-session.md](cursor-cli-session.md).
+
 ## 2026-07-04 — Durable web session (refresh token + RPC token gate)
 
 - Session tokens split into a short-lived **access** token (5 min, unchanged, sent on every RPC) and a new long-lived **refresh** token (7-day sliding); `ExchangeCode` now mints both, and `RefreshSession` consumes a refresh token to mint a new access token plus a slid refresh token — fixing users being logged out whenever a device slept or a tab was backgrounded past the 5-minute access-token TTL

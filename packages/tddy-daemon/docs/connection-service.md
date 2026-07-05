@@ -16,9 +16,9 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 | `ListEligibleDaemons` | Eligible daemon instances for host selection (`instance_id`, `label`, `is_local`); sourced from `EligibleDaemonSource` |
 | `ListSessionWorkflowFiles` | Lists workflow file **basenames** present on disk under `{sessions_base}/sessions/{session_id}/` using a **fixed server allowlist** (`changeset.yaml`, `.session.yaml`, `PRD.md`, `TODO.md`). Requires the same **`session_token`** → user → **`sessions_base`** resolution as **`ListSessions`**; **`session_id`** is validated with **`validate_session_id_segment`** before path construction. Entries whose canonical path falls outside the canonical session directory (e.g. symlink escape) are omitted from the list. |
 | `ReadSessionWorkflowFile` | Returns UTF-8 text for one allowlisted **basename** under the same resolved session directory. Rejects empty, non-allowlisted, or path-segment-unsafe **`basename`** values (`..`, `/`, `\`). Uses canonical path checks so resolved file paths cannot sit outside the session root. |
-| `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id`; optional `daemon_instance_id` selects target instance (local spawn when empty or local; non-local targets are unsupported until cross-daemon routing exists). When **`allowed_agents`** in config is non-empty, a non-empty **`agent`** on the request must match an entry **`id`** (after trim); otherwise the RPC returns **`INVALID_ARGUMENT`**. When **`allowed_agents`** is empty, **`agent`** is not restricted by this allowlist. When `session_type == "claude-cli"`, the tool-spawn path is bypassed entirely — see [Claude Code CLI sessions](#claude-code-cli-sessions) below. |
-| `ConnectSession` / `ResumeSession` | LiveKit / respawn (resume passes `project_id` from metadata); `session_id` is validated as a single path segment before resolving `{sessions_base}/sessions/{session_id}/`. For `session_type == "claude-cli"` sessions, `ConnectSession` returns empty LiveKit fields immediately (no token RPC). |
-| `StreamSessionTerminalIO` | Bidi stream for raw terminal I/O with a running `claude` CLI process. First client message must carry `session_token` + `session_id` for auth. Subsequent messages carry raw stdin bytes; the server forwards them to the child process stdin and broadcasts stdout/stderr back as `SessionTerminalOutput` messages. Resize: if the input starts with `\x1b]resize;{cols};{rows}\x07`, the daemon updates the terminal size instead of forwarding to stdin. Session must have `session_type == "claude-cli"`; returns `FAILED_PRECONDITION` when no active process is found. Accepts an optional `terminal_id` on the first message (empty ⇒ the reserved `"main"` claude terminal); an unknown id returns `NOT_FOUND`. |
+| `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id`; optional `daemon_instance_id` selects target instance (local spawn when empty or local; non-local targets are unsupported until cross-daemon routing exists). When **`allowed_agents`** in config is non-empty, a non-empty **`agent`** on the request must match an entry **`id`** (after trim); otherwise the RPC returns **`INVALID_ARGUMENT`**. When **`allowed_agents`** is empty, **`agent`** is not restricted by this allowlist. When `session_type == "claude-cli"` or `"cursor-cli"`, the tool-spawn path is bypassed — see [Claude Code CLI sessions](#claude-code-cli-sessions) and [Cursor Agent CLI sessions](#cursor-agent-cli-sessions). |
+| `ConnectSession` / `ResumeSession` | LiveKit / respawn (resume passes `project_id` from metadata); `session_id` is validated as a single path segment before resolving `{sessions_base}/sessions/{session_id}/`. For `session_type == "claude-cli"` or `"cursor-cli"` sessions, `ConnectSession` returns empty LiveKit fields immediately (no token RPC). |
+| `StreamSessionTerminalIO` | Bidi stream for raw terminal I/O with a running CLI child (`claude` or Cursor Agent CLI). First client message must carry `session_token` + `session_id` for auth. Subsequent messages carry raw stdin bytes; the server forwards them to the child process stdin and broadcasts stdout/stderr back as `SessionTerminalOutput` messages. Resize: if the input starts with `\x1b]resize;{cols};{rows}\x07`, the daemon updates the terminal size instead of forwarding to stdin. Session must have `session_type == "claude-cli"` or `"cursor-cli"`; returns `FAILED_PRECONDITION` when no active process is found. Accepts an optional `terminal_id` on the first message (empty ⇒ the reserved `"main"` terminal); an unknown id returns `NOT_FOUND`. |
 | `StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions` | Manage the **tools** running in a session — see [Session tools](#session-tools-multiple-terminals-per-session) below. |
 | `ExecuteTool` | Runs one exec-tool (Read, Write, StrReplace, Delete, Grep, Glob, Shell, Await, ReadLints, SemanticSearch) against the session's worktree. After execution, appends a `ToolCallRecord` to the durable JSONL log `~/.tddy/sessions/{session_id}/tool-calls.jsonl` (non-fatal: a write failure is logged as a warning and never blocks the response). Authenticates via `session_token` → OS user, validates `session_id`; optional `daemon_instance_id` for peer routing. |
 | `ListExecTools` | Returns the exec-tool catalog (`ToolDef` per tool: `name`, `description`, `input_schema_json`). Auth same as `ExecuteTool`. |
@@ -102,7 +102,7 @@ When `StartSessionRequest.session_type == "claude-cli"`, the standard tool-spawn
 3. `ClaudeCliSessionManager::start()` spawns the `claude` binary (resolved from `claude_cli.binary_path` in config, default `"claude"`) with `--model <model> --session-id <session_id>` in the worktree directory.
 4. `StartSessionResponse` returns empty LiveKit fields (`livekit_room`, `livekit_url`, `livekit_server_identity` all empty); the web client detects this and routes to `ConnectedClaudeCliTerminal`.
 
-**`ClaudeCliSessionManager`** (`claude_cli_session.rs`): in-memory registry (`HashMap<String, Arc<PtyHandle>>`) mapping session id to the active child process. `PtyHandle` holds:
+**`ClaudeCliSessionManager`** (`cli_session_manager.rs`, re-exported as `claude_cli_session`): in-memory registry (`HashMap<String, Arc<PtyHandle>>`) mapping session id to the active child process. `PtyHandle` holds:
 - `stdin_tx`: `mpsc::UnboundedSender<Bytes>` — feed bytes into the child stdin
 - `stdout_tx`: `broadcast::Sender<Bytes>` — subscribe for stdout/stderr chunks
 - `worktree_path`: for deletion
@@ -114,7 +114,27 @@ A background task monitors the child with `child.wait()`; on exit the entry is r
 
 **`DeleteSession` for claude-cli**: After PID termination (SIGTERM / SIGKILL), the daemon also calls `remove_dir_all` on the worktree path stored in `metadata.repo_path`. The session directory is then removed as usual.
 
-**`ReportSessionStatus`**: Hook-driven RPC. `tddy-tools session-hook` calls this after mapping a Claude Code lifecycle event to a `SessionActivityStatus`. The handler validates `session_id` (path traversal guard), resolves `sessions_base` from `os_user` directly (no web-token path), reads `.session.yaml`, requires `session_type == "claude-cli"`, constant-time-compares `hook_token`, then calls `update_activity_status(session_dir, status)`. Sessions with `hook_token: None` (e.g. Telegram-started) return `PermissionDenied`. See [claude-cli-session.md](../../../docs/ft/daemon/claude-cli-session.md#session-activity-status-via-per-worktree-hooks) for the full hook flow.
+**`ReportSessionStatus`**: Hook-driven RPC. `tddy-tools session-hook` calls this after mapping a Claude Code or Cursor Agent CLI lifecycle event to a `SessionActivityStatus`. The handler validates `session_id` (path traversal guard), resolves `sessions_base` from `os_user` directly (no web-token path), reads `.session.yaml`, requires `session_type == "claude-cli"` or `"cursor-cli"`, constant-time-compares `hook_token`, then calls `update_activity_status(session_dir, status)`. See [claude-cli-session.md](../../../docs/ft/daemon/claude-cli-session.md#session-activity-status-via-per-worktree-hooks) and [cursor-cli-session.md](../../../docs/ft/daemon/cursor-cli-session.md#activity-status-hooks-cursorhooksjson) for hook flows.
+
+## Cursor Agent CLI sessions
+
+When `StartSessionRequest.session_type == "cursor-cli"`, the standard tool-spawn path is bypassed. The flow mirrors [Claude Code CLI sessions](#claude-code-cli-sessions) with Cursor-specific hooks and argv:
+
+1. A dedicated git worktree is created (branch `cursor-cli/{short_id}` when `new_branch_name` is empty).
+2. `<worktree>/.cursor/hooks.json` is written via `tddy_core::build_cursor_hooks_settings` (`install_cursor_hooks_in_worktree` in `cursor_cli_spawn.rs`). Each hook invokes `tddy-tools session-hook`, which reads Cursor's stdin JSON `hook_event_name` and calls `ReportSessionStatus`.
+3. `.session.yaml` is written with `session_type = "cursor-cli"`, `model`, `repo_path`, `pid`, and `hook_token`.
+4. `CliSessionManager::start_cursor()` spawns the Cursor Agent CLI binary (config `cursor_cli.binary_path`, default `"agent"`) with `--model <model>` and an optional initial prompt positional arg.
+5. `StartSessionResponse` returns empty LiveKit fields; the web client routes to `ConnectedClaudeCliTerminal` (same gRPC terminal path as claude-cli).
+
+**Sandbox:** `sandbox == true` with `session_type == "cursor-cli"` returns `FAILED_PRECONDITION` (not supported in v1).
+
+**`WaitingForInput`:** Cursor hooks do not emit a permission-prompt equivalent; `activity_status` never transitions to `WaitingForInput` for cursor-cli sessions.
+
+**Config:** optional `cursor_cli:` block (`binary_path`, `tddy_tools_path`, `daemon_url`) — see `config::resolve_cursor_binary_path` and siblings.
+
+**Telegram:** `/start-cursor <prompt>` — project → branch → `tcur:` model keyboard → spawn; see [telegram-session-control.md](../../../docs/ft/daemon/telegram-session-control.md#start-cursor-flow).
+
+Feature reference: [cursor-cli-session.md](../../../docs/ft/daemon/cursor-cli-session.md).
 
 ## Managed-codebase workflow (workflow-aware claude-cli)
 
@@ -233,4 +253,5 @@ Every `ExecuteTool` invocation appends a JSON line to **`~/.tddy/sessions/{sessi
 - **Worktrees**: **`ListWorktreesForProject`** (cached rows; **`refresh`** runs **`WorktreeStatsCache::refresh_stats_for_project`** in a blocking worker), **`RemoveWorktree`** ( **`remove_worktree_under_repo`**, then **`invalidate_project`**). Project checkout: **`main_repo_path_for_host`** with the local **`daemon_instance_id`**. Details: [worktrees.md](./worktrees.md), [docs/ft/web/worktrees.md](../../../../docs/ft/web/worktrees.md).
 - Feature: [Session directory layout](../../../../docs/ft/coder/session-layout.md)
 - Feature: [docs/ft/daemon/project-concept.md](../../../../docs/ft/daemon/project-concept.md)
+- Feature: [Cursor Agent CLI session](../../../../docs/ft/daemon/cursor-cli-session.md)
 - [changesets.md](./changesets.md)
