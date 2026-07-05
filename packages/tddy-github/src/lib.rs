@@ -7,5 +7,8 @@ pub mod stub;
 pub use auth_service::AuthServiceImpl;
 pub use provider::{GitHubOAuthProvider, GitHubUser};
 pub use real::RealGitHubProvider;
-pub use session_token::{SessionClaims, SessionTokenError, SessionTokenSigner, SESSION_TOKEN_TTL};
+pub use session_token::{
+    SessionClaims, SessionTokenError, SessionTokenSigner, TokenKind, REFRESH_TOKEN_TTL,
+    SESSION_TOKEN_TTL,
+};
 pub use stub::StubGitHubProvider;

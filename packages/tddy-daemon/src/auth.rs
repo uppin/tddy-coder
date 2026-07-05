@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tddy_github::{
     AuthServiceImpl, GitHubOAuthProvider, RealGitHubProvider, SessionTokenSigner,
-    StubGitHubProvider,
+    StubGitHubProvider, TokenKind,
 };
 use tddy_rpc::ServiceEntry;
 use tddy_service::AuthServiceServer;
@@ -69,10 +69,18 @@ pub fn build_auth_entries(config: &DaemonConfig, web_host: &str, web_port: u16) 
         };
     };
 
-    // Verify the token's signature/expiry and extract the login. With no signer, every token is
-    // rejected (returns `None`), so all token-gated RPCs are unauthenticated.
+    // Verify the token's signature/expiry and extract the login. Only access-kind tokens
+    // authenticate an RPC — a long-lived refresh token is rejected here so it cannot be used as
+    // an RPC credential. With no signer, every token is rejected (returns `None`), so all
+    // token-gated RPCs are unauthenticated.
     let user_resolver: SessionUserResolver = match signer {
-        Some(signer) => Arc::new(move |token: &str| signer.verify(token).ok().map(|c| c.login)),
+        Some(signer) => Arc::new(move |token: &str| {
+            signer
+                .verify(token)
+                .ok()
+                .filter(|c| c.kind == TokenKind::Access)
+                .map(|c| c.login)
+        }),
         None => Arc::new(|_: &str| None),
     };
 
@@ -181,6 +189,45 @@ mod tests {
 
         // Then it is rejected
         assert_eq!(login, None);
+    }
+
+    #[test]
+    fn the_resolver_accepts_an_access_kind_token() {
+        // Given auth wired with a shared signing secret
+        let (config, _dir) = a_config(Some("shared-secret"));
+        let resolver = build_auth_entries(&config, "127.0.0.1", 0)
+            .user_resolver
+            .expect("auth should produce a resolver");
+        // and an access-kind token minted with that secret
+        let token =
+            tddy_github::SessionTokenSigner::new(b"shared-secret").mint_access(&a_github_user("u"));
+
+        // When the resolver resolves it
+        let login = (resolver)(&token);
+
+        // Then the RPC is authenticated
+        assert_eq!(login.as_deref(), Some("u"));
+    }
+
+    #[test]
+    fn the_resolver_rejects_a_refresh_kind_token() {
+        // Given auth wired with a shared signing secret
+        let (config, _dir) = a_config(Some("shared-secret"));
+        let resolver = build_auth_entries(&config, "127.0.0.1", 0)
+            .user_resolver
+            .expect("auth should produce a resolver");
+        // and a *refresh*-kind token minted with that same secret
+        let refresh = tddy_github::SessionTokenSigner::new(b"shared-secret")
+            .mint_refresh(&a_github_user("u"));
+
+        // When the resolver resolves it
+        let login = (resolver)(&refresh);
+
+        // Then it is rejected — the long-lived refresh token cannot authenticate an RPC
+        assert_eq!(
+            login, None,
+            "a refresh-kind token must not authenticate an RPC"
+        );
     }
 
     #[test]

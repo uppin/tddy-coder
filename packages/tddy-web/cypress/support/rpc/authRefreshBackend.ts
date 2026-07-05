@@ -1,29 +1,19 @@
 /**
- * In-memory `auth.AuthService` (+ minimal `connection.ConnectionService`) backend for testing the
- * shared session-token refresh lifecycle (`AuthProvider`/`useAuthContext`).
+ * In-memory `auth.AuthService` backend for the shared session-token lifecycle
+ * (`AuthProvider`/`useAuthContext`).
  *
- * `RefreshSession` is a pure function of the sent token (`<sent-token>-refreshed`) rather than a
- * call-counter — deterministic regardless of how many independent callers happen to refresh the
- * same starting token, so tests aren't sensitive to unmigrated legacy `useAuth()` call sites (e.g.
- * `SelectedDaemonProvider`) also refreshing in the background. `ListSessions` returns an empty
- * list; tests only care about the `sessionToken` field it was sent.
+ * The session lifecycle moved to the two-token model (short-lived access token + long-lived
+ * refresh token), so this is a thin alias of {@link aDurableSessionBackend} — `RefreshSession`
+ * consumes a refresh token and returns a fresh access token plus a slid refresh token. Kept as a
+ * named export so existing specs keep a stable import while sharing one backend implementation.
  */
 
-import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AuthService } from "../../../src/gen/auth_pb";
-import { ConnectionService } from "../../../src/gen/connection_pb";
-import { aGitHubUser } from "./responses";
-
-export function anAuthRefreshBackend(): InMemoryRpcBackend {
-  return anInMemoryRpcBackend()
-    .implement(AuthService, {
-      getAuthStatus: async () => ({ authenticated: true, user: aGitHubUser() }),
-      refreshSession: async (req) => ({
-        sessionToken: `${req.sessionToken}-refreshed`,
-        user: aGitHubUser(),
-      }),
-    })
-    .implement(ConnectionService, {
-      listSessions: async () => ({ sessions: [] }),
-    });
-}
+export {
+  aDurableSessionBackend as anAuthRefreshBackend,
+  CURRENT_ACCESS_TOKEN,
+  EXPIRED_ACCESS_TOKEN,
+  VALID_REFRESH_TOKEN,
+  REFRESHED_ACCESS_TOKEN,
+  ACCESS_TOKEN_KEY,
+  REFRESH_TOKEN_KEY,
+} from "./durableSessionBackend";

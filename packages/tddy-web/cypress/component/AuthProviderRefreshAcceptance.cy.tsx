@@ -1,20 +1,18 @@
 /**
  * Acceptance tests for the shared `AuthProvider` / `useAuthContext` session-token lifecycle.
  *
- * Reproduces the reported bug: RPC calls fail with an expired token because `useAuth()` is
- * currently mounted independently in up to 7 places (`App`, `ConnectionForm`,
- * `SelectedDaemonProvider`, `WorktreesAppPage`, `VmsAppPage`, `RpcPlaygroundAppPage`,
- * `AuthCallback`), each with its own React state and its own 4-minute refresh timer — plus three
- * more screens (`SessionsDrawerScreen`, `TasksDrawerScreen`, `ProjectsAppPage`) that read
- * `localStorage` directly and never refresh anything themselves. `SelectedDaemonProvider` keys its
- * children on `selectedInstanceId` (`src/rpc/selectedDaemon.tsx`), so switching to a non-default
- * daemon remounts whichever of those independent `useAuth()` instances happened to live in that
- * subtree, destroying its timer.
+ * Reproduces the bug behind this provider: `useAuth()` used to be mounted independently in many
+ * places (`App`, `ConnectionForm`, `SelectedDaemonProvider`, `WorktreesAppPage`, `VmsAppPage`,
+ * `RpcPlaygroundAppPage`, `AuthCallback`) plus screens reading `localStorage` directly, so each
+ * had its own session state and could refresh in an uncoordinated way; a daemon-switch remount
+ * (`SelectedDaemonProvider` keys its children on `selectedInstanceId`) destroyed whichever instance
+ * lived in that subtree.
  *
- * `AuthProvider` fixes this by being the *only* place that owns the session token and its refresh
- * timer. Every consumer reads the same value via `useAuthContext()`, so a descendant remount (a
- * daemon switch) cannot reset or duplicate the timer, and the token used for RPC calls to *any*
- * connected daemon is always the one shared, centrally refreshed value.
+ * `AuthProvider` fixes this by owning the *only* session store. Every consumer reads the same value
+ * via `useAuthContext()`, so a descendant remount cannot reset or duplicate anything, and the token
+ * used for RPC calls to *any* connected daemon is the one shared, centrally refreshed value. Under
+ * the two-token model, an expired access token is transparently re-minted from the refresh token
+ * exactly once for the whole subtree rather than once per consumer.
  */
 
 import React, { useState } from "react";
@@ -25,13 +23,15 @@ import { ConnectionService } from "../../src/gen/connection_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { anAuthRefreshBackend } from "../support/rpc/authRefreshBackend";
-
-// Matches the (currently unexported) `SESSION_REFRESH_INTERVAL_MS` in `src/hooks/useAuth.ts` —
-// `AuthProvider` reuses that same interval for its single, centralized refresh timer.
-const SESSION_REFRESH_INTERVAL_MS = 4 * 60 * 1000;
-
-const INITIAL_TOKEN = "session-token-v1";
+import {
+  anAuthRefreshBackend,
+  CURRENT_ACCESS_TOKEN,
+  EXPIRED_ACCESS_TOKEN,
+  VALID_REFRESH_TOKEN,
+  REFRESHED_ACCESS_TOKEN,
+  ACCESS_TOKEN_KEY,
+  REFRESH_TOKEN_KEY,
+} from "../support/rpc/authRefreshBackend";
 
 // ---------------------------------------------------------------------------
 // Test harness probes
@@ -66,8 +66,8 @@ function RemountableTokenProbe({ probeId }: { probeId: string }) {
 
 /**
  * Issues `ConnectionService.ListSessions` (daemon-level RPC) with the shared session token on
- * click — proves the refreshed token from `useAuthContext()` actually reaches a request sent to a
- * connected daemon, not just a display value.
+ * click — proves the token from `useAuthContext()` actually reaches a request sent to a connected
+ * daemon, not just a display value.
  */
 function DaemonRpcProbe({ probeId }: { probeId: string }) {
   const { sessionToken } = useAuthContext();
@@ -104,6 +104,11 @@ const authProbe = {
   },
 };
 
+function givenStoredTokens(win: Window, accessToken: string, refreshToken: string) {
+  win.localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  win.localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -111,11 +116,11 @@ const authProbe = {
 describe("AuthProvider — shared session-token lifecycle", () => {
   beforeEach(() => {
     cy.clearLocalStorage();
-    cy.window().then((win) => win.localStorage.setItem("tddy_session_token", INITIAL_TOKEN));
   });
 
   it("shares one session token across every consumer in its subtree", () => {
-    // Given — a backend that authenticates the stored token
+    // Given — a currently-valid access token that needs no refresh
+    cy.window().then((win) => givenStoredTokens(win, CURRENT_ACCESS_TOKEN, VALID_REFRESH_TOKEN));
     const backend = anAuthRefreshBackend();
 
     // When — two independent components consume the shared context
@@ -127,16 +132,18 @@ describe("AuthProvider — shared session-token lifecycle", () => {
       backend,
     );
 
-    // Then — both see the same token
-    authProbe.expectToken("a", INITIAL_TOKEN);
-    authProbe.expectToken("b", INITIAL_TOKEN);
+    // Then — both see the same token, and no refresh was needed
+    authProbe.expectToken("a", CURRENT_ACCESS_TOKEN);
+    authProbe.expectToken("b", CURRENT_ACCESS_TOKEN);
+    cy.wrap(null).should(() => {
+      expect(backend.callsTo(AuthService.method.refreshSession)).to.have.length(0);
+    });
   });
 
-  it("refreshes the shared token exactly once per interval and updates every consumer", () => {
-    // Given — three consumers, mirroring today's App / WorktreesAppPage / VmsAppPage each
-    // mounting their own independent useAuth() instance
+  it("re-mints the shared token exactly once for every consumer when the access token has expired", () => {
+    // Given — three consumers and a slept-device state (expired access, valid refresh)
+    cy.window().then((win) => givenStoredTokens(win, EXPIRED_ACCESS_TOKEN, VALID_REFRESH_TOKEN));
     const backend = anAuthRefreshBackend();
-    cy.clock();
     mountWithRpc(
       <AuthProvider>
         <TokenProbe probeId="a" />
@@ -145,10 +152,6 @@ describe("AuthProvider — shared session-token lifecycle", () => {
       </AuthProvider>,
       backend,
     );
-    authProbe.expectToken("a", INITIAL_TOKEN);
-
-    // When — the refresh interval elapses
-    cy.tick(SESSION_REFRESH_INTERVAL_MS);
 
     // Then — exactly one RefreshSession call was made, not one per consumer
     cy.wrap(null).should(() => {
@@ -156,70 +159,60 @@ describe("AuthProvider — shared session-token lifecycle", () => {
     });
 
     // And — every consumer observes the same refreshed token
-    const refreshedToken = `${INITIAL_TOKEN}-refreshed`;
-    authProbe.expectToken("a", refreshedToken);
-    authProbe.expectToken("b", refreshedToken);
-    authProbe.expectToken("c", refreshedToken);
+    authProbe.expectToken("a", REFRESHED_ACCESS_TOKEN);
+    authProbe.expectToken("b", REFRESHED_ACCESS_TOKEN);
+    authProbe.expectToken("c", REFRESHED_ACCESS_TOKEN);
   });
 
-  it("keeps refreshing on schedule after a descendant subtree remounts", () => {
+  it("keeps a remounted descendant on the current token without a second refresh", () => {
     // Given — a consumer inside a boundary that gets remounted independently, as
     // SelectedDaemonProvider does to its children on every daemon switch
+    cy.window().then((win) => givenStoredTokens(win, EXPIRED_ACCESS_TOKEN, VALID_REFRESH_TOKEN));
     const backend = anAuthRefreshBackend();
-    cy.clock();
     mountWithRpc(
       <AuthProvider>
         <RemountableTokenProbe probeId="a" />
       </AuthProvider>,
       backend,
     );
-    authProbe.expectToken("a", INITIAL_TOKEN);
+    authProbe.expectToken("a", REFRESHED_ACCESS_TOKEN);
 
     // When — the descendant remounts (e.g. a daemon switch)
     authProbe.remount("a");
 
-    // Then — the freshly remounted consumer immediately shows the current token, with no reset to
-    // a loading/empty state
-    authProbe.expectToken("a", INITIAL_TOKEN);
+    // Then — the freshly remounted consumer immediately shows the current token
+    authProbe.expectToken("a", REFRESHED_ACCESS_TOKEN);
 
-    // When — the refresh interval elapses afterwards
-    cy.tick(SESSION_REFRESH_INTERVAL_MS);
-
-    // Then — the remount did not duplicate the timer: still exactly one RefreshSession call, and
-    // the remounted consumer picks up the refreshed token
+    // And — the remount did not trigger a second refresh
     cy.wrap(null).should(() => {
       expect(backend.callsTo(AuthService.method.refreshSession)).to.have.length(1);
     });
-    authProbe.expectToken("a", `${INITIAL_TOKEN}-refreshed`);
   });
 
   it("carries the refreshed token into a daemon-level RPC call made through useDaemonClient", () => {
-    // Given — a probe that issues ConnectionService.ListSessions with the shared token, routed
-    // over the shared common-room LiveKit connection to a selected daemon
+    // Given — a slept-device state routed over the shared common-room LiveKit connection
+    cy.window().then((win) => givenStoredTokens(win, EXPIRED_ACCESS_TOKEN, VALID_REFRESH_TOKEN));
     const backend = anAuthRefreshBackend();
-    cy.clock();
     mountWithRecordingLiveKitRpc(
-      <AuthProvider>{withSelectedDaemon(<DaemonRpcProbe probeId="a" />)}</AuthProvider>,
+      <AuthProvider>
+        {withSelectedDaemon(
+          <div>
+            <TokenProbe probeId="a" />
+            <DaemonRpcProbe probeId="a" />
+          </div>,
+        )}
+      </AuthProvider>,
       backend,
     );
 
-    // When — the operator triggers a call before any refresh has happened
+    // When — the shared token has refreshed and the operator triggers a call
+    authProbe.expectToken("a", REFRESHED_ACCESS_TOKEN);
     authProbe.invokeListSessions("a");
 
-    // Then — the daemon received the original token
+    // Then — the daemon received the refreshed token, not a stale one
     cy.wrap(null).should(() => {
       const calls = backend.callsTo(ConnectionService.method.listSessions);
-      expect(calls.map((c) => c.sessionToken)).to.deep.equal([INITIAL_TOKEN]);
-    });
-
-    // When — the shared token is refreshed and the operator calls again
-    cy.tick(SESSION_REFRESH_INTERVAL_MS);
-    authProbe.invokeListSessions("a");
-
-    // Then — the daemon received the refreshed token, not the stale pre-refresh one
-    cy.wrap(null).should(() => {
-      const calls = backend.callsTo(ConnectionService.method.listSessions);
-      expect(calls.map((c) => c.sessionToken)).to.deep.equal([INITIAL_TOKEN, `${INITIAL_TOKEN}-refreshed`]);
+      expect(calls.map((c) => c.sessionToken)).to.deep.equal([REFRESHED_ACCESS_TOKEN]);
     });
   });
 });

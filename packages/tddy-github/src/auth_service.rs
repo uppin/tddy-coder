@@ -94,11 +94,15 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
                 "session token signing is not configured",
             ));
         };
-        let session_token = signer.mint(&user, crate::session_token::SESSION_TOKEN_TTL);
+        // A short-lived access token for RPCs plus a long-lived refresh token to mint further
+        // access tokens without re-login.
+        let session_token = signer.mint_access(&user);
+        let refresh_token = signer.mint_refresh(&user);
 
         Ok(Response::new(ExchangeCodeResponse {
             session_token,
             user: Some(proto_user),
+            refresh_token,
         }))
     }
 
@@ -107,10 +111,13 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
         request: Request<GetAuthStatusRequest>,
     ) -> Result<Response<GetAuthStatusResponse>, Status> {
         let req = request.into_inner();
+        // Only an access-kind token authenticates a session — a refresh token is a minting
+        // credential, never proof of an authenticated session (matches the daemon RPC resolver).
         let claims = self
             .signer
             .as_ref()
-            .and_then(|signer| signer.verify(&req.session_token).ok());
+            .and_then(|signer| signer.verify(&req.session_token).ok())
+            .filter(|claims| claims.kind == crate::session_token::TokenKind::Access);
         Ok(Response::new(match claims {
             Some(claims) => GetAuthStatusResponse {
                 authenticated: true,
@@ -133,20 +140,30 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
                 "session token signing is not configured",
             ));
         };
-        // Only a currently-valid token can be refreshed; an expired/forged one forces re-login.
+        // Only a currently-valid refresh token can extend a session; an expired/forged one forces
+        // re-login.
         let claims = signer
-            .verify(&req.session_token)
+            .verify(&req.refresh_token)
             .map_err(|e| Status::unauthenticated(e.to_string()))?;
+        // A short-lived access token must not be usable to mint — only a refresh token can.
+        if claims.kind != crate::session_token::TokenKind::Refresh {
+            return Err(Status::unauthenticated(
+                "session token: not a refresh token",
+            ));
+        }
         let user = GitHubUser {
             id: claims.id,
             login: claims.login,
             avatar_url: claims.avatar_url,
             name: claims.name,
         };
-        let session_token = signer.mint(&user, crate::session_token::SESSION_TOKEN_TTL);
+        // Mint a fresh access token plus a slid refresh token (fresh 7-day window).
+        let session_token = signer.mint_access(&user);
+        let refresh_token = signer.mint_refresh(&user);
         Ok(Response::new(RefreshSessionResponse {
             session_token,
             user: Some(to_proto_user(&user)),
+            refresh_token,
         }))
     }
 
@@ -330,7 +347,7 @@ mod tests {
     // Signed-token minting, refresh, and the "no signer configured" guard.
     // -------------------------------------------------------------------------
 
-    use crate::session_token::{SessionTokenSigner, SESSION_TOKEN_TTL};
+    use crate::session_token::{SessionTokenSigner, TokenKind, REFRESH_TOKEN_TTL};
     use std::time::{Duration, SystemTime};
 
     #[tokio::test]
@@ -378,57 +395,122 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refresh_session_returns_a_token_that_expires_later_than_the_original() {
-        // Given a signed service and a still-valid token issued a minute ago
+    async fn exchange_code_returns_both_an_access_token_and_a_refresh_token() {
+        // Given a signed auth service that knows a login code
         let secret = b"shared-secret";
         let (stub, user) = setup();
+        stub.register_code("login-code", user);
         let service = AuthServiceImpl::new_signed(stub, SessionTokenSigner::new(secret));
-        let signer = SessionTokenSigner::new(secret);
-        let issued_at = SystemTime::now() - Duration::from_secs(60);
-        let token = signer.mint_with_issued_at(&user, issued_at, SESSION_TOKEN_TTL);
+        let state = service
+            .get_auth_url(Request::new(GetAuthUrlRequest {}))
+            .await
+            .expect("auth url")
+            .into_inner()
+            .state;
 
-        // When the session is refreshed
-        let refreshed = service
-            .refresh_session(Request::new(RefreshSessionRequest {
-                session_token: token.clone(),
+        // When a code is exchanged
+        let resp = service
+            .exchange_code(Request::new(ExchangeCodeRequest {
+                code: "login-code".to_string(),
+                state,
             }))
             .await
-            .expect("refresh of a valid token should succeed")
+            .expect("exchange should succeed")
             .into_inner();
 
-        // Then the new token is for the same user and expires later than the original
-        let old_exp = signer.verify(&token).expect("original valid").exp;
-        let new_exp = signer
-            .verify(&refreshed.session_token)
-            .expect("refreshed valid")
-            .exp;
-        assert!(
-            new_exp > old_exp,
-            "refreshed token should expire later (old={old_exp}, new={new_exp})"
+        // Then login returns an access token and a refresh token of the right kinds
+        let verifier = SessionTokenSigner::new(secret);
+        assert_eq!(
+            verifier
+                .verify(&resp.session_token)
+                .expect("access verifies")
+                .kind,
+            TokenKind::Access
         );
-        assert_eq!(refreshed.user.expect("user").login, "testuser");
+        assert_eq!(
+            verifier
+                .verify(&resp.refresh_token)
+                .expect("refresh verifies")
+                .kind,
+            TokenKind::Refresh
+        );
     }
 
     #[tokio::test]
-    async fn refresh_session_rejects_an_expired_token() {
-        // Given a signed service and a token that expired ten minutes ago
+    async fn refresh_session_mints_a_new_access_token_and_a_sliding_refresh_token() {
+        // Given a signed service and a valid refresh token
         let secret = b"shared-secret";
         let (stub, user) = setup();
         let service = AuthServiceImpl::new_signed(stub, SessionTokenSigner::new(secret));
-        let expired = SessionTokenSigner::new(secret).mint_with_issued_at(
+        let refresh_token = SessionTokenSigner::new(secret).mint_refresh(&user);
+
+        // When the session is refreshed
+        let resp = service
+            .refresh_session(Request::new(RefreshSessionRequest { refresh_token }))
+            .await
+            .expect("refresh of a valid refresh token should succeed")
+            .into_inner();
+
+        // Then it returns a new access token plus a refresh token slid to a fresh 7-day window
+        let verifier = SessionTokenSigner::new(secret);
+        let access = verifier
+            .verify(&resp.session_token)
+            .expect("new access valid");
+        let refresh = verifier
+            .verify(&resp.refresh_token)
+            .expect("new refresh valid");
+        assert_eq!(access.kind, TokenKind::Access);
+        assert_eq!(refresh.kind, TokenKind::Refresh);
+        assert_eq!(refresh.exp - refresh.iat, REFRESH_TOKEN_TTL.as_secs());
+        assert_eq!(resp.user.expect("user").login, "testuser");
+    }
+
+    #[tokio::test]
+    async fn refresh_session_rejects_an_access_kind_token() {
+        // Given a signed service and an *access*-kind token
+        let secret = b"shared-secret";
+        let (stub, user) = setup();
+        let service = AuthServiceImpl::new_signed(stub, SessionTokenSigner::new(secret));
+        let access_token = SessionTokenSigner::new(secret).mint_access(&user);
+
+        // When it is presented to refresh
+        let result = service
+            .refresh_session(Request::new(RefreshSessionRequest {
+                refresh_token: access_token,
+            }))
+            .await;
+
+        // Then it is rejected — a short-lived access token cannot extend a session
+        assert!(
+            result.is_err(),
+            "an access-kind token must not be refreshable"
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_session_rejects_an_expired_refresh_token() {
+        // Given a signed service and a refresh token whose 7-day window lapsed a day ago
+        let secret = b"shared-secret";
+        let (stub, user) = setup();
+        let service = AuthServiceImpl::new_signed(stub, SessionTokenSigner::new(secret));
+        let expired = SessionTokenSigner::new(secret).mint_kind_with_issued_at(
             &user,
-            SystemTime::now() - Duration::from_secs(600),
-            Duration::from_secs(300),
+            TokenKind::Refresh,
+            SystemTime::now() - (REFRESH_TOKEN_TTL + Duration::from_secs(86_400)),
+            REFRESH_TOKEN_TTL,
         );
 
         // When a refresh is attempted
         let result = service
             .refresh_session(Request::new(RefreshSessionRequest {
-                session_token: expired,
+                refresh_token: expired,
             }))
             .await;
 
-        // Then it is rejected
-        assert!(result.is_err(), "refresh must reject an expired token");
+        // Then it is rejected — the session has ended and re-login is required
+        assert!(
+            result.is_err(),
+            "refresh must reject an expired refresh token"
+        );
     }
 }
