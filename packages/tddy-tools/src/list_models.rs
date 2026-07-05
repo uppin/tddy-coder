@@ -10,8 +10,8 @@ use anyhow::Context;
 use clap::Parser;
 use serde::Serialize;
 use tddy_core::backend::{
-    claude_cli_models, AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodexAcpBackend,
-    CodexBackend, CursorBackend, StubBackend,
+    claude_cli_models, cursor_cli_models, AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend,
+    CodexAcpBackend, CodexBackend, CursorBackend, StubBackend,
 };
 use tddy_core::backend::{BackendModels, CodingBackend};
 
@@ -70,6 +70,9 @@ impl From<&BackendModels> for ModelsJson {
 /// The `claude-cli` session type is not a `CodingBackend`; it enumerates a curated catalog.
 pub const CLAUDE_CLI_AGENT: &str = "claude-cli";
 
+/// The `cursor-cli` session type pseudo-agent for model listing.
+pub const CURSOR_CLI_AGENT: &str = "cursor-cli";
+
 /// Render a [`BackendModels`] catalog as the daemon⇄tools JSON contract:
 /// `{"models":[{"id":..,"label":..}],"default_model":".."}`.
 #[must_use]
@@ -93,6 +96,9 @@ async fn resolve_models(args: &ListModelsArgs) -> anyhow::Result<BackendModels> 
     let agent = args.agent.trim();
     if agent == CLAUDE_CLI_AGENT {
         return Ok(claude_cli_models());
+    }
+    if agent == CURSOR_CLI_AGENT {
+        return Ok(cursor_cli_models());
     }
     let backend =
         build_backend(args).with_context(|| format!("no backend for agent {:?}", agent))?;
@@ -150,5 +156,17 @@ mod tests {
         assert_eq!(parsed["models"][0]["id"], "opus");
         assert_eq!(parsed["models"][0]["label"], "Claude Opus");
         assert_eq!(parsed["models"][1]["id"], "sonnet");
+    }
+
+    #[test]
+    fn list_models_cursor_cli_agent_returns_curated_catalog() {
+        // Given / When
+        let catalog = cursor_cli_models();
+        let json = render_models_json(&catalog);
+
+        // Then
+        assert!(json.contains("gpt-5.3-codex"));
+        assert_eq!(catalog.default_model, "claude-4.6-sonnet-medium-thinking");
+        assert!(catalog.models.len() >= 3);
     }
 }

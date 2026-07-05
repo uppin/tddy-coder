@@ -164,6 +164,20 @@ pub fn session_list_status_from_session_dir(
         });
     }
 
+    if meta.session_type.as_deref() == Some("cursor-cli") {
+        return Ok(SessionListStatusDisplay {
+            workflow_goal: String::new(),
+            workflow_state: String::new(),
+            elapsed_display: String::new(),
+            agent: "cursor-cli".to_string(),
+            model: meta.model.clone().unwrap_or_default(),
+            activity_status: meta.activity_status.clone().unwrap_or_default(),
+            orchestrator_session_id: String::new(),
+            recipe: String::new(),
+            stack_plan_json: String::new(),
+        });
+    }
+
     let changeset = match read_changeset(session_dir) {
         Ok(c) => c,
         Err(e) => {

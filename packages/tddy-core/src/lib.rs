@@ -5,6 +5,7 @@ pub mod backend;
 pub mod branch_worktree_intent;
 pub mod changeset;
 pub mod claude_hooks;
+pub mod cursor_hooks;
 pub mod elapsed_format;
 pub mod error;
 pub mod feature_start_slash;
@@ -59,6 +60,7 @@ pub use changeset::{
     PrInternalStatus, Stack, StackNode,
 };
 pub use claude_hooks::{build_claude_hooks_settings, HookCommandParams};
+pub use cursor_hooks::build_cursor_hooks_settings;
 pub use elapsed_format::format_elapsed_compact;
 pub use error::{BackendError, ParseError, WorkflowError};
 pub use feature_start_slash::{

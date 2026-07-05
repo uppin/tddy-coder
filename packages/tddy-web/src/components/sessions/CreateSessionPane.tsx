@@ -9,6 +9,7 @@ import { Button } from "../ui/button";
 
 /** Pseudo-agent key used to fetch the claude-cli session type's model catalog. */
 const CLAUDE_CLI_AGENT = "claude-cli";
+const CURSOR_CLI_AGENT = "cursor-cli";
 
 const WORKFLOW_RECIPES = [
   "tdd",
@@ -27,7 +28,7 @@ const WORKFLOW_RECIPES = [
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
-type SessionType = "tool" | "claude-cli";
+type SessionType = "tool" | "claude-cli" | "cursor-cli";
 type BranchIntent = "new_branch_from_base" | "work_on_selected_branch";
 
 /**
@@ -115,7 +116,12 @@ export function CreateSessionPane({
 
   // The model catalog is enumerated per selected backend: the chosen agent for tool sessions, and
   // the "claude-cli" pseudo-agent for the Claude CLI session type.
-  const modelAgentKey = sessionType === "claude-cli" ? CLAUDE_CLI_AGENT : agent;
+  const modelAgentKey =
+    sessionType === "claude-cli"
+      ? CLAUDE_CLI_AGENT
+      : sessionType === "cursor-cli"
+        ? CURSOR_CLI_AGENT
+        : agent;
   const agentModels = useAgentModels(client, sessionToken, modelAgentKey, daemonInstanceId);
 
   // Reset the model selection to the backend's advertised default whenever the catalog changes
@@ -265,6 +271,21 @@ export function CreateSessionPane({
           initialPrompt: "",
           sandbox: false,
         });
+      } else if (sessionType === "cursor-cli") {
+        res = await client.startSession({
+          ...commonParams,
+          toolPath: "",
+          agent: "",
+          recipe: "",
+          stackParent: "",
+          sessionType: "cursor-cli",
+          model,
+          permissionMode: "",
+          initialPrompt,
+          sandbox: false,
+          managedCodebase: false,
+          specializedAgents: [],
+        });
       } else {
         res = await client.startSession({
           ...commonParams,
@@ -361,6 +382,19 @@ export function CreateSessionPane({
         >
           Claude CLI
         </button>
+        <button
+          type="button"
+          data-testid="create-session-type-cursor-cli"
+          aria-pressed={sessionType === "cursor-cli"}
+          onClick={() => setSessionType("cursor-cli")}
+          className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
+            sessionType === "cursor-cli"
+              ? "bg-primary text-primary-foreground border-primary"
+              : "bg-background text-foreground border-input hover:bg-muted"
+          }`}
+        >
+          Cursor CLI
+        </button>
       </div>
 
       {/* Host — which daemon runs the session. Only shown when the common room advertises daemons. */}
@@ -450,6 +484,27 @@ export function CreateSessionPane({
           </div>
 
           {modelField}
+        </>
+      )}
+
+      {/* Cursor CLI session fields */}
+      {sessionType === "cursor-cli" && (
+        <>
+          {modelField}
+          <div>
+            <label className={labelClass} htmlFor="create-session-initial-prompt">
+              Initial prompt
+            </label>
+            <textarea
+              id="create-session-initial-prompt"
+              data-testid="create-session-initial-prompt-input"
+              className={`${inputClass} resize-y`}
+              rows={3}
+              value={initialPrompt}
+              onChange={(e) => setInitialPrompt(e.target.value)}
+              placeholder="Optional initial prompt"
+            />
+          </div>
         </>
       )}
 

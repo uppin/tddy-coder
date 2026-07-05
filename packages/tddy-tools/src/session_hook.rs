@@ -32,8 +32,9 @@ pub struct SessionHookArgs {
     #[arg(long)]
     pub hook_token: String,
 
-    /// Claude Code hook event name (e.g. SessionStart, Stop).
-    #[arg(long)]
+    /// Claude Code hook event name (e.g. SessionStart, Stop). Optional for Cursor hooks that
+    /// rely on stdin `hook_event_name` only.
+    #[arg(long, default_value = "")]
     pub event: String,
 }
 
@@ -56,13 +57,19 @@ async fn try_run_session_hook(args: SessionHookArgs) -> anyhow::Result<()> {
     .await
     .map_err(|e| anyhow::anyhow!("join error: {e}"))??;
 
-    // Parse the hook event to get notification_type (may differ from --event for Notification).
-    let notification_type = parse_hook_event(&stdin_buf)
-        .ok()
-        .and_then(|ev| ev.notification_type);
+    // Parse the hook event from stdin. Primary mapping uses `hook_event_name`; `--event` is a
+    // backward-compat fallback for Claude hooks that still bake the flag into the command.
+    let parsed = parse_hook_event(&stdin_buf).ok();
+    let notification_type = parsed.as_ref().and_then(|ev| ev.notification_type.clone());
+    let hook_event_name = parsed
+        .as_ref()
+        .map(|ev| ev.hook_event_name.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(args.event.as_str());
 
     // Map event → activity status. None = no-op, exit 0 without calling daemon.
-    let Some(status) = activity_status_from_hook(&args.event, notification_type.as_deref()) else {
+    let Some(status) = activity_status_from_hook(hook_event_name, notification_type.as_deref())
+    else {
         return Ok(());
     };
 

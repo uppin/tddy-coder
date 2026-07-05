@@ -119,6 +119,9 @@ pub struct DaemonConfig {
     /// Claude Code CLI session configuration (spawning interactive `claude` processes in PTYs).
     #[serde(default)]
     pub claude_cli: Option<ClaudeCliConfig>,
+    /// Cursor Agent CLI session configuration (spawning interactive `agent` processes in PTYs).
+    #[serde(default)]
+    pub cursor_cli: Option<CursorCliConfig>,
     /// When set, this daemon runs in relay mode: no web bundle, idle-timeout auto-shutdown,
     /// forwards RPCs to a remote peer via LiveKit.
     #[serde(default)]
@@ -163,6 +166,7 @@ impl Default for DaemonConfig {
             codex_oauth_loopback_proxy_eligible: default_codex_oauth_loopback_proxy_eligible(),
             telegram: None,
             claude_cli: None,
+            cursor_cli: None,
             relay: None,
             tddy_data_dir: None,
             screen_sharing: None,
@@ -243,6 +247,10 @@ pub fn resolve_rdp_binary_path(config: &DaemonConfig) -> String {
 
 fn default_claude_cli_binary_path() -> String {
     "claude".to_string()
+}
+
+fn default_cursor_cli_binary_path() -> String {
+    "agent".to_string()
 }
 
 /// Environment variable that overrides the resolved `claude` binary path (highest priority).
@@ -376,6 +384,67 @@ pub struct ClaudeCliConfig {
     /// single daemon-wide home — see [`resolve_claude_home_dir`].
     #[serde(default)]
     pub claude_home_dir: Option<PathBuf>,
+}
+
+/// Cursor Agent CLI session configuration. Loaded from daemon YAML under `cursor_cli:`.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CursorCliConfig {
+    /// Path to the Cursor Agent CLI binary (default `"agent"`).
+    #[serde(default = "default_cursor_cli_binary_path")]
+    pub binary_path: String,
+    /// Absolute path to `tddy-tools` for per-worktree hook commands. Falls back to claude_cli or
+    /// sibling-of-daemon resolution when absent.
+    #[serde(default)]
+    pub tddy_tools_path: Option<String>,
+    /// HTTP base URL for `ReportSessionStatus`. Falls back to claude_cli or web_port default.
+    #[serde(default)]
+    pub daemon_url: Option<String>,
+}
+
+/// Resolve the Cursor Agent CLI binary path from config and env.
+///
+/// Resolution: `cursor_cli.binary_path` → `TDDY_CURSOR_AGENT` env → `"agent"`.
+pub fn resolve_cursor_binary_path(config: &DaemonConfig) -> String {
+    if let Ok(env) = std::env::var("TDDY_CURSOR_AGENT") {
+        if !env.trim().is_empty() {
+            return env;
+        }
+    }
+    config
+        .cursor_cli
+        .as_ref()
+        .map(|c| c.binary_path.as_str())
+        .unwrap_or("agent")
+        .to_string()
+}
+
+/// Resolve tddy-tools path for cursor-cli hooks (cursor config → claude config → default).
+pub fn resolve_cursor_cli_tddy_tools_path(config: &DaemonConfig) -> Option<String> {
+    config
+        .cursor_cli
+        .as_ref()
+        .and_then(|c| c.tddy_tools_path.clone())
+        .or_else(|| {
+            config
+                .claude_cli
+                .as_ref()
+                .and_then(|c| c.tddy_tools_path.clone())
+        })
+}
+
+/// Resolve daemon URL for cursor-cli hooks (cursor config → claude config).
+pub fn resolve_cursor_cli_daemon_url(config: &DaemonConfig) -> Option<String> {
+    config
+        .cursor_cli
+        .as_ref()
+        .and_then(|c| c.daemon_url.clone())
+        .or_else(|| {
+            config
+                .claude_cli
+                .as_ref()
+                .and_then(|c| c.daemon_url.clone())
+        })
 }
 
 /// Environment variable overriding the persistent sandbox claude `$HOME`.

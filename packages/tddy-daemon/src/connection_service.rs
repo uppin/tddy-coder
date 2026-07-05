@@ -37,7 +37,7 @@ use tddy_service::proto::connection::{
 use uuid::Uuid;
 
 use crate::agent_list_mapping::agent_allowlist_rows;
-use crate::claude_cli_session::{ClaimOutcome, ClaudeCliSessionManager, MAIN_TERMINAL_ID};
+use crate::cli_session_manager::{ClaimOutcome, CliSessionManager, MAIN_TERMINAL_ID};
 use crate::config::DaemonConfig;
 use crate::livekit_peer_discovery::{local_instance_id_for_config, LiveKitDiscoveryHandles};
 use crate::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
@@ -64,7 +64,7 @@ use tddy_service::proto::connection::{
 use tddy_task::TaskRegistry;
 
 /// Runs blocking clone/spawn work with a wall-clock cap so hung NSS/git/spawn cannot block RPCs forever.
-async fn spawn_blocking_with_timeout<T: Send + 'static>(
+pub(crate) async fn spawn_blocking_with_timeout<T: Send + 'static>(
     timeout: Duration,
     op_label: &'static str,
     f: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
@@ -232,9 +232,9 @@ impl Unpin for MpscControlEventStream {}
 async fn relay_control_events(
     session_id: String,
     control_token: String,
-    manager: Arc<crate::claude_cli_session::ClaudeCliSessionManager>,
+    manager: Arc<crate::cli_session_manager::CliSessionManager>,
     mut broadcast_rx: tokio::sync::broadcast::Receiver<
-        crate::claude_cli_session::ControlChangeEvent,
+        crate::cli_session_manager::ControlChangeEvent,
     >,
     tx: tokio::sync::mpsc::UnboundedSender<TerminalControlEvent>,
 ) {
@@ -286,7 +286,7 @@ pub struct ConnectionServiceImpl {
     common_room_livekit_room: Option<Arc<tokio::sync::RwLock<Option<Arc<Room>>>>>,
     telegram: Option<Arc<TelegramDaemonHooks>>,
     worktree_stats_cache: Arc<WorktreeStatsCache>,
-    claude_cli_manager: Arc<ClaudeCliSessionManager>,
+    claude_cli_manager: Arc<CliSessionManager>,
     /// Sandboxed claude-cli sessions (darwin Seatbelt).
     sandbox_manager: Arc<crate::sandbox_session::SandboxSessionManager>,
     /// Registry for Tasks created by tool invocations (every ExecuteTool call).
@@ -319,7 +319,7 @@ impl ConnectionServiceImpl {
         spawn_client: Option<(spawn_worker::SpawnClient, i32)>,
         livekit_discovery: Option<LiveKitDiscoveryHandles>,
         telegram: Option<Arc<TelegramDaemonHooks>>,
-        claude_cli_manager: Arc<ClaudeCliSessionManager>,
+        claude_cli_manager: Arc<CliSessionManager>,
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
         let (eligible_daemon_source, common_room_livekit_room) = match livekit_discovery {
@@ -551,7 +551,7 @@ impl ConnectionServiceImpl {
 async fn spawn_claude_cli_session_inner(
     config: &DaemonConfig,
     tddy_data_dir: &Path,
-    claude_cli_manager: &Arc<ClaudeCliSessionManager>,
+    claude_cli_manager: &Arc<CliSessionManager>,
     os_user: &str,
     session_id: &str,
     sessions_base: PathBuf,
@@ -837,7 +837,7 @@ async fn spawn_claude_cli_session_inner(
             lk.daemon_instance_id.as_deref(),
             session_id,
         );
-        match crate::claude_cli_session::spawn_livekit_bridge(
+        match crate::cli_session_manager::spawn_livekit_bridge(
             Arc::clone(&handle),
             &lk.url,
             &room_name,
@@ -1909,7 +1909,7 @@ fn prepare_managed_workflow_inner(
 struct StackChildSpawnHandler {
     config: DaemonConfig,
     tddy_data_dir: PathBuf,
-    claude_cli_manager: Arc<ClaudeCliSessionManager>,
+    claude_cli_manager: Arc<CliSessionManager>,
     os_user: String,
     project_id: String,
     sessions_base: PathBuf,
@@ -2592,6 +2592,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 "model is required for claude-cli sessions",
             ));
         }
+        if req.session_type.trim() == "cursor-cli" && req.model.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "model is required for cursor-cli sessions",
+            ));
+        }
+        if req.session_type.trim() == "cursor-cli" && req.sandbox {
+            return Err(Status::failed_precondition(
+                "sandbox is not supported for cursor-cli sessions",
+            ));
+        }
 
         // Auto-provision the project's working copy on this host before dispatching to any session
         // type: if the project isn't cloned here yet (registered-but-missing, or known only on a
@@ -2700,6 +2710,32 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     managed_recipe,
                 )
                 .await;
+        }
+
+        // --- cursor-cli branch: no LiveKit; spawns Cursor Agent CLI in a PTY worktree ---
+        if req.session_type.trim() == "cursor-cli" {
+            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
+                os_user,
+                Some(&self.tddy_data_dir),
+            )
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+            let session_id = Uuid::now_v7().to_string();
+            return crate::cursor_cli_spawn::spawn_cursor_cli_session_inner(
+                &self.config,
+                &self.tddy_data_dir,
+                &self.claude_cli_manager,
+                os_user,
+                &session_id,
+                sessions_base,
+                req.model.trim(),
+                req.project_id.trim(),
+                req.branch_worktree_intent.trim(),
+                req.new_branch_name.trim(),
+                req.selected_integration_base_ref.trim(),
+                req.selected_branch_to_work_on.trim(),
+                req.initial_prompt.trim(),
+            )
+            .await;
         }
 
         let livekit = spawner::livekit_creds_from_config(&self.config)
@@ -2858,8 +2894,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
 
-        // claude-cli and workspace sessions do not use LiveKit — return empty fields immediately.
+        // claude-cli, cursor-cli, and workspace sessions do not use LiveKit — return empty fields immediately.
         if metadata.session_type.as_deref() == Some("claude-cli")
+            || metadata.session_type.as_deref() == Some("cursor-cli")
             || metadata.session_type.as_deref() == Some("workspace")
         {
             return Ok(Response::new(ConnectSessionResponse {
@@ -2919,6 +2956,18 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return self
                 .resume_claude_cli_session(os_user, &req.session_id, session_dir, metadata)
                 .await;
+        }
+
+        // --- cursor-cli branch: resume without LiveKit ---
+        if metadata.session_type.as_deref() == Some("cursor-cli") {
+            return crate::cursor_cli_spawn::resume_cursor_cli_session(
+                &self.claude_cli_manager,
+                &self.config,
+                &req.session_id,
+                &session_dir,
+                metadata,
+            )
+            .await;
         }
 
         let repo_path = metadata
@@ -4204,10 +4253,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let meta = tddy_core::read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
 
-        // Only claude-cli sessions support hook status reporting.
-        if meta.session_type.as_deref() != Some("claude-cli") {
+        // claude-cli and cursor-cli sessions support hook status reporting.
+        let session_type = meta.session_type.as_deref().unwrap_or("");
+        if session_type != "claude-cli" && session_type != "cursor-cli" {
             return Err(Status::failed_precondition(
-                "session_type is not claude-cli",
+                "session_type is not claude-cli or cursor-cli",
             ));
         }
 
@@ -4691,7 +4741,7 @@ mod signal_session_unit_tests {
             None,
             None,
             None,
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
     }
 
@@ -4820,7 +4870,7 @@ mod delete_session_unit_tests {
             None,
             None,
             None,
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
     }
 
@@ -4874,7 +4924,7 @@ mod list_sessions_unit_tests {
             None,
             None,
             None,
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
     }
 
@@ -4968,7 +5018,7 @@ mod report_session_status_unit_tests {
             None,
             None,
             None,
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
     }
 
@@ -5264,7 +5314,7 @@ mod specialized_subagent_env_unit_tests {
             None,
             None,
             None,
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
     }
 
@@ -5422,7 +5472,7 @@ mod add_planned_pr_unit_tests {
             None,
             None,
             None,
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
     }
 
@@ -5674,7 +5724,7 @@ mod cross_daemon_session_token_acceptance_tests {
             None,
             None,
             None,
-            Arc::new(ClaudeCliSessionManager::new()),
+            Arc::new(CliSessionManager::new()),
         )
     }
 

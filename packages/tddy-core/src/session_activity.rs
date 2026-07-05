@@ -79,17 +79,18 @@ pub fn activity_status_from_hook(
     notification_type: Option<&str>,
 ) -> Option<SessionActivityStatus> {
     match hook_event_name {
-        "SessionStart" => Some(SessionActivityStatus::Started),
-        "UserPromptSubmit" => Some(SessionActivityStatus::Running),
-        "PostToolUse" => Some(SessionActivityStatus::ExecutingTool),
+        // Claude Code CLI (PascalCase)
+        "SessionStart" | "sessionStart" => Some(SessionActivityStatus::Started),
+        "UserPromptSubmit" | "beforeSubmitPrompt" => Some(SessionActivityStatus::Running),
+        "PostToolUse" | "postToolUse" => Some(SessionActivityStatus::ExecutingTool),
         "Notification" => match notification_type {
             Some("permission_prompt") | Some("elicitation_dialog") | Some("idle_prompt") => {
                 Some(SessionActivityStatus::WaitingForInput)
             }
             _ => None,
         },
-        "Stop" => Some(SessionActivityStatus::Done),
-        "SessionEnd" => Some(SessionActivityStatus::Ended),
+        "Stop" | "stop" => Some(SessionActivityStatus::Done),
+        "SessionEnd" | "sessionEnd" => Some(SessionActivityStatus::Ended),
         _ => None,
     }
 }
@@ -216,6 +217,51 @@ mod tests {
 
         // Then
         assert_eq!(status, Some(SessionActivityStatus::Ended));
+    }
+
+    /// Cursor `sessionStart` maps to `Started`.
+    #[test]
+    fn cursor_session_start_maps_to_started() {
+        assert_eq!(
+            activity_status_from_hook("sessionStart", None),
+            Some(SessionActivityStatus::Started)
+        );
+    }
+
+    /// Cursor `beforeSubmitPrompt` maps to `Running`.
+    #[test]
+    fn cursor_before_submit_prompt_maps_to_running() {
+        assert_eq!(
+            activity_status_from_hook("beforeSubmitPrompt", None),
+            Some(SessionActivityStatus::Running)
+        );
+    }
+
+    /// Cursor `postToolUse` maps to `ExecutingTool`.
+    #[test]
+    fn cursor_post_tool_use_maps_to_executing_tool() {
+        assert_eq!(
+            activity_status_from_hook("postToolUse", None),
+            Some(SessionActivityStatus::ExecutingTool)
+        );
+    }
+
+    /// Cursor `stop` maps to `Done`.
+    #[test]
+    fn cursor_stop_maps_to_done() {
+        assert_eq!(
+            activity_status_from_hook("stop", None),
+            Some(SessionActivityStatus::Done)
+        );
+    }
+
+    /// Cursor `sessionEnd` maps to `Ended`.
+    #[test]
+    fn cursor_session_end_maps_to_ended() {
+        assert_eq!(
+            activity_status_from_hook("sessionEnd", None),
+            Some(SessionActivityStatus::Ended)
+        );
     }
 
     /// Unknown events (e.g. `PreToolUse`) return `None` — no-op, no daemon call.

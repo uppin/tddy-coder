@@ -63,6 +63,14 @@ pub struct StartClaudeCommand {
     pub prompt: String,
 }
 
+/// Simulated Telegram `/start-cursor <prompt>` command to launch a Cursor Agent CLI session.
+#[derive(Debug, Clone)]
+pub struct StartCursorCommand {
+    pub chat_id: i64,
+    pub user_id: u64,
+    pub prompt: String,
+}
+
 /// Simulated Telegram `/chain-workflow` (stacked session) with feature text; parent session is
 /// selected in a first step before project / integration base / agent (PRD).
 #[derive(Debug, Clone)]
@@ -100,6 +108,13 @@ pub struct StartWorkflowOutcome {
 /// Result of handling `/start-claude`: session id + anything sent to Telegram.
 #[derive(Debug, Clone)]
 pub struct StartClaudeOutcome {
+    pub session_id: String,
+    pub messages: Vec<CapturedTelegramMessage>,
+}
+
+/// Result of handling `/start-cursor`.
+#[derive(Debug, Clone)]
+pub struct StartCursorOutcome {
     pub session_id: String,
     pub messages: Vec<CapturedTelegramMessage>,
 }
@@ -187,6 +202,8 @@ const CHAIN_WORKFLOW_CMD: &str = "/chain-workflow";
 /// Start a Claude Code CLI session with the first user prompt: `/start-claude <prompt>`.
 /// Follows project → branch → model keyboard flow; skips recipe (tddy-coder only).
 pub const START_CLAUDE_CMD: &str = "/start-claude";
+/// Start a Cursor Agent CLI session with the first user prompt: `/start-cursor <prompt>`.
+pub const START_CURSOR_CMD: &str = "/start-cursor";
 /// Submit feature text to a running child `tddy-coder` presenter: `/submit-feature <session_id_or_prefix> <description…>`
 pub const SUBMIT_FEATURE_CMD: &str = "/submit-feature";
 const SESSIONS_CMD: &str = "/sessions";
@@ -236,12 +253,23 @@ pub const CB_TELEGRAM_CHAIN_PARENT: &str = "tcp:";
 /// Claude Code CLI model picker: `tcm:<model_idx>|p:<proj_idx>|s:<session_id>`.
 /// Model index refers to [`CLAUDE_CLI_MODELS`].
 pub const CB_TELEGRAM_CLAUDE_MODEL: &str = "tcm:";
+/// Cursor Agent CLI model picker: `tcur:<model_idx>|p:<proj_idx>|s:<session_id>`.
+pub const CB_TELEGRAM_CURSOR_MODEL: &str = "tcur:";
 /// Available Claude models for Claude Code CLI sessions (Telegram model-picker keyboard).
 /// Per `docs/ft/daemon/claude-cli-session.md`.
 pub const CLAUDE_CLI_MODELS: [(&str, &str); 3] = [
     ("claude-opus-4-8", "Claude Opus 4"),
     ("claude-sonnet-4-6", "Claude Sonnet 4.5"),
     ("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
+];
+
+pub const CURSOR_CLI_MODELS: [(&str, &str); 3] = [
+    (
+        "claude-4.6-sonnet-medium-thinking",
+        "Claude 4.6 Sonnet (thinking)",
+    ),
+    ("gpt-5.3-codex", "GPT-5.3 Codex"),
+    ("composer-2.5", "Composer 2.5"),
 ];
 
 // ---------------------------------------------------------------------------
@@ -397,12 +425,36 @@ pub fn parse_start_claude_prompt(message_text: &str) -> Option<String> {
     Some(rest.trim().to_string())
 }
 
+/// Parse `/start-cursor <prompt>` from a message body.
+pub fn parse_start_cursor_prompt(message_text: &str) -> Option<String> {
+    let trimmed = message_text.trim();
+    let rest = trimmed.strip_prefix(START_CURSOR_CMD)?;
+    Some(rest.trim().to_string())
+}
+
 /// Decode `tcm:<model_idx>|p:<proj_idx>|s:<session_id>` (Claude model pick after branch).
 pub fn parse_telegram_claude_model_callback(callback_data: &str) -> Option<(usize, usize, String)> {
     let rest = callback_data.strip_prefix(CB_TELEGRAM_CLAUDE_MODEL)?;
     let (model_part, after_p) = rest.split_once("|p:")?;
     let model_idx: usize = model_part.parse().ok()?;
     if model_idx >= CLAUDE_CLI_MODELS.len() {
+        return None;
+    }
+    let (proj_part, sess_part) = after_p.split_once("|s:")?;
+    let proj_idx: usize = proj_part.parse().ok()?;
+    let session_id = sess_part.trim().to_string();
+    if session_id.is_empty() {
+        return None;
+    }
+    Some((model_idx, proj_idx, session_id))
+}
+
+/// Decode `tcur:<model_idx>|p:<proj_idx>|s:<session_id>` (Cursor model pick after branch).
+pub fn parse_telegram_cursor_model_callback(callback_data: &str) -> Option<(usize, usize, String)> {
+    let rest = callback_data.strip_prefix(CB_TELEGRAM_CURSOR_MODEL)?;
+    let (model_part, after_p) = rest.split_once("|p:")?;
+    let model_idx: usize = model_part.parse().ok()?;
+    if model_idx >= CURSOR_CLI_MODELS.len() {
         return None;
     }
     let (proj_part, sess_part) = after_p.split_once("|s:")?;
@@ -956,7 +1008,7 @@ pub struct TelegramWorkflowSpawn {
     pub pending_elicitation_other: Arc<Mutex<HashMap<i64, String>>>,
     /// Shared registry of active Claude Code CLI sessions, injected so Telegram-launched sessions
     /// are attachable via the terminal-stream RPCs (same `Arc` as `ConnectionServiceImpl`).
-    pub claude_cli_manager: Arc<crate::claude_cli_session::ClaudeCliSessionManager>,
+    pub claude_cli_manager: Arc<crate::cli_session_manager::CliSessionManager>,
 }
 
 impl TelegramWorkflowSpawn {
@@ -1564,10 +1616,16 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         // setup_worktree_for_session_with_optional_chain_base is called).
         let pre_snap = read_changeset_routing_snapshot(&session_dir).unwrap_or_default();
         let is_claude_cli = pre_snap.session_type.as_deref() == Some("claude-cli");
+        let is_cursor_cli = pre_snap.session_type.as_deref() == Some("cursor-cli");
         // Compute the derived branch name now while cs is still immutable (before get_or_insert_with
         // takes a mutable borrow).
         let derived_claude_cli_branch = if is_claude_cli {
             claude_cli_branch_name_from_changeset(&cs)
+        } else {
+            None
+        };
+        let derived_cursor_cli_branch = if is_cursor_cli {
+            Some(cursor_cli_branch_name_from_session_id(session_id))
         } else {
             None
         };
@@ -1588,7 +1646,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 // validate_workflow_branch_intent / setup_worktree can proceed without waiting for
                 // tddy-coder to produce a branch_suggestion.
                 if wf.new_branch_name.is_none() {
-                    wf.new_branch_name = derived_claude_cli_branch.clone();
+                    wf.new_branch_name = derived_claude_cli_branch
+                        .clone()
+                        .or_else(|| derived_cursor_cli_branch.clone());
                 }
             }
         } else {
@@ -1615,7 +1675,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 wf.selected_branch_to_work_on = None;
                 // Same: derive new_branch_name for claude-cli when the user picked a base branch.
                 if wf.new_branch_name.is_none() {
-                    wf.new_branch_name = derived_claude_cli_branch.clone();
+                    wf.new_branch_name = derived_claude_cli_branch
+                        .clone()
+                        .or_else(|| derived_cursor_cli_branch.clone());
                 }
             }
         }
@@ -1633,6 +1695,11 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         if pre_snap.session_type.as_deref() == Some("claude-cli") {
             return self
                 .send_claude_model_pick_keyboard(chat_id, proj_idx, session_id)
+                .await;
+        }
+        if pre_snap.session_type.as_deref() == Some("cursor-cli") {
+            return self
+                .send_cursor_model_pick_keyboard(chat_id, proj_idx, session_id)
                 .await;
         }
 
@@ -1687,6 +1754,23 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         }
         self.sender
             .send_message_with_keyboard(chat_id, "Choose a model for the Claude CLI session:", rows)
+            .await?;
+        Ok(())
+    }
+
+    async fn send_cursor_model_pick_keyboard(
+        &self,
+        chat_id: i64,
+        proj_idx: usize,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        let mut rows: InlineKeyboardRows = Vec::new();
+        for (i, (_model_id, label)) in CURSOR_CLI_MODELS.iter().enumerate() {
+            let data = format!("{CB_TELEGRAM_CURSOR_MODEL}{i}|p:{proj_idx}|s:{session_id}");
+            rows.push(vec![(label.to_string(), data)]);
+        }
+        self.sender
+            .send_message_with_keyboard(chat_id, "Choose a model for the Cursor CLI session:", rows)
             .await?;
         Ok(())
     }
@@ -2438,6 +2522,71 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         })
     }
 
+    /// `/start-cursor <prompt>`: start a Cursor Agent CLI session seeded with `prompt`.
+    pub async fn handle_start_cursor(
+        &mut self,
+        cmd: StartCursorCommand,
+    ) -> anyhow::Result<StartCursorOutcome> {
+        self.ensure_authorized(cmd.chat_id)?;
+
+        if let Some(ref map_path) = self.telegram_github_mapping_path {
+            let store = TelegramGithubMappingStore::open(map_path)?;
+            if store.get_github_login(cmd.user_id).is_none() {
+                anyhow::bail!(
+                    "Telegram account is not linked to GitHub. Use the bot's /link-github flow (or web OAuth) to connect your GitHub identity before starting a session."
+                );
+            }
+        }
+
+        let session_id = Uuid::new_v4().to_string();
+        let session_dir = unified_session_dir_path(&self.sessions_base, &session_id);
+        std::fs::create_dir_all(&session_dir)?;
+
+        {
+            let trimmed = cmd.prompt.trim().to_string();
+            let name = if !trimmed.is_empty() {
+                trimmed
+                    .split_whitespace()
+                    .take(6)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                format!("cursor-{}", &session_id[..8.min(session_id.len())])
+            };
+            let initial_prompt = if !trimmed.is_empty() {
+                Some(trimmed)
+            } else {
+                None
+            };
+            let workflow = Some(tddy_core::ChangesetWorkflow {
+                branch_worktree_intent: Some(BranchWorktreeIntent::NewBranchFromBase),
+                ..Default::default()
+            });
+            let cs = Changeset {
+                name: Some(name),
+                initial_prompt,
+                workflow,
+                ..Default::default()
+            };
+            write_changeset(&session_dir, &cs)
+                .map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
+        }
+
+        self.persist_changeset_session_type_marker(&session_dir, "cursor-cli")?;
+
+        if let Ok(mut g) = self.telegram_tracked.lock() {
+            g.bind_chat_to_session_for_telegram_tracking(cmd.chat_id, &session_id);
+        }
+
+        self.send_project_pick_keyboard(cmd.chat_id, &session_id)
+            .await?;
+
+        Ok(StartCursorOutcome {
+            session_id,
+            messages: vec![],
+        })
+    }
+
     /// Write `session_type: <value>` into `changeset.yaml` (raw-YAML merge, preserves other fields).
     fn persist_changeset_session_type_marker(
         &self,
@@ -2516,7 +2665,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     /// `initial_prompt` + `model` written by previous keyboard callbacks).
     ///
     /// Creates the git worktree, launches `claude --model <m> --session-id <id> [<prompt>]` via
-    /// [`crate::claude_cli_session::ClaudeCliSessionManager`], writes `.session.yaml`, and replies
+    /// [`crate::cli_session_manager::CliSessionManager`], writes `.session.yaml`, and replies
     /// with the session id and attach instructions.
     async fn spawn_telegram_claude_cli(
         &self,
@@ -2643,7 +2792,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 lk.daemon_instance_id.as_deref(),
                 session_id,
             );
-            match crate::claude_cli_session::spawn_livekit_bridge(
+            match crate::cli_session_manager::spawn_livekit_bridge(
                 Arc::clone(&handle),
                 &lk.url,
                 &room_name,
@@ -2682,6 +2831,129 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             format!("LiveKit room `{lk_room}`. Attach via the web UI or `tddy-tools pty-relay --server-identity {lk_server_identity}`.")
         };
         let done = format!("Claude Code CLI session started ({sid_short}…). {attach_hint}");
+        self.sender.send_message(chat_id, &done).await?;
+        Ok(())
+    }
+
+    pub async fn handle_telegram_cursor_model_callback(
+        &self,
+        chat_id: i64,
+        model_idx: usize,
+        proj_idx: usize,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        self.ensure_authorized(chat_id)?;
+        let (model_id, _label) = CURSOR_CLI_MODELS
+            .get(model_idx)
+            .ok_or_else(|| anyhow::anyhow!("invalid cursor model index {model_idx}"))?;
+        let Some(ref deps) = self.workflow_spawn else {
+            anyhow::bail!("Telegram workflow spawn is not configured");
+        };
+        let projects = sorted_projects_for_workflow_spawn(deps)?;
+        let project = projects
+            .get(proj_idx)
+            .ok_or_else(|| anyhow::anyhow!("invalid project index {proj_idx}"))?;
+        let session_dir = unified_session_dir_path(&self.sessions_base, session_id);
+        self.persist_changeset_model(&session_dir, model_id)?;
+        self.spawn_telegram_cursor_cli(chat_id, session_id, &project.project_id)
+            .await
+    }
+
+    async fn spawn_telegram_cursor_cli(
+        &self,
+        chat_id: i64,
+        session_id: &str,
+        project_id: &str,
+    ) -> anyhow::Result<()> {
+        let deps = self
+            .workflow_spawn
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("workflow spawn not configured"))?
+            .clone();
+
+        let session_dir = unified_session_dir_path(&self.sessions_base, session_id);
+        let snap = read_changeset_routing_snapshot(&session_dir).unwrap_or_default();
+        let model = snap.model.clone().unwrap_or_default();
+        if model.trim().is_empty() {
+            anyhow::bail!("model not set for cursor-cli session (model keyboard not completed)");
+        }
+        let initial_prompt = snap.initial_prompt.clone();
+
+        let projects_dir = projects_dir_for_telegram_workflow_spawn(&deps)?;
+        let project = project_storage::find_project(&projects_dir, project_id)?
+            .ok_or_else(|| anyhow::anyhow!("project not found: {project_id}"))?;
+        let repo_root = std::path::Path::new(&project.main_repo_path);
+        if !repo_root.exists() {
+            anyhow::bail!(
+                "project main repo path does not exist: {}",
+                repo_root.display()
+            );
+        }
+
+        let repo_root_owned = repo_root.to_path_buf();
+        let session_dir_clone = session_dir.clone();
+        let worktree_path: std::path::PathBuf = tokio::task::spawn_blocking(move || {
+            tddy_core::setup_worktree_for_session_with_optional_chain_base(
+                &repo_root_owned,
+                &session_dir_clone,
+                None,
+            )
+            .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("worktree join error: {e}"))?
+        .map_err(|e| anyhow::anyhow!("worktree setup error: {e}"))?;
+
+        let hook_token = crate::cursor_cli_spawn::install_cursor_hooks_in_worktree(
+            &deps.config,
+            &worktree_path,
+            session_id,
+            &deps.os_user,
+        );
+
+        let binary_path = crate::config::resolve_cursor_binary_path(&deps.config);
+        let manager = Arc::clone(&deps.claude_cli_manager);
+        let handle = manager
+            .start_cursor(
+                session_id,
+                worktree_path.clone(),
+                &model,
+                &binary_path,
+                initial_prompt.as_deref(),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to spawn cursor-cli: {e}"))?;
+
+        let pid = handle.pid;
+        let now = chrono::Utc::now().to_rfc3339();
+        let meta = tddy_core::SessionMetadata {
+            session_id: session_id.to_string(),
+            project_id: project_id.to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            status: "active".to_string(),
+            repo_path: Some(worktree_path.to_string_lossy().to_string()),
+            pid: Some(pid),
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("cursor-cli".to_string()),
+            model: Some(model.clone()),
+            activity_status: None,
+            hook_token: Some(hook_token),
+            sandbox: None,
+            agent: None,
+            recipe: None,
+            specialized_agents: Vec::new(),
+        };
+        tddy_core::write_session_metadata(&session_dir, &meta)
+            .map_err(|e| anyhow::anyhow!("write session metadata: {e}"))?;
+
+        let sid_short = &session_id[..8.min(session_id.len())];
+        let done = format!(
+            "Cursor Agent CLI session started ({sid_short}…). Attach via the web UI or `tddy-tools pty-relay`."
+        );
         self.sender.send_message(chat_id, &done).await?;
         Ok(())
     }
@@ -3186,6 +3458,12 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         );
         Ok(None)
     }
+}
+
+/// Branch name for cursor-cli Telegram sessions: `cursor-cli/<first-8-chars-of-session-id>`.
+fn cursor_cli_branch_name_from_session_id(session_id: &str) -> String {
+    let short_id = &session_id[..8.min(session_id.len())];
+    format!("cursor-cli/{short_id}")
 }
 
 /// Derive a git branch name for a `/start-claude` session from the changeset `name` field.
