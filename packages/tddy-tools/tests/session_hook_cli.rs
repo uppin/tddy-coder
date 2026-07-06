@@ -111,6 +111,70 @@ fn session_hook_noop_event_exits_zero_without_daemon() {
         .success(); // exit 0 — fail-quiet contract
 }
 
+/// When stdin carries Cursor `sessionStart` (maps to `Started`) but the daemon is unreachable,
+/// the process must still exit 0 — fail-quiet contract.
+#[test]
+fn session_hook_cursor_session_start_unreachable_daemon_exits_zero() {
+    // When / Then
+    tddy_tools_bin()
+        .args([
+            "session-hook",
+            "--session",
+            "cursor-session-start-1",
+            "--daemon",
+            "http://127.0.0.1:1",
+            "--os-user",
+            "testuser",
+            "--hook-token",
+            "tok-cursor-start",
+        ])
+        .write_stdin(r#"{"hook_event_name":"sessionStart","session_id":"cursor-session-start-1"}"#)
+        .assert()
+        .success();
+}
+
+/// Cursor `beforeSubmitPrompt` maps to `Running`; fail-quiet even when daemon is down.
+#[test]
+fn session_hook_cursor_before_submit_prompt_unreachable_daemon_exits_zero() {
+    tddy_tools_bin()
+        .args([
+            "session-hook",
+            "--session",
+            "cursor-session-running-1",
+            "--daemon",
+            "http://127.0.0.1:1",
+            "--os-user",
+            "testuser",
+            "--hook-token",
+            "tok-cursor-running",
+        ])
+        .write_stdin(
+            r#"{"hook_event_name":"beforeSubmitPrompt","session_id":"cursor-session-running-1"}"#,
+        )
+        .assert()
+        .success();
+}
+
+/// Cursor `stop` maps to `Done`; stdin `hook_event_name` is used without `--event`.
+#[test]
+fn session_hook_cursor_stop_unreachable_daemon_exits_zero() {
+    tddy_tools_bin()
+        .args([
+            "session-hook",
+            "--session",
+            "cursor-session-stop-1",
+            "--daemon",
+            "http://127.0.0.1:1",
+            "--os-user",
+            "testuser",
+            "--hook-token",
+            "tok-cursor-stop",
+        ])
+        .write_stdin(r#"{"hook_event_name":"stop","session_id":"cursor-session-stop-1"}"#)
+        .assert()
+        .success();
+}
+
 /// When stdin carries a `SessionStart` event (maps to `Started`) but the daemon is
 /// unreachable, the process must still exit 0.
 ///

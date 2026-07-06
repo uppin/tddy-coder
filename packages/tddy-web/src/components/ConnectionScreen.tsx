@@ -15,7 +15,7 @@ import {
   type EligibleDaemonEntry,
 } from "../gen/connection_pb";
 import { GhosttyTerminalGrpc, type GrpcStream } from "./GhosttyTerminalGrpc";
-import { CLAUDE_CLI_MODELS, isClaudeCliSession } from "../constants/claudeCliModels";
+import { CLAUDE_CLI_MODELS, isCliTerminalSession } from "../constants/claudeCliModels";
 import {
   buildAgentSelectOptionsFromRpc,
   coalesceBackendAgentSelection,
@@ -1548,7 +1548,7 @@ export function ConnectionScreen({
         const res = await client.connectSession({ sessionToken, sessionId: id });
         if (cancelled || seq !== terminalDeepLinkSeqRef.current) return;
         const sessForLink = sessions.find((s) => s.sessionId === id);
-        const isClaudeCliLink = isClaudeCliSession(sessForLink?.agent ?? "");
+        const isClaudeCliLink = isCliTerminalSession(sessForLink?.agent ?? "");
         setSessionAttachments((prev) =>
           addSessionAttachment(prev, id, {
             livekitUrl: res.livekitUrl,
@@ -1572,7 +1572,7 @@ export function ConnectionScreen({
           const res = await client.resumeSession({ sessionToken, sessionId: id });
           if (cancelled || seq !== terminalDeepLinkSeqRef.current) return;
           const sessForLink = sessions.find((s) => s.sessionId === id);
-          const isClaudeCliLink = isClaudeCliSession(sessForLink?.agent ?? "");
+          const isClaudeCliLink = isCliTerminalSession(sessForLink?.agent ?? "");
           setSessionAttachments((prev) =>
             addSessionAttachment(prev, res.sessionId, {
               livekitUrl: res.livekitUrl,
@@ -1723,7 +1723,7 @@ export function ConnectionScreen({
       const res = await client.connectSession({ sessionToken, sessionId });
       console.info("[ConnectionScreen] connectSession: new attachment", { sessionId });
       const sess = sessions.find((s) => s.sessionId === sessionId);
-      const isClaudeCli = isClaudeCliSession(sess?.agent ?? "");
+      const isClaudeCli = isCliTerminalSession(sess?.agent ?? "");
       setSessionAttachments((prev) =>
         addSessionAttachment(prev, sessionId, {
           livekitUrl: res.livekitUrl,
@@ -1765,7 +1765,7 @@ export function ConnectionScreen({
       );
       console.info("[ConnectionScreen] resumeSession: new attachment", { sessionId: res.sessionId });
       const sess = sessions.find((s) => s.sessionId === sessionId);
-      const isClaudeCli = isClaudeCliSession(sess?.agent ?? "");
+      const isClaudeCli = isCliTerminalSession(sess?.agent ?? "");
       setSessionAttachments((prev) =>
         addSessionAttachment(prev, res.sessionId, {
           livekitUrl: res.livekitUrl,

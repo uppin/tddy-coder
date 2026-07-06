@@ -645,6 +645,27 @@ pub fn claude_cli_models() -> BackendModels {
     }
 }
 
+/// Curated model catalog for the `cursor-cli` session type (ids passed to `agent --model`).
+#[must_use]
+pub fn cursor_cli_models() -> BackendModels {
+    BackendModels {
+        models: vec![
+            BackendModel::new("gpt-5.3-codex", "GPT-5.3 Codex"),
+            BackendModel::new(
+                "claude-4.6-sonnet-medium-thinking",
+                "Claude 4.6 Sonnet (thinking)",
+            ),
+            BackendModel::new(
+                "claude-sonnet-5-thinking-high",
+                "Claude Sonnet 5 (thinking high)",
+            ),
+            BackendModel::new("composer-2.5", "Composer 2.5"),
+            BackendModel::new("glm-5.2-high", "GLM 5.2 High"),
+        ],
+        default_model: "claude-4.6-sonnet-medium-thinking".to_string(),
+    }
+}
+
 /// Map an ACP agent's advertised [`agent_client_protocol::SessionModelState`] into [`BackendModels`].
 /// Errors when the agent advertised no models (an unavailable backend must not look available).
 pub fn acp_models_from_session_state(

@@ -193,7 +193,7 @@ fn main() -> anyhow::Result<()> {
     // Create one shared ClaudeCliSessionManager — injected into both the Telegram spawn path and
     // ConnectionServiceImpl so that Telegram-launched sessions are attachable via the terminal RPCs.
     let shared_claude_cli_manager =
-        Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new());
+        Arc::new(tddy_daemon::cli_session_manager::CliSessionManager::new());
 
     let mut telegram_inbound: Option<(
         Bot,

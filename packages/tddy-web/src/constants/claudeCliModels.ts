@@ -29,3 +29,13 @@ export const CLAUDE_CLI_MODELS: ClaudeCliModel[] = [
 export function isClaudeCliSession(agent: string): boolean {
   return agent === "claude-cli";
 }
+
+/** Raw Cursor Agent CLI session — terminal I/O via `StreamSessionTerminalIO`. */
+export function isCursorCliSession(agent: string): boolean {
+  return agent === "cursor-cli";
+}
+
+/** Claude or Cursor CLI session (PTY terminal, no LiveKit for session process). */
+export function isCliTerminalSession(agent: string): boolean {
+  return isClaudeCliSession(agent) || isCursorCliSession(agent);
+}

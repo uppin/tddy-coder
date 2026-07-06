@@ -5,7 +5,7 @@
 //! use tddy_daemon::test_util::{test_config, test_service, TEST_TOKEN, TEST_USER};
 //! ```
 
-use crate::claude_cli_session::ClaudeCliSessionManager;
+use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
 use crate::connection_service::{ConnectionServiceImpl, SessionUserResolver, SessionsBaseResolver};
 use std::path::PathBuf;
@@ -53,6 +53,6 @@ pub fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
         None,
         None,
         None,
-        Arc::new(ClaudeCliSessionManager::new()),
+        Arc::new(CliSessionManager::new()),
     )
 }

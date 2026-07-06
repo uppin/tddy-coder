@@ -19,7 +19,7 @@ import { Signal } from "../../gen/connection_pb";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { detectIsMobile, useIsMobile } from "../../hooks/useIsMobile";
 import { resolveShortcutsForSession } from "../../lib/toolShortcuts";
-import { isClaudeCliSession } from "../../constants/claudeCliModels";
+import { isCliTerminalSession } from "../../constants/claudeCliModels";
 import { PanelLeftOpen } from "lucide-react";
 // ---------------------------------------------------------------------------
 // Screen
@@ -97,7 +97,7 @@ export function SessionsDrawerScreen() {
   const mobileShortcuts = useMemo(
     () =>
       resolveShortcutsForSession(
-        isClaudeCliSession(selectedSession?.agent ?? ""),
+        isCliTerminalSession(selectedSession?.agent ?? ""),
         selectedSession?.tool ?? "",
       ),
     [selectedSession],

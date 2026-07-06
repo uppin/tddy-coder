@@ -141,6 +141,7 @@ export const TEST_IDS = {
   createSessionDialog: "create-session-dialog",
   createSessionTypeToolBtn: "create-session-type-tool",
   createSessionTypeClaudeCliBtn: "create-session-type-claude-cli",
+  createSessionTypeCursorCliBtn: "create-session-type-cursor-cli",
   createSessionProjectSelect: "create-session-project-select",
   createSessionAgentSelect: "create-session-agent-select",
   createSessionRecipeInput: "create-session-recipe-input",
