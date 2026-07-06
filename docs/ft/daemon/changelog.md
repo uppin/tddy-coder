@@ -2,6 +2,12 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-06 — Cursor CLI sandbox parity with Claude CLI
+
+- **`session_type = "cursor-cli"` + `sandbox = true`** succeeds on macOS (Seatbelt) and Linux (cgroups+namespaces) via `start_sandboxed_cursor_cli_session` and `tddy-sandbox-recipes::cursor_cli`; managed codebase, specialized subagents, and `TDDY_SOCKET` workflow wiring mirror claude-cli.
+- In-jail `agent` spawns via direct `node index.js`; MCP config via `$HOME/.cursor/mcp.json` (no auto-injected `--approve-mcps` / `--force` / `--trust`).
+- **`WaitingForInput`** remains unmapped (documented gap); sandboxed cursor-cli resume relaunch and jail Keychain auth are follow-ups. Feature: [cursor-cli-session.md](cursor-cli-session.md). PR [#287](https://github.com/uppin/tddy-coder/pull/287).
+
 ## 2026-07-05 — Cursor Agent CLI session
 
 - **`session_type = "cursor-cli"`** — web **Create session** pane, RPC start/resume/connect, gRPC terminal I/O (same path as claude-cli), per-worktree **`.cursor/hooks.json`** → `ReportSessionStatus`, curated model catalog via **`ListAgentModels("cursor-cli")`**, Telegram **`/start-cursor`**. Sandbox and **`WaitingForInput`** are out of scope for v1. Feature: [cursor-cli-session.md](cursor-cli-session.md).

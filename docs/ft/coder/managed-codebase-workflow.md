@@ -48,20 +48,21 @@ per-session env (alongside a `PATH` that resolves `tddy-tools`).
 ## Architecture
 
 ```
-Web CreateSessionPane (claude-cli)
+Web CreateSessionPane (claude-cli | cursor-cli)
   [x] Managed codebase                    StartSessionRequest
       Recipe:    [ tdd ▾ ]        ──────►   recipe = "tdd"
       Subagents: [x] fastcontext           managed_codebase = true
                                            specialized_agents = ["fastcontext"]
         │
         ▼
-  daemon start_session → start_(sandboxed_)claude_cli_session(managed_recipe)
+  daemon start_session → start_(sandboxed_)claude_cli_session | start_sandboxed_cursor_cli_session (managed_recipe)
         │  seed changeset.yaml state = recipe.start_goal()
         │  set_up_managed_workflow: WorkflowController + per-session toolcall listener
         │  launch claude with --append-system-prompt-file <orchestration prompt>
+        │    OR cursor with .cursor/rules/tddy-managed-workflow.mdc (no --append-system-prompt-file)
         │  inject per-session env: TDDY_SOCKET=<listener>, PATH=<tddy-tools dir>:…
         ▼
-  Claude runs → `tddy-tools transition --to <goal>` (on host)
+  Agent runs → `tddy-tools transition --to <goal>` (on host)
         │  TDDY_SOCKET relay → per-session ToolcallRpcService → WorkflowController
         ▼
   WorkflowController validates edge, persists state.current → changeset.yaml
@@ -69,41 +70,43 @@ Web CreateSessionPane (claude-cli)
 
 ## User story
 
-As a developer, I want to start a Claude-CLI session that follows a chosen workflow (e.g. TDD) and
-manages its own progress, so that Claude advances through the workflow's goals and records its state in
+As a developer, I want to start a Claude-CLI or Cursor-CLI session that follows a chosen workflow (e.g. TDD) and
+manages its own progress, so that the agent advances through the workflow's goals and records its state in
 `changeset.yaml` — the same durable state the rest of the system reads — instead of running as an
 unstructured free-form session.
 
 ## Acceptance criteria
 
 ### Web (CreateSessionPane)
-1. For `session_type == "claude-cli"`, a **"Managed codebase"** control is an explicit checkbox
+1. For `session_type == "claude-cli"` **or** `"cursor-cli"`, a **"Managed codebase"** control is an explicit checkbox
    (`create-session-managed-codebase-toggle`). It is absent for the `"tool"` session type.
 2. When the checkbox is enabled, the form reveals **both** a **workflow-recipe** picker
    (`create-session-recipe-select`) and the **specialized-subagents** multi-select
    (`create-session-managed-codebase-section`).
-3. Submitting a managed Claude-CLI session sends `managed_codebase = true` and the selected `recipe`
+3. Submitting a managed Claude-CLI or Cursor-CLI session sends `managed_codebase = true` and the selected `recipe`
    on `StartSessionRequest`; `managed_codebase` is the explicit flag (no longer implied by the number
    of selected subagents).
 4. A managed session with a recipe and **no** subagents still sends `managed_codebase = true` and the
    selected `recipe` (a case the implied model could not express).
 5. When the checkbox is disabled, the request carries `managed_codebase = false` and an empty `recipe`.
 
-### Daemon (StartSession → claude-cli)
-6. A managed Claude-CLI session (`managed_codebase = true`, non-empty `recipe`) seeds the session's
+### Daemon (StartSession → claude-cli | cursor-cli)
+6. A managed CLI session (`managed_codebase = true`, non-empty `recipe`) seeds the session's
    `changeset.yaml` `state.current` with the recipe's start goal before launch (e.g. `interview` for
    `tdd`).
-7. A managed Claude-CLI session with an **unknown** recipe is rejected with `INVALID_ARGUMENT`.
-8. A managed Claude-CLI session launches `claude` with `--append-system-prompt-file` pointing at a file
+7. A managed CLI session with an **unknown** recipe is rejected with `INVALID_ARGUMENT`.
+8. A managed **claude-cli** session launches `claude` with `--append-system-prompt-file` pointing at a file
    whose content equals `recipe.orchestration_system_prompt(start_goal)`.
-9. A managed Claude-CLI session launches `claude` with a per-session `TDDY_SOCKET` (the session's
+   A managed **cursor-cli** session writes the same orchestration text to
+   `<worktree>/.cursor/rules/tddy-managed-workflow.mdc` (Cursor has no `--append-system-prompt-file`).
+9. A managed CLI session launches with a per-session `TDDY_SOCKET` (the session's
    toolcall listener) and a `PATH` that resolves `tddy-tools` in its environment.
-10. An **unmanaged** Claude-CLI session (`managed_codebase = false`) launches with no orchestration
+10. An **unmanaged** CLI session (`managed_codebase = false`) launches with no orchestration
     prompt and no workflow wiring (behavior unchanged from today).
 11. A host-side `transition` for a managed session validates against the recipe graph and persists the
     new `state.current` to `changeset.yaml`; an illegal transition is rejected and leaves the state
     unchanged.
-12. Applies to **both** sandboxed and non-sandboxed Claude-CLI sessions. The explicit
+12. Applies to **both** sandboxed and non-sandboxed **claude-cli** and **cursor-cli** sessions. The explicit
     `managed_codebase` + `recipe` request drives it; `TDDY_AGENT_DRIVEN` remains only for the
     `tddy-coder` path and is unaffected.
 

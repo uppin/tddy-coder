@@ -112,7 +112,16 @@ When `StartSession.sandbox = true`:
 
 ### Managed codebase and specialized subagents
 
-When `managed_codebase = true`, the daemon seeds `changeset.yaml`, prepends orchestration guidance (`.cursor/rules/tddy-managed-workflow.mdc` or initial prompt), sets `TDDY_SOCKET`, and exposes `subagent_new_session` / `prompt` / `cancel` via MCP. `specialized_agents` resolves to `TDDY_SUBAGENTS_JSON` / `TDDY_SUBAGENT` in the sandbox env overlay.
+When `managed_codebase = true`, the daemon seeds `changeset.yaml`, writes orchestration guidance to `.cursor/rules/tddy-managed-workflow.mdc` in the worktree (or prepends it to the initial prompt for non-sandbox sessions), sets `TDDY_SOCKET`, and exposes `subagent_new_session` / `prompt` / `cancel` via MCP. `specialized_agents` resolves to `TDDY_SUBAGENTS_JSON` / `TDDY_SUBAGENT` in the sandbox env overlay.
+
+### Workflow `CursorBackend::invoke`
+
+`CursorBackend::invoke` registers `tddy-tools --mcp` and `permission-prompt-tool` for headless tool approvals (same model as `ClaudeCodeBackend`), and exports `TDDY_SOCKET`, `TDDY_REPO_DIR`, `TDDY_SESSION_DIR`, and `TDDY_REMOTE_*` (`RemoteToolEnv`) into the invoke subprocess.
+
+## Known follow-ups
+
+- **Jail authentication:** interactive `agent` in a Seatbelt jail may fail to store tokens in macOS Keychain (exit 155). Hosts that store credentials only in Keychain need `AGENT_CLI_CREDENTIAL_STORE=file` (writes `~/.cursor/auth.json`) or `CURSOR_API_KEY` for headless runs — not yet wired into the sandbox env overlay.
+- **`resume_sandboxed_cursor_cli_session`:** sandboxed cursor-cli resume relaunch is not implemented; non-sandbox resume works via `CliSessionManager`.
 
 ## Out of scope (v1)
 
