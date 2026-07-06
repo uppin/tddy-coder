@@ -1412,6 +1412,365 @@ impl ConnectionServiceImpl {
         }))
     }
 
+    /// Handle `StartSession` for sandboxed `cursor-cli` sessions (darwin Seatbelt / Linux cgroups).
+    #[allow(clippy::too_many_arguments)]
+    async fn start_sandboxed_cursor_cli_session(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        sessions_base: PathBuf,
+        model: &str,
+        project_id: &str,
+        branch_worktree_intent: &str,
+        new_branch_name: &str,
+        selected_integration_base_ref: &str,
+        selected_branch_to_work_on: &str,
+        initial_prompt: &str,
+        _managed_codebase: bool,
+        specialized_agents: &[String],
+        managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        if model.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "model is required for cursor-cli sessions",
+            ));
+        }
+        let project_id = project_id.trim();
+        if project_id.is_empty() {
+            return Err(Status::invalid_argument(
+                "project_id is required for cursor-cli sessions",
+            ));
+        }
+        let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
+
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        let project = project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+        let repo_root = PathBuf::from(&project.main_repo_path);
+        if !repo_root.exists() {
+            return Err(Status::invalid_argument(
+                "project main repo path does not exist",
+            ));
+        }
+
+        let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+        std::fs::create_dir_all(&session_dir)
+            .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
+
+        let short_id = &session_id[..8.min(session_id.len())];
+        let (intent, resolved_new_branch, resolved_selected_branch) = match branch_worktree_intent
+            .trim()
+        {
+            "new_branch_from_base" => {
+                let branch = if new_branch_name.trim().is_empty() {
+                    format!("cursor-cli/{short_id}")
+                } else {
+                    new_branch_name.trim().to_string()
+                };
+                (BranchWorktreeIntent::NewBranchFromBase, Some(branch), None)
+            }
+            "work_on_selected_branch" => {
+                if selected_branch_to_work_on.trim().is_empty() {
+                    return Err(Status::invalid_argument(
+                        "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
+                    ));
+                }
+                (
+                    BranchWorktreeIntent::WorkOnSelectedBranch,
+                    None,
+                    Some(selected_branch_to_work_on.trim().to_string()),
+                )
+            }
+            _ => (
+                BranchWorktreeIntent::NewBranchFromBase,
+                Some(format!("cursor-cli/{short_id}")),
+                None,
+            ),
+        };
+
+        let cs_workflow = ChangesetWorkflow {
+            branch_worktree_intent: Some(intent),
+            new_branch_name: resolved_new_branch,
+            selected_integration_base_ref: if selected_integration_base_ref.trim().is_empty() {
+                None
+            } else {
+                Some(selected_integration_base_ref.trim().to_string())
+            },
+            selected_branch_to_work_on: resolved_selected_branch,
+            ..ChangesetWorkflow::default()
+        };
+        let mut cs = Changeset {
+            workflow: Some(cs_workflow),
+            recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
+            ..Changeset::default()
+        };
+        if let Some(recipe) = &managed_recipe {
+            tddy_core::changeset::update_state(
+                &mut cs,
+                tddy_core::workflow::ids::WorkflowState::new(recipe.start_goal().as_str()),
+            );
+        }
+        tddy_core::write_changeset(&session_dir, &cs)
+            .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
+
+        let repo_root_clone = repo_root.clone();
+        let session_dir_clone = session_dir.clone();
+        let timeout = self.config.spawn_worker_request_timeout();
+        let worktree_path = spawn_blocking_with_timeout(
+            timeout,
+            "start_sandboxed_cursor_cli_session: create worktree",
+            move || {
+                tddy_core::setup_worktree_for_session_with_optional_chain_base(
+                    &repo_root_clone,
+                    &session_dir_clone,
+                    None,
+                )
+                .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
+            },
+        )
+        .await?;
+
+        let hook_token = crate::cursor_cli_spawn::install_cursor_hooks_in_worktree(
+            &self.config,
+            &worktree_path,
+            session_id,
+            os_user,
+        );
+
+        let sandbox_root = session_dir.join("sandbox");
+        let egress_dir = session_dir.join("egress");
+        std::fs::create_dir_all(sandbox_root.join(".work").join("home"))
+            .map_err(|e| Status::internal(format!("mkdir sandbox scratch: {e}")))?;
+        std::fs::create_dir_all(sandbox_root.join(".work").join("tmp"))
+            .map_err(|e| Status::internal(format!("mkdir sandbox tmp: {e}")))?;
+        std::fs::create_dir_all(sandbox_root.join("context"))
+            .map_err(|e| Status::internal(format!("mkdir sandbox context: {e}")))?;
+        std::fs::create_dir_all(&egress_dir)
+            .map_err(|e| Status::internal(format!("mkdir sandbox egress: {e}")))?;
+
+        let sandbox_root = std::fs::canonicalize(&sandbox_root).unwrap_or(sandbox_root);
+        let egress_dir = std::fs::canonicalize(&egress_dir).unwrap_or(egress_dir);
+        let scratch_dir = sandbox_root.join(".work");
+        let scratch_tmp = scratch_dir.join("tmp");
+        let context_dir = sandbox_root.join("context");
+
+        let replacement_pairs = subagent_replacement_pairs(&specialized_defs);
+        let replacement_refs: Vec<Vec<&str>> = replacement_pairs
+            .iter()
+            .map(|(_, tools)| tools.iter().map(String::as_str).collect())
+            .collect();
+        let replacements: Vec<tddy_sandbox::SubagentReplacement<'_>> = replacement_pairs
+            .iter()
+            .zip(replacement_refs.iter())
+            .map(|((name, _), refs)| tddy_sandbox::SubagentReplacement {
+                name,
+                replaced: refs,
+            })
+            .collect();
+        let ctx = crate::sandbox_session::prepare_context_dir_with_subagent(
+            &worktree_path,
+            &replacements,
+        )
+        .map_err(Status::internal)?;
+        crate::sandbox_session::copy_dir_all(ctx.path(), &context_dir).map_err(Status::internal)?;
+
+        let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
+            crate::config::resolve_cursor_cli_tddy_tools_path(&self.config).as_deref(),
+        );
+
+        let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
+        let mut session_env: Vec<(String, String)> = Vec::new();
+        if let Some(recipe) = managed_recipe.clone() {
+            let launch = self.prepare_managed_workflow(
+                session_id,
+                recipe,
+                &session_dir,
+                &worktree_path,
+                &context_dir,
+                &tddy_tools_path,
+                None,
+            )?;
+            if let Ok(prompt) = std::fs::read_to_string(&launch.prompt_file) {
+                let rules_dir = worktree_path.join(".cursor").join("rules");
+                let _ = std::fs::create_dir_all(&rules_dir);
+                let _ = std::fs::write(rules_dir.join("tddy-managed-workflow.mdc"), prompt);
+            }
+            session_env = launch.env;
+            managed = Some(launch.workflow);
+        }
+
+        let canonicalize_exec = |p: &str| -> String {
+            if p.contains('/') {
+                std::fs::canonicalize(p)
+                    .map(|c| c.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| p.to_string())
+            } else {
+                p.to_string()
+            }
+        };
+        let tddy_tools_path = canonicalize_exec(&tddy_tools_path);
+        let sandbox_runner_path =
+            canonicalize_exec(&crate::sandbox_session::resolve_sandbox_runner_path());
+        let cursor_binary =
+            canonicalize_exec(&crate::config::resolve_cursor_binary_path(&self.config));
+        let cursor_home_dir = crate::config::resolve_cursor_home_dir(&self.config);
+        let scratch_home = crate::sandbox_session::prepare_persistent_cursor_home(
+            &cursor_home_dir,
+            &cursor_binary,
+        );
+
+        let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(session_id);
+        let ready_marker = sandbox_root.join("sandbox.ready");
+        let profile_path = sandbox_root.join("sandbox.sb");
+
+        let egress_shim_port =
+            crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
+        let loopback_allow_ports = vec![egress_shim_port];
+
+        let mut runner_argv = vec![
+            sandbox_runner_path,
+            "--session-id".into(),
+            session_id.to_string(),
+            "--context-dir".into(),
+            context_dir.to_string_lossy().to_string(),
+            "--tool-ipc-socket".into(),
+            tool_ipc_socket.to_string_lossy().to_string(),
+            "--tddy-tools-path".into(),
+            tddy_tools_path.clone(),
+            "--ready-marker".into(),
+            ready_marker.to_string_lossy().to_string(),
+            "--agent-kind".into(),
+            "cursor".into(),
+            "--agent-binary".into(),
+            cursor_binary.clone(),
+            "--model".into(),
+            model.to_string(),
+            "--egress-shim-port".into(),
+            egress_shim_port.to_string(),
+            "--stdio".into(),
+        ];
+        let prompt = initial_prompt.trim();
+        if !prompt.is_empty() {
+            runner_argv.push("--agent-arg".into());
+            runner_argv.push(prompt.to_string());
+        }
+
+        let mut env = crate::sandbox_session::build_sandbox_runner_env(
+            &scratch_home,
+            &scratch_tmp,
+            session_id,
+            &tool_ipc_socket,
+            &egress_dir,
+        );
+        if !specialized_defs.is_empty() {
+            env.extend(self.specialized_subagent_env(&specialized_defs)?);
+        }
+
+        let mut handle = crate::sandbox_session::spawn_sandbox_runner(
+            crate::sandbox_session::SandboxRunnerSpawn {
+                project_root: sandbox_root.clone(),
+                scratch_dir: scratch_dir.clone(),
+                egress_dir: egress_dir.clone(),
+                profile_path,
+                runner_argv,
+                env,
+                loopback_allow_ports,
+                ipc_socket: Some(tool_ipc_socket.clone()),
+                mounts: vec![tddy_sandbox::MountSpec::read_write(scratch_home.clone())],
+                host_home: None,
+            },
+        )
+        .map_err(|e| {
+            let logs = tddy_sandbox::format_egress_logs(&egress_dir);
+            let mut status = crate::sandbox_session::sandbox_error_to_status(e);
+            status.message = format!("{}\n{logs}", status.message);
+            status
+        })?;
+
+        crate::sandbox_session::wait_for_sandbox_ready(
+            &mut handle,
+            &ready_marker,
+            std::time::Duration::from_secs(120),
+            &egress_dir,
+        )
+        .await
+        .map_err(Status::deadline_exceeded)?;
+
+        let (stdout_tx, _) = tokio::sync::broadcast::channel(256);
+        let capture = Arc::new(StdMutex::new(Vec::new()));
+        let (stdin_tx, stdin_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        crate::sandbox_session::dial_and_bridge(
+            session_id,
+            worktree_path.clone(),
+            &mut handle,
+            self.task_registry.clone(),
+            stdout_tx.clone(),
+            Arc::clone(&capture),
+            stdin_rx,
+            Arc::new(session_env),
+        )
+        .await
+        .map_err(Status::internal)?;
+
+        let pid = handle.pid();
+        let state = Arc::new(crate::sandbox_session::SandboxSessionState::new(
+            crate::sandbox_session::SandboxSessionStateInit {
+                pid,
+                worktree_path: worktree_path.clone(),
+                stdout_tx,
+                capture,
+                stdin_tx,
+                ready_marker: ready_marker.clone(),
+                handle,
+                managed_workflow: managed,
+            },
+        ));
+        self.sandbox_manager
+            .insert(session_id.to_string(), state)
+            .await;
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let meta = tddy_core::SessionMetadata {
+            session_id: session_id.to_string(),
+            project_id: project_id.to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            status: "active".to_string(),
+            repo_path: Some(worktree_path.to_string_lossy().to_string()),
+            pid: Some(pid),
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("cursor-cli".to_string()),
+            model: Some(model.to_string()),
+            activity_status: None,
+            hook_token: Some(hook_token),
+            sandbox: Some(true),
+            agent: None,
+            recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
+            specialized_agents: specialized_agents.to_vec(),
+        };
+        tddy_core::write_session_metadata(&session_dir, &meta)
+            .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
+
+        log::info!(
+            target: "tddy_daemon::connection_service",
+            "started sandboxed cursor-cli session {session_id} pid={pid} worktree={}",
+            worktree_path.display()
+        );
+
+        Ok(Response::new(StartSessionResponse {
+            session_id: session_id.to_string(),
+            livekit_room: String::new(),
+            livekit_url: String::new(),
+            livekit_server_identity: String::new(),
+        }))
+    }
+
     /// Handle `ResumeSession` for `session_type = "claude-cli"` sessions.
     async fn resume_claude_cli_session(
         &self,
@@ -2597,11 +2956,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 "model is required for cursor-cli sessions",
             ));
         }
-        if req.session_type.trim() == "cursor-cli" && req.sandbox {
-            return Err(Status::failed_precondition(
-                "sandbox is not supported for cursor-cli sessions",
-            ));
-        }
 
         // Auto-provision the project's working copy on this host before dispatching to any session
         // type: if the project isn't cloned here yet (registered-but-missing, or known only on a
@@ -2720,6 +3074,36 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             )
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
             let session_id = Uuid::now_v7().to_string();
+            let managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>> = if req
+                .managed_codebase
+                && !req.recipe.trim().is_empty()
+            {
+                Some(
+                    tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(req.recipe.trim())
+                        .map_err(Status::invalid_argument)?,
+                )
+            } else {
+                None
+            };
+            if req.sandbox {
+                return self
+                    .start_sandboxed_cursor_cli_session(
+                        os_user,
+                        &session_id,
+                        sessions_base,
+                        req.model.trim(),
+                        req.project_id.trim(),
+                        req.branch_worktree_intent.trim(),
+                        req.new_branch_name.trim(),
+                        req.selected_integration_base_ref.trim(),
+                        req.selected_branch_to_work_on.trim(),
+                        req.initial_prompt.trim(),
+                        req.managed_codebase,
+                        &req.specialized_agents,
+                        managed_recipe,
+                    )
+                    .await;
+            }
             return crate::cursor_cli_spawn::spawn_cursor_cli_session_inner(
                 &self.config,
                 &self.tddy_data_dir,
@@ -2734,6 +3118,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 req.selected_integration_base_ref.trim(),
                 req.selected_branch_to_work_on.trim(),
                 req.initial_prompt.trim(),
+                req.managed_codebase,
+                &req.specialized_agents,
+                managed_recipe,
             )
             .await;
         }

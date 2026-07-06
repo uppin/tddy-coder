@@ -26,6 +26,8 @@ pub struct SandboxAppConfig {
     #[serde(default)]
     pub claude_binary: Option<String>,
     #[serde(default)]
+    pub cursor_binary: Option<String>,
+    #[serde(default)]
     pub tddy_tools_path: Option<String>,
     #[serde(default)]
     pub sandbox_runner_path: Option<String>,
@@ -33,6 +35,8 @@ pub struct SandboxAppConfig {
     pub session_base: Option<PathBuf>,
     #[serde(default)]
     pub claude_home_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub cursor_home_dir: Option<PathBuf>,
     #[serde(default)]
     pub cwd: Option<PathBuf>,
     #[serde(default)]

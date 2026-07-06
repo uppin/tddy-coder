@@ -27,6 +27,7 @@ tddy-daemon = { path = "../tddy-daemon" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
+tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-service = { path = "../tddy-service" }
 tddy-task = { path = "../tddy-task" }

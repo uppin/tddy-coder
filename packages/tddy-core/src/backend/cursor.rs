@@ -201,7 +201,29 @@ pub(crate) fn build_cursor_cli_args(request: &InvokeRequest, prompt: &str) -> Ve
     args.push("--stream-partial-output".to_string());
     args.push("--force".to_string());
     args.push("--trust".to_string());
+    args.push("--approve-mcps".to_string());
     args
+}
+
+/// Write `.cursor/mcp.json` under `base_dir` registering `tddy-tools --mcp`.
+fn register_cursor_mcp_config(base_dir: &std::path::Path) -> Result<(), BackendError> {
+    let tddy_tools = super::claude::tddy_tools_path().ok_or_else(|| {
+        BackendError::InvocationFailed("tddy-tools binary not found for cursor MCP".into())
+    })?;
+    let cursor_dir = base_dir.join(".cursor");
+    std::fs::create_dir_all(&cursor_dir)
+        .map_err(|e| BackendError::InvocationFailed(format!("create .cursor dir: {e}")))?;
+    let config = serde_json::json!({
+        "mcpServers": {
+            "tddy-tools": {
+                "command": tddy_tools.to_string_lossy(),
+                "args": ["--mcp"]
+            }
+        }
+    });
+    std::fs::write(cursor_dir.join("mcp.json"), config.to_string())
+        .map_err(|e| BackendError::InvocationFailed(format!("write .cursor/mcp.json: {e}")))?;
+    Ok(())
 }
 
 impl CursorBackend {
@@ -223,6 +245,12 @@ impl CursorBackend {
             Some(ref sys) => format!("{}\n\n{}", sys, request.prompt),
             None => request.prompt.clone(),
         };
+
+        let mcp_base = request
+            .working_dir
+            .as_deref()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        register_cursor_mcp_config(mcp_base)?;
 
         let args = build_cursor_cli_args(&request, &prompt);
 
@@ -280,6 +308,11 @@ impl CursorBackend {
         }
         if let Some(ref p) = request.session_dir {
             cmd.env("TDDY_SESSION_DIR", p);
+        }
+        if let Some(ref remote) = request.remote {
+            for (key, value) in remote.env_pairs() {
+                cmd.env(key, value);
+            }
         }
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
@@ -647,6 +680,15 @@ mod tests {
         // Then
         assert!(args.iter().any(|a| a == "--resume"));
         assert!(args.contains(&"resume-id".to_string()));
+    }
+
+    #[test]
+    fn build_args_includes_headless_mcp_approval_flags() {
+        let request = minimal_request("red", None, "x", hints_tdd_red_goal());
+        let args = build_cursor_cli_args(&request, "p");
+        assert!(args.contains(&"--approve-mcps".to_string()));
+        assert!(args.contains(&"--force".to_string()));
+        assert!(args.contains(&"--trust".to_string()));
     }
 
     #[test]

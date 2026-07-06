@@ -147,15 +147,15 @@ of being limited to the single hardcoded FastContext discovery agent and CLI fla
 16. `ListSubagents` RPC returns the resolved def set (builtin + `<tddyhome>/agents`) as
     `{name, label, model}` rows.
 17. `StartSessionRequest.managed_codebase` (bool) and `.specialized_agents` (repeated string, subagent
-    names) are accepted for `session_type == "claude-cli"` sandboxed sessions; an unknown name in
+    names) are accepted for `session_type == "claude-cli"` **or** `"cursor-cli"` sandboxed sessions; an unknown name in
     `specialized_agents` is a request error, not a silently-dropped agent.
 18. When `specialized_agents` is non-empty, the spawned jail's env includes `TDDY_SUBAGENT` +
-    `TDDY_SUBAGENTS_JSON` for the resolved agents. (The daemon's sandboxed claude-cli path already
-    never mounts the repo — `SandboxRunnerSpawn.mounts` is unconditionally empty there, matching
+    `TDDY_SUBAGENTS_JSON` for the resolved agents. (The daemon's sandboxed claude-cli **and** cursor-cli paths already
+    never mount the repo — `SandboxRunnerSpawn.mounts` is unconditionally empty there, matching
     today's proxied-tools-only design; `managed_codebase` does not toggle mount behavior on this
     path, unlike `tddy-sandbox-app`'s standalone `--codebase-mode mounted|managed` CLI flag.)
-19. The web new-session form shows a collapsible **"Managed codebase"** section only when
-    `sessionType === "claude-cli"`; expanding it lists available subagents (from `ListSubagents`) as a
+19. The web new-session form shows a collapsible **"Managed codebase"** section when
+    `sessionType === "claude-cli"` **or** `"cursor-cli"`; expanding it lists available subagents (from `ListSubagents`) as a
     multi-select; toggling any on sets `managed_codebase: true` and includes the selected names in
     the `StartSessionRequest`.
 

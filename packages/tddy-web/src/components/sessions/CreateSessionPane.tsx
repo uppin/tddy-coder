@@ -276,15 +276,15 @@ export function CreateSessionPane({
           ...commonParams,
           toolPath: "",
           agent: "",
-          recipe: "",
+          recipe: managedCodebase ? recipe : "",
           stackParent: "",
           sessionType: "cursor-cli",
           model,
           permissionMode: "",
           initialPrompt,
-          sandbox: false,
-          managedCodebase: false,
-          specializedAgents: [],
+          sandbox,
+          managedCodebase,
+          specializedAgents: managedCodebase ? selectedSubagents : [],
         });
       } else {
         res = await client.startSession({
@@ -492,6 +492,18 @@ export function CreateSessionPane({
         <>
           {modelField}
           <div>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                data-testid="create-session-sandbox-toggle"
+                type="checkbox"
+                className="h-4 w-4 rounded border-input"
+                checked={sandbox}
+                onChange={(e) => setSandbox(e.target.checked)}
+              />
+              Sandbox
+            </label>
+          </div>
+          <div>
             <label className={labelClass} htmlFor="create-session-initial-prompt">
               Initial prompt
             </label>
@@ -504,6 +516,66 @@ export function CreateSessionPane({
               onChange={(e) => setInitialPrompt(e.target.value)}
               placeholder="Optional initial prompt"
             />
+          </div>
+          <div>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                data-testid="create-session-managed-codebase-toggle"
+                type="checkbox"
+                className="h-4 w-4 rounded border-input"
+                checked={managedCodebase}
+                onChange={(e) => setManagedCodebase(e.target.checked)}
+              />
+              Managed codebase
+            </label>
+            {managedCodebase && (
+              <div className="mt-2 space-y-3 pl-4">
+                <div>
+                  <label className={labelClass} htmlFor="create-session-recipe">
+                    Recipe
+                  </label>
+                  <select
+                    id="create-session-recipe"
+                    data-testid="create-session-recipe-select"
+                    className={inputClass}
+                    value={recipe}
+                    onChange={(e) => setRecipe(e.target.value)}
+                  >
+                    {WORKFLOW_RECIPES.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div
+                  data-testid="create-session-managed-codebase-section"
+                  className="space-y-1"
+                >
+                  {subagents.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No specialized subagents available
+                    </p>
+                  ) : (
+                    subagents.map((sa) => (
+                      <label
+                        key={sa.name}
+                        className="flex items-center gap-2 text-sm text-muted-foreground"
+                      >
+                        <input
+                          data-testid={`create-session-subagent-checkbox-${sa.name}`}
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-input"
+                          checked={selectedSubagents.includes(sa.name)}
+                          onChange={() => toggleSubagent(sa.name)}
+                        />
+                        {sa.label || sa.name}
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}

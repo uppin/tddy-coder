@@ -126,7 +126,7 @@ When `StartSessionRequest.session_type == "cursor-cli"`, the standard tool-spawn
 4. `CliSessionManager::start_cursor()` spawns the Cursor Agent CLI binary (config `cursor_cli.binary_path`, default `"agent"`) with `--model <model>` and an optional initial prompt positional arg.
 5. `StartSessionResponse` returns empty LiveKit fields; the web client routes to `ConnectedClaudeCliTerminal` (same gRPC terminal path as claude-cli).
 
-**Sandbox:** `sandbox == true` with `session_type == "cursor-cli"` returns `FAILED_PRECONDITION` (not supported in v1).
+**Sandbox:** `sandbox == true` with `session_type == "cursor-cli"` starts a sandboxed session via `start_sandboxed_cursor_cli_session` — see [Sandboxed Cursor Agent CLI sessions](#sandboxed-cursor-agent-cli-sessions). `managed_codebase`, `recipe`, and `specialized_agents` are honored on both sandboxed and non-sandboxed cursor-cli starts.
 
 **`WaitingForInput`:** Cursor hooks do not emit a permission-prompt equivalent; `activity_status` never transitions to `WaitingForInput` for cursor-cli sessions.
 
@@ -136,17 +136,17 @@ When `StartSessionRequest.session_type == "cursor-cli"`, the standard tool-spawn
 
 Feature reference: [cursor-cli-session.md](../../../docs/ft/daemon/cursor-cli-session.md).
 
-## Managed-codebase workflow (workflow-aware claude-cli)
+## Managed-codebase workflow (workflow-aware claude-cli and cursor-cli)
 
-When `StartSessionRequest.managed_codebase == true` **and** `recipe` is non-empty, a claude-cli session (sandboxed or not) is launched *workflow-aware*: Claude drives and persists its own workflow state. The recipe is resolved once in the `StartSession` dispatch via `tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name` (an unknown name is `INVALID_ARGUMENT`) and threaded into both launch paths. See [managed-codebase-workflow.md](../../../docs/ft/coder/managed-codebase-workflow.md) for the product WHAT.
+When `StartSessionRequest.managed_codebase == true` **and** `recipe` is non-empty, a **claude-cli** or **cursor-cli** session (sandboxed or not) is launched *workflow-aware*: the agent drives and persists its own workflow state. The recipe is resolved once in the `StartSession` dispatch via `tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name` (an unknown name is `INVALID_ARGUMENT`) and threaded into both launch paths. See [managed-codebase-workflow.md](../../../docs/ft/coder/managed-codebase-workflow.md) for the product WHAT.
 
-`ConnectionServiceImpl::prepare_managed_workflow` is the single helper shared by all four sites (start/resume × non-sandboxed/sandboxed). It:
+`ConnectionServiceImpl::prepare_managed_workflow` is the single helper shared by all start/resume sites (claude-cli and cursor-cli × non-sandboxed/sandboxed). It:
 
 1. Builds the per-session wiring (`session_toolcall::set_up_managed_workflow` for a new session — controller at `recipe.start_goal()`; `resume_managed_workflow` for a resume — controller at the goal persisted in `changeset.yaml`, resolved by `managed_resume_goal`). The `WorkflowController` is registered as the **per-instance** `transition` handler of a per-session toolcall listener (`SessionToolcallListener`, bound on a short out-of-tree socket to satisfy `SUN_LEN`).
-2. Writes the recipe's `orchestration_system_prompt` to `orchestration-prompt.txt` (the session dir for non-sandboxed; the jail-visible context dir for sandboxed) and returns it as `--append-system-prompt-file` for the `claude` argv.
+2. Writes the recipe's `orchestration_system_prompt` to `orchestration-prompt.txt` (the session dir for non-sandboxed; the jail-visible context dir for sandboxed) and returns it as `--append-system-prompt-file` for the **claude** argv. For **cursor-cli**, the same text is written to `<worktree>/.cursor/rules/tddy-managed-workflow.mdc` (Cursor has no `--append-system-prompt-file`).
 3. Returns the per-session env (`TDDY_SOCKET` = the listener socket, plus a `PATH` that resolves `tddy-tools`).
 
-For new sessions the changeset is seeded with `recipe.start_goal()` before `write_changeset`, and `recipe` is persisted in `.session.yaml` (the resume signal). The listener/`ManagedWorkflow` is owned by `ClaudeCliSessionManager` (non-sandboxed, dropped when the main terminal exits) or `SandboxSessionState` (sandboxed).
+For new sessions the changeset is seeded with `recipe.start_goal()` before `write_changeset`, and `recipe` is persisted in `.session.yaml` (the resume signal). The listener/`ManagedWorkflow` is owned by `ClaudeCliSessionManager` (non-sandboxed claude-cli/cursor-cli, dropped when the main terminal exits) or `SandboxSessionState` (sandboxed claude-cli or cursor-cli).
 
 **How `transition` reaches the controller:** `tddy-tools transition` always runs **on the host** — sandboxed sessions relay the agent's `Shell` tool back to the daemon (`tool_engine::tool_shell`, which now runs the command with the per-session `extra_env`), and non-sandboxed sessions inherit the PTY env — so the child `tddy-tools` reads `TDDY_SOCKET` and dispatches over the existing relay to the per-session `ToolcallRpcService::with_transition_handler` in `tddy-core`. The process-global registry (`toolcall/transition.rs`) remains a fallback only for the in-process `tddy-coder`/`agent_session_runner` path; the per-instance handler prevents cross-session bleed under concurrency. Only `transition` is served on this listener (ask/approve use the MCP `approval_prompt` tool + PTY). Live workflow-event streaming to the web client is a follow-up; state is durable in `changeset.yaml`.
 
@@ -206,6 +206,30 @@ claude_cli:
   tddy_tools_path: /usr/local/bin/tddy-tools  # default: current_exe sibling → "tddy-tools"
   daemon_url: http://127.0.0.1:8899    # default: http://127.0.0.1:{web_port}
 ```
+
+## Sandboxed Cursor Agent CLI sessions
+
+When `StartSessionRequest.session_type == "cursor-cli"` **and** `sandbox == true`, the daemon uses the sandbox spawn path (`start_sandboxed_cursor_cli_session`) instead of `CliSessionManager::start_cursor()`:
+
+1. Creates the same git worktree as a non-sandbox cursor-cli session (host `tool_engine::execute_tool` operates on this worktree).
+2. Prepares a read-only **context dir** (`SandboxContextDir`: synced project docs + managed-codebase appendix when applicable).
+3. Renders an SBPL profile from `tddy-sandbox-recipes::cursor_cli` and spawns `tddy-sandbox-runner --agent-kind cursor` via Seatbelt (macOS) or cgroups+namespaces (Linux).
+4. Waits for the ready marker, then **`dial_and_bridge`** dials the runner over piped stdio (`--stdio`) for a single bidi **`SessionChannel`** — same transport as sandboxed claude-cli.
+5. Writes `$HOME/.cursor/mcp.json` in the jail (registers `tddy-tools --mcp`). Headless MCP approval flags are **not** auto-injected — callers pass `--approve-mcps` / `--force` / `--trust` via agent args when using print mode.
+6. Spawns the Cursor Agent CLI via direct `node index.js` (bypasses the bash `agent` wrapper; `realpath` fails under Seatbelt).
+7. Writes `.session.yaml` with `sandbox: true`; returns empty LiveKit fields.
+
+**Specialized subagents** and **managed codebase** follow the same rules as [Sandboxed Claude Code CLI sessions](#sandboxed-claude-code-cli-sessions): the jail never mounts the repo; `specialized_subagent_env` and `prepare_managed_workflow` wire `TDDY_SUBAGENTS_JSON`, `TDDY_SOCKET`, and orchestration via `.cursor/rules/tddy-managed-workflow.mdc`.
+
+**Terminal I/O**: `StreamSessionTerminalIO` / `StreamTerminalOutput` / `SendTerminalInput` delegate to `SandboxSessionManager` when `metadata.sandbox == true` (same as claude-cli).
+
+**Lifecycle**:
+- **`DeleteSession`**: stops the `SandboxHandle`, removes worktree and session dir.
+- **`ResumeSession`**: non-sandbox cursor-cli resumes via `CliSessionManager`; **sandboxed cursor-cli resume relaunch is not yet implemented**.
+
+**Standalone proof:** `tddy-sandbox-app --agent-kind cursor --repo <path> --cursor-binary <agent> [-- -p hi]` exercises the darwin Seatbelt path without the daemon.
+
+Feature reference: [cursor-cli-session.md](../../../docs/ft/daemon/cursor-cli-session.md#sandbox-mode).
 
 ## Session tools (multiple terminals per session)
 

@@ -15,13 +15,35 @@ fn spawn_trace(session_dir: &Path, message: &str) {
     let _ = append_line(&trace, message);
 }
 
-/// Parameters for a local sandboxed Claude session.
+/// Agent kind for the in-jail CLI: `claude` (default) or `cursor`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentKind {
+    Claude,
+    Cursor,
+}
+
+impl AgentKind {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.trim() {
+            "claude" => Ok(Self::Claude),
+            "cursor" => Ok(Self::Cursor),
+            other => Err(format!(
+                "unrecognized --agent-kind {other:?}; expected \"claude\" or \"cursor\""
+            )),
+        }
+    }
+}
+
+/// Parameters for a local sandboxed Claude or Cursor session.
 pub struct SpawnParams {
+    pub agent_kind: AgentKind,
     pub repo: PathBuf,
     pub session_id: String,
     pub model: String,
     pub permission_mode: String,
     pub claude_binary: Option<String>,
+    /// Path to the `agent` binary when `agent_kind` is Cursor (default: `agent` on PATH).
+    pub cursor_binary: Option<String>,
     pub tddy_tools_path: Option<String>,
     pub sandbox_runner_path: Option<String>,
     pub session_dir: PathBuf,
@@ -35,6 +57,8 @@ pub struct SpawnParams {
     /// runs sharing this dir is analogous to a user running multiple concurrent `claude` CLI
     /// sessions against their real `~/.claude` today; this is not an oversight.
     pub claude_home_dir: PathBuf,
+    /// Persistent jail `$HOME` for Cursor (`agent`) when `agent_kind` is Cursor.
+    pub cursor_home_dir: PathBuf,
     /// Remote-codebase mode: don't mount `repo` into the jail. Claude reaches it only via
     /// `mcp__tddy-tools__*` calls, which the host relays against the real `repo` path (see
     /// `bridge::AppToolHandler`). Matches the daemon's sandboxed-session isolation model.
@@ -260,7 +284,37 @@ pub(crate) fn build_sandbox_mounts(
     }
 }
 
-/// A sandboxed Claude session ready for host `SessionChannel` attach.
+pub(crate) fn seed_cursor_credentials(cursor_home_dir: &Path) -> Result<()> {
+    let dest_dir = cursor_home_dir.join(".cursor");
+    std::fs::create_dir_all(&dest_dir)
+        .with_context(|| format!("create persistent cursor home {}", dest_dir.display()))?;
+    let Some(host_home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return Ok(());
+    };
+    let host_cursor = host_home.join(".cursor");
+    for name in ["auth.json", "cli-config.json"] {
+        let src = host_cursor.join(name);
+        let dest = dest_dir.join(name);
+        if dest.exists() || !src.is_file() {
+            continue;
+        }
+        std::fs::copy(&src, &dest).with_context(|| {
+            format!(
+                "seed cursor credentials {} -> {}",
+                src.display(),
+                dest.display()
+            )
+        })?;
+        #[cfg(unix)]
+        if name == "auth.json" {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    Ok(())
+}
+
+/// A sandboxed Claude or Cursor session ready for host `SessionChannel` attach.
 pub struct SpawnedSandbox {
     pub handle: SandboxHandle,
     pub session_id: String,
@@ -278,6 +332,40 @@ fn canonicalize_exec_path(path: &str) -> String {
     } else {
         path.to_string()
     }
+}
+
+fn resolve_cursor_binary(configured: Option<&str>) -> Result<String> {
+    let name = configured
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("agent");
+    if name.contains('/') {
+        let path = Path::new(name);
+        anyhow::ensure!(
+            path.is_file() || path.is_symlink(),
+            "cursor agent binary not found at {}",
+            path.display()
+        );
+        return Ok(canonicalize_exec_path(name));
+    }
+    let which_out = std::process::Command::new("which")
+        .arg(name)
+        .output()
+        .context("run which to locate agent")?;
+    if which_out.status.success() {
+        let path = String::from_utf8_lossy(&which_out.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if !path.is_empty() {
+            return Ok(canonicalize_exec_path(&path));
+        }
+    }
+    anyhow::bail!(
+        "cursor agent binary {name:?} not found on host PATH.\n\
+         Pass an absolute path, e.g.: --cursor-binary $(which agent)"
+    );
 }
 
 fn resolve_claude_binary(configured: Option<&str>) -> Result<String> {
@@ -353,13 +441,20 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         .context("mkdir sandbox scratch tmp")?;
     std::fs::create_dir_all(sandbox_root.join("context")).context("mkdir sandbox context")?;
     std::fs::create_dir_all(&egress_dir).context("mkdir sandbox egress")?;
-    seed_claude_credentials(&params.claude_home_dir)?;
+    let scratch_home_dir = match params.agent_kind {
+        AgentKind::Claude => &params.claude_home_dir,
+        AgentKind::Cursor => &params.cursor_home_dir,
+    };
+    match params.agent_kind {
+        AgentKind::Claude => seed_claude_credentials(scratch_home_dir)?,
+        AgentKind::Cursor => seed_cursor_credentials(scratch_home_dir)?,
+    }
 
     let sandbox_root = std::fs::canonicalize(&sandbox_root).unwrap_or(sandbox_root);
     let egress_dir = std::fs::canonicalize(&egress_dir).unwrap_or(egress_dir);
     let scratch_dir = sandbox_root.join(".work");
-    let scratch_home = std::fs::canonicalize(&params.claude_home_dir)
-        .unwrap_or_else(|_| params.claude_home_dir.clone());
+    let scratch_home =
+        std::fs::canonicalize(scratch_home_dir).unwrap_or_else(|_| scratch_home_dir.clone());
     let scratch_tmp = scratch_dir.join("tmp");
     let context_dir = sandbox_root.join("context");
 
@@ -403,7 +498,13 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         .map(|p| canonicalize_exec_path(&p))
         .unwrap_or_else(|| canonicalize_exec_path(&resolve_sandbox_runner_path()));
     let claude_binary = resolve_claude_binary(params.claude_binary.as_deref())?;
-    seed_claude_local_install(&params.claude_home_dir, &claude_binary)?;
+    let cursor_binary = resolve_cursor_binary(params.cursor_binary.as_deref())?;
+    if params.agent_kind == AgentKind::Claude {
+        seed_claude_local_install(scratch_home_dir, &claude_binary)?;
+    } else {
+        #[cfg(unix)]
+        tddy_sandbox_recipes::seed_cursor_local_install(scratch_home_dir, &cursor_binary)?;
+    }
 
     let grpc_socket = sandbox_root.join("sandbox.grpc.sock");
     let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(&params.session_id);
@@ -455,12 +556,8 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         tddy_tools_path,
         "--ready-marker".into(),
         ready_marker.to_string_lossy().to_string(),
-        "--claude-binary".into(),
-        claude_binary.clone(),
         "--model".into(),
         params.model.clone(),
-        "--permission-mode".into(),
-        perm.to_string(),
         "--grpc-listen-port".into(),
         grpc_listen_port.to_string(),
         "--egress-shim-port".into(),
@@ -470,11 +567,27 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         "--initial-rows".into(),
         initial_rows.to_string(),
     ];
-    // Forward each caller pass-through arg as a `--claude-arg` token; the runner appends them
-    // verbatim after the fixed flags + MCP allowlist when building the in-jail `claude` argv.
-    for claude_arg in &params.claude_args {
-        runner_argv.push("--claude-arg".into());
-        runner_argv.push(claude_arg.clone());
+    match params.agent_kind {
+        AgentKind::Claude => {
+            runner_argv.push("--claude-binary".into());
+            runner_argv.push(claude_binary.clone());
+            runner_argv.push("--permission-mode".into());
+            runner_argv.push(perm.to_string());
+            for claude_arg in &params.claude_args {
+                runner_argv.push("--claude-arg".into());
+                runner_argv.push(claude_arg.clone());
+            }
+        }
+        AgentKind::Cursor => {
+            runner_argv.push("--agent-kind".into());
+            runner_argv.push("cursor".into());
+            runner_argv.push("--agent-binary".into());
+            runner_argv.push(cursor_binary.clone());
+            for agent_arg in &params.claude_args {
+                runner_argv.push("--agent-arg".into());
+                runner_argv.push(agent_arg.clone());
+            }
+        }
     }
     if let Some(level) = &params.mcp_log_level {
         runner_argv.push("--mcp-log-level".into());

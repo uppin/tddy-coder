@@ -4,6 +4,11 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-06 — Cursor CLI sandbox + managed workflow in CreateSessionPane
+
+- **Cursor Agent CLI** sessions expose the same **Sandbox** toggle and **Managed codebase** section (recipe picker + specialized-subagents multi-select) as Claude CLI.
+- Cypress `CreateSessionCursorCliAcceptance` covers sandbox and managed-codebase request fields. Feature: [cursor-cli-session.md](../daemon/cursor-cli-session.md). PR [#287](https://github.com/uppin/tddy-coder/pull/287).
+
 ## 2026-07-04 — Multi-daemon session host selection & auto-provision
 
 - New sessions can pick which host/daemon runs them; the picker appears when more than one daemon is in the common room.

@@ -133,7 +133,7 @@ pub fn build_claude_args(
 }
 
 /// Resolve tddy-tools binary path (next to current executable, or parent dir for test binaries in deps/).
-fn tddy_tools_path() -> Option<PathBuf> {
+pub(crate) fn tddy_tools_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
     #[cfg(windows)]

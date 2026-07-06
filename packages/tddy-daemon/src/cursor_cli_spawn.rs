@@ -72,6 +72,9 @@ pub async fn spawn_cursor_cli_session_inner(
     selected_integration_base_ref: &str,
     selected_branch_to_work_on: &str,
     initial_prompt: &str,
+    managed_codebase: bool,
+    specialized_agents: &[String],
+    managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
         return Err(Status::invalid_argument(
@@ -142,10 +145,17 @@ pub async fn spawn_cursor_cli_session_inner(
         selected_branch_to_work_on: resolved_selected_branch,
         ..ChangesetWorkflow::default()
     };
-    let cs = Changeset {
+    let mut cs = Changeset {
         workflow: Some(cs_workflow),
+        recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
         ..Changeset::default()
     };
+    if let Some(recipe) = &managed_recipe {
+        tddy_core::changeset::update_state(
+            &mut cs,
+            tddy_core::workflow::ids::WorkflowState::new(recipe.start_goal().as_str()),
+        );
+    }
     tddy_core::write_changeset(&session_dir, &cs)
         .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
@@ -177,6 +187,17 @@ pub async fn spawn_cursor_cli_session_inner(
             Some(p.to_string())
         }
     };
+    if managed_recipe.is_some() {
+        let rules_dir = worktree_path.join(".cursor").join("rules");
+        let _ = std::fs::create_dir_all(&rules_dir);
+        if let Some(recipe) = &managed_recipe {
+            let _ = std::fs::write(
+                rules_dir.join("tddy-managed-workflow.mdc"),
+                format!("Managed workflow recipe: {}\n", recipe.name()),
+            );
+        }
+    }
+    let _ = (managed_codebase, specialized_agents);
 
     let handle = cli_manager
         .start_cursor(
@@ -209,8 +230,8 @@ pub async fn spawn_cursor_cli_session_inner(
         hook_token: Some(hook_token),
         sandbox: None,
         agent: None,
-        recipe: None,
-        specialized_agents: Vec::new(),
+        recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
+        specialized_agents: specialized_agents.to_vec(),
     };
     write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;

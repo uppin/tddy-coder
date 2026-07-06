@@ -9049,6 +9049,7 @@ dependencies = [
  "tddy-discovery",
  "tddy-sandbox",
  "tddy-sandbox-darwin",
+ "tddy-sandbox-recipes",
  "tddy-sandbox-runner",
  "tddy-service",
  "tddy-task",

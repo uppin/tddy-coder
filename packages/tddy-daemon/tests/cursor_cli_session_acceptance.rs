@@ -7,7 +7,7 @@ use tddy_core::session_metadata::{read_session_metadata, SessionMetadata};
 use tddy_daemon::claude_cli_session::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_rpc::{Code, Request};
+use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ListSessionsRequest, StartSessionRequest,
 };
@@ -83,6 +83,17 @@ fn create_test_repo_with_origin(dir: &std::path::Path) {
     run(&["commit", "--allow-empty", "-m", "init"], author_env);
     run(&["remote", "add", "origin", dir.to_str().unwrap()], &[]);
     run(&["push", "-u", "origin", "main"], &[]);
+}
+
+fn write_echo_argv_script(dir: &std::path::Path) -> std::path::PathBuf {
+    let script_path = dir.join("stub_agent.sh");
+    std::fs::write(&script_path, "#!/bin/sh\necho \"ARGV: $@\"\ncat\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    script_path
 }
 
 fn register_project(projects_dir: &std::path::Path, repo_path: &std::path::Path) {
@@ -219,22 +230,32 @@ async fn cursor_cli_session_writes_hooks_json() {
 }
 
 #[tokio::test]
-async fn cursor_cli_sandbox_rejected() {
+async fn cursor_cli_sandbox_start_succeeds_when_sandbox_backend_available() {
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        return;
+    }
+    #[cfg(target_os = "linux")]
+    if !tddy_sandbox_cgroups::unprivileged_userns_available() {
+        return;
+    }
+
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_cursor_cli_binary("/bin/cat");
+    let stub = write_echo_argv_script(repo_dir.path());
+    let (_cfg_dir, config) = write_config_with_cursor_cli_binary(stub.to_str().unwrap());
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let mut req = start_cursor_cli_request();
     req.sandbox = true;
-    let err = service
+    let resp = service
         .start_session(Request::new(req))
         .await
-        .expect_err("sandbox must be rejected");
+        .expect("sandbox cursor-cli must start when sandbox backend is available");
 
-    assert_eq!(err.code(), Code::FailedPrecondition);
+    assert!(resp.into_inner().livekit_room.is_empty());
 }
 
 #[tokio::test]

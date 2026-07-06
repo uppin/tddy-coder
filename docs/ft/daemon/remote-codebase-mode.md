@@ -134,7 +134,15 @@ Reuse from this feature area:
 - Workspace exec tool catalog (`ListExecTools` shapes)
 
 Entry point: `StartSession` with `session_type:"claude-cli"` and `sandbox:true`.
-Details: [claude-cli-session.md](claude-cli-session.md#darwin-sandbox-mode-startsessionrequestsandbox--true).
+Details: [claude-cli-session.md](claude-cli-session.md#sandbox-mode).
+
+**Cursor Agent CLI** uses the same proxied-tools model when `session_type:"cursor-cli"` and `sandbox:true`:
+the `agent` binary runs in a Seatbelt (macOS) or cgroups+namespaces (Linux) jail, reaches the host worktree only via
+`mcp__tddy-tools__*`, and egresses through the same `SessionChannel` HTTPS_PROXY tunnel. MCP config is written to
+`$HOME/.cursor/mcp.json` inside the jail; headless approval flags (`--approve-mcps`, `--force`, `--trust`) are not
+injected by tddy — pass them explicitly when using print mode.
+
+Details: [cursor-cli-session.md](cursor-cli-session.md#sandbox-mode).
 
 ## Non-goals (out of scope)
 
