@@ -11,6 +11,9 @@ use tddy_sandbox::{binary_exec_reads, system_baseline_reads, SandboxError, Secre
 use crate::claude_cli::{
     claude_credentials_copies, claude_interactive_policy, process_claude_exec_reads,
 };
+use crate::cursor_cli::{
+    cursor_credentials_copies, cursor_interactive_policy, process_cursor_exec_reads,
+};
 
 /// Named sandbox recipe overlay applied on top of generic exec/read detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +22,8 @@ pub enum SandboxRecipe {
     Generic,
     /// Claude Code CLI (Node/V8 interactive PTY + credentials copy).
     ClaudeCli,
+    /// Cursor Agent CLI (`agent` binary; Node/V8 interactive PTY + credentials copy).
+    CursorCli,
     /// Interactive shell — fork + PTY, no JIT.
     Shell,
     /// `tddy-sandbox-runner` hosting a generic `--pty-command` action.
@@ -27,6 +32,13 @@ pub enum SandboxRecipe {
 
 /// Infer recipe from sandbox-runner argv (`--claude-binary` → Claude CLI; `--pty-command` → Shell).
 pub fn detect_recipe_from_argv(argv: &[String]) -> SandboxRecipe {
+    if argv.iter().any(|a| a == "--agent-kind") {
+        let idx = argv.iter().position(|a| a == "--agent-kind").unwrap();
+        if argv.get(idx + 1).is_some_and(|k| k == "cursor") {
+            return SandboxRecipe::CursorCli;
+        }
+        return SandboxRecipe::ClaudeCli;
+    }
     if argv.iter().any(|a| a == "--claude-binary") {
         SandboxRecipe::ClaudeCli
     } else if argv
@@ -42,6 +54,7 @@ pub fn detect_recipe_from_argv(argv: &[String]) -> SandboxRecipe {
 fn parse_recipe_name(name: &str) -> SandboxRecipe {
     match name {
         "claude-cli" | "claude_cli" => SandboxRecipe::ClaudeCli,
+        "cursor-cli" | "cursor_cli" => SandboxRecipe::CursorCli,
         "bash" | "shell" => SandboxRecipe::Shell,
         "generic" => SandboxRecipe::Generic,
         _ => SandboxRecipe::Generic,
@@ -84,8 +97,17 @@ fn primary_binary_from_command(command: &[String]) -> Option<PathBuf> {
 }
 
 fn claude_binary_from_runner_argv(argv: &[String]) -> Option<PathBuf> {
-    let idx = argv.iter().position(|a| a == "--claude-binary")?;
-    argv.get(idx + 1).map(PathBuf::from)
+    if let Some(idx) = argv.iter().position(|a| a == "--claude-binary") {
+        return argv.get(idx + 1).map(PathBuf::from);
+    }
+    if let Some(idx) = argv.iter().position(|a| a == "--agent-kind") {
+        if argv.get(idx + 1).is_some_and(|k| k == "cursor") {
+            if let Some(bidx) = argv.iter().position(|a| a == "--agent-binary") {
+                return argv.get(bidx + 1).map(PathBuf::from);
+            }
+        }
+    }
+    None
 }
 
 fn canonical_binary_path(path: &str) -> Option<PathBuf> {
@@ -108,6 +130,15 @@ fn collect_reads(
                 let canon = canonical_binary_path(&claude.to_string_lossy())
                     .unwrap_or_else(|| claude.to_path_buf());
                 reads.extend(process_claude_exec_reads(&canon));
+            } else {
+                reads.extend(system_baseline_reads());
+            }
+        }
+        SandboxRecipe::CursorCli => {
+            if let Some(cursor) = claude_binary {
+                let canon = canonical_binary_path(&cursor.to_string_lossy())
+                    .unwrap_or_else(|| cursor.to_path_buf());
+                reads.extend(process_cursor_exec_reads(&canon));
             } else {
                 reads.extend(system_baseline_reads());
             }
@@ -154,6 +185,7 @@ fn runner_pty_policy() -> PolicySpec {
 fn policy_for_recipe(recipe: SandboxRecipe) -> PolicySpec {
     match recipe {
         SandboxRecipe::ClaudeCli => claude_interactive_policy(),
+        SandboxRecipe::CursorCli => cursor_interactive_policy(),
         SandboxRecipe::Shell => shell_interactive_policy(),
         SandboxRecipe::RunnerPty => runner_pty_policy(),
         SandboxRecipe::Generic => generic_exec_policy(),
@@ -189,6 +221,9 @@ fn copies_for_recipe(
     match recipe {
         SandboxRecipe::ClaudeCli => host_home
             .map(|home| claude_credentials_copies(home, scratch_home))
+            .unwrap_or_default(),
+        SandboxRecipe::CursorCli => host_home
+            .map(|home| cursor_credentials_copies(home, scratch_home))
             .unwrap_or_default(),
         SandboxRecipe::Generic | SandboxRecipe::Shell | SandboxRecipe::RunnerPty => Vec::new(),
     }
@@ -238,7 +273,7 @@ pub fn build_runner_plan(params: RunnerPlanRequest) -> Result<SandboxPlan, Sandb
     .mounts(params.mounts)
     .network(NetworkSpec {
         loopback_allow_ports: params.loopback_allow_ports,
-        allow_oauth_inbound: recipe == SandboxRecipe::ClaudeCli,
+        allow_oauth_inbound: matches!(recipe, SandboxRecipe::ClaudeCli | SandboxRecipe::CursorCli),
     })
     .env_map(params.env);
 
@@ -286,6 +321,31 @@ mod tests {
             "--pty-command=-c".into(),
         ];
         assert_eq!(detect_recipe_from_argv(&argv), SandboxRecipe::RunnerPty);
+    }
+
+    #[test]
+    fn detect_recipe_from_argv_finds_cursor_agent_kind() {
+        let argv = vec![
+            "runner".into(),
+            "--agent-kind".into(),
+            "cursor".into(),
+            "--agent-binary".into(),
+            "/tmp/stub_agent.sh".into(),
+        ];
+        assert_eq!(detect_recipe_from_argv(&argv), SandboxRecipe::CursorCli);
+        let bin = claude_binary_from_runner_argv(&argv).expect("agent binary");
+        assert_eq!(bin, PathBuf::from("/tmp/stub_agent.sh"));
+        let reads = collect_reads(
+            SandboxRecipe::CursorCli,
+            Some(Path::new("/usr/bin/runner")),
+            Some(&bin),
+        );
+        assert!(
+            reads
+                .iter()
+                .any(|r| { r.host.to_string_lossy().contains("/tmp") }),
+            "cursor reads must include stub parent under /tmp: {reads:?}"
+        );
     }
 
     #[test]

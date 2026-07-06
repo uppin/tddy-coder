@@ -13,10 +13,11 @@ As a developer, I want to start a raw Cursor Agent CLI session from the tddy web
 ## Start session
 
 1. The **Create session** pane's **Session type** selector includes **Cursor Agent CLI** (alongside **Managed session** and **Claude Code CLI**). When selected:
-   - The **Workflow recipe** dropdown is hidden.
+   - The **Workflow recipe** dropdown appears when **Managed codebase** is enabled.
    - A **Model** dropdown is populated from `ListAgentModels("cursor-cli")` (curated catalog in `tddy_core::cursor_cli_models()`).
    - The **Tool** dropdown is hidden (binary resolved from `cursor_cli.binary_path`, default `"agent"`).
-2. **Start New Session** issues `StartSession` with `session_type = "cursor-cli"` and the chosen `model`.
+   - **Sandbox** and **Managed codebase** toggles are available (parity with Claude CLI).
+2. **Start New Session** issues `StartSession` with `session_type = "cursor-cli"`, the chosen `model`, and optional `sandbox`, `managed_codebase`, `recipe`, and `specialized_agents`.
 3. The daemon creates a git worktree on branch `cursor-cli/{short_id}` (auto-default when `new_branch_name` is empty).
 4. The daemon writes `<worktree>/.cursor/hooks.json` via `tddy_core::build_cursor_hooks_settings`.
 5. The daemon spawns the Cursor Agent CLI with `--model <model>` and an optional initial prompt.
@@ -98,12 +99,24 @@ Optional `cursor_cli:` block in `daemon.yaml`:
 
 ### Proto
 
-No new RPCs. `sandbox = true` with `session_type = "cursor-cli"` returns `FAILED_PRECONDITION`.
+No new RPCs. `sandbox = true` with `session_type = "cursor-cli"` starts a Seatbelt (macOS) or cgroups+namespaces (Linux) sandboxed session via `start_sandboxed_cursor_cli_session`, mirroring `claude-cli`.
+
+### Sandbox mode
+
+When `StartSession.sandbox = true`:
+
+- macOS: Seatbelt profile from `tddy-sandbox-recipes::cursor_cli` via `tddy-sandbox-runner --agent-kind cursor`.
+- Linux: rootless cgroups+user namespaces (same backend as Claude CLI).
+- MCP config: writes `$HOME/.cursor/mcp.json` inside the jail (registering `tddy-tools --mcp`). Headless approval flags (`--approve-mcps`, `--force`, `--trust`) are **not** injected by tddy — pass them explicitly via agent args when using print mode.
+- Egress is confined to the SessionChannel tunnel; tool execution uses the host worktree via IPC.
+
+### Managed codebase and specialized subagents
+
+When `managed_codebase = true`, the daemon seeds `changeset.yaml`, prepends orchestration guidance (`.cursor/rules/tddy-managed-workflow.mdc` or initial prompt), sets `TDDY_SOCKET`, and exposes `subagent_new_session` / `prompt` / `cancel` via MCP. `specialized_agents` resolves to `TDDY_SUBAGENTS_JSON` / `TDDY_SUBAGENT` in the sandbox env overlay.
 
 ## Out of scope (v1)
 
-- **Sandbox mode** for cursor-cli sessions
-- **`WaitingForInput`** activity status
+- **`WaitingForInput`** activity status (Cursor hooks have no permission-prompt equivalent — documented gap)
 - TDD/bugfix workflow integration (no recipe)
 - Model switching after session start
 - Session chaining (`previous_session_id`)

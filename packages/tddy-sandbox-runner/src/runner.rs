@@ -30,7 +30,9 @@ use tddy_service::tonic_sandbox::sandbox_service_server::{
 use tddy_sandbox::{
     append_line, egress_log_path, session_id_from_env, SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG,
 };
-use tddy_sandbox_recipes::{append_claude_mcp_args, claude_scratch_mcp_dir};
+use tddy_sandbox_recipes::{
+    append_claude_mcp_args, claude_scratch_mcp_dir,
+};
 
 /// Hosts `connection.ConnectionService/ExecuteTool` over the tool-IPC socket, using `tddy-rpc`'s
 /// length-prefixed framing instead of the old unframed single-`read()`/`write_all()` JSON
@@ -206,6 +208,12 @@ pub struct SandboxRunnerArgs {
     pub tddy_tools_path: Option<PathBuf>,
     #[arg(long, default_value = "claude")]
     pub claude_binary: String,
+    /// Agent kind for in-jail PTY: `claude` (default) or `cursor`.
+    #[arg(long, default_value = "claude")]
+    pub agent_kind: String,
+    /// Binary path for the in-jail agent when `agent_kind` is `cursor` (default: `agent`).
+    #[arg(long)]
+    pub agent_binary: Option<String>,
     #[arg(long)]
     pub model: String,
     #[arg(long)]
@@ -238,6 +246,9 @@ pub struct SandboxRunnerArgs {
     /// once per token (`--claude-arg=--add-dir --claude-arg=/foo`). Ignored in `--pty-command` mode.
     #[arg(long = "claude-arg", allow_hyphen_values = true)]
     pub claude_arg: Vec<String>,
+    /// Extra args for the in-jail `agent` when `agent_kind=cursor`. Falls back to `claude_arg`.
+    #[arg(long = "agent-arg", allow_hyphen_values = true)]
+    pub agent_arg: Vec<String>,
     /// `RUST_LOG` for the in-jail `tddy-tools --mcp` server (whose logs — including specialized
     /// subagent HTTP activity — are persisted to `<egress-dir>/tddy-tools.mcp.log`). Defaults to a
     /// level that captures subagent turns. Claude-mode only.
@@ -987,6 +998,9 @@ fn run_claude_pty_thread(
             cwd.display(),
         ),
     );
+    let binary = std::fs::canonicalize(&argv[0])
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| argv[0].clone());
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -996,7 +1010,7 @@ fn run_claude_pty_thread(
             pixel_height: 0,
         })
         .context("openpty")?;
-    let mut cmd = CommandBuilder::new(&argv[0]);
+    let mut cmd = CommandBuilder::new(&binary);
     for arg in &argv[1..] {
         cmd.arg(arg);
     }
@@ -1304,6 +1318,85 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
         ) {
             boot_log_error("spawn_claude_pty", format!("{e:#}"));
             write_failure_marker(&format!("spawn_claude_pty failed: {e:#}"));
+        }
+    });
+
+    Ok(PtyState { stdin_tx })
+}
+
+struct SpawnCursorPtyParams<'a> {
+    cwd: &'a Path,
+    cursor_binary: &'a str,
+    model: &'a str,
+    tddy_tools_path: &'a Path,
+    egress_shim: &'a str,
+    relay: Arc<SandboxSessionRelay>,
+    initial_cols: u16,
+    initial_rows: u16,
+    agent_args: &'a [String],
+    mcp_log_level: Option<&'a str>,
+}
+
+fn spawn_cursor_pty(params: SpawnCursorPtyParams<'_>) -> Result<PtyState> {
+    let SpawnCursorPtyParams {
+        cwd,
+        cursor_binary,
+        model,
+        tddy_tools_path,
+        egress_shim,
+        relay,
+        initial_cols,
+        initial_rows,
+        agent_args,
+        mcp_log_level,
+    } = params;
+    let (stdin_tx, stdin_rx) = std::sync::mpsc::channel::<Bytes>();
+
+    let mut mcp_env = std::collections::BTreeMap::new();
+    if let Some(egress_dir) = std::env::var_os("TDDY_SANDBOX_EGRESS_DIR") {
+        if !egress_dir.is_empty() {
+            let log_path = Path::new(&egress_dir).join("tddy-tools.mcp.log");
+            mcp_env.insert(
+                "TDDY_TOOLS_LOG_FILE".to_string(),
+                log_path.to_string_lossy().into_owned(),
+            );
+        }
+    }
+    mcp_env.insert(
+        "RUST_LOG".to_string(),
+        mcp_log_level.unwrap_or(DEFAULT_MCP_RUST_LOG).to_string(),
+    );
+
+    let mcp_base = std::env::var_os("HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| cwd.to_path_buf());
+    let argv = tddy_sandbox_recipes::build_cursor_sandbox_argv(
+        Path::new(cursor_binary),
+        model,
+        agent_args,
+        &mcp_base,
+        tddy_tools_path,
+        &mcp_env,
+    )
+    .context("build sandbox cursor argv")?;
+
+    let cwd = cwd.to_path_buf();
+    let relay_thread = Arc::clone(&relay);
+    let egress_shim = egress_shim.to_string();
+
+    std::thread::spawn(move || {
+        if let Err(e) = run_claude_pty_thread(
+            argv,
+            cwd,
+            egress_shim,
+            relay_thread,
+            stdin_rx,
+            initial_cols,
+            initial_rows,
+        ) {
+            boot_log_error("spawn_cursor_pty", format!("{e:#}"));
+            write_failure_marker(&format!("spawn_cursor_pty failed: {e:#}"));
         }
     });
 
@@ -1723,56 +1816,88 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
     let cwd = args.cwd.clone().unwrap_or_else(|| args.context_dir.clone());
     let shutdown_notify = Arc::new(tokio::sync::Notify::new());
 
-    let pty = if generic_pty {
-        boot_log(
-            "INFO",
-            &format!("boot: spawn_generic_pty argv={:?}", args.pty_command),
-        );
-        let (pty_state, done_rx) = spawn_generic_pty(
-            args.pty_command.clone(),
-            cwd,
-            Arc::clone(&relay),
-            args.initial_cols,
-            args.initial_rows,
-        )
-        .inspect_err(|e| boot_log_error("spawn_generic_pty", format!("{e:#}")))?;
-        let notify = Arc::clone(&shutdown_notify);
-        tokio::spawn(async move {
-            let _ = tokio::task::spawn_blocking(move || done_rx.recv()).await;
-            tokio::time::sleep(Duration::from_millis(300)).await;
-            notify.notify_one();
-        });
-        boot_log("INFO", "boot: generic pty thread spawned");
-        pty_state
-    } else {
-        boot_log(
-            "INFO",
-            &format!("boot: spawn_claude_pty binary={}", args.claude_binary),
-        );
-        let tddy_tools_path = args
-            .tddy_tools_path
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("tddy_tools_path is required for claude pty mode"))?;
-        let pty_state = spawn_claude_pty(SpawnClaudePtyParams {
-            context_dir: &args.context_dir,
-            cwd: &cwd,
-            claude_binary: &args.claude_binary,
-            model: &args.model,
-            permission_mode: &args.permission_mode,
-            append_system_prompt_file: args.append_system_prompt_file.as_deref(),
-            session_id: &args.session_id,
-            tddy_tools_path,
-            egress_shim: &egress_shim,
-            relay: Arc::clone(&relay),
-            initial_cols: args.initial_cols,
-            initial_rows: args.initial_rows,
-            claude_args: &args.claude_arg,
-            mcp_log_level: args.mcp_log_level.as_deref(),
-        })
-        .inspect_err(|e| boot_log_error("spawn_claude_pty", format!("{e:#}")))?;
-        boot_log("INFO", "boot: claude pty thread spawned");
-        pty_state
-    };
+    let pty =
+        if generic_pty {
+            boot_log(
+                "INFO",
+                &format!("boot: spawn_generic_pty argv={:?}", args.pty_command),
+            );
+            let (pty_state, done_rx) = spawn_generic_pty(
+                args.pty_command.clone(),
+                cwd,
+                Arc::clone(&relay),
+                args.initial_cols,
+                args.initial_rows,
+            )
+            .inspect_err(|e| boot_log_error("spawn_generic_pty", format!("{e:#}")))?;
+            let notify = Arc::clone(&shutdown_notify);
+            tokio::spawn(async move {
+                let _ = tokio::task::spawn_blocking(move || done_rx.recv()).await;
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                notify.notify_one();
+            });
+            boot_log("INFO", "boot: generic pty thread spawned");
+            pty_state
+        } else if args.agent_kind == "cursor" {
+            boot_log(
+                "INFO",
+                &format!(
+                    "boot: spawn_cursor_pty binary={}",
+                    args.agent_binary.as_deref().unwrap_or("agent")
+                ),
+            );
+            let tddy_tools_path = args.tddy_tools_path.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("tddy_tools_path is required for cursor pty mode")
+            })?;
+            let cursor_binary = args.agent_binary.as_deref().unwrap_or("agent");
+            let agent_args = if args.agent_arg.is_empty() {
+                &args.claude_arg
+            } else {
+                &args.agent_arg
+            };
+            let pty_state = spawn_cursor_pty(SpawnCursorPtyParams {
+                cwd: &cwd,
+                cursor_binary,
+                model: &args.model,
+                tddy_tools_path,
+                egress_shim: &egress_shim,
+                relay: Arc::clone(&relay),
+                initial_cols: args.initial_cols,
+                initial_rows: args.initial_rows,
+                agent_args,
+                mcp_log_level: args.mcp_log_level.as_deref(),
+            })
+            .inspect_err(|e| boot_log_error("spawn_cursor_pty", format!("{e:#}")))?;
+            boot_log("INFO", "boot: cursor pty thread spawned");
+            pty_state
+        } else {
+            boot_log(
+                "INFO",
+                &format!("boot: spawn_claude_pty binary={}", args.claude_binary),
+            );
+            let tddy_tools_path = args.tddy_tools_path.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("tddy_tools_path is required for claude pty mode")
+            })?;
+            let pty_state = spawn_claude_pty(SpawnClaudePtyParams {
+                context_dir: &args.context_dir,
+                cwd: &cwd,
+                claude_binary: &args.claude_binary,
+                model: &args.model,
+                permission_mode: &args.permission_mode,
+                append_system_prompt_file: args.append_system_prompt_file.as_deref(),
+                session_id: &args.session_id,
+                tddy_tools_path,
+                egress_shim: &egress_shim,
+                relay: Arc::clone(&relay),
+                initial_cols: args.initial_cols,
+                initial_rows: args.initial_rows,
+                claude_args: &args.claude_arg,
+                mcp_log_level: args.mcp_log_level.as_deref(),
+            })
+            .inspect_err(|e| boot_log_error("spawn_claude_pty", format!("{e:#}")))?;
+            boot_log("INFO", "boot: claude pty thread spawned");
+            pty_state
+        };
 
     let service = SandboxRunnerService {
         session_id: args.session_id.clone(),

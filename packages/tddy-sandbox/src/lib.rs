@@ -23,7 +23,8 @@ pub use context_dir::{
 };
 pub use error::SandboxError;
 pub use exec_reads::{
-    binary_exec_reads, detect_toolchain_reads, process_exec_reads, system_baseline_reads,
+    binary_exec_reads, detect_toolchain_reads, path_traversal_reads, process_exec_reads,
+    system_baseline_reads,
 };
 pub use log::{
     append_line, egress_log_path, format_egress_logs, format_sandbox_diagnostics,

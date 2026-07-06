@@ -400,6 +400,9 @@ pub struct CursorCliConfig {
     /// HTTP base URL for `ReportSessionStatus`. Falls back to claude_cli or web_port default.
     #[serde(default)]
     pub daemon_url: Option<String>,
+    /// Persistent jail `$HOME` for sandboxed cursor-cli sessions (default: `$HOME/.tddy/sandbox-cursor-home`).
+    #[serde(default)]
+    pub cursor_home_dir: Option<PathBuf>,
 }
 
 /// Resolve the Cursor Agent CLI binary path from config and env.
@@ -445,6 +448,27 @@ pub fn resolve_cursor_cli_daemon_url(config: &DaemonConfig) -> Option<String> {
                 .as_ref()
                 .and_then(|c| c.daemon_url.clone())
         })
+}
+
+/// Environment variable overriding the persistent sandbox cursor `$HOME`.
+pub const CURSOR_HOME_ENV: &str = "TDDY_SANDBOX_CURSOR_HOME";
+
+/// Resolve the single daemon-wide persistent jail `$HOME` for sandboxed cursor-cli sessions.
+pub fn resolve_cursor_home_dir(config: &DaemonConfig) -> PathBuf {
+    if let Some(env) = std::env::var_os(CURSOR_HOME_ENV).filter(|v| !v.is_empty()) {
+        return PathBuf::from(env);
+    }
+    if let Some(dir) = config
+        .cursor_cli
+        .as_ref()
+        .and_then(|c| c.cursor_home_dir.as_ref())
+    {
+        return dir.clone();
+    }
+    let base = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    base.join(".tddy").join("sandbox-cursor-home")
 }
 
 /// Environment variable overriding the persistent sandbox claude `$HOME`.

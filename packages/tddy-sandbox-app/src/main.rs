@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use clap::Parser;
-use spawn::{resolve_codebase_mode, spawn_claude_sandbox, SpawnParams};
+use spawn::{resolve_codebase_mode, spawn_claude_sandbox, AgentKind, SpawnParams};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_task::TaskRegistry;
 use uuid::Uuid;
@@ -44,6 +44,10 @@ struct Args {
     #[arg(long, env = "TDDY_SESSION_BASE")]
     session_base: Option<PathBuf>,
 
+    /// Agent kind: `claude` (default) or `cursor` (`agent` binary).
+    #[arg(long, default_value = "claude")]
+    agent_kind: String,
+
     /// Claude model passed to the in-jail `claude` binary (default: `claude-opus-4-8`).
     #[arg(long)]
     model: Option<String>,
@@ -55,6 +59,14 @@ struct Args {
     /// Path to the `claude` binary (default: `claude` on PATH).
     #[arg(long)]
     claude_binary: Option<String>,
+
+    /// Path to the Cursor `agent` binary when `--agent-kind cursor` (default: `agent` on PATH).
+    #[arg(long)]
+    cursor_binary: Option<String>,
+
+    /// Persistent jail `$HOME` for Cursor (`agent`). Default: `$HOME/.tddy/sandbox-cursor-home`.
+    #[arg(long, env = "TDDY_SANDBOX_CURSOR_HOME")]
+    cursor_home_dir: Option<PathBuf>,
 
     /// Path to `tddy-tools` for in-jail MCP (default: sibling of this binary).
     #[arg(long)]
@@ -143,6 +155,10 @@ fn default_claude_home_dir() -> PathBuf {
     default_session_base().join("sandbox-claude-home")
 }
 
+fn default_cursor_home_dir() -> PathBuf {
+    default_session_base().join("sandbox-cursor-home")
+}
+
 /// Repoint `<session-base>/sessions/latest` at `<session_id>` (best-effort; failures are ignored —
 /// it's a convenience pointer for finding the current session's logs, never load-bearing).
 fn update_latest_session_symlink(session_base: &std::path::Path, session_id: &str) {
@@ -192,14 +208,36 @@ async fn main() -> Result<()> {
         eprintln!("verbose logging enabled (RUST_LOG)");
     }
 
+    let agent_kind = AgentKind::parse(&args.agent_kind).map_err(|e| anyhow::anyhow!(e))?;
+
     let claude_home_dir = args
         .claude_home_dir
         .or(cfg.claude_home_dir)
         .unwrap_or_else(default_claude_home_dir);
+    let cursor_home_dir = args
+        .cursor_home_dir
+        .or(cfg.cursor_home_dir)
+        .unwrap_or_else(default_cursor_home_dir);
+    let persistent_home = match agent_kind {
+        AgentKind::Claude => &claude_home_dir,
+        AgentKind::Cursor => &cursor_home_dir,
+    };
     eprintln!(
-        "claude_home_dir={} (persistent across restarts)",
-        claude_home_dir.display()
+        "agent_kind={:?} persistent_home={} (persistent across restarts)",
+        agent_kind,
+        persistent_home.display()
     );
+    if agent_kind == AgentKind::Claude {
+        eprintln!(
+            "claude_home_dir={} (persistent across restarts)",
+            claude_home_dir.display()
+        );
+    } else {
+        eprintln!(
+            "cursor_home_dir={} (persistent across restarts)",
+            cursor_home_dir.display()
+        );
+    }
 
     // `--codebase-mode`/`--remote-codebase` on the CLI win; otherwise fall back to config.
     let codebase_mode = args.codebase_mode.or(cfg.codebase_mode);
@@ -246,16 +284,19 @@ async fn main() -> Result<()> {
 
     let spawned = tokio::select! {
         res = spawn_claude_sandbox(SpawnParams {
+            agent_kind,
             repo: args.repo,
             session_id: session_id.clone(),
             model,
             permission_mode,
             claude_binary: args.claude_binary.or(cfg.claude_binary),
+            cursor_binary: args.cursor_binary.or(cfg.cursor_binary),
             tddy_tools_path: args.tddy_tools_path.or(cfg.tddy_tools_path),
             sandbox_runner_path: args.sandbox_runner_path.or(cfg.sandbox_runner_path),
             session_dir: session_dir.clone(),
             cwd: args.cwd.or(cfg.cwd),
             claude_home_dir,
+            cursor_home_dir,
             remote_codebase: managed_codebase,
             specialized_defs,
             claude_args,

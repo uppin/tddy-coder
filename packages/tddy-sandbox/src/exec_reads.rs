@@ -8,6 +8,29 @@ use std::path::PathBuf;
 
 use crate::builder::{ReadReason, ReadSpec};
 
+/// Read-only grants for ancestor directories needed to traverse to `path` under Seatbelt.
+///
+/// A `(subpath "/Users/foo/bar")` grant does not permit `lstat("/Users")` — each directory on the
+/// path from `/` must be readable for `realpath` and Node module resolution.
+pub fn path_traversal_reads(path: &Path) -> Vec<ReadSpec> {
+    let resolved = if path.is_absolute() {
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    } else {
+        path.to_path_buf()
+    };
+
+    let mut reads = Vec::new();
+    let mut current = resolved.parent();
+    while let Some(dir) = current {
+        if dir.as_os_str().is_empty() || dir == Path::new("/") {
+            break;
+        }
+        reads.push(ReadSpec::subpath(dir, ReadReason::BinaryDeps));
+        current = dir.parent();
+    }
+    reads
+}
+
 /// Read grants for executing a host binary: OS baseline, optional toolchain dirs, and `otool -L` deps.
 pub fn process_exec_reads(binary: &Path) -> Vec<ReadSpec> {
     let mut reads = system_baseline_reads();
@@ -169,6 +192,20 @@ mod tests {
         assert!(
             reads.iter().all(|r| !r.host.as_os_str().is_empty()),
             "a bare binary name must not yield an empty-host read: {reads:?}"
+        );
+    }
+
+    #[test]
+    fn path_traversal_reads_include_ancestors_up_to_root() {
+        let path = PathBuf::from("/Users/alice/.local/share/cursor-agent/versions/1.0/node");
+        let reads = path_traversal_reads(&path);
+        assert!(
+            reads.iter().any(|r| r.host == PathBuf::from("/Users")),
+            "/Users must be readable for traversal: {reads:?}"
+        );
+        assert!(
+            reads.iter().any(|r| r.host == PathBuf::from("/Users/alice")),
+            "user home ancestor must be readable: {reads:?}"
         );
     }
 }

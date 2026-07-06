@@ -502,6 +502,18 @@ pub fn build_allow_read_paths(runner_argv: &[String]) -> Vec<PathBuf> {
             }
         }
     }
+    if let Some(idx) = runner_argv.iter().position(|arg| arg == "--agent-kind") {
+        if runner_argv.get(idx + 1).is_some_and(|k| k == "cursor") {
+            if let Some(bidx) = runner_argv.iter().position(|arg| arg == "--agent-binary") {
+                if let Some(agent) = runner_argv.get(bidx + 1) {
+                    if let Some(path) = canonical_binary_path(agent) {
+                        push_parent_allow_path(&mut paths, &path.to_string_lossy());
+                        paths.extend(detect_binary_load_paths(&path.to_string_lossy()));
+                    }
+                }
+            }
+        }
+    }
     paths
 }
 
@@ -557,19 +569,37 @@ pub struct SandboxRunnerSpawn {
 pub fn build_sandbox_plan(params: SandboxRunnerSpawn) -> Result<SandboxPlan, SandboxError> {
     use tddy_sandbox_recipes::{build_runner_plan, RunnerPlanRequest};
 
-    build_runner_plan(RunnerPlanRequest {
+    let mut plan = build_runner_plan(RunnerPlanRequest {
         project_root: params.project_root,
         scratch_dir: params.scratch_dir,
         egress_dir: params.egress_dir,
         profile_path: params.profile_path,
-        runner_argv: params.runner_argv,
+        runner_argv: params.runner_argv.clone(),
         env: params.env,
         loopback_allow_ports: params.loopback_allow_ports,
         ipc_socket: params.ipc_socket,
         mounts: params.mounts,
         recipe: None,
         host_home: params.host_home,
-    })
+    })?;
+    #[cfg(target_os = "macos")]
+    merge_allow_read_paths_into_plan(&mut plan, &params.runner_argv);
+    Ok(plan)
+}
+
+#[cfg(target_os = "macos")]
+fn merge_allow_read_paths_into_plan(plan: &mut SandboxPlan, runner_argv: &[String]) {
+    use tddy_sandbox::builder::{ReadReason, ReadSpec};
+    for path in build_allow_read_paths(runner_argv) {
+        let spec = ReadSpec::subpath(&path, ReadReason::BinaryDeps).executable();
+        if !plan
+            .reads
+            .iter()
+            .any(|r| r.host == spec.host && r.kind == spec.kind)
+        {
+            plan.reads.push(spec);
+        }
+    }
 }
 
 /// Prepare the single daemon-wide persistent jail `$HOME`: ensure it exists, seed
@@ -601,6 +631,36 @@ pub fn prepare_persistent_claude_home(claude_home_dir: &Path, claude_binary: &st
     #[cfg(not(unix))]
     let _ = claude_binary; // install mirror is unix-only
     std::fs::canonicalize(claude_home_dir).unwrap_or_else(|_| claude_home_dir.to_path_buf())
+}
+
+/// Prepare the persistent jail `$HOME` for sandboxed cursor-cli sessions.
+pub fn prepare_persistent_cursor_home(
+    cursor_home_dir: &Path,
+    cursor_binary: &str,
+) -> PathBuf {
+    if let Err(e) = std::fs::create_dir_all(cursor_home_dir) {
+        log::warn!(
+            "persistent cursor home {}: create failed: {e}",
+            cursor_home_dir.display()
+        );
+    }
+    if let Err(e) = tddy_sandbox_recipes::seed_cursor_credentials(cursor_home_dir) {
+        log::warn!(
+            "persistent cursor home {}: credential seed failed: {e}",
+            cursor_home_dir.display()
+        );
+    }
+    #[cfg(unix)]
+    if let Err(e) = tddy_sandbox_recipes::seed_cursor_local_install(cursor_home_dir, cursor_binary)
+    {
+        log::warn!(
+            "persistent cursor home {}: install mirror failed: {e}",
+            cursor_home_dir.display()
+        );
+    }
+    #[cfg(not(unix))]
+    let _ = cursor_binary;
+    std::fs::canonicalize(cursor_home_dir).unwrap_or_else(|_| cursor_home_dir.to_path_buf())
 }
 
 /// When set to `qemu`, [`spawn_sandbox_runner`] and [`crate::sandbox_action::spawn_confined_plan`]

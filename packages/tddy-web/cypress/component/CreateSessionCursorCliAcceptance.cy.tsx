@@ -10,7 +10,7 @@ import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-t
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { ConnectionService } from "../../src/gen/connection_pb";
 import { createSessionPage } from "../support/pages/createSessionPage";
-import { TEST_IDS, byTestId } from "../support/testIds";
+import { TEST_IDS, byTestId, createSessionSubagentCheckbox } from "../support/testIds";
 
 const CURSOR_CLI_MODELS = [
   { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
@@ -20,7 +20,12 @@ const CURSOR_CLI_MODELS = [
 function aBackendForCursorCliSession() {
   return anInMemoryRpcBackend()
     .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
-    .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: [] }))
+    .onUnary(ConnectionService.method.listSubagents, () => ({
+      subagents: [
+        { name: "fastcontext", label: "Fast Context", model: "microsoft/FastContext-1.0-4B-RL" },
+        { name: "my-explorer", label: "Explorer", model: "qwen2.5-coder:7b" },
+      ],
+    }))
     .onUnary(ConnectionService.method.listProjects, () => ({
       projects: [{ projectId: "proj-cursor", name: "Cursor Project", mainRepoPath: "/repo" }],
     }))
@@ -57,7 +62,7 @@ describe("CreateSessionPane — cursor-cli session type", () => {
     cy.viewport(1280, 800);
   });
 
-  it("exposes Cursor CLI as a third session type with model and initial prompt fields", () => {
+  it("exposes Cursor CLI as a third session type with model, sandbox, and managed workflow fields", () => {
     // Given
     mountCreateSessionPane(aBackendForCursorCliSession());
 
@@ -70,7 +75,8 @@ describe("CreateSessionPane — cursor-cli session type", () => {
     byTestId(TEST_IDS.createSessionInitialPromptInput).should("be.visible");
     byTestId(TEST_IDS.createSessionPermissionModeSelect).should("not.exist");
     byTestId(TEST_IDS.createSessionAgentSelect).should("not.exist");
-    byTestId(TEST_IDS.createSessionRecipeSelect).should("not.exist");
+    byTestId(TEST_IDS.createSessionSandboxToggle).should("be.visible");
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).should("be.visible");
   });
 
   it("populates the cursor-cli model dropdown from ListAgentModels", () => {
@@ -111,5 +117,29 @@ describe("CreateSessionPane — cursor-cli session type", () => {
       expect(calls[0].toolPath).to.eq("");
     });
     cy.get("@onCreated").should("have.been.calledWith", "cursor-cli-sess-1");
+  });
+
+  it("submitting cursor-cli with sandbox and managed workflow sends the matching StartSession fields", () => {
+    // Given
+    const backend = aBackendForCursorCliSession();
+    mountCreateSessionPane(backend);
+
+    // When
+    byTestId(TEST_IDS.createSessionTypeCursorCliBtn).click();
+    createSessionPage.selectProject("proj-cursor");
+    byTestId(TEST_IDS.createSessionSandboxToggle).click();
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
+    byTestId(createSessionSubagentCheckbox("fastcontext")).click();
+    createSessionPage.submit();
+
+    // Then
+    cy.wrap(null).should(() => {
+      const calls = backend.callsTo(ConnectionService.method.startSession);
+      expect(calls).to.have.length(1);
+      expect(calls[0].sessionType).to.eq("cursor-cli");
+      expect(calls[0].sandbox).to.eq(true);
+      expect(calls[0].managedCodebase).to.eq(true);
+      expect(calls[0].specializedAgents).to.deep.eq(["fastcontext"]);
+    });
   });
 });

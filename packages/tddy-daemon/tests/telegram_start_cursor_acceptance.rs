@@ -67,6 +67,7 @@ fn daemon_config_with_stub_binary(stub_binary: &str) -> DaemonConfig {
             binary_path: stub_binary.to_string(),
             tddy_tools_path: None,
             daemon_url: None,
+            cursor_home_dir: None,
         }),
         ..Default::default()
     }
