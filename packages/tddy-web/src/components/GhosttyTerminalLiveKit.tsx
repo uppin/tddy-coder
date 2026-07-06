@@ -9,6 +9,7 @@ import { useLiveKitTransportFactory } from "../rpc/transportProvider";
 import { create } from "@bufbuild/protobuf";
 import { isCancelledLiveKitConnectionError } from "../lib/liveKitConnectionErrors";
 import { tddyDevDebug } from "../lib/tddyDevLog";
+import { tddyDebug } from "../lib/debugMask";
 import { shouldShowVisibleLiveKitStatusStrip } from "../lib/liveKitStatusPresentation";
 import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "../lib/terminalZoom";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
@@ -17,6 +18,8 @@ import { TerminalConnectionStatusBar } from "./connection/TerminalConnectionStat
 import { ShortcutDrawer } from "./connection/ShortcutDrawer";
 import { MobileTerminalKeyboard } from "./connection/MobileTerminalKeyboard";
 import type { ToolShortcutDef } from "../lib/toolShortcuts";
+
+const dResize = tddyDebug("tddy:term:resize");
 
 /** Human-readable description of a terminal input byte sequence. */
 function describeKey(bytes: Uint8Array): string {
@@ -601,6 +604,12 @@ export function GhosttyTerminalLiveKit({
               }
             }}
             onResize={(size) => {
+              dResize(
+                "LiveKit OSC resize send cols=%d rows=%d fixedGrid=%o",
+                size.cols,
+                size.rows,
+                fixedViewportGrid ?? null,
+              );
               const seq = `\x1b]resize;${size.cols};${size.rows}\x07`;
               enqueueTerminalInput(new TextEncoder().encode(seq));
             }}

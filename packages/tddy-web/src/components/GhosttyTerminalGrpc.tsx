@@ -13,6 +13,7 @@ import type { ToolShortcutDef } from "../lib/toolShortcuts";
 // `[tddy]` diagnostics for the gRPC terminal byte stream (enabled by the DEBUG mask).
 // The 220-col garbling on reconnect lived here, so log incoming bytes / buffering / resize.
 const dGrpc = tddyDebug("tddy:term:grpc");
+const dResize = tddyDebug("tddy:term:resize");
 
 /** Hex preview of the first `n` bytes for diagnosing garbled / misaligned output. */
 function hexPreview(data: Uint8Array, n = 24): string {
@@ -110,7 +111,7 @@ export function GhosttyTerminalGrpc({
         sendInput(data);
       }}
       onResize={(size) => {
-        dGrpc("resize → cols=%d rows=%d", size.cols, size.rows);
+        dResize("OSC resize send cols=%d rows=%d seq=\\x1b]resize;%d;%d\\x07", size.cols, size.rows, size.cols, size.rows);
         sendInput(`\x1b]resize;${size.cols};${size.rows}\x07`);
       }}
     />

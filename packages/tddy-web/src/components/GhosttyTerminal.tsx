@@ -267,6 +267,15 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         // Proactively report the size on mount so the PTY is resized to match the screen
         // immediately — don't rely on the terminal only emitting onResize when the grid
         // changes (it may already match the default, so no event would fire).
+        const container = containerRef.current;
+        logResize(
+          "mount report cols=%d rows=%d container=%dx%dpx fixedGrid=%o",
+          term.cols,
+          term.rows,
+          container?.clientWidth ?? 0,
+          container?.clientHeight ?? 0,
+          fixedViewportGrid ?? null,
+        );
         onResize?.({ cols: term.cols, rows: term.rows });
 
         logLife("term opened cols=%d rows=%d, calling onReady", term.cols, term.rows);
