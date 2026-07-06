@@ -34,6 +34,7 @@ import type { Room } from "livekit-client";
 import { TrafficMeterRegistry } from "./trafficMeter";
 import { createTrafficInterceptor } from "./httpTrafficInterceptor";
 import { createAuthGateInterceptor } from "./authGateInterceptor";
+import { wrapTransportWithAuthGate } from "./authGatedTransport";
 
 /**
  * Settable holder for the app's access-token resolver. The production transport's auth-gate
@@ -188,8 +189,14 @@ export function RpcTransportProvider({
   }
 
   const registry = registryRef.current;
-  const lkFactory = liveKitFactory ??
-    ((room, targetIdentity, opts) => createDefaultLiveKitTransport(room, targetIdentity, opts, registry));
+  const resolveFreshAccessToken = () =>
+    authTokenGateRef.current?.current ? authTokenGateRef.current.current() : Promise.resolve(null);
+  const innerLkFactory =
+    liveKitFactory ??
+    ((room, targetIdentity, opts) =>
+      createDefaultLiveKitTransport(room, targetIdentity, opts, registry));
+  const lkFactory = (room: Room, targetIdentity: string, opts?: LiveKitTransportOptions) =>
+    wrapTransportWithAuthGate(innerLkFactory(room, targetIdentity, opts), resolveFreshAccessToken);
 
   const value: RpcTransportContextValue = {
     httpTransport: httpRef.current,

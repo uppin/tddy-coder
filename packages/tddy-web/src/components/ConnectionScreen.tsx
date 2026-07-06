@@ -25,8 +25,8 @@ import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome"
 import { ParticipantList } from "./ParticipantList";
 import { useAuthContext } from "../hooks/authProvider";
 import { useHttpClient } from "../rpc/transportProvider";
-import { useDaemonClient } from "../rpc/selectedDaemon";
-import { useCommonRoom } from "../hooks/useCommonRoom";
+import { useDaemonClient, useSelectedDaemon } from "../rpc/selectedDaemon";
+import { useObservedCommonRoomStatus } from "../hooks/useCommonRoom";
 import { useRoomParticipants } from "../hooks/useRoomParticipants";
 import { GitHubLoginButton } from "./GitHubLoginButton";
 import { UserAvatar } from "./UserAvatar";
@@ -91,7 +91,6 @@ import {
   removeSessionAttachment,
   type SessionAttachmentMap,
 } from "./connection/multiSessionState";
-import { presenceIdentityForUser } from "../lib/presenceIdentity";
 import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "../lib/terminalZoom";
 
 /** Host dropdown: local daemon first, then peers; stable order by `instanceId` (matches daemon list policy). */
@@ -1331,18 +1330,12 @@ export function ConnectionScreen({
     !isLoading &&
     Boolean(user);
 
-  const presenceIdentity = useMemo(
-    () => (user ? presenceIdentityForUser(user.login) : undefined),
-    [user?.login],
-  );
+  const { room: sharedCommonRoom } = useSelectedDaemon();
+  const presenceRoom = presenceReady ? sharedCommonRoom : null;
+  const { status: presenceStatus, error: presenceError } =
+    useObservedCommonRoomStatus(presenceRoom);
 
-  const { room: presenceRoom, status: presenceStatus, error: presenceError } = useCommonRoom(
-    presenceReady ? livekitUrl : undefined,
-    presenceReady ? commonRoom : undefined,
-    presenceReady ? presenceIdentity : undefined
-  );
-
-  const participants = useRoomParticipants(presenceReady ? presenceRoom : null);
+  const participants = useRoomParticipants(presenceRoom);
 
   const hasActiveSession = useMemo(
     () => sessions.some((s) => s.isActive),

@@ -130,6 +130,7 @@ export function aDurableSessionBackend(): InMemoryRpcBackend {
     })
     .implement(ConnectionService, {
       listSessions: async () => ({ sessions: [] }),
+      sendTerminalInput: async () => ({}),
     });
 }
 
@@ -166,6 +167,7 @@ export function aDeferredRefreshSessionBackend(): {
     })
     .implement(ConnectionService, {
       listSessions: async () => ({ sessions: [] }),
+      sendTerminalInput: async () => ({}),
     });
   return { backend, releaseRefresh: () => release() };
 }

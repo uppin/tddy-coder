@@ -9,7 +9,7 @@
  * in-flight refresh, and an expired refresh token ends the session.
  */
 
-import React from "react";
+import React, { useRef } from "react";
 import { AuthProvider, useAuthContext } from "../../src/hooks/authProvider";
 import { useDaemonClient } from "../../src/rpc/selectedDaemon";
 import { AuthService } from "../../src/gen/auth_pb";
@@ -36,6 +36,7 @@ const tokenTestId = (probeId: string) => `session-probe-token-${probeId}`;
 const authTestId = (probeId: string) => `session-probe-auth-${probeId}`;
 const refreshingTestId = "session-probe-refreshing";
 const listSessionsBtnTestId = "session-probe-list-sessions";
+const sendTerminalInputBtnTestId = "session-probe-send-terminal-input";
 
 /** Renders the shared access token and authentication flag from the durable session. */
 function SessionProbe({ probeId }: { probeId: string }) {
@@ -70,6 +71,29 @@ function DaemonRpcProbe() {
   );
 }
 
+/**
+ * Simulates a terminal send closure that captured a stale token at mount (e.g. GrpcSessionTerminal
+ * before the transport auth gate) — proves LiveKit RPC still reaches the daemon with a fresh token.
+ */
+function StaleTokenTerminalInputProbe() {
+  const client = useDaemonClient(ConnectionService);
+  const staleTokenRef = useRef(EXPIRED_ACCESS_TOKEN);
+  return (
+    <button
+      data-testid={sendTerminalInputBtnTestId}
+      onClick={() => {
+        void client?.sendTerminalInput({
+          sessionToken: staleTokenRef.current,
+          sessionId: "sess-1",
+          data: new Uint8Array([13]),
+        });
+      }}
+    >
+      send terminal input
+    </button>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Page object — raw selectors live here; test bodies read as behavior.
 // ---------------------------------------------------------------------------
@@ -92,6 +116,9 @@ const session = {
   },
   invokeListSessions() {
     cy.get(`[data-testid='${listSessionsBtnTestId}']`).click();
+  },
+  invokeSendTerminalInput() {
+    cy.get(`[data-testid='${sendTerminalInputBtnTestId}']`).click();
   },
   expectStorageCleared() {
     cy.window().should((win) => {
@@ -155,6 +182,33 @@ describe("Durable web session — refresh-token + RPC token gate", () => {
     // Then — the daemon received the refreshed token, never the stale expired one
     cy.wrap(null).should(() => {
       const calls = backend.callsTo(ConnectionService.method.listSessions);
+      expect(calls.map((c) => c.sessionToken)).to.deep.equal([REFRESHED_ACCESS_TOKEN]);
+    });
+  });
+
+  it("sends the freshly refreshed access token on SendTerminalInput over LiveKit when the caller still holds a stale token", () => {
+    // Given — an expired access token and a valid refresh token
+    const backend = aDurableSessionBackend();
+    cy.window().then((win) => givenStoredTokens(win, EXPIRED_ACCESS_TOKEN, VALID_REFRESH_TOKEN));
+
+    // When — the app mounts, refreshes, and terminal input is sent with a stale closure token
+    mountWithRecordingLiveKitRpc(
+      <AuthProvider>
+        {withSelectedDaemon(
+          <div>
+            <SessionProbe probeId="a" />
+            <StaleTokenTerminalInputProbe />
+          </div>,
+        )}
+      </AuthProvider>,
+      backend,
+    );
+    session.expectToken("a", REFRESHED_ACCESS_TOKEN);
+    session.invokeSendTerminalInput();
+
+    // Then — the daemon received the refreshed token, never the stale expired one
+    cy.wrap(null).should(() => {
+      const calls = backend.callsTo(ConnectionService.method.sendTerminalInput);
       expect(calls.map((c) => c.sessionToken)).to.deep.equal([REFRESHED_ACCESS_TOKEN]);
     });
   });

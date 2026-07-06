@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Room, RoomEvent } from "livekit-client";
+import { ConnectionState, Room, RoomEvent } from "livekit-client";
 import { TokenService } from "../gen/token_pb";
 import { useHttpClient } from "../rpc/transportProvider";
 import { tddyDebug } from "../lib/debugMask";
 
 const dbg = tddyDebug("tddy:presenter:room");
+const roomDbg = tddyDebug("tddy:rpc:livekit-room");
 
 export type CommonRoomStatus = "idle" | "connecting" | "connected" | "error";
 
@@ -128,4 +129,67 @@ export function useCommonRoom(
   }, [url, roomName, identity, tokenClient]);
 
   return { room, status, error };
+}
+
+function commonRoomStatusFromConnectionState(state: ConnectionState): CommonRoomStatus {
+  switch (state) {
+    case ConnectionState.Connected:
+      return "connected";
+    case ConnectionState.Connecting:
+    case ConnectionState.Reconnecting:
+    case ConnectionState.Disconnected:
+      return "connecting";
+    default:
+      return "connecting";
+  }
+}
+
+/**
+ * Observes an existing common-room LiveKit connection (e.g. from `SelectedDaemonProvider`)
+ * without opening a second join to the lobby.
+ */
+export function useObservedCommonRoomStatus(room: Room | null): {
+  status: CommonRoomStatus;
+  error: string | null;
+} {
+  const [status, setStatus] = useState<CommonRoomStatus>(() =>
+    room ? commonRoomStatusFromConnectionState(room.state) : "idle",
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!room) {
+      setStatus("idle");
+      setError(null);
+      return;
+    }
+
+    const syncStatus = () => {
+      const state = room.state;
+      roomDbg("connection state room=%o state=%o", room.name, ConnectionState[state] ?? state);
+      setStatus(commonRoomStatusFromConnectionState(state));
+    };
+    const onDisconnected = (reason?: unknown) => {
+      roomDbg("disconnected room=%o reason=%o", room.name, reason ?? "unknown");
+      setStatus("error");
+      setError(`LiveKit disconnected (reason=${String(reason ?? "unknown")}).`);
+    };
+    const onReconnecting = () => roomDbg("reconnecting room=%o", room.name);
+    const onReconnected = () => roomDbg("reconnected room=%o", room.name);
+
+    syncStatus();
+    room.on(RoomEvent.ConnectionStateChanged, syncStatus);
+    room.on(RoomEvent.Disconnected, onDisconnected);
+    room.on(RoomEvent.Reconnecting, onReconnecting);
+    room.on(RoomEvent.Reconnected, onReconnected);
+
+    return () => {
+      room.off(RoomEvent.ConnectionStateChanged, syncStatus);
+      room.off(RoomEvent.Disconnected, onDisconnected);
+      room.off(RoomEvent.Reconnecting, onReconnecting);
+      room.off(RoomEvent.Reconnected, onReconnected);
+    };
+  }, [room]);
+
+  return { status, error };
 }
