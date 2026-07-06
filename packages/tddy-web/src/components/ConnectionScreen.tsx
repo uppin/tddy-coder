@@ -59,6 +59,8 @@ import { SessionWorkflowFilesModal } from "./session/SessionWorkflowFilesModal";
 import { DaemonNavMenu } from "./shell/DaemonNavMenu";
 import { Button } from "@/components/ui/button";
 import { resolveShortcutsForSession, type ToolShortcutDef } from "../lib/toolShortcuts";
+import { measureTerminalGridFromRect } from "../lib/terminalGridMeasure";
+import { tddyDebug } from "../lib/debugMask";
 import {
   Table,
   TableBody,
@@ -1146,6 +1148,8 @@ function ConnectedTerminal({
   );
 }
 
+const dTermResize = tddyDebug("tddy:term:resize");
+
 function ConnectedClaudeCliTerminal({
   sessionId,
   sessionToken,
@@ -1157,6 +1161,7 @@ function ConnectedClaudeCliTerminal({
 }) {
   const client = useHttpClient(ConnectionService);
   const [stream, setStream] = useState<GrpcStream | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const outputListeners: Array<(data: Uint8Array) => void> = [];
@@ -1176,12 +1181,34 @@ function ConnectedClaudeCliTerminal({
     };
     setStream(grpcStream);
 
+    const { widthPx, heightPx, cols: initialCols, rows: initialRows } = measureTerminalGridFromRect(
+      containerRef.current?.getBoundingClientRect(),
+    );
+    dTermResize(
+      "streamTerminalOutput open sessionId=%s container=%gx%gpx initialCols=%d initialRows=%d transport=http",
+      sessionId,
+      widthPx,
+      heightPx,
+      initialCols,
+      initialRows,
+    );
+    if (initialCols === 0 || initialRows === 0) {
+      dTermResize(
+        "streamTerminalOutput warning sessionId=%s container not laid out yet (cols=%d rows=%d)",
+        sessionId,
+        initialCols,
+        initialRows,
+      );
+    }
+
     // Server-streaming output — works in all browsers via connect-web Fetch transport.
     void (async () => {
       try {
         for await (const output of client.streamTerminalOutput({
           sessionToken,
           sessionId,
+          initialCols,
+          initialRows,
         }) as AsyncIterable<SessionTerminalOutput>) {
           if (closed) break;
           if (output.data.length > 0) {
@@ -1198,16 +1225,20 @@ function ConnectedClaudeCliTerminal({
     };
   }, [client, sessionId, sessionToken]);
 
-  if (!stream) return null;
+  if (!stream) {
+    return <div ref={containerRef} style={{ width: "100%", height: "100%" }} />;
+  }
 
   return (
-    <GhosttyTerminalGrpc
-      sessionToken={sessionToken}
-      sessionId={sessionId}
-      stream={stream}
-      connectionOverlay
-      onDisconnect={onDisconnect}
-    />
+    <div ref={containerRef} style={{ width: "100%", height: "100%" }}>
+      <GhosttyTerminalGrpc
+        sessionToken={sessionToken}
+        sessionId={sessionId}
+        stream={stream}
+        connectionOverlay
+        onDisconnect={onDisconnect}
+      />
+    </div>
   );
 }
 

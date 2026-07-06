@@ -4,15 +4,12 @@ import type { ConnectionService, SessionTerminalOutput } from "../../gen/connect
 import { GhosttyTerminalGrpc, type GrpcStream } from "../GhosttyTerminalGrpc";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import { tddyDebug } from "../../lib/debugMask";
+import { measureTerminalGridFromRect } from "../../lib/terminalGridMeasure";
 
 const dGrpc = tddyDebug("tddy:term:grpc");
+const dResize = tddyDebug("tddy:term:resize");
 
 type ConnectionClient = Client<typeof ConnectionService>;
-
-// Character cell size estimates for converting container pixels to terminal columns/rows.
-// Based on a monospace font rendered at the default terminal font size (14px).
-const CHAR_WIDTH_PX = 8;
-const CHAR_HEIGHT_PX = 17;
 
 interface GrpcSessionTerminalProps {
   sessionId: string;
@@ -79,9 +76,25 @@ export function GrpcSessionTerminal({
 
     // Measure container dimensions so the daemon can resize the PTY before
     // replaying buffered output — eliminates the 220-col garbling on connect.
-    const rect = containerRef.current?.getBoundingClientRect();
-    const initialCols = rect && rect.width > 0 ? Math.max(1, Math.floor(rect.width / CHAR_WIDTH_PX)) : 0;
-    const initialRows = rect && rect.height > 0 ? Math.max(1, Math.floor(rect.height / CHAR_HEIGHT_PX)) : 0;
+    const { widthPx, heightPx, cols: initialCols, rows: initialRows } = measureTerminalGridFromRect(
+      containerRef.current?.getBoundingClientRect(),
+    );
+    dResize(
+      "streamTerminalOutput open sessionId=%s container=%gx%gpx initialCols=%d initialRows=%d",
+      sessionId,
+      widthPx,
+      heightPx,
+      initialCols,
+      initialRows,
+    );
+    if (initialCols === 0 || initialRows === 0) {
+      dResize(
+        "streamTerminalOutput warning sessionId=%s container not laid out yet (cols=%d rows=%d)",
+        sessionId,
+        initialCols,
+        initialRows,
+      );
+    }
     void (async () => {
       try {
         for await (const output of client.streamTerminalOutput({
