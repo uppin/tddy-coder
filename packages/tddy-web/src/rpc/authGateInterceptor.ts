@@ -13,7 +13,7 @@
 import type { Interceptor } from "@connectrpc/connect";
 
 /** True when `message` owns a string `sessionToken` field the gate should refresh. */
-function carriesSessionToken(message: unknown): message is { sessionToken: string } {
+export function carriesSessionToken(message: unknown): message is { sessionToken: string } {
   return (
     typeof message === "object" &&
     message !== null &&

@@ -3,6 +3,9 @@ import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionTerminalOutput } from "../../gen/connection_pb";
 import { GhosttyTerminalGrpc, type GrpcStream } from "../GhosttyTerminalGrpc";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
+import { tddyDebug } from "../../lib/debugMask";
+
+const dGrpc = tddyDebug("tddy:term:grpc");
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
@@ -55,9 +58,15 @@ export function GrpcSessionTerminal({
 
     const grpcStream: GrpcStream = {
       send(data: Uint8Array) {
-        client.sendTerminalInput({ sessionToken, sessionId, data, controlToken: controlTokenRef.current }).catch(() => {
-          // Non-fatal — terminal still receives output; daemon may reject if not controller.
-        });
+        client
+          .sendTerminalInput({ sessionToken, sessionId, data, controlToken: controlTokenRef.current })
+          .catch((err) => {
+            dGrpc(
+              "sendTerminalInput failed sessionId=%s error=%o",
+              sessionId,
+              err instanceof Error ? err.message : err,
+            );
+          });
       },
       onMessage(fn: (data: Uint8Array) => void) {
         outputListeners.push(fn);
