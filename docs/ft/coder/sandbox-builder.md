@@ -37,6 +37,10 @@ needs" set lives in one reviewable recipe; and a non-leaking secret channel deli
   `bad interpreter: Operation not permitted`).
 - Linux backend `tddy-sandbox-cgroups` confines network + resources + uids but inherits the host
   filesystem (explicit `FIXME(fs-confinement)`); it ignores `SandboxSpec::allow_read_paths`.
+- The Linux backend runs under an unprivileged daemon (`User=tddy`): a functional userns probe
+  detects a per-binary AppArmor grant, and the cgroup scope is created in the systemd-delegated
+  subtree (`Delegate=yes`) derived at runtime — not the hardcoded cgroup root. Config-overridable via
+  the daemon's `sandbox_cgroup:` section; see `packages/tddy-sandbox/docs/architecture.md`.
 
 ## Requirements
 

@@ -46,6 +46,16 @@ UNIT_PATH="${SYSTEMD_DIR}/tddy-daemon.service"
 NO_SYSTEMCTL="${INSTALL_NO_SYSTEMCTL:-0}"
 OVERWRITE_SYSTEMD_UNIT="${INSTALL_OVERWRITE_SYSTEMD_UNIT:-0}"
 
+# The unprivileged OS user/group the daemon runs as (see the systemd unit below). Configurable so
+# nothing is hardcoded; set INSTALL_DAEMON_USER=root for multi-user setuid spawning instead.
+DAEMON_USER="${INSTALL_DAEMON_USER:-tddy}"
+DAEMON_GROUP="${INSTALL_DAEMON_GROUP:-$DAEMON_USER}"
+
+# AppArmor profile granting the unprivileged user namespaces the Linux cgroups sandbox needs.
+APPARMOR_DIR="${INSTALL_APPARMOR_DIR:-/etc/apparmor.d}"
+APPARMOR_PROFILE_SRC="${ROOT_DIR}/packages/tddy-daemon/apparmor/tddy-daemon"
+APPARMOR_PROFILE_PATH="${APPARMOR_DIR}/tddy-daemon"
+
 # Paths referenced by daemon.yaml.production (log + auth); children use per-repo tmp/logs at runtime.
 DAEMON_LOG_DIR="/var/log/tddy-daemon"
 AUTH_STORAGE_DIR="/var/lib/tddy"
@@ -169,8 +179,20 @@ echo "install: codex-acp — if present under node_modules, copied to \${BIN_DIR
 mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$SYSTEMD_DIR" "$WEB_BUNDLE_DIR"
 
 if [[ "$NO_SYSTEMCTL" != "1" ]]; then
+  if [[ "$DAEMON_USER" != "root" ]]; then
+    echo "install: ensuring service user/group ${DAEMON_USER}:${DAEMON_GROUP}"
+    if ! getent group "$DAEMON_GROUP" >/dev/null; then
+      groupadd --system "$DAEMON_GROUP"
+    fi
+    if ! id -u "$DAEMON_USER" >/dev/null 2>&1; then
+      useradd --system --gid "$DAEMON_GROUP" --home-dir "$AUTH_STORAGE_DIR" \
+        --shell /usr/sbin/nologin "$DAEMON_USER"
+    fi
+  fi
   echo "install: ensuring system dirs for daemon log + auth: ${DAEMON_LOG_DIR}, ${AUTH_STORAGE_DIR}"
   mkdir -p "$DAEMON_LOG_DIR" "$AUTH_STORAGE_DIR"
+  echo "install: chowning ${DAEMON_LOG_DIR} and ${AUTH_STORAGE_DIR} to ${DAEMON_USER}:${DAEMON_GROUP}"
+  chown -R "${DAEMON_USER}:${DAEMON_GROUP}" "$DAEMON_LOG_DIR" "$AUTH_STORAGE_DIR"
 fi
 
 echo "install: installing binaries -> ${BIN_DIR}/"
@@ -214,18 +236,41 @@ Type=simple
 ExecStart=${BIN_DIR}/tddy-daemon -c ${CONFIG_FILE}
 Restart=on-failure
 RestartSec=5
-# Default: runs as root so the daemon can spawn tddy-coder as different OS users (setuid/pre_exec).
-# Single-user homelab only: uncomment User=/Group= to match your mapped os_user so spawns use
-# same_user=true (skips pre_exec; avoids long NSS/initgroups stalls in cmd.spawn).
-# Ensure auth_storage, config dir, and listen port are usable by that user.
-#User=tddy
-#Group=tddy
+# Runs unprivileged as ${DAEMON_USER}. Delegate=yes hands the service a writable cgroup v2 subtree so
+# the Linux sandbox can create per-session scopes with memory/cpu/pids limits; AppArmorProfile grants
+# the unprivileged user namespaces the sandbox needs (Ubuntu 24.04 restricts these by default).
+# NOTE: as a non-root user the daemon spawns sessions as itself (same_user=true) — multi-user setuid
+# spawning needs root: re-run with INSTALL_DAEMON_USER=root (Delegate=/AppArmorProfile= are then
+# harmless but unnecessary). Ensure auth_storage, config dir, and listen port are usable by the user.
+User=${DAEMON_USER}
+Group=${DAEMON_GROUP}
+Delegate=yes
+AppArmorProfile=tddy-daemon
 
 [Install]
 WantedBy=multi-user.target
 UNIT
   chmod 0644 "$UNIT_PATH"
   echo "install:   ExecStart=${BIN_DIR}/tddy-daemon -c ${CONFIG_FILE}"
+fi
+
+# AppArmor profile granting the daemon binary unprivileged user namespaces. Loaded before the service
+# starts because the unit's AppArmorProfile= transition fails if the profile is not present.
+if [[ "$NO_SYSTEMCTL" != "1" ]]; then
+  if [[ -f "$APPARMOR_PROFILE_SRC" ]]; then
+    echo "install: installing AppArmor profile -> ${APPARMOR_PROFILE_PATH} (userns grant for ${BIN_DIR}/tddy-daemon)"
+    mkdir -p "$APPARMOR_DIR"
+    sed -e "s#__INSTALL_BIN_DIR__#${BIN_DIR}#g" "$APPARMOR_PROFILE_SRC" >"$APPARMOR_PROFILE_PATH"
+    chmod 0644 "$APPARMOR_PROFILE_PATH"
+    if command -v apparmor_parser >/dev/null 2>&1; then
+      apparmor_parser -r "$APPARMOR_PROFILE_PATH"
+      echo "install:   AppArmor profile loaded"
+    else
+      echo "install:   WARNING: apparmor_parser not found; profile written but not loaded" >&2
+    fi
+  else
+    echo "install: WARNING: AppArmor profile source missing: ${APPARMOR_PROFILE_SRC}" >&2
+  fi
 fi
 
 if [[ "$NO_SYSTEMCTL" != "1" ]]; then

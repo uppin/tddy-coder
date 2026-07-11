@@ -126,6 +126,7 @@ fn start_cursor_cli_request() -> StartSessionRequest {
         sandbox: false,
         managed_codebase: false,
         specialized_agents: vec![],
+        ..Default::default()
     }
 }
 

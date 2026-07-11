@@ -150,6 +150,7 @@ fn sandbox_start_request() -> StartSessionRequest {
         sandbox: true,
         managed_codebase: false,
         specialized_agents: vec![],
+        ..Default::default()
     }
 }
 

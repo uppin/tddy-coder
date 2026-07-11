@@ -20,6 +20,19 @@ web_bundle_path: "__WEB_BUNDLE_PATH__"
 
 auth_storage: "/var/lib/tddy/auth"
 
+# Linux rootless cgroups sandbox delegation. Defaults derive the delegated cgroup base from
+# /proc/self/cgroup at runtime (nothing hardcoded), so no override is needed when the systemd unit
+# runs with Delegate=yes (./install sets this) and — on Ubuntu 24.04 — the AppArmor profile granting
+# unprivileged user namespaces is loaded (./install installs it). Uncomment only to override:
+# sandbox_cgroup:
+#   mount_root: /sys/fs/cgroup     # cgroup v2 unified mount root
+#   base_path: /sys/fs/cgroup/system.slice/tddy-daemon.service  # skip /proc derivation entirely
+#   controllers: [memory, cpu, pids]
+#   supervisor_leaf: supervisor    # leaf the daemon moves its own process into
+#   memory_max: 2147483648         # 2 GiB — default when a session carries no explicit limit
+#   cpu_max: "100000 100000"       # 1 CPU
+#   pids_max: 512
+
 # github:
 #   client_id: "<your-github-oauth-app-client-id>"
 #   client_secret: "<secret>"

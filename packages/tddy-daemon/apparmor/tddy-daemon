@@ -1,0 +1,24 @@
+# AppArmor profile for tddy-daemon.
+#
+# Grants the daemon binary the unprivileged user namespaces the Linux cgroups sandbox needs.
+# Ubuntu 23.10+/24.04 restrict unprivileged user namespaces via AppArmor by default
+# (kernel.apparmor_restrict_unprivileged_userns=1); this per-binary profile lifts ONLY that
+# restriction for the daemon while leaving the host-wide sysctl untouched.
+#
+# This file is a TEMPLATE: `__INSTALL_BIN_DIR__` is substituted with the real binary directory by
+# ./install, which then copies it to /etc/apparmor.d/tddy-daemon and runs `apparmor_parser -r`.
+# It does not parse as-is (the placeholder is not a valid path) — render it via ./install, or
+# replace the placeholder with your binary path for a manual install.
+#
+# The daemon's functional userns probe attempts the real unshare + uid/gid mapping, so it detects
+# this grant at runtime; without the profile the mapping is denied and the sandbox fails fast.
+
+abi <abi/4.0>,
+include <tunables/global>
+
+profile tddy-daemon __INSTALL_BIN_DIR__/tddy-daemon flags=(unconfined) {
+  userns,
+
+  # Site-local additions (optional): create /etc/apparmor.d/local/tddy-daemon to extend.
+  include if exists <local/tddy-daemon>
+}

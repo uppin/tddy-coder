@@ -217,6 +217,20 @@ fn generate_server_struct(service: &Service, buf: &mut String, rpc: &str) {
     writeln!(buf, "    pub fn new(inner: T) -> Self {{").unwrap();
     writeln!(buf, "        Self {{ inner: Arc::new(inner) }}").unwrap();
     writeln!(buf, "    }}").unwrap();
+    writeln!(buf).unwrap();
+    writeln!(
+        buf,
+        "    /// Build from an already-shared handle, so the same implementation instance can be"
+    )
+    .unwrap();
+    writeln!(
+        buf,
+        "    /// served over more than one transport (e.g. LiveKit and a local Unix socket)."
+    )
+    .unwrap();
+    writeln!(buf, "    pub fn from_arc(inner: Arc<T>) -> Self {{").unwrap();
+    writeln!(buf, "        Self {{ inner }}").unwrap();
+    writeln!(buf, "    }}").unwrap();
     writeln!(buf, "}}").unwrap();
     writeln!(buf).unwrap();
 

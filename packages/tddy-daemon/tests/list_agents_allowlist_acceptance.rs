@@ -207,6 +207,7 @@ allowed_agents:
         sandbox: false,
         managed_codebase: false,
         specialized_agents: vec![],
+        ..Default::default()
     });
 
     // When

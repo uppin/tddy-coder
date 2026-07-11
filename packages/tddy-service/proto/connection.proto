@@ -62,6 +62,11 @@ service ConnectionService {
   // choosing its ancestors (parent node ids) from the already-planned nodes. See
   // docs/ft/coder/pr-stacking.md § Manually adding a planned PR.
   rpc AddPlannedPr(AddPlannedPrRequest) returns (AddPlannedPrResponse);
+  // Local peer-trust: mint a session token for the caller identified by its SO_PEERCRED peer uid
+  // over the daemon's Unix-domain socket. Available only on the local UDS transport (the peer
+  // credential is not present on ConnectRPC-HTTP or LiveKit), and only for a peer uid mapped to a
+  // configured user.
+  rpc MintLocalToken(MintLocalTokenRequest) returns (MintLocalTokenResponse);
 }
 
 message ListToolsRequest {}
@@ -253,6 +258,15 @@ message StartSessionRequest {
   // session's mcp__tddy-tools__subagent_* tools. Each name must resolve to a builtin or
   // <tddyhome>/agents/*.yaml def; an unresolvable name is a request error.
   repeated string specialized_agents = 18;
+  // Absolute path to a local git checkout to use as the session worktree, sent by a local client
+  // (e.g. tddy-sandbox-app) instead of selecting a configured project_id. When set, it overrides
+  // project_id-based resolution. The session still runs as the caller's mapped os_user, so this
+  // grants no access beyond that user. Empty = resolve from project_id as before.
+  string repo_path = 24;
+  // Extra arguments forwarded verbatim to the in-jail `claude` for claude-cli sessions (after any
+  // recipe/config args; a trailing positional prompt lands last). Sent by local clients that carry
+  // their own SandboxAppConfig. Empty = none.
+  repeated string claude_args = 25;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved
@@ -647,4 +661,11 @@ message AddPlannedPrResponse {
   // Updated JSON-serialized `Stack`, same wire shape as `SessionEntry.stack_plan_json` (field 23)
   // — callers re-use the existing `parseStackPlan` parser rather than a second message schema.
   string stack_plan_json = 1;
+}
+
+// --- Local peer-trust token minting (Unix-domain socket only) ---
+
+message MintLocalTokenRequest {}
+message MintLocalTokenResponse {
+  string session_token = 1;
 }

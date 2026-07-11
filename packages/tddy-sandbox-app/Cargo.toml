@@ -26,12 +26,16 @@ tddy-core = { path = "../tddy-core" }
 tddy-daemon = { path = "../tddy-daemon" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-sandbox = { path = "../tddy-sandbox" }
-tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
 tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-service = { path = "../tddy-service" }
 tddy-task = { path = "../tddy-task" }
 tonic = { version = "0.12", default-features = false, features = ["transport"] }
+
+# macOS spawns the Seatbelt jail in-process via this crate; the Linux path talks to a running
+# tddy-daemon over gRPC instead and never links it.
+[target.'cfg(target_os = "macos")'.dependencies]
+tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

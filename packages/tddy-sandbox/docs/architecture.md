@@ -65,11 +65,43 @@ generic-action-execution flow:
 with the caller mapped to root-in-ns, then `NEWNS | NEWNET`, a private root mount, and `lo` brought up
 (no other interfaces → no direct egress, so outbound must use the in-jail `HTTPS_PROXY`). The process
 is placed in a cgroup v2 scope with memory/CPU/pids limits. It **fails fast** with
-`SandboxError::Unsupported` when unprivileged user namespaces are unavailable (e.g. Ubuntu AppArmor
-`apparmor_restrict_unprivileged_userns=1`) or the cgroup v2 subtree isn't writable — never a silent
-unconfined fallback. The production daemon runs as a root systemd service, where the userns
-restriction does not apply. *(Follow-up: `pivot_root` read-only-root filesystem write-confinement; the
-network-namespace egress guarantee and cgroup limits are in place.)*
+`SandboxError::Unsupported` when unprivileged user namespaces are unavailable or the cgroup v2 subtree
+isn't writable — never a silent unconfined fallback.
+
+The production daemon runs as an **unprivileged systemd service** (`User=tddy`) with two grants that
+`./install` provisions:
+
+- **`Delegate=yes`** — hands the service a writable cgroup v2 subtree. The backend derives the
+  delegated base from `/proc/self/cgroup` at runtime (config-overridable via `sandbox_cgroup:`; never
+  hardcoded), relocates the daemon's own process into a `supervisor` leaf to satisfy cgroup v2's
+  no-internal-processes rule, enables `memory cpu pids` in the base's `subtree_control`, then creates
+  per-session `tddy-<name>-<seq>.scope` children.
+- **An AppArmor profile** granting the daemon binary unprivileged user namespaces. On Ubuntu 24.04
+  `apparmor_restrict_unprivileged_userns=1` gates the userns *mapping* writes (not `unshare` itself),
+  so the precondition check is a **functional probe** — it forks a child that performs the real
+  `unshare` + uid/gid mapping and reports success — rather than a sysctl read, which cannot see a
+  per-binary grant. (Running as root also works and short-circuits both requirements.)
+
+*(Follow-up: `pivot_root` read-only-root filesystem write-confinement; the network-namespace egress
+guarantee and cgroup limits are in place.)*
+
+### Standalone `tddy-sandbox-app` on Linux (daemon-assisted)
+
+The standalone launcher spawns the jail in-process only on macOS (Seatbelt). On Linux an unprivileged
+app cannot place its own child in a limited cgroup scope (cgroup v2 **delegation containment** — the
+common ancestor of its shell scope and any writable delegated subtree is the root cgroup, which it
+can't write). So on Linux `tddy-sandbox-app` **delegates to a running `tddy-daemon`**: it connects the
+daemon's Unix socket over tonic gRPC, `MintLocalToken` (SO_PEERCRED peer-trust — the peer uid's mapped
+os_user → a signed access token), `StartSession` carrying its `repo_path`/`model`/`permission_mode`/
+`codebase_mode`/`claude_args`, and PTY-proxies the session over `StreamSessionTerminalIO`. The daemon
+serves `ConnectionService` over the UDS via a hand-written tonic adapter over the existing impl,
+alongside its HTTP/LiveKit transports; `repo_path` is used directly as the worktree and is never
+daemon-removed (`.worktrees` guard).
+
+> **Status — unverified (draft PR #291, stacked on the unprivileged-cgroups work):** this Linux path
+> is implemented and unit/transport-integration-tested, but has **not** been run end-to-end (no
+> automated test drives a live daemon; the on-host run also depends on the daemon's own cgroups
+> sandbox, which has open issues), and the macOS build was not re-verified after the `#[cfg]` split.
 
 ## SandboxSpec
 

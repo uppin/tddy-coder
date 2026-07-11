@@ -10,18 +10,30 @@
 //! ```
 
 mod bridge;
+mod codebase_mode;
 mod config;
+#[cfg(target_os = "linux")]
+mod daemon_client;
+#[cfg(target_os = "macos")]
 mod spawn;
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use clap::Parser;
-use spawn::{resolve_codebase_mode, spawn_claude_sandbox, AgentKind, SpawnParams};
+use codebase_mode::resolve_codebase_mode;
+
+#[cfg(target_os = "macos")]
+use spawn::{spawn_claude_sandbox, AgentKind, SpawnParams};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::{Arc, Mutex};
+#[cfg(target_os = "macos")]
 use tddy_core::output::SESSIONS_SUBDIR;
+#[cfg(target_os = "macos")]
 use tddy_task::TaskRegistry;
+#[cfg(target_os = "macos")]
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
@@ -121,6 +133,12 @@ struct Args {
     #[arg(long)]
     mcp_log_level: Option<String>,
 
+    /// Linux only: path to the running tddy-daemon's Unix socket. The Linux path talks to the
+    /// daemon over gRPC instead of spawning the jail in-process. Default: resolves like the daemon
+    /// itself — `${XDG_RUNTIME_DIR}/tddy-daemon.sock`, else `/run/tddy-daemon.sock`.
+    #[arg(long)]
+    daemon_socket: Option<PathBuf>,
+
     /// Enable debug logging for tddy sandbox components (HTTP/gRPC frame traces stay quiet).
     #[arg(short, long)]
     verbose: bool,
@@ -144,6 +162,7 @@ const VERBOSE_RUST_LOG: &str = "\
     tower=warn,\
     tonic=warn";
 
+#[cfg(target_os = "macos")]
 fn default_session_base() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -151,16 +170,19 @@ fn default_session_base() -> PathBuf {
         .join(".tddy")
 }
 
+#[cfg(target_os = "macos")]
 fn default_claude_home_dir() -> PathBuf {
     default_session_base().join("sandbox-claude-home")
 }
 
+#[cfg(target_os = "macos")]
 fn default_cursor_home_dir() -> PathBuf {
     default_session_base().join("sandbox-cursor-home")
 }
 
 /// Repoint `<session-base>/sessions/latest` at `<session_id>` (best-effort; failures are ignored —
 /// it's a convenience pointer for finding the current session's logs, never load-bearing).
+#[cfg(target_os = "macos")]
 fn update_latest_session_symlink(session_base: &std::path::Path, session_id: &str) {
     #[cfg(unix)]
     {
@@ -188,6 +210,82 @@ async fn main() -> Result<()> {
         None => config::SandboxAppConfig::default(),
     };
 
+    // macOS spawns the Seatbelt jail in-process; Linux drives a running tddy-daemon over gRPC.
+    #[cfg(target_os = "macos")]
+    {
+        run_macos(args, cfg).await
+    }
+    #[cfg(target_os = "linux")]
+    {
+        run_linux(args, cfg).await
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = (args, cfg);
+        anyhow::bail!(
+            "tddy-sandbox-app supports macOS (in-process Seatbelt jail) or Linux (via a running \
+             tddy-daemon); this platform is unsupported"
+        )
+    }
+}
+
+/// Linux: send the resolved sandbox params to a running tddy-daemon and proxy the terminal to the
+/// daemon-hosted sandboxed session (see `daemon_client`). The in-process Seatbelt path is macOS-only.
+#[cfg(target_os = "linux")]
+async fn run_linux(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
+    // `--codebase-mode`/`--remote-codebase` on the CLI win; otherwise fall back to config.
+    let codebase_mode = args.codebase_mode.or(cfg.codebase_mode);
+    let managed_codebase = resolve_codebase_mode(codebase_mode.as_deref(), args.remote_codebase)
+        .map_err(|e| anyhow::anyhow!(e))?;
+    if managed_codebase {
+        eprintln!(
+            "codebase_mode=managed: repo not mounted; Claude reaches it only via mcp__tddy-tools__* calls"
+        );
+    }
+
+    // Specialized-agent names come from the CLI flag and the config list. The daemon resolves each
+    // name against its own `<tddyhome>/agents` (+ builtins), so inline `subagents:` defs in the app
+    // config cannot be honored here — the daemon never sees them. Refuse rather than silently drop
+    // a subagent the caller explicitly declared.
+    if !cfg.subagents.is_empty() {
+        anyhow::bail!(
+            "inline `subagents:` defs are not supported on the Linux daemon path — the daemon \
+             resolves specialized agents from its own <tddyhome>/agents. Use `--specialized-agent \
+             <name>` / config `specialized_agents:` with agents the daemon already knows."
+        );
+    }
+    let mut specialized_agents = args.specialized_agent;
+    specialized_agents.extend(cfg.specialized_agents);
+
+    // Config `claude_args` first, then CLI `-- <args>` — a trailing positional prompt lands last.
+    let mut claude_args = cfg.claude_args;
+    claude_args.extend(args.claude_args);
+
+    let model = args
+        .model
+        .or(cfg.model)
+        .unwrap_or_else(|| "claude-opus-4-8".to_string());
+    let permission_mode = args
+        .permission_mode
+        .or(cfg.permission_mode)
+        .unwrap_or_else(|| "auto".to_string());
+
+    daemon_client::run(daemon_client::DaemonClientParams {
+        daemon_socket: args.daemon_socket,
+        repo: args.repo,
+        model,
+        permission_mode,
+        managed_codebase,
+        claude_args,
+        specialized_agents,
+    })
+    .await
+}
+
+/// macOS: spawn the Seatbelt jail + Claude in-process and attach the terminal via SessionChannel
+/// gRPC on loopback — the original no-daemon flow, unchanged.
+#[cfg(target_os = "macos")]
+async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     let session_id = Uuid::now_v7().to_string();
     let session_base = args
         .session_base

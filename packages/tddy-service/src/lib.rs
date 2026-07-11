@@ -135,6 +135,15 @@ pub mod tonic_sandbox {
     include!(concat!(env!("OUT_DIR"), "/tonic_sandbox/sandbox.rs"));
 }
 
+/// Tonic-generated gRPC server/client for connection.proto.
+/// Uses the same message types as `proto::connection` (via extern_path), kept in a separate
+/// module from the tddy-rpc `ConnectionServiceServer` (re-exported above) so the two service
+/// codegen flavors do not collide.
+pub mod tonic_connection {
+    #![allow(unused_imports, clippy::all)]
+    include!(concat!(env!("OUT_DIR"), "/tonic_connection/connection.rs"));
+}
+
 #[cfg(test)]
 mod integration_tests;
 

@@ -123,6 +123,7 @@ async fn workspace_session_creates_worktree_with_no_pty() {
             sandbox: false,
             managed_codebase: false,
             specialized_agents: vec![],
+            ..Default::default()
         }))
         .await
         .expect("StartSession with session_type=workspace must succeed");

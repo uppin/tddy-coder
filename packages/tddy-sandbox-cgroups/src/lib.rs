@@ -10,6 +10,8 @@
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 
 use nix::mount::MsFlags;
 use nix::sched::{unshare, CloneFlags};
@@ -88,8 +90,12 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
         .map(PathBuf::from)
         .unwrap_or_else(|| plan.spec.project_root.join("sandbox.ready"));
 
-    let scope = cgroup_scope_path(&plan.spec);
-    prepare_cgroup_scope(&scope).map_err(|e| cgroup_unsupported_error(&scope, &e))?;
+    // Derive (and, once per daemon, prepare) the delegated cgroup base before spawning, so the
+    // daemon is relocated into its supervisor leaf before it forks the child. Fails fast when no
+    // writable cgroup v2 subtree is available — never a silent degrade to an unconfined process.
+    let base = detect_and_prepare_base(&plan.cgroup)?;
+    let scope = scope_dir_in(&base, &session_name_from(&plan.spec), next_seq());
+    std::fs::create_dir_all(&scope).map_err(|e| cgroup_unsupported_error(&scope, &e))?;
 
     let uid = nix::unistd::geteuid().as_raw();
     let gid = nix::unistd::getegid().as_raw();
@@ -141,7 +147,7 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
         }
     }
 
-    if let Err(e) = std::fs::write(scope.join("cgroup.procs"), child.id().to_string()) {
+    if let Err(e) = move_pid_into_scope(&scope, child.id()) {
         let _ = child.kill();
         return Err(cgroup_unsupported_error(&scope, &e));
     }
@@ -196,9 +202,6 @@ fn apply_bind_mounts(mounts: &[(PathBuf, PathBuf, MsFlags)]) -> std::io::Result<
     Ok(())
 }
 
-/// cgroup v2 unified hierarchy root.
-const CGROUP_ROOT: &str = "/sys/fs/cgroup";
-
 /// Default resource limits applied when the spec carries none (memory 2 GiB, 1 CPU, 512 pids).
 fn default_limits() -> CgroupLimits {
     CgroupLimits {
@@ -250,9 +253,11 @@ pub fn spawn(spec: SandboxSpec) -> Result<SandboxHandle, SandboxError> {
         .unwrap_or_else(|| spec.project_root.join("sandbox.ready"));
 
     // cgroup scope created before spawn so limits apply from the start. A host without a writable
-    // cgroup v2 subtree fails fast (no silent degrade to an unlimited process).
-    let scope = cgroup_scope_path(&spec);
-    prepare_cgroup_scope(&scope).map_err(|e| cgroup_unsupported_error(&scope, &e))?;
+    // cgroup v2 subtree fails fast (no silent degrade to an unlimited process). The delegated base
+    // is prepared (and the daemon relocated) before the child is forked.
+    let base = detect_and_prepare_base(&tddy_sandbox::CgroupConfig::default())?;
+    let scope = scope_dir_in(&base, &session_name_from(&spec), next_seq());
+    std::fs::create_dir_all(&scope).map_err(|e| cgroup_unsupported_error(&scope, &e))?;
 
     let uid = nix::unistd::geteuid().as_raw();
     let gid = nix::unistd::getegid().as_raw();
@@ -283,7 +288,7 @@ pub fn spawn(spec: SandboxSpec) -> Result<SandboxHandle, SandboxError> {
 
     // Move the jailed process into its scope so the limits bind it. A failure here means it would
     // run uncgrouped — kill it and fail rather than continue unconfined.
-    if let Err(e) = std::fs::write(scope.join("cgroup.procs"), child.id().to_string()) {
+    if let Err(e) = move_pid_into_scope(&scope, child.id()) {
         let _ = child.kill();
         return Err(cgroup_unsupported_error(&scope, &e));
     }
@@ -314,49 +319,288 @@ fn arg_value(argv: &[String], flag: &str) -> Option<String> {
 }
 
 /// Whether the current process can create an unprivileged user namespace. Root always can; an
-/// unprivileged process is blocked when Ubuntu's AppArmor restriction or the userns sysctls deny it.
+/// unprivileged process is decided by a real functional probe (a fork that attempts
+/// `unshare(CLONE_NEWUSER)`), which sees a per-binary AppArmor `userns` grant that a sysctl read
+/// cannot.
 pub fn unprivileged_userns_available() -> bool {
-    if nix::unistd::geteuid().is_root() {
-        return true;
+    unprivileged_userns_available_with(nix::unistd::geteuid().is_root(), probe_unprivileged_userns)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Unprivileged-`User=tddy` cgroups sandbox support (functional userns probe + delegated cgroup
+// base under systemd `Delegate=yes`). Stubs below are pinned by RED-phase tests; `/green` fills
+// in the bodies. Exposed `pub` for testability, matching the crate's existing helper convention.
+// ---------------------------------------------------------------------------------------------
+
+/// Outcome of attempting to enter a fresh unprivileged user namespace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UsernsProbe {
+    Available,
+    Denied,
+}
+
+/// Default cgroup v2 unified mount point (systemd's conventional location). A *default*, not a
+/// hardcoded assumption: overridable via config and derivable from `/proc/self/mountinfo`.
+const DEFAULT_CGROUP_MOUNT_ROOT: &str = "/sys/fs/cgroup";
+
+/// Pure decision: root can always create a user namespace; otherwise trust the functional probe.
+/// Kept pure (no host state) so it is unit-testable without root or AppArmor.
+pub fn userns_available_from(is_root: bool, probe: UsernsProbe) -> bool {
+    is_root || probe == UsernsProbe::Available
+}
+
+/// Injectable seam over the functional probe: root short-circuits without attempting; otherwise the
+/// decision follows the injected attempt's result (never the sysctl). Unit-testable via a closure.
+pub fn unprivileged_userns_available_with(
+    is_root: bool,
+    attempt: impl FnOnce() -> UsernsProbe,
+) -> bool {
+    if is_root {
+        true
+    } else {
+        userns_available_from(false, attempt())
     }
-    let read = |p: &str| {
-        std::fs::read_to_string(p)
-            .ok()
-            .map(|s| s.trim().to_string())
-    };
-    if read("/proc/sys/kernel/apparmor_restrict_unprivileged_userns").as_deref() == Some("1") {
+}
+
+/// Real functional probe (host-touching, not unit-tested): fork a child that calls
+/// `unshare(CLONE_NEWUSER)` and `_exit(0/1)` using only async-signal-safe ops; parent `waitpid`s and
+/// maps exit status. Detects a per-binary AppArmor `userns` grant that the sysctl read cannot see.
+fn probe_unprivileged_userns() -> UsernsProbe {
+    // Format the id-maps in the parent (heap is fine here). The strings stay valid in the forked
+    // child via copy-on-write, so the child needs no allocation to reference them.
+    let uid_map = format!("0 {} 1\n", unsafe { libc::geteuid() });
+    let gid_map = format!("0 {} 1\n", unsafe { libc::getegid() });
+
+    // SAFETY: `fork` in a multi-threaded process yields a child in which only the forking thread
+    // exists, so the child must call only async-signal-safe functions. It does exactly that:
+    // `unshare(2)`, raw `open`/`write`/`close` (via `probe_write`), and `_exit(2)` — no heap
+    // allocation, no locking, no logging, no Rust destructors.
+    unsafe {
+        let pid = libc::fork();
+        if pid < 0 {
+            return UsernsProbe::Denied;
+        }
+        if pid == 0 {
+            // Child: replicate the jail's userns setup end-to-end. The AppArmor restriction gates the
+            // uid/gid *mapping* writes, not `unshare` itself (which succeeds unprivileged), so probing
+            // only `unshare` would falsely report availability without the grant. Mirror
+            // `enter_rootless_jail`: map uid, deny setgroups (best-effort), then map gid.
+            if libc::unshare(libc::CLONE_NEWUSER) != 0 {
+                libc::_exit(1);
+            }
+            if !probe_write(c"/proc/self/uid_map".as_ptr(), uid_map.as_bytes()) {
+                libc::_exit(1);
+            }
+            probe_write(c"/proc/self/setgroups".as_ptr(), b"deny");
+            if !probe_write(c"/proc/self/gid_map".as_ptr(), gid_map.as_bytes()) {
+                libc::_exit(1);
+            }
+            libc::_exit(0);
+        }
+        // Parent: reap the child and map its exit status.
+        let mut status: libc::c_int = 0;
+        if libc::waitpid(pid, &mut status, 0) < 0 {
+            return UsernsProbe::Denied;
+        }
+        if libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0 {
+            UsernsProbe::Available
+        } else {
+            UsernsProbe::Denied
+        }
+    }
+}
+
+/// Async-signal-safe write of `buf` to the nul-terminated `path`. Called only from the forked probe
+/// child, so it uses raw libc `open`/`write`/`close` — no allocation, locking, or Rust destructors.
+/// Returns true only when the entire buffer was written.
+///
+/// # Safety
+/// `path` must be a valid nul-terminated C string pointer.
+unsafe fn probe_write(path: *const libc::c_char, buf: &[u8]) -> bool {
+    let fd = libc::open(path, libc::O_WRONLY);
+    if fd < 0 {
         return false;
     }
-    if read("/proc/sys/kernel/unprivileged_userns_clone").as_deref() == Some("0") {
-        return false;
+    let mut written = 0usize;
+    let mut ok = true;
+    while written < buf.len() {
+        let n = libc::write(
+            fd,
+            buf[written..].as_ptr() as *const libc::c_void,
+            buf.len() - written,
+        );
+        if n <= 0 {
+            ok = false;
+            break;
+        }
+        written += n as usize;
     }
-    !matches!(
-        read("/proc/sys/user/max_user_namespaces").and_then(|s| s.parse::<u64>().ok()),
-        Some(0)
+    libc::close(fd);
+    ok
+}
+
+/// Pure: extract the cgroup v2 relative path from `/proc/self/cgroup` contents — the single
+/// `0::<path>` line. `"0::/system.slice/x.service\n"` -> `Some("/system.slice/x.service")`;
+/// `"0::/"` -> `Some("/")`; no `0::` line (v1-only host) -> `None`.
+pub fn cgroup_v2_relative_path(proc_self_cgroup: &str) -> Option<String> {
+    proc_self_cgroup
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))
+        .map(|path| path.trim_end_matches('\n').to_string())
+}
+
+/// Pure: find the cgroup2 mount point from `/proc/self/mountinfo` contents (fstype `cgroup2`).
+pub fn cgroup2_mount_root_from(mountinfo: &str) -> Option<PathBuf> {
+    for line in mountinfo.lines() {
+        let Some((left, right)) = line.split_once(" - ") else {
+            continue;
+        };
+        if right.split_whitespace().next() == Some("cgroup2") {
+            if let Some(mount_point) = left.split_whitespace().nth(4) {
+                return Some(PathBuf::from(mount_point));
+            }
+        }
+    }
+    None
+}
+
+/// Pure: join the mount root with the v2 relative path (strip the leading `/` so `join` does not
+/// replace the root). `("/sys/fs/cgroup", "/a/b")` -> `/sys/fs/cgroup/a/b`; `(_, "/")` -> mount root.
+pub fn delegated_cgroup_base_from(mount_root: &Path, relative: &str) -> PathBuf {
+    mount_root.join(relative.trim_start_matches('/'))
+}
+
+/// Pure precedence resolver: config `base_override` wins; else derive from `/proc/self/cgroup`
+/// joined with (config `mount_root` -> `cgroup2_mount_root_from(mountinfo)` -> `default_mount_root`).
+pub fn resolve_cgroup_base(
+    cfg: &tddy_sandbox::CgroupConfig,
+    proc_self_cgroup: &str,
+    mountinfo: &str,
+    default_mount_root: &Path,
+) -> Option<PathBuf> {
+    if let Some(base) = &cfg.base_override {
+        return Some(base.clone());
+    }
+    let relative = cgroup_v2_relative_path(proc_self_cgroup)?;
+    let mount_root = cfg
+        .mount_root
+        .clone()
+        .or_else(|| cgroup2_mount_root_from(mountinfo))
+        .unwrap_or_else(|| default_mount_root.to_path_buf());
+    Some(delegated_cgroup_base_from(&mount_root, &relative))
+}
+
+/// Pure: configured controllers, or `[memory, cpu, pids]` when unset.
+pub fn controllers_or_default(cfg: &tddy_sandbox::CgroupConfig) -> Vec<String> {
+    if cfg.controllers.is_empty() {
+        vec!["memory".to_string(), "cpu".to_string(), "pids".to_string()]
+    } else {
+        cfg.controllers.clone()
+    }
+}
+
+/// Pure: format the `cgroup.subtree_control` enable line, e.g. `"+memory +cpu +pids"`.
+pub fn subtree_control_line(controllers: &[String]) -> String {
+    controllers
+        .iter()
+        .map(|c| format!("+{c}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Pure: the per-session scope directory under `base`, uniquely named via `seq`.
+pub fn scope_dir_in(base: &Path, session_name: &str, seq: u64) -> PathBuf {
+    base.join(format!("tddy-{session_name}-{seq}.scope"))
+}
+
+/// Seam: create `base/<leaf>` and move the daemon's own thread group into it by writing `self_pid`
+/// (the TGID) to `base/<leaf>/cgroup.procs`, satisfying cgroup v2's no-internal-processes rule.
+pub fn relocate_self_into_leaf(base: &Path, self_pid: u32, leaf: &str) -> std::io::Result<()> {
+    let leaf_dir = base.join(leaf);
+    std::fs::create_dir_all(&leaf_dir)?;
+    std::fs::write(leaf_dir.join("cgroup.procs"), self_pid.to_string())
+}
+
+/// Seam: enable the given controllers in `base/cgroup.subtree_control`.
+pub fn enable_controllers(base: &Path, controllers: &[String]) -> std::io::Result<()> {
+    std::fs::write(
+        base.join("cgroup.subtree_control"),
+        subtree_control_line(controllers),
     )
 }
 
-/// cgroup v2 scope directory for a session, derived from the project root's final component.
-fn cgroup_scope_path(spec: &SandboxSpec) -> PathBuf {
-    let name = spec
-        .project_root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("session");
-    let pid = std::process::id();
-    PathBuf::from(CGROUP_ROOT).join(format!("tddy-{name}-{pid}.scope"))
+/// Seam: move `pid` into `scope` by writing it to `scope/cgroup.procs`.
+pub fn move_pid_into_scope(scope: &Path, pid: u32) -> std::io::Result<()> {
+    std::fs::write(scope.join("cgroup.procs"), pid.to_string())
 }
 
-/// Create the cgroup scope and enable the controllers we limit. Returns Err if the cgroup root is
-/// not writable (no delegation) — the caller degrades to no-limits rather than failing the spawn.
-fn prepare_cgroup_scope(scope: &Path) -> std::io::Result<()> {
-    // Enable controllers in the root's subtree_control (ignored if already enabled / not permitted).
-    let _ = std::fs::write(
-        Path::new(CGROUP_ROOT).join("cgroup.subtree_control"),
-        "+memory +cpu +pids",
-    );
-    std::fs::create_dir_all(scope)?;
-    Ok(())
+/// Host-touching orchestrator (one-time per daemon process, `OnceLock`-guarded): resolve the
+/// delegated base, relocate self into the supervisor leaf, and enable controllers. Caches the base
+/// or the error so every later spawn is fail-fast and never re-degrades.
+fn detect_and_prepare_base(cfg: &tddy_sandbox::CgroupConfig) -> Result<PathBuf, SandboxError> {
+    static PREPARED_BASE: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+    let result = PREPARED_BASE.get_or_init(|| {
+        let proc_self_cgroup = std::fs::read_to_string("/proc/self/cgroup").unwrap_or_default();
+        let mountinfo = std::fs::read_to_string("/proc/self/mountinfo").unwrap_or_default();
+        let base = match resolve_cgroup_base(
+            cfg,
+            &proc_self_cgroup,
+            &mountinfo,
+            Path::new(DEFAULT_CGROUP_MOUNT_ROOT),
+        ) {
+            Some(base) => base,
+            None => {
+                return Err("cgroup v2 delegation unavailable (no unified cgroup v2 hierarchy in \
+                     /proc/self/cgroup); the cgroups sandbox requires a writable cgroup v2 subtree. \
+                     Run the daemon via systemd with `Delegate=yes` (or as a root service)."
+                    .to_string());
+            }
+        };
+        // cgroup v2 forbids a cgroup from both holding processes and delegating controllers, so the
+        // daemon moves its own thread group into a leaf before enabling controllers on the base.
+        let leaf = cfg.supervisor_leaf.as_deref().unwrap_or("supervisor");
+        if let Err(e) = relocate_self_into_leaf(&base, std::process::id(), leaf) {
+            return Err(format!(
+                "cgroup v2 delegation unavailable for {} ({e}); the cgroups sandbox requires a \
+                 writable cgroup v2 subtree. Run the daemon via systemd with `Delegate=yes` (or as \
+                 a root service).",
+                base.display()
+            ));
+        }
+        // Best-effort: some hosts do not delegate every controller. The base is still usable for
+        // scopes even if a controller can't be enabled, so warn rather than fail.
+        if let Err(e) = enable_controllers(&base, &controllers_or_default(cfg)) {
+            log::warn!(
+                target: "tddy_sandbox_cgroups",
+                "some cgroup controllers could not be enabled in {}: {e}",
+                base.display()
+            );
+        }
+        Ok(base)
+    });
+    match result {
+        Ok(base) => Ok(base.clone()),
+        Err(message) => Err(SandboxError::Unsupported {
+            platform: "linux".to_string(),
+            message: message.clone(),
+        }),
+    }
+}
+
+/// Session name for a spawn's scope, derived from the project root's final component.
+fn session_name_from(spec: &SandboxSpec) -> String {
+    spec.project_root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("session")
+        .to_string()
+}
+
+/// Monotonic, process-global sequence so two concurrent sessions of one project never share a scope
+/// name (the old `tddy-<project>-<daemon_pid>.scope` scheme collided on the constant daemon pid).
+fn next_seq() -> u64 {
+    static SCOPE_SEQ: AtomicU64 = AtomicU64::new(0);
+    SCOPE_SEQ.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Child-side jail setup (runs in the forked child before `execve`): user namespace with the
@@ -492,8 +736,8 @@ pub fn userns_unsupported_error() -> SandboxError {
 mod tests {
     use super::*;
     use tddy_sandbox::{
-        EnvSpec, NetworkSpec, PolicySpec, ReadReason, ReadSpec, ResourceLimits, SandboxPlan,
-        SandboxSpec,
+        CgroupConfig, EnvSpec, NetworkSpec, PolicySpec, ReadReason, ReadSpec, ResourceLimits,
+        SandboxPlan, SandboxSpec,
     };
 
     fn a_plan(reads: Vec<ReadSpec>, limits: ResourceLimits) -> SandboxPlan {
@@ -520,6 +764,7 @@ mod tests {
             network: NetworkSpec::default(),
             limits,
             stdin: None,
+            cgroup: Default::default(),
         }
     }
 
@@ -596,5 +841,187 @@ mod tests {
         assert_eq!(cgroup.memory_max, Some(123));
         assert_eq!(cgroup.cpu_max, Some("50000 100000".to_string()));
         assert_eq!(cgroup.pids_max, Some(7));
+    }
+
+    #[test]
+    fn reports_userns_available_when_the_functional_attempt_succeeds() {
+        // Given — a non-root process whose functional userns attempt succeeds
+
+        // When
+        let available = userns_available_from(false, UsernsProbe::Available);
+
+        // Then
+        assert!(available);
+    }
+
+    #[test]
+    fn reports_userns_unavailable_when_the_functional_attempt_is_denied() {
+        // Given — a non-root process whose functional userns attempt is denied
+
+        // When
+        let available = userns_available_from(false, UsernsProbe::Denied);
+
+        // Then
+        assert!(!available);
+    }
+
+    #[test]
+    fn reports_userns_available_for_root_without_attempting() {
+        // Given — root, with an attempt closure that must never be invoked
+
+        // When
+        let available = unprivileged_userns_available_with(true, || {
+            panic!("root must short-circuit before attempting the probe")
+        });
+
+        // Then
+        assert!(available);
+    }
+
+    #[test]
+    fn parses_the_v2_cgroup_path_from_proc_self_cgroup() {
+        // Given
+        let contents = "0::/system.slice/tddy-daemon.service\n";
+
+        // When
+        let relative = cgroup_v2_relative_path(contents);
+
+        // Then
+        assert_eq!(
+            relative.as_deref(),
+            Some("/system.slice/tddy-daemon.service")
+        );
+    }
+
+    #[test]
+    fn treats_the_root_v2_cgroup_as_the_mount_root() {
+        // Given — a service living at the cgroup v2 root
+
+        // When
+        let base = delegated_cgroup_base_from(Path::new("/sys/fs/cgroup"), "/");
+
+        // Then
+        assert_eq!(base, PathBuf::from("/sys/fs/cgroup"));
+    }
+
+    #[test]
+    fn reports_no_v2_path_on_a_cgroup_v1_only_host() {
+        // Given — a v1-only /proc/self/cgroup with no `0::` unified line
+        let contents = "3:cpu,cpuacct:/user.slice\n2:memory:/user.slice\n";
+
+        // When
+        let relative = cgroup_v2_relative_path(contents);
+
+        // Then
+        assert_eq!(relative, None);
+    }
+
+    #[test]
+    fn finds_the_cgroup2_mount_root_from_mountinfo() {
+        // Given — a mountinfo whose cgroup2 mount is at /sys/fs/cgroup
+        let mountinfo = "23 66 0:22 / /proc rw,nosuid - proc proc rw\n\
+             31 23 0:27 / /sys/fs/cgroup rw,nosuid,nodev,noexec relatime shared:9 - cgroup2 cgroup2 rw,nsdelegate\n";
+
+        // When
+        let root = cgroup2_mount_root_from(mountinfo);
+
+        // Then
+        assert_eq!(root, Some(PathBuf::from("/sys/fs/cgroup")));
+    }
+
+    #[test]
+    fn prefers_the_configured_base_override_over_proc_derivation() {
+        // Given — an explicit base override
+        let cfg = CgroupConfig {
+            base_override: Some(PathBuf::from("/custom/delegated/base")),
+            ..Default::default()
+        };
+
+        // When
+        let base = resolve_cgroup_base(
+            &cfg,
+            "0::/system.slice/tddy-daemon.service\n",
+            "",
+            Path::new("/sys/fs/cgroup"),
+        );
+
+        // Then
+        assert_eq!(base, Some(PathBuf::from("/custom/delegated/base")));
+    }
+
+    #[test]
+    fn derives_the_base_from_proc_when_no_override_is_configured() {
+        // Given — no override; derive from /proc/self/cgroup joined with the default mount root
+        let cfg = CgroupConfig::default();
+
+        // When
+        let base = resolve_cgroup_base(
+            &cfg,
+            "0::/system.slice/tddy-daemon.service\n",
+            "",
+            Path::new("/sys/fs/cgroup"),
+        );
+
+        // Then
+        assert_eq!(
+            base,
+            Some(PathBuf::from(
+                "/sys/fs/cgroup/system.slice/tddy-daemon.service"
+            ))
+        );
+    }
+
+    #[test]
+    fn defaults_controllers_to_memory_cpu_pids_when_unconfigured() {
+        // Given
+        let cfg = CgroupConfig::default();
+
+        // When
+        let controllers = controllers_or_default(&cfg);
+
+        // Then
+        assert_eq!(controllers, vec!["memory", "cpu", "pids"]);
+    }
+
+    #[test]
+    fn uses_configured_controllers_when_present() {
+        // Given
+        let cfg = CgroupConfig {
+            controllers: vec!["memory".to_string(), "pids".to_string()],
+            ..Default::default()
+        };
+
+        // When
+        let controllers = controllers_or_default(&cfg);
+
+        // Then
+        assert_eq!(controllers, vec!["memory", "pids"]);
+    }
+
+    #[test]
+    fn formats_the_subtree_control_enable_line() {
+        // Given
+        let controllers = vec!["memory".to_string(), "cpu".to_string(), "pids".to_string()];
+
+        // When
+        let line = subtree_control_line(&controllers);
+
+        // Then
+        assert_eq!(line, "+memory +cpu +pids");
+    }
+
+    #[test]
+    fn names_each_session_scope_uniquely_under_the_base() {
+        // Given — the same base and session name across two spawns with distinct sequence numbers
+        let base = Path::new("/sys/fs/cgroup/system.slice/tddy-daemon.service");
+
+        // When
+        let first = scope_dir_in(base, "proj", 1);
+        let second = scope_dir_in(base, "proj", 2);
+
+        // Then — both live under the base and never collide
+        assert!(first.starts_with(base));
+        assert!(second.starts_with(base));
+        assert_ne!(first, second);
     }
 }

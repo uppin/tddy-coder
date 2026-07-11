@@ -14,8 +14,9 @@ mod spec;
 pub mod tool_ipc;
 
 pub use builder::{
-    CopySpec, EnvSpec, MachPolicy, MountSpec, NetworkSpec, PolicySpec, ReadKind, ReadReason,
-    ReadSpec, ResourceLimits, SandboxBuilder, SandboxPlan, SecretSource, SecretSpec, SymlinkSpec,
+    CgroupConfig, CopySpec, EnvSpec, MachPolicy, MountSpec, NetworkSpec, PolicySpec, ReadKind,
+    ReadReason, ReadSpec, ResourceLimits, SandboxBuilder, SandboxPlan, SecretSource, SecretSpec,
+    SymlinkSpec,
 };
 pub use context_dir::{
     copy_context_from_repo, copy_tree, copy_tree_within_root, SandboxContextDir,
