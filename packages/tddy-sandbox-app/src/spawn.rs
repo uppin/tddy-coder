@@ -590,6 +590,9 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         // Preserve prior behavior (build_sandbox_plan used to hardcode $HOME): the recipe's
         // per-session credential copy stays enabled for the app path.
         host_home: std::env::var_os("HOME").map(PathBuf::from),
+        // Standalone app path has no daemon config; empty config lets the cgroups backend derive
+        // the delegated base at runtime (ignored by the macOS/QEMU backends).
+        cgroup: tddy_sandbox::CgroupConfig::default(),
     })
     .map_err(|e| {
         let logs = tddy_sandbox::format_egress_logs(&egress_dir);

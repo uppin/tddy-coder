@@ -588,7 +588,11 @@ pub fn build_sandbox_plan(params: SandboxRunnerSpawn) -> Result<SandboxPlan, San
     })?;
     plan.cgroup = params.cgroup;
     #[cfg(target_os = "macos")]
-    merge_allow_read_paths_into_plan(&mut plan, &params.runner_argv);
+    let plan = {
+        let mut plan = plan;
+        merge_allow_read_paths_into_plan(&mut plan, &params.runner_argv);
+        plan
+    };
     Ok(plan)
 }
 
