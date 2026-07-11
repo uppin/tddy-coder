@@ -547,6 +547,15 @@ impl ConnectionServiceImpl {
     }
 }
 
+/// Resolve the `claude` binary for the interactive (non-sandboxed) StartSession path.
+///
+/// Delegates to [`crate::config::resolve_claude_binary_path`] so the interactive and sandboxed
+/// spawn paths never diverge on which `claude` they pick (explicit config path honored; bare name
+/// auto-resolved to a real host install).
+pub fn resolve_start_session_claude_binary(config: &DaemonConfig) -> String {
+    crate::config::resolve_claude_binary_path(config)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn spawn_claude_cli_session_inner(
     config: &DaemonConfig,
@@ -725,17 +734,14 @@ async fn spawn_claude_cli_session_inner(
             );
     }
 
-    // Spawn the claude CLI process in a PTY inside the real worktree.
-    let binary_path = config
-        .claude_cli
-        .as_ref()
-        .map(|c| c.binary_path.as_str())
-        .unwrap_or("claude");
-
+    // Spawn the claude CLI process in a PTY inside the real worktree. Resolve `claude` through the
+    // shared host resolver — the same one the sandboxed path uses — so an explicit config path is
+    // honored and a bare name is resolved to a real host install instead of relying on the daemon's
+    // minimal systemd `PATH`.
     let manager = Arc::clone(claude_cli_manager);
     let session_id_owned = session_id.to_string();
     let model_owned = model.to_string();
-    let binary_owned = binary_path.to_string();
+    let binary_owned = resolve_start_session_claude_binary(config);
     let worktree_clone = worktree_path.clone();
 
     let initial_prompt_opt = {
@@ -789,6 +795,7 @@ async fn spawn_claude_cli_session_inner(
             permission_mode_opt.as_deref(),
             append_system_prompt_file.as_deref(),
             env_extra,
+            Some(os_user),
         )
         .await
         .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {}", e)))?;
@@ -6183,5 +6190,47 @@ mod list_agent_models_parse_tests {
     fn errors_on_malformed_probe_output() {
         // When / Then — garbage is a hard error, never an empty catalog
         assert!(parse_agent_models_json("not json at all").is_err());
+    }
+}
+
+#[cfg(test)]
+mod start_session_binary_resolution_tests {
+    use super::*;
+
+    fn a_config_with_claude_binary(binary_path: &str) -> crate::config::DaemonConfig {
+        let yaml = format!(
+            "users:\n  - github_user: u\n    os_user: u\nclaude_cli:\n  binary_path: {binary_path}\n"
+        );
+        serde_yaml::from_str(&yaml).expect("daemon config should parse")
+    }
+
+    /// The interactive (non-sandboxed) StartSession path must resolve `claude` through the same
+    /// host resolver as the sandboxed path, so an explicitly configured absolute path is honored
+    /// instead of being spawned by bare name against the daemon's minimal systemd `PATH`.
+    #[test]
+    fn start_session_honors_an_explicitly_configured_claude_binary_path() {
+        // Given a daemon config naming an explicit claude binary path
+        let config = a_config_with_claude_binary("/opt/custom/bin/claude");
+
+        // When resolving the binary for an interactive StartSession
+        let resolved = resolve_start_session_claude_binary(&config);
+
+        // Then the configured absolute path is used verbatim
+        assert_eq!(resolved, "/opt/custom/bin/claude");
+    }
+
+    /// The StartSession resolver is the *same* resolution the sandboxed path uses — the two spawn
+    /// paths must never diverge on which `claude` they pick.
+    #[test]
+    fn start_session_resolves_the_same_binary_as_the_sandbox_path() {
+        // Given a daemon config naming an explicit claude binary path
+        let config = a_config_with_claude_binary("/opt/custom/bin/claude");
+
+        // When resolving via the StartSession path and the shared sandbox resolver
+        let start_session = resolve_start_session_claude_binary(&config);
+        let sandbox = crate::config::resolve_claude_binary_path(&config);
+
+        // Then both paths agree
+        assert_eq!(start_session, sandbox);
     }
 }

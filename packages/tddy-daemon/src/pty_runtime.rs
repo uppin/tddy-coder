@@ -28,6 +28,10 @@ pub struct PtySpawnSpec {
     pub kind: String,
     /// Extra environment variables set on the spawned process (in addition to the inherited env).
     pub env: Vec<(String, String)>,
+    /// Target OS user to impersonate for this spawn. When `Some`, the child receives that user's
+    /// `HOME`/`PATH` (see [`pty_user_env_overrides`]). Callers with no user context (e.g. Bash
+    /// terminals) pass `None`, leaving the child under the daemon's own identity.
+    pub os_user: Option<String>,
 }
 
 /// Ready signal emitted once the PTY is open and the child has been spawned.
@@ -165,6 +169,96 @@ impl TaskBody for PtyTaskBody {
     }
 }
 
+/// Environment overrides applied to a PTY child impersonating a target OS user.
+///
+/// Sets `HOME` to the target user's home directory (so per-user config/credentials resolve there)
+/// and prepends the user's configured `PATH` extra ahead of the daemon's `PATH` (so a user-local
+/// install such as `~/.local/bin/claude` is found). Mirrors the env `spawner::spawn_as_user`
+/// applies to non-interactive spawns.
+pub fn pty_user_env_overrides(
+    home_dir: &std::path::Path,
+    path_extra: Option<&str>,
+) -> Vec<(String, String)> {
+    vec![
+        ("HOME".to_string(), home_dir.to_string_lossy().into_owned()),
+        (
+            "PATH".to_string(),
+            crate::spawner::merge_spawn_child_path(path_extra),
+        ),
+    ]
+}
+
+/// Whether spawning as the target user requires dropping privileges: true unless the target
+/// uid+gid already match the daemon's current identity (dev / single-user, where no setuid is
+/// needed).
+pub fn pty_requires_privilege_drop(
+    target_uid: u32,
+    target_gid: u32,
+    current_uid: u32,
+    current_gid: u32,
+) -> bool {
+    !(target_uid == current_uid && target_gid == current_gid)
+}
+
+/// Wrap `argv` so it execs behind `setpriv`, dropping to the target user's uid/gid with
+/// initialized supplementary groups. `setpriv` preserves the environment, so the HOME/PATH
+/// overrides applied to the command are kept.
+pub fn wrap_argv_for_privilege_drop(argv: &[String], uid: u32, gid: u32) -> Vec<String> {
+    let mut wrapped = vec![
+        "setpriv".to_string(),
+        "--reuid".to_string(),
+        uid.to_string(),
+        "--regid".to_string(),
+        gid.to_string(),
+        "--init-groups".to_string(),
+        "--".to_string(),
+    ];
+    wrapped.extend_from_slice(argv);
+    wrapped
+}
+
+/// The uid/gid/home of a target OS user, resolved from the passwd database.
+#[cfg(unix)]
+struct ResolvedPtyUser {
+    uid: u32,
+    gid: u32,
+    home_dir: String,
+}
+
+/// Resolve `os_user` to its uid/gid/home via `getpwnam_r`. Mirrors the passwd lookup in
+/// `spawner::spawn_as_user`.
+#[cfg(unix)]
+fn resolve_pty_os_user(os_user: &str) -> Result<ResolvedPtyUser, String> {
+    let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
+    let mut buf = vec![0u8; 16384];
+    let mut result = std::ptr::null_mut();
+    let name = std::ffi::CString::new(os_user).map_err(|e| format!("invalid username: {e}"))?;
+    let ret = unsafe {
+        libc::getpwnam_r(
+            name.as_ptr(),
+            passwd.as_mut_ptr(),
+            buf.as_mut_ptr() as *mut libc::c_char,
+            buf.len(),
+            &mut result,
+        )
+    };
+    if ret != 0 || result.is_null() {
+        return Err(format!("user '{os_user}' not found"));
+    }
+    let passwd = unsafe { &*result };
+    if passwd.pw_dir.is_null() {
+        return Err(format!("user '{os_user}' has no home directory"));
+    }
+    let home_dir = unsafe { std::ffi::CStr::from_ptr(passwd.pw_dir) }
+        .to_string_lossy()
+        .into_owned();
+    Ok(ResolvedPtyUser {
+        uid: passwd.pw_uid,
+        gid: passwd.pw_gid,
+        home_dir,
+    })
+}
+
 fn open_pty_and_pump(
     spec: PtySpawnSpec,
     mut stdin_rx: mpsc::UnboundedReceiver<Bytes>,
@@ -176,6 +270,52 @@ fn open_pty_and_pump(
         return Err("empty argv".into());
     }
 
+    // Resolve OS-user impersonation up front — before allocating a PTY — so an unresolvable user
+    // fails loudly without leaking a pty pair. On success this yields the child's HOME/PATH
+    // overrides plus the final argv (front-loaded with a `setpriv` privilege drop when the target
+    // differs from the daemon's own identity). With no `os_user`, the argv/env pass through as-is.
+    #[cfg(unix)]
+    let (final_argv, user_env): (Vec<String>, Vec<(String, String)>) = match spec.os_user.as_deref()
+    {
+        None => (spec.argv.clone(), Vec::new()),
+        Some(user) => {
+            let resolved = match resolve_pty_os_user(user) {
+                Ok(r) => r,
+                Err(e) => {
+                    let msg = format!("cannot resolve os_user '{user}': {e}");
+                    let _ = setup_tx.send(Err(msg.clone()));
+                    return Err(msg);
+                }
+            };
+            let home = std::path::PathBuf::from(&resolved.home_dir);
+            let path_extra = crate::tddy_user_config::spawn_path_extra_for_home(&home);
+            let env = pty_user_env_overrides(&home, path_extra.as_deref());
+            let current_uid = unsafe { libc::getuid() };
+            let current_gid = unsafe { libc::getgid() };
+            let argv = if pty_requires_privilege_drop(
+                resolved.uid,
+                resolved.gid,
+                current_uid,
+                current_gid,
+            ) {
+                log::info!(
+                    target: "tddy_daemon::pty_runtime",
+                    "PTY child for os_user '{user}': dropping to uid={} gid={} via setpriv",
+                    resolved.uid,
+                    resolved.gid
+                );
+                wrap_argv_for_privilege_drop(&spec.argv, resolved.uid, resolved.gid)
+            } else {
+                spec.argv.clone()
+            };
+            (argv, env)
+        }
+    };
+
+    #[cfg(not(unix))]
+    let (final_argv, user_env): (Vec<String>, Vec<(String, String)>) =
+        (spec.argv.clone(), Vec::new());
+
     let pty_system = native_pty_system();
     let initial_size = PtySize {
         rows: DEFAULT_TERM_ROWS,
@@ -183,9 +323,14 @@ fn open_pty_and_pump(
         pixel_width: 0,
         pixel_height: 0,
     };
-    let pair = pty_system
-        .openpty(initial_size)
-        .map_err(|e| format!("openpty failed: {e}"))?;
+    let pair = match pty_system.openpty(initial_size) {
+        Ok(pair) => pair,
+        Err(e) => {
+            let msg = format!("openpty failed: {e}");
+            let _ = setup_tx.send(Err(msg.clone()));
+            return Err(msg);
+        }
+    };
 
     let master = Arc::new(Mutex::new(pair.master));
     let current_size = Arc::new(Mutex::new(initial_size));
@@ -221,26 +366,42 @@ fn open_pty_and_pump(
         }
     });
 
-    let mut cmd = CommandBuilder::new(&spec.argv[0]);
-    for arg in &spec.argv[1..] {
+    let mut cmd = CommandBuilder::new(&final_argv[0]);
+    for arg in &final_argv[1..] {
         cmd.arg(arg);
     }
     cmd.cwd(&spec.worktree_path);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+
+    // Impersonation HOME/PATH (empty when no `os_user`), applied before `spec.env` so a managed
+    // session's explicit overrides still win. `setpriv` preserves these across the privilege drop.
+    for (key, value) in &user_env {
+        cmd.env(key, value);
+    }
+
     for (key, value) in &spec.env {
         cmd.env(key, value);
     }
 
-    let child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| format!("spawn failed: {e}"))?;
+    let child = match pair.slave.spawn_command(cmd) {
+        Ok(child) => child,
+        Err(e) => {
+            let msg = format!("spawn failed: {e}");
+            let _ = setup_tx.send(Err(msg.clone()));
+            return Err(msg);
+        }
+    };
     drop(pair.slave);
 
-    let pid = child
-        .process_id()
-        .ok_or_else(|| "spawned child has no pid".to_string())?;
+    let pid = match child.process_id() {
+        Some(pid) => pid,
+        None => {
+            let msg = "spawned child has no pid".to_string();
+            let _ = setup_tx.send(Err(msg.clone()));
+            return Err(msg);
+        }
+    };
 
     let _ = setup_tx.send(Ok(SetupResult {
         pid,
@@ -300,4 +461,124 @@ fn open_pty_and_pump(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    /// A PTY child impersonating a target OS user must receive that user's `HOME`, so tools read
+    /// their per-user config and credentials (e.g. claude's `~/.claude`) from the impersonated
+    /// home rather than the daemon's.
+    #[test]
+    fn user_env_overrides_set_home_to_the_target_user_home() {
+        // Given the target user's home directory
+        let home = Path::new("/home/tddy");
+
+        // When building the child environment overrides
+        let env = pty_user_env_overrides(home, None);
+
+        // Then HOME points at the target user's home
+        let home_value = env
+            .iter()
+            .find(|(k, _)| k == "HOME")
+            .map(|(_, v)| v.as_str());
+        assert_eq!(home_value, Some("/home/tddy"));
+    }
+
+    /// The child `PATH` is prefixed with the target user's configured extra path so a user-local
+    /// install (e.g. `~/.local/bin/claude`) resolves ahead of the daemon's minimal systemd `PATH`.
+    #[test]
+    fn user_env_overrides_prepend_the_user_path_extra() {
+        // Given the target user's home and their extra PATH entry
+        let home = Path::new("/home/tddy");
+
+        // When building the child environment overrides
+        let env = pty_user_env_overrides(home, Some("/home/tddy/.local/bin"));
+
+        // Then the user's bin dir is prepended to PATH
+        let path_value = env
+            .iter()
+            .find(|(k, _)| k == "PATH")
+            .map(|(_, v)| v.as_str())
+            .expect("PATH override must be present");
+        assert!(
+            path_value.starts_with("/home/tddy/.local/bin:"),
+            "user path extra must be prepended, was: {path_value}"
+        );
+    }
+
+    /// No privilege drop is needed when the target user is already the daemon's own identity
+    /// (dev / single-user), so the child spawns without a setuid.
+    #[test]
+    fn no_privilege_drop_for_the_daemons_own_user() {
+        // Given the daemon runs as uid/gid 1000 and the target is the same user
+        // When deciding whether to drop privileges
+        // Then no drop is required
+        assert!(!pty_requires_privilege_drop(1000, 1000, 1000, 1000));
+    }
+
+    /// A privilege drop is required when the target user differs from the daemon's identity
+    /// (e.g. root daemon spawning as a regular user).
+    #[test]
+    fn privilege_drop_required_for_a_different_user() {
+        // Given the daemon runs as root and the target is uid/gid 1000
+        // When deciding whether to drop privileges
+        // Then a drop is required
+        assert!(pty_requires_privilege_drop(1000, 1000, 0, 0));
+    }
+
+    /// When impersonation requires dropping privileges, the child is launched behind a `setpriv`
+    /// front so it execs under the target user's uid/gid with initialized supplementary groups,
+    /// preserving the already-set `HOME`/`PATH` env.
+    #[test]
+    fn wraps_the_command_behind_a_setpriv_privilege_drop_launcher() {
+        // Given the claude argv and the target user's uid/gid
+        let argv = vec![
+            "claude".to_string(),
+            "--model".to_string(),
+            "opus".to_string(),
+        ];
+
+        // When wrapping it for a privilege drop to uid/gid 1000
+        let wrapped = wrap_argv_for_privilege_drop(&argv, 1000, 1000);
+
+        // Then setpriv leads, drops to the target ids with initialized groups, then execs the argv
+        assert_eq!(
+            wrapped,
+            vec![
+                "setpriv",
+                "--reuid",
+                "1000",
+                "--regid",
+                "1000",
+                "--init-groups",
+                "--",
+                "claude",
+                "--model",
+                "opus",
+            ]
+        );
+    }
+
+    /// The spawn spec carries the target OS user end-to-end, so the interactive claude session
+    /// runs under the impersonated user rather than the daemon's identity.
+    #[test]
+    fn spawn_spec_carries_the_target_os_user() {
+        // Given a spec describing an impersonated claude spawn
+        let spec = PtySpawnSpec {
+            argv: vec!["claude".to_string()],
+            worktree_path: PathBuf::from("/tmp/worktree"),
+            session_id: "session-1".to_string(),
+            terminal_id: "main".to_string(),
+            kind: "claude-cli".to_string(),
+            env: Vec::new(),
+            os_user: Some("tddy".to_string()),
+        };
+
+        // When reading back the target user
+        // Then it is preserved on the spec
+        assert_eq!(spec.os_user.as_deref(), Some("tddy"));
+    }
 }

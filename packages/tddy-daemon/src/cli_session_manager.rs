@@ -295,6 +295,7 @@ impl CliSessionManager {
             model,
             argv,
             Vec::new(),
+            None,
         )
         .await
     }
@@ -342,6 +343,7 @@ impl CliSessionManager {
             permission_mode,
             None,
             Vec::new(),
+            None,
         )
         .await
     }
@@ -365,6 +367,7 @@ impl CliSessionManager {
         permission_mode: Option<&str>,
         append_system_prompt_file: Option<&Path>,
         env: Vec<(String, String)>,
+        os_user: Option<&str>,
     ) -> anyhow::Result<Arc<PtyHandle>> {
         let mut argv = Self::build_claude_argv(
             binary_path,
@@ -397,6 +400,7 @@ impl CliSessionManager {
             model,
             argv,
             env,
+            os_user,
         )
         .await
     }
@@ -415,6 +419,7 @@ impl CliSessionManager {
         model: &str,
         argv: Vec<String>,
         env: Vec<(String, String)>,
+        os_user: Option<&str>,
     ) -> anyhow::Result<Arc<PtyHandle>> {
         let (ready_tx, ready_rx) = oneshot::channel();
         let spec = PtySpawnSpec {
@@ -424,6 +429,7 @@ impl CliSessionManager {
             terminal_id: terminal_id.to_string(),
             kind: kind.to_string(),
             env,
+            os_user: os_user.map(str::to_string),
         };
 
         let task = PtyRuntime::spawn(&self.task_registry, &self.pty_registry, spec, ready_tx).await;
@@ -627,6 +633,7 @@ impl CliSessionManager {
             None,
             append_system_prompt_file,
             env,
+            None,
         )
         .await
     }
@@ -657,6 +664,7 @@ impl CliSessionManager {
             "",
             argv,
             Vec::new(),
+            None,
         )
         .await
     }
@@ -1219,5 +1227,100 @@ mod tests {
     async fn kill_all_is_safe_on_empty_manager() {
         let manager = ClaudeCliSessionManager::new();
         manager.kill_all().await; // must not panic
+    }
+
+    /// When the tool binary cannot be spawned, the caller must see the real reason (e.g. the
+    /// `spawn failed: …` from portable_pty), not a generic PTY-plumbing message. Regression for
+    /// the masked "PTY runtime did not signal ready" error that hid a missing-binary failure.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn surfaces_the_underlying_reason_when_the_binary_cannot_be_spawned() {
+        // Given
+        let manager = ClaudeCliSessionManager::new();
+        let worktree = tempfile::tempdir().expect("temp dir");
+
+        // When
+        let result = manager
+            .start_terminal(
+                "spawn-failure-session",
+                worktree.path().to_path_buf(),
+                "/nonexistent/definitely-not-a-real-binary",
+            )
+            .await;
+
+        // Then
+        let message = result
+            .err()
+            .map(|e| e.to_string())
+            .expect("spawning a missing binary must fail");
+        assert!(
+            message.contains("spawn failed"),
+            "error should surface the real spawn failure, was: {message}"
+        );
+    }
+
+    /// A session pinned to an OS user that cannot be resolved must fail loudly, naming the user —
+    /// never silently spawn under the daemon's own identity (which would defeat multi-user
+    /// isolation on a root daemon).
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn fails_to_start_when_the_os_user_cannot_be_resolved() {
+        // Given a manager and a session pinned to a user that does not exist on this host
+        let manager = ClaudeCliSessionManager::new();
+        let worktree = tempfile::tempdir().expect("temp dir");
+
+        // When starting the session as that unresolvable user
+        let result = manager
+            .start_with_options(
+                "unknown-os-user-session",
+                worktree.path().to_path_buf(),
+                "some-model",
+                "/bin/sh",
+                None,
+                None,
+                None,
+                Vec::new(),
+                Some("nyxzzz-nonexistent-user"),
+            )
+            .await;
+
+        // Then the start fails and the error names the unresolvable user
+        let message = result
+            .err()
+            .map(|e| e.to_string())
+            .expect("start must fail for an unresolvable os_user");
+        assert!(
+            message.contains("nyxzzz-nonexistent-user"),
+            "error should name the unresolvable os_user, was: {message}"
+        );
+    }
+
+    /// The generic "did not signal ready" plumbing message must never stand in for a concrete
+    /// spawn failure — otherwise operators cannot tell a missing binary from a hung runtime.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn does_not_mask_a_spawn_failure_as_a_ready_timeout() {
+        // Given
+        let manager = ClaudeCliSessionManager::new();
+        let worktree = tempfile::tempdir().expect("temp dir");
+
+        // When
+        let result = manager
+            .start_terminal(
+                "spawn-mask-session",
+                worktree.path().to_path_buf(),
+                "/nonexistent/definitely-not-a-real-binary",
+            )
+            .await;
+
+        // Then
+        let message = result
+            .err()
+            .map(|e| e.to_string())
+            .expect("spawning a missing binary must fail");
+        assert!(
+            !message.contains("did not signal ready"),
+            "a spawn failure must not be reported as a ready-signal timeout, was: {message}"
+        );
     }
 }
