@@ -224,6 +224,22 @@ pub struct ResourceLimits {
     pub pids_max: Option<u64>,
 }
 
+/// cgroup v2 delegation parameters for the Linux cgroups backend. All fields are optional so the
+/// backend can derive sensible defaults at runtime (deriving the delegated base from
+/// `/proc/self/cgroup`, controllers `memory cpu pids`, supervisor leaf `supervisor`). The macOS and
+/// QEMU backends ignore this. Sourced from daemon config so nothing is hardcoded in the crate.
+#[derive(Debug, Clone, Default)]
+pub struct CgroupConfig {
+    /// Explicit delegated cgroup base directory. When set, skips `/proc/self/cgroup` derivation.
+    pub base_override: Option<PathBuf>,
+    /// cgroup v2 unified mount root. Defaults to `/sys/fs/cgroup` when unset.
+    pub mount_root: Option<PathBuf>,
+    /// Controllers to enable in the base's `cgroup.subtree_control`. Empty means `[memory, cpu, pids]`.
+    pub controllers: Vec<String>,
+    /// Leaf cgroup the daemon relocates its own process into. Defaults to `supervisor` when unset.
+    pub supervisor_leaf: Option<String>,
+}
+
 /// The fully-explicit jail description both backends consume. Wraps the legacy [`SandboxSpec`]
 /// (composition) so spec-only code keeps working; the typed allow-lists are additive.
 #[derive(Debug, Clone)]
@@ -239,6 +255,8 @@ pub struct SandboxPlan {
     pub limits: ResourceLimits,
     /// Optional stdin bytes fed to the confined child after spawn.
     pub stdin: Option<Vec<u8>>,
+    /// cgroup v2 delegation parameters (Linux backend only; ignored elsewhere).
+    pub cgroup: CgroupConfig,
 }
 
 /// Assembles a [`SandboxPlan`] from explicit, caller-supplied grants.
@@ -507,6 +525,7 @@ impl SandboxBuilder {
             network,
             limits,
             stdin,
+            cgroup: CgroupConfig::default(),
         })
     }
 }

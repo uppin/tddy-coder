@@ -65,11 +65,25 @@ generic-action-execution flow:
 with the caller mapped to root-in-ns, then `NEWNS | NEWNET`, a private root mount, and `lo` brought up
 (no other interfaces → no direct egress, so outbound must use the in-jail `HTTPS_PROXY`). The process
 is placed in a cgroup v2 scope with memory/CPU/pids limits. It **fails fast** with
-`SandboxError::Unsupported` when unprivileged user namespaces are unavailable (e.g. Ubuntu AppArmor
-`apparmor_restrict_unprivileged_userns=1`) or the cgroup v2 subtree isn't writable — never a silent
-unconfined fallback. The production daemon runs as a root systemd service, where the userns
-restriction does not apply. *(Follow-up: `pivot_root` read-only-root filesystem write-confinement; the
-network-namespace egress guarantee and cgroup limits are in place.)*
+`SandboxError::Unsupported` when unprivileged user namespaces are unavailable or the cgroup v2 subtree
+isn't writable — never a silent unconfined fallback.
+
+The production daemon runs as an **unprivileged systemd service** (`User=tddy`) with two grants that
+`./install` provisions:
+
+- **`Delegate=yes`** — hands the service a writable cgroup v2 subtree. The backend derives the
+  delegated base from `/proc/self/cgroup` at runtime (config-overridable via `sandbox_cgroup:`; never
+  hardcoded), relocates the daemon's own process into a `supervisor` leaf to satisfy cgroup v2's
+  no-internal-processes rule, enables `memory cpu pids` in the base's `subtree_control`, then creates
+  per-session `tddy-<name>-<seq>.scope` children.
+- **An AppArmor profile** granting the daemon binary unprivileged user namespaces. On Ubuntu 24.04
+  `apparmor_restrict_unprivileged_userns=1` gates the userns *mapping* writes (not `unshare` itself),
+  so the precondition check is a **functional probe** — it forks a child that performs the real
+  `unshare` + uid/gid mapping and reports success — rather than a sysctl read, which cannot see a
+  per-binary grant. (Running as root also works and short-circuits both requirements.)
+
+*(Follow-up: `pivot_root` read-only-root filesystem write-confinement; the network-namespace egress
+guarantee and cgroup limits are in place.)*
 
 ## SandboxSpec
 

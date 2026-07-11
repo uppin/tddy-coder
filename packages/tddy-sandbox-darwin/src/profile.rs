@@ -244,6 +244,7 @@ mod tests {
             network,
             limits: ResourceLimits::default(),
             stdin: None,
+            cgroup: Default::default(),
         }
     }
 

@@ -59,6 +59,36 @@ pub struct GitConfig {
     pub ssh_command: Option<String>,
 }
 
+/// Linux rootless cgroups sandbox delegation (`sandbox_cgroup:` YAML section). All fields optional
+/// so the backend derives defaults at runtime (delegated base from `/proc/self/cgroup`, controllers
+/// `memory cpu pids`, supervisor leaf `supervisor`) — nothing is hardcoded in the crate. Consulted
+/// only by the Linux cgroups backend; ignored on macOS / QEMU.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxCgroupConfig {
+    /// Explicit delegated cgroup base directory; skips `/proc/self/cgroup` derivation when set.
+    #[serde(default)]
+    pub base_path: Option<PathBuf>,
+    /// cgroup v2 unified mount root (default `/sys/fs/cgroup`).
+    #[serde(default)]
+    pub mount_root: Option<PathBuf>,
+    /// Controllers enabled in the base's `cgroup.subtree_control`; empty means `[memory, cpu, pids]`.
+    #[serde(default)]
+    pub controllers: Vec<String>,
+    /// Leaf cgroup the daemon relocates its own process into (default `supervisor`).
+    #[serde(default)]
+    pub supervisor_leaf: Option<String>,
+    /// Default `memory.max` (bytes) applied when a plan carries no explicit limits.
+    #[serde(default)]
+    pub memory_max: Option<u64>,
+    /// Default `cpu.max` applied when a plan carries no explicit limits.
+    #[serde(default)]
+    pub cpu_max: Option<String>,
+    /// Default `pids.max` applied when a plan carries no explicit limits.
+    #[serde(default)]
+    pub pids_max: Option<u64>,
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DaemonConfig {
@@ -136,6 +166,9 @@ pub struct DaemonConfig {
     /// Git behavior for daemon-side remote operations (see `GitConfig`).
     #[serde(default)]
     pub git: Option<GitConfig>,
+    /// Linux rootless cgroups sandbox delegation (see `SandboxCgroupConfig`). None = runtime defaults.
+    #[serde(default)]
+    pub sandbox_cgroup: Option<SandboxCgroupConfig>,
 
     /// Browser DEBUG mask exposed to tddy-web via `GET /api/config` (`debug` field). A `debug`-package
     /// namespace mask (e.g. `tddy:term:*`, or `tddy:term:write,tddy:term:resize`) that enables scoped
@@ -171,7 +204,26 @@ impl Default for DaemonConfig {
             tddy_data_dir: None,
             screen_sharing: None,
             git: None,
+            sandbox_cgroup: None,
             debug: None,
+        }
+    }
+}
+
+impl DaemonConfig {
+    /// Map the optional `sandbox_cgroup:` section onto the cgroups backend's [`CgroupConfig`]. An
+    /// absent section yields defaults (empty `CgroupConfig`), so the backend derives everything at
+    /// runtime. Only the delegation fields map here; the default-limit overrides feed the plan's
+    /// `ResourceLimits` fallback separately.
+    pub fn sandbox_cgroup_config(&self) -> tddy_sandbox::CgroupConfig {
+        match &self.sandbox_cgroup {
+            Some(sc) => tddy_sandbox::CgroupConfig {
+                base_override: sc.base_path.clone(),
+                mount_root: sc.mount_root.clone(),
+                controllers: sc.controllers.clone(),
+                supervisor_leaf: sc.supervisor_leaf.clone(),
+            },
+            None => tddy_sandbox::CgroupConfig::default(),
         }
     }
 }
@@ -1281,5 +1333,34 @@ users:
         let c: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
         let git = c.git.as_ref().expect("git section must be present");
         assert!(git.ssh_command.is_none());
+    }
+
+    #[test]
+    fn maps_daemon_sandbox_cgroup_config_onto_the_plan_field() {
+        // Given — a daemon config with an explicit sandbox_cgroup section
+        let yaml = "
+sandbox_cgroup:
+  base_path: /custom/delegated/base
+  controllers: [memory, pids]
+  supervisor_leaf: worker
+users:
+  - github_user: u
+    os_user: u
+";
+        let config: DaemonConfig = serde_yaml::from_str(yaml).expect("parse");
+
+        // When
+        let cgroup = config.sandbox_cgroup_config();
+
+        // Then
+        assert_eq!(
+            cgroup.base_override,
+            Some(std::path::PathBuf::from("/custom/delegated/base"))
+        );
+        assert_eq!(
+            cgroup.controllers,
+            vec!["memory".to_string(), "pids".to_string()]
+        );
+        assert_eq!(cgroup.supervisor_leaf, Some("worker".to_string()));
     }
 }

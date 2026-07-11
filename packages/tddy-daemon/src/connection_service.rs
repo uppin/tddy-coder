@@ -1328,6 +1328,7 @@ impl ConnectionServiceImpl {
                 // Persistent home is seeded separately (non-clobbering); disable the recipe's
                 // per-session credential copy so it can't overwrite a refreshed jail token.
                 host_home: None,
+                cgroup: self.config.sandbox_cgroup_config(),
             },
         )
         .map_err(|e| {
@@ -1687,6 +1688,7 @@ impl ConnectionServiceImpl {
                 ipc_socket: Some(tool_ipc_socket.clone()),
                 mounts: vec![tddy_sandbox::MountSpec::read_write(scratch_home.clone())],
                 host_home: None,
+                cgroup: self.config.sandbox_cgroup_config(),
             },
         )
         .map_err(|e| {
@@ -2122,6 +2124,7 @@ impl ConnectionServiceImpl {
                 // Persistent home is seeded separately (non-clobbering); disable the recipe's
                 // per-session credential copy so it can't overwrite a refreshed jail token.
                 host_home: None,
+                cgroup: self.config.sandbox_cgroup_config(),
             },
         )
         .map_err(|e| {

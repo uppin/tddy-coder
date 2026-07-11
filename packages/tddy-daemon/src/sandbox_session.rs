@@ -562,6 +562,10 @@ pub struct SandboxRunnerSpawn {
     /// session. `None` disables that per-session copy — required when a **persistent** claude home
     /// is mounted and seeded separately (a re-copy would clobber the jail's refreshed OAuth token).
     pub host_home: Option<PathBuf>,
+    /// cgroup v2 delegation parameters from daemon config (Linux cgroups backend only; the macOS and
+    /// QEMU backends ignore it). Defaults to an empty [`tddy_sandbox::CgroupConfig`], letting the
+    /// backend derive the delegated base at runtime.
+    pub cgroup: tddy_sandbox::CgroupConfig,
 }
 
 /// Assemble the explicit [`SandboxPlan`] for a runner spawn via `tddy-sandbox-recipes`.
@@ -569,7 +573,7 @@ pub struct SandboxRunnerSpawn {
 pub fn build_sandbox_plan(params: SandboxRunnerSpawn) -> Result<SandboxPlan, SandboxError> {
     use tddy_sandbox_recipes::{build_runner_plan, RunnerPlanRequest};
 
-    let plan = build_runner_plan(RunnerPlanRequest {
+    let mut plan = build_runner_plan(RunnerPlanRequest {
         project_root: params.project_root,
         scratch_dir: params.scratch_dir,
         egress_dir: params.egress_dir,
@@ -582,6 +586,7 @@ pub fn build_sandbox_plan(params: SandboxRunnerSpawn) -> Result<SandboxPlan, San
         recipe: None,
         host_home: params.host_home,
     })?;
+    plan.cgroup = params.cgroup;
     #[cfg(target_os = "macos")]
     merge_allow_read_paths_into_plan(&mut plan, &params.runner_argv);
     Ok(plan)

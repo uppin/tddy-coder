@@ -108,6 +108,13 @@ telegram:
 git:
   ssh_command: "/usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=10"
 
+# Linux rootless cgroups sandbox delegation (see daemon.yaml.production for the full field list).
+# Dev usually runs the daemon as the developer's own user, so runtime-derived defaults suffice —
+# leave commented. Override only to pin a base or tweak controllers/limits:
+# sandbox_cgroup:
+#   controllers: [memory, cpu, pids]
+#   supervisor_leaf: supervisor
+
 allowed_agents:
   - id: claude
     label: "Claude (opus)"

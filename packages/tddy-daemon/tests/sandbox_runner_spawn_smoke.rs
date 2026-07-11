@@ -112,6 +112,7 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
         ipc_socket: None,
         mounts: vec![],
         host_home: None,
+        cgroup: Default::default(),
     })
     .expect("spawn sandbox-runner");
 
@@ -209,6 +210,7 @@ async fn generic_pty_runner_writes_ready_marker_inside_seatbelt() {
         ipc_socket: None,
         mounts: vec![],
         host_home: None,
+        cgroup: Default::default(),
     })
     .expect("spawn generic pty sandbox-runner");
 
@@ -306,6 +308,7 @@ async fn generic_pty_host_relay_streams_command_output() {
         ipc_socket: None,
         mounts: vec![],
         host_home: None,
+        cgroup: Default::default(),
     })
     .expect("spawn generic pty sandbox-runner");
 

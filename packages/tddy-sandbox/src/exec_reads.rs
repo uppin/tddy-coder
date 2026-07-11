@@ -182,6 +182,9 @@ pub fn detect_toolchain_reads() -> Vec<ReadSpec> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `PathBuf` is only imported at module scope on macOS (above), but `path_traversal_reads` and
+    // its test are platform-agnostic — import it unconditionally here so the test builds on Linux.
+    use std::path::PathBuf;
 
     /// A bare binary name has an *empty* parent path — `Path::parent` returns `Some("")`, not
     /// `None`. That empty subpath must never become a read grant: macOS `sandbox-exec` rejects
@@ -204,7 +207,9 @@ mod tests {
             "/Users must be readable for traversal: {reads:?}"
         );
         assert!(
-            reads.iter().any(|r| r.host == PathBuf::from("/Users/alice")),
+            reads
+                .iter()
+                .any(|r| r.host == PathBuf::from("/Users/alice")),
             "user home ancestor must be readable: {reads:?}"
         );
     }
