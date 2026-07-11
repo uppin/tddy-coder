@@ -18,7 +18,8 @@ use regex::Regex;
 
 use crate::discovery::extract_final_answer;
 use crate::openai::{
-    discovery_tool_definitions, ChatCompletionRequest, ChatMessage, OpenAiClient, ToolCall,
+    discovery_tool_definitions, ChatCompletionRequest, ChatMessage, OpenAiClient, TokenUsage,
+    ToolCall,
 };
 
 /// A single block of subagent response content — currently text-only, mirroring ACP's
@@ -53,6 +54,8 @@ pub enum StopReason {
 pub struct PromptOutcome {
     pub stop_reason: StopReason,
     pub content: Vec<ContentBlock>,
+    /// Tokens spent by this `prompt()` call — the sum across every model turn it ran.
+    pub usage: TokenUsage,
 }
 
 /// Error from a subagent session or the codebase-access layer it uses internally.
@@ -83,6 +86,12 @@ impl From<&str> for SubagentError {
 #[async_trait]
 pub trait SubagentSession: Send {
     async fn prompt(&mut self, text: &str) -> Result<PromptOutcome, SubagentError>;
+
+    /// The model this conversation talks to (e.g. an Ollama tag or a hosted model id).
+    fn model(&self) -> &str;
+
+    /// Running token total across every `prompt()` call made on this session.
+    fn cumulative_usage(&self) -> TokenUsage;
 }
 
 /// Boxed async dispatch fn injected by the caller (`tddy-tools`) for managed codebase access.
@@ -426,7 +435,7 @@ async fn send_turn_and_check_final_answer(
     messages: &mut Vec<ChatMessage>,
     tools: Vec<crate::openai::ToolDefinition>,
     error_context: &str,
-) -> Result<TurnStep, SubagentError> {
+) -> Result<(TurnStep, TokenUsage), SubagentError> {
     let message_count = messages.len();
     let tool_count = tools.len();
     log::info!(
@@ -450,6 +459,7 @@ async fn send_turn_and_check_final_answer(
         SubagentError(format!("{error_context}: {e}"))
     })?;
     let elapsed = started.elapsed();
+    let turn_usage = response.usage.unwrap_or_default();
     let choice = response.choices.into_iter().next().ok_or_else(|| {
         log::warn!(
             target: "tddy_discovery::subagent",
@@ -474,12 +484,16 @@ async fn send_turn_and_check_final_answer(
     {
         let answer = answer.to_string();
         messages.push(ChatMessage::assistant(message.content.clone(), None));
-        return Ok(TurnStep::FinalAnswer(PromptOutcome {
-            stop_reason: StopReason::EndTurn,
-            content: vec![ContentBlock::text(answer)],
-        }));
+        return Ok((
+            TurnStep::FinalAnswer(PromptOutcome {
+                stop_reason: StopReason::EndTurn,
+                content: vec![ContentBlock::text(answer)],
+                usage: turn_usage,
+            }),
+            turn_usage,
+        ));
     }
-    Ok(TurnStep::Continue(message))
+    Ok((TurnStep::Continue(message), turn_usage))
 }
 
 /// Result of [`send_turn_and_check_final_answer`] — either the loop is done, or the caller must
@@ -497,6 +511,7 @@ pub struct FastContextSession {
     max_turns: u32,
     access: CodebaseAccess,
     messages: Vec<ChatMessage>,
+    cumulative: TokenUsage,
 }
 
 impl FastContextSession {
@@ -512,6 +527,7 @@ impl FastContextSession {
             max_turns,
             access,
             messages: Vec::new(),
+            cumulative: TokenUsage::default(),
         }
     }
 }
@@ -520,17 +536,17 @@ impl FastContextSession {
     /// One model round-trip: sends the current history, appends the response, and dispatches any
     /// tool calls. Returns `Some(outcome)` once the model yields a `<final_answer>`, or `None` to
     /// keep looping.
-    async fn run_one_turn(&mut self) -> Result<Option<PromptOutcome>, SubagentError> {
-        let message = match send_turn_and_check_final_answer(
+    async fn run_one_turn(&mut self) -> Result<(Option<PromptOutcome>, TokenUsage), SubagentError> {
+        let (step, turn_usage) = send_turn_and_check_final_answer(
             &self.client,
             &self.model,
             &mut self.messages,
             discovery_tool_definitions(),
             "FastContextSession",
         )
-        .await?
-        {
-            TurnStep::FinalAnswer(outcome) => return Ok(Some(outcome)),
+        .await?;
+        let message = match step {
+            TurnStep::FinalAnswer(outcome) => return Ok((Some(outcome), turn_usage)),
             TurnStep::Continue(message) => message,
         };
 
@@ -556,7 +572,7 @@ impl FastContextSession {
                     .push(ChatMessage::assistant(message.content.clone(), None));
             }
         }
-        Ok(None)
+        Ok((None, turn_usage))
     }
 }
 
@@ -565,13 +581,30 @@ impl SubagentSession for FastContextSession {
     async fn prompt(&mut self, text: &str) -> Result<PromptOutcome, SubagentError> {
         self.messages.push(ChatMessage::user(text.to_string()));
 
+        let mut call_usage = TokenUsage::default();
         for _turn in 0..self.max_turns {
-            if let Some(outcome) = self.run_one_turn().await? {
+            let (maybe_outcome, turn_usage) = self.run_one_turn().await?;
+            call_usage = call_usage + turn_usage;
+            if let Some(mut outcome) = maybe_outcome {
+                outcome.usage = call_usage;
+                self.cumulative = self.cumulative + call_usage;
                 return Ok(outcome);
             }
         }
 
-        self.synthesize_findings().await
+        let (mut outcome, turn_usage) = self.synthesize_findings().await?;
+        call_usage = call_usage + turn_usage;
+        outcome.usage = call_usage;
+        self.cumulative = self.cumulative + call_usage;
+        Ok(outcome)
+    }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn cumulative_usage(&self) -> TokenUsage {
+        self.cumulative
     }
 }
 
@@ -580,7 +613,7 @@ impl FastContextSession {
     /// gathered so far and return empty content, spend one final turn — with no tools, so the model
     /// cannot keep searching — asking it to summarize its findings. Always yields
     /// `StopReason::MaxTurnRequests`, but with the synthesized prose as content.
-    async fn synthesize_findings(&mut self) -> Result<PromptOutcome, SubagentError> {
+    async fn synthesize_findings(&mut self) -> Result<(PromptOutcome, TokenUsage), SubagentError> {
         self.messages.push(ChatMessage::user(
             "You have reached your search budget and may not call any more tools. \
              Summarize your findings now from what you have already read, citing the specific \
@@ -588,20 +621,24 @@ impl FastContextSession {
                 .to_string(),
         ));
 
-        let message = match send_turn_and_check_final_answer(
+        let (step, turn_usage) = send_turn_and_check_final_answer(
             &self.client,
             &self.model,
             &mut self.messages,
             Vec::new(),
             "FastContextSession synthesis",
         )
-        .await?
-        {
+        .await?;
+        let message = match step {
             TurnStep::FinalAnswer(outcome) => {
-                return Ok(PromptOutcome {
-                    stop_reason: StopReason::MaxTurnRequests,
-                    content: outcome.content,
-                })
+                return Ok((
+                    PromptOutcome {
+                        stop_reason: StopReason::MaxTurnRequests,
+                        content: outcome.content,
+                        usage: turn_usage,
+                    },
+                    turn_usage,
+                ))
             }
             TurnStep::Continue(message) => message,
         };
@@ -609,10 +646,14 @@ impl FastContextSession {
         let content = message.content.clone().unwrap_or_default();
         self.messages
             .push(ChatMessage::assistant(message.content.clone(), None));
-        Ok(PromptOutcome {
-            stop_reason: StopReason::MaxTurnRequests,
-            content: vec![ContentBlock::text(content)],
-        })
+        Ok((
+            PromptOutcome {
+                stop_reason: StopReason::MaxTurnRequests,
+                content: vec![ContentBlock::text(content)],
+                usage: turn_usage,
+            },
+            turn_usage,
+        ))
     }
 }
 
@@ -638,6 +679,7 @@ pub struct SpecializedSubagentSession {
     access: CodebaseAccess,
     messages: Vec<ChatMessage>,
     tools: Vec<crate::agent_def::SubagentTool>,
+    cumulative: TokenUsage,
 }
 
 impl SpecializedSubagentSession {
@@ -660,6 +702,7 @@ impl SpecializedSubagentSession {
             access,
             messages,
             tools,
+            cumulative: TokenUsage::default(),
         }
     }
 
@@ -687,18 +730,18 @@ impl SpecializedSubagentSession {
         dispatch_tool_call(&self.access, tool_call).await
     }
 
-    async fn run_one_turn(&mut self) -> Result<Option<PromptOutcome>, SubagentError> {
+    async fn run_one_turn(&mut self) -> Result<(Option<PromptOutcome>, TokenUsage), SubagentError> {
         let tools = self.tool_definitions();
-        let message = match send_turn_and_check_final_answer(
+        let (step, turn_usage) = send_turn_and_check_final_answer(
             &self.client,
             &self.model,
             &mut self.messages,
             tools,
             "SpecializedSubagentSession",
         )
-        .await?
-        {
-            TurnStep::FinalAnswer(outcome) => return Ok(Some(outcome)),
+        .await?;
+        let message = match step {
+            TurnStep::FinalAnswer(outcome) => return Ok((Some(outcome), turn_usage)),
             TurnStep::Continue(message) => message,
         };
 
@@ -716,7 +759,7 @@ impl SpecializedSubagentSession {
                         tool_call.function.name.clone(),
                     ));
                 }
-                Ok(None)
+                Ok((None, turn_usage))
             }
             // No tool call and no <final_answer> — plain prose. Unlike FastContextSession (which
             // keeps looping toward max_turns on such a turn, matching the citation convention it
@@ -726,10 +769,14 @@ impl SpecializedSubagentSession {
                 let content = message.content.clone().unwrap_or_default();
                 self.messages
                     .push(ChatMessage::assistant(message.content.clone(), None));
-                Ok(Some(PromptOutcome {
-                    stop_reason: StopReason::EndTurn,
-                    content: vec![ContentBlock::text(content)],
-                }))
+                Ok((
+                    Some(PromptOutcome {
+                        stop_reason: StopReason::EndTurn,
+                        content: vec![ContentBlock::text(content)],
+                        usage: turn_usage,
+                    }),
+                    turn_usage,
+                ))
             }
         }
     }
@@ -740,16 +787,31 @@ impl SubagentSession for SpecializedSubagentSession {
     async fn prompt(&mut self, text: &str) -> Result<PromptOutcome, SubagentError> {
         self.messages.push(ChatMessage::user(text.to_string()));
 
+        let mut call_usage = TokenUsage::default();
         for _turn in 0..self.max_turns {
-            if let Some(outcome) = self.run_one_turn().await? {
+            let (maybe_outcome, turn_usage) = self.run_one_turn().await?;
+            call_usage = call_usage + turn_usage;
+            if let Some(mut outcome) = maybe_outcome {
+                outcome.usage = call_usage;
+                self.cumulative = self.cumulative + call_usage;
                 return Ok(outcome);
             }
         }
 
+        self.cumulative = self.cumulative + call_usage;
         Ok(PromptOutcome {
             stop_reason: StopReason::MaxTurnRequests,
             content: Vec::new(),
+            usage: call_usage,
         })
+    }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn cumulative_usage(&self) -> TokenUsage {
+        self.cumulative
     }
 }
 

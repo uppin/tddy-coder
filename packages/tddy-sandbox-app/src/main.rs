@@ -282,6 +282,12 @@ async fn main() -> Result<()> {
         .or(cfg.permission_mode)
         .unwrap_or_else(|| "auto".to_string());
 
+    // Captured before `model`/`claude_home_dir`/`agent_kind` move into `SpawnParams` — used to
+    // build the end-of-session token summary once the terminal bridge returns.
+    let model_for_summary = model.clone();
+    let claude_home_for_summary = claude_home_dir.clone();
+    let is_claude_agent = agent_kind == AgentKind::Claude;
+
     let spawned = tokio::select! {
         res = spawn_claude_sandbox(SpawnParams {
             agent_kind,
@@ -356,10 +362,56 @@ async fn main() -> Result<()> {
         let _ = child.wait();
     }
 
+    print_token_summary(
+        &session_dir,
+        &session_id,
+        &claude_home_for_summary,
+        &model_for_summary,
+        is_claude_agent,
+    );
+
     if let Err(e) = bridge_result {
         spawn::log_spawn_diagnostics(&spawned.egress_dir, &spawned.session_dir);
         return Err(e);
     }
 
     Ok(())
+}
+
+/// Print the per-conversation token breakdown for the finished session to stderr.
+///
+/// Merges the subagent conversation accounting the in-jail MCP server wrote to
+/// `<session_dir>/egress/accounting.json` with the main agent's own usage (summed from its
+/// transcript via [`tddy_core::token_accounting::read_main_agent_usage`]). Best-effort: a missing
+/// or unreadable accounting file simply contributes no subagent rows.
+fn print_token_summary(
+    session_dir: &std::path::Path,
+    session_id: &str,
+    claude_home_dir: &std::path::Path,
+    model: &str,
+    include_main_agent: bool,
+) {
+    use tddy_core::token_accounting::{
+        format_token_summary, read_main_agent_usage, ConversationRecord,
+    };
+
+    #[derive(serde::Deserialize)]
+    struct AccountingFile {
+        #[serde(default)]
+        conversations: Vec<ConversationRecord>,
+    }
+
+    let mut records = Vec::new();
+    if include_main_agent {
+        records.push(read_main_agent_usage(claude_home_dir, session_id, model));
+    }
+
+    let accounting_path = session_dir.join("egress").join("accounting.json");
+    if let Ok(text) = std::fs::read_to_string(&accounting_path) {
+        if let Ok(parsed) = serde_json::from_str::<AccountingFile>(&text) {
+            records.extend(parsed.conversations);
+        }
+    }
+
+    eprintln!("{}", format_token_summary(session_id, &records));
 }
