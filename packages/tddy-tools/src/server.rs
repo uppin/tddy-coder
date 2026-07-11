@@ -1007,7 +1007,16 @@ fn env_non_empty(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.trim().is_empty())
 }
 
-type SubagentSessionTable = tokio::sync::Mutex<HashMap<String, Box<dyn SubagentSession>>>;
+/// One open subagent conversation plus the accounting metadata that lives alongside the session
+/// (its agent name and turn count). Cumulative token usage and the model are read back from the
+/// session itself (`SubagentSession::cumulative_usage`/`model`).
+struct SubagentConversation {
+    agent: String,
+    turns: u32,
+    session: Box<dyn SubagentSession>,
+}
+
+type SubagentSessionTable = tokio::sync::Mutex<HashMap<String, SubagentConversation>>;
 
 /// Process-wide session table — `PermissionServer` merges the subagent router at construction
 /// time, but the conversation must survive across separate `tools/call` invocations, so the table
@@ -1081,8 +1090,48 @@ fn prompt_outcome_json(outcome: PromptOutcome) -> String {
     serde_json::json!({
         "stopReason": outcome.stop_reason,
         "content": outcome.content,
+        "usage": {
+            "inputTokens": outcome.usage.input_tokens,
+            "outputTokens": outcome.usage.output_tokens,
+            "totalTokens": outcome.usage.total(),
+        },
     })
     .to_string()
+}
+
+/// Snapshot every open conversation as the shared [`ConversationRecord`] shape used by
+/// `subagent_list` and the accounting file.
+fn conversation_records(
+    sessions: &HashMap<String, SubagentConversation>,
+) -> Vec<tddy_core::token_accounting::ConversationRecord> {
+    sessions
+        .iter()
+        .map(|(id, conv)| {
+            let usage = conv.session.cumulative_usage();
+            tddy_core::token_accounting::ConversationRecord {
+                agent: conv.agent.clone(),
+                id: id.clone(),
+                model: conv.session.model().to_string(),
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                total_tokens: usage.total(),
+                turns: conv.turns,
+            }
+        })
+        .collect()
+}
+
+/// Overwrite the host-visible accounting file (`TDDY_TOOLS_ACCOUNTING_FILE`, pointed by the runner
+/// into the session egress dir) with the current conversation list. A no-op when the env var is
+/// unset; write failures are ignored — accounting is best-effort telemetry, never load-bearing.
+fn write_accounting_file(sessions: &HashMap<String, SubagentConversation>) {
+    let Some(path) = env_non_empty("TDDY_TOOLS_ACCOUNTING_FILE") else {
+        return;
+    };
+    let payload = serde_json::json!({ "conversations": conversation_records(sessions) });
+    if let Ok(text) = serde_json::to_string_pretty(&payload) {
+        let _ = std::fs::write(&path, text);
+    }
 }
 
 /// `subagent_new_session` (ACP `session/new`-shaped): opens a conversation with the named
@@ -1111,10 +1160,14 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
     };
     match registry.create(&agent_name, subagent_config_from_env()) {
         Ok(session) => {
-            subagent_sessions()
-                .lock()
-                .await
-                .insert(session_id.clone(), session);
+            subagent_sessions().lock().await.insert(
+                session_id.clone(),
+                SubagentConversation {
+                    agent: agent_name,
+                    turns: 0,
+                    session,
+                },
+            );
             serde_json::json!({ "sessionId": session_id }).to_string()
         }
         Err(e) => subagent_error_json(e),
@@ -1140,13 +1193,18 @@ async fn subagent_prompt_tool(args: serde_json::Value) -> String {
     }
 
     let mut sessions = subagent_sessions().lock().await;
-    let Some(session) = sessions.get_mut(session_id) else {
+    let Some(conv) = sessions.get_mut(session_id) else {
         return subagent_error_json(format!("unknown subagent session: {session_id}"));
     };
-    match session.prompt(&prompt_text).await {
-        Ok(outcome) => prompt_outcome_json(outcome),
-        Err(e) => subagent_error_json(e),
-    }
+    let response = match conv.session.prompt(&prompt_text).await {
+        Ok(outcome) => {
+            conv.turns += 1;
+            prompt_outcome_json(outcome)
+        }
+        Err(e) => return subagent_error_json(e),
+    };
+    write_accounting_file(&sessions);
+    response
 }
 
 /// `subagent_cancel` (ACP `session/cancel`-shaped): closes an open session, if any.
@@ -1154,12 +1212,16 @@ async fn subagent_cancel_tool(args: serde_json::Value) -> String {
     let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
         return subagent_error_json("missing required field: sessionId");
     };
-    let cancelled = subagent_sessions()
-        .lock()
-        .await
-        .remove(session_id)
-        .is_some();
+    let mut sessions = subagent_sessions().lock().await;
+    let cancelled = sessions.remove(session_id).is_some();
+    write_accounting_file(&sessions);
     serde_json::json!({ "cancelled": cancelled }).to_string()
+}
+
+/// `subagent_list`: enumerate every open conversation with its per-conversation token accounting.
+async fn subagent_list_tool(_args: serde_json::Value) -> String {
+    let sessions = subagent_sessions().lock().await;
+    serde_json::json!({ "conversations": conversation_records(&sessions) }).to_string()
 }
 
 fn schema_object(
@@ -1256,6 +1318,20 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
     );
     router.add_route(subagent_route(cancel_tool, |args| {
         Box::pin(subagent_cancel_tool(args))
+    }));
+
+    let list_tool = rmcp::model::Tool::new(
+        "subagent_list",
+        "List all open subagent conversations with per-conversation token accounting. \
+         Returns {conversations:[{agent, id, model, inputTokens, outputTokens, totalTokens, \
+         turns}]}.",
+        schema_object(serde_json::json!({
+            "type": "object",
+            "properties": {}
+        })),
+    );
+    router.add_route(subagent_route(list_tool, |args| {
+        Box::pin(subagent_list_tool(args))
     }));
 
     router

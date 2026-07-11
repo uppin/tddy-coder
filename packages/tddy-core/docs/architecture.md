@@ -190,6 +190,16 @@ Guarantees fd 1 (stdout) carries only RPC frames when a process runs with `--std
 - **create_session_dir_in**: Creates `{base}/sessions/{uuid}/` for stable session directory. Uses `SESSIONS_SUBDIR` constant. When `output_dir == "."`, CLI uses `$HOME/.tddy` as base; PlanTask uses `session_base` from context.
 - **session_lifecycle** (`session_lifecycle.rs`): `materialize_unified_session_directory`, `unified_session_dir_path`, `resolve_effective_session_id` (process-bound id wins over backend id), `validate_session_id_segment` / `SessionIdValidationError`, `UnifiedSessionTreeBootstrap` as the default `SessionLifecycleBootstrap` for the unified tree. Product reference: [session-layout.md](../../../docs/ft/coder/session-layout.md).
 
+### Token accounting (`token_accounting.rs`)
+
+Agent-neutral per-conversation token accounting: `TokenUsage` (input/output counts, `total()`,
+field-wise `Add`), the `ConversationRecord` wire shape (camelCase token fields) shared by the
+`subagent_list` MCP tool, the in-jail accounting file, and the stderr summary, and
+`format_token_summary`. Agent-specific token *sources* live with their backend — the Claude
+readers `read_claude_transcript_usage` (main-thread transcript) and `read_claude_subagent_usages`
+(nested Task-tool subagents under `<session_id>/subagents/`) are in `backend/claude.rs`. See
+[session-token-accounting.md](../../../docs/ft/coder/session-token-accounting.md).
+
 ## Data Flow
 
 ```

@@ -25,6 +25,7 @@ pub mod stdio_safety;
 pub mod stream;
 #[cfg(test)]
 pub(crate) mod test_support;
+pub mod token_accounting;
 pub mod toolcall;
 pub mod workflow;
 pub mod worktree;

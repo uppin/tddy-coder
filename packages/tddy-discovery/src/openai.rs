@@ -2,6 +2,32 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Token usage for one model call, normalized from the OpenAI/Ollama `usage` object
+/// (`prompt_tokens` → input, `completion_tokens` → output).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+impl TokenUsage {
+    /// Total tokens billed for the call — input plus output.
+    pub fn total(&self) -> u64 {
+        self.input_tokens + self.output_tokens
+    }
+}
+
+impl std::ops::Add for TokenUsage {
+    type Output = TokenUsage;
+
+    fn add(self, other: TokenUsage) -> TokenUsage {
+        TokenUsage {
+            input_tokens: self.input_tokens + other.input_tokens,
+            output_tokens: self.output_tokens + other.output_tokens,
+        }
+    }
+}
+
 /// A message in the conversation history.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -162,6 +188,30 @@ pub struct ChatCompletionRequest {
 #[derive(Debug, Deserialize)]
 pub struct ChatCompletionResponse {
     pub choices: Vec<ChatChoice>,
+    /// Token accounting for the call. Absent when the endpoint omits `usage`; a partial `usage`
+    /// object counts missing counters as zero rather than failing the response parse.
+    #[serde(default, deserialize_with = "deserialize_usage")]
+    pub usage: Option<TokenUsage>,
+}
+
+/// Map the wire `usage {prompt_tokens, completion_tokens}` onto [`TokenUsage`], tolerating an
+/// absent object (`None`) or missing individual counters (zero).
+fn deserialize_usage<'de, D>(deserializer: D) -> Result<Option<TokenUsage>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    struct RawUsage {
+        #[serde(default)]
+        prompt_tokens: u64,
+        #[serde(default)]
+        completion_tokens: u64,
+    }
+    let raw: Option<RawUsage> = Option::deserialize(deserializer)?;
+    Ok(raw.map(|r| TokenUsage {
+        input_tokens: r.prompt_tokens,
+        output_tokens: r.completion_tokens,
+    }))
 }
 
 #[derive(Debug, Deserialize)]

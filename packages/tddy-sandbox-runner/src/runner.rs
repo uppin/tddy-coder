@@ -1277,6 +1277,11 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
                 "TDDY_TOOLS_LOG_FILE".to_string(),
                 log_path.to_string_lossy().into_owned(),
             );
+            let accounting_path = Path::new(&egress_dir).join("accounting.json");
+            mcp_env.insert(
+                "TDDY_TOOLS_ACCOUNTING_FILE".to_string(),
+                accounting_path.to_string_lossy().into_owned(),
+            );
         }
     }
     mcp_env.insert(
@@ -1359,6 +1364,11 @@ fn spawn_cursor_pty(params: SpawnCursorPtyParams<'_>) -> Result<PtyState> {
             mcp_env.insert(
                 "TDDY_TOOLS_LOG_FILE".to_string(),
                 log_path.to_string_lossy().into_owned(),
+            );
+            let accounting_path = Path::new(&egress_dir).join("accounting.json");
+            mcp_env.insert(
+                "TDDY_TOOLS_ACCOUNTING_FILE".to_string(),
+                accounting_path.to_string_lossy().into_owned(),
             );
         }
     }
