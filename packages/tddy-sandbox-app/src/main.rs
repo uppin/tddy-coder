@@ -380,6 +380,12 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
         .or(cfg.permission_mode)
         .unwrap_or_else(|| "auto".to_string());
 
+    // Captured before `model`/`claude_home_dir`/`agent_kind` move into `SpawnParams` — used to
+    // build the end-of-session token summary once the terminal bridge returns.
+    let model_for_summary = model.clone();
+    let claude_home_for_summary = claude_home_dir.clone();
+    let is_claude_agent = agent_kind == AgentKind::Claude;
+
     let spawned = tokio::select! {
         res = spawn_claude_sandbox(SpawnParams {
             agent_kind,
@@ -454,10 +460,65 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
         let _ = child.wait();
     }
 
+    print_token_summary(
+        &session_dir,
+        &session_id,
+        &claude_home_for_summary,
+        &model_for_summary,
+        is_claude_agent,
+    );
+
     if let Err(e) = bridge_result {
         spawn::log_spawn_diagnostics(&spawned.egress_dir, &spawned.session_dir);
         return Err(e);
     }
 
     Ok(())
+}
+
+/// Print the per-conversation token breakdown for the finished session to stderr.
+///
+/// Combines three sources: the main Claude agent's own usage (from its transcript, via
+/// [`tddy_core::backend::read_claude_transcript_usage`]), each of Claude's nested Task-tool
+/// subagents ([`tddy_core::backend::read_claude_subagent_usages`]), and the tddy subagent
+/// conversations the in-jail MCP server wrote to `<session_dir>/egress/accounting.json`.
+/// Best-effort: a missing or unreadable accounting file simply contributes no tddy-subagent rows.
+fn print_token_summary(
+    session_dir: &std::path::Path,
+    session_id: &str,
+    claude_home_dir: &std::path::Path,
+    model: &str,
+    include_main_agent: bool,
+) {
+    use tddy_core::backend::{read_claude_subagent_usages, read_claude_transcript_usage};
+    use tddy_core::token_accounting::{format_token_summary, ConversationRecord};
+
+    #[derive(serde::Deserialize)]
+    struct AccountingFile {
+        #[serde(default)]
+        conversations: Vec<ConversationRecord>,
+    }
+
+    let mut records = Vec::new();
+    if include_main_agent {
+        records.push(read_claude_transcript_usage(
+            claude_home_dir,
+            session_id,
+            model,
+        ));
+        records.extend(read_claude_subagent_usages(
+            claude_home_dir,
+            session_id,
+            model,
+        ));
+    }
+
+    let accounting_path = session_dir.join("egress").join("accounting.json");
+    if let Ok(text) = std::fs::read_to_string(&accounting_path) {
+        if let Ok(parsed) = serde_json::from_str::<AccountingFile>(&text) {
+            records.extend(parsed.conversations);
+        }
+    }
+
+    eprintln!("{}", format_token_summary(session_id, &records));
 }
