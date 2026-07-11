@@ -569,7 +569,7 @@ pub struct SandboxRunnerSpawn {
 pub fn build_sandbox_plan(params: SandboxRunnerSpawn) -> Result<SandboxPlan, SandboxError> {
     use tddy_sandbox_recipes::{build_runner_plan, RunnerPlanRequest};
 
-    let mut plan = build_runner_plan(RunnerPlanRequest {
+    let plan = build_runner_plan(RunnerPlanRequest {
         project_root: params.project_root,
         scratch_dir: params.scratch_dir,
         egress_dir: params.egress_dir,

@@ -27,13 +27,25 @@ const PTY_STUB_OUTPUT_TIMEOUT_MS: u64 = 2_000;
 /// Full `StartSession` RPC path includes git worktree setup before the PTY spawns.
 const PTY_RPC_STUB_OUTPUT_TIMEOUT_MS: u64 = 10_000;
 
+/// The OS user the test process runs as — a real, resolvable user (same-user, so the interactive
+/// claude-cli spawn needs no privilege drop). Fixtures use this rather than a fabricated name so
+/// impersonation resolves during the spawn.
+fn current_os_user() -> String {
+    let pw = unsafe { libc::getpwuid(libc::getuid()) };
+    assert!(!pw.is_null(), "current uid must resolve to a passwd entry");
+    unsafe { std::ffi::CStr::from_ptr((*pw).pw_name) }
+        .to_string_lossy()
+        .into_owned()
+}
+
 fn write_config_with_binary(stub_binary: &str) -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
+    let user = current_os_user();
     let yaml = format!(
         r#"
 users:
-  - github_user: "testuser"
-    os_user: "testuser"
+  - github_user: "{user}"
+    os_user: "{user}"
 allowed_tools:
   - path: /bin/true
     label: true
@@ -55,9 +67,10 @@ fn minimal_service_with_manager(
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
-    let user_resolver: UserResolver = Arc::new(|token| {
+    let resolved_user = current_os_user();
+    let user_resolver: UserResolver = Arc::new(move |token| {
         if token == VALID_TOKEN {
-            Some("testuser".to_string())
+            Some(resolved_user.clone())
         } else {
             None
         }

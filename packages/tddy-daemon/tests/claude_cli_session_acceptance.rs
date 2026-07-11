@@ -26,13 +26,25 @@ const TEST_PROJECT_ID: &str = "test-project";
 const PTY_STUB_OUTPUT_TIMEOUT_MS: u64 = 2_000;
 const PTY_RPC_STUB_OUTPUT_TIMEOUT_MS: u64 = 10_000;
 
+/// The OS user the test process runs as — a real, resolvable user (same-user, so the interactive
+/// claude-cli spawn needs no privilege drop). Fixtures use this rather than a fabricated name so
+/// impersonation resolves during the spawn.
+fn current_os_user() -> String {
+    let pw = unsafe { libc::getpwuid(libc::getuid()) };
+    assert!(!pw.is_null(), "current uid must resolve to a passwd entry");
+    unsafe { std::ffi::CStr::from_ptr((*pw).pw_name) }
+        .to_string_lossy()
+        .into_owned()
+}
+
 fn write_config_with_claude_cli_binary(stub_binary: &str) -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
+    let user = current_os_user();
     let yaml = format!(
         r#"
 users:
-  - github_user: "testuser"
-    os_user: "testuser"
+  - github_user: "{user}"
+    os_user: "{user}"
 allowed_tools:
   - path: /bin/true
     label: true
@@ -62,9 +74,10 @@ fn minimal_service_with_manager(
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
-    let user_resolver: UserResolver = Arc::new(|token| {
+    let resolved_user = current_os_user();
+    let user_resolver: UserResolver = Arc::new(move |token| {
         if token == VALID_TOKEN {
-            Some("testuser".to_string())
+            Some(resolved_user.clone())
         } else {
             None
         }
@@ -308,7 +321,7 @@ async fn claude_cli_session_enrichment_reads_from_metadata() {
     let session_id = "01900000-0000-7000-8000-000000000001";
     let session_dir = sessions_tmp
         .path()
-        .join("testuser")
+        .join(current_os_user())
         .join("sessions")
         .join(session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
@@ -338,17 +351,20 @@ async fn claude_cli_session_enrichment_reads_from_metadata() {
     write_session_metadata(&session_dir, &meta).unwrap();
     // No changeset.yaml — intentionally absent to test the claude-cli fallback path.
 
-    let config_yaml = r#"
+    let user = current_os_user();
+    let config_yaml = format!(
+        r#"
 users:
-  - github_user: "testuser"
-    os_user: "testuser"
-"#;
+  - github_user: "{user}"
+    os_user: "{user}"
+"#
+    );
     let cfg_dir = tempfile::tempdir().unwrap();
     let cfg_path = cfg_dir.path().join("d.yaml");
     std::fs::write(&cfg_path, config_yaml).unwrap();
     let config = DaemonConfig::load(&cfg_path).unwrap();
 
-    let sessions_base = sessions_tmp.path().join("testuser");
+    let sessions_base = sessions_tmp.path().join(current_os_user());
     let service = minimal_service(config, sessions_base);
 
     // When
@@ -396,7 +412,7 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
     let session_id = "01900000-0000-7000-8000-000000000002";
     let session_dir = sessions_tmp
         .path()
-        .join("testuser")
+        .join(current_os_user())
         .join("sessions")
         .join(session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
@@ -426,7 +442,7 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
     write_session_metadata(&session_dir, &meta).unwrap();
 
     let (_cfg_dir, config) = write_config_with_claude_cli_binary("/bin/cat");
-    let sessions_base = sessions_tmp.path().join("testuser");
+    let sessions_base = sessions_tmp.path().join(current_os_user());
     let service = minimal_service(config, sessions_base);
 
     // When
@@ -468,11 +484,14 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
 async fn claude_cli_start_session_requires_model() {
     // Given
     let sessions_tmp = tempfile::tempdir().unwrap();
-    let config_yaml = r#"
+    let user = current_os_user();
+    let config_yaml = format!(
+        r#"
 users:
-  - github_user: "testuser"
-    os_user: "testuser"
-"#;
+  - github_user: "{user}"
+    os_user: "{user}"
+"#
+    );
     let cfg_dir = tempfile::tempdir().unwrap();
     let cfg_path = cfg_dir.path().join("d.yaml");
     std::fs::write(&cfg_path, config_yaml).unwrap();
