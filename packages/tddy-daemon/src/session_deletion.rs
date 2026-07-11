@@ -14,6 +14,19 @@ use crate::project_storage;
 use crate::session_reader::is_pid_alive;
 use crate::worktrees;
 
+/// Pure: does `worktree` sit under the daemon's managed worktree layout?
+///
+/// Every worktree the daemon creates for a claude-cli/cursor-cli session lives under a
+/// `.worktrees` directory inside the project's main repo (see `tddy_core::worktree::worktree_dir`).
+/// A session started against a client-supplied `repo_path` (an arbitrary local checkout) does not,
+/// so this returns `false` for it — the signal used to keep the user's checkout from being removed
+/// on session deletion.
+pub fn is_daemon_managed_worktree(worktree: &Path) -> bool {
+    worktree
+        .components()
+        .any(|c| c.as_os_str() == std::ffi::OsStr::new(".worktrees"))
+}
+
 /// After SIGKILL the child may be a zombie until its parent reaps it; `kill(pid, 0)` still succeeds.
 #[cfg(all(unix, target_os = "linux"))]
 fn pid_is_zombie(pid: u32) -> bool {
@@ -223,12 +236,24 @@ pub fn delete_session_directory(
         };
 
         if !removed_git_aware {
-            let _ = std::fs::remove_dir_all(&worktree);
-            log::info!(
-                "delete_session_directory: removed claude-cli worktree {:?} for {} (remove_dir_all fallback)",
-                worktree,
-                session_id
-            );
+            // The git-aware removal was skipped or failed. Only fall back to `remove_dir_all` for a
+            // daemon-managed worktree (created under `<repo>/.worktrees/`). A session started
+            // against a client-supplied `repo_path` (an arbitrary local checkout) records that path
+            // here verbatim; wiping it would destroy the user's working tree, so it is left intact.
+            if is_daemon_managed_worktree(&worktree) {
+                let _ = std::fs::remove_dir_all(&worktree);
+                log::info!(
+                    "delete_session_directory: removed claude-cli worktree {:?} for {} (remove_dir_all fallback)",
+                    worktree,
+                    session_id
+                );
+            } else {
+                log::info!(
+                    "delete_session_directory: leaving worktree {:?} for {} intact (not a daemon-managed worktree — e.g. a client-supplied repo_path checkout)",
+                    worktree,
+                    session_id
+                );
+            }
         }
     }
 
@@ -348,5 +373,74 @@ mod tests {
         let err =
             delete_session_directory(&base, "session-owned-on-another-daemon", None).unwrap_err();
         assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
+    }
+
+    #[test]
+    fn daemon_managed_worktree_recognised_by_dot_worktrees_layout() {
+        // Given — a worktree created under a project's `.worktrees` dir
+        let worktree = Path::new("/home/dev/my-repo/.worktrees/claude-cli-abc123");
+
+        // When / Then
+        assert!(is_daemon_managed_worktree(worktree));
+    }
+
+    #[test]
+    fn client_supplied_checkout_is_not_treated_as_daemon_managed() {
+        // Given — an arbitrary local checkout passed via `repo_path`
+        let checkout = Path::new("/home/dev/some-project");
+
+        // When / Then
+        assert!(!is_daemon_managed_worktree(checkout));
+    }
+
+    /// A `repo_path` session records the user's checkout as its worktree. Deleting the session must
+    /// terminate/clean the session dir but never remove that external checkout.
+    #[test]
+    fn delete_preserves_a_client_supplied_repo_path_checkout() {
+        // Given — an external checkout with a file the user would lose if it were wiped
+        let temp = tempfile::tempdir().unwrap();
+        let checkout = temp.path().join("external-checkout");
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::fs::write(checkout.join("keep-me.txt"), b"important").unwrap();
+
+        // And — a claude-cli session whose worktree IS that checkout
+        let base = temp.path().join("tddy-home");
+        let sid = "unit-repo-path-sid";
+        let dir = unified_session_dir_path(&base, sid);
+        std::fs::create_dir_all(&dir).unwrap();
+        let metadata = SessionMetadata {
+            session_id: sid.to_string(),
+            project_id: String::new(),
+            created_at: "2026-07-11T10:00:00Z".to_string(),
+            updated_at: "2026-07-11T10:00:00Z".to_string(),
+            status: "exited".to_string(),
+            repo_path: Some(checkout.to_string_lossy().to_string()),
+            pid: None,
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("claude-cli".to_string()),
+            model: Some("claude-opus-4-8".to_string()),
+            activity_status: None,
+            hook_token: None,
+            sandbox: Some(true),
+            agent: None,
+            recipe: None,
+            specialized_agents: Vec::new(),
+        };
+        tddy_core::write_session_metadata(&dir, &metadata).unwrap();
+
+        // When — the session is deleted with no projects dir (external checkout, no project)
+        let r = delete_session_directory(&base, sid, None);
+
+        // Then — the session dir is gone but the user's checkout is left intact
+        assert!(r.is_ok(), "expected delete to succeed");
+        assert!(!dir.exists(), "session directory should be removed");
+        assert!(checkout.is_dir(), "external checkout must not be removed");
+        assert!(
+            checkout.join("keep-me.txt").exists(),
+            "files in the external checkout must be preserved"
+        );
     }
 }

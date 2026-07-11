@@ -25,9 +25,7 @@ pub fn cursor_agent_prerequisite_reads(cursor_binary: &Path) -> Vec<ReadSpec> {
     let resolved = resolve_cursor_agent_binary(cursor_binary);
 
     if let Some(install_dir) = resolved.parent() {
-        reads.push(
-            ReadSpec::subpath(install_dir, ReadReason::BinaryDeps).executable(),
-        );
+        reads.push(ReadSpec::subpath(install_dir, ReadReason::BinaryDeps).executable());
         reads.extend(path_traversal_reads(install_dir));
         let node = install_dir.join("node");
         let index = install_dir.join("index.js");
@@ -410,7 +408,8 @@ mod tests {
         );
         assert_eq!(
             PathBuf::from(&argv[1]),
-            std::fs::canonicalize(version_dir.join("index.js")).unwrap_or(version_dir.join("index.js"))
+            std::fs::canonicalize(version_dir.join("index.js"))
+                .unwrap_or(version_dir.join("index.js"))
         );
         assert!(!argv.contains(&"--trust".to_string()));
     }
@@ -531,6 +530,10 @@ mod tests {
             .expect("seed must succeed");
 
         let link = cursor_home.path().join(".local").join("bin").join("agent");
-        assert!(link.exists(), "agent symlink must exist at {}", link.display());
+        assert!(
+            link.exists(),
+            "agent symlink must exist at {}",
+            link.display()
+        );
     }
 }

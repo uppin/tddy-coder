@@ -408,9 +408,65 @@ fn main() -> anyhow::Result<()> {
             if let Some(ref tracker) = idle_tracker_opt {
                 connection_impl = connection_impl.with_idle_tracker(tracker.clone());
             }
-            // Get the shared TaskRegistry before moving connection_impl into the server.
-            let task_registry = connection_impl.task_registry();
-            let connection_server = tddy_service::ConnectionServiceServer::new(connection_impl);
+            // Share one instance across transports: the LiveKit/HTTP RpcService server and the
+            // local Unix-domain-socket tonic server both reference the same Arc, so a session
+            // started over the socket is visible over every other transport.
+            let connection_arc = Arc::new(connection_impl);
+            // Get the shared TaskRegistry before handing the impl to the servers.
+            let task_registry = connection_arc.task_registry();
+
+            // Local Unix-domain socket transport (SO_PEERCRED peer-trust + MintLocalToken). Spawned
+            // as an independent task; it must not disturb the HTTP server below.
+            {
+                let socket_path = config_arc.local_socket_path();
+                // The one secret every daemon shares (also signs session tokens); when absent the
+                // adapter denies minting with FAILED_PRECONDITION.
+                let signer = config_arc
+                    .livekit
+                    .as_ref()
+                    .and_then(|lk| lk.api_secret.clone())
+                    .map(|s| tddy_github::SessionTokenSigner::new(s.as_bytes()));
+                let uid_to_username: tddy_daemon::connection_tonic_adapter::UidToUsername =
+                    Arc::new(tddy_daemon::user_sessions_path::username_for_uid);
+                let adapter =
+                    tddy_daemon::connection_tonic_adapter::ConnectionServiceTonicAdapter::new(
+                        connection_arc.clone(),
+                        config_arc.clone(),
+                        signer,
+                        uid_to_username,
+                    );
+                tokio::spawn(async move {
+                    let shutdown = async {
+                        let mut term = tokio::signal::unix::signal(
+                            tokio::signal::unix::SignalKind::terminate(),
+                        )
+                        .ok();
+                        tokio::select! {
+                            _ = tokio::signal::ctrl_c() => {}
+                            _ = async {
+                                match term.as_mut() {
+                                    Some(s) => { s.recv().await; }
+                                    None => std::future::pending::<()>().await,
+                                }
+                            } => {}
+                        }
+                    };
+                    if let Err(e) = tddy_daemon::local_socket_server::serve_connection_uds(
+                        &socket_path,
+                        adapter,
+                        shutdown,
+                    )
+                    .await
+                    {
+                        log::error!(
+                            target: "tddy_daemon::local_socket_server",
+                            "local socket server exited with error: {e:#}"
+                        );
+                    }
+                });
+            }
+
+            let connection_server = tddy_service::ConnectionServiceServer::from_arc(connection_arc);
             rpc_entries.push(tddy_rpc::ServiceEntry {
                 name: "connection.ConnectionService",
                 service: Arc::new(connection_server) as Arc<dyn tddy_rpc::RpcService>,

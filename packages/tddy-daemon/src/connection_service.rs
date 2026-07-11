@@ -23,16 +23,16 @@ use tddy_service::proto::connection::{
     ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
     ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
-    ListWorktreesForProjectRequest, ListWorktreesForProjectResponse, ModelInfo,
-    ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
-    ReadSessionWorkflowFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
-    ReportSessionStatusRequest, ReportSessionStatusResponse, ResumeSessionRequest,
-    ResumeSessionResponse, SendTerminalInputResponse, SessionEntry as ProtoSessionEntry,
-    SessionTerminalInput, SessionTerminalOutput, Signal, SignalSessionRequest,
-    SignalSessionResponse, StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
-    StartTerminalSessionResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    StreamTerminalOutputRequest, SubagentInfo, TerminalControlEvent, TerminalSessionInfo, ToolInfo,
-    WatchTerminalControlRequest, WorkflowFileEntry, WorktreeRow,
+    ListWorktreesForProjectRequest, ListWorktreesForProjectResponse, MintLocalTokenRequest,
+    MintLocalTokenResponse, ModelInfo, ProjectEntry as ProtoProjectEntry,
+    ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse, RemoveWorktreeRequest,
+    RemoveWorktreeResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
+    ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse,
+    SessionEntry as ProtoSessionEntry, SessionTerminalInput, SessionTerminalOutput, Signal,
+    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
+    StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
+    StopTerminalSessionResponse, StreamTerminalOutputRequest, SubagentInfo, TerminalControlEvent,
+    TerminalSessionInfo, ToolInfo, WatchTerminalControlRequest, WorkflowFileEntry, WorktreeRow,
 };
 use uuid::Uuid;
 
@@ -1029,10 +1029,19 @@ impl ConnectionServiceImpl {
         sessions_base: PathBuf,
         model: &str,
         project_id: &str,
+        // Client-supplied local checkout to run against directly (StartSessionRequest.repo_path).
+        // When non-empty it wins over `project_id`: the session's worktree IS this path (no git
+        // worktree is created, no registered project is required, and it is never removed on
+        // session end). Empty → resolve the worktree from the registered `project_id` as before.
+        repo_path: &str,
         branch_worktree_intent: &str,
         new_branch_name: &str,
         selected_integration_base_ref: &str,
         selected_branch_to_work_on: &str,
+        // Passed to `claude` as a trailing positional (first user turn) after any pass-through args.
+        initial_prompt: &str,
+        // Extra args forwarded verbatim to the in-jail `claude` (StartSessionRequest.claude_args).
+        claude_args: &[String],
         permission_mode: &str,
         stack_parent: Option<&str>,
         // Specialized subagents (see docs/ft/coder/specialized-subagents.md). This sandboxed path
@@ -1053,24 +1062,8 @@ impl ConnectionServiceImpl {
             ));
         }
         let project_id = project_id.trim();
-        if project_id.is_empty() {
-            return Err(Status::invalid_argument(
-                "project_id is required for claude-cli sessions",
-            ));
-        }
+        let repo_path = repo_path.trim();
         let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
-
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        let project = project_storage::find_project(&projects_dir, project_id)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
-        let repo_root = PathBuf::from(&project.main_repo_path);
-        if !repo_root.exists() {
-            return Err(Status::invalid_argument(
-                "project main repo path does not exist",
-            ));
-        }
 
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)
@@ -1137,25 +1130,68 @@ impl ConnectionServiceImpl {
         tddy_core::write_changeset(&session_dir, &cs)
             .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
-        let chain_base_ref =
-            Self::resolve_chain_base_ref(&sessions_base, stack_parent, &repo_root)?;
-
-        let repo_root_clone = repo_root.clone();
-        let session_dir_clone = session_dir.clone();
-        let timeout = self.config.spawn_worker_request_timeout();
-        let worktree_path = spawn_blocking_with_timeout(
-            timeout,
-            "start_sandboxed_claude_cli_session: create worktree",
-            move || {
-                tddy_core::setup_worktree_for_session_with_optional_chain_base(
-                    &repo_root_clone,
-                    &session_dir_clone,
-                    chain_base_ref.as_deref(),
+        // Resolve the session's worktree. A client-supplied `repo_path` is used directly (arbitrary
+        // local checkout, edited via the host-side tool relay as the caller's mapped OS user); it is
+        // never wrapped in a daemon-managed git worktree and never removed on session end. Otherwise
+        // fall back to the registered project and create a git worktree as before.
+        let worktree_path = match session_worktree_source(repo_path, project_id) {
+            WorktreeSource::Project(pid) => {
+                if pid.is_empty() {
+                    return Err(Status::invalid_argument(
+                        "project_id is required for claude-cli sessions",
+                    ));
+                }
+                let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+                    .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+                let project = project_storage::find_project(&projects_dir, &pid)
+                    .map_err(|e| Status::internal(e.to_string()))?
+                    .ok_or_else(|| Status::not_found("project not found"))?;
+                let repo_root = PathBuf::from(&project.main_repo_path);
+                if !repo_root.exists() {
+                    return Err(Status::invalid_argument(
+                        "project main repo path does not exist",
+                    ));
+                }
+                let chain_base_ref =
+                    Self::resolve_chain_base_ref(&sessions_base, stack_parent, &repo_root)?;
+                let repo_root_clone = repo_root.clone();
+                let session_dir_clone = session_dir.clone();
+                let timeout = self.config.spawn_worker_request_timeout();
+                spawn_blocking_with_timeout(
+                    timeout,
+                    "start_sandboxed_claude_cli_session: create worktree",
+                    move || {
+                        tddy_core::setup_worktree_for_session_with_optional_chain_base(
+                            &repo_root_clone,
+                            &session_dir_clone,
+                            chain_base_ref.as_deref(),
+                        )
+                        .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
+                    },
                 )
-                .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
-            },
-        )
-        .await?;
+                .await?
+            }
+            WorktreeSource::RepoPath(path) => {
+                let canonical = std::fs::canonicalize(&path).map_err(|e| {
+                    Status::invalid_argument(format!(
+                        "repo_path {} is not accessible: {e}",
+                        path.display()
+                    ))
+                })?;
+                if !canonical.is_dir() {
+                    return Err(Status::invalid_argument(format!(
+                        "repo_path {} is not a directory",
+                        canonical.display()
+                    )));
+                }
+                log::info!(
+                    target: "tddy_daemon::connection_service",
+                    "start_sandboxed_claude_cli_session {session_id}: using client-supplied repo_path {} directly as worktree (not daemon-managed; not removed on session end)",
+                    canonical.display()
+                );
+                canonical
+            }
+        };
 
         let sandbox_root = session_dir.join("sandbox");
         let egress_dir = session_dir.join("egress");
@@ -1300,6 +1336,13 @@ impl ConnectionServiceImpl {
         if let Some(prompt_path) = &append_system_prompt_file {
             runner_argv.push("--append-system-prompt-file".into());
             runner_argv.push(prompt_path.to_string_lossy().to_string());
+        }
+        // Forward client-supplied pass-through args (+ a trailing positional prompt) to the in-jail
+        // `claude`. Each token becomes a `--claude-arg` occurrence the runner replays verbatim after
+        // claude's fixed flags and before the MCP allowlist args.
+        for token in sandbox_claude_passthrough_args(claude_args, initial_prompt) {
+            runner_argv.push("--claude-arg".into());
+            runner_argv.push(token);
         }
 
         let mut env = crate::sandbox_session::build_sandbox_runner_env(
@@ -3045,10 +3088,13 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         sessions_base,
                         req.model.trim(),
                         req.project_id.trim(),
+                        req.repo_path.trim(),
                         req.branch_worktree_intent.trim(),
                         req.new_branch_name.trim(),
                         req.selected_integration_base_ref.trim(),
                         req.selected_branch_to_work_on.trim(),
+                        req.initial_prompt.trim(),
+                        &req.claude_args,
                         req.permission_mode.trim(),
                         stack_parent_for_claude_cli.as_deref(),
                         req.managed_codebase,
@@ -5023,6 +5069,19 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         );
         Ok(Response::new(AddPlannedPrResponse { stack_plan_json }))
     }
+
+    /// Local peer-trust minting is not available on this transport. Peer credentials
+    /// (SO_PEERCRED) exist only on the daemon's local Unix-domain socket; over ConnectRPC-HTTP or
+    /// LiveKit there is no peer uid to trust, so those transports reach this tddy-rpc handler and
+    /// are rejected. The UDS tonic adapter handles `MintLocalToken` itself and never delegates here.
+    async fn mint_local_token(
+        &self,
+        _request: Request<MintLocalTokenRequest>,
+    ) -> Result<Response<MintLocalTokenResponse>, Status> {
+        Err(Status::unauthenticated(
+            "local token minting is only available over the local socket",
+        ))
+    }
 }
 
 /// Guard for any RPC that mutates a `"pr-stack"` orchestrator's `Changeset.stack`: rejects a
@@ -6235,5 +6294,114 @@ mod start_session_binary_resolution_tests {
 
         // Then both paths agree
         assert_eq!(start_session, sandbox);
+    }
+}
+
+/// Where a session's worktree comes from. A local client (e.g. tddy-sandbox-app) may send an explicit
+/// `repo_path` to use directly; otherwise the worktree is resolved from a registered `project_id`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorktreeSource {
+    /// Use this local checkout path directly (client-supplied).
+    RepoPath(std::path::PathBuf),
+    /// Resolve from the registered project id.
+    Project(String),
+}
+
+/// Pure: choose the worktree source for a session from the request's `repo_path` / `project_id`.
+/// A non-empty `repo_path` wins (local-client path); otherwise fall back to `project_id`.
+pub fn session_worktree_source(repo_path: &str, project_id: &str) -> WorktreeSource {
+    if repo_path.is_empty() {
+        WorktreeSource::Project(project_id.to_string())
+    } else {
+        WorktreeSource::RepoPath(std::path::PathBuf::from(repo_path))
+    }
+}
+
+/// Pure: assemble the pass-through argument tokens forwarded to the in-jail `claude` for a
+/// sandboxed session, in the order `claude` must receive them.
+///
+/// Client-supplied `claude_args` come first, verbatim (e.g. `--add-dir /foo`). A non-empty
+/// `initial_prompt` is appended last as a trailing positional, so it lands as the first user turn
+/// even when extra flags precede it; an empty/whitespace prompt is omitted. The runner wraps each
+/// returned token in a `--claude-arg` occurrence and inserts them after `claude`'s fixed flags and
+/// before the MCP allowlist args (see `SpawnClaudePtyParams::claude_args`), which keeps a trailing
+/// positional a positional instead of being swallowed by the variadic `--mcp-config`.
+pub fn sandbox_claude_passthrough_args(
+    claude_args: &[String],
+    initial_prompt: &str,
+) -> Vec<String> {
+    let mut out: Vec<String> = claude_args.to_vec();
+    let prompt = initial_prompt.trim();
+    if !prompt.is_empty() {
+        out.push(prompt.to_string());
+    }
+    out
+}
+
+#[cfg(test)]
+mod worktree_source_tests {
+    use super::{session_worktree_source, WorktreeSource};
+    use std::path::PathBuf;
+
+    #[test]
+    fn uses_the_client_repo_path_when_present() {
+        // Given — a request carrying an explicit local repo path
+        // When
+        let source = session_worktree_source("/home/dev/proj", "proj-123");
+
+        // Then
+        assert_eq!(
+            source,
+            WorktreeSource::RepoPath(PathBuf::from("/home/dev/proj"))
+        );
+    }
+
+    #[test]
+    fn falls_back_to_project_id_when_repo_path_is_empty() {
+        // Given — no repo_path
+        // When
+        let source = session_worktree_source("", "proj-123");
+
+        // Then
+        assert_eq!(source, WorktreeSource::Project("proj-123".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod sandbox_claude_passthrough_args_tests {
+    use super::sandbox_claude_passthrough_args;
+
+    #[test]
+    fn forwards_client_claude_args_verbatim() {
+        // Given — a client that passed extra claude flags and no prompt
+        let claude_args = vec!["--add-dir".to_string(), "/repo/extra".to_string()];
+
+        // When
+        let tokens = sandbox_claude_passthrough_args(&claude_args, "");
+
+        // Then
+        assert_eq!(tokens, vec!["--add-dir", "/repo/extra"]);
+    }
+
+    #[test]
+    fn appends_the_initial_prompt_last_as_a_trailing_positional() {
+        // Given — both extra flags and an initial prompt
+        let claude_args = vec!["--add-dir".to_string(), "/repo/extra".to_string()];
+
+        // When
+        let tokens = sandbox_claude_passthrough_args(&claude_args, "build feature X");
+
+        // Then — the prompt must land after every flag so it stays a positional
+        assert_eq!(tokens, vec!["--add-dir", "/repo/extra", "build feature X"]);
+    }
+
+    #[test]
+    fn omits_a_blank_initial_prompt() {
+        // Given — no client args and a whitespace-only prompt
+        // When
+        let tokens = sandbox_claude_passthrough_args(&[], "   ");
+
+        // Then
+        assert!(tokens.is_empty());
     }
 }

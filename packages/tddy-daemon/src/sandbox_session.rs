@@ -639,10 +639,7 @@ pub fn prepare_persistent_claude_home(claude_home_dir: &Path, claude_binary: &st
 }
 
 /// Prepare the persistent jail `$HOME` for sandboxed cursor-cli sessions.
-pub fn prepare_persistent_cursor_home(
-    cursor_home_dir: &Path,
-    cursor_binary: &str,
-) -> PathBuf {
+pub fn prepare_persistent_cursor_home(cursor_home_dir: &Path, cursor_binary: &str) -> PathBuf {
     if let Err(e) = std::fs::create_dir_all(cursor_home_dir) {
         log::warn!(
             "persistent cursor home {}: create failed: {e}",

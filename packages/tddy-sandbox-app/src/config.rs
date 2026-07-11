@@ -78,6 +78,14 @@ impl SandboxAppConfig {
 /// wins). The active set is every inline def (declaring an inline subagent activates it) plus each
 /// `named` agent, de-duplicated with first-seen order preserved. A `named` agent that resolves
 /// against nothing in the pool is a hard error — not a silently-dropped entry.
+///
+/// Only *called* from the macOS in-process spawn path, which must resolve each subagent's full def
+/// (model, base_url, tools) to wire it into the in-jail `tddy-tools --mcp`. The Linux daemon-assisted
+/// path instead forwards the requested agent *names* over `StartSessionRequest.specialized_agents`
+/// and lets the daemon resolve them against its own `<tddyhome>/agents`, so it never calls this. The
+/// resolution logic itself is platform-agnostic, so this stays compiled and unit-tested on all
+/// platforms; the allow suppresses the resulting dead-code lint on non-macOS builds.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn resolve_session_agents(
     named: &[String],
     inline: &[SpecializedAgentDef],
