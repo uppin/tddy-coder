@@ -31,6 +31,66 @@ pub(crate) fn which_binary(binary: &Path) -> String {
     format!("{} (not found in PATH)", name)
 }
 
+/// Sum the Claude Code agent's token usage from its own session transcript.
+///
+/// Claude Code writes a session transcript to
+/// `<claude_home>/.claude/projects/<encoded-cwd>/<session_id>.jsonl`. Because the runner spawns
+/// `claude --session-id <session_id>`, the file name is deterministic, so we locate it by session
+/// id (unique) rather than reconstructing the cwd encoding: for each project subdir, read
+/// `<session_id>.jsonl` if present and fold every assistant message's `message.usage` input/output
+/// counts (Claude's separate `cache_*` counters are intentionally not folded into input), counting
+/// each assistant line as one turn and taking the model from those lines.
+///
+/// This Claude-Code-specific transcript layout lives with the Claude backend on purpose — other
+/// agents store their transcripts elsewhere. When no transcript exists, the record reports zero
+/// tokens with `fallback_model` — never an error, so a caller can still render a main-agent row.
+pub fn read_claude_transcript_usage(
+    claude_home: &Path,
+    session_id: &str,
+    fallback_model: &str,
+) -> crate::token_accounting::ConversationRecord {
+    use crate::token_accounting::{ConversationRecord, TokenUsage};
+
+    let mut usage = TokenUsage::default();
+    let mut turns = 0u32;
+    let mut model: Option<String> = None;
+
+    let projects_dir = claude_home.join(".claude").join("projects");
+    if let Ok(entries) = std::fs::read_dir(&projects_dir) {
+        for entry in entries.flatten() {
+            let transcript = entry.path().join(format!("{session_id}.jsonl"));
+            let Ok(contents) = std::fs::read_to_string(&transcript) else {
+                continue;
+            };
+            for line in contents.lines() {
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+                    continue;
+                };
+                if value.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+                    continue;
+                }
+                let message = &value["message"];
+                usage.input_tokens += message["usage"]["input_tokens"].as_u64().unwrap_or(0);
+                usage.output_tokens += message["usage"]["output_tokens"].as_u64().unwrap_or(0);
+                if let Some(m) = message["model"].as_str() {
+                    model = Some(m.to_string());
+                }
+                turns += 1;
+            }
+        }
+    }
+
+    ConversationRecord {
+        agent: "claude".to_string(),
+        id: session_id.to_string(),
+        model: model.unwrap_or_else(|| fallback_model.to_string()),
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        total_tokens: usage.total(),
+        turns,
+    }
+}
+
 /// Type for progress callback (tool activity, task events).
 type ProgressCallback = Option<Arc<Mutex<Box<dyn FnMut(&stream::ProgressEvent) + Send>>>>;
 

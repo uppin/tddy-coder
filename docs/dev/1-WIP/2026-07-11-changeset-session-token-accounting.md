@@ -22,6 +22,7 @@
 
 - [x] `packages/tddy-tools/tests/subagent_token_accounting_acceptance.rs`
 - [x] `packages/tddy-core/tests/token_accounting_acceptance.rs`
+- [x] `packages/tddy-core/tests/claude_transcript_usage_acceptance.rs`
 
 ## Unit tests
 
@@ -69,14 +70,16 @@ rustfmt-style and compile clean under clippy.
 
 ### `tddy-core`
 
-- New `token_accounting` module: canonical `TokenUsage`; `ConversationRecord`
+- New agent-neutral `token_accounting` module: canonical `TokenUsage`; `ConversationRecord`
   `{ agent, id, model, input_tokens, output_tokens, total_tokens, turns }`
   (serde camelCase: `inputTokens`/`outputTokens`/`totalTokens`) shared by the accounting
   file, the `subagent_list` output, and the summary; `format_token_summary(session_id,
-  records) -> String` (per-record lines + TOTAL row); `read_main_agent_usage(claude_home,
-  session_id, fallback_model) -> ConversationRecord` — globs
-  `<home>/.claude/projects/*/<session_id>.jsonl`, sums assistant `message.usage`, captures
-  `message.model`; missing transcript → zeros + fallback model.
+  records) -> String` (per-record lines + TOTAL row).
+- `backend/claude.rs`: `read_claude_transcript_usage(claude_home, session_id, fallback_model)
+  -> ConversationRecord` — the Claude-Code-specific transcript reader lives with the Claude
+  backend (not the generic module): reads `<home>/.claude/projects/*/<session_id>.jsonl`, sums
+  assistant `message.usage` (input/output only, `cache_*` excluded), captures `message.model`;
+  missing transcript → zeros + fallback model. Re-exported via `backend/mod.rs`.
 
 ### `tddy-tools`
 
@@ -95,5 +98,5 @@ rustfmt-style and compile clean under clippy.
 
 - `main.rs`: after the terminal bridge returns, read
   `<session_dir>/egress/accounting.json` (subagent conversations) + call
-  `tddy_core::token_accounting::read_main_agent_usage` for the main agent, then print
+  `tddy_core::backend::read_claude_transcript_usage` for the main agent, then print
   `format_token_summary` to stderr.

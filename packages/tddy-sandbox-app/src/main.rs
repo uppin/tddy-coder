@@ -382,7 +382,7 @@ async fn main() -> Result<()> {
 ///
 /// Merges the subagent conversation accounting the in-jail MCP server wrote to
 /// `<session_dir>/egress/accounting.json` with the main agent's own usage (summed from its
-/// transcript via [`tddy_core::token_accounting::read_main_agent_usage`]). Best-effort: a missing
+/// transcript via [`tddy_core::backend::read_claude_transcript_usage`]). Best-effort: a missing
 /// or unreadable accounting file simply contributes no subagent rows.
 fn print_token_summary(
     session_dir: &std::path::Path,
@@ -391,9 +391,8 @@ fn print_token_summary(
     model: &str,
     include_main_agent: bool,
 ) {
-    use tddy_core::token_accounting::{
-        format_token_summary, read_main_agent_usage, ConversationRecord,
-    };
+    use tddy_core::backend::read_claude_transcript_usage;
+    use tddy_core::token_accounting::{format_token_summary, ConversationRecord};
 
     #[derive(serde::Deserialize)]
     struct AccountingFile {
@@ -403,7 +402,11 @@ fn print_token_summary(
 
     let mut records = Vec::new();
     if include_main_agent {
-        records.push(read_main_agent_usage(claude_home_dir, session_id, model));
+        records.push(read_claude_transcript_usage(
+            claude_home_dir,
+            session_id,
+            model,
+        ));
     }
 
     let accounting_path = session_dir.join("egress").join("accounting.json");

@@ -1,10 +1,11 @@
-//! Per-conversation token accounting for a session: the canonical record shape shared by the
-//! subagent listing / accounting file, the summing of the main `claude` agent's own transcript,
-//! and the end-of-session summary `tddy-sandbox-app` prints.
+//! Per-conversation token accounting for a session: the canonical, agent-neutral record shape
+//! shared by the subagent listing / accounting file and the end-of-session summary
+//! `tddy-sandbox-app` prints.
+//!
+//! Agent-specific token *sources* live with their backend, not here — e.g. summing the Claude
+//! agent's own transcript is [`crate::backend::read_claude_transcript_usage`].
 //!
 //! Feature: docs/ft/coder/session-token-accounting.md
-
-use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -72,60 +73,4 @@ pub fn format_token_summary(session_id: &str, records: &[ConversationRecord]) ->
         "TOTAL: in={total_in} out={total_out} total={total}"
     ));
     lines.join("\n")
-}
-
-/// Sum the main `claude` agent's token usage from its transcript.
-///
-/// The runner spawns `claude --session-id <session_id>`, so Claude Code writes the transcript to
-/// `<claude_home>/.claude/projects/<encoded-cwd>/<session_id>.jsonl`. We find it by session id
-/// (unique) rather than reconstructing the cwd encoding: for each project subdir, read
-/// `<session_id>.jsonl` if present and fold every assistant message's `message.usage`
-/// input/output counts (Claude's separate `cache_*` counters are intentionally not folded into
-/// input), counting each assistant line as one turn and taking the model from those lines.
-///
-/// When no transcript exists, the record reports zero tokens with `fallback_model` — never an
-/// error, so the summary still renders a main-agent row.
-pub fn read_main_agent_usage(
-    claude_home: &Path,
-    session_id: &str,
-    fallback_model: &str,
-) -> ConversationRecord {
-    let mut usage = TokenUsage::default();
-    let mut turns = 0u32;
-    let mut model: Option<String> = None;
-
-    let projects_dir = claude_home.join(".claude").join("projects");
-    if let Ok(entries) = std::fs::read_dir(&projects_dir) {
-        for entry in entries.flatten() {
-            let transcript = entry.path().join(format!("{session_id}.jsonl"));
-            let Ok(contents) = std::fs::read_to_string(&transcript) else {
-                continue;
-            };
-            for line in contents.lines() {
-                let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-                    continue;
-                };
-                if value.get("type").and_then(|t| t.as_str()) != Some("assistant") {
-                    continue;
-                }
-                let message = &value["message"];
-                usage.input_tokens += message["usage"]["input_tokens"].as_u64().unwrap_or(0);
-                usage.output_tokens += message["usage"]["output_tokens"].as_u64().unwrap_or(0);
-                if let Some(m) = message["model"].as_str() {
-                    model = Some(m.to_string());
-                }
-                turns += 1;
-            }
-        }
-    }
-
-    ConversationRecord {
-        agent: "claude".to_string(),
-        id: session_id.to_string(),
-        model: model.unwrap_or_else(|| fallback_model.to_string()),
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        total_tokens: usage.total(),
-        turns,
-    }
 }
