@@ -75,11 +75,15 @@ rustfmt-style and compile clean under clippy.
   (serde camelCase: `inputTokens`/`outputTokens`/`totalTokens`) shared by the accounting
   file, the `subagent_list` output, and the summary; `format_token_summary(session_id,
   records) -> String` (per-record lines + TOTAL row).
-- `backend/claude.rs`: `read_claude_transcript_usage(claude_home, session_id, fallback_model)
-  -> ConversationRecord` — the Claude-Code-specific transcript reader lives with the Claude
-  backend (not the generic module): reads `<home>/.claude/projects/*/<session_id>.jsonl`, sums
-  assistant `message.usage` (input/output only, `cache_*` excluded), captures `message.model`;
-  missing transcript → zeros + fallback model. Re-exported via `backend/mod.rs`.
+- `backend/claude.rs`: the Claude-Code-specific transcript readers live with the Claude backend
+  (not the generic module), re-exported via `backend/mod.rs`:
+  - `read_claude_transcript_usage(...)` → main-thread `ConversationRecord` from
+    `<home>/.claude/projects/*/<session_id>.jsonl` (assistant `message.usage`, input/output only,
+    `cache_*` excluded); missing transcript → zeros + fallback model.
+  - `read_claude_subagent_usages(...)` → one `ConversationRecord` per nested Task-tool subagent
+    from `<project>/<session_id>/subagents/agent-*.jsonl` (agent name from the sibling
+    `.meta.json` `agentType`, id from the file stem), sorted by id.
+  - shared `sum_assistant_usage` helper folds a transcript's assistant `message.usage`.
 
 ### `tddy-tools`
 
@@ -97,6 +101,6 @@ rustfmt-style and compile clean under clippy.
 ### `tddy-sandbox-app`
 
 - `main.rs`: after the terminal bridge returns, read
-  `<session_dir>/egress/accounting.json` (subagent conversations) + call
-  `tddy_core::backend::read_claude_transcript_usage` for the main agent, then print
-  `format_token_summary` to stderr.
+  `<session_dir>/egress/accounting.json` (tddy subagent conversations) + call
+  `tddy_core::backend::{read_claude_transcript_usage, read_claude_subagent_usages}` for the main
+  Claude agent and its nested Task subagents, then print `format_token_summary` to stderr.

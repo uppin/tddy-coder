@@ -380,10 +380,11 @@ async fn main() -> Result<()> {
 
 /// Print the per-conversation token breakdown for the finished session to stderr.
 ///
-/// Merges the subagent conversation accounting the in-jail MCP server wrote to
-/// `<session_dir>/egress/accounting.json` with the main agent's own usage (summed from its
-/// transcript via [`tddy_core::backend::read_claude_transcript_usage`]). Best-effort: a missing
-/// or unreadable accounting file simply contributes no subagent rows.
+/// Combines three sources: the main Claude agent's own usage (from its transcript, via
+/// [`tddy_core::backend::read_claude_transcript_usage`]), each of Claude's nested Task-tool
+/// subagents ([`tddy_core::backend::read_claude_subagent_usages`]), and the tddy subagent
+/// conversations the in-jail MCP server wrote to `<session_dir>/egress/accounting.json`.
+/// Best-effort: a missing or unreadable accounting file simply contributes no tddy-subagent rows.
 fn print_token_summary(
     session_dir: &std::path::Path,
     session_id: &str,
@@ -391,7 +392,7 @@ fn print_token_summary(
     model: &str,
     include_main_agent: bool,
 ) {
-    use tddy_core::backend::read_claude_transcript_usage;
+    use tddy_core::backend::{read_claude_subagent_usages, read_claude_transcript_usage};
     use tddy_core::token_accounting::{format_token_summary, ConversationRecord};
 
     #[derive(serde::Deserialize)]
@@ -403,6 +404,11 @@ fn print_token_summary(
     let mut records = Vec::new();
     if include_main_agent {
         records.push(read_claude_transcript_usage(
+            claude_home_dir,
+            session_id,
+            model,
+        ));
+        records.extend(read_claude_subagent_usages(
             claude_home_dir,
             session_id,
             model,
