@@ -474,6 +474,7 @@ async fn start_session_rpc_threads_permission_mode_to_pty() {
             sandbox: false,
             managed_codebase: false,
             specialized_agents: vec![],
+            ..Default::default()
         }))
         .await
         .expect("StartSession with permission_mode must succeed");

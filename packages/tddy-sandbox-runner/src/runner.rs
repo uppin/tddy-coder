@@ -30,9 +30,7 @@ use tddy_service::tonic_sandbox::sandbox_service_server::{
 use tddy_sandbox::{
     append_line, egress_log_path, session_id_from_env, SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG,
 };
-use tddy_sandbox_recipes::{
-    append_claude_mcp_args, claude_scratch_mcp_dir,
-};
+use tddy_sandbox_recipes::{append_claude_mcp_args, claude_scratch_mcp_dir};
 
 /// Hosts `connection.ConnectionService/ExecuteTool` over the tool-IPC socket, using `tddy-rpc`'s
 /// length-prefixed framing instead of the old unframed single-`read()`/`write_all()` JSON
@@ -2045,14 +2043,15 @@ pub type SandboxClient = tddy_service::tonic_sandbox::sandbox_service_client::Sa
     tonic::transport::Channel,
 >;
 
-/// Connect a tonic client to the sandbox gRPC server over an AF_UNIX socket (Linux; survives the
-/// jail's network namespace). The HTTP authority is a required-but-ignored placeholder for the UDS
-/// connector.
-pub async fn connect_sandbox_client_uds(uds_path: &Path) -> Result<SandboxClient> {
+/// Build a tonic [`Channel`](tonic::transport::Channel) connected over an AF_UNIX socket (Linux;
+/// survives a jail/daemon network namespace). The HTTP authority is a required-but-ignored
+/// placeholder for the UDS connector. Reused by any AF_UNIX tonic client (the in-jail
+/// `SandboxService`, the daemon `ConnectionService`) so the connector pattern lives in one place.
+pub async fn connect_uds_channel(uds_path: &Path) -> Result<tonic::transport::Channel> {
     use hyper_util::rt::TokioIo;
 
     let uds_path = uds_path.to_path_buf();
-    let channel = tonic::transport::Endpoint::try_from("http://127.0.0.1:50051")
+    tonic::transport::Endpoint::try_from("http://127.0.0.1:50051")
         .context("build uds endpoint")?
         .connect_with_connector(tower::service_fn(move |_| {
             let uds_path = uds_path.clone();
@@ -2062,7 +2061,13 @@ pub async fn connect_sandbox_client_uds(uds_path: &Path) -> Result<SandboxClient
             }
         }))
         .await
-        .context("connect sandbox grpc uds")?;
+        .context("connect grpc uds")
+}
+
+/// Connect a tonic client to the sandbox gRPC server over an AF_UNIX socket (Linux; survives the
+/// jail's network namespace).
+pub async fn connect_sandbox_client_uds(uds_path: &Path) -> Result<SandboxClient> {
+    let channel = connect_uds_channel(uds_path).await?;
     Ok(tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient::new(channel))
 }
 

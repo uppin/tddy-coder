@@ -20,9 +20,9 @@ pub use claude_cli::{
 pub use cursor_cli::seed_cursor_local_install;
 pub use cursor_cli::{
     append_cursor_mcp_args, build_cursor_sandbox_argv, cursor_agent_prerequisite_reads,
-    prepare_cursor_mcp_config,
     cursor_credentials_copies, cursor_interactive_policy, cursor_runner_env_overlay,
-    process_cursor_exec_reads, seed_cursor_credentials, write_cursor_mcp_config,
+    prepare_cursor_mcp_config, process_cursor_exec_reads, seed_cursor_credentials,
+    write_cursor_mcp_config,
 };
 pub use plan::{
     build_process_plan, build_runner_plan, detect_recipe_from_argv, recipe_from_name,

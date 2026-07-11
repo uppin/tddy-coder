@@ -30,6 +30,37 @@ pub fn home_dir_for_user(_os_user: &str) -> Option<PathBuf> {
     None
 }
 
+/// OS username for a uid (from passwd, via the reentrant `getpwuid_r`). Injected into the local
+/// peer-trust path so a SO_PEERCRED peer uid can be matched against a configured `users[]` entry.
+#[cfg(unix)]
+pub fn username_for_uid(uid: u32) -> Option<String> {
+    let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
+    let mut buf = vec![0u8; 16384];
+    let mut result = std::ptr::null_mut();
+    let ret = unsafe {
+        libc::getpwuid_r(
+            uid as libc::uid_t,
+            passwd.as_mut_ptr(),
+            buf.as_mut_ptr() as *mut libc::c_char,
+            buf.len(),
+            &mut result,
+        )
+    };
+    if ret != 0 || result.is_null() {
+        return None;
+    }
+    let passwd = unsafe { &*result };
+    let name = unsafe { std::ffi::CStr::from_ptr(passwd.pw_name) }
+        .to_string_lossy()
+        .into_owned();
+    Some(name)
+}
+
+#[cfg(not(unix))]
+pub fn username_for_uid(_uid: u32) -> Option<String> {
+    None
+}
+
 /// Resolve the sessions base path for an OS user.
 ///
 /// If `config_dir` is `Some`, it is used directly (config is the single source of truth).

@@ -3,25 +3,37 @@
 //! Wraps the shared [`tddy_sandbox_runner::run_host_relay`] with an interactive front-end: real
 //! stdin/stdout in raw mode and Ctrl-C shutdown. Tool execution runs via [`tool_engine`].
 
+#[cfg(target_os = "macos")]
 use std::io::{Read, Write};
+#[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
 use std::sync::Arc;
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
 use anyhow::{Context, Result};
 use bytes::Bytes;
+#[cfg(target_os = "macos")]
 use tddy_daemon::tool_engine;
+#[cfg(target_os = "macos")]
 use tddy_sandbox_runner::{run_host_relay, ExecuteToolResponse, HostRelayConfig, HostToolHandler};
+#[cfg(target_os = "macos")]
 use tddy_task::TaskRegistry;
+#[cfg(target_os = "macos")]
 use tokio::sync::mpsc;
 
 /// Runs MCP tool calls in the host worktree via [`tool_engine`].
+#[cfg(target_os = "macos")]
 struct AppToolHandler {
     worktree: PathBuf,
     task_registry: TaskRegistry,
 }
 
+#[cfg(target_os = "macos")]
 #[async_trait::async_trait]
 impl HostToolHandler for AppToolHandler {
     async fn execute(
@@ -49,6 +61,7 @@ impl HostToolHandler for AppToolHandler {
 }
 
 /// Connect to the in-jail sandbox gRPC server and relay stdin/stdout until disconnect.
+#[cfg(target_os = "macos")]
 pub async fn run_terminal_bridge(
     ready_marker: &Path,
     session_id: &str,
@@ -183,7 +196,7 @@ pub async fn run_terminal_bridge(
 /// Both tuples are `(rows, cols)` (matching [`terminal_size_or_default`]'s return order); the OSC
 /// payload itself is `cols;rows`, matching the wire format `tddy_daemon::claude_cli_session::
 /// strip_resize` and `tddy_tools::pty_relay::encode_resize_osc` already use.
-fn resize_frame_if_changed(current: (u16, u16), last_sent: (u16, u16)) -> Option<Bytes> {
+pub(crate) fn resize_frame_if_changed(current: (u16, u16), last_sent: (u16, u16)) -> Option<Bytes> {
     if current == last_sent {
         return None;
     }
@@ -266,13 +279,13 @@ pub(crate) fn terminal_size_or_default() -> (u16, u16) {
     (24, 220)
 }
 
-struct RawMode {
+pub(crate) struct RawMode {
     #[cfg(unix)]
     saved: libc::termios,
 }
 
 impl RawMode {
-    fn enable() -> Self {
+    pub(crate) fn enable() -> Self {
         #[cfg(unix)]
         unsafe {
             let mut saved: libc::termios = std::mem::zeroed();
