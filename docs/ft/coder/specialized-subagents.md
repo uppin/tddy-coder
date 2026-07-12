@@ -159,6 +159,36 @@ of being limited to the single hardcoded FastContext discovery agent and CLI fla
     multi-select; toggling any on sets `managed_codebase: true` and includes the selected names in
     the `StartSessionRequest`.
 
+## Start-time warm-up gate
+
+When a sandbox session is started with one or more specialized agents wired in, the session-owning
+process **warms them up before launching the in-jail agent CLI** (`claude` / `agent`): it proactively
+"wakes" each resolved def's model endpoint and waits until every one answers, so a cold or unreachable
+model surfaces at session creation instead of stalling the main agent's first `subagent_prompt`.
+**Session creation/resume fails hard if any agent never becomes ready** within the budget — there is
+no fallback to starting the session anyway.
+
+- **Probe (backend-agnostic).** `POST {base_url}/v1/chat/completions` with the def's `model`, a
+  one-token `max_tokens`, `temperature: 0`, `stream: false`. A `200` means ready. The same probe warms
+  a local Ollama server (it triggers the model's blocking cold-load) and the default SGLang `:30000`
+  endpoint identically.
+- **Retry policy.** Connection errors, request timeouts, `408`/`429`, and `5xx` (including Ollama's
+  `502`) are **retryable transients** — retried on an interval until a total budget (default **120s**,
+  matching the sandbox-ready timeout) elapses. A definitive `404` (model not found) **fails fast**.
+- **Why `502` is transient, not "unloaded".** Per Ollama's API error docs, a `502` means a *cloud
+  model cannot be reached* (or a fronting proxy failed) — **not** "model not loaded." A local
+  cold-start is a blocking `200` (~5–30s). So `502` is treated as a transient reachability failure;
+  explicit waking still pays the cold-start cost up front and confirms the model actually answers.
+- **Where it runs.** `tddy-sandbox-app` (macOS in-process path) runs the gate before
+  `spawn_claude_sandbox`, with visible log output, and is Ctrl-C-interruptible. The daemon runs it in
+  the sandboxed **claude-cli** and **cursor-cli** start paths (after resolving defs, before spawning
+  the jail); a failure is returned as `failed_precondition`. Resume reuses the daemon start path, so it
+  is gated too.
+- **Implementation.** `tddy_discovery::warmup::warm_up_agents(defs, &WarmupOptions)` — the shared
+  readiness primitive used by both the app and the daemon. `WarmupOptions { timeout, retry_interval,
+  request_timeout }` is injectable so tests run in milliseconds. An empty def set is an immediate no-op
+  (no HTTP). Step output logs at target `tddy_discovery::warmup`.
+
 ## Non-goals (out of scope for v1)
 
 - Tool kinds beyond `READ`/`GLOB`/`GREP` (the registry/schema is extensible; only these three ship).
