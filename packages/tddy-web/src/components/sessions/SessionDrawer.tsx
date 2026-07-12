@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { SessionEntry } from "../../gen/connection_pb";
+import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
 import { groupSessionsByStack } from "../../utils/sessionStackGroups";
 import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
@@ -39,6 +40,8 @@ interface SessionDrawerProps {
   selectedInstanceId?: string;
   /** Turn a daemon instance id into its display label. Defaults to the identity function. */
   hostLabelForInstance?: (instanceId: string) => string;
+  /** Parsed `session` participant-metadata, keyed by session id (req 4). Defaults to empty. */
+  sessionMetadataBySessionId?: ReadonlyMap<string, SessionMetadata>;
 }
 
 interface StackGroup {
@@ -58,11 +61,13 @@ function SessionStackGroup({
   selectedSessionId,
   onSelectSession,
   owningHost,
+  sessionMetadataBySessionId,
 }: {
   group: StackGroup;
   selectedSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   owningHost: OwningHostInfo;
+  sessionMetadataBySessionId: ReadonlyMap<string, SessionMetadata>;
 }) {
   const [isOpen, setIsOpen] = useState(true);
 
@@ -73,6 +78,7 @@ function SessionStackGroup({
         isSelected={group.parent.sessionId === selectedSessionId}
         onClick={onSelectSession}
         hostLabel={badgeHostLabel(group.parent, owningHost)}
+        sessionMetadata={sessionMetadataBySessionId.get(group.parent.sessionId)}
       />
       {/* <details> provides the <summary> toggle target; children visibility is controlled explicitly via React state */}
       <details>
@@ -93,6 +99,7 @@ function SessionStackGroup({
             onClick={onSelectSession}
             depth={1}
             hostLabel={badgeHostLabel(child, owningHost)}
+            sessionMetadata={sessionMetadataBySessionId.get(child.sessionId)}
           />
         ))}
       </div>
@@ -111,6 +118,7 @@ export function SessionDrawer({
   isMobile = false,
   selectedInstanceId = "",
   hostLabelForInstance = (instanceId) => instanceId,
+  sessionMetadataBySessionId = new Map(),
 }: SessionDrawerProps) {
   const owningHost: OwningHostInfo = {
     selectedInstanceId,
@@ -222,6 +230,7 @@ export function SessionDrawer({
               selectedSessionId={selectedSessionId}
               onSelectSession={onSelectSession}
               owningHost={owningHost}
+              sessionMetadataBySessionId={sessionMetadataBySessionId}
             />
           ))}
           {flat.map((session) => (
@@ -231,6 +240,7 @@ export function SessionDrawer({
               isSelected={session.sessionId === selectedSessionId}
               onClick={onSelectSession}
               hostLabel={badgeHostLabel(session, owningHost)}
+              sessionMetadata={sessionMetadataBySessionId.get(session.sessionId)}
             />
           ))}
           {sessions.length === 0 && (

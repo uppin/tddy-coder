@@ -103,6 +103,61 @@ fn metadata_merge_preserves_codex_oauth_and_project_count() {
     );
 }
 
+#[test]
+fn metadata_merge_preserves_session_key_and_owned_project_count_mutually() {
+    // Regression guard for the `session` metadata key (changeset 2026-07-12-fast-session-change).
+    // The merge helper is generic and shallow-merges top-level keys, so a pre-existing `session`
+    // block must survive an `owned_project_count` update and vice versa. This test locks that
+    // contract so a future narrower merge can't silently drop the `session` block.
+
+    // Given a baseline carrying a `session` block, and an update carrying owned_project_count
+    let baseline = r#"{"session":{"workflow_goal":"acceptance-tests","workflow_state":"Red","agent":"claude","model":"sonnet-4"}}"#;
+    let update = format!(r#"{{"{key}":3}}"#, key = OWNED_PROJECT_COUNT_METADATA_KEY);
+
+    // When merging the update into the baseline
+    let merged =
+        merge_participant_metadata_json(baseline, &update).expect("merge returns JSON string");
+
+    // Then the `session` block survives alongside the new owned_project_count
+    let v: Value = serde_json::from_str(&merged).expect("merged parses as JSON");
+    assert_eq!(
+        v.get(OWNED_PROJECT_COUNT_METADATA_KEY)
+            .and_then(|x| x.as_u64()),
+        Some(3),
+        "merge must include owned_project_count from the update"
+    );
+    assert_eq!(
+        v.pointer("/session/workflow_goal").and_then(|x| x.as_str()),
+        Some("acceptance-tests"),
+        "merge must preserve the baseline `session` block"
+    );
+    assert_eq!(
+        v.pointer("/session/workflow_state")
+            .and_then(|x| x.as_str()),
+        Some("Red"),
+        "merge must preserve workflow_state from the baseline `session` block"
+    );
+
+    // And vice versa — a baseline with owned_project_count survives a `session` update
+    let baseline2 = format!(r#"{{"{key}":3}}"#, key = OWNED_PROJECT_COUNT_METADATA_KEY);
+    let update2 = r#"{"session":{"workflow_goal":"plan","workflow_state":"Plan"}}"#;
+    let merged2 =
+        merge_participant_metadata_json(&baseline2, update2).expect("merge returns JSON string");
+    let v2: Value = serde_json::from_str(&merged2).expect("merged parses as JSON");
+    assert_eq!(
+        v2.get(OWNED_PROJECT_COUNT_METADATA_KEY)
+            .and_then(|x| x.as_u64()),
+        Some(3),
+        "merge must preserve owned_project_count from the baseline when a `session` update arrives"
+    );
+    assert_eq!(
+        v2.pointer("/session/workflow_state")
+            .and_then(|x| x.as_str()),
+        Some("Plan"),
+        "merge must include the new `session` block from the update"
+    );
+}
+
 #[tokio::test]
 #[serial]
 async fn livekit_participant_metadata_includes_project_count() -> Result<()> {

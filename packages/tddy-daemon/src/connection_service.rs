@@ -2678,6 +2678,13 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         orchestrator_session_id: String::new(),
                         recipe: String::new(),
                         stack_plan_json: String::new(),
+                        // FIXME(2026-07-12-fast-session-change): populate from a per-session
+                        // traffic meter for GrpcSessionTerminal sessions the daemon owns.
+                        // Zero/empty is the honest value until that meter is wired; tddy-coder
+                        // sessions report live counters via the participant runtime instead.
+                        bytes_in: 0,
+                        bytes_out: 0,
+                        last_data_received_at: String::new(),
                     };
                     if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
                         &session_dir,
@@ -5398,6 +5405,33 @@ mod delete_session_unit_tests {
         assert!(result.is_err(), "invalid token should return error");
         assert_eq!(result.unwrap_err().code, tddy_rpc::Code::Unauthenticated);
     }
+
+    /// Daemon-direct contract (changeset 2026-07-12-fast-session-change): the web routes
+    /// `DeleteSession` directly to the daemon participant (`daemon-{instanceId}`) with the
+    /// caller's `session_token` — the coder is not on the path, so lifecycle control still works
+    /// when the coder participant is stuck. A caller with a valid token passes auth and reaches
+    /// session processing; with no such session on disk the result is a downstream error
+    /// (FailedPrecondition from `delete_session_directory`), NOT `Unauthenticated`. Behaviour is
+    /// unchanged from today (delete was always daemon-served); this test locks the contract.
+    #[tokio::test]
+    async fn delete_session_unit_accepts_daemon_direct_caller_with_valid_token() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = make_unit_service(temp.path().to_path_buf());
+        let request = Request::new(DeleteSessionRequest {
+            session_token: "valid".to_string(),
+            session_id: "no-such-session".to_string(),
+        });
+        let result = service.delete_session(request).await;
+        assert!(result.is_err(), "missing session should return an error");
+        let code = result.unwrap_err().code;
+        assert_ne!(
+            code,
+            tddy_rpc::Code::Unauthenticated,
+            "relay caller with a valid token must pass the auth boundary (got {code:?}); \
+             the daemon must treat the coder relay's forwarded session_token identically to a \
+             direct web call"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -6573,7 +6607,9 @@ mod terminal_output_chunking_tests {
         // A one-megabyte session history must yield more than one frame — the whole point of the
         // change is that an oversized single frame can exceed the data-channel message limit and
         // never reach the browser. This guards the constant against being set unhelpfully large.
-        assert!(TERMINAL_OUTPUT_FRAME_MAX_BYTES > 0);
-        assert!(TERMINAL_OUTPUT_FRAME_MAX_BYTES < 1024 * 1024);
+        const _: () = {
+            assert!(TERMINAL_OUTPUT_FRAME_MAX_BYTES > 0);
+            assert!(TERMINAL_OUTPUT_FRAME_MAX_BYTES < 1024 * 1024);
+        };
     }
 }

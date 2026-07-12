@@ -45,6 +45,19 @@ const noopHandlers = {
   onTerminate: () => undefined,
 };
 
+/** A single attached gRPC runtime for SESSION_ID — enough for the runtime layer to render the
+ *  focused terminal container marker that the overlay/Claim CTA hang off of. */
+const aFocusedGrpcRuntime = [
+  {
+    sessionId: SESSION_ID,
+    attached: true,
+    status: "connected-grpc" as const,
+    bytesIn: 0,
+    bytesOut: 0,
+    lastDataReceivedAt: null,
+  },
+];
+
 // ---------------------------------------------------------------------------
 // AC1: When this screen is not the controller, the "Claim terminal" overlay is visible.
 // ---------------------------------------------------------------------------
@@ -64,6 +77,8 @@ it("shows Claim terminal CTA overlay when this screen does not hold the control 
         holderScreenId: "other-screen-abc",
         onClaim,
       }}
+      runtimes={aFocusedGrpcRuntime}
+      focusedRuntimeId={SESSION_ID}
     />,
   );
 
@@ -92,6 +107,8 @@ it("clicking Claim terminal calls onClaim callback", () => {
         holderScreenId: "other-screen-xyz",
         onClaim,
       }}
+      runtimes={aFocusedGrpcRuntime}
+      focusedRuntimeId={SESSION_ID}
     />,
   );
 
@@ -118,6 +135,8 @@ it("does not show the Claim terminal overlay when this screen holds the control 
         holderScreenId: "this-screen-id",
         onClaim: cy.stub(),
       }}
+      runtimes={aFocusedGrpcRuntime}
+      focusedRuntimeId={SESSION_ID}
     />,
   );
 
@@ -138,6 +157,8 @@ it("does not show the overlay when terminalControl prop is absent", () => {
       {...noopHandlers}
       selectedSession={aSelectedSession as SessionEntry}
       attachment={aConnectedGrpcAttachment}
+      runtimes={aFocusedGrpcRuntime}
+      focusedRuntimeId={SESSION_ID}
     />,
   );
 

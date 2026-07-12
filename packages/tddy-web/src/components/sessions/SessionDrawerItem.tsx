@@ -2,6 +2,7 @@ import React from "react";
 import type { SessionEntry } from "../../gen/connection_pb";
 import { sessionDrawerLabel } from "../../utils/sessionDrawerLabel";
 import { connectionStatusForSession } from "../../utils/connectionStatusForSession";
+import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
 import { cn } from "../../lib/utils";
 
@@ -12,6 +13,8 @@ interface SessionDrawerItemProps {
   depth?: number;
   /** Owning-host label for a cross-host row; `null`/omitted for rows on the selected host. */
   hostLabel?: string | null;
+  /** Parsed `session` participant-metadata block for this row (presence-driven, req 4). */
+  sessionMetadata?: SessionMetadata | null;
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -20,7 +23,7 @@ const STATUS_COLOR: Record<string, string> = {
   "needs-input": "bg-yellow-500",
 };
 
-export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLabel }: SessionDrawerItemProps) {
+export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLabel, sessionMetadata }: SessionDrawerItemProps) {
   const label = sessionDrawerLabel(session);
   const status = connectionStatusForSession(session);
 
@@ -70,6 +73,22 @@ export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLab
       >
         {session.sessionId}
       </TooltipContent>
+      {/* Parsed `session` participant-metadata block (req 4) — presence-driven from LiveKit. */}
+      {sessionMetadata && (
+        <div
+          data-testid={`sessions-drawer-item-session-meta-${session.sessionId}`}
+          className="px-3 pb-1 -mt-1 text-[10px] leading-tight text-muted-foreground"
+        >
+          <span className="truncate block">{sessionMetadata.workflowGoal}</span>
+          <span className="flex items-center gap-1">
+            <span>{sessionMetadata.workflowState}</span>
+            <span>·</span>
+            <span>{sessionMetadata.agent}</span>
+            <span>·</span>
+            <span>{sessionMetadata.model}</span>
+          </span>
+        </div>
+      )}
     </Tooltip>
   );
 }

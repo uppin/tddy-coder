@@ -1,15 +1,21 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { create } from "@bufbuild/protobuf";
 import { createClient, type Client } from "@connectrpc/connect";
+import type { Room } from "livekit-client";
 import { ConnectionService, SessionEntrySchema, type SessionEntry } from "../../gen/connection_pb";
 import { TokenService } from "../../gen/token_pb";
-import { useHttpClient, useLiveKitTransportFactory } from "../../rpc/transportProvider";
+import {
+  useHttpClient,
+  useLiveKitTransportFactory,
+  useLiveKitTransportFactoryIsOverridden,
+} from "../../rpc/transportProvider";
 import { useDaemonClient, useDaemonClientFor, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { daemonRpcIdentity } from "../../lib/participantRole";
 import { owningHostForSession } from "../../utils/crossHostSessions";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";
 import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
 import { useSessionManager } from "./sessionManager";
+import { SessionRuntimeRegistry, type SessionRuntimeConnection } from "./sessionRuntimeRegistry";
 import { useAuthContext } from "../../hooks/authProvider";
 import { DaemonSelectorConnected } from "../shell/DaemonSelector";
 import { TooltipProvider } from "../ui/tooltip";
@@ -85,14 +91,72 @@ export function SessionsDrawerScreen() {
     attachment.status === "connected-grpc" || attachment.status === "connected-livekit"
       ? attachment.sessionId
       : null;
-  const { controlState, controlTokenRef, claim: claimControl } = useTerminalControl(connectedSessionId, sessionToken);
+
+  // Per-session runtime registry: one entry per attached session, surviving focus switches.
+  // The inspector reads byte counters + last-received from it for active sessions; inactive sessions
+  // fall back to the daemon-sourced `SessionEntry` fields (req 5 dual source). Created once and kept
+  // in a ref so the `SessionRuntimeRegistry` instance (and its cached `runtimes` snapshot) is stable
+  // across renders — must be instantiated before any callback that touches it (buildSessionClient,
+  // onSessionRoom, onSessionDisconnect).
+  const runtimeRegistryRef = useRef<SessionRuntimeRegistry | null>(null);
+  runtimeRegistryRef.current ??= new SessionRuntimeRegistry();
+  const runtimeRegistry = runtimeRegistryRef.current;
+  const runtimes = useSyncExternalStore(
+    (listener) => runtimeRegistry.subscribe(listener),
+    () => runtimeRegistry.runtimes,
+    () => runtimeRegistry.runtimes,
+  );
+
+  // Session-scoped ConnectionService client (targets the coder participant
+  // `daemon-{ownerInstanceId}-{sessionId}` = `attachment.livekitServerIdentity`). Built LAZILY — only
+  // when the user actually invokes a session-scoped RPC (ExecuteTool, ClaimTerminalControl) — so that
+  // lifecycle RPCs (Delete/Signal/Resume/Connect) and the auto-claim-on-attach stay daemon-direct and
+  // do not record the session-participant identity. In production the session's own LiveKit `Room`
+  // (captured via the terminal's `onRoom`) is the transport room; in tests the test-double
+  // `liveKitFactory` ignores its `room` argument, so the common room is an acceptable stand-in.
+  const liveKitFactoryIsOverridden = useLiveKitTransportFactoryIsOverridden();
+  const buildSessionClient = useCallback((): Client<typeof ConnectionService> | null => {
+    if (!connectedSessionId) return null;
+    if (attachment.status !== "connected-livekit") return null;
+    const targetIdentity = attachment.livekitServerIdentity;
+    if (!targetIdentity) return null;
+    const sessionRoom =
+      runtimeRegistry.get(connectedSessionId)?.room ?? (liveKitFactoryIsOverridden ? room : null);
+    if (!sessionRoom) return null;
+    return createClient(ConnectionService, liveKitFactory(sessionRoom, targetIdentity));
+  }, [connectedSessionId, attachment, room, liveKitFactory, liveKitFactoryIsOverridden, runtimeRegistry]);
+
+  const { controlState, controlTokenRef, claim: claimControl } = useTerminalControl(
+    connectedSessionId,
+    sessionToken,
+    buildSessionClient,
+  );
+
+  // Capture a session's connected LiveKit `Room` (fired by the terminal after `room.connect`) so
+  // `buildSessionClient` can route session-scoped RPCs over the session's own room in production.
+  const onSessionRoom = useCallback(
+    (sessionId: string, sessionRoom: Room) => {
+      runtimeRegistry.setRoom(sessionId, sessionRoom);
+    },
+    [runtimeRegistry],
+  );
+
+  // Disconnect a runtime terminal. Evicts the session's runtime; if it is the focused/attached
+  // session, also resets the attachment so the screen re-evaluates state for the next selection.
+  const onSessionDisconnect = useCallback(
+    (sessionId: string) => {
+      runtimeRegistry.disconnect(sessionId);
+      if (sessionId === connectedSessionId) resetAttachment();
+    },
+    [runtimeRegistry, connectedSessionId, resetAttachment],
+  );
 
   // The merged session list, refresh, and change events all live in one place: `SessionManager`. It
   // unions the selected host's sessions (from ListSessions, refreshed via the window-bound
   // `sessionsRefreshBridge`) with the live cross-host sessions observed as common-room coder
   // participants — LiveKit presence is the keep-alive that makes a non-selected host's session visible.
   const participants = useRoomParticipants(room);
-  const { sessions: sortedSessions, addOptimisticSession } = useSessionManager(
+  const { sessions: sortedSessions, addOptimisticSession, sessionMetadataBySessionId } = useSessionManager(
     client,
     sessionToken,
     participants,
@@ -103,6 +167,60 @@ export function SessionsDrawerScreen() {
     () => sortedSessions.find((s) => s.sessionId === selectedSessionId) ?? null,
     [sortedSessions, selectedSessionId],
   );
+
+  // Register a session in the runtime registry on successful attach, storing the connection
+  // params so the runtime layer can render its terminal independently of the focused attachment.
+  // `lastDataReceivedAt` starts at the attach moment so the inspector reads "0s ago" before the
+  // first DataReceived event lands. Re-attach (an existing backgrounded runtime) refreshes the
+  // connection params without resetting byte counters.
+  useEffect(() => {
+    if (attachment.status !== "connected-livekit" && attachment.status !== "connected-grpc") return;
+    if (!attachment.sessionId) return;
+    const conn: SessionRuntimeConnection =
+      attachment.status === "connected-livekit"
+        ? {
+            status: "connected-livekit",
+            livekitUrl: attachment.livekitUrl,
+            livekitRoom: attachment.livekitRoom,
+            livekitServerIdentity: attachment.livekitServerIdentity,
+            identity: attachment.identity,
+          }
+        : { status: "connected-grpc", livekitUrl: "", livekitRoom: "", livekitServerIdentity: "", identity: "" };
+    const existing = runtimeRegistry.get(attachment.sessionId);
+    if (!existing) {
+      runtimeRegistry.add(attachment.sessionId, {
+        sessionId: attachment.sessionId,
+        attached: true,
+        ...conn,
+        bytesIn: 0,
+        bytesOut: 0,
+        lastDataReceivedAt: Date.now(),
+      });
+    } else {
+      runtimeRegistry.updateConnection(attachment.sessionId, conn);
+    }
+    runtimeRegistry.focus(attachment.sessionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachment.status, attachment.sessionId]);
+
+  // Compute the inspector traffic source for the selected session: live runtime (active) wins;
+  // otherwise the daemon-sourced `SessionEntry` fields (inactive / non-LiveKit sessions).
+  const selectedTraffic = useMemo(() => {
+    if (!selectedSession) return null;
+    const live = runtimeRegistry.get(selectedSession.sessionId);
+    if (live) {
+      return { bytesIn: live.bytesIn, bytesOut: live.bytesOut, lastDataReceivedAt: live.lastDataReceivedAt };
+    }
+    const fromEntry = Number(selectedSession.bytesIn ?? 0n) || 0;
+    const fromEntryOut = Number(selectedSession.bytesOut ?? 0n) || 0;
+    const lastStr = selectedSession.lastDataReceivedAt ?? "";
+    const lastNum = lastStr ? Number(lastStr) : null;
+    return {
+      bytesIn: fromEntry,
+      bytesOut: fromEntryOut,
+      lastDataReceivedAt: Number.isFinite(lastNum) ? (lastNum as number) : null,
+    };
+  }, [selectedSession, runtimes, runtimeRegistry]);
 
   // The daemon that owns the selected session — cross-host interaction (connect, resume, delete,
   // terminate) must reach that daemon, not the selected one.
@@ -337,6 +455,7 @@ export function SessionsDrawerScreen() {
             isMobile={isMobile}
             selectedInstanceId={selectedInstanceId ?? ""}
             hostLabelForInstance={hostLabelForInstance}
+            sessionMetadataBySessionId={sessionMetadataBySessionId}
           />
           <SessionMainPane
             selectedSession={selectedSession}
@@ -357,9 +476,14 @@ export function SessionsDrawerScreen() {
             onSessionCreated={handleSessionCreated}
             terminalControl={connectedSessionId ? { ...controlState, onClaim: claimControl } : undefined}
             controlTokenRef={connectedSessionId ? controlTokenRef : undefined}
-            onDisconnect={resetAttachment}
             mobileShortcuts={mobileShortcuts}
             onChildSessionStarted={handleChildSessionStarted}
+            traffic={selectedTraffic}
+            runtimes={runtimes}
+            focusedRuntimeId={runtimeRegistry.focusedSessionId}
+            onSessionRoom={onSessionRoom}
+            onSessionDisconnect={onSessionDisconnect}
+            buildSessionClient={buildSessionClient}
           />
         </div>
       </div>

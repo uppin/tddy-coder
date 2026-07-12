@@ -26,6 +26,7 @@ import {
   sessionsScreenSharingStartBtn,
   sessionsScreenSharingStopBtn,
   sessionsScreenSharingRemoveBtn,
+  sessionsRuntimeTerminal,
   sessionsUsageRow,
   sessionsUsageRowAgent,
   sessionsUsageRowModel,
@@ -412,4 +413,35 @@ export const sessionsDrawerPage = {
   /** The `<video>` element inside the screen-sharing overlay. */
   screenSharingOverlayVideo: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.screenSharingOverlayVideo, { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
+  // Fast Session Change — runtime registry + background terminals + inspector I/O
+  // ---------------------------------------------------------------------------
+
+  /** The hidden layer that keeps one mounted terminal per attached session. */
+  runtimeLayer: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsRuntimeLayer, { timeout: 5000, ...options }),
+
+  /** A per-session terminal container mounted in the runtime registry. */
+  runtimeTerminal: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsRuntimeTerminal(sessionId), { timeout: 10000, ...options }),
+
+  /** Cumulative inbound bytes for the focused session (inspector Details tab). */
+  inspectorBytesIn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorBytesIn, { timeout: 5000, ...options }),
+
+  /** Cumulative outbound bytes for the focused session (inspector Details tab). */
+  inspectorBytesOut: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorBytesOut, { timeout: 5000, ...options }),
+
+  /** The "last data received: Ns ago" relative timestamp (inspector Details tab). */
+  inspectorLastDataReceived: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorLastDataReceived, { timeout: 5000, ...options }),
+
+  /** The parsed `session` participant-metadata block on a drawer row. */
+  drawerItemSessionMeta: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(
+      `${TEST_IDS.sessionsDrawerItemSessionMeta}-${sessionId}`,
+      { timeout: 5000, ...options },
+    ),
 };

@@ -59,9 +59,18 @@ async function runControlSession(
 export function useTerminalControl(
   sessionId: string | null,
   sessionToken: string,
+  /**
+   * Optional lazy builder for a session-scoped `ConnectionService` client (targets the coder
+   * participant `daemon-{instanceId}-{sessionId}`). When provided, the explicit `claim()` (the
+   * "Claim terminal" button, steal=true) routes through it. The auto-claim-on-attach (steal=false)
+   * always uses the daemon client below so control is still acquired automatically when no one else
+   * holds the lease. `null`/`undefined` falls back to the daemon client for both paths.
+   */
+  buildSessionClient?: () => Client<typeof ConnectionService> | null,
 ): UseTerminalControlResult {
   // ConnectionService is daemon-level RPC — routed to the currently selected daemon (see
-  // `SelectedDaemonProvider`). `null` until a daemon is selected / the room is connected.
+  // `SelectedDaemonProvider`). `null` until a daemon is selected / the room is connected. Used for
+  // the auto-claim-on-attach (steal=false) and as the fallback for the explicit claim.
   const client = useDaemonClient(ConnectionService);
   const [controlState, setControlState] = useState<TerminalControlState>(
     initialTerminalControlState,
@@ -90,9 +99,13 @@ export function useTerminalControl(
   }, [sessionId, sessionToken, client, screenId]);
 
   const claim = useCallback(async () => {
-    if (!sessionId || !client) return;
+    if (!sessionId) return;
+    // Route the explicit steal-claim through the session participant when a session-scoped client
+    // is available; otherwise fall back to the daemon participant.
+    const claimClient = buildSessionClient?.() ?? client;
+    if (!claimClient) return;
     try {
-      const resp = await client.claimTerminalControl({
+      const resp = await claimClient.claimTerminalControl({
         sessionToken,
         sessionId,
         screenId,
@@ -105,7 +118,7 @@ export function useTerminalControl(
     } catch {
       // network/auth error — state remains isController:false, user may retry
     }
-  }, [sessionId, sessionToken, client, screenId]);
+  }, [sessionId, sessionToken, client, screenId, buildSessionClient]);
 
   const reset = useCallback(() => {
     controlTokenRef.current = "";

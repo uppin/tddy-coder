@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import type { Client } from "@connectrpc/connect";
 import { ConnectionService, type SessionEntry } from "../../gen/connection_pb";
+import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
 import { sortSessionsByCreation } from "../../utils/sessionSort";
 import {
   mergeActiveAndFetchedSessions,
@@ -32,6 +33,7 @@ export class SessionManager {
   private selectedInstanceId = "";
   private fetcher: SessionFetcher | null = null;
   private cached: SessionEntry[] = [];
+  private cachedSessionMetadata: ReadonlyMap<string, SessionMetadata> = new Map();
   private readonly listeners = new Set<() => void>();
   private unsubscribeBridge: (() => void) | null = null;
 
@@ -87,6 +89,15 @@ export class SessionManager {
     return this.cached;
   }
 
+  /**
+   * Per-session `session` metadata parsed from live participants, keyed by `sessionId`. Updated on
+   * every recompute. The screen overlays these onto drawer rows + the inspector for active
+   * sessions whose metadata is richer than the daemon's `ListSessions` enrichment.
+   */
+  get sessionMetadataBySessionId(): ReadonlyMap<string, SessionMetadata> {
+    return this.cachedSessionMetadata;
+  }
+
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => {
@@ -105,6 +116,11 @@ export class SessionManager {
         this.selectedInstanceId,
       ),
     );
+    const meta = new Map<string, SessionMetadata>();
+    for (const p of this.activeParticipants) {
+      if (p.sessionMetadata) meta.set(p.sessionId, p.sessionMetadata);
+    }
+    this.cachedSessionMetadata = meta;
     for (const listener of this.listeners) listener();
   }
 }
@@ -117,9 +133,13 @@ export class SessionManager {
 export function useSessionManager(
   client: Client<typeof ConnectionService> | null,
   sessionToken: string,
-  participants: ReadonlyArray<{ identity: string }>,
+  participants: ReadonlyArray<{ identity: string; metadata?: string }>,
   selectedInstanceId: string,
-): { sessions: SessionEntry[]; addOptimisticSession: (entry: SessionEntry) => void } {
+): {
+  sessions: SessionEntry[];
+  addOptimisticSession: (entry: SessionEntry) => void;
+  sessionMetadataBySessionId: ReadonlyMap<string, SessionMetadata>;
+} {
   const managerRef = useRef<SessionManager | null>(null);
   managerRef.current ??= new SessionManager();
   const manager = managerRef.current;
@@ -152,10 +172,16 @@ export function useSessionManager(
     () => manager.sessions,
   );
 
+  const sessionMetadataBySessionId = useSyncExternalStore(
+    (listener) => manager.subscribe(listener),
+    () => manager.sessionMetadataBySessionId,
+    () => manager.sessionMetadataBySessionId,
+  );
+
   const addOptimisticSession = useCallback(
     (entry: SessionEntry) => manager.addOptimisticSession(entry),
     [manager],
   );
 
-  return { sessions, addOptimisticSession };
+  return { sessions, addOptimisticSession, sessionMetadataBySessionId };
 }

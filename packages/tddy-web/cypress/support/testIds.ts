@@ -198,6 +198,18 @@ export const TEST_IDS = {
   sessionTrafficRateOut: "session-traffic-rate-out",
   sessionTrafficPing: "session-traffic-ping",
 
+  // Fast Session Change — per-session runtime registry + background terminals
+  /** The hidden layer that keeps one mounted terminal per attached session. */
+  sessionsRuntimeLayer: "sessions-runtime-layer",
+  /** Inspector Details tab — cumulative inbound bytes for the session. */
+  sessionsInspectorBytesIn: "sessions-inspector-bytes-in",
+  /** Inspector Details tab — cumulative outbound bytes for the session. */
+  sessionsInspectorBytesOut: "sessions-inspector-bytes-out",
+  /** Inspector Details tab — "last data received: Ns ago" relative timestamp. */
+  sessionsInspectorLastDataReceived: "sessions-inspector-last-data-received",
+  /** Drawer row — container for parsed `session` participant metadata (goal/state/agent/model). */
+  sessionsDrawerItemSessionMeta: "sessions-drawer-item-session-meta",
+
   // Terminal control mutex — "Claim terminal" CTA
   terminalControlOverlay: "terminal-control-overlay",
   terminalClaimBtn: "terminal-claim-btn",
@@ -423,6 +435,12 @@ export const sessionsInspectorDeleteConfirm = (sessionId: string) =>
 /** `[data-testid="sessions-inspector-terminate-<sessionId>"]` — Terminate button in inspector */
 export const sessionsInspectorTerminateBtn = (sessionId: string) =>
   `sessions-inspector-terminate-${sessionId}`;
+
+/** `[data-testid="sessions-runtime-terminal-<sessionId>"]` — per-session terminal container
+ *  mounted in the runtime registry (one per attached session; the focused one is CSS-visible,
+ *  the others are `display:none` but still mounted). */
+export const sessionsRuntimeTerminal = (sessionId: string) =>
+  `sessions-runtime-terminal-${sessionId}`;
 
 // ---------------------------------------------------------------------------
 // Tasks drawer screen dynamic helpers

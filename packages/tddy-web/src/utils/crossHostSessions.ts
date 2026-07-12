@@ -14,12 +14,15 @@
 
 import { create } from "@bufbuild/protobuf";
 import { SessionEntrySchema, type SessionEntry } from "../gen/connection_pb";
+import { parseSessionParticipantMetadata, type SessionMetadata } from "../lib/sessionParticipantMetadata";
 
 /** A live session observed as a coder participant in the common room. */
 export interface SessionParticipant {
   readonly sessionId: string;
   /** Owning daemon instance id, parsed from the identity; empty for a single-daemon `daemon-<id>`. */
   readonly owningInstanceId: string;
+  /** Parsed `session` metadata block published by the coder participant, when present. */
+  readonly sessionMetadata?: SessionMetadata;
 }
 
 const SESSION_ID_UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -44,10 +47,11 @@ export function parseSessionParticipantIdentity(identity: string): SessionPartic
 
 /**
  * The live sessions observed among `participants`, de-duplicated by session id (first-seen wins).
- * Mirrors `daemonHostsFromParticipants` for daemons.
+ * Mirrors `daemonHostsFromParticipants` for daemons. Parses each participant's `session` metadata
+ * block (req 4) so the drawer row can render goal/state/agent/model from presence.
  */
 export function sessionParticipantsFromParticipants(
-  participants: ReadonlyArray<{ identity: string }>,
+  participants: ReadonlyArray<{ identity: string; metadata?: string }>,
 ): SessionParticipant[] {
   const seen = new Set<string>();
   const sessions: SessionParticipant[] = [];
@@ -55,7 +59,12 @@ export function sessionParticipantsFromParticipants(
     const parsed = parseSessionParticipantIdentity(p.identity);
     if (!parsed || seen.has(parsed.sessionId)) continue;
     seen.add(parsed.sessionId);
-    sessions.push(parsed);
+    const sessionMetadata = p.metadata ? parseSessionParticipantMetadata(p.metadata) : null;
+    sessions.push({
+      sessionId: parsed.sessionId,
+      owningInstanceId: parsed.owningInstanceId,
+      sessionMetadata: sessionMetadata ?? undefined,
+    });
   }
   return sessions;
 }
