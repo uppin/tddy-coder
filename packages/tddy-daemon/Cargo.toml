@@ -46,6 +46,7 @@ tddy-stdio = { path = "../tddy-stdio" }
 tddy-service = { path = "../tddy-service" }
 tddy-actions = { path = "../tddy-actions" }
 tddy-task = { path = "../tddy-task" }
+tddy-tool-engine = { path = "../tddy-tool-engine" }
 tokio-stream = "0.1"
 tokio-util = "0.7"
 tddy-vm = { path = "../tddy-vm" }

@@ -14,6 +14,7 @@ import { SessionUsageTab } from "./SessionUsageTab";
 import { SessionVncTab } from "./SessionVncTab";
 import { SessionScreenSharingTab } from "./SessionScreenSharingTab";
 import { useHttpClient } from "../../rpc/transportProvider";
+import { formatLastDataReceived } from "./lastDataReceivedFormat";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,6 +37,14 @@ interface SessionInspectorDrawerProps {
   /** LiveKit participant identity of the daemon/presenter side, for the token-usage stream.
    *  Selected together with `room`; falls back to `"server"` when not connected over LiveKit. */
   serverIdentity?: string;
+  /** Inspector I/O traffic (req 5): byte counters + last-received. Live runtime for active
+   *  sessions; daemon-sourced `SessionEntry` fields for inactive / non-LiveKit sessions. */
+  traffic?: { bytesIn: number; bytesOut: number; lastDataReceivedAt: number | null } | null;
+  /** Lazy builder for a session-scoped `ConnectionService` client (targets the coder participant
+   *  for an attached LiveKit session). The Tools tab routes `ListExecTools` / `ListSessionToolCalls`
+   *  / `ExecuteTool` through it when available, falling back to the daemon `client` for inactive /
+   *  non-LiveKit sessions. */
+  buildSessionClient?: () => Client<typeof ConnectionService> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +78,8 @@ export function SessionInspectorDrawer({
   sessionToken,
   room = null,
   serverIdentity = "server",
+  traffic = null,
+  buildSessionClient,
 }: SessionInspectorDrawerProps) {
   const [pendingDelete, setPendingDelete] = useState(false);
   const [tab, setTab] = useState<InspectorTab>("details");
@@ -205,6 +216,28 @@ export function SessionInspectorDrawer({
                 <MetaRow label="Previous session" value={session.previousSessionId} />
               </div>
 
+              {/* I/O traffic (req 5 dual source) — bytes in / bytes out / last data received. */}
+              <div className="flex flex-col gap-1">
+                <span
+                  data-testid="sessions-inspector-bytes-in"
+                  className="text-xs"
+                >
+                  {String(traffic?.bytesIn ?? 0)}
+                </span>
+                <span
+                  data-testid="sessions-inspector-bytes-out"
+                  className="text-xs"
+                >
+                  {String(traffic?.bytesOut ?? 0)}
+                </span>
+                <span
+                  data-testid="sessions-inspector-last-data-received"
+                  className="text-xs"
+                >
+                  {formatLastDataReceived(traffic?.lastDataReceivedAt ?? null, Date.now())}
+                </span>
+              </div>
+
               {/* Controls */}
               <div className="flex flex-col gap-2">
                 {!session.isActive && (
@@ -262,35 +295,38 @@ export function SessionInspectorDrawer({
           <ScrollArea className="flex-1 min-h-0">
             <SessionToolsTab
               sessionId={session.sessionId}
-              onListExecTools={() =>
-                client
-                  ? client
+              onListExecTools={() => {
+                const c = buildSessionClient?.() ?? client;
+                return c
+                  ? c
                       .listExecTools({ sessionToken: sessionToken ?? "", daemonInstanceId: "" })
                       .then((r) => r.tools)
-                  : Promise.resolve([])
-              }
-              onListSessionToolCalls={() =>
-                client
-                  ? client
+                  : Promise.resolve([]);
+              }}
+              onListSessionToolCalls={() => {
+                const c = buildSessionClient?.() ?? client;
+                return c
+                  ? c
                       .listSessionToolCalls({
                         sessionToken: sessionToken ?? "",
                         sessionId: session.sessionId,
                         daemonInstanceId: "",
                       })
                       .then((r) => r.toolCalls)
-                  : Promise.resolve([])
-              }
-              onExecuteTool={({ toolName, argsJson }) =>
-                client
-                  ? client.executeTool({
+                  : Promise.resolve([]);
+              }}
+              onExecuteTool={({ toolName, argsJson }) => {
+                const c = buildSessionClient?.() ?? client;
+                return c
+                  ? c.executeTool({
                       sessionToken: sessionToken ?? "",
                       sessionId: session.sessionId,
                       toolName,
                       argsJson,
                       daemonInstanceId: "",
                     })
-                  : Promise.resolve({ resultJson: "", isError: true, errorMessage: "no client" })
-              }
+                  : Promise.resolve({ resultJson: "", isError: true, errorMessage: "no client" });
+              }}
             />
           </ScrollArea>
         ) : tab === "usage" ? (

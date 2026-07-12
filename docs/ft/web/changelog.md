@@ -4,6 +4,13 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-12 — Fast session change: per-session runtimes, session-participant RPC, live inspector bytes
+
+- Switching between attached LiveKit sessions is now a focus change, not a reconnect: each attached session owns its own LiveKit `Room` + `GhosttyTerminalLiveKit` instance held in a `SessionRuntimeRegistry`; the focused terminal is CSS-visible while the others stay mounted (`display:none`) and keep streaming. No unmount, no terminal resize, no LiveKit reconnect on switch.
+- Session-scoped `ConnectionService` RPCs (`ExecuteTool`, `ListExecTools`, `ListSessionToolCalls`, `ClaimTerminalControl`/`WatchTerminalControl`, VNC, screen-sharing) route to the session's own participant (`daemon-{instanceId}-{sessionId}`); `DeleteSession`/`SignalSession` and bootstrap/directory RPCs stay daemon-direct on `daemon-{instanceId}` so lifecycle control still works when the coder participant is stuck.
+- The sessions list overlays `session` participant metadata (goal/state/agent/model/…) onto active cross-host rows — presence-driven, no `ListSessions` fan-out for active rows.
+- The Session Inspector **Details** tab shows live bytes in / bytes out and a "last data received: Ns ago" relative timestamp; for a session with no LiveKit participant it falls back to daemon `SessionEntry` (`bytes_in`/`bytes_out`/`last_data_received_at`) fields.
+- Feature: [session-drawer.md § Fast Session Change](session-drawer.md#fast-session-change), [web-terminal.md § Per-session LiveKit room](web-terminal.md#per-session-livekit-room-sessions-drawer), [livekit-participant-owned-projects.md](livekit-participant-owned-projects.md). PR [#297](https://github.com/uppin/tddy-coder/pull/297).
 ## 2026-07-12 — Session Inspector: real-time token usage
 
 - The Session Inspector has a new **Usage** tab showing live per-conversation token usage (main agent + each subagent: input/output/total tokens and turns) with a summing TOTAL row, updating as the session runs.

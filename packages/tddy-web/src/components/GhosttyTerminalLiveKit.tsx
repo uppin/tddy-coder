@@ -123,6 +123,14 @@ export interface GhosttyTerminalLiveKitProps {
    * this to `true`.
    */
   hideStatusStrip?: boolean;
+  /**
+   * Fired once after the session's LiveKit `Room` connects successfully, with the connected room.
+   * The sessions drawer uses it to capture the per-session room so session-scoped
+   * `ConnectionService` RPCs (tools, terminal control) can be routed to the coder participant
+   * (`daemon-{instanceId}-{sessionId}`) over the session's own room. Not fired in test doubles
+   * (the test-double `liveKitFactory` never establishes a real room).
+   */
+  onRoom?: (room: Room) => void;
 }
 
 export function GhosttyTerminalLiveKit({
@@ -151,6 +159,7 @@ export function GhosttyTerminalLiveKit({
   onRemoteSessionEnded,
   mobileShortcuts,
   hideStatusStrip = false,
+  onRoom,
 }: GhosttyTerminalLiveKitProps) {
   const liveKitFactory = useLiveKitTransportFactory();
   const log = debugLogging
@@ -178,11 +187,19 @@ export function GhosttyTerminalLiveKit({
   const [coderSessionActive, setCoderSessionActive] = useState(true);
   const coderAvailableRef = useRef(true);
   const onRemoteSessionEndedRef = useRef(onRemoteSessionEnded);
+  const onRoomRef = useRef(onRoom);
   const remoteSessionEndedEmittedRef = useRef(false);
+  const onRoomEmittedRef = useRef(false);
 
   useEffect(() => {
     onRemoteSessionEndedRef.current = onRemoteSessionEnded;
   }, [onRemoteSessionEnded]);
+
+  useEffect(() => {
+    onRoomRef.current = onRoom;
+    // A new connection attempt (token/url/room change resets the effect) may re-fire onRoom.
+    onRoomEmittedRef.current = false;
+  }, [onRoom, url, token, roomName]);
 
   useEffect(() => {
     onConnectionStatusChange?.(status);
@@ -294,6 +311,10 @@ export function GhosttyTerminalLiveKit({
         log("lifecycle: connecting to room");
         await room.connect(url, initialToken);
         log("lifecycle: room connected");
+        if (!onRoomEmittedRef.current) {
+          onRoomEmittedRef.current = true;
+          onRoomRef.current?.(room!);
+        }
 
         const participantIdentities = () =>
           Array.from(room!.remoteParticipants.values()).map((p) => p.identity);

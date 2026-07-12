@@ -72,6 +72,7 @@ fn runner_args(tmp: &Path, stub_claude: &Path) -> (SandboxRunnerArgs, PathBuf) {
         tddy_tools_path: Some(tddy_tools_path()),
         ready_marker: tmp.join("sandbox.ready"),
         permission_mode: "auto".to_string(),
+        resume: false,
         append_system_prompt_file: None,
         grpc_listen_port: None,
         egress_shim_port: None,

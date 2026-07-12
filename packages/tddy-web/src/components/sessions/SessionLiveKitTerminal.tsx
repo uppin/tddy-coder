@@ -1,5 +1,6 @@
 import React from "react";
 import type { Client } from "@connectrpc/connect";
+import type { Room } from "livekit-client";
 import type { TokenService } from "../../gen/token_pb";
 import { GhosttyTerminalLiveKit } from "../GhosttyTerminalLiveKit";
 import { useLiveKitTerminalToken } from "./useLiveKitTerminalToken";
@@ -16,6 +17,8 @@ interface SessionLiveKitTerminalProps {
   tokenClient: TokenClient;
   onDisconnect?: () => void;
   mobileShortcuts?: ToolShortcutDef[];
+  /** Fired once with the session's connected LiveKit `Room` (see `GhosttyTerminalLiveKit.onRoom`). */
+  onRoom?: (room: Room) => void;
 }
 
 /**
@@ -32,6 +35,7 @@ export function SessionLiveKitTerminal({
   tokenClient,
   onDisconnect,
   mobileShortcuts,
+  onRoom,
 }: SessionLiveKitTerminalProps) {
   const { token, ttlSeconds, getToken } = useLiveKitTerminalToken(tokenClient, livekitRoom, identity);
 
@@ -52,6 +56,7 @@ export function SessionLiveKitTerminal({
       hideStatusStrip
       onRemoteSessionEnded={onDisconnect}
       mobileShortcuts={mobileShortcuts}
+      onRoom={onRoom}
     />
   );
 }

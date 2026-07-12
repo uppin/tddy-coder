@@ -6,6 +6,7 @@ pub mod plain;
 pub mod recipe;
 pub mod remote;
 pub mod run;
+pub mod session_participant;
 mod tty;
 pub mod web_server;
 

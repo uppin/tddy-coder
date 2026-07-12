@@ -186,6 +186,21 @@ Product reference for the count field and merge semantics: [livekit-participant-
 
 Spawned **`tddy-*`** sessions use the same configured room for **`--livekit-room`** when **`common_room`** is set; each process still uses a distinct **`daemon-{session_id}`** LiveKit identity for terminal RPC. If **`common_room`** is unset, the room name is **`daemon-{session_id}`** per session. See [daemon changelog](../daemon/changelog.md).
 
+### Per-session LiveKit room (sessions drawer)
+
+In **`SessionsDrawerScreen`** (`#/sessions`), each attached LiveKit session owns its own
+**`Room`** (joined as **`browser-{sessionId}-{ts}`**) and its own
+**`GhosttyTerminalLiveKit`** instance, kept mounted in the background by the session drawer's
+[per-session runtime registry](session-drawer.md#fast-session-change). Switching focus between
+attached sessions is a CSS-visibility change — no LiveKit reconnect, no terminal reinit or
+resize — and the switched-away terminal keeps streaming.
+
+This per-session LiveKit room is **not** the shared **`livekit.common_room`** presence
+connection. It is the session's terminal room — the same room name the coder participant
+joined (**`daemon-{instanceId}-{sessionId}`**), with a distinct browser identity. The common
+room presence connection stays separate and continues to drive the
+[Connected participants](#shared-livekit-room-livekitcommon_room) table.
+
 ### Fullscreen terminal session chrome
 
 The fullscreen **GhosttyTerminalLiveKit** view opened after **Expand** from a floating terminal or when the focused session is in **`full`** presentation uses the **connection chrome** described under [Connection chrome (LiveKit overlay)](#connection-chrome-livekit-overlay). **Terminate** in the dot menu, after confirmation, calls **`SignalSession`** with SIGTERM for **that** session’s id (same semantics as **Terminate (SIGTERM)** in the per-session **Signal** dropdown).

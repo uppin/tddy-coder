@@ -2,6 +2,13 @@
 
 Release note history for the Coder product area.
 
+## 2026-07-12 — Session-participant ConnectionService + session metadata + shared tool engine
+
+- A `tddy-coder` session now serves session-scoped `ConnectionService` methods (`ListExecTools`, `ListSessionToolCalls`, `ExecuteTool`, `ClaimTerminalControl`, `WatchTerminalControl`) directly from its own LiveKit participant (`daemon-{instanceId}-{sessionId}`), and publishes a `session` metadata block (goal/state/agent/model/…) on workflow-state transitions, shallow-merged with `owned_project_count` / `codex_oauth`.
+- `ExecuteTool` dispatches through a new shared **`tddy-tool-engine`** crate (extracted from the daemon) against the session's worktree root, backed by a per-session `tddy_task::TaskRegistry`; the catalog mirrors the shared engine's. The `ToolExecutor` seam is `async`.
+- `DeleteSession` / `SignalSession` are **not** served by the coder — the web routes them daemon-direct to `daemon-{instanceId}`.
+- The interactive path wires a workflow-state tap (`spawn_session_metadata_tap`) so transitions republish the `session` block; the headless `--grpc` path's metadata tap is FIXME-tracked.
+- Feature: [session-participant-rpc.md](session-participant-rpc.md). PR [#297](https://github.com/uppin/tddy-coder/pull/297).
 ## 2026-07-12 — Specialized-agent warm-up gate
 
 - Starting a sandbox session with specialized agents wired in now **warms them up first**: each resolved agent's model endpoint is woken and awaited before the in-jail agent CLI starts, so a cold **Ollama** model or unreachable endpoint surfaces at session creation instead of stalling the main agent's first `subagent_prompt`.

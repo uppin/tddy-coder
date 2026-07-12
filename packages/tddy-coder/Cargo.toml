@@ -42,8 +42,12 @@ tddy-service = { path = "../tddy-service" }
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-connectrpc = { path = "../tddy-connectrpc" }
 tddy-github = { path = "../tddy-github" }
+tddy-task = { path = "../tddy-task" }
+tddy-tool-engine = { path = "../tddy-tool-engine" }
 tonic = "0.12"
 tokio-stream = "0.1"
+prost = "0.13"
+async-trait = "0.1"
 tempfile = "3"
 walkdir = "2"
 
@@ -51,7 +55,6 @@ walkdir = "2"
 libc = "0.2"
 
 [dev-dependencies]
-async-trait = "0.1"
 serial_test = "3"
 assert_cmd = "2"
 ctor = "0.2"
@@ -60,3 +63,7 @@ tempfile = "3"
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
+tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
+livekit = "0.7"
+futures-util = "0.3"
+env_logger = "0.11"

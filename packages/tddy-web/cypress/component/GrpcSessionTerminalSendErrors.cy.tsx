@@ -36,6 +36,7 @@ import {
   SendTerminalInputResponseSchema,
 } from "../../src/gen/connection_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
+import type { ConnectedSession } from "../../src/components/sessions/useTerminalControl";
 import { decodeProtoRequestBody, interceptProtoRpc, toArrayBuffer } from "../support/rpc/protoRpc";
 
 // ---------------------------------------------------------------------------
@@ -72,12 +73,12 @@ function interceptClaimTerminalControl(token = CONTROL_TOKEN) {
 // ---------------------------------------------------------------------------
 
 /**
- * Renders GrpcSessionTerminal with a real HTTP transport that Cypress can intercept.
- * Passes `controlToken` through once the prop exists (currently causes a TS error
- * that is suppressed with @ts-expect-error — this is intentional: the prop must be
- * added as part of the bug fix).
+ * Renders GrpcSessionTerminal with a real HTTP transport that Cypress can intercept. `connected`
+ * is the claimed lease — when non-null, `sendTerminalInput` goes out carrying the token; when
+ * `null`, input is queued (the onReady resize is held until the claim resolves) and no
+ * SendTerminalInput RPC is emitted.
  */
-function Harness({ controlToken }: { controlToken?: string }) {
+function Harness({ connected }: { connected: ConnectedSession | null }) {
   const transport = useMemo(
     () => createConnectTransport({ baseUrl: `${window.location.origin}/rpc`, useBinaryFormat: true }),
     [],
@@ -90,7 +91,7 @@ function Harness({ controlToken }: { controlToken?: string }) {
         sessionId={SESSION_ID}
         sessionToken={SESSION_TOKEN}
         client={client}
-        controlToken={controlToken}
+        connected={connected}
       />
     </div>
   );
@@ -124,8 +125,10 @@ describe("GrpcSessionTerminal — SendTerminalInput error handling", () => {
       return false;
     });
 
-    // When — mount; terminal will fit() → onResize → stream.send → sendTerminalInput
-    cy.mount(<Harness />);
+    // When — mount with an active lease so the resize reaches the server (input is only sent
+    // once `connected` is non-null; with `null` it would be queued and never fire). The intercept
+    // above makes every SendTerminalInput fail regardless of token.
+    cy.mount(<Harness connected={{ sessionId: SESSION_ID, controlToken: "any-lease-token" }} />);
 
     // When — wait for the resize to reach the server so we know the RPC was triggered
     cy.wait("@sendTerminalInput");
@@ -161,8 +164,8 @@ describe("GrpcSessionTerminal — SendTerminalInput error handling", () => {
       req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: OK_SEND_INPUT });
     }).as("sendTerminalInput");
 
-    // When — mount with a known control token (the prop to be added in the fix)
-    cy.mount(<Harness controlToken={CONTROL_TOKEN} />);
+    // When — mount with a claimed lease carrying the known control token
+    cy.mount(<Harness connected={{ sessionId: SESSION_ID, controlToken: CONTROL_TOKEN }} />);
 
     // When — wait for at least one send (the resize on mount)
     cy.wait("@sendTerminalInput");

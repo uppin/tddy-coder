@@ -161,6 +161,17 @@ message SessionEntry {
   // or the plan has not been written yet. Powers the PR-Stack Chat Screen's planned-PR list
   // (docs/ft/web/session-drawer.md § Per-Workflow Session Views).
   string stack_plan_json = 23;
+  // Cumulative bytes received over the session's transport (LiveKit for tddy-coder sessions with
+  // a participant; the gRPC terminal stream for claude-cli / cursor-cli / workspace sessions the
+  // daemon owns). Populated by the daemon `ListSessions` for sessions it can observe; zero for
+  // tddy-coder sessions with no LiveKit participant. Inspector fallback when no live runtime
+  // exists (changeset 2026-07-12-fast-session-change).
+  uint64 bytes_in = 24;
+  // Cumulative bytes sent over the session's transport. See `bytes_in`.
+  uint64 bytes_out = 25;
+  // Epoch-milliseconds of the most recent data received over the session's transport, as a string.
+  // Empty when no data has ever been received. Inspector fallback when no live runtime exists.
+  string last_data_received_at = 26;
 }
 
 message ProjectEntry {

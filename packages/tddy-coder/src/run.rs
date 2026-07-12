@@ -1713,7 +1713,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
 
         if livekit_enabled {
             let url = args.livekit_url.as_ref().unwrap().clone();
-            let (_, session_artifact_dir, _) = livekit_daemon_workflow_paths(
+            let (agent_working_dir, session_artifact_dir, _) = livekit_daemon_workflow_paths(
                 &tddy_data_dir,
                 args.resume_from.as_deref(),
                 args.session_id.as_deref(),
@@ -1751,8 +1751,53 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             let factory = view_factory
                 .clone()
                 .expect("factory set when livekit_enabled");
-            let (terminal_service, _metadata_tx, metadata_rx) =
+            let (terminal_service, metadata_tx, metadata_rx) =
                 terminal_and_codex_oauth_for_livekit(factory, args.mouse);
+            // Session-scoped ConnectionService served from the coder's own participant identity
+            // (`daemon-{instanceId}-{sessionId}`) — the web routes ListExecTools / ExecuteTool /
+            // ClaimTerminalControl / ListSessionToolCalls here. Delete/signal stay daemon-direct.
+            // FIXME(2026-07-12-fast-session-change): wire `tools` to the real exec tool catalog and
+            // `executor` to the coder tool engine.
+            // Tap the workflow state machine onto the `session` metadata block: every
+            // `PresenterEvent` transition is mapped into `SessionMetadata` and published on
+            // `metadata_tx`, so the web Inspector / Sessions drawer sees live goal/state/agent/model
+            // without polling. Seeded with CLI-known values so the first publish (before any event)
+            // already advertises agent/model/recipe/repo_path.
+            let metadata_seed = crate::session_participant::SessionMetadataSeed {
+                agent: agent_str.to_string(),
+                model: args
+                    .model
+                    .as_deref()
+                    .unwrap_or_else(|| default_model_for_agent(agent_str))
+                    .to_string(),
+                recipe: args
+                    .recipe
+                    .clone()
+                    .unwrap_or_else(|| "free-prompting".to_string()),
+                repo_path: std::env::current_dir()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            };
+            if let Some(event_tx) = usage_event_tx.clone() {
+                let _metadata_tap_handle = crate::session_participant::spawn_session_metadata_tap(
+                    event_tx.subscribe(),
+                    metadata_tx,
+                    metadata_seed,
+                );
+            }
+            let session_connection_svc = crate::session_participant::SessionConnectionService {
+                session_id: args.session_id.clone().unwrap_or_default(),
+                session_token: args.livekit_token.clone().unwrap_or_default(),
+                tool_calls_path: session_artifact_dir.join("tool-calls.jsonl"),
+                tools: crate::session_participant::coder_session_tool_catalog(),
+                executor: std::sync::Arc::new(
+                    crate::session_participant::CoderSessionToolExecutor {
+                        worktree_root: agent_working_dir.clone(),
+                        task_registry: tddy_task::TaskRegistry::new(),
+                        session_id: args.session_id.clone().unwrap_or_default(),
+                    },
+                ),
+            };
             let mut livekit_entries = vec![
                 tddy_rpc::ServiceEntry {
                     name: "terminal.TerminalService",
@@ -1782,6 +1827,9 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         ),
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
+                crate::session_participant::session_connection_service_entry(
+                    session_connection_svc,
+                ),
             ];
             let livekit_names: Vec<&str> = livekit_entries.iter().map(|e| e.name).collect();
             livekit_entries.push(tddy_service::reflection_entry_from(&livekit_names));
@@ -2792,6 +2840,29 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             .clone()
             .map(|d| d.join(tddy_core::CODEX_OAUTH_AUTHORIZE_URL_FILENAME));
         let shutdown = shutdown.clone();
+        // Session-scoped ConnectionService on the coder's own participant (see the interactive
+        // site above for the full rationale). The tool executor dispatches against the coder's
+        // current working directory (the repo under development), mirroring the interactive path's
+        // `agent_working_dir`. FIXME: wire the `session` metadata tap into this headless path's own
+        // thread/runtime (the interactive path above now spawns `spawn_session_metadata_tap`).
+        let session_connection_svc = crate::session_participant::SessionConnectionService {
+            session_id: args.session_id.clone().unwrap_or_default(),
+            session_token: args.livekit_token.clone().unwrap_or_default(),
+            tool_calls_path: args
+                .session_dir
+                .clone()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("tool-calls.jsonl"),
+            tools: crate::session_participant::coder_session_tool_catalog(),
+            executor: std::sync::Arc::new(crate::session_participant::CoderSessionToolExecutor {
+                worktree_root: std::env::current_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from(".")),
+                task_registry: tddy_task::TaskRegistry::new(),
+                session_id: args.session_id.clone().unwrap_or_default(),
+            }),
+        };
+        let session_connection_entry =
+            crate::session_participant::session_connection_service_entry(session_connection_svc);
         if has_key_secret {
             let token_generator = std::sync::Arc::new(tddy_livekit::TokenGenerator::new(
                 args.livekit_api_key.as_ref().unwrap().clone(),
@@ -2825,6 +2896,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     service: std::sync::Arc::new(tunnel_server)
                         as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
+                session_connection_entry,
             ];
             // Mount the Presenter View-adapter (TddyRemote) onto the LiveKit surface too, not just
             // the local gRPC port — a browser View reaches the Presenter over LiveKit, and via
@@ -2868,6 +2940,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                         tddy_service::LoopbackTunnelServiceImpl,
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
+                session_connection_entry,
             ];
             // Mount the Presenter View-adapter (TddyRemote) onto the LiveKit surface too, not just
             // the local gRPC port — a browser View reaches the Presenter over LiveKit, and via

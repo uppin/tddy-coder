@@ -29,6 +29,11 @@ import {
   SessionEntrySchema,
   StartSessionResponseSchema,
   ToolInfoSchema,
+  ClaimTerminalControlResponseSchema,
+  ExecuteToolResponseSchema,
+  ListExecToolsResponseSchema,
+  ListSessionToolCallsResponseSchema,
+  ToolDefSchema,
   type AgentInfo,
   type ConnectSessionResponse,
   type EligibleDaemonEntry,
@@ -144,6 +149,13 @@ export interface ConnectionServiceBackend extends InMemoryRpcBackend {
   readonly deletedSessionIds: string[];
   /** Every `{ sessionId, signal }` passed to `SignalSession`, in call order. */
   readonly signalCalls: { sessionId: string; signal: number }[];
+  /** Every `sessionId` passed to `ExecuteTool`, in call order. */
+  readonly executedToolSessionIds: string[];
+  /** Every `sessionId` passed to `ClaimTerminalControl`, in call order. */
+  readonly claimedControlSessionIds: string[];
+  /** Every `sessionId` passed to `ConnectSession`, in call order — used by the fast-session-change
+   *  regression test to assert re-selecting an already-attached session does NOT re-connect. */
+  readonly connectedSessionIds: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +171,9 @@ export function aConnectionServiceBackend(
 ): ConnectionServiceBackend {
   const deletedSessionIds: string[] = [];
   const signalCalls: { sessionId: string; signal: number }[] = [];
+  const executedToolSessionIds: string[] = [];
+  const claimedControlSessionIds: string[] = [];
+  const connectedSessionIds: string[] = [];
 
   const defaultDaemons: DaemonEntry[] = [{ instanceId: "local", label: "local (this daemon)", isLocal: true }];
   const daemons = scenario.daemons ?? defaultDaemons;
@@ -209,6 +224,7 @@ export function aConnectionServiceBackend(
       }),
       listProjectBranches: async () => ({ branches: scenario.projectBranches ?? [] }),
       connectSession: async (req) => {
+        connectedSessionIds.push(req.sessionId);
         const overrides =
           typeof scenario.connectSession === "function"
             ? scenario.connectSession(req.sessionId)
@@ -257,9 +273,45 @@ export function aConnectionServiceBackend(
         deletedSessionIds.push(req.sessionId);
         return {};
       },
+      listExecTools: async () => ({
+        tools: [
+          create(ToolDefSchema, {
+            name: "Echo",
+            description: "Echo a message",
+            inputSchemaJson: JSON.stringify({
+              type: "object",
+              properties: { message: { type: "string" } },
+              required: ["message"],
+            }),
+          }),
+        ],
+      }),
+      listSessionToolCalls: async () => ({ toolCalls: [] }),
+      executeTool: async (req) => {
+        executedToolSessionIds.push(req.sessionId);
+        return create(ExecuteToolResponseSchema, {
+          resultJson: '{"ok":true}',
+          isError: false,
+          errorMessage: "",
+        });
+      },
+      claimTerminalControl: async (req) => {
+        claimedControlSessionIds.push(req.sessionId);
+        return create(ClaimTerminalControlResponseSchema, { granted: true, controlToken: "ctrl-1" });
+      },
+      // Server-streaming control watch — yield nothing in tests.
+      watchTerminalControl: async function* () {
+        yield { $typeName: "connection.TerminalControlEvent", event: { case: "granted", value: "ctrl-1" } } as any;
+      },
     });
 
-  return Object.assign(backend, { deletedSessionIds, signalCalls });
+  return Object.assign(backend, {
+    deletedSessionIds,
+    signalCalls,
+    executedToolSessionIds,
+    claimedControlSessionIds,
+    connectedSessionIds,
+  });
 }
 
 /**

@@ -42,6 +42,25 @@ export function aFakeCommonRoom(participantIdentities: string[]): Room {
 }
 
 /**
+ * Like `aFakeCommonRoom`, but each participant carries its own `metadata` string (e.g. a JSON
+ * document with a `session` block). Used by acceptance tests that assert presence-driven
+ * session metadata rendering in the sessions drawer.
+ */
+export function aFakeCommonRoomWithMetadata(
+  participants: ReadonlyArray<{ identity: string; metadata: string }>,
+): Room {
+  const remoteParticipants = new Map(
+    participants.map((p) => [p.identity, { identity: p.identity, metadata: p.metadata, joinedAt: new Date() }]),
+  );
+  return {
+    localParticipant: undefined,
+    remoteParticipants,
+    on: () => {},
+    off: () => {},
+  } as unknown as Room;
+}
+
+/**
  * Wrap `children` in a `SelectedDaemonProvider` pre-seeded with `daemons` (default: a single
  * fixture daemon) and a fresh `Room` — enough for `useDaemonClient` to resolve non-null. Also
  * provides `AuthProvider`, since every real daemon-mode screen (`SessionsDrawerScreen`,
@@ -56,6 +75,25 @@ export function withSelectedDaemon(
 ): React.ReactElement {
   const room =
     participantIdentities !== undefined ? aFakeCommonRoom(participantIdentities) : new Room();
+  return (
+    <AuthProvider>
+      <SelectedDaemonProvider room={room} daemons={daemons}>
+        {children}
+      </SelectedDaemonProvider>
+    </AuthProvider>
+  );
+}
+
+/**
+ * Variant of {@link withSelectedDaemon} that takes a pre-built common-room `Room` (e.g. one from
+ * `aFakeCommonRoomWithMetadata`) so a test can seed participant metadata for presence-driven
+ * rendering assertions.
+ */
+export function withSelectedDaemonRoom(
+  children: React.ReactNode,
+  daemons: DaemonHost[],
+  room: Room,
+): React.ReactElement {
   return (
     <AuthProvider>
       <SelectedDaemonProvider room={room} daemons={daemons}>

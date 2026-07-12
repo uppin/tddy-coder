@@ -1,7 +1,14 @@
-//! Tool dispatch engine for remote-codebase workspace sessions.
+//! Tool dispatch engine for workspace sessions.
 //!
 //! Implements `execute_tool` which routes tool calls to their respective implementations.
 //! All file paths are validated against the worktree root to prevent path traversal.
+//!
+//! Shared by `tddy-daemon` (remote-codebase workspace sessions) and `tddy-coder` (session
+//! participant `ExecuteTool` / `ListExecTools`).
+
+pub mod catalog;
+
+pub use catalog::{tool_catalog, ToolDef};
 
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;

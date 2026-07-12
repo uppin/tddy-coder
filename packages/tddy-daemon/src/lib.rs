@@ -43,11 +43,14 @@ pub mod telegram_session_subscriber;
 pub mod telegram_tracked_session;
 pub mod token_provider;
 pub mod tool_call_log;
-pub mod tool_catalog;
-pub mod tool_engine;
+pub mod tool_catalog_sync;
 pub mod user_sessions_path;
 pub mod workspace_session;
 pub mod worktrees;
+
+// Re-export the shared tool engine so legacy `crate::tool_engine::...` references inside the
+// daemon keep resolving after the extraction into the `tddy-tool-engine` crate.
+pub use tddy_tool_engine as tool_engine;
 
 pub mod sandbox_action;
 pub mod sandbox_plan_builder;

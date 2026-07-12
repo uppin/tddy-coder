@@ -468,6 +468,9 @@ state:
             orchestrator_session_id: String::new(),
             recipe: String::new(),
             stack_plan_json: String::new(),
+            bytes_in: 0,
+            bytes_out: 0,
+            last_data_received_at: String::new(),
         };
         apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
         assert_eq!(proto.workflow_goal, "acceptance-tests");
@@ -739,6 +742,9 @@ sessions:
             orchestrator_session_id: String::new(),
             recipe: String::new(),
             stack_plan_json: String::new(),
+            bytes_in: 0,
+            bytes_out: 0,
+            last_data_received_at: String::new(),
         };
         apply_session_list_status_to_proto(&session_dir, &mut proto).unwrap();
         assert_eq!(

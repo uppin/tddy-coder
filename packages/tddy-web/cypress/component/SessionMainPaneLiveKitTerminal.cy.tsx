@@ -82,6 +82,21 @@ function LiveKitMainPaneHarness() {
       onDelete={cy.stub()}
       onTerminate={cy.stub()}
       tokenClient={tokenClient}
+      runtimes={[
+        {
+          sessionId: FAKE_SESSION.sessionId,
+          attached: true,
+          status: "connected-livekit",
+          livekitUrl: LIVEKIT_ATTACHMENT.livekitUrl,
+          livekitRoom: LIVEKIT_ATTACHMENT.livekitRoom,
+          livekitServerIdentity: LIVEKIT_ATTACHMENT.livekitServerIdentity,
+          identity: (LIVEKIT_ATTACHMENT as { identity: string }).identity,
+          bytesIn: 0,
+          bytesOut: 0,
+          lastDataReceivedAt: null,
+        },
+      ]}
+      focusedRuntimeId={FAKE_SESSION.sessionId}
     />
   );
 }

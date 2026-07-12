@@ -1,8 +1,16 @@
-//! Static tool catalog for remote-codebase mode workspace sessions.
+//! Static tool catalog for workspace sessions.
 //!
-//! Each entry corresponds to one tool the daemon can dispatch via `ExecuteTool`.
+//! Each entry corresponds to one tool the engine can dispatch via `execute_tool`. Callers map
+//! these [`ToolDef`]s to their own wire representation (e.g. `tddy-service` proto `ToolDef` in the
+//! daemon, the coder's local `ToolDef` in `tddy-coder`).
 
-use tddy_service::proto::connection::ToolDef;
+/// A tool exposed by `ListExecTools` and dispatched by [`crate::execute_tool`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolDef {
+    pub name: String,
+    pub description: String,
+    pub input_schema_json: String,
+}
 
 /// Returns the full tool catalog for workspace sessions.
 pub fn tool_catalog() -> Vec<ToolDef> {
@@ -63,25 +71,30 @@ pub fn tool_catalog() -> Vec<ToolDef> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
 
     #[test]
-    fn workspace_exec_tool_names_match_tool_catalog() {
+    fn tool_catalog_names_are_unique_and_non_empty() {
         // Given
-        let catalog: HashSet<String> = tool_catalog().into_iter().map(|t| t.name).collect();
-        let sandbox: HashSet<&str> = tddy_sandbox::workspace_exec_tool_names()
-            .iter()
-            .copied()
-            .collect();
+        let catalog = tool_catalog();
 
-        // Then — sandbox claude allowlist must cover the same exec tools as ListExecTools
-        assert_eq!(
-            catalog,
-            sandbox
-                .into_iter()
-                .map(String::from)
-                .collect::<HashSet<_>>(),
-            "workspace_exec_tool_names must stay in sync with tool_catalog"
-        );
+        // Then — every entry has a non-empty unique name and a non-empty schema
+        let mut names: Vec<&str> = catalog.iter().map(|t| t.name.as_str()).collect();
+        names.sort();
+        for w in names.windows(2) {
+            assert_ne!(w[0], w[1], "tool catalog has duplicate names");
+        }
+        for t in &catalog {
+            assert!(!t.name.is_empty(), "tool entry has empty name");
+            assert!(
+                !t.description.is_empty(),
+                "tool {} has empty description",
+                t.name
+            );
+            assert!(
+                !t.input_schema_json.is_empty(),
+                "tool {} has empty schema",
+                t.name
+            );
+        }
     }
 }
