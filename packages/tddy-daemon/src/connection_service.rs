@@ -1083,6 +1083,17 @@ impl ConnectionServiceImpl {
         let repo_path = repo_path.trim();
         let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
 
+        // Readiness gate: wake every specialized agent's endpoint and wait until each answers
+        // before spawning the jail, so a cold/unreachable model fails session start here rather
+        // than stalling the main agent's first subagent call. No fallback — the jail is never
+        // spawned if warm-up fails (this covers resume, which reuses this start path).
+        tddy_discovery::warmup::warm_up_agents(
+            &specialized_defs,
+            &tddy_discovery::warmup::WarmupOptions::default(),
+        )
+        .await
+        .map_err(|e| Status::failed_precondition(e.to_string()))?;
+
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
@@ -1511,6 +1522,17 @@ impl ConnectionServiceImpl {
             ));
         }
         let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
+
+        // Readiness gate: wake every specialized agent's endpoint and wait until each answers
+        // before spawning the jail, so a cold/unreachable model fails session start here rather
+        // than stalling the main agent's first subagent call. No fallback — the jail is never
+        // spawned if warm-up fails (this covers resume, which reuses this start path).
+        tddy_discovery::warmup::warm_up_agents(
+            &specialized_defs,
+            &tddy_discovery::warmup::WarmupOptions::default(),
+        )
+        .await
+        .map_err(|e| Status::failed_precondition(e.to_string()))?;
 
         let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
