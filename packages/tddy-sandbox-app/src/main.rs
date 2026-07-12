@@ -490,35 +490,16 @@ fn print_token_summary(
     model: &str,
     include_main_agent: bool,
 ) {
-    use tddy_core::backend::{read_claude_subagent_usages, read_claude_transcript_usage};
-    use tddy_core::token_accounting::{format_token_summary, ConversationRecord};
+    use tddy_core::backend::gather_session_usage;
+    use tddy_core::token_accounting::format_token_summary;
 
-    #[derive(serde::Deserialize)]
-    struct AccountingFile {
-        #[serde(default)]
-        conversations: Vec<ConversationRecord>,
-    }
-
-    let mut records = Vec::new();
-    if include_main_agent {
-        records.push(read_claude_transcript_usage(
-            claude_home_dir,
-            session_id,
-            model,
-        ));
-        records.extend(read_claude_subagent_usages(
-            claude_home_dir,
-            session_id,
-            model,
-        ));
-    }
-
-    let accounting_path = session_dir.join("egress").join("accounting.json");
-    if let Ok(text) = std::fs::read_to_string(&accounting_path) {
-        if let Ok(parsed) = serde_json::from_str::<AccountingFile>(&text) {
-            records.extend(parsed.conversations);
-        }
-    }
+    let records = gather_session_usage(
+        session_dir,
+        session_id,
+        claude_home_dir,
+        model,
+        include_main_agent,
+    );
 
     eprintln!("{}", format_token_summary(session_id, &records));
 }

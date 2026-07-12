@@ -43,6 +43,9 @@ pub enum PresenterEvent {
     /// Presenter requested the view loop to exit (e.g. successful Continue with agent).
     /// Distinct from [`IntentReceived`](PresenterEvent::IntentReceived): sent after session resolution.
     ShouldQuit,
+    /// Current cumulative per-conversation token usage snapshot for the running session.
+    /// Carries the full snapshot (not a delta) so a newly-connected view sees current totals.
+    TokenUsageUpdated(Vec<crate::token_accounting::ConversationRecord>),
 }
 
 /// Handle passed to gRPC service: broadcast sender for events, mpsc sender for intents.

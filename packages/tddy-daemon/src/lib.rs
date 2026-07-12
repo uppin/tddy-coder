@@ -45,6 +45,7 @@ pub mod token_provider;
 pub mod tool_call_log;
 pub mod tool_catalog;
 pub mod tool_engine;
+pub mod usage_watcher;
 pub mod user_sessions_path;
 pub mod workspace_session;
 pub mod worktrees;
