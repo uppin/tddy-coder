@@ -6,7 +6,7 @@ import type { TokenService } from "../../gen/token_pb";
 import { SessionLiveKitTerminal } from "./SessionLiveKitTerminal";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
 import { TerminalControlOverlay } from "./TerminalControlOverlay";
-import { useTerminalControl } from "./useTerminalControl";
+import { useTerminalControl, type Session } from "./useTerminalControl";
 import type { SessionRuntimeState } from "./sessionRuntimeRegistry";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import { cn } from "../../lib/utils";
@@ -45,7 +45,7 @@ export interface SessionRuntimeProps {
 /**
  * One mounted terminal + its own terminal-control lease for a single attached session.
  *
- * Each runtime owns its `useTerminalControl` hook — and therefore its own `controlTokenRef` — so
+ * Each runtime owns its `useTerminalControl` hook — and therefore its own `connected` lease state — so
  * switching focus between sessions can never leak one session's control token into another
  * session's terminal input (the root cause of the "terminal controlled by another screen" failures
  * on fast session change). The focused runtime additionally carries the
@@ -89,12 +89,16 @@ export function SessionRuntime({
     commonRoom,
   ]);
 
-  // The runtime owns its own control lease + token. The auto-claim-on-attach uses the owning
-  // daemon `client`; the explicit "Claim terminal" steal-claim routes through `buildSessionClient`.
-  const { controlState, controlTokenRef, claim: claimControl } = useTerminalControl(
-    runtime.sessionId,
+  // The runtime owns its own control lease. The `Session` reference (sessionId + owning daemon
+  // client) is passed to `useTerminalControl`, which converts it into a `ConnectedSession` (lease
+  // token in hand) once the auto-claim resolves — `connected` stays `null` until then, gating
+  // `sendTerminalInput`. The explicit "Claim terminal" steal-claim routes through
+  // `buildSessionClient`.
+  const session: Session | null =
+    client != null ? { sessionId: runtime.sessionId, client } : null;
+  const { controlState, connected, claim: claimControl } = useTerminalControl(
+    session,
     sessionToken,
-    client ?? null,
     buildSessionClient,
   );
 
@@ -137,7 +141,7 @@ export function SessionRuntime({
             sessionId={runtime.sessionId}
             sessionToken={sessionToken}
             client={client}
-            controlToken={controlTokenRef.current}
+            connected={connected}
             onDisconnect={() => onSessionDisconnect?.(runtime.sessionId)}
             mobileShortcuts={focused ? mobileShortcuts : undefined}
           />

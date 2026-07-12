@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionTerminalOutput } from "../../gen/connection_pb";
 import { GhosttyTerminalGrpc, type GrpcStream } from "../GhosttyTerminalGrpc";
+import type { ConnectedSession } from "./useTerminalControl";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import { tddyDebug } from "../../lib/debugMask";
 import { measureTerminalGridFromRect } from "../../lib/terminalGridMeasure";
@@ -15,7 +16,12 @@ interface GrpcSessionTerminalProps {
   sessionId: string;
   sessionToken: string;
   client: ConnectionClient;
-  controlToken?: string;
+  /** The claimed session (lease token in hand), or `null` while the auto-claim is in flight / was
+   *  denied. `sendTerminalInput` is gated on this: input sent before the claim resolves (typically
+   *  the onReady resize OSC) is queued and flushed once the claim arrives, so it can never go out
+   *  with an empty/stale token. The output stream (`streamTerminalOutput`) needs no token and opens
+   *  immediately. */
+  connected: ConnectedSession | null;
   onDisconnect?: () => void;
   mobileShortcuts?: ToolShortcutDef[];
 }
@@ -24,7 +30,7 @@ export function GrpcSessionTerminal({
   sessionId,
   sessionToken,
   client,
-  controlToken,
+  connected,
   onDisconnect,
   mobileShortcuts,
 }: GrpcSessionTerminalProps) {
@@ -32,10 +38,14 @@ export function GrpcSessionTerminal({
   // containerRef must be on a div that is ALWAYS rendered (not gated on stream),
   // so getBoundingClientRect() returns real dimensions when the effect runs.
   const containerRef = useRef<HTMLDivElement>(null);
-  // Keep a ref so the send() closure always reads the latest token without
-  // needing to recreate the grpcStream (and remount the terminal) on each change.
-  const controlTokenRef = useRef<string>(controlToken ?? "");
-  controlTokenRef.current = controlToken ?? "";
+  // Latest claimed lease — a ref so the send() closure (created once for the stream's lifetime)
+  // reads the current value without recreating the stream on each claim transition. `null` until
+  // the claim resolves.
+  const connectedRef = useRef<ConnectedSession | null>(connected);
+  connectedRef.current = connected;
+  // Input sent before the claim resolves is queued here and flushed once `connected` arrives —
+  // structurally, `sendTerminalInput` cannot go out before the lease exists.
+  const pendingInputRef = useRef<Uint8Array[]>([]);
 
   // Disconnect fires automatically when the terminal goes away — either the remote
   // stream ends or this component unmounts (e.g. the user switches sessions). Read
@@ -49,21 +59,35 @@ export function GrpcSessionTerminal({
     onDisconnectRef.current?.();
   };
 
+  const sendInputRequest = useCallback(
+    (data: Uint8Array) => {
+      const conn = connectedRef.current;
+      if (conn === null) {
+        // No lease yet — the auto-claim is in flight. Queue the input (typically the onReady
+        // resize OSC) until `connected` arrives and the flush effect below releases it.
+        pendingInputRef.current.push(data);
+        return;
+      }
+      client
+        .sendTerminalInput({ sessionToken, sessionId, data, controlToken: conn.controlToken })
+        .catch((err) => {
+          dGrpc(
+            "sendTerminalInput failed sessionId=%s error=%o",
+            sessionId,
+            err instanceof Error ? err.message : err,
+          );
+        });
+    },
+    [client, sessionId, sessionToken],
+  );
+
   useEffect(() => {
     const outputListeners: Array<(data: Uint8Array) => void> = [];
     let closed = false;
 
     const grpcStream: GrpcStream = {
       send(data: Uint8Array) {
-        client
-          .sendTerminalInput({ sessionToken, sessionId, data, controlToken: controlTokenRef.current })
-          .catch((err) => {
-            dGrpc(
-              "sendTerminalInput failed sessionId=%s error=%o",
-              sessionId,
-              err instanceof Error ? err.message : err,
-            );
-          });
+        sendInputRequest(data);
       },
       onMessage(fn: (data: Uint8Array) => void) {
         outputListeners.push(fn);
@@ -117,7 +141,20 @@ export function GrpcSessionTerminal({
     return () => {
       closed = true;
     };
-  }, [client, sessionId, sessionToken]);
+  }, [client, sessionId, sessionToken, sendInputRequest]);
+
+  // Release input that was queued while the claim was in flight once `connected` arrives. Keyed on
+  // `connected` so it fires exactly when the lease transitions null → ConnectedSession.
+  useEffect(() => {
+    if (connected === null) return;
+    const pending = pendingInputRef.current;
+    if (pending.length === 0) return;
+    pendingInputRef.current = [];
+    dGrpc("flushing %d buffered input chunk(s) after ConnectedSession claimed", pending.length);
+    for (const data of pending) {
+      sendInputRequest(data);
+    }
+  }, [connected, sendInputRequest]);
 
   // Tear down the attachment when the terminal unmounts (session switch / screen
   // close). Empty deps so the cleanup runs only on real unmount, not on prop changes.

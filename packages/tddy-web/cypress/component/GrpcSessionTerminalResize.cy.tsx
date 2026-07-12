@@ -47,6 +47,7 @@ function Harness({ containerWidth = 800, containerHeight = 400 }: { containerWid
         sessionId="resize-test-session-aabbcc"
         sessionToken="test-token"
         client={client}
+        connected={null}
       />
     </div>
   );

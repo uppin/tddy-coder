@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { Client } from "@connectrpc/connect";
 import { ConnectionService } from "../../gen/connection_pb";
 import { getScreenId } from "../../lib/screenId";
@@ -8,24 +8,63 @@ import {
   applyTerminalControlEvent,
 } from "./terminalControlState";
 
+// ---------------------------------------------------------------------------
+// Session vs ConnectedSession
+// ---------------------------------------------------------------------------
+
+type ControlClient = Client<typeof ConnectionService>;
+
+/**
+ * A reference to a session addressed via the daemon's LiveKit-RPC participant (`daemon-{instanceId}`).
+ * Carries the daemon `ConnectionService` client used for the daemon-served terminal **output** stream
+ * (`streamTerminalOutput`, no token) and as the auto-claim target. You cannot send terminal input on
+ * a bare `Session` — input requires a {@link ConnectedSession} (the claim's lease).
+ */
+export interface Session {
+  sessionId: string;
+  client: ControlClient;
+}
+
+/**
+ * A {@link Session} that has been claimed for control — carries the lease token granted by
+ * `ClaimTerminalControl`. Produced *only* by a successful claim; `null` while the claim is in flight
+ * or was denied. Terminal input (`sendTerminalInput`) is callable exclusively on a `ConnectedSession`,
+ * so input can never race the claim: there is no `ConnectedSession` to send with until the claim
+ * resolves. For sessions with a LiveKit-room participant, the explicit steal-claim ("Claim terminal"
+ * button) still routes through the session participant via `buildSessionClient`; the token returned
+ * is the same lease regardless of which participant served the claim.
+ */
+export interface ConnectedSession {
+  sessionId: string;
+  controlToken: string;
+}
+
+// ---------------------------------------------------------------------------
+// Hook result
+// ---------------------------------------------------------------------------
+
 export interface UseTerminalControlResult {
   controlState: TerminalControlState;
-  /** Ref to the control token granted by ClaimTerminalControl. Empty string until granted. */
-  controlTokenRef: React.MutableRefObject<string>;
+  /** The claimed session (lease token in hand), or `null` while the claim is in flight / denied.
+   *  Reactive state — the terminal re-renders when the claim resolves, so input gating and the
+   *  flush of queued input are driven by this object, not a ref. */
+  connected: ConnectedSession | null;
   /** Steal control from the current holder (steal=true ClaimTerminalControl). */
   claim(): Promise<void>;
   /** Reset state (call when detaching from a session). */
   reset(): void;
 }
 
-type ControlClient = Client<typeof ConnectionService>;
+// ---------------------------------------------------------------------------
+// Claim loop
+// ---------------------------------------------------------------------------
 
 async function runControlSession(
   sessionId: string,
   sessionToken: string,
   screenId: string,
   client: ControlClient,
-  controlTokenRef: { current: string },
+  onConnected: (connected: ConnectedSession) => void,
   onState: (s: TerminalControlState) => void,
   signal: AbortSignal,
 ): Promise<void> {
@@ -35,15 +74,16 @@ async function runControlSession(
     screenId,
     steal: false,
   });
+  const controlToken = resp.granted ? resp.controlToken : "";
   if (resp.granted) {
-    controlTokenRef.current = resp.controlToken;
+    onConnected({ sessionId, controlToken });
     onState({ isController: true, holderScreenId: screenId });
   } else {
     onState({ isController: false, holderScreenId: resp.currentHolderScreenId });
   }
 
   for await (const event of client.watchTerminalControl(
-    { sessionToken, sessionId, controlToken: controlTokenRef.current },
+    { sessionToken, sessionId, controlToken },
     { signal },
   )) {
     onState(
@@ -55,38 +95,39 @@ async function runControlSession(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
+
 export function useTerminalControl(
-  sessionId: string | null,
+  /** The session to claim control for. `null` until the owning daemon client is reachable; the
+   *  effect waits until a `Session` is available. Pass the owning daemon's client (not the
+   *  selected-daemon client) so a cross-host session's lease is acquired on the host that owns it. */
+  session: Session | null,
   sessionToken: string,
-  /**
-   * Daemon `ConnectionService` client for this session's OWNING daemon — used for the
-   * auto-claim-on-attach (steal=false) and as the fallback for the explicit steal-claim. Pass the
-   * owning daemon's client (not the selected-daemon client) so a cross-host session's lease is
-   * acquired on the host that actually owns the terminal. `null` until the owning daemon is
-   * reachable; the effect waits until a client is available.
-   */
-  client: ControlClient | null,
-  /**
-   * Optional lazy builder for a session-scoped `ConnectionService` client (targets the coder
-   * participant `daemon-{instanceId}-{sessionId}`). When provided, the explicit `claim()` (the
-   * "Claim terminal" button, steal=true) routes through it. The auto-claim-on-attach (steal=false)
-   * always uses the daemon client above so control is still acquired automatically when no one else
-   * holds the lease. `null`/`undefined` falls back to the daemon client for both paths.
-   */
+  /** Optional lazy builder for a session-scoped `ConnectionService` client (targets the coder
+   *  participant `daemon-{instanceId}-{sessionId}`). When provided, the explicit `claim()` (the
+   *  "Claim terminal" button, steal=true) routes through it. The auto-claim-on-attach (steal=false)
+   *  always uses the daemon `Session.client` so control is acquired automatically when no one else
+   *  holds the lease. `null`/`undefined` falls back to the daemon client for both paths. */
   buildSessionClient?: () => ControlClient | null,
 ): UseTerminalControlResult {
+  const sessionId = session?.sessionId ?? null;
+  const client = session?.client ?? null;
+
   const [controlState, setControlState] = useState<TerminalControlState>(
     initialTerminalControlState,
   );
-  const controlTokenRef = useRef<string>("");
+  const [connected, setConnected] = useState<ConnectedSession | null>(null);
   const screenId = getScreenId();
 
-  // On session attach (or when the owning client becomes available): reset any stale token from a
-  // previous session so the new session's terminal input never leaks the previous session's lease
-  // token, then claim control (steal=false) and subscribe to lease changes.
+  // On session attach (or when the owning client becomes available): drop any stale lease from a
+  // previous session so the new session's terminal input never leaks the previous session's token,
+  // then claim control (steal=false) and subscribe to lease changes. `connected` stays null until
+  // the claim resolves — the terminal gates input on it.
   useEffect(() => {
     if (!sessionId || !client) return;
-    controlTokenRef.current = "";
+    setConnected(null);
     setControlState(initialTerminalControlState);
     const abortController = new AbortController();
 
@@ -95,7 +136,7 @@ export function useTerminalControl(
       sessionToken,
       screenId,
       client,
-      controlTokenRef,
+      setConnected,
       setControlState,
       abortController.signal,
     ).catch(() => {
@@ -103,6 +144,9 @@ export function useTerminalControl(
     });
 
     return () => abortController.abort();
+    // `session` is intentionally decomposed into `sessionId`/`client` so the effect is keyed on the
+    // stable primitives, not the `Session` object identity (which the caller rebuilds each render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, sessionToken, client, screenId]);
 
   const claim = useCallback(async () => {
@@ -119,7 +163,7 @@ export function useTerminalControl(
         steal: true,
       });
       if (resp.granted) {
-        controlTokenRef.current = resp.controlToken;
+        setConnected({ sessionId, controlToken: resp.controlToken });
         setControlState({ isController: true, holderScreenId: screenId });
       }
     } catch {
@@ -128,9 +172,9 @@ export function useTerminalControl(
   }, [sessionId, sessionToken, client, screenId, buildSessionClient]);
 
   const reset = useCallback(() => {
-    controlTokenRef.current = "";
+    setConnected(null);
     setControlState(initialTerminalControlState);
   }, []);
 
-  return { controlState, controlTokenRef, claim, reset };
+  return { controlState, connected, claim, reset };
 }

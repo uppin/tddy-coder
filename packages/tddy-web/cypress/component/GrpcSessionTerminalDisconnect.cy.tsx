@@ -89,6 +89,7 @@ function SessionsTerminalHarness({ onDisconnect }: { onDisconnect: () => void })
           sessionId={SESSION_ID}
           sessionToken={SESSION_TOKEN}
           client={client}
+          connected={null}
           onDisconnect={onDisconnect}
         />
       )}
