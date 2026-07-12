@@ -3,7 +3,7 @@
  * from a LiveKit participant (presence-driven, no ListSessions fan-out for that row).
  *
  * Changeset: `2026-07-12-fast-session-change`
- * PRD: `docs/ft/web/1-WIP/PRD-2026-07-12-fast-session-change.md` (req 4)
+ * Feature: `docs/ft/web/session-drawer.md#fast-session-change` (req 4)
  *
  * Green: `useRoomParticipants` parses a `session` metadata block and
  * `SessionManager.mergeActiveAndFetchedSessions` overlays it onto synthesized cross-host rows

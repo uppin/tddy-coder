@@ -3,7 +3,7 @@
  * mounted terminal per attached session and survives focus switches (explicit-disconnect eviction).
  *
  * Changeset: `2026-07-12-fast-session-change`
- * PRD: `docs/ft/web/1-WIP/PRD-2026-07-12-fast-session-change.md` (req 2, 3)
+ * Feature: `docs/ft/web/session-drawer.md#fast-session-change` (req 2, 3)
  *
  * ⚠️ RED PHASE — fails until `./sessionRuntimeRegistry` exists with the API below.
  */

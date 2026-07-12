@@ -9,10 +9,11 @@ Operators viewing the **Connected participants** table in **tddy-web** (shared L
 Server-side LiveKit participants publish JSON **local participant metadata** that includes:
 
 - **`owned_project_count`**: non-negative integer — row count for **`projects.yaml`** under the configured registry directory (same file shape as **`tddy_daemon::project_storage`**).
+- **`session`** (published by `tddy-coder` participants): an object carrying the running session's presence — `workflow_goal`, `workflow_state`, `elapsed_display`, `agent`, `model`, `activity_status`, `recipe`, `repo_path`, `pending_elicitation`. The web's sessions drawer overlays it onto sessions-list rows so active cross-host rows show goal/state/agent/model with no `ListSessions` fan-out. See [Session Drawer Screen § Sessions list metadata from participants](session-drawer.md#sessions-list-metadata-from-participants) and [Session Participant RPC & Metadata](../coder/session-participant-rpc.md).
 
-Participants that omit the field (older agents) are indistinguishable from “no count” in the UI: the **Projects** column shows an em dash (**—**).
+Participants that omit a field (older agents) are indistinguishable from "no value" in the UI: the **Projects** column shows an em dash (**—**) and a missing **`session`** block leaves the row on its `ListSessions`-sourced metadata.
 
-Metadata updates are **shallow-merged** at the top level so **Codex OAuth** hints (`codex_oauth`) and **`owned_project_count`** coexist in a single JSON document on each **`set_metadata`** call.
+Metadata updates are **shallow-merged** at the top level so **`owned_project_count`**, **`codex_oauth`**, and **`session`** coexist in a single JSON document on each **`set_metadata`** call.
 
 ## Web dashboard
 

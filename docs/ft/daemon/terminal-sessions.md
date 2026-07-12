@@ -119,6 +119,62 @@ given moment; all other connected screens are **observers** (they still receive 
 
 ---
 
+## Session-scoped RPC routing & daemon-direct lifecycle
+
+> The daemon is the **bootstrap/directory authority** and the **direct target for lifecycle
+> control**; session-scoped `ConnectionService` methods for a LiveKit-backed (tddy-coder)
+> session are served by the coder's own LiveKit participant. See
+> [Session Participant RPC & Metadata](../coder/session-participant-rpc.md) for the coder side.
+
+### Bootstrap / directory boundary
+
+The daemon participant (`daemon-{instanceId}`) serves the calls the web makes **before or
+without** an attached session participant:
+
+- `StartSession`, `ConnectSession`, `ResumeSession`
+- `ListSessions`, `ListProjects`, `ListAgents`, `ListTools`, `ListEligibleDaemons`,
+  `ListProjectBranches`
+
+### Session-scoped surface delegated
+
+`ListExecTools`, `ListSessionToolCalls`, `ExecuteTool`, `ClaimTerminalControl`,
+`WatchTerminalControl`, VNC, and screen-sharing for a LiveKit-backed session are served by
+the coder's participant (`daemon-{instanceId}-{sessionId}`), not the daemon. The daemon still
+serves these for **non-LiveKit** (claude-cli / cursor-cli / workspace) sessions where no coder
+participant exists — that `ConnectionService` path is unchanged.
+
+### `DeleteSession` / `SignalSession` — daemon-direct
+
+The web calls `DeleteSession` / `SignalSession` **directly** on the daemon participant
+(`daemon-{instanceId}`) with the caller's `session_token`; the coder is **not** on the path.
+The daemon validates the token (GitHub user → OS user → session ownership) exactly as it does
+for every other session RPC, performs process teardown / signalling, updates `.session.yaml`,
+and returns the result. Daemon errors surface **verbatim** to the web caller. Serving these
+daemon-direct keeps lifecycle control available even when the coder participant is
+unresponsive, and lets the sessions list delete/signal an unattached row without a relay hop.
+
+### Inspector data for sessions with no LiveKit participant
+
+`SessionEntry` carries `bytes_in` / `bytes_out` / `last_data_received_at` fields. The daemon
+populates these in `ListSessions` from the `GrpcSessionTerminal` traffic meter for
+claude-cli / cursor-cli / workspace sessions it owns (live counters), and reports zero / empty
+for tddy-coder sessions that have no LiveKit participant (stopped). The web inspector renders
+these when no per-session live runtime exists (see
+[Session Drawer Screen § Inspector I/O bytes + last-data-received](../web/session-drawer.md#inspector-io-bytes--last-data-received)).
+
+### What stays the same
+
+- Process lifecycle ownership stays with the daemon: it spawns and tears down the coder
+  process and owns the `.session.yaml` record.
+- `session_list_enrichment.rs` (`SessionListStatusDisplay`) keeps enriching `SessionEntry`
+  from disk for inactive and directory-listed sessions.
+- Auth model is unchanged: `session_token` → GitHub user → OS user → session ownership,
+  validated at the daemon for every `DeleteSession` / `SignalSession` (always daemon-direct).
+- claude-cli / cursor-cli / workspace sessions keep their existing daemon-served
+  `ConnectionService` path.
+
+---
+
 ## Non-goals (out of scope)
 
 - Web UI integration (deferred).

@@ -2,6 +2,13 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-12 — Fast session change: daemon-direct delete/signal + inspector `SessionEntry` bytes
+
+- Session-scoped `ConnectionService` methods (tools, terminal control, VNC, screen-sharing) for a LiveKit-backed (tddy-coder) session are served by the coder's own LiveKit participant (`daemon-{instanceId}-{sessionId}`); the daemon no longer relays them. The daemon stays the bootstrap/directory authority (`StartSession`/`ConnectSession`/`ResumeSession` + `ListSessions`/`ListProjects`/…).
+- `DeleteSession` / `SignalSession` are **daemon-direct**: the web calls them on `daemon-{instanceId}` with the caller's `session_token`; the coder is not on the path, so lifecycle control still works when the coder participant is stuck. Daemon errors surface verbatim. A contract test guards the daemon-direct path.
+- `SessionEntry` gains `bytes_in` / `bytes_out` / `last_data_received_at`; the daemon populates them from the `GrpcSessionTerminal` traffic meter for claude-cli/cursor-cli/workspace sessions and reports zero/empty for stopped tddy-coder sessions, so the web inspector can render traffic for sessions with no LiveKit participant.
+- Non-LiveKit (claude-cli / cursor-cli / workspace) sessions' `ConnectionService` path is unchanged.
+- Feature: [terminal-sessions.md § Session-scoped RPC routing & daemon-direct lifecycle](terminal-sessions.md#session-scoped-rpc-routing--daemon-direct-lifecycle). PR [#297](https://github.com/uppin/tddy-coder/pull/297).
 ## 2026-07-06 — Cursor CLI sandbox parity with Claude CLI
 
 - **`session_type = "cursor-cli"` + `sandbox = true`** succeeds on macOS (Seatbelt) and Linux (cgroups+namespaces) via `start_sandboxed_cursor_cli_session` and `tddy-sandbox-recipes::cursor_cli`; managed codebase, specialized subagents, and `TDDY_SOCKET` workflow wiring mirror claude-cli.

@@ -4,7 +4,7 @@
  * not the daemon participant (`daemon-<instanceId>`).
  *
  * Changeset: `2026-07-12-fast-session-change`
- * PRD: `docs/ft/web/1-WIP/PRD-2026-07-12-fast-session-change.md` (req 1)
+ * Feature: `docs/ft/web/session-drawer.md#fast-session-change` (req 1)
  *
  * ⚠️ RED PHASE — fails until `./sessionParticipantRpcClient` exists with the API below.
  */

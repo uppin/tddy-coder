@@ -3,7 +3,7 @@
  * daemon participant (regression guard for the bootstrap boundary).
  *
  * Changeset: `2026-07-12-fast-session-change`
- * PRD: `docs/ft/web/1-WIP/PRD-2026-07-12-fast-session-change.md` (req 1 boundary)
+ * Feature: `docs/ft/web/session-drawer.md#fast-session-change` (req 1 boundary)
  *
  * Green: the session-scoped retargeting lands AND the bootstrap/lifecycle RPCs
  * (`StartSession` / `ConnectSession` / `ResumeSession` / `DeleteSession` / `SignalSession`) keep

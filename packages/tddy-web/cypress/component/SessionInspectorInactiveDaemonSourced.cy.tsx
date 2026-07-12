@@ -3,7 +3,7 @@
  * LiveKit participant comes from the daemon `ListSessions` `SessionEntry` fields (inactive fallback).
  *
  * Changeset: `2026-07-12-fast-session-change`
- * PRD: `docs/ft/web/1-WIP/PRD-2026-07-12-fast-session-change.md` (req 5 — dual source)
+ * Feature: `docs/ft/web/session-drawer.md#fast-session-change` (req 5 — dual source)
  *
  * Green:
  *   - `SessionEntry` proto carries `bytes_in` / `bytes_out` / `last_data_received_at`;

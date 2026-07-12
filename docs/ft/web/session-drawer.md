@@ -100,6 +100,95 @@ selected host. Because selection never calls `selectDaemon`, the screen does not
 - Clicking a connected session in the drawer auto-calls `connectSession`
 - Clicking a disconnected session opens the inspector by default without auto-connecting
 
+## Fast Session Change
+
+The drawer keeps one self-contained **runtime** per attached LiveKit session, so switching
+between sessions is a focus change — not a disconnect/reconnect. Background sessions stay
+mounted and keep streaming; the inspector shows live traffic per session; and session-scoped
+RPCs target each session's own LiveKit participant.
+
+### Per-session runtime registry
+
+`SessionRuntimeRegistry` (keyed by `sessionId`) replaces the single `useSessionAttachment`
+singleton for LiveKit-backed sessions. Each `SessionRuntimeState` holds:
+
+- attachment status
+- its own LiveKit `Room` (joined as `browser-{sessionId}-{ts}`)
+- its own `GhosttyTerminalLiveKit` instance
+- a `ConnectionService` client bound to the session's participant identity
+  (`daemon-{instanceId}-{sessionId}`)
+- a per-session traffic meter + byte counters (in/out)
+- `lastDataReceivedAt` (from the LiveKit transport's `DataReceived` events)
+- terminal control state
+
+One `<SessionRuntime>` is mounted per attached session. The focused session's terminal is
+CSS-visible; the others are `display:none` but stay subscribed to `streamTerminalIO`.
+Selecting a session is a focus switch — no unmount, no `resetAttachment`, no LiveKit
+reconnect, no terminal resize.
+
+### Eviction
+
+Background attachments persist until **explicit disconnect** — there is no cap. Disconnect
+removes only that session's runtime. Memory therefore grows with the number of concurrently
+attached sessions (one LiveKit Room + one Ghostty terminal each); this is intentional for the
+fast-switching workflow.
+
+### Session-participant RPC routing
+
+For an attached LiveKit session, the `ConnectionService` client is built via
+`liveKitFactory(room, sessionServerIdentity)` where `sessionServerIdentity` is the session's
+own participant (`daemon-{instanceId}-{sessionId}`). Session-scoped RPCs route through it:
+
+- `ListExecTools`, `ListSessionToolCalls`, `ExecuteTool`
+- `ClaimTerminalControl`, `WatchTerminalControl`
+- VNC and screen-sharing RPCs
+
+**Daemon-direct** RPCs stay on the daemon participant (`daemon-{instanceId}`), not the session
+participant, so lifecycle and bootstrap control still work when the coder participant is stuck:
+
+- `DeleteSession`, `SignalSession` — lifecycle control, daemon-direct.
+- `ConnectSession`, `ResumeSession`, `StartSession` — attachment bootstrap.
+- Directory RPCs: `ListSessions`, `ListProjects`, `ListAgents`, `ListTools`,
+  `ListEligibleDaemons`, `ListProjectBranches`.
+
+See [Session Participant RPC & Metadata](../coder/session-participant-rpc.md) for the coder
+side of this contract.
+
+### Sessions list metadata from participants
+
+`useRoomParticipants`'s `RoomParticipant` carries a parsed `session` metadata field (sibling of
+`owned_project_count` / `codex_oauth`, published by the coder process — see
+[LiveKit common room: owned project count](livekit-participant-owned-projects.md)).
+`SessionManager.mergeActiveAndFetchedSessions` overlays parsed session metadata onto
+synthesized cross-host rows and live-updates fetched rows from participant metadata
+(presence-driven, no `ListSessions` fan-out for active rows). A common-room participant with
+`session` metadata produces a drawer row showing goal/state/agent/model with no `ListSessions`
+call for that row.
+
+### Inspector I/O bytes + last-data-received
+
+The inspector **Details** tab shows bytes in, bytes out, and a "last data received: Ns ago"
+relative timestamp that advances while the inspector is open. The source is dual:
+
+- **Attached LiveKit session** — bytes in/out come from the per-session traffic meter and
+  `lastDataReceivedAt` from the LiveKit transport's `DataReceived` events, updating in the
+  background (even while the session is not focused).
+- **No LiveKit participant** — a stopped tddy-coder session, or claude-cli / cursor-cli /
+  workspace sessions that never join a room — falls back to `SessionEntry` fields
+  (`bytes_in`, `bytes_out`, `last_data_received_at`) populated by the daemon `ListSessions`
+  RPC (see [Terminal Sessions § Inspector data for sessions with no LiveKit participant](../daemon/terminal-sessions.md#inspector-data-for-sessions-with-no-livekit-participant)).
+
+The inspector renders the live runtime values when a runtime exists, else the daemon-sourced
+`SessionEntry` values.
+
+### Out of scope
+
+- claude-cli / cursor-cli / workspace sessions keep their existing gRPC terminal path
+  (`GrpcSessionTerminal`); they have no LiveKit participant and are not bound to the
+  runtime registry, background-terminal, or participant-routing behaviour.
+- `ConnectionScreen` (`#/`) is unchanged; fast session change affects only
+  `SessionsDrawerScreen` (`#/sessions`).
+
 ## Session Inspector Drawer
 
 The Session Inspector is an overlay panel anchored to the right edge of `SessionMainPane`.
@@ -557,7 +646,6 @@ ids, so they do not share a lease.
 
 ## Known Limitations
 
-- The terminal in the main pane is a placeholder; real terminal mounting is out of scope.
 - Multi-daemon host filtering (the `daemonInstanceId` grouping in `ConnectionScreen`) is
   deferred — sessions from all daemons appear together in the flat list.
 - The old `ConnectionScreen` monolith is not retired by this change.
@@ -565,3 +653,5 @@ ids, so they do not share a lease.
   the task is in the in-memory registry.
 - The HTTP `/rpc` meter is app-global (shared across all open sessions); only the LiveKit
   meter is strictly per-session.
+- Per-session runtimes have no eviction cap (explicit-disconnect only); memory grows with the
+  number of concurrently attached sessions.

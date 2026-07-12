@@ -3,7 +3,7 @@
  * participant's metadata JSON, tolerating missing keys and older empty metadata.
  *
  * Changeset: `2026-07-12-fast-session-change`
- * PRD: `docs/ft/web/1-WIP/PRD-2026-07-12-fast-session-change.md` (req 4)
+ * Feature: `docs/ft/web/session-drawer.md#fast-session-change` (req 4)
  *
  * ⚠️ RED PHASE — fails until `./sessionParticipantMetadata` exists with the API below.
  */

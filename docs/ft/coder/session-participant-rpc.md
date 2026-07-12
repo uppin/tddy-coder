@@ -6,9 +6,15 @@ A `tddy-coder` session serves the session-scoped `ConnectionService` methods dir
 
 ## Technical Context
 
-### Problem Statement
+### Design Rationale
 
-Today the coder's LiveKit participant only serves `TerminalService`. All other session-scoped `ConnectionService` RPCs route through the daemon's `daemon-{instanceId}` participant, so the session screen is bound to the daemon rather than to the session. Meanwhile the coder creates a metadata watch channel but never sends anything on it, so its LiveKit participant carries no session information — the web's sessions list can only show metadata for sessions whose owning daemon answered `ListSessions`, and cross-host active rows fall back to a short-id label.
+Serving session-scoped RPCs from the coder's own LiveKit participant (rather than relaying
+them through the daemon) binds the session screen to the session, not to the daemon, and
+removes a hop. The coder publishes its own `session` metadata on that participant so the
+web's sessions list can render active cross-host rows from presence alone — no `ListSessions`
+fan-out to each owning daemon. `DeleteSession` / `SignalSession` stay **daemon-direct**
+because the daemon owns process teardown and must remain reachable even when the coder
+participant is stuck.
 
 ### Target Consumers
 
@@ -17,7 +23,7 @@ Today the coder's LiveKit participant only serves `TerminalService`. All other s
 
 ### Success Metrics
 
-- **Latency**: session-scoped RPCs no longer round-trip through the daemon participant; they resolve on the session participant directly.
+- **Latency**: session-scoped RPCs resolve on the session participant directly, without a daemon round-trip.
 - **Presence richness**: active sessions show goal/state/agent/model in the web drawer without a `ListSessions` fan-out to the owning daemon.
 - **Reliability**: delete/signal are daemon-direct, so they still work when the coder participant is stuck; daemon errors surface verbatim to the web caller.
 
@@ -29,7 +35,7 @@ The coder's LiveKit participant serves the following `ConnectionService` methods
 
 - `ListExecTools` — the session's executable tool catalog.
 - `ListSessionToolCalls` — the durable `~/.tddy/sessions/{sessionId}/tool-calls.jsonl` log.
-- `ExecuteTool` — invoke a tool against the session; appends to the same durable log.
+- `ExecuteTool` — invoke a tool against the session; appends to the same durable log. Dispatches through the shared **`tddy-tool-engine`** crate against the session's worktree root (`agent_working_dir`), backed by a per-session `tddy_task::TaskRegistry`; the catalog mirrors the shared engine's (`Read`/`Write`/`StrReplace`/`Delete`/`Grep`/`Glob`/`Shell`/`Await`/`ReadLints`/`SemanticSearch`). Background `Shell` jobs (`block_until_ms=0`) land in the registry; live status is reachable via `Await`. The `ToolExecutor` seam is `async`.
 - `ClaimTerminalControl` / `WatchTerminalControl` — the coder owns its own terminal, so it serves the control lease directly (the daemon's `ClaudeCliSessionManager` control registry is irrelevant for tddy-coder sessions).
 - `DeleteSession` / `SignalSession` — **not served here**. The web routes them directly to the daemon participant (`daemon-{instanceId}`), which owns process teardown. This keeps lifecycle control available even when the coder participant is stuck, and avoids a relay hop.
 
@@ -71,8 +77,9 @@ Republished on workflow state transitions (the workflow already writes `changese
 
 ### Architecture
 
-- New modules in `tddy-coder`: `connection_service_participant` (method handlers — tools, terminal control), `metadata_publisher` (changeset → `session` JSON → `metadata_tx`). No relay module: delete/signal are daemon-direct.
-- Wired into the participant's `ServiceEntry` list in `run.rs` (both the `livekit_multi` path and the single-token path) and into the existing `metadata_tx` watch channel.
+- Modules in `tddy-coder`: `connection_service_participant` (method handlers — tools, terminal control), `metadata_publisher` (changeset → `session` JSON → `metadata_tx`), and `spawn_session_metadata_tap` (workflow-state → `session` metadata on the interactive path). No relay module: delete/signal are daemon-direct.
+- `ExecuteTool` dispatches via the shared [`tddy-tool-engine`](../../../packages/tddy-tool-engine/) crate (`CoderSessionToolExecutor` holds the session's `worktree_root` + a `tddy_task::TaskRegistry`); `coder_session_tool_catalog()` mirrors the shared catalog.
+- Wired into the participant's `ServiceEntry` list in `run.rs` (both the `livekit_multi` path and the single-token path) and into the existing `metadata_tx` watch channel. The headless `--grpc` path's `session` metadata tap is FIXME-tracked (`2026-07-12-fast-session-change`); the tool executor is wired on both paths.
 
 ### Performance Constraints
 
@@ -101,22 +108,22 @@ participant.metadata → JSON.parse → { session: { workflow_goal, workflow_sta
 
 ## Acceptance Criteria
 
-- [ ] The coder's LiveKit participant answers `ListExecTools`, `ExecuteTool`, and `ClaimTerminalControl` over its identity.
-- [ ] After a workflow state transition, the participant's metadata JSON contains a `session` block with `workflow_goal`, `workflow_state`, `agent`, and `model`.
-- [ ] `DeleteSession` / `SignalSession` are **not** served by the coder participant; the web routes them to `daemon-{instanceId}` and they still terminate the session (daemon-direct).
-- [ ] The `session` metadata key coexists with `owned_project_count` / `codex_oauth` (shallow merge preserves sibling keys).
-- [ ] Start/Resume/Connect and directory RPCs are **not** served by the coder participant.
+- [x] The coder's LiveKit participant answers `ListExecTools`, `ExecuteTool`, and `ClaimTerminalControl` over its identity.
+- [x] After a workflow state transition, the participant's metadata JSON contains a `session` block with `workflow_goal`, `workflow_state`, `agent`, and `model`.
+- [x] `DeleteSession` / `SignalSession` are **not** served by the coder participant; the web routes them to `daemon-{instanceId}` and they still terminate the session (daemon-direct).
+- [x] The `session` metadata key coexists with `owned_project_count` / `codex_oauth` (shallow merge preserves sibling keys).
+- [x] Start/Resume/Connect and directory RPCs are **not** served by the coder participant.
 
 ## Testing Strategy
 
-- **Integration (LiveKit testkit)**: spawn a coder participant against `LIVEKIT_TESTKIT_WS_URL`; call session-scoped `ConnectionService` methods (tools, terminal control) over its identity; observe metadata after a transition. Delete/signal daemon-direct behaviour is covered by the web Cypress + daemon unit tests.
-- **Unit**: `connection_service_participant` handlers against an in-process harness; `metadata_publisher` JSON shape + merge.
+- **Integration (LiveKit testkit)**: spawn a coder participant against `LIVEKIT_TESTKIT_WS_URL`; call session-scoped `ConnectionService` methods (tools, terminal control) over its identity; observe metadata after a transition. A real-executor test asserts `ListExecTools` returns the full shared catalog and `ExecuteTool("Read")` returns the worktree file's contents via `tddy-tool-engine`. Delete/signal daemon-direct behaviour is covered by the web Cypress + daemon unit tests.
+- **Unit**: `connection_service_participant` handlers against an in-process harness (incl. an async `ToolExecutor` fake, catalog-mirrors-shared-engine, `CoderSessionToolExecutor` Write→Read against a tempdir); `metadata_publisher` JSON shape + merge + the workflow-state tap mapping (`apply_session_metadata_event`).
 
 ## Related Documentation
 
-- Web PRD: `docs/ft/web/1-WIP/PRD-2026-07-12-fast-session-change.md`.
-- Daemon PRD: `docs/ft/daemon/1-WIP/PRD-2026-07-12-fast-session-change.md`.
-- Changeset: `docs/dev/1-WIP/2026-07-12-fast-session-change.md`.
+- [Session Drawer Screen § Fast Session Change](../web/session-drawer.md#fast-session-change) — web consumer.
+- [Terminal Sessions § Session-scoped RPC routing & daemon-direct lifecycle](../daemon/terminal-sessions.md#session-scoped-rpc-routing--daemon-direct-lifecycle) — daemon side.
 - [LiveKit peer discovery (daemon)](../daemon/livekit-peer-discovery.md) — daemon participant identity.
 - [LiveKit common room: owned project count](../web/livekit-participant-owned-projects.md) — participant metadata schema.
 - [`participant-metadata.md`](../../../packages/tddy-livekit/docs/participant-metadata.md) — `tddy-livekit` metadata merge technical reference.
+- [`tddy-tool-engine`](../../../packages/tddy-tool-engine/) — shared exec-tool dispatch engine.
