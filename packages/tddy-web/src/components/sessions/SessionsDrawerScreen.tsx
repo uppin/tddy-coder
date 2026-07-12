@@ -1,10 +1,15 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { create } from "@bufbuild/protobuf";
+import { createClient, type Client } from "@connectrpc/connect";
 import { ConnectionService, SessionEntrySchema, type SessionEntry } from "../../gen/connection_pb";
 import { TokenService } from "../../gen/token_pb";
-import { sortSessionsByCreation } from "../../utils/sessionSort";
-import { useHttpClient } from "../../rpc/transportProvider";
-import { useDaemonClient } from "../../rpc/selectedDaemon";
+import { useHttpClient, useLiveKitTransportFactory } from "../../rpc/transportProvider";
+import { useDaemonClient, useDaemonClientFor, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
+import { daemonRpcIdentity } from "../../lib/participantRole";
+import { owningHostForSession } from "../../utils/crossHostSessions";
+import { useRoomParticipants } from "../../hooks/useRoomParticipants";
+import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
+import { useSessionManager } from "./sessionManager";
 import { useAuthContext } from "../../hooks/authProvider";
 import { DaemonSelectorConnected } from "../shell/DaemonSelector";
 import { TooltipProvider } from "../ui/tooltip";
@@ -32,13 +37,28 @@ export function SessionsDrawerScreen() {
   // ConnectionService is daemon-level RPC — routed over the shared common-room LiveKit
   // connection to whichever daemon is currently selected (see `SelectedDaemonProvider`).
   // `null` until a daemon is selected / the room is connected; every call site below guards.
+  // The selected-daemon `client` still owns the CREATE flow (a new session is created on the
+  // selected host); cross-host interaction routes through `activeClient` (computed below).
   const client = useDaemonClient(ConnectionService);
+  const { room, selectedInstanceId } = useSelectedDaemon();
+  const daemons = useDaemons();
+  const liveKitFactory = useLiveKitTransportFactory();
   // TokenService issues this session's own browser LiveKit-join token — it must stay HTTP to the
   // serving daemon (you cannot fetch a LiveKit-join token *over* LiveKit), per the PRD's bootstrap
   // exception. Do not migrate this to useDaemonClient.
   const tokenClient = useHttpClient(TokenService);
 
-  const [sessions, setSessions] = useState<SessionEntry[]>([]);
+  // Address any daemon's ConnectionService directly (`daemon-{instanceId}`) over the shared
+  // common-room connection. Used to connect to a cross-host row's owning daemon at click time, when
+  // the owner is known but the selected session (and thus `activeClient`) hasn't updated yet.
+  const clientForHost = useCallback(
+    (instanceId: string): Client<typeof ConnectionService> | null =>
+      room && instanceId
+        ? createClient(ConnectionService, liveKitFactory(room, daemonRpcIdentity(instanceId)))
+        : null,
+    [room, liveKitFactory],
+  );
+
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
     return parseSessionsDrawerSessionId(window.location.hash.slice(1));
@@ -67,30 +87,39 @@ export function SessionsDrawerScreen() {
       : null;
   const { controlState, controlTokenRef, claim: claimControl } = useTerminalControl(connectedSessionId, sessionToken);
 
-  // Fetch sessions on mount
-  useEffect(() => {
-    if (!client) return;
-    let cancelled = false;
-    client
-      .listSessions({ sessionToken })
-      .then((resp) => {
-        if (!cancelled) {
-          setSessions(resp.sessions as SessionEntry[]);
-        }
-      })
-      .catch((err) => {
-        console.debug("[SessionsDrawerScreen] listSessions error", err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [client, sessionToken]);
-
-  const sortedSessions = useMemo(() => sortSessionsByCreation(sessions), [sessions]);
+  // The merged session list, refresh, and change events all live in one place: `SessionManager`. It
+  // unions the selected host's sessions (from ListSessions, refreshed via the window-bound
+  // `sessionsRefreshBridge`) with the live cross-host sessions observed as common-room coder
+  // participants — LiveKit presence is the keep-alive that makes a non-selected host's session visible.
+  const participants = useRoomParticipants(room);
+  const { sessions: sortedSessions, addOptimisticSession } = useSessionManager(
+    client,
+    sessionToken,
+    participants,
+    selectedInstanceId ?? "",
+  );
 
   const selectedSession = useMemo(
     () => sortedSessions.find((s) => s.sessionId === selectedSessionId) ?? null,
     [sortedSessions, selectedSessionId],
+  );
+
+  // The daemon that owns the selected session — cross-host interaction (connect, resume, delete,
+  // terminate) must reach that daemon, not the selected one.
+  const selectedOwningHost = useMemo(
+    () => (selectedSession ? owningHostForSession(selectedSession, selectedInstanceId ?? "") : null),
+    [selectedSession, selectedInstanceId],
+  );
+  const activeClient = useDaemonClientFor(ConnectionService, selectedOwningHost);
+
+  // Human-readable host label for a daemon instance id, with the local daemon's " (this daemon)"
+  // suffix stripped — used for the owning-host badge on cross-host rows.
+  const hostLabelForInstance = useCallback(
+    (instanceId: string): string => {
+      const host = daemons.find((d) => d.instanceId === instanceId);
+      return (host?.label ?? instanceId).replace(/ \(this daemon\)$/, "");
+    },
+    [daemons],
   );
 
   // Key-press shortcuts for the connected session's tool (shown as the mobile overlay).
@@ -119,8 +148,8 @@ export function SessionsDrawerScreen() {
         ? "open"
         : "closed",
     );
-    if (session.isActive && client) {
-      connectSession(selectedSessionId, sessionToken, client).catch((err) => {
+    if (session.isActive && activeClient) {
+      connectSession(selectedSessionId, sessionToken, activeClient).catch((err) => {
         console.debug("[SessionsDrawerScreen] deep-link connectSession error", err);
       });
     }
@@ -171,84 +200,72 @@ export function SessionsDrawerScreen() {
     // Track auto-open so we know whether a subsequent connect should auto-close
     inspectorAutoOpenRef.current = willOpen;
     setInspectorState(willOpen ? "open" : "closed");
-    if (session?.isActive && client) {
-      connectSession(sessionId, sessionToken, client).catch((err) => {
-        console.debug("[SessionsDrawerScreen] connectSession error", err);
-      });
+    // Connect to the clicked session's owning daemon. `activeClient` still reflects the previously
+    // selected session at this point (the selection state update is not yet applied), so build the
+    // client for this session's owner directly rather than reading `activeClient` here.
+    if (session?.isActive) {
+      const owner = owningHostForSession(session, selectedInstanceId ?? "");
+      const owningClient = clientForHost(owner);
+      if (owningClient) {
+        connectSession(sessionId, sessionToken, owningClient).catch((err) => {
+          console.debug("[SessionsDrawerScreen] connectSession error", err);
+        });
+      }
     }
   };
 
   const handleResume = (sessionId: string) => {
-    if (!client) return;
-    resumeSession(sessionId, sessionToken, client).catch((err) => {
+    if (!activeClient) return;
+    resumeSession(sessionId, sessionToken, activeClient).catch((err) => {
       console.debug("[SessionsDrawerScreen] resumeSession error", err);
     });
   };
 
   const handleDelete = (sessionId: string) => {
-    if (!client) return;
-    deleteSession(sessionId, sessionToken, client).catch((err) => {
+    if (!activeClient) return;
+    deleteSession(sessionId, sessionToken, activeClient).catch((err) => {
       console.debug("[SessionsDrawerScreen] deleteSession error", err);
     });
   };
 
-  const refreshSessions = () => {
-    if (!client) return;
-    client
-      .listSessions({ sessionToken })
-      .then((resp) => {
-        setSessions(resp.sessions as SessionEntry[]);
-      })
-      .catch((err) => {
-        console.debug("[SessionsDrawerScreen] listSessions refresh error", err);
-      });
-  };
-
   // A pr-stack orchestrator's "Start session" CTA spawns a child immediately in the
   // background (no navigation, no auto-connect — the operator stays on the orchestrator's
-  // chat screen). Append a minimal entry so the drawer reflects it right away. Unlike
-  // handleTerminate's refreshSessions() (which needs an authoritative isActive from the
-  // daemon), a full refetch here isn't safe to chain: the daemon's session-list enrichment
-  // may not have indexed the brand-new session yet, so an immediate refetch could overwrite
-  // this optimistic entry with a response that doesn't include it yet. The optimistic entry's
-  // remaining fields (workflowGoal, status, etc.) fill in on the next refresh this screen
-  // already performs for an unrelated reason (e.g. selecting another session, terminating a
-  // session) — there is no background polling anywhere in this screen today, for any session.
+  // chat screen). Add a minimal optimistic entry so the drawer reflects it right away. Unlike
+  // handleTerminate's refresh() (which needs an authoritative isActive from the daemon), a full
+  // refetch here isn't safe to chain: the daemon's session-list enrichment may not have indexed the
+  // brand-new session yet. The optimistic overlay is merged into the list (a fetched entry with the
+  // same id always wins), and its remaining fields fill in on the next fan-out refresh.
   const handleChildSessionStarted = (entry: {
     sessionId: string;
     recipe: string;
     orchestratorSessionId: string;
     projectId: string;
   }) => {
-    setSessions((prev) => {
-      if (prev.some((s) => s.sessionId === entry.sessionId)) return prev;
-      return [
-        ...prev,
-        create(SessionEntrySchema, {
-          sessionId: entry.sessionId,
-          recipe: entry.recipe,
-          orchestratorSessionId: entry.orchestratorSessionId,
-          projectId: entry.projectId,
-          isActive: true,
-          createdAt: new Date().toISOString(),
-        }),
-      ];
-    });
+    addOptimisticSession(
+      create(SessionEntrySchema, {
+        sessionId: entry.sessionId,
+        recipe: entry.recipe,
+        orchestratorSessionId: entry.orchestratorSessionId,
+        projectId: entry.projectId,
+        isActive: true,
+        createdAt: new Date().toISOString(),
+      }),
+    );
   };
 
   const handleTerminate = (sessionId: string) => {
-    if (!client) return;
-    signalSession(sessionId, Signal.SIGTERM, sessionToken, client)
+    if (!activeClient) return;
+    signalSession(sessionId, Signal.SIGTERM, sessionToken, activeClient)
       .catch((err) => {
         // Common cause: the session already ended (e.g. process exited on its own) before this
-        // click reached the daemon — refreshSessions() below still corrects the stale `isActive`
-        // that caused the "Terminate" button to be shown for an already-dead session.
+        // click reached the daemon — refresh() below still corrects the stale `isActive` that
+        // caused the "Terminate" button to be shown for an already-dead session.
         console.debug("[SessionsDrawerScreen] signalSession error", err);
       })
       .finally(() => {
         // The daemon computes `isActive` from live PID liveness, not from a push update — refetch
         // so the row (and its "Terminate" button) reflects the session's actual current state.
-        refreshSessions();
+        requestSessionsRefresh();
       });
   };
 
@@ -278,14 +295,7 @@ export function SessionsDrawerScreen() {
     });
     // Refresh the sessions list so the newly-created session appears in the drawer
     // and selectedSession resolves to a non-null value.
-    client
-      .listSessions({ sessionToken })
-      .then((resp) => {
-        setSessions(resp.sessions as SessionEntry[]);
-      })
-      .catch((err) => {
-        console.debug("[SessionsDrawerScreen] listSessions after create error", err);
-      });
+    requestSessionsRefresh();
   };
 
   return (
@@ -325,6 +335,8 @@ export function SessionsDrawerScreen() {
             onClose={() => setSessionListOpen(false)}
             onOpen={() => setSessionListOpen(true)}
             isMobile={isMobile}
+            selectedInstanceId={selectedInstanceId ?? ""}
+            hostLabelForInstance={hostLabelForInstance}
           />
           <SessionMainPane
             selectedSession={selectedSession}
@@ -338,7 +350,7 @@ export function SessionsDrawerScreen() {
             onDelete={handleDelete}
             onTerminate={handleTerminate}
             isCreating={mode === "creating"}
-            client={client ?? undefined}
+            client={mode === "creating" ? (client ?? undefined) : (activeClient ?? client ?? undefined)}
             tokenClient={tokenClient}
             sessionToken={sessionToken}
             onCancelCreate={handleCancelCreate}
