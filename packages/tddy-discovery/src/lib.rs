@@ -6,3 +6,4 @@ pub mod discovery;
 pub mod openai;
 pub mod subagent;
 pub mod tools;
+pub mod warmup;

@@ -108,6 +108,23 @@ fn resolved_terminal_id(raw: &str) -> &str {
     }
 }
 
+/// Maximum size of a single terminal-output frame published to a client on attach. Chosen to stay
+/// well under the LiveKit/WebRTC data-channel and gRPC-web message size limits while keeping the
+/// number of replay frames for a long-lived session reasonable.
+pub(crate) const TERMINAL_OUTPUT_FRAME_MAX_BYTES: usize = 32 * 1024;
+
+/// Split a terminal capture buffer into ordered frames of at most `max_frame_bytes` each so a long
+/// session history is replayed as several bounded frames instead of one oversized frame that could
+/// exceed the transport's per-message limit and never reach the client.
+///
+/// An empty input yields no frames. Any non-empty input yields `ceil(len / max_frame_bytes)`
+/// frames; concatenating them in order reproduces the input exactly.
+pub(crate) fn chunk_terminal_output(data: &[u8], max_frame_bytes: usize) -> Vec<bytes::Bytes> {
+    data.chunks(max_frame_bytes)
+        .map(bytes::Bytes::copy_from_slice)
+        .collect()
+}
+
 /// Derives the agent and recipe to relaunch a resumed session with, from its persisted
 /// `.session.yaml`. Empty/whitespace-only values are treated as absent (`None`), mirroring the
 /// spawner's trimming, so a legacy session with no persisted agent/recipe restores as `None`.
@@ -793,6 +810,7 @@ async fn spawn_claude_cli_session_inner(
             &binary_owned,
             initial_prompt_opt.as_deref(),
             permission_mode_opt.as_deref(),
+            false,
             append_system_prompt_file.as_deref(),
             env_extra,
             Some(os_user),
@@ -1064,6 +1082,17 @@ impl ConnectionServiceImpl {
         let project_id = project_id.trim();
         let repo_path = repo_path.trim();
         let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
+
+        // Readiness gate: wake every specialized agent's endpoint and wait until each answers
+        // before spawning the jail, so a cold/unreachable model fails session start here rather
+        // than stalling the main agent's first subagent call. No fallback — the jail is never
+        // spawned if warm-up fails (this covers resume, which reuses this start path).
+        tddy_discovery::warmup::warm_up_agents(
+            &specialized_defs,
+            &tddy_discovery::warmup::WarmupOptions::default(),
+        )
+        .await
+        .map_err(|e| Status::failed_precondition(e.to_string()))?;
 
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)
@@ -1493,6 +1522,17 @@ impl ConnectionServiceImpl {
             ));
         }
         let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
+
+        // Readiness gate: wake every specialized agent's endpoint and wait until each answers
+        // before spawning the jail, so a cold/unreachable model fails session start here rather
+        // than stalling the main agent's first subagent call. No fallback — the jail is never
+        // spawned if warm-up fails (this covers resume, which reuses this start path).
+        tddy_discovery::warmup::warm_up_agents(
+            &specialized_defs,
+            &tddy_discovery::warmup::WarmupOptions::default(),
+        )
+        .await
+        .map_err(|e| Status::failed_precondition(e.to_string()))?;
 
         let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
@@ -1967,6 +2007,9 @@ impl ConnectionServiceImpl {
                 "auto",
                 &meta.specialized_agents,
                 managed_recipe,
+                // Resume path: the transcript already exists under the persistent sandbox claude
+                // HOME, so the runner must launch `claude --resume <id>`, not `--session-id <id>`.
+                true,
             )
             .await?;
 
@@ -1999,6 +2042,11 @@ impl ConnectionServiceImpl {
         permission_mode: &str,
         specialized_agents: &[String],
         managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
+        // When true, spawn the runner with `--resume` so the jailed `claude` continues the existing
+        // on-disk transcript (`--resume <id>`) instead of assigning the id to a fresh session
+        // (`--session-id <id>`). The persistent sandbox claude HOME keeps the transcript across
+        // daemon restarts, so a fresh `--session-id` would abort with "Session ID already in use".
+        resume: bool,
     ) -> Result<u32, Status> {
         let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
         let sandbox_root = session_dir.join("sandbox");
@@ -2136,6 +2184,9 @@ impl ConnectionServiceImpl {
             egress_shim_port.to_string(),
             "--stdio".into(),
         ];
+        if resume {
+            runner_argv.push("--resume".into());
+        }
         if let Some(prompt_path) = &append_system_prompt_file {
             runner_argv.push("--append-system-prompt-file".into());
             runner_argv.push(prompt_path.to_string_lossy().to_string());
@@ -3944,13 +3995,13 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 return Err(Status::not_found("terminal not found or not running"));
             }
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-            let historical = sandbox
+            let frames = sandbox
                 .capture
                 .lock()
-                .map(|cap| bytes::Bytes::copy_from_slice(&cap))
+                .map(|cap| chunk_terminal_output(&cap, TERMINAL_OUTPUT_FRAME_MAX_BYTES))
                 .unwrap_or_default();
-            if !historical.is_empty() {
-                let _ = tx.send(historical);
+            for frame in frames {
+                let _ = tx.send(frame);
             }
             let mut stdout_rx = sandbox.stdout_tx.subscribe();
             tokio::spawn(async move {
@@ -4021,19 +4072,23 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // only way to see historical content, so we keep it.
         let replay_capture = !has_initial_dims;
         if replay_capture {
-            let historical = handle
+            let frames = handle
                 .capture
                 .lock()
-                .map(|cap| bytes::Bytes::copy_from_slice(&cap))
+                .map(|cap| chunk_terminal_output(&cap, TERMINAL_OUTPUT_FRAME_MAX_BYTES))
                 .unwrap_or_default();
-            if !historical.is_empty() {
+            if !frames.is_empty() {
+                let total_bytes: usize = frames.iter().map(|f| f.len()).sum();
                 log::debug!(
                     target: "tddy_daemon::connection_service",
-                    "stream_terminal_output: replaying {} capture bytes for session {}",
-                    historical.len(),
+                    "stream_terminal_output: replaying {} capture bytes in {} frame(s) for session {}",
+                    total_bytes,
+                    frames.len(),
                     session_id
                 );
-                let _ = mpsc_tx.send(historical);
+                for frame in frames {
+                    let _ = mpsc_tx.send(frame);
+                }
             }
         } else {
             log::debug!(
@@ -6403,5 +6458,122 @@ mod sandbox_claude_passthrough_args_tests {
 
         // Then
         assert!(tokens.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod terminal_output_chunking_tests {
+    use super::{chunk_terminal_output, TERMINAL_OUTPUT_FRAME_MAX_BYTES};
+
+    /// A terminal capture with a recognizable, order-sensitive byte pattern so that a bug which
+    /// drops, duplicates, or reorders a chunk is caught on reassembly.
+    fn a_terminal_capture_of(len: usize) -> Vec<u8> {
+        (0..len).map(|i| (i % 251) as u8).collect()
+    }
+
+    /// Concatenate the emitted frames back into a single buffer.
+    fn reassembled(frames: &[bytes::Bytes]) -> Vec<u8> {
+        frames.iter().flat_map(|f| f.iter().copied()).collect()
+    }
+
+    #[test]
+    fn returns_no_frames_for_an_empty_capture() {
+        // Given — a freshly attached session whose capture buffer is empty
+        let capture = a_terminal_capture_of(0);
+
+        // When
+        let frames = chunk_terminal_output(&capture, 4);
+
+        // Then — nothing to replay means no frame is published
+        assert_eq!(frames, Vec::<bytes::Bytes>::new());
+    }
+
+    #[test]
+    fn keeps_a_capture_that_fits_within_the_limit_as_one_frame() {
+        // Given — a 3-byte capture and a 4-byte frame limit
+        let capture = a_terminal_capture_of(3);
+
+        // When
+        let frames = chunk_terminal_output(&capture, 4);
+
+        // Then — a single frame carrying the whole capture verbatim
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].as_ref(), capture.as_slice());
+    }
+
+    #[test]
+    fn keeps_a_capture_exactly_at_the_limit_as_one_frame() {
+        // Given — a capture whose length equals the frame limit
+        let capture = a_terminal_capture_of(4);
+
+        // When
+        let frames = chunk_terminal_output(&capture, 4);
+
+        // Then — the boundary case is not split
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].as_ref(), capture.as_slice());
+    }
+
+    #[test]
+    fn splits_a_capture_larger_than_the_limit_into_multiple_frames() {
+        // Given — a 10-byte capture and a 4-byte frame limit
+        let capture = a_terminal_capture_of(10);
+
+        // When
+        let frames = chunk_terminal_output(&capture, 4);
+
+        // Then — 4 + 4 + 2 = three frames, never one oversized frame
+        assert_eq!(frames.len(), 3);
+    }
+
+    #[test]
+    fn never_emits_a_frame_larger_than_the_limit() {
+        // Given — a 10-byte capture and a 4-byte frame limit
+        let capture = a_terminal_capture_of(10);
+
+        // When
+        let frames = chunk_terminal_output(&capture, 4);
+
+        // Then — every frame, including the remainder, respects the limit
+        let sizes: Vec<usize> = frames.iter().map(|f| f.len()).collect();
+        assert_eq!(sizes, vec![4, 4, 2]);
+    }
+
+    #[test]
+    fn reassembling_the_frames_reproduces_the_original_capture() {
+        // Given — a 10-byte capture and a 4-byte frame limit
+        let capture = a_terminal_capture_of(10);
+
+        // When
+        let frames = chunk_terminal_output(&capture, 4);
+
+        // Then — chunking preserves byte content and order exactly
+        assert_eq!(reassembled(&frames), capture);
+    }
+
+    #[test]
+    fn applies_the_default_frame_limit_so_a_long_session_is_not_replayed_as_one_frame() {
+        // Given — a one-megabyte capture, representative of a long-lived interactive session
+        let capture = a_terminal_capture_of(1024 * 1024);
+
+        // When — chunked at the production default limit
+        let frames = chunk_terminal_output(&capture, TERMINAL_OUTPUT_FRAME_MAX_BYTES);
+
+        // Then — the history is split into fixed-size frames that reassemble losslessly
+        let expected_frame_count = capture.len().div_ceil(TERMINAL_OUTPUT_FRAME_MAX_BYTES);
+        assert_eq!(frames.len(), expected_frame_count);
+        assert!(frames
+            .iter()
+            .all(|f| f.len() <= TERMINAL_OUTPUT_FRAME_MAX_BYTES));
+        assert_eq!(reassembled(&frames), capture);
+    }
+
+    #[test]
+    fn the_default_frame_limit_is_small_enough_to_chunk_a_megabyte_capture() {
+        // A one-megabyte session history must yield more than one frame — the whole point of the
+        // change is that an oversized single frame can exceed the data-channel message limit and
+        // never reach the browser. This guards the constant against being set unhelpfully large.
+        assert!(TERMINAL_OUTPUT_FRAME_MAX_BYTES > 0);
+        assert!(TERMINAL_OUTPUT_FRAME_MAX_BYTES < 1024 * 1024);
     }
 }

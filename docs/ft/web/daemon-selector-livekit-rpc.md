@@ -52,6 +52,14 @@ session's server identity in its own LiveKit room, exactly as today:
 Only **daemon-level** RPC — calls that are not scoped to one already-attached session — switch
 with the selector.
 
+**Exception — cross-host session aggregation.** The sessions drawer deliberately does *not* scope
+`ListSessions` to the selected daemon. It fans the call out to **every** common-room daemon (a
+per-daemon `daemon-{instanceId}` client built from the shared room + transport factory) and merges
+the results, so a session with a live LiveKit participant on a non-selected host stays visible (see
+[session-drawer.md § Cross-Host Active Sessions](./session-drawer.md#cross-host-active-sessions)).
+Interaction with such a row routes attach/resume/delete/terminate to that session's **owning**
+daemon via `useDaemonClientFor` — without calling `selectDaemon`, so the selected host is unchanged.
+
 ## The daemon identity subtlety
 
 A `tddy-daemon` joins the common room as **two** LiveKit participants:

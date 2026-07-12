@@ -365,6 +365,28 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
                 .collect::<Vec<_>>()
                 .join(",")
         );
+
+        // Readiness gate: wake every specialized agent's endpoint and wait until each answers
+        // before starting the in-jail agent CLI, so a cold/unreachable model surfaces here instead
+        // of stalling the main agent's first subagent call. No fallback — the CLI is never spawned
+        // if warm-up fails.
+        eprintln!(
+            "waking {} specialized agent(s) before starting {agent_kind:?} …",
+            specialized_defs.len()
+        );
+        let warmup_options = tddy_discovery::warmup::WarmupOptions::default();
+        tokio::select! {
+            res = tddy_discovery::warmup::warm_up_agents(&specialized_defs, &warmup_options) => {
+                if let Err(e) = res {
+                    eprintln!("specialized agent warm-up failed: {e}");
+                    return Err(anyhow::anyhow!(e.to_string()));
+                }
+            }
+            _ = tokio::signal::ctrl_c() => {
+                eprintln!("interrupted");
+                std::process::exit(130);
+            }
+        }
     }
 
     // Config `claude_args` first, then CLI `-- <args>` — a trailing positional prompt lands last.

@@ -216,35 +216,38 @@ impl CliSessionManager {
     ///
     /// Exported so tests can assert the argument list without spawning a real PTY.
     ///
-    /// Arg order: `[binary, "--model", model, "--session-id", id, "--permission-mode", mode, prompt?]`.
-    /// `model` is omitted when empty. `initial_prompt` is appended as a positional arg only
-    /// when non-empty (trimmed); an empty/whitespace prompt is treated as absent so the
-    /// process is started interactively without an injected first turn.
-    /// `permission_mode` defaults to `"auto"` when `None` or empty/whitespace.
+    /// Arg order: `[binary, "--model", model, <session flag>, id, "--permission-mode", mode, prompt?]`.
+    /// `model` is omitted when empty. The session flag is `--resume <id>` when `resume` is true
+    /// (continue an existing on-disk transcript) and `--session-id <id>` otherwise (assign the id to
+    /// a fresh session). `initial_prompt` is appended as a positional arg only when non-empty
+    /// (trimmed); an empty/whitespace prompt is treated as absent so the process is started
+    /// interactively without an injected first turn. `permission_mode` defaults to `"auto"` when
+    /// `None` or empty/whitespace.
     ///
-    /// A managed workflow's `--append-system-prompt-file` is inserted by
-    /// [`Self::start_with_options`] (before any positional prompt), not here, so this pure builder
-    /// stays focused on the base argv.
+    /// The base argv (binary, model, session flag, permission mode) is built by the shared
+    /// [`tddy_core::claude_argv::build_claude_base_argv`] so this path and the sandboxed runner
+    /// stay in lockstep. A managed workflow's `--append-system-prompt-file` is inserted by
+    /// [`Self::start_with_options`] (before any positional prompt), not here, so this builder stays
+    /// focused on the base argv plus the positional prompt.
     pub fn build_claude_argv(
         binary_path: &str,
         model: &str,
         session_id: &str,
         initial_prompt: Option<&str>,
         permission_mode: Option<&str>,
+        resume: bool,
     ) -> Vec<String> {
-        let mut argv = vec![binary_path.to_string()];
-        if !model.is_empty() {
-            argv.push("--model".to_string());
-            argv.push(model.to_string());
-        }
-        argv.push("--session-id".to_string());
-        argv.push(session_id.to_string());
         let mode = permission_mode
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or("auto");
-        argv.push("--permission-mode".to_string());
-        argv.push(mode.to_string());
+        let mut argv = tddy_core::claude_argv::build_claude_base_argv(
+            binary_path,
+            model,
+            session_id,
+            mode,
+            resume,
+        );
         if let Some(p) = initial_prompt {
             let p = p.trim();
             if !p.is_empty() {
@@ -341,6 +344,7 @@ impl CliSessionManager {
             binary_path,
             initial_prompt,
             permission_mode,
+            false,
             None,
             Vec::new(),
             None,
@@ -349,6 +353,10 @@ impl CliSessionManager {
     }
 
     /// Like [`Self::start`], plus managed-workflow launch options.
+    ///
+    /// `resume` — when true, continue the existing on-disk transcript via `--resume <id>` instead of
+    /// assigning the id to a fresh session via `--session-id <id>`. Only [`Self::resume_with_options`]
+    /// passes true; fresh starts pass false.
     ///
     /// `append_system_prompt_file` — when `Some`, inserted as `--append-system-prompt-file <path>`
     /// (before any positional prompt) so `claude` appends that file to its system prompt (a managed
@@ -365,6 +373,7 @@ impl CliSessionManager {
         binary_path: &str,
         initial_prompt: Option<&str>,
         permission_mode: Option<&str>,
+        resume: bool,
         append_system_prompt_file: Option<&Path>,
         env: Vec<(String, String)>,
         os_user: Option<&str>,
@@ -375,6 +384,7 @@ impl CliSessionManager {
             session_id,
             initial_prompt,
             permission_mode,
+            resume,
         );
         if let Some(path) = append_system_prompt_file {
             // Insert before a trailing positional prompt (if any) so the flag precedes the prompt.
@@ -631,6 +641,7 @@ impl CliSessionManager {
             binary_path,
             None,
             None,
+            true,
             append_system_prompt_file,
             env,
             None,
@@ -1103,6 +1114,64 @@ pub async fn spawn_livekit_bridge(
 mod tests {
     use super::*;
 
+    /// The token immediately following `flag` in an argv, or `None` if the flag is absent.
+    fn value_after<'a>(argv: &'a [String], flag: &str) -> Option<&'a str> {
+        argv.iter()
+            .position(|a| a == flag)
+            .and_then(|i| argv.get(i + 1))
+            .map(String::as_str)
+    }
+
+    fn contains_flag(argv: &[String], flag: &str) -> bool {
+        argv.iter().any(|a| a == flag)
+    }
+
+    #[test]
+    fn resuming_builds_the_argv_with_resume_not_session_id() {
+        // Given — a resume of an existing session
+        let resume = true;
+
+        // When
+        let argv = ClaudeCliSessionManager::build_claude_argv(
+            "claude",
+            "claude-opus-4-8",
+            "019f5514-c0eb-7893-b32f-a02043a6e5cf",
+            None,
+            None,
+            resume,
+        );
+
+        // Then — the id is passed to --resume and --session-id is absent
+        assert_eq!(
+            value_after(&argv, "--resume"),
+            Some("019f5514-c0eb-7893-b32f-a02043a6e5cf")
+        );
+        assert!(!contains_flag(&argv, "--session-id"));
+    }
+
+    #[test]
+    fn a_fresh_start_builds_the_argv_with_session_id_not_resume() {
+        // Given — a fresh (non-resume) start
+        let resume = false;
+
+        // When
+        let argv = ClaudeCliSessionManager::build_claude_argv(
+            "claude",
+            "claude-opus-4-8",
+            "019f5514-c0eb-7893-b32f-a02043a6e5cf",
+            None,
+            None,
+            resume,
+        );
+
+        // Then — the id is assigned via --session-id and --resume is absent
+        assert_eq!(
+            value_after(&argv, "--session-id"),
+            Some("019f5514-c0eb-7893-b32f-a02043a6e5cf")
+        );
+        assert!(!contains_flag(&argv, "--resume"));
+    }
+
     fn pid_is_alive(pid: u32) -> bool {
         // kill -0 checks existence without sending a signal; ESRCH means dead
         let ret = unsafe { libc::kill(pid as i32, 0) };
@@ -1278,6 +1347,7 @@ mod tests {
                 "/bin/sh",
                 None,
                 None,
+                false,
                 None,
                 Vec::new(),
                 Some("nyxzzz-nonexistent-user"),

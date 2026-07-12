@@ -396,6 +396,10 @@ export const sessionsDrawerItemStatus = (sessionId: string) =>
 export const sessionsDrawerItemTooltip = (sessionId: string) =>
   `sessions-drawer-item-tooltip-${sessionId}`;
 
+/** `[data-testid="sessions-drawer-item-host-<sessionId>"]` — owning-host badge on cross-host rows */
+export const sessionsDrawerItemHost = (sessionId: string) =>
+  `sessions-drawer-item-host-${sessionId}`;
+
 /** `[data-testid="sessions-detail-resume-<sessionId>"]` — Resume button in detail pane */
 export const sessionsDetailResumeBtn = (sessionId: string) =>
   `sessions-detail-resume-${sessionId}`;

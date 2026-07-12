@@ -15,6 +15,16 @@ const STATUS_COLOR: Record<string, string> = {
   "needs-input": "bg-yellow-500",
 };
 
+/**
+ * Owning-host attribution passed down so each row can badge cross-host sessions. A session's owning
+ * daemon is its `daemonInstanceId`; `hostLabelForInstance` turns that id into a display label;
+ * `selectedInstanceId` is the host currently selected (rows owned by it get no badge).
+ */
+interface OwningHostInfo {
+  selectedInstanceId: string;
+  hostLabelForInstance: (instanceId: string) => string;
+}
+
 interface SessionDrawerProps {
   sessions: SessionEntry[];
   selectedSessionId: string | null;
@@ -25,6 +35,10 @@ interface SessionDrawerProps {
   onOpen: () => void;
   /** On mobile the open list is a full-width overlay (out of flow) so it doesn't resize the terminal. */
   isMobile?: boolean;
+  /** The currently selected host — rows owned by it get no badge. Defaults to `""`. */
+  selectedInstanceId?: string;
+  /** Turn a daemon instance id into its display label. Defaults to the identity function. */
+  hostLabelForInstance?: (instanceId: string) => string;
 }
 
 interface StackGroup {
@@ -32,14 +46,23 @@ interface StackGroup {
   children: SessionEntry[];
 }
 
+/** Resolve the owning-host badge label for a row, or `null` when it belongs to the selected host. */
+function badgeHostLabel(session: SessionEntry, info: OwningHostInfo): string | null {
+  const owner = session.daemonInstanceId.trim() || info.selectedInstanceId;
+  if (owner === info.selectedInstanceId) return null;
+  return info.hostLabelForInstance(owner);
+}
+
 function SessionStackGroup({
   group,
   selectedSessionId,
   onSelectSession,
+  owningHost,
 }: {
   group: StackGroup;
   selectedSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
+  owningHost: OwningHostInfo;
 }) {
   const [isOpen, setIsOpen] = useState(true);
 
@@ -49,6 +72,7 @@ function SessionStackGroup({
         session={group.parent}
         isSelected={group.parent.sessionId === selectedSessionId}
         onClick={onSelectSession}
+        hostLabel={badgeHostLabel(group.parent, owningHost)}
       />
       {/* <details> provides the <summary> toggle target; children visibility is controlled explicitly via React state */}
       <details>
@@ -68,6 +92,7 @@ function SessionStackGroup({
             isSelected={child.sessionId === selectedSessionId}
             onClick={onSelectSession}
             depth={1}
+            hostLabel={badgeHostLabel(child, owningHost)}
           />
         ))}
       </div>
@@ -84,7 +109,13 @@ export function SessionDrawer({
   onClose,
   onOpen,
   isMobile = false,
+  selectedInstanceId = "",
+  hostLabelForInstance = (instanceId) => instanceId,
 }: SessionDrawerProps) {
+  const owningHost: OwningHostInfo = {
+    selectedInstanceId,
+    hostLabelForInstance,
+  };
   if (!isOpen) {
     // Strip mode on desktop; hidden on mobile (mobile uses the floating overlay
     // open button rendered by SessionsDrawerScreen).
@@ -190,6 +221,7 @@ export function SessionDrawer({
               group={group}
               selectedSessionId={selectedSessionId}
               onSelectSession={onSelectSession}
+              owningHost={owningHost}
             />
           ))}
           {flat.map((session) => (
@@ -198,6 +230,7 @@ export function SessionDrawer({
               session={session}
               isSelected={session.sessionId === selectedSessionId}
               onClick={onSelectSession}
+              hostLabel={badgeHostLabel(session, owningHost)}
             />
           ))}
           {sessions.length === 0 && (

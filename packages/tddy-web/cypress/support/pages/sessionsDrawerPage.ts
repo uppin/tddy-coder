@@ -11,6 +11,7 @@ import {
   sessionsDrawerItemLabel,
   sessionsDrawerItemStatus,
   sessionsDrawerItemTooltip,
+  sessionsDrawerItemHost,
   sessionsDetailResumeBtn,
   sessionsDetailDeleteBtn,
   sessionsInspectorResumeBtn,
@@ -83,6 +84,10 @@ export const sessionsDrawerPage = {
   /** The tooltip content element (visible on hover) that contains the full session id. */
   drawerItemTooltip: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsDrawerItemTooltip(sessionId), options),
+
+  /** The owning-host badge inside a drawer item (only present on cross-host rows). */
+  drawerItemHost: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsDrawerItemHost(sessionId), { timeout: 5000, ...options }),
 
   // ---------------------------------------------------------------------------
   // Detail pane (right area)

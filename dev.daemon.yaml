@@ -68,6 +68,8 @@ github:
 users:
   - github_user: "testuser"
     os_user: "CURRENT_USER"  # Replaced by web-dev with $USER
+  - github_user: "uppin"
+    os_user: "mantasi"
 
 # When true (default), pass --mouse to spawned tddy-* (browser / touch terminals).
 spawn_mouse: true
