@@ -1984,6 +1984,9 @@ impl ConnectionServiceImpl {
                 "auto",
                 &meta.specialized_agents,
                 managed_recipe,
+                // Resume path: the transcript already exists under the persistent sandbox claude
+                // HOME, so the runner must launch `claude --resume <id>`, not `--session-id <id>`.
+                true,
             )
             .await?;
 
@@ -2016,6 +2019,11 @@ impl ConnectionServiceImpl {
         permission_mode: &str,
         specialized_agents: &[String],
         managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
+        // When true, spawn the runner with `--resume` so the jailed `claude` continues the existing
+        // on-disk transcript (`--resume <id>`) instead of assigning the id to a fresh session
+        // (`--session-id <id>`). The persistent sandbox claude HOME keeps the transcript across
+        // daemon restarts, so a fresh `--session-id` would abort with "Session ID already in use".
+        resume: bool,
     ) -> Result<u32, Status> {
         let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
         let sandbox_root = session_dir.join("sandbox");
@@ -2153,6 +2161,9 @@ impl ConnectionServiceImpl {
             egress_shim_port.to_string(),
             "--stdio".into(),
         ];
+        if resume {
+            runner_argv.push("--resume".into());
+        }
         if let Some(prompt_path) = &append_system_prompt_file {
             runner_argv.push("--append-system-prompt-file".into());
             runner_argv.push(prompt_path.to_string_lossy().to_string());
