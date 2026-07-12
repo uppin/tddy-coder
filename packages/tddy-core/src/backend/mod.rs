@@ -226,6 +226,55 @@ pub fn kill_child_process() -> bool {
 pub use crate::workflow::ids::GoalId;
 pub use crate::workflow::recipe::{GoalHints, PermissionHint, WorkflowRecipe};
 
+/// Gather the full per-conversation token-usage snapshot for a session by merging every source,
+/// in a stable order: when `include_main_agent`, the main Claude agent's own transcript usage
+/// ([`read_claude_transcript_usage`]) followed by its nested Task-tool subagents
+/// ([`read_claude_subagent_usages`]); then the tddy subagent conversations the in-jail MCP server
+/// wrote to `<session_dir>/egress/accounting.json`.
+///
+/// Best-effort on the accounting file: a missing or unreadable file simply contributes no rows,
+/// never an error. With no transcript and no accounting file, `include_main_agent` still yields a
+/// single zero-token main-agent row carrying `fallback_model`, so a caller always has something to
+/// render.
+pub fn gather_session_usage(
+    session_dir: &std::path::Path,
+    session_id: &str,
+    claude_home: &std::path::Path,
+    fallback_model: &str,
+    include_main_agent: bool,
+) -> Vec<crate::token_accounting::ConversationRecord> {
+    use crate::token_accounting::ConversationRecord;
+
+    #[derive(serde::Deserialize)]
+    struct AccountingFile {
+        #[serde(default)]
+        conversations: Vec<ConversationRecord>,
+    }
+
+    let mut records = Vec::new();
+    if include_main_agent {
+        records.push(read_claude_transcript_usage(
+            claude_home,
+            session_id,
+            fallback_model,
+        ));
+        records.extend(read_claude_subagent_usages(
+            claude_home,
+            session_id,
+            fallback_model,
+        ));
+    }
+
+    let accounting_path = session_dir.join("egress").join("accounting.json");
+    if let Ok(text) = std::fs::read_to_string(&accounting_path) {
+        if let Ok(parsed) = serde_json::from_str::<AccountingFile>(&text) {
+            records.extend(parsed.conversations);
+        }
+    }
+
+    records
+}
+
 /// Sink for routing agent output (e.g. to TUI instead of stderr).
 #[derive(Clone)]
 pub struct AgentOutputSink(std::sync::Arc<dyn Fn(&str) + Send + Sync>);
@@ -977,5 +1026,211 @@ mod tests {
         assert_eq!(preselected_index_for_agent("codex-acp"), 4);
         assert_eq!(preselected_index_for_agent("stub"), 5);
         assert_eq!(preselected_index_for_agent("unknown"), 0);
+    }
+}
+
+#[cfg(test)]
+mod gather_session_usage_tests {
+    use super::gather_session_usage;
+    use crate::token_accounting::ConversationRecord;
+    use std::path::Path;
+
+    /// One `type:"assistant"` transcript line carrying a single turn's input/output usage.
+    fn assistant_line(model: &str, input: u64, output: u64) -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "message": { "model": model, "usage": { "input_tokens": input, "output_tokens": output } },
+        })
+        .to_string()
+    }
+
+    /// Write the main Claude transcript at the deterministic
+    /// `<claude_home>/.claude/projects/<proj>/<session_id>.jsonl` path (one assistant turn).
+    fn write_main_transcript(
+        claude_home: &Path,
+        session_id: &str,
+        model: &str,
+        input: u64,
+        output: u64,
+    ) {
+        let dir = claude_home.join(".claude").join("projects").join("proj");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{session_id}.jsonl")),
+            format!("{}\n", assistant_line(model, input, output)),
+        )
+        .unwrap();
+    }
+
+    /// Write a Task-tool subagent transcript + its `agentType` meta sibling.
+    fn write_subagent(
+        claude_home: &Path,
+        session_id: &str,
+        agent_stem: &str,
+        agent_type: &str,
+        model: &str,
+        input: u64,
+        output: u64,
+    ) {
+        let dir = claude_home
+            .join(".claude")
+            .join("projects")
+            .join("proj")
+            .join(session_id)
+            .join("subagents");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{agent_stem}.jsonl")),
+            format!("{}\n", assistant_line(model, input, output)),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(format!("{agent_stem}.meta.json")),
+            serde_json::json!({ "agentType": agent_type }).to_string(),
+        )
+        .unwrap();
+    }
+
+    /// Write the in-jail accounting file the tddy MCP server produces (camelCase token fields).
+    fn write_accounting(session_dir: &Path) {
+        let egress = session_dir.join("egress");
+        std::fs::create_dir_all(&egress).unwrap();
+        std::fs::write(
+            egress.join("accounting.json"),
+            serde_json::json!({
+                "conversations": [{
+                    "agent": "fastcontext",
+                    "id": "fc-1",
+                    "model": "ollama",
+                    "inputTokens": 5,
+                    "outputTokens": 1,
+                    "totalTokens": 6,
+                    "turns": 1,
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn merges_main_agent_its_task_subagents_and_the_accounting_file_in_order() {
+        // Given a session with a main transcript, one Task subagent, and a tddy accounting file
+        let tmp = tempfile::tempdir().unwrap();
+        let claude_home = tmp.path().join("home");
+        let session_dir = tmp.path().join("session");
+        write_main_transcript(&claude_home, "sess-1", "claude-opus-4-8", 100, 20);
+        write_subagent(
+            &claude_home,
+            "sess-1",
+            "agent-01",
+            "Explore",
+            "claude-haiku-4-5",
+            40,
+            8,
+        );
+        write_accounting(&session_dir);
+
+        // When
+        let records =
+            gather_session_usage(&session_dir, "sess-1", &claude_home, "fallback-model", true);
+
+        // Then — main agent, then its subagent, then the tddy-subagent row
+        assert_eq!(
+            records,
+            vec![
+                ConversationRecord {
+                    agent: "claude".to_string(),
+                    id: "sess-1".to_string(),
+                    model: "claude-opus-4-8".to_string(),
+                    input_tokens: 100,
+                    output_tokens: 20,
+                    total_tokens: 120,
+                    turns: 1,
+                },
+                ConversationRecord {
+                    agent: "Explore".to_string(),
+                    id: "agent-01".to_string(),
+                    model: "claude-haiku-4-5".to_string(),
+                    input_tokens: 40,
+                    output_tokens: 8,
+                    total_tokens: 48,
+                    turns: 1,
+                },
+                ConversationRecord {
+                    agent: "fastcontext".to_string(),
+                    id: "fc-1".to_string(),
+                    model: "ollama".to_string(),
+                    input_tokens: 5,
+                    output_tokens: 1,
+                    total_tokens: 6,
+                    turns: 1,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn omits_the_main_agent_and_its_subagents_when_include_main_agent_is_false() {
+        // Given a session that has a Claude transcript on disk, but only the tddy accounting file
+        // should be reported (e.g. a Cursor session — no Claude main-agent row)
+        let tmp = tempfile::tempdir().unwrap();
+        let claude_home = tmp.path().join("home");
+        let session_dir = tmp.path().join("session");
+        write_main_transcript(&claude_home, "sess-2", "claude-opus-4-8", 100, 20);
+        write_accounting(&session_dir);
+
+        // When
+        let records = gather_session_usage(
+            &session_dir,
+            "sess-2",
+            &claude_home,
+            "fallback-model",
+            false,
+        );
+
+        // Then — only the accounting conversation, no claude/subagent rows
+        assert_eq!(
+            records,
+            vec![ConversationRecord {
+                agent: "fastcontext".to_string(),
+                id: "fc-1".to_string(),
+                model: "ollama".to_string(),
+                input_tokens: 5,
+                output_tokens: 1,
+                total_tokens: 6,
+                turns: 1,
+            }]
+        );
+    }
+
+    #[test]
+    fn reports_a_single_zero_token_main_agent_row_with_the_fallback_model_when_no_transcript_exists(
+    ) {
+        // Given an empty home and no accounting file
+        let tmp = tempfile::tempdir().unwrap();
+
+        // When
+        let records = gather_session_usage(
+            &tmp.path().join("session"),
+            "sess-x",
+            &tmp.path().join("home"),
+            "fallback-model",
+            true,
+        );
+
+        // Then — one zero-token main-agent row (never an error)
+        assert_eq!(
+            records,
+            vec![ConversationRecord {
+                agent: "claude".to_string(),
+                id: "sess-x".to_string(),
+                model: "fallback-model".to_string(),
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                turns: 0,
+            }]
+        );
     }
 }

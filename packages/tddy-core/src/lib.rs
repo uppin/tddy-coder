@@ -28,6 +28,7 @@ pub mod stream;
 pub(crate) mod test_support;
 pub mod token_accounting;
 pub mod toolcall;
+pub mod usage_watcher;
 pub mod workflow;
 pub mod worktree;
 

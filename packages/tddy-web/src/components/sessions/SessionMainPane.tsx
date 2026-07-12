@@ -222,6 +222,11 @@ export function SessionMainPane({
                 client={client}
                 sessionToken={sessionToken}
                 room={room}
+                serverIdentity={
+                  attachment.status === "connected-livekit"
+                    ? attachment.livekitServerIdentity
+                    : undefined
+                }
               />
             </div>
           )}

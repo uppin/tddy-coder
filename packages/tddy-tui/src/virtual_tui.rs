@@ -680,6 +680,8 @@ pub fn apply_event(
         PresenterEvent::ShouldQuit => {
             state.should_quit = true;
         }
+        // The TUI does not render live token usage; the snapshot is for remote (Inspector) views.
+        PresenterEvent::TokenUsageUpdated(_) => {}
     }
 }
 

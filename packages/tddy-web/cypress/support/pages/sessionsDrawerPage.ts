@@ -26,6 +26,13 @@ import {
   sessionsScreenSharingStartBtn,
   sessionsScreenSharingStopBtn,
   sessionsScreenSharingRemoveBtn,
+  sessionsUsageRow,
+  sessionsUsageRowAgent,
+  sessionsUsageRowModel,
+  sessionsUsageRowInput,
+  sessionsUsageRowOutput,
+  sessionsUsageRowTotal,
+  sessionsUsageRowTurns,
   TEST_IDS,
 } from "../testIds";
 
@@ -161,6 +168,62 @@ export const sessionsDrawerPage = {
   /** The Tools tab button in the inspector tab strip. */
   inspectorToolsTab: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsInspectorTabTools, { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
+  // Usage tab
+  // ---------------------------------------------------------------------------
+
+  /** The Usage tab button in the inspector tab strip. */
+  inspectorUsageTab: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorTabUsage, { timeout: 5000, ...options }),
+
+  /** The Usage tab panel (rendered when the Usage tab is active). */
+  usageTabPanel: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsUsageTabPanel, { timeout: 5000, ...options }),
+
+  /** The zero/empty state shown before any usage snapshot arrives. */
+  usageEmpty: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsUsageEmpty, { timeout: 5000, ...options }),
+
+  /** A single conversation row, keyed by conversation id. */
+  usageRow: (id: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsUsageRow(id), { timeout: 5000, ...options }),
+
+  /** The agent cell of a conversation row. */
+  usageRowAgent: (id: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsUsageRowAgent(id), { timeout: 5000, ...options }),
+
+  /** The model cell of a conversation row. */
+  usageRowModel: (id: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsUsageRowModel(id), { timeout: 5000, ...options }),
+
+  /** The input-tokens cell of a conversation row. */
+  usageRowInput: (id: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsUsageRowInput(id), { timeout: 5000, ...options }),
+
+  /** The output-tokens cell of a conversation row. */
+  usageRowOutput: (id: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsUsageRowOutput(id), { timeout: 5000, ...options }),
+
+  /** The total-tokens cell of a conversation row. */
+  usageRowTotal: (id: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsUsageRowTotal(id), { timeout: 5000, ...options }),
+
+  /** The turns cell of a conversation row. */
+  usageRowTurns: (id: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsUsageRowTurns(id), { timeout: 5000, ...options }),
+
+  /** The input-tokens cell of the TOTAL row. */
+  usageTotalInput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsUsageTotalInput, { timeout: 5000, ...options }),
+
+  /** The output-tokens cell of the TOTAL row. */
+  usageTotalOutput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsUsageTotalOutput, { timeout: 5000, ...options }),
+
+  /** The total-tokens cell of the TOTAL row. */
+  usageTotalTotal: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsUsageTotalTotal, { timeout: 5000, ...options }),
 
   // ---------------------------------------------------------------------------
   // VNC tab

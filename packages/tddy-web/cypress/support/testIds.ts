@@ -203,6 +203,14 @@ export const TEST_IDS = {
   terminalClaimBtn: "terminal-claim-btn",
   terminalControlHolder: "terminal-control-holder",
 
+  // Session inspector — Usage tab
+  sessionsInspectorTabUsage: "sessions-inspector-tab-usage",
+  sessionsUsageTabPanel: "sessions-usage-tab-panel",
+  sessionsUsageEmpty: "sessions-usage-empty",
+  sessionsUsageTotalInput: "sessions-usage-total-input",
+  sessionsUsageTotalOutput: "sessions-usage-total-output",
+  sessionsUsageTotalTotal: "sessions-usage-total-total",
+
   // Session inspector — VNC tab
   sessionsInspectorTabVnc: "sessions-inspector-tab-vnc",
   sessionsVncTabPanel: "sessions-vnc-tab-panel",
@@ -465,6 +473,31 @@ export const sessionsVncStopBtn = (targetId: string) => `sessions-vnc-stop-${tar
 
 /** `[data-testid="sessions-vnc-remove-<targetId>"]` — Remove target button */
 export const sessionsVncRemoveBtn = (targetId: string) => `sessions-vnc-remove-${targetId}`;
+
+// ---------------------------------------------------------------------------
+// Usage tab dynamic helpers (one row per conversation, keyed by conversation id)
+// ---------------------------------------------------------------------------
+
+/** `[data-testid="sessions-usage-row-<id>"]` — a single conversation row */
+export const sessionsUsageRow = (id: string) => `sessions-usage-row-${id}`;
+
+/** `[data-testid="sessions-usage-row-agent-<id>"]` — the agent cell of a conversation row */
+export const sessionsUsageRowAgent = (id: string) => `sessions-usage-row-agent-${id}`;
+
+/** `[data-testid="sessions-usage-row-model-<id>"]` — the model cell of a conversation row */
+export const sessionsUsageRowModel = (id: string) => `sessions-usage-row-model-${id}`;
+
+/** `[data-testid="sessions-usage-row-input-<id>"]` — the input-tokens cell of a conversation row */
+export const sessionsUsageRowInput = (id: string) => `sessions-usage-row-input-${id}`;
+
+/** `[data-testid="sessions-usage-row-output-<id>"]` — the output-tokens cell of a conversation row */
+export const sessionsUsageRowOutput = (id: string) => `sessions-usage-row-output-${id}`;
+
+/** `[data-testid="sessions-usage-row-total-<id>"]` — the total-tokens cell of a conversation row */
+export const sessionsUsageRowTotal = (id: string) => `sessions-usage-row-total-${id}`;
+
+/** `[data-testid="sessions-usage-row-turns-<id>"]` — the turns cell of a conversation row */
+export const sessionsUsageRowTurns = (id: string) => `sessions-usage-row-turns-${id}`;
 
 // ---------------------------------------------------------------------------
 // Screen Sharing tab dynamic helpers

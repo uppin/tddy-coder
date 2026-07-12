@@ -9,6 +9,8 @@ import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "../../lib/utils";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
 import { SessionToolsTab } from "./SessionToolsTab";
+import { SessionUsageTab } from "./SessionUsageTab";
+// (usage stream is owned by SessionUsageTab so it opens only while that tab is mounted)
 import { SessionVncTab } from "./SessionVncTab";
 import { SessionScreenSharingTab } from "./SessionScreenSharingTab";
 import { useHttpClient } from "../../rpc/transportProvider";
@@ -31,6 +33,9 @@ interface SessionInspectorDrawerProps {
   client?: Client<typeof ConnectionService>;
   sessionToken?: string;
   room?: Room | null;
+  /** LiveKit participant identity of the daemon/presenter side, for the token-usage stream.
+   *  Selected together with `room`; falls back to `"server"` when not connected over LiveKit. */
+  serverIdentity?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +68,7 @@ export function SessionInspectorDrawer({
   client,
   sessionToken,
   room = null,
+  serverIdentity = "server",
 }: SessionInspectorDrawerProps) {
   const [pendingDelete, setPendingDelete] = useState(false);
   const [tab, setTab] = useState<InspectorTab>("details");
@@ -286,6 +292,10 @@ export function SessionInspectorDrawer({
                   : Promise.resolve({ resultJson: "", isError: true, errorMessage: "no client" })
               }
             />
+          </ScrollArea>
+        ) : tab === "usage" ? (
+          <ScrollArea className="flex-1 min-h-0">
+            <SessionUsageTab room={room} serverIdentity={serverIdentity} />
           </ScrollArea>
         ) : tab === "vnc" ? (
           <ScrollArea className="flex-1 min-h-0">

@@ -10,10 +10,10 @@ use crate::gen::{
     AnswerOther, AnswerSelect, AnswerText, AppModeDocumentReview, AppModeDone, AppModeFeatureInput,
     AppModeMarkdownViewer, AppModeMultiSelect, AppModeProto, AppModeRunning, AppModeSelect,
     AppModeTextInput, ApproveSessionDocument, BackendSelected, ClarificationQuestionProto,
-    ClientMessage, DeleteInboxItem, DismissViewer, EditInboxItem, GoalStarted, InboxChanged,
-    IntentReceived, ModeChanged, QuestionOptionProto, QueuePrompt, Quit, RefineSessionDocument,
-    RejectSessionDocument, Scroll, ServerMessage, StateChanged, SubmitFeatureInput,
-    ViewSessionDocument, WorkflowComplete,
+    ClientMessage, ConversationRecord as ProtoConversationRecord, DeleteInboxItem, DismissViewer,
+    EditInboxItem, GoalStarted, InboxChanged, IntentReceived, ModeChanged, QuestionOptionProto,
+    QueuePrompt, Quit, RefineSessionDocument, RejectSessionDocument, Scroll, ServerMessage,
+    StateChanged, SubmitFeatureInput, TokenUsageUpdated, ViewSessionDocument, WorkflowComplete,
 };
 
 /// Convert ClientMessage to UserIntent. Returns None if the message has no intent.
@@ -164,6 +164,22 @@ pub fn event_to_server_message(event: PresenterEvent) -> ServerMessage {
                 ServerMessage { event: None }
             }
         }
+        PresenterEvent::TokenUsageUpdated(records) => ServerMessage {
+            event: Some(Event::TokenUsageUpdated(TokenUsageUpdated {
+                conversations: records
+                    .into_iter()
+                    .map(|r| ProtoConversationRecord {
+                        agent: r.agent,
+                        id: r.id,
+                        model: r.model,
+                        input_tokens: r.input_tokens,
+                        output_tokens: r.output_tokens,
+                        total_tokens: r.total_tokens,
+                        turns: r.turns,
+                    })
+                    .collect(),
+            })),
+        },
     }
 }
 
@@ -352,6 +368,74 @@ mod acceptance_plan_approval_rpc {
             from_workflow.encode_to_vec(),
             from_document_review.encode_to_vec(),
             "DocumentReview gate must serialize like SessionDocumentApprovalNeeded"
+        );
+    }
+}
+
+#[cfg(test)]
+mod token_usage_updated_rpc {
+    use super::*;
+    use crate::gen::{
+        server_message, ConversationRecord as ProtoConversationRecord, TokenUsageUpdated,
+    };
+    use tddy_core::token_accounting::ConversationRecord;
+    use tddy_core::PresenterEvent;
+
+    #[test]
+    fn maps_each_conversation_record_field_for_field_onto_the_proto_snapshot() {
+        // Given a two-conversation usage snapshot (main agent + one subagent)
+        let records = vec![
+            ConversationRecord {
+                agent: "claude".to_string(),
+                id: "claude-main".to_string(),
+                model: "claude-opus-4-8".to_string(),
+                input_tokens: 12_340,
+                output_tokens: 3_210,
+                total_tokens: 15_550,
+                turns: 7,
+            },
+            ConversationRecord {
+                agent: "Explore".to_string(),
+                id: "agent-01".to_string(),
+                model: "claude-haiku-4-5".to_string(),
+                input_tokens: 4_100,
+                output_tokens: 820,
+                total_tokens: 4_920,
+                turns: 2,
+            },
+        ];
+
+        // When it is converted for the wire
+        let msg = event_to_server_message(PresenterEvent::TokenUsageUpdated(records));
+
+        // Then it is a TokenUsageUpdated event mirroring every record field-for-field
+        let Some(server_message::Event::TokenUsageUpdated(TokenUsageUpdated { conversations })) =
+            msg.event
+        else {
+            panic!("expected a TokenUsageUpdated event, got {:?}", msg.event);
+        };
+        assert_eq!(
+            conversations,
+            vec![
+                ProtoConversationRecord {
+                    agent: "claude".to_string(),
+                    id: "claude-main".to_string(),
+                    model: "claude-opus-4-8".to_string(),
+                    input_tokens: 12_340,
+                    output_tokens: 3_210,
+                    total_tokens: 15_550,
+                    turns: 7,
+                },
+                ProtoConversationRecord {
+                    agent: "Explore".to_string(),
+                    id: "agent-01".to_string(),
+                    model: "claude-haiku-4-5".to_string(),
+                    input_tokens: 4_100,
+                    output_tokens: 820,
+                    total_tokens: 4_920,
+                    turns: 2,
+                },
+            ]
         );
     }
 }

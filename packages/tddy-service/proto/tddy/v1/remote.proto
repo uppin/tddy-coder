@@ -109,7 +109,27 @@ message ServerMessage {
     WorktreeElicitation worktree_elicitation = 10;
     SessionStatusChanged session_status_changed = 11;
     BackendSelected backend_selected = 12;
+    TokenUsageUpdated token_usage_updated = 13;
   }
+}
+
+// Per-session token usage snapshot: the full cumulative per-conversation breakdown (never a
+// delta). Emitted on connect and whenever a conversation's usage changes; the client replaces its
+// held snapshot on each event.
+message TokenUsageUpdated {
+  repeated ConversationRecord conversations = 1;
+}
+
+// One conversation's token accounting — the main agent or a subagent. Mirrors
+// tddy_core::token_accounting::ConversationRecord.
+message ConversationRecord {
+  string agent = 1;  // "claude", "Explore", "fastcontext", …
+  string id = 2;
+  string model = 3;
+  uint64 input_tokens = 4;
+  uint64 output_tokens = 5;
+  uint64 total_tokens = 6;
+  uint32 turns = 7;
 }
 
 message SessionCreated {
