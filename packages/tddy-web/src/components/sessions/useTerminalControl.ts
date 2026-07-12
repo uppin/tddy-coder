@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import type { Client } from "@connectrpc/connect";
 import { ConnectionService } from "../../gen/connection_pb";
-import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { getScreenId } from "../../lib/screenId";
 import {
   type TerminalControlState,
@@ -60,27 +59,35 @@ export function useTerminalControl(
   sessionId: string | null,
   sessionToken: string,
   /**
+   * Daemon `ConnectionService` client for this session's OWNING daemon — used for the
+   * auto-claim-on-attach (steal=false) and as the fallback for the explicit steal-claim. Pass the
+   * owning daemon's client (not the selected-daemon client) so a cross-host session's lease is
+   * acquired on the host that actually owns the terminal. `null` until the owning daemon is
+   * reachable; the effect waits until a client is available.
+   */
+  client: ControlClient | null,
+  /**
    * Optional lazy builder for a session-scoped `ConnectionService` client (targets the coder
    * participant `daemon-{instanceId}-{sessionId}`). When provided, the explicit `claim()` (the
    * "Claim terminal" button, steal=true) routes through it. The auto-claim-on-attach (steal=false)
-   * always uses the daemon client below so control is still acquired automatically when no one else
+   * always uses the daemon client above so control is still acquired automatically when no one else
    * holds the lease. `null`/`undefined` falls back to the daemon client for both paths.
    */
-  buildSessionClient?: () => Client<typeof ConnectionService> | null,
+  buildSessionClient?: () => ControlClient | null,
 ): UseTerminalControlResult {
-  // ConnectionService is daemon-level RPC — routed to the currently selected daemon (see
-  // `SelectedDaemonProvider`). `null` until a daemon is selected / the room is connected. Used for
-  // the auto-claim-on-attach (steal=false) and as the fallback for the explicit claim.
-  const client = useDaemonClient(ConnectionService);
   const [controlState, setControlState] = useState<TerminalControlState>(
     initialTerminalControlState,
   );
   const controlTokenRef = useRef<string>("");
   const screenId = getScreenId();
 
-  // On session attach: claim control (steal=false) then subscribe to lease changes.
+  // On session attach (or when the owning client becomes available): reset any stale token from a
+  // previous session so the new session's terminal input never leaks the previous session's lease
+  // token, then claim control (steal=false) and subscribe to lease changes.
   useEffect(() => {
     if (!sessionId || !client) return;
+    controlTokenRef.current = "";
+    setControlState(initialTerminalControlState);
     const abortController = new AbortController();
 
     void runControlSession(

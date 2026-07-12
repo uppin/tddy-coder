@@ -214,6 +214,9 @@ export const TEST_IDS = {
   terminalControlOverlay: "terminal-control-overlay",
   terminalClaimBtn: "terminal-claim-btn",
   terminalControlHolder: "terminal-control-holder",
+  // Control-token reset regression harness (SessionRuntimeControlTokenReset.cy.tsx)
+  controlTokenDisplay: "control-token-display",
+  switchSession: "switch-session",
 
   // Session inspector — Usage tab
   sessionsInspectorTabUsage: "sessions-inspector-tab-usage",

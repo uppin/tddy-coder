@@ -24,7 +24,6 @@ import { SessionMainPane } from "./SessionMainPane";
 import { StatusBar } from "./StatusBar";
 import { useSessionAttachment } from "./useSessionAttachment";
 import { nextInspectorState } from "./inspectorState";
-import { useTerminalControl } from "./useTerminalControl";
 import { sessionsDrawerPathForSession, parseSessionsDrawerSessionId } from "../../routing/appRoutes";
 import { Signal } from "../../gen/connection_pb";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
@@ -125,12 +124,6 @@ export function SessionsDrawerScreen() {
     if (!sessionRoom) return null;
     return createClient(ConnectionService, liveKitFactory(sessionRoom, targetIdentity));
   }, [connectedSessionId, attachment, room, liveKitFactory, liveKitFactoryIsOverridden, runtimeRegistry]);
-
-  const { controlState, controlTokenRef, claim: claimControl } = useTerminalControl(
-    connectedSessionId,
-    sessionToken,
-    buildSessionClient,
-  );
 
   // Capture a session's connected LiveKit `Room` (fired by the terminal after `room.connect`) so
   // `buildSessionClient` can route session-scoped RPCs over the session's own room in production.
@@ -474,8 +467,7 @@ export function SessionsDrawerScreen() {
             sessionToken={sessionToken}
             onCancelCreate={handleCancelCreate}
             onSessionCreated={handleSessionCreated}
-            terminalControl={connectedSessionId ? { ...controlState, onClaim: claimControl } : undefined}
-            controlTokenRef={connectedSessionId ? controlTokenRef : undefined}
+            room={room}
             mobileShortcuts={mobileShortcuts}
             onChildSessionStarted={handleChildSessionStarted}
             traffic={selectedTraffic}
@@ -484,6 +476,8 @@ export function SessionsDrawerScreen() {
             onSessionRoom={onSessionRoom}
             onSessionDisconnect={onSessionDisconnect}
             buildSessionClient={buildSessionClient}
+            liveKitFactory={liveKitFactory}
+            liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
           />
         </div>
       </div>
