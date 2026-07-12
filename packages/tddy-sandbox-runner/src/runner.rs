@@ -218,6 +218,12 @@ pub struct SandboxRunnerArgs {
     pub ready_marker: PathBuf,
     #[arg(long, default_value = "auto")]
     pub permission_mode: String,
+    /// When set, resume an existing on-disk claude session transcript via `--resume <id>` instead
+    /// of assigning the id to a fresh session via `--session-id <id>`. The daemon sets this on the
+    /// resume path (the transcript already exists under the persistent sandbox claude HOME, so
+    /// `--session-id` would abort with "Session ID already in use"). Claude-mode only.
+    #[arg(long)]
+    pub resume: bool,
     /// When set, pass `--append-system-prompt-file <path>` to the jailed `claude` (a managed
     /// workflow's orchestration prompt). The path must be readable inside the jail (e.g. under the
     /// context dir).
@@ -1180,6 +1186,33 @@ fn subagent_replaced_tools_from_env() -> Vec<String> {
     )
 }
 
+/// Build the leading claude argv: binary, optional `--model <model>` (omitted when empty), the
+/// session flag, then `--permission-mode <mode>`. The session flag is `--resume <id>` when
+/// `resume` is true (continue an existing on-disk transcript), otherwise `--session-id <id>`
+/// (assign the id to a new session). The two flags are mutually exclusive.
+fn build_claude_session_argv(
+    claude_binary: &str,
+    model: &str,
+    session_id: &str,
+    permission_mode: &str,
+    resume: bool,
+) -> Vec<String> {
+    let mut argv = vec![claude_binary.to_string()];
+    if !model.is_empty() {
+        argv.push("--model".into());
+        argv.push(model.to_string());
+    }
+    if resume {
+        argv.push("--resume".into());
+    } else {
+        argv.push("--session-id".into());
+    }
+    argv.push(session_id.to_string());
+    argv.push("--permission-mode".into());
+    argv.push(permission_mode.to_string());
+    argv
+}
+
 struct SpawnClaudePtyParams<'a> {
     context_dir: &'a Path,
     /// Working directory for the Claude process (defaults to `context_dir` when no project dir is
@@ -1188,6 +1221,9 @@ struct SpawnClaudePtyParams<'a> {
     claude_binary: &'a str,
     model: &'a str,
     permission_mode: &'a str,
+    /// When true, resume the existing on-disk transcript via `--resume <id>` instead of assigning
+    /// the id to a fresh session via `--session-id <id>` (see `SandboxRunnerArgs::resume`).
+    resume: bool,
     /// When set, passed to `claude` as `--append-system-prompt-file <path>` (must be readable in
     /// the jail).
     append_system_prompt_file: Option<&'a Path>,
@@ -1215,6 +1251,7 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
         claude_binary,
         model,
         permission_mode,
+        resume,
         append_system_prompt_file,
         session_id,
         tddy_tools_path,
@@ -1227,15 +1264,8 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
     } = params;
     let (stdin_tx, stdin_rx) = std::sync::mpsc::channel::<Bytes>();
 
-    let mut argv = vec![claude_binary.to_string()];
-    if !model.is_empty() {
-        argv.push("--model".into());
-        argv.push(model.to_string());
-    }
-    argv.push("--session-id".into());
-    argv.push(session_id.to_string());
-    argv.push("--permission-mode".into());
-    argv.push(permission_mode.to_string());
+    let mut argv =
+        build_claude_session_argv(claude_binary, model, session_id, permission_mode, resume);
     if let Some(path) = append_system_prompt_file {
         argv.push("--append-system-prompt-file".into());
         argv.push(path.to_string_lossy().into_owned());
@@ -1892,6 +1922,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
                 claude_binary: &args.claude_binary,
                 model: &args.model,
                 permission_mode: &args.permission_mode,
+                resume: args.resume,
                 append_system_prompt_file: args.append_system_prompt_file.as_deref(),
                 session_id: &args.session_id,
                 tddy_tools_path,
@@ -2683,5 +2714,119 @@ mod tests {
             "an unrecognized request must 404; got: {:?}",
             String::from_utf8_lossy(&response)
         );
+    }
+}
+
+#[cfg(test)]
+mod claude_session_argv_tests {
+    use super::{build_claude_session_argv, SandboxRunnerArgs};
+    use clap::Parser;
+
+    /// The token immediately following `flag` in an argv, or `None` if the flag is absent.
+    fn value_after<'a>(argv: &'a [String], flag: &str) -> Option<&'a str> {
+        argv.iter()
+            .position(|a| a == flag)
+            .and_then(|i| argv.get(i + 1))
+            .map(String::as_str)
+    }
+
+    fn contains_flag(argv: &[String], flag: &str) -> bool {
+        argv.iter().any(|a| a == flag)
+    }
+
+    fn parse_runner_args(extra: &[&str]) -> SandboxRunnerArgs {
+        let mut argv = vec![
+            "tddy-sandbox-runner",
+            "--session-id",
+            "sess-1",
+            "--context-dir",
+            "/tmp/ctx",
+            "--tool-ipc-socket",
+            "/tmp/ipc.sock",
+            "--model",
+            "claude-opus-4-8",
+            "--ready-marker",
+            "/tmp/ready",
+        ];
+        argv.extend_from_slice(extra);
+        SandboxRunnerArgs::try_parse_from(argv).expect("argv must parse")
+    }
+
+    #[test]
+    fn a_fresh_session_assigns_the_id_with_session_id() {
+        // Given — a brand-new session (not a resume)
+        let resume = false;
+
+        // When
+        let argv = build_claude_session_argv(
+            "claude",
+            "claude-opus-4-8",
+            "019f5514-c0eb-7893-b32f-a02043a6e5cf",
+            "plan",
+            resume,
+        );
+
+        // Then — the id is assigned via --session-id, and --resume is not used
+        assert_eq!(
+            value_after(&argv, "--session-id"),
+            Some("019f5514-c0eb-7893-b32f-a02043a6e5cf")
+        );
+        assert!(!contains_flag(&argv, "--resume"));
+    }
+
+    #[test]
+    fn resuming_a_session_uses_resume_not_session_id() {
+        // Given — a resume of an existing session whose transcript already exists on disk
+        let resume = true;
+
+        // When
+        let argv = build_claude_session_argv(
+            "claude",
+            "claude-opus-4-8",
+            "019f5514-c0eb-7893-b32f-a02043a6e5cf",
+            "auto",
+            resume,
+        );
+
+        // Then — the id is passed to --resume, and the conflicting --session-id flag is absent
+        assert_eq!(
+            value_after(&argv, "--resume"),
+            Some("019f5514-c0eb-7893-b32f-a02043a6e5cf")
+        );
+        assert!(!contains_flag(&argv, "--session-id"));
+    }
+
+    #[test]
+    fn the_base_argv_preserves_model_and_permission_mode_when_resuming() {
+        // Given — a resume that must still pin model and permission mode
+        let argv = build_claude_session_argv(
+            "claude",
+            "claude-opus-4-8",
+            "019f5514-c0eb-7893-b32f-a02043a6e5cf",
+            "auto",
+            true,
+        );
+
+        // Then
+        assert_eq!(value_after(&argv, "--model"), Some("claude-opus-4-8"));
+        assert_eq!(value_after(&argv, "--permission-mode"), Some("auto"));
+    }
+
+    #[test]
+    fn the_runner_accepts_a_resume_flag_so_the_daemon_can_request_resume() {
+        // Given / When — the daemon relaunches the runner with --resume
+        let args = parse_runner_args(&["--resume"]);
+
+        // Then
+        assert!(args.resume);
+    }
+
+    #[test]
+    fn the_runner_defaults_to_a_fresh_start_without_the_resume_flag() {
+        // Given / When — no --resume flag
+        let args = parse_runner_args(&[]);
+
+        // Then — a normal spawn is a fresh session, not a resume
+        assert!(!args.resume);
     }
 }
