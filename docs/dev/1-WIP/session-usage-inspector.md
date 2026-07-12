@@ -13,8 +13,9 @@
 - [x] Add `PresenterEvent::TokenUsageUpdated(Vec<ConversationRecord>)` (`tddy-core/src/presenter/presenter_events.rs`)
 - [x] Map the new event in `event_to_server_message` (`tddy-service/src/convert.rs`)
 - [x] Extract `gather_session_usage(...)` from `print_token_summary` into reusable form (`tddy-core/src/backend/mod.rs`); reuse the existing `read_claude_transcript_usage` / `read_claude_subagent_usages` + `accounting.json` merge
-- [x] `SessionUsageEmitter` (broadcast + dedup) + `spawn_usage_watcher` poll-based watcher (`tddy-daemon/src/usage_watcher.rs`)
-- [ ] **Blocked:** wire `spawn_usage_watcher` into the interactive/CLI session spawn path + replay the current usage snapshot on connect (`tddy-service/src/service.rs`). Depends on the unfinished per-session presenter stream (LiveKit `Room` not yet threaded — see `usePresenterChat.ts:98` TODO). `spawn_usage_watcher` is implemented ready-to-wire; wire-in point marked with `TODO` in `usage_watcher.rs`.
+- [x] `SessionUsageEmitter` (broadcast + dedup) + `spawn_usage_watcher` poll-based watcher — now in `tddy-core/src/usage_watcher.rs` (moved from `tddy-daemon` so `tddy-coder` can call it)
+- [x] Wire the watcher into the session lifecycle: `spawn_session_usage_watcher` (derives `include_main_agent` from agent) called in `run_daemon` (`tddy-coder/src/run.rs`) with the session's presenter `event_tx`, so a running session broadcasts `TokenUsageUpdated` that flows through `event_to_server_message` → `TddyRemote.Stream` to the web
+- [ ] **Follow-up (out of scope):** replay the current usage snapshot to a View that connects mid-session (`connect_view` snapshot in `tddy-core`/`tddy-service`); today a late subscriber sees usage only on the next poll tick. Also, end-to-end production rendering still depends on a connected LiveKit `Room` being threaded to the presenter stream (`usePresenterChat.ts:98` TODO) — unchanged by this work.
 - [x] Web: `formatTokens` (`tddy-web/src/components/sessions/formatTokens.ts`)
 - [x] Web: `sessionUsage.ts` pure helpers — `emptyUsage()`, `usageTotals(records)`
 - [x] Web: `useSessionUsage(room, serverIdentity)` hook (`tddy-web/src/components/sessions/useSessionUsage.ts`)
@@ -46,7 +47,7 @@
 - Added `omits_the_main_agent_and_its_subagents_when_include_main_agent_is_false` to `gather_session_usage` tests (the accounting-only / Cursor-session branch).
 
 **Accepted / deferred (not blockers):**
-- `spawn_usage_watcher` / `UsageWatchTarget` are implemented but unwired (dead in production) pending the per-session presenter-stream LiveKit `Room` threading — documented `TODO` in `usage_watcher.rs`. Until wired, the Usage tab is fully built + tested but shows no live data in production.
+- **Watcher now wired** (`spawn_session_usage_watcher` called in `run_daemon`), so a running session broadcasts live `TokenUsageUpdated`. Remaining follow-ups: (a) snapshot-on-connect replay for a View that connects mid-session; (b) the pre-existing production LiveKit `Room` threading the Inspector's presenter stream needs to actually receive events end-to-end (`usePresenterChat.ts:98`).
 - Minor style nits (a couple of multi-`expect` boundary tests) left as-is — boundary cases of one behavior.
 
 ## Delta summary

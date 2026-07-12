@@ -10,8 +10,8 @@
 //! `tddy-core` `gather_session_usage` tests; these pin the emitter's broadcast/dedup contract.
 
 use tddy_core::token_accounting::ConversationRecord;
+use tddy_core::usage_watcher::SessionUsageEmitter;
 use tddy_core::PresenterEvent;
-use tddy_daemon::usage_watcher::SessionUsageEmitter;
 use tokio::sync::broadcast;
 
 fn a_record(id: &str, input: u64, output: u64) -> ConversationRecord {
