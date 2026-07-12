@@ -114,7 +114,9 @@ async fn call_tool(
 fn tool_result_json(response: &Value) -> Value {
     let text = response["result"]["content"][0]["text"]
         .as_str()
-        .unwrap_or_else(|| panic!("tools/call result must carry a text content block; got: {response}"));
+        .unwrap_or_else(|| {
+            panic!("tools/call result must carry a text content block; got: {response}")
+        });
     serde_json::from_str(text)
         .unwrap_or_else(|e| panic!("tool result text {text:?} was not valid JSON: {e}"))
 }
@@ -136,7 +138,14 @@ async fn open_and_prompt(
     session_id: &str,
     prompts: &[&str],
 ) {
-    call_tool(stdin, stdout, base_id, "subagent_new_session", json!({"sessionId": session_id})).await;
+    call_tool(
+        stdin,
+        stdout,
+        base_id,
+        "subagent_new_session",
+        json!({"sessionId": session_id}),
+    )
+    .await;
     for (i, text) in prompts.iter().enumerate() {
         call_tool(
             stdin,
@@ -159,7 +168,13 @@ async fn subagent_list_reports_each_open_conversation_with_its_cumulative_token_
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(final_answer_with_usage("src/a.rs:1-1", 100, 40)))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(final_answer_with_usage(
+                "src/a.rs:1-1",
+                100,
+                40,
+            )),
+        )
         .mount(&server)
         .await;
 
@@ -184,17 +199,49 @@ async fn subagent_list_reports_each_open_conversation_with_its_cumulative_token_
     let body = tool_result_json(&response);
 
     let a = conversation(&body, "conv-a");
-    assert_eq!(a["agent"].as_str(), Some("fastcontext"), "conv-a agent; got: {a}");
-    assert_eq!(a["model"].as_str(), Some("test-model"), "conv-a model; got: {a}");
-    assert_eq!(a["inputTokens"].as_u64(), Some(200), "conv-a input; got: {a}");
-    assert_eq!(a["outputTokens"].as_u64(), Some(80), "conv-a output; got: {a}");
-    assert_eq!(a["totalTokens"].as_u64(), Some(280), "conv-a total; got: {a}");
+    assert_eq!(
+        a["agent"].as_str(),
+        Some("fastcontext"),
+        "conv-a agent; got: {a}"
+    );
+    assert_eq!(
+        a["model"].as_str(),
+        Some("test-model"),
+        "conv-a model; got: {a}"
+    );
+    assert_eq!(
+        a["inputTokens"].as_u64(),
+        Some(200),
+        "conv-a input; got: {a}"
+    );
+    assert_eq!(
+        a["outputTokens"].as_u64(),
+        Some(80),
+        "conv-a output; got: {a}"
+    );
+    assert_eq!(
+        a["totalTokens"].as_u64(),
+        Some(280),
+        "conv-a total; got: {a}"
+    );
     assert_eq!(a["turns"].as_u64(), Some(2), "conv-a turns; got: {a}");
 
     let b = conversation(&body, "conv-b");
-    assert_eq!(b["inputTokens"].as_u64(), Some(100), "conv-b input; got: {b}");
-    assert_eq!(b["outputTokens"].as_u64(), Some(40), "conv-b output; got: {b}");
-    assert_eq!(b["totalTokens"].as_u64(), Some(140), "conv-b total; got: {b}");
+    assert_eq!(
+        b["inputTokens"].as_u64(),
+        Some(100),
+        "conv-b input; got: {b}"
+    );
+    assert_eq!(
+        b["outputTokens"].as_u64(),
+        Some(40),
+        "conv-b output; got: {b}"
+    );
+    assert_eq!(
+        b["totalTokens"].as_u64(),
+        Some(140),
+        "conv-b total; got: {b}"
+    );
     assert_eq!(b["turns"].as_u64(), Some(1), "conv-b turns; got: {b}");
 }
 
@@ -207,7 +254,13 @@ async fn subagent_prompt_result_includes_the_turns_token_usage() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(final_answer_with_usage("src/a.rs:1-1", 100, 40)))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(final_answer_with_usage(
+                "src/a.rs:1-1",
+                100,
+                40,
+            )),
+        )
         .mount(&server)
         .await;
     let mut child = spawn_mcp_server(&[
@@ -218,7 +271,14 @@ async fn subagent_prompt_result_includes_the_turns_token_usage() {
     let mut stdin = child.stdin.take().expect("child stdin");
     let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
     initialize_mcp_session(&mut stdin, &mut stdout).await;
-    call_tool(&mut stdin, &mut stdout, 1, "subagent_new_session", json!({"sessionId": "conv-x"})).await;
+    call_tool(
+        &mut stdin,
+        &mut stdout,
+        1,
+        "subagent_new_session",
+        json!({"sessionId": "conv-x"}),
+    )
+    .await;
 
     // When
     let response = call_tool(
@@ -233,9 +293,21 @@ async fn subagent_prompt_result_includes_the_turns_token_usage() {
 
     // Then
     let body = tool_result_json(&response);
-    assert_eq!(body["usage"]["inputTokens"].as_u64(), Some(100), "prompt usage input; got: {body}");
-    assert_eq!(body["usage"]["outputTokens"].as_u64(), Some(40), "prompt usage output; got: {body}");
-    assert_eq!(body["usage"]["totalTokens"].as_u64(), Some(140), "prompt usage total; got: {body}");
+    assert_eq!(
+        body["usage"]["inputTokens"].as_u64(),
+        Some(100),
+        "prompt usage input; got: {body}"
+    );
+    assert_eq!(
+        body["usage"]["outputTokens"].as_u64(),
+        Some(40),
+        "prompt usage output; got: {body}"
+    );
+    assert_eq!(
+        body["usage"]["totalTokens"].as_u64(),
+        Some(140),
+        "prompt usage total; got: {body}"
+    );
 }
 
 // ─── host-visible accounting file ──────────────────────────────────────────────
@@ -249,7 +321,13 @@ async fn writes_the_accounting_file_with_all_conversations_when_the_env_var_is_s
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(final_answer_with_usage("src/a.rs:1-1", 100, 40)))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(final_answer_with_usage(
+                "src/a.rs:1-1",
+                100,
+                40,
+            )),
+        )
         .mount(&server)
         .await;
     let dir = tempfile::tempdir().expect("tempdir");
@@ -273,9 +351,18 @@ async fn writes_the_accounting_file_with_all_conversations_when_the_env_var_is_s
     // Then — the accounting file records conv-1 with its totals.
     let contents = std::fs::read_to_string(&accounting_path)
         .unwrap_or_else(|e| panic!("accounting file {accounting_str} must exist: {e}"));
-    let body: Value = serde_json::from_str(&contents)
-        .unwrap_or_else(|e| panic!("accounting file must be valid JSON: {e}; contents: {contents}"));
+    let body: Value = serde_json::from_str(&contents).unwrap_or_else(|e| {
+        panic!("accounting file must be valid JSON: {e}; contents: {contents}")
+    });
     let c = conversation(&body, "conv-1");
-    assert_eq!(c["totalTokens"].as_u64(), Some(140), "conv-1 total in accounting file; got: {c}");
-    assert_eq!(c["turns"].as_u64(), Some(1), "conv-1 turns in accounting file; got: {c}");
+    assert_eq!(
+        c["totalTokens"].as_u64(),
+        Some(140),
+        "conv-1 total in accounting file; got: {c}"
+    );
+    assert_eq!(
+        c["turns"].as_u64(),
+        Some(1),
+        "conv-1 turns in accounting file; got: {c}"
+    );
 }
