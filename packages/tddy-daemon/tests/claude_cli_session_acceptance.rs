@@ -23,7 +23,11 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 const VALID_TOKEN: &str = "valid-token";
 const TEST_MODEL: &str = "claude-opus-4-8";
 const TEST_PROJECT_ID: &str = "test-project";
-const PTY_STUB_OUTPUT_TIMEOUT_MS: u64 = 2_000;
+// Safety-net ceiling, not an expected duration: `wait_for_capture_contains` returns the instant
+// the stub's `ARGV:` line appears (~0.3s locally), so this only guards against false failures when
+// a real PTY subprocess spawn + relay is starved under parallel-test CPU load. Matches the 10s
+// RPC-stub ceiling below.
+const PTY_STUB_OUTPUT_TIMEOUT_MS: u64 = 10_000;
 const PTY_RPC_STUB_OUTPUT_TIMEOUT_MS: u64 = 10_000;
 
 /// The OS user the test process runs as — a real, resolvable user (same-user, so the interactive
@@ -633,6 +637,7 @@ fn build_claude_argv_includes_positional_prompt_when_present() {
         "test-session-id",
         Some("build a hello world app"),
         None,
+        false,
     );
 
     assert_eq!(
@@ -673,7 +678,8 @@ fn build_claude_argv_omits_when_empty_or_none() {
             "claude-opus-4-8",
             "sid",
             None,
-            None
+            None,
+            false
         ),
         expected,
         "None initial_prompt must produce no positional arg"
@@ -684,7 +690,8 @@ fn build_claude_argv_omits_when_empty_or_none() {
             "claude-opus-4-8",
             "sid",
             Some(""),
-            None
+            None,
+            false
         ),
         expected,
         "empty string must produce no positional arg"
@@ -695,7 +702,8 @@ fn build_claude_argv_omits_when_empty_or_none() {
             "claude-opus-4-8",
             "sid",
             Some("   "),
-            None
+            None,
+            false
         ),
         expected,
         "whitespace-only must produce no positional arg (trimmed to empty)"
@@ -929,8 +937,13 @@ async fn resume_does_not_replay_initial_prompt() {
         argv_line
     );
     assert!(
-        argv_line.contains("--session-id"),
-        "--session-id must be present in resumed session ARGV; ARGV line: {:?}",
+        argv_line.contains("--resume"),
+        "--resume must be present in resumed session ARGV; ARGV line: {:?}",
+        argv_line
+    );
+    assert!(
+        !argv_line.contains("--session-id"),
+        "a resumed session must use --resume, not --session-id; ARGV line: {:?}",
         argv_line
     );
 }

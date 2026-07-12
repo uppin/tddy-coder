@@ -810,6 +810,7 @@ async fn spawn_claude_cli_session_inner(
             &binary_owned,
             initial_prompt_opt.as_deref(),
             permission_mode_opt.as_deref(),
+            false,
             append_system_prompt_file.as_deref(),
             env_extra,
             Some(os_user),

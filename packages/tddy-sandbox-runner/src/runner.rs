@@ -1186,33 +1186,6 @@ fn subagent_replaced_tools_from_env() -> Vec<String> {
     )
 }
 
-/// Build the leading claude argv: binary, optional `--model <model>` (omitted when empty), the
-/// session flag, then `--permission-mode <mode>`. The session flag is `--resume <id>` when
-/// `resume` is true (continue an existing on-disk transcript), otherwise `--session-id <id>`
-/// (assign the id to a new session). The two flags are mutually exclusive.
-fn build_claude_session_argv(
-    claude_binary: &str,
-    model: &str,
-    session_id: &str,
-    permission_mode: &str,
-    resume: bool,
-) -> Vec<String> {
-    let mut argv = vec![claude_binary.to_string()];
-    if !model.is_empty() {
-        argv.push("--model".into());
-        argv.push(model.to_string());
-    }
-    if resume {
-        argv.push("--resume".into());
-    } else {
-        argv.push("--session-id".into());
-    }
-    argv.push(session_id.to_string());
-    argv.push("--permission-mode".into());
-    argv.push(permission_mode.to_string());
-    argv
-}
-
 struct SpawnClaudePtyParams<'a> {
     context_dir: &'a Path,
     /// Working directory for the Claude process (defaults to `context_dir` when no project dir is
@@ -1264,8 +1237,13 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
     } = params;
     let (stdin_tx, stdin_rx) = std::sync::mpsc::channel::<Bytes>();
 
-    let mut argv =
-        build_claude_session_argv(claude_binary, model, session_id, permission_mode, resume);
+    let mut argv = tddy_core::claude_argv::build_claude_base_argv(
+        claude_binary,
+        model,
+        session_id,
+        permission_mode,
+        resume,
+    );
     if let Some(path) = append_system_prompt_file {
         argv.push("--append-system-prompt-file".into());
         argv.push(path.to_string_lossy().into_owned());
@@ -2719,20 +2697,8 @@ mod tests {
 
 #[cfg(test)]
 mod claude_session_argv_tests {
-    use super::{build_claude_session_argv, SandboxRunnerArgs};
+    use super::SandboxRunnerArgs;
     use clap::Parser;
-
-    /// The token immediately following `flag` in an argv, or `None` if the flag is absent.
-    fn value_after<'a>(argv: &'a [String], flag: &str) -> Option<&'a str> {
-        argv.iter()
-            .position(|a| a == flag)
-            .and_then(|i| argv.get(i + 1))
-            .map(String::as_str)
-    }
-
-    fn contains_flag(argv: &[String], flag: &str) -> bool {
-        argv.iter().any(|a| a == flag)
-    }
 
     fn parse_runner_args(extra: &[&str]) -> SandboxRunnerArgs {
         let mut argv = vec![
@@ -2750,66 +2716,6 @@ mod claude_session_argv_tests {
         ];
         argv.extend_from_slice(extra);
         SandboxRunnerArgs::try_parse_from(argv).expect("argv must parse")
-    }
-
-    #[test]
-    fn a_fresh_session_assigns_the_id_with_session_id() {
-        // Given — a brand-new session (not a resume)
-        let resume = false;
-
-        // When
-        let argv = build_claude_session_argv(
-            "claude",
-            "claude-opus-4-8",
-            "019f5514-c0eb-7893-b32f-a02043a6e5cf",
-            "plan",
-            resume,
-        );
-
-        // Then — the id is assigned via --session-id, and --resume is not used
-        assert_eq!(
-            value_after(&argv, "--session-id"),
-            Some("019f5514-c0eb-7893-b32f-a02043a6e5cf")
-        );
-        assert!(!contains_flag(&argv, "--resume"));
-    }
-
-    #[test]
-    fn resuming_a_session_uses_resume_not_session_id() {
-        // Given — a resume of an existing session whose transcript already exists on disk
-        let resume = true;
-
-        // When
-        let argv = build_claude_session_argv(
-            "claude",
-            "claude-opus-4-8",
-            "019f5514-c0eb-7893-b32f-a02043a6e5cf",
-            "auto",
-            resume,
-        );
-
-        // Then — the id is passed to --resume, and the conflicting --session-id flag is absent
-        assert_eq!(
-            value_after(&argv, "--resume"),
-            Some("019f5514-c0eb-7893-b32f-a02043a6e5cf")
-        );
-        assert!(!contains_flag(&argv, "--session-id"));
-    }
-
-    #[test]
-    fn the_base_argv_preserves_model_and_permission_mode_when_resuming() {
-        // Given — a resume that must still pin model and permission mode
-        let argv = build_claude_session_argv(
-            "claude",
-            "claude-opus-4-8",
-            "019f5514-c0eb-7893-b32f-a02043a6e5cf",
-            "auto",
-            true,
-        );
-
-        // Then
-        assert_eq!(value_after(&argv, "--model"), Some("claude-opus-4-8"));
-        assert_eq!(value_after(&argv, "--permission-mode"), Some("auto"));
     }
 
     #[test]

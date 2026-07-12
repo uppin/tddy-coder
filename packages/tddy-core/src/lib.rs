@@ -4,6 +4,7 @@ pub mod agent_skills;
 pub mod backend;
 pub mod branch_worktree_intent;
 pub mod changeset;
+pub mod claude_argv;
 pub mod claude_hooks;
 pub mod cursor_hooks;
 pub mod elapsed_format;
