@@ -143,7 +143,7 @@ impl RpcService for SessionConnectionServiceRpc {
                     .map(|t| ProtoToolDef {
                         name: t.name,
                         description: t.description,
-                        input_schema_json: String::new(),
+                        input_schema_json: t.input_schema_json,
                     })
                     .collect();
                 let resp = ListExecToolsResponse { tools };
@@ -158,13 +158,13 @@ impl RpcService for SessionConnectionServiceRpc {
                         ))))
                     }
                 };
-                let r = self.svc.execute_tool(&req.tool_name, &req.args_json);
+                let r = self.svc.execute_tool(&req.tool_name, &req.args_json).await;
                 let resp = ExecuteToolResponse {
                     result_json: r.result_json,
                     is_error: r.is_error,
                     error_message: r.error_message,
-                    job_id: String::new(),
-                    job_running: false,
+                    job_id: r.job_id,
+                    job_running: r.job_running,
                 };
                 RpcResult::Unary(Ok(resp.encode_to_vec()))
             }

@@ -48,7 +48,6 @@ use crate::session_reader;
 use crate::spawn_worker;
 use crate::spawner::{self, SpawnOptions};
 use crate::telegram_session_subscriber::TelegramDaemonHooks;
-use crate::tool_catalog;
 use crate::tool_engine;
 use crate::user_sessions_path::{
     project_path_under_home_from_user_relative, projects_path_for_user, repos_base_for_user,
@@ -4633,7 +4632,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
         Ok(Response::new(ListExecToolsResponse {
-            tools: tool_catalog::tool_catalog(),
+            tools: tool_engine::tool_catalog()
+                .into_iter()
+                .map(|t| tddy_service::proto::connection::ToolDef {
+                    name: t.name,
+                    description: t.description,
+                    input_schema_json: t.input_schema_json,
+                })
+                .collect(),
         }))
     }
 

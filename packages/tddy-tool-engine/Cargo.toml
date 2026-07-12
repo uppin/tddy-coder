@@ -1,0 +1,23 @@
+[package]
+name = "tddy-tool-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Exec tool dispatch engine (Read/Write/StrReplace/Delete/Grep/Glob/Shell/Await/ReadLints/SemanticSearch) — path-contained against a worktree root, backed by tddy-task"
+
+[lib]
+name = "tddy_tool_engine"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = "0.1"
+bytes = "1"
+glob = "0.3"
+log = "0.4"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "time", "process"] }
+tddy-task = { path = "../tddy-task" }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "process"] }

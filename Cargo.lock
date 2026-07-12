@@ -8618,7 +8618,9 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-stdio",
+ "tddy-task",
  "tddy-testing-commons",
+ "tddy-tool-engine",
  "tddy-tui",
  "tddy-workflow-recipes",
  "tempfile",
@@ -8742,6 +8744,7 @@ dependencies = [
  "tddy-stdio",
  "tddy-task",
  "tddy-testing-commons",
+ "tddy-tool-engine",
  "tddy-tools",
  "tddy-vm",
  "tddy-workflow-recipes",
@@ -9264,6 +9267,21 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "uuid",
+]
+
+[[package]]
+name = "tddy-tool-engine"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "glob",
+ "log",
+ "pretty_assertions",
+ "serde_json",
+ "tddy-task",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

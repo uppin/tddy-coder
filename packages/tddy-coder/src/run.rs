@@ -1713,7 +1713,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
 
         if livekit_enabled {
             let url = args.livekit_url.as_ref().unwrap().clone();
-            let (_, session_artifact_dir, _) = livekit_daemon_workflow_paths(
+            let (agent_working_dir, session_artifact_dir, _) = livekit_daemon_workflow_paths(
                 &tddy_data_dir,
                 args.resume_from.as_deref(),
                 args.session_id.as_deref(),
@@ -1790,7 +1790,13 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 session_token: args.livekit_token.clone().unwrap_or_default(),
                 tool_calls_path: session_artifact_dir.join("tool-calls.jsonl"),
                 tools: crate::session_participant::coder_session_tool_catalog(),
-                executor: std::sync::Arc::new(crate::session_participant::CoderSessionToolExecutor),
+                executor: std::sync::Arc::new(
+                    crate::session_participant::CoderSessionToolExecutor {
+                        worktree_root: agent_working_dir.clone(),
+                        task_registry: tddy_task::TaskRegistry::new(),
+                        session_id: args.session_id.clone().unwrap_or_default(),
+                    },
+                ),
             };
             let mut livekit_entries = vec![
                 tddy_rpc::ServiceEntry {
@@ -2835,10 +2841,10 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             .map(|d| d.join(tddy_core::CODEX_OAUTH_AUTHORIZE_URL_FILENAME));
         let shutdown = shutdown.clone();
         // Session-scoped ConnectionService on the coder's own participant (see the interactive
-        // site above for the full rationale). FIXME: wire real tools + executor; wire the
-        // `session` metadata tap (the interactive path above now spawns
-        // `spawn_session_metadata_tap`; this headless path runs in its own thread/runtime and
-        // still needs the tap wired into that runtime).
+        // site above for the full rationale). The tool executor dispatches against the coder's
+        // current working directory (the repo under development), mirroring the interactive path's
+        // `agent_working_dir`. FIXME: wire the `session` metadata tap into this headless path's own
+        // thread/runtime (the interactive path above now spawns `spawn_session_metadata_tap`).
         let session_connection_svc = crate::session_participant::SessionConnectionService {
             session_id: args.session_id.clone().unwrap_or_default(),
             session_token: args.livekit_token.clone().unwrap_or_default(),
@@ -2848,7 +2854,12 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join("tool-calls.jsonl"),
             tools: crate::session_participant::coder_session_tool_catalog(),
-            executor: std::sync::Arc::new(crate::session_participant::CoderSessionToolExecutor),
+            executor: std::sync::Arc::new(crate::session_participant::CoderSessionToolExecutor {
+                worktree_root: std::env::current_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from(".")),
+                task_registry: tddy_task::TaskRegistry::new(),
+                session_id: args.session_id.clone().unwrap_or_default(),
+            }),
         };
         let session_connection_entry =
             crate::session_participant::session_connection_service_entry(session_connection_svc);

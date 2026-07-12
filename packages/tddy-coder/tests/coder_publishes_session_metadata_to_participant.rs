@@ -32,8 +32,9 @@ const METADATA_POLL_TIMEOUT: Duration = Duration::from_secs(15);
 const SESSION_ID: &str = "aaaaaaaa-0000-4000-8000-000000000002";
 
 struct EchoExecutor;
+#[async_trait::async_trait]
 impl ToolExecutor for EchoExecutor {
-    fn execute(&self, _tool_name: &str, args_json: &str) -> ToolOutcome {
+    async fn execute(&self, _tool_name: &str, args_json: &str) -> ToolOutcome {
         ToolOutcome {
             result_json: args_json.to_string(),
             is_error: false,
@@ -90,6 +91,7 @@ async fn coder_publishes_session_metadata_to_participant() -> Result<()> {
         tools: vec![ToolDef {
             name: "Echo".to_string(),
             description: "Echo a message".to_string(),
+            input_schema_json: r#"{"type":"object"}"#.to_string(),
         }],
         executor: Arc::new(EchoExecutor),
     };

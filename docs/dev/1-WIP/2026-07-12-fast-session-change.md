@@ -4,7 +4,7 @@
 **Branch**: `feat-fast-session-change`
 **Status**: 🚧 In Progress
 **Type**: Architecture Change
-**Packages**: `tddy-web`, `tddy-coder`, `tddy-livekit`, `tddy-daemon`
+**Packages**: `tddy-web`, `tddy-coder`, `tddy-tool-engine`, `tddy-livekit`, `tddy-daemon`
 **Feature PRDs**:
 - [Web — Fast Session Change](../ft/web/1-WIP/PRD-2026-07-12-fast-session-change.md)
 - [Daemon — Fast Session Change](../ft/daemon/1-WIP/PRD-2026-07-12-fast-session-change.md)
@@ -15,7 +15,8 @@
 **CRITICAL**: List ALL packages with documentation changes:
 
 - **tddy-web**: [README](../../packages/tddy-web/README.md) — per-session runtime registry, background terminals, session-participant RPC routing, participant metadata merge, inspector I/O bytes + last-data-received.
-- **tddy-coder**: [README](../../packages/tddy-coder/README.md) — serve session-scoped `ConnectionService` (tools, terminal control) from the LiveKit participant; publish `session` metadata. Delete/signal are daemon-direct (not served by the coder).
+- **tddy-coder**: [README](../../packages/tddy-coder/README.md) — serve session-scoped `ConnectionService` (tools, terminal control) from the LiveKit participant; publish `session` metadata. Delete/signal are daemon-direct (not served by the coder). `ExecuteTool` dispatches via the shared `tddy-tool-engine` against the session's worktree root.
+- **tddy-tool-engine**: [README](../../packages/tddy-tool-engine/) — new shared crate extracted from `tddy-daemon`: `execute_tool` / `execute_tool_with_env` / `tool_catalog` (Read/Write/StrReplace/Delete/Grep/Glob/Shell/Await/ReadLints/SemanticSearch), path-contained against a worktree root, backed by `tddy-task`.
 - **tddy-livekit**: [`participant-metadata.md`](../../packages/tddy-livekit/docs/participant-metadata.md) — document the `session` metadata key + merge semantics.
 - **tddy-daemon**: [`terminal-sessions.md`](../../packages/tddy-daemon/docs/terminal-sessions.md) (feature-facing) — bootstrap/directory boundary + delete/signal stay daemon-direct (no coder relay); `connection_service.rs` gains a daemon-direct caller contract test.
 
@@ -40,7 +41,7 @@ Switching sessions today unmounts the Ghostty terminal, tears down its LiveKit r
 **High-level deliverables tracking progress throughout development:**
 
 - [ ] **Package Documentation**: Update package READMEs and dev docs (wrap-time — permanent `packages/*/docs/` edits deferred to wrap per workspace rules; `session` metadata key schema captured in this changeset)
-- [x] **Implementation**: `SessionRuntimeRegistry` + background terminals (web); coder `ConnectionService` server (tools/control) + metadata publisher + workflow-state tap (`spawn_session_metadata_tap`); livekit `session` key docs (in changeset); daemon delete/signal daemon-direct contract test
+- [x] **Implementation**: `SessionRuntimeRegistry` + background terminals (web); coder `ConnectionService` server (tools/control) + metadata publisher + workflow-state tap (`spawn_session_metadata_tap`); livekit `session` key docs (in changeset); daemon delete/signal daemon-direct contract test; **`tddy-tool-engine` shared crate** extracted from the daemon (exec tool dispatch + catalog) and wired into the coder's `CoderSessionToolExecutor` + `coder_session_tool_catalog()`
 - [x] **Testing**: All acceptance + unit tests passing (see Validation Results)
 - [x] **Integration**: Cross-package participant RPC + daemon-direct lifecycle + metadata merge verified
 - [x] **Technical Debt**: Explicit-disconnect eviction documented as intentional (no cap); coder workflow-state → `session` metadata tap wired (interactive path; headless `--grpc` path FIXME-tracked)
@@ -82,10 +83,15 @@ Switching sessions today unmounts the Ghostty terminal, tears down its LiveKit r
 
 #### tddy-coder
 
-- **New**: `src/session_participant/connection_service_participant.rs` — session-scoped `ConnectionService` handlers (`ListExecTools`, `ListSessionToolCalls`, `ExecuteTool`, `ClaimTerminalControl`, `WatchTerminalControl`). `DeleteSession` / `SignalSession` are intentionally NOT served here (daemon-direct).
+- **New**: `src/session_participant/connection_service_participant.rs` — session-scoped `ConnectionService` handlers (`ListExecTools`, `ListSessionToolCalls`, `ExecuteTool`, `ClaimTerminalControl`, `WatchTerminalControl`). `DeleteSession` / `SignalSession` are intentionally NOT served here (daemon-direct). `CoderSessionToolExecutor` dispatches `ExecuteTool` through the shared `tddy-tool-engine` against the session's `worktree_root`, backed by a per-session `tddy_task::TaskRegistry`; `coder_session_tool_catalog()` mirrors the shared catalog. The `ToolExecutor` seam is `async` (the engine's `execute_tool` is async).
 - **New**: `src/session_participant/metadata_publisher.rs` — `Changeset` + `SessionMetadata` → `session` JSON → push to `metadata_tx`; merge preserves `owned_project_count` / `codex_oauth`.
 - **New**: `src/session_participant/mod.rs` — `spawn_session_participant` + `SessionParticipantOptions`.
-- **Modified**: `src/run.rs` — register `ConnectionService` on the participant `ServiceEntry` list (both `livekit_multi` and single-token paths); wire the previously-ignored `metadata_tx`.
+- **Modified**: `src/run.rs` — register `ConnectionService` on the participant `ServiceEntry` list (both `livekit_multi` and single-token paths); wire the previously-ignored `metadata_tx`; capture `agent_working_dir` as the tool engine's `worktree_root` and construct a `CoderSessionToolExecutor` (interactive path) / `std::env::current_dir()` (headless `--grpc` path).
+
+#### tddy-tool-engine
+
+- **New crate** `packages/tddy-tool-engine` — exec tool dispatch engine extracted from `tddy-daemon/src/tool_engine.rs` (+ `tool_catalog.rs`) so the daemon and coder share one implementation. Public API: `execute_tool(worktree_root, tool_name, args_json, &registry, session_id)`, `execute_tool_with_env(...)`, `ToolOutcome`, `ToolDef { name, description, input_schema_json }`, `tool_catalog()`. Tools: Read/Write/StrReplace/Delete/Grep/Glob/Shell/Await/ReadLints/SemanticSearch, all path-contained against `worktree_root`, background shell jobs via `tddy_task::TaskRegistry`. Deps: `tddy-task`, `glob`, `bytes`, `serde_json`, `tokio`, `async-trait`, `log`.
+- `tddy-daemon` imports the shared crate via a `pub use tddy_tool_engine as tool_engine;` re-export shim (legacy `tool_engine::execute_tool` call sites unchanged); the daemon-side sandbox-allowlist sync test moved to `src/tool_catalog_sync.rs`; `ListExecTools` maps the shared `ToolDef` → proto `ToolDef` at the RPC boundary.
 
 #### tddy-livekit
 
@@ -100,7 +106,8 @@ Switching sessions today unmounts the Ghostty terminal, tears down its LiveKit r
 
 #### tddy-daemon
 
-- **Modified**: `src/connection_service.rs` — no behaviour change; `DeleteSession` / `SignalSession` remain daemon-direct (the web calls them on `daemon-{instanceId}`). Add a contract test asserting a caller with a valid `session_token` clears auth and reaches session processing (regression guard for the daemon-direct path).
+- **Refactor**: `tool_engine.rs` + `tool_catalog.rs` extracted into the shared `tddy-tool-engine` crate (see above). `lib.rs` re-exports the crate as `tool_engine` so internal call sites are unchanged; the sandbox-allowlist sync test moved to `src/tool_catalog_sync.rs`.
+- **Modified**: `src/connection_service.rs` — no behaviour change to `DeleteSession` / `SignalSession` (remain daemon-direct; the web calls them on `daemon-{instanceId}`). `ListExecTools` now maps the shared `tddy_tool_engine::ToolDef` → proto `ToolDef` at the RPC boundary. Add a contract test asserting a caller with a valid `session_token` clears auth and reaches session processing (regression guard for the daemon-direct path).
 - **Modified**: `src/connection_service.rs` (or session-enrichment path) — populate new `SessionEntry` fields `bytes_in` / `bytes_out` / `last_data_received_at` from the `GrpcSessionTerminal` traffic meter for claude-cli / cursor-cli / workspace sessions the daemon owns; zero / empty for tddy-coder sessions with no LiveKit participant.
 - **Proto**: `packages/tddy-service/proto/connection.proto` `SessionEntry` — add `uint64 bytes_in = 24;`, `uint64 bytes_out = 25;`, `string last_data_received_at = 26;` (epoch-millis string, empty when never received).
 - **Docs**: `docs/ft/daemon/terminal-sessions.md` (via PRD wrap) — bootstrap/directory boundary; delete/signal stay daemon-direct (no coder relay).
@@ -181,8 +188,10 @@ Switching sessions today unmounts the Ghostty terminal, tears down its LiveKit r
 - [x] `tddy-web/src/lib/sessionParticipantMetadata.test.ts`
 - [x] `tddy-web/src/components/sessions/lastDataReceivedFormat.test.ts`
 - [x] `tddy-web/src/components/sessions/sessionParticipantRpcClient.test.ts`
-- [x] `tddy-coder src/.../connection_service_participant.rs` (module tests)
+- [x] `tddy-coder src/.../connection_service_participant.rs` (module tests — incl. async `ToolExecutor` fake, catalog-mirrors-shared-engine, `CoderSessionToolExecutor` Write→Read against tempdir)
 - [x] `tddy-coder src/.../metadata_publisher.rs` (module tests)
+- [x] `tddy-tool-engine tests/execute_tool_acceptance.rs` (Write→Read, path-traversal rejection, unknown-tool error, catalog completeness) + `catalog::tests` (unique non-empty names)
+- [x] `tddy-coder tests/coder_serves_connection_service_from_participant.rs` (extended — real-executor `Read` against worktree + full catalog)
 - [x] `tddy-coder src/session_participant/connection_service_participant.rs` (module tests)
 - [x] `tddy-coder src/session_participant/metadata_publisher.rs` (module tests)
 - [x] `tddy-livekit tests/participant_metadata_unit.rs` (extend — `session` key preserved across merges)
@@ -194,8 +203,9 @@ Switching sessions today unmounts the Ghostty terminal, tears down its LiveKit r
 
 **Rust** (`cargo test -p tddy-coder -p tddy-daemon -p tddy-livekit -p tddy-service -p tddy-core` against `LIVEKIT_TESTKIT_WS_URL=ws://127.0.0.1:32768`):
 - `tddy-core`: 253 lib + all integration suites pass.
-- `tddy-coder`: 62 lib + all integration suites pass, incl. `coder_serves_connection_service_from_participant` (1), `coder_publishes_session_metadata_to_participant` (1), and 8 new `metadata_publisher::tests` tap-mapping tests (`apply_session_metadata_event` for `BackendSelected` / `GoalStarted` / `StateChanged` / `ModeChanged` elicitation + running fallback / `WorkflowComplete` ok+err / irrelevant-event no-op, plus `a_default_session_metadata` seed).
-- `tddy-daemon`: 288 lib pass, incl. `delete_session_unit_accepts_daemon_direct_caller_with_valid_token`. 1 pre-existing failure (`sandbox_session::tests::dial_and_bridge_drives_run_host_relay_over_a_stdio_sandbox_client` panics with "build tddy-sandbox-runner first" — missing pre-built binary; unrelated to this feature).
+- `tddy-coder`: 64 lib + all integration suites pass, incl. `coder_serves_connection_service_from_participant` (2: the Echo plumbing test + a new real-executor test asserting `ListExecTools` returns the full shared catalog with non-empty schemas and `ExecuteTool("Read")` returns the worktree file's contents via `tddy-tool-engine`), `coder_publishes_session_metadata_to_participant` (1), and 8 new `metadata_publisher::tests` tap-mapping tests (`apply_session_metadata_event` for `BackendSelected` / `GoalStarted` / `StateChanged` / `ModeChanged` elicitation + running fallback / `WorkflowComplete` ok+err / irrelevant-event no-op, plus `a_default_session_metadata` seed), plus 2 new `connection_service_participant::tests` (catalog mirrors shared engine; `CoderSessionToolExecutor` Write→Read against a tempdir worktree root).
+- `tddy-tool-engine`: 5 tests pass (1 catalog unit + 4 `execute_tool_acceptance` integration: Write→Read, path-traversal rejection, unknown-tool honest error, catalog lists every dispatched tool).
+- `tddy-daemon`: 288 lib pass, incl. `delete_session_unit_accepts_daemon_direct_caller_with_valid_token` and `tool_catalog_sync::tests::workspace_exec_tool_names_match_tool_catalog` (sandbox-allowlist sync guard preserved after the extraction). 1 pre-existing failure (`sandbox_session::tests::dial_and_bridge_drives_run_host_relay_over_a_stdio_sandbox_client` panics with "build tddy-sandbox-runner first" — missing pre-built binary; unrelated to this feature).
 - `tddy-livekit`: 11 lib + `participant_metadata_acceptance` (3) + `participant_metadata_unit` (1) + rpc suites pass.
 - `tddy-service`: 39 lib pass.
 
@@ -217,8 +227,8 @@ Switching sessions today unmounts the Ghostty terminal, tears down its LiveKit r
 ### Production readiness
 
 - Deferred work is FIXME-marked with the `2026-07-12-fast-session-change` tag:
-  - `packages/tddy-coder/src/run.rs` (headless `--grpc` path) — wire real exec tool catalog + executor + the `session` metadata tap into that path's own thread/runtime (the interactive path now spawns `spawn_session_metadata_tap`).
-  - `packages/tddy-coder/src/session_participant/connection_service_participant.rs` — `ExecuteTool` returns an honest "not yet wired" error; `coder_session_tool_catalog()` returns an empty catalog until the tool-engine integration lands.
+  - `packages/tddy-coder/src/run.rs` (headless `--grpc` path) — wire the `session` metadata tap into that path's own thread/runtime (the interactive path now spawns `spawn_session_metadata_tap`). The tool executor is wired on both paths (worktree root = `agent_working_dir` interactive / `current_dir` headless).
+- `ExecuteTool` for tddy-coder sessions is fully wired via the shared `tddy-tool-engine` (Read/Write/StrReplace/Delete/Grep/Glob/Shell/Await/ReadLints/SemanticSearch, path-contained against the session worktree root). Background `Shell` jobs (`block_until_ms=0`) land in the session's `tddy_task::TaskRegistry`; their live status is reachable via the engine's `Await` tool. Surfacing live background-job status to the web beyond `tool-calls.jsonl` is a future enhancement (out of scope here).
 - No `println!`/`eprintln!` in TUI code paths; no test-only `cfg(test)` branches in production code.
 - The `liveKitFactoryIsOverridden` seam in `SessionsDrawerScreen.buildSessionClient` is a deliberate DI adaptation: in production the session's own LiveKit `Room` (captured via `onRoom`) is the transport room; the common-room fallback only applies when the transport factory is overridden (test doubles that ignore their `room` argument). Production behaviour is unchanged (the fallback path is unreachable with the real factory).
 
@@ -247,7 +257,7 @@ Switching sessions today unmounts the Ghostty terminal, tears down its LiveKit r
 ### Follow-up (tracked, not blocking PR)
 
 - [x] `g-coder-metadata-tap`: wire the coder's workflow-state transitions to the `session` metadata block on the participant — done for the interactive path (`spawn_session_metadata_tap` subscribes to `PresenterEvent`s via `usage_event_tx.subscribe()`, maps them via `apply_session_metadata_event`, and publishes `SessionMetadata` on `metadata_tx`; seeded with agent/model/recipe/repo_path from CLI args). Headless `--grpc` path remains FIXME-tracked (separate thread/runtime).
-- [ ] `CoderSessionToolExecutor.execute`: bridge `ExecuteTool(tool_name, args_json)` to the coder's tool engine (FIXME in `connection_service_participant.rs`). Currently returns an honest "not yet wired" error; `coder_session_tool_catalog()` returns an empty catalog.
+- [x] `CoderSessionToolExecutor.execute`: `ExecuteTool(tool_name, args_json)` dispatches through the shared `tddy-tool-engine` against the session's worktree root (the coder's `agent_working_dir`), backed by a per-session `tddy_task::TaskRegistry`. The `ToolExecutor` seam is `async`; `coder_session_tool_catalog()` mirrors the shared catalog (Read/Write/StrReplace/Delete/Grep/Glob/Shell/Await/ReadLints/SemanticSearch) with non-empty `input_schema_json`. Wired on both the interactive and headless `--grpc` paths in `run.rs`. Verified by a new unit test (Write→Read against a tempdir worktree) and a new LiveKit integration test (`coder_session_participant_executes_a_real_read_against_its_worktree`: full catalog + `ExecuteTool("Read")` returns the worktree file's contents).
 
 ## References
 

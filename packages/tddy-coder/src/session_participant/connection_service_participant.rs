@@ -3,25 +3,34 @@
 //! `DeleteSession` / `SignalSession` are **not** served here — the web routes them directly to the
 //! daemon participant (`daemon-{instanceId}`), which owns process teardown and must be reachable
 //! even when the coder participant is stuck (changeset `2026-07-12-fast-session-change`).
+//!
+//! `ExecuteTool` dispatches through the shared [`tddy_tool_engine`] against the session's
+//! `worktree_root` (the coder's agent working directory), backed by a per-session
+//! [`tddy_task::TaskRegistry`] for background shell jobs.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use tddy_task::TaskRegistry;
 
 /// A tool exposed by `ListExecTools`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolDef {
     pub name: String,
     pub description: String,
+    pub input_schema_json: String,
 }
 
-/// Result of `ExecuteTool`.
+/// Result of `ExecuteTool` (plus the background-job fields the web response carries).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecuteToolResult {
     pub result_json: String,
     pub is_error: bool,
     pub error_message: String,
+    pub job_id: String,
+    pub job_running: bool,
 }
 
 /// Result of `ClaimTerminalControl`.
@@ -41,10 +50,11 @@ pub struct ToolOutcome {
     pub job_running: bool,
 }
 
-/// Seam for invoking a tool. The production wiring (in `run.rs`) injects an executor backed by the
-/// shared tool engine; unit tests inject a fake.
+/// Seam for invoking a tool. Production wires [`CoderSessionToolExecutor`] (backed by the shared
+/// `tddy-tool-engine`); unit tests inject a fake.
+#[async_trait]
 pub trait ToolExecutor: Send + Sync {
-    fn execute(&self, tool_name: &str, args_json: &str) -> ToolOutcome;
+    async fn execute(&self, tool_name: &str, args_json: &str) -> ToolOutcome;
 }
 
 /// One recorded tool-call execution, persisted as a JSONL row. Field shape matches the daemon's
@@ -82,8 +92,8 @@ impl SessionConnectionService {
     }
 
     /// Executes a tool and appends a `tool-calls.jsonl` entry (schema-compatible with the daemon).
-    pub fn execute_tool(&self, tool_name: &str, args_json: &str) -> ExecuteToolResult {
-        let outcome = self.executor.execute(tool_name, args_json);
+    pub async fn execute_tool(&self, tool_name: &str, args_json: &str) -> ExecuteToolResult {
+        let outcome = self.executor.execute(tool_name, args_json).await;
         let record = ToolCallRecord {
             task_id: outcome.job_id.clone(),
             tool_name: tool_name.to_string(),
@@ -109,6 +119,8 @@ impl SessionConnectionService {
             result_json: outcome.result_json,
             is_error: outcome.is_error,
             error_message: outcome.error_message,
+            job_id: outcome.job_id,
+            job_running: outcome.job_running,
         }
     }
 
@@ -141,36 +153,49 @@ fn append_tool_call(path: &std::path::Path, record: &ToolCallRecord) -> anyhow::
         .map_err(|e| anyhow::anyhow!("write {}: {}", path.display(), e))
 }
 
-/// `ToolExecutor` used by `run.rs` when registering `ConnectionService` on the coder's own
-/// participant. `ExecuteTool` for a tddy-coder session is not yet wired to the coder's workflow
-/// action surface — this executor returns an honest error rather than a silent fallback.
-///
-/// FIXME(2026-07-12-fast-session-change): bridge `ExecuteTool(tool_name, args_json)` to the coder's
-/// tool engine (build executor / workflow actions) so the web can run exec tools against the
-/// session participant directly.
-pub struct CoderSessionToolExecutor;
+/// `ToolExecutor` backed by the shared `tddy-tool-engine`, dispatching against the session's
+/// `worktree_root` (the coder's agent working directory). Background shell jobs (`Shell` with
+/// `block_until_ms=0`) land in this session's [`TaskRegistry`]; their live status is reachable via
+/// the engine's `Await` tool, and completed calls are also persisted to `tool-calls.jsonl` by
+/// [`SessionConnectionService::execute_tool`].
+pub struct CoderSessionToolExecutor {
+    pub worktree_root: PathBuf,
+    pub task_registry: TaskRegistry,
+    pub session_id: String,
+}
 
+#[async_trait]
 impl ToolExecutor for CoderSessionToolExecutor {
-    fn execute(&self, tool_name: &str, _args_json: &str) -> ToolOutcome {
+    async fn execute(&self, tool_name: &str, args_json: &str) -> ToolOutcome {
+        let outcome = tddy_tool_engine::execute_tool(
+            &self.worktree_root,
+            tool_name,
+            args_json,
+            &self.task_registry,
+            &self.session_id,
+        )
+        .await;
         ToolOutcome {
-            result_json: String::new(),
-            is_error: true,
-            error_message: format!(
-                "ExecuteTool '{tool_name}' is not yet wired for tddy-coder sessions (FIXME 2026-07-12-fast-session-change)"
-            ),
-            job_id: String::new(),
-            job_running: false,
+            result_json: outcome.result_json,
+            is_error: outcome.is_error,
+            error_message: outcome.error_message,
+            job_id: outcome.job_id,
+            job_running: outcome.job_running,
         }
     }
 }
 
-/// The exec tool catalog the coder exposes via `ListExecTools` on its session participant.
-///
-/// FIXME(2026-07-12-fast-session-change): populate from the coder's real tool surface (build tools,
-/// workflow actions). Empty for now — the web lists no exec tools for a coder session until the
-/// catalog is wired, which is honest (no silent fallback).
+/// The exec tool catalog the coder exposes via `ListExecTools` on its session participant — the
+/// shared `tddy-tool-engine` catalog mapped to the coder's [`ToolDef`].
 pub fn coder_session_tool_catalog() -> Vec<ToolDef> {
-    Vec::new()
+    tddy_tool_engine::tool_catalog()
+        .into_iter()
+        .map(|t| ToolDef {
+            name: t.name,
+            description: t.description,
+            input_schema_json: t.input_schema_json,
+        })
+        .collect()
 }
 
 #[cfg(test)]
