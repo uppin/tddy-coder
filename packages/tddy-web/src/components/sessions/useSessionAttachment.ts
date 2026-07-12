@@ -46,6 +46,10 @@ export interface UseSessionAttachmentResult {
     sessionToken: string,
     client: ConnectionClient,
   ): Promise<void>;
+  /** Restore the attachment to an already-connected session's state without an RPC round-trip —
+   *  used by the screen's fast-path select (switching focus to a session whose runtime is already
+   *  mounted in the registry). Mirrors `connectSession`'s terminal state but skips the network hop. */
+  restore(state: SessionAttachmentState): void;
   reset(): void;
 }
 
@@ -129,9 +133,13 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
     [],
   );
 
+  const restore = useCallback((state: SessionAttachmentState) => {
+    setState(state);
+  }, []);
+
   const reset = useCallback(() => {
     setState({ status: "idle" });
   }, []);
 
-  return { state, connectSession, resumeSession, deleteSession, signalSession, reset };
+  return { state, connectSession, resumeSession, deleteSession, signalSession, restore, reset };
 }

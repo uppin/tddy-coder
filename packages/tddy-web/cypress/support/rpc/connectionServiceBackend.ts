@@ -153,6 +153,9 @@ export interface ConnectionServiceBackend extends InMemoryRpcBackend {
   readonly executedToolSessionIds: string[];
   /** Every `sessionId` passed to `ClaimTerminalControl`, in call order. */
   readonly claimedControlSessionIds: string[];
+  /** Every `sessionId` passed to `ConnectSession`, in call order — used by the fast-session-change
+   *  regression test to assert re-selecting an already-attached session does NOT re-connect. */
+  readonly connectedSessionIds: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +173,7 @@ export function aConnectionServiceBackend(
   const signalCalls: { sessionId: string; signal: number }[] = [];
   const executedToolSessionIds: string[] = [];
   const claimedControlSessionIds: string[] = [];
+  const connectedSessionIds: string[] = [];
 
   const defaultDaemons: DaemonEntry[] = [{ instanceId: "local", label: "local (this daemon)", isLocal: true }];
   const daemons = scenario.daemons ?? defaultDaemons;
@@ -220,6 +224,7 @@ export function aConnectionServiceBackend(
       }),
       listProjectBranches: async () => ({ branches: scenario.projectBranches ?? [] }),
       connectSession: async (req) => {
+        connectedSessionIds.push(req.sessionId);
         const overrides =
           typeof scenario.connectSession === "function"
             ? scenario.connectSession(req.sessionId)
@@ -305,6 +310,7 @@ export function aConnectionServiceBackend(
     signalCalls,
     executedToolSessionIds,
     claimedControlSessionIds,
+    connectedSessionIds,
   });
 }
 

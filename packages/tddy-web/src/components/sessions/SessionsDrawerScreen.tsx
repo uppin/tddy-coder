@@ -22,7 +22,7 @@ import { TooltipProvider } from "../ui/tooltip";
 import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
 import { StatusBar } from "./StatusBar";
-import { useSessionAttachment } from "./useSessionAttachment";
+import { useSessionAttachment, type SessionAttachmentState } from "./useSessionAttachment";
 import { nextInspectorState } from "./inspectorState";
 import { sessionsDrawerPathForSession, parseSessionsDrawerSessionId } from "../../routing/appRoutes";
 import { Signal } from "../../gen/connection_pb";
@@ -81,7 +81,7 @@ export function SessionsDrawerScreen() {
   const [sessionListOpen, setSessionListOpen] = useState(() => !detectIsMobile());
   const isMobile = useIsMobile();
 
-  const { state: attachment, connectSession, resumeSession, deleteSession, signalSession, reset: resetAttachment } = useSessionAttachment();
+  const { state: attachment, connectSession, resumeSession, deleteSession, signalSession, restore: restoreAttachment, reset: resetAttachment } = useSessionAttachment();
 
   const isConnected =
     attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
@@ -298,8 +298,6 @@ export function SessionsDrawerScreen() {
 
   // When a session is selected in the drawer, auto-connect if it is active
   const handleSelectSession = (sessionId: string) => {
-    // Reset attachment so useEffect re-evaluates state for the newly selected session
-    resetAttachment();
     setSelectedSessionId(sessionId);
     // On mobile the list is a full-screen overlay — close it so the terminal is visible.
     if (isMobile) setSessionListOpen(false);
@@ -311,9 +309,35 @@ export function SessionsDrawerScreen() {
     // Track auto-open so we know whether a subsequent connect should auto-close
     inspectorAutoOpenRef.current = willOpen;
     setInspectorState(willOpen ? "open" : "closed");
-    // Connect to the clicked session's owning daemon. `activeClient` still reflects the previously
-    // selected session at this point (the selection state update is not yet applied), so build the
-    // client for this session's owner directly rather than reading `activeClient` here.
+
+    // Fast path — the session's runtime is already mounted in the registry (it was attached
+    // earlier and stays alive across focus switches). Restore the attachment from the registry's
+    // stored connection params so the screen re-evaluates state for the newly selected session
+    // WITHOUT an RPC round-trip: no re-connect, no fresh ClaimTerminalControl, no token race, and
+    // the existing terminal stream keeps flowing. The registry effect below re-focuses it.
+    const existing = runtimeRegistry.get(sessionId);
+    if (existing?.status === "connected-livekit") {
+      restoreAttachment({
+        status: "connected-livekit",
+        sessionId,
+        livekitUrl: existing.livekitUrl ?? "",
+        livekitRoom: existing.livekitRoom ?? "",
+        livekitServerIdentity: existing.livekitServerIdentity ?? "",
+        identity: existing.identity ?? "",
+      } satisfies SessionAttachmentState);
+      return;
+    }
+    if (existing?.status === "connected-grpc") {
+      restoreAttachment({ status: "connected-grpc", sessionId } satisfies SessionAttachmentState);
+      return;
+    }
+
+    // Slow path — not yet attached. Reset so the attachment effect re-evaluates state for the
+    // new selection, then connect to the clicked session's owning daemon. `activeClient` still
+    // reflects the previously selected session at this point (the selection state update is not
+    // yet applied), so build the client for this session's owner directly rather than reading
+    // `activeClient` here.
+    resetAttachment();
     if (session?.isActive) {
       const owner = owningHostForSession(session, selectedInstanceId ?? "");
       const owningClient = clientForHost(owner);
