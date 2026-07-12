@@ -24,6 +24,24 @@ import { AuthProvider } from "../../../src/hooks/authProvider";
 export const DEFAULT_TEST_DAEMON: DaemonHost = { instanceId: "local", label: "local (this daemon)" };
 
 /**
+ * A minimal stand-in for a connected common-room `Room` carrying a fixed set of remote participant
+ * identities — enough for `useRoomParticipants` (which reads `remoteParticipants`, `localParticipant`
+ * and the join/leave event hooks). Cross-host tests seed the coder identities
+ * (`daemon-<instanceId>-<sessionId>`) that make a session count as having a live participant.
+ */
+export function aFakeCommonRoom(participantIdentities: string[]): Room {
+  const remoteParticipants = new Map(
+    participantIdentities.map((identity) => [identity, { identity, metadata: "", joinedAt: new Date() }]),
+  );
+  return {
+    localParticipant: undefined,
+    remoteParticipants,
+    on: () => {},
+    off: () => {},
+  } as unknown as Room;
+}
+
+/**
  * Wrap `children` in a `SelectedDaemonProvider` pre-seeded with `daemons` (default: a single
  * fixture daemon) and a fresh `Room` — enough for `useDaemonClient` to resolve non-null. Also
  * provides `AuthProvider`, since every real daemon-mode screen (`SessionsDrawerScreen`,
@@ -34,10 +52,13 @@ export const DEFAULT_TEST_DAEMON: DaemonHost = { instanceId: "local", label: "lo
 export function withSelectedDaemon(
   children: React.ReactNode,
   daemons: DaemonHost[] = [DEFAULT_TEST_DAEMON],
+  participantIdentities?: string[],
 ): React.ReactElement {
+  const room =
+    participantIdentities !== undefined ? aFakeCommonRoom(participantIdentities) : new Room();
   return (
     <AuthProvider>
-      <SelectedDaemonProvider room={new Room()} daemons={daemons}>
+      <SelectedDaemonProvider room={room} daemons={daemons}>
         {children}
       </SelectedDaemonProvider>
     </AuthProvider>

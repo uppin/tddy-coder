@@ -50,6 +50,48 @@ active-first grouping (contrast with `sortSessionsForDisplay` used by `Connectio
 - `"needs-input"` — `pendingElicitation: true` (takes precedence over `isActive`)
 - `"disconnected"` — `isActive: false` and `pendingElicitation: false`
 
+## Cross-Host Active Sessions
+
+The drawer shows a session that currently has a **live LiveKit participant** regardless of the
+selected host. The list is the **union** of two sources:
+
+- **The selected host's sessions** — from its `ListSessions` (active *and* inactive/history rows).
+- **Live cross-host sessions** — every session with a coder participant in the common room, across
+  all hosts.
+
+There is **no `ListSessions` fan-out** and **no backend liveness signal**. Liveness *is* LiveKit
+participant presence: a session's coder process joins the shared common room as
+`daemon-<instanceId>-<sessionId>` (or `daemon-<sessionId>` on a single daemon), and the LiveKit SDK
+keeps that participant alive while the process lives (connection-level keep-alive; a dead process ⇒
+`ParticipantDisconnected`). The web is already in that room, so it observes those participants
+directly via `useRoomParticipants` — real-time and independent of each owning daemon's version.
+`parseSessionParticipantIdentity` (`utils/crossHostSessions.ts`) reads the owning instance id and the
+(trailing-UUID) session id straight from the identity; a live session the selected host didn't return
+is added as a minimal synthesized row owned by its host (label falls back to the short session id).
+Cross-host visibility only applies when a common room exists — a single-daemon deployment has one
+host and no cross-host case.
+
+### `SessionManager`
+
+The merged list, its refresh, and its change events live in one place: `SessionManager`
+(`components/sessions/sessionManager.ts`), a plain observable store (no React/RPC dependency of its
+own — those are injected). It unions the selected host's fetched sessions with the live participants,
+de-dupes by `sessionId` (a metadata-carrying fetched row wins over a synthesized one), and sorts
+newest-first. `useSessionManager` binds the RPC client, common-room participants, and selected host
+into it and exposes the reactive list via `useSyncExternalStore`.
+
+Refresh is decoupled from React through a **window-bound bridge** (`lib/sessionsRefreshBridge.ts`,
+mirroring `terminalZoomBridge`): any screen calls `requestSessionsRefresh()` and the manager re-pulls
+the selected host's sessions. (Active cross-host rows need no refresh — presence updates them live.)
+
+**Owning-host badge** — a drawer item whose owning host differs from the selected host renders a
+small muted host-label badge (`DaemonHost.label`, with the `" (this daemon)"` suffix stripped).
+
+**Owning-daemon routing** — selecting a cross-host row does **not** change the selected host.
+Attach/resume/delete/terminate RPCs for the selected session route to that session's **owning**
+daemon (`useDaemonClientFor(ConnectionService, owningHost)`), while the **create** flow targets the
+selected host. Because selection never calls `selectDaemon`, the screen does not remount.
+
 ## Session Attachment
 
 `useSessionAttachment` hook manages the single-session attach lifecycle:
@@ -120,7 +162,7 @@ Adds to `src/components/ui/`:
 
 ## RPCs Used
 
-- `ListSessions` — session list with `isActive`, `createdAt`, `repoPath`, `workflowGoal`, `pendingElicitation`
+- `ListSessions` — session list with `isActive`, `createdAt`, `repoPath`, `workflowGoal`, `pendingElicitation`; fanned out per-host and merged (see [Cross-Host Active Sessions](#cross-host-active-sessions); liveness is derived client-side from common-room participants, not from this RPC)
 - `ConnectSession` / `ResumeSession` — attach to a running or paused session
 - `StreamTerminalOutput` / `SendTerminalInput` — gRPC terminal stream (claude-cli path)
 - `DeleteSession` — delete session (two-click confirm)

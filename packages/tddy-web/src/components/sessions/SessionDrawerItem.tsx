@@ -10,6 +10,8 @@ interface SessionDrawerItemProps {
   isSelected: boolean;
   onClick: (sessionId: string) => void;
   depth?: number;
+  /** Owning-host label for a cross-host row; `null`/omitted for rows on the selected host. */
+  hostLabel?: string | null;
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -18,7 +20,7 @@ const STATUS_COLOR: Record<string, string> = {
   "needs-input": "bg-yellow-500",
 };
 
-export function SessionDrawerItem({ session, isSelected, onClick, depth }: SessionDrawerItemProps) {
+export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLabel }: SessionDrawerItemProps) {
   const label = sessionDrawerLabel(session);
   const status = connectionStatusForSession(session);
 
@@ -51,6 +53,15 @@ export function SessionDrawerItem({ session, isSelected, onClick, depth }: Sessi
           >
             {label}
           </span>
+          {/* Owning-host badge — only for cross-host rows (a session owned by a non-selected host). */}
+          {hostLabel && (
+            <span
+              data-testid={`sessions-drawer-item-host-${session.sessionId}`}
+              className="flex-shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
+            >
+              {hostLabel}
+            </span>
+          )}
         </button>
       </TooltipTrigger>
       <TooltipContent
