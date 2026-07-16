@@ -40,6 +40,9 @@ const dMouse = tddyDebug("tddy:term:mouse");
 /** Finger separation change (px) required before applying one font step during touch pinch. */
 const PINCH_FONT_STEP_SPAN_PX = 22;
 
+/** Vertical movement (px) a single finger must travel before a touch counts as a scroll drag (vs. a tap). */
+const TOUCH_SCROLL_START_THRESHOLD_PX = 8;
+
 /** Canvas/CSS width of the rendered grid (not the full-width xterm root). Used for X-axis font fit. */
 function measureTerminalCanvasCssWidth(term: Terminal): number {
   const root = term.element;
@@ -47,6 +50,15 @@ function measureTerminalCanvasCssWidth(term: Terminal): number {
   const canvas = root.querySelector("canvas");
   if (!canvas) return 0;
   return canvas.getBoundingClientRect().width;
+}
+
+/** Canvas/CSS height of the rendered grid. Used to convert drag pixels into scroll lines. */
+function measureTerminalCanvasCssHeight(term: Terminal): number {
+  const root = term.element;
+  if (!root) return 0;
+  const canvas = root.querySelector("canvas");
+  if (!canvas) return 0;
+  return canvas.getBoundingClientRect().height;
 }
 
 /** Limit Ctrl/Cmd +/-/0 so we do not steal shortcuts from other page inputs (e.g. browser address bar). */
@@ -111,6 +123,8 @@ export interface GhosttyTerminalHandle {
   getBufferLines?(): BufferLineInfo[];
   /** Apply font size to the live terminal and refit (Green phase). */
   setTerminalFontSize?(px: number): void;
+  /** Lines the viewport is scrolled up from the bottom (0 = pinned to latest output). */
+  getViewportScrollOffset?(): number;
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
@@ -565,6 +579,87 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       applyFontSizePx,
     ]);
 
+    // Single-finger vertical drag → scroll through scrollback. Mobile has no mouse
+    // wheel, so a swipe is the only way to reach earlier output. Natural, content-
+    // following direction: dragging the finger down pulls older output into view.
+    // Listeners attach as soon as the container exists (not gated on `ready`) so a
+    // drag arriving right after the canvas mounts is not missed; `termRef` is read
+    // lazily at event time and the handlers no-op until the terminal is available.
+    useEffect(() => {
+      if (!sessionActive || fixedViewportGrid) return;
+      const container = containerRef.current;
+      if (!container) return;
+
+      let dragging = false;
+      let engaged = false;
+      let startY = 0;
+      let lastY = 0;
+      let pixelAccum = 0;
+
+      const cellHeightPx = (): number => {
+        const term = termRef.current;
+        if (!term || term.rows <= 0) return 0;
+        const h = measureTerminalCanvasCssHeight(term);
+        return h > 0 ? h / term.rows : 0;
+      };
+
+      const onTouchStart = (e: TouchEvent) => {
+        if (e.touches.length !== 1) {
+          dragging = false;
+          return;
+        }
+        dragging = true;
+        engaged = false;
+        pixelAccum = 0;
+        startY = e.touches[0].clientY;
+        lastY = startY;
+      };
+
+      const onTouchMove = (e: TouchEvent) => {
+        // Only a single active finger scrolls — never during a two-finger pinch.
+        if (!dragging || e.touches.length !== 1) return;
+        const term = termRef.current;
+        if (!term) return;
+        const y = e.touches[0].clientY;
+        // A tap (negligible movement) must not scroll — wait for real drag distance.
+        if (!engaged && Math.abs(y - startY) < TOUCH_SCROLL_START_THRESHOLD_PX) return;
+        engaged = true;
+        const cell = cellHeightPx();
+        if (cell <= 0) return;
+        pixelAccum += y - lastY;
+        lastY = y;
+        const lines = Math.trunc(pixelAccum / cell);
+        if (lines !== 0) {
+          pixelAccum -= lines * cell;
+          // Finger down (positive delta) reveals older output. `scrollLines` moves the
+          // viewport by `viewportY - amount`, so a negative amount increases getViewportY
+          // (scrolls back toward earlier output) — a natural, content-following drag.
+          term.scrollLines(-lines);
+          logMouse("touch-scroll lines=%d viewportY=%d", -lines, term.getViewportY?.());
+        }
+        // Non-passive listener: stop the page from scrolling while dragging the terminal.
+        e.preventDefault();
+      };
+
+      const endDrag = () => {
+        dragging = false;
+        engaged = false;
+        pixelAccum = 0;
+      };
+
+      container.addEventListener("touchstart", onTouchStart, { passive: true });
+      container.addEventListener("touchmove", onTouchMove, { passive: false });
+      container.addEventListener("touchend", endDrag, { passive: true });
+      container.addEventListener("touchcancel", endDrag, { passive: true });
+
+      return () => {
+        container.removeEventListener("touchstart", onTouchStart);
+        container.removeEventListener("touchmove", onTouchMove);
+        container.removeEventListener("touchend", endDrag);
+        container.removeEventListener("touchcancel", endDrag);
+      };
+    }, [sessionActive, fixedViewportGrid]);
+
     useEffect(() => {
       if (!ready || !termRef.current?.textarea) return;
       const ta = termRef.current.textarea;
@@ -745,6 +840,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     useImperativeHandle(
       ref,
       () => ({
+        getViewportScrollOffset() {
+          // Number of lines the viewport is scrolled up from the bottom of the
+          // scrollback (0 = pinned to the latest output). Lets callers/tests
+          // observe whether a scroll gesture actually moved the viewport.
+          const t = termRef.current as unknown as { getViewportY?: () => number } | null;
+          return t?.getViewportY?.() ?? 0;
+        },
         setTerminalFontSize(px: number) {
           if (!Number.isFinite(px)) return;
           if (zoomVerbose) {

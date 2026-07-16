@@ -49,10 +49,13 @@ function MobileKeyboardWrapper({
 export interface GhosttyTerminalDriverOptions extends Partial<GhosttyTerminalProps> {
   /** When true, mounts via MobileKeyboardWrapper so ref.current.focus() can be tested. */
   withMobileKeyboardWrapper?: boolean;
+  /** When true, mounts with a captured imperative handle so the live buffer (viewport + scrollback) can be inspected. */
+  withHandleCapture?: boolean;
 }
 
 export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
-  const { withMobileKeyboardWrapper, ...terminalProps } = options;
+  const { withMobileKeyboardWrapper, withHandleCapture, ...terminalProps } = options;
+  const handleRef = React.createRef<GhosttyTerminalHandle>();
   const onDataStub = terminalProps.onData ?? cy.stub().as("onData");
   const onResizeStub = terminalProps.onResize ?? undefined;
 
@@ -74,6 +77,8 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
             terminalProps={mergedProps}
           />,
         );
+      } else if (withHandleCapture) {
+        mount(<GhosttyTerminal ref={handleRef} {...(mergedProps as GhosttyTerminalProps)} />);
       } else {
         mount(<GhosttyTerminal {...(mergedProps as GhosttyTerminalProps)} />);
       }
@@ -204,6 +209,80 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
             cancelable: true,
           }),
         );
+      });
+      return this;
+    },
+
+    /**
+     * Simulate a single-finger drag downward over the terminal — the natural,
+     * content-following gesture a mobile user makes to pull earlier output back
+     * into view. Dispatches a touchstart, a series of downward touchmoves, and a
+     * touchend on the terminal container. Requires `withHandleCapture: true` so
+     * scroll offset can be read.
+     */
+    dragDownOneFinger() {
+      terminal().then(($el) => {
+        const el = $el[0];
+        const rect = el.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const startY = rect.top + rect.height * 0.2;
+        const touchAt = (y: number) =>
+          new Touch({
+            identifier: 1,
+            target: el,
+            clientX: cx,
+            clientY: y,
+            radiusX: 0,
+            radiusY: 0,
+            rotationAngle: 0,
+            force: 1,
+          });
+        const start = touchAt(startY);
+        el.dispatchEvent(
+          new TouchEvent("touchstart", {
+            touches: [start],
+            targetTouches: [start],
+            changedTouches: [start],
+            cancelable: true,
+            bubbles: true,
+          }),
+        );
+        for (let step = 1; step <= 6; step++) {
+          const moved = touchAt(startY + step * 20);
+          el.dispatchEvent(
+            new TouchEvent("touchmove", {
+              touches: [moved],
+              targetTouches: [moved],
+              changedTouches: [moved],
+              cancelable: true,
+              bubbles: true,
+            }),
+          );
+        }
+        const end = touchAt(startY + 120);
+        el.dispatchEvent(
+          new TouchEvent("touchend", {
+            touches: [],
+            targetTouches: [],
+            changedTouches: [end],
+            cancelable: true,
+            bubbles: true,
+          }),
+        );
+      });
+      return this;
+    },
+
+    /**
+     * Assert the terminal viewport has scrolled back from the bottom — i.e. an
+     * earlier region of output is now visible. `.should(cb)` retries so the
+     * assertion absorbs the async settle after the gesture.
+     */
+    expectRevealsEarlierOutput() {
+      cy.wrap(handleRef).should((ref) => {
+        const handle = (ref as unknown as React.RefObject<GhosttyTerminalHandle>).current;
+        const offset = handle?.getViewportScrollOffset?.() ?? 0;
+        expect(offset, "terminal viewport should reveal earlier output after the drag").to.be.greaterThan(0);
       });
       return this;
     },
