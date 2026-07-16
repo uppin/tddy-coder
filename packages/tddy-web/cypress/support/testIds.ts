@@ -210,6 +210,14 @@ export const TEST_IDS = {
   /** Drawer row — container for parsed `session` participant metadata (goal/state/agent/model). */
   sessionsDrawerItemSessionMeta: "sessions-drawer-item-session-meta",
 
+  // Session terminal tabs — Agent + bash terminals per session
+  /** The terminal tab strip at the top of the session runtime area. */
+  sessionsTerminalTabs: "sessions-terminal-tabs",
+  /** The fixed, non-closable Agent tab (reserved "main" terminal). */
+  sessionsTerminalTabAgent: "sessions-terminal-tab-agent",
+  /** The "+" button that opens a new bash terminal. */
+  sessionsTerminalTabNew: "sessions-terminal-tab-new",
+
   // Terminal control mutex — "Claim terminal" CTA
   terminalControlOverlay: "terminal-control-overlay",
   terminalClaimBtn: "terminal-claim-btn",
@@ -444,6 +452,20 @@ export const sessionsInspectorTerminateBtn = (sessionId: string) =>
  *  the others are `display:none` but still mounted). */
 export const sessionsRuntimeTerminal = (sessionId: string) =>
   `sessions-runtime-terminal-${sessionId}`;
+
+/** `[data-testid="sessions-terminal-tab-<terminalId>"]` — a single bash terminal tab. */
+export const sessionsTerminalTab = (terminalId: string) =>
+  `sessions-terminal-tab-${terminalId}`;
+
+/** `[data-testid="sessions-terminal-tab-close-<terminalId>"]` — the ✕ close control on a bash tab. */
+export const sessionsTerminalTabClose = (terminalId: string) =>
+  `sessions-terminal-tab-close-${terminalId}`;
+
+/** `[data-testid="sessions-terminal-pane-<terminalId>"]` — the mounted terminal container for one
+ *  terminal_id (active is CSS-visible, the rest are `display:none` but stay mounted). The Agent tab
+ *  uses `terminalId = "main"`. */
+export const sessionsTerminalPane = (terminalId: string) =>
+  `sessions-terminal-pane-${terminalId}`;
 
 // ---------------------------------------------------------------------------
 // Tasks drawer screen dynamic helpers

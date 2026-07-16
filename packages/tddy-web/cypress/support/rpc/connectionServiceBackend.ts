@@ -33,6 +33,11 @@ import {
   ExecuteToolResponseSchema,
   ListExecToolsResponseSchema,
   ListSessionToolCallsResponseSchema,
+  ListTerminalSessionsResponseSchema,
+  SessionTerminalOutputSchema,
+  StartTerminalSessionResponseSchema,
+  StopTerminalSessionResponseSchema,
+  TerminalSessionInfoSchema,
   ToolDefSchema,
   type AgentInfo,
   type ConnectSessionResponse,
@@ -142,6 +147,11 @@ export interface ConnectionServiceScenario {
     | ((req: { name: string; gitUrl: string }) => Partial<StartSessionResponse>);
   /** When set, SignalSession always fails with this Connect error instead of succeeding. */
   signalSessionError?: { code: Code; message: string };
+  /** Initial `ListTerminalSessions` result — the bash terminals already open on the session.
+   *  Defaults to none (only the reserved "main"/Agent terminal, which is not listed here). */
+  terminals?: Array<{ terminalId: string; kind?: string; pid?: number }>;
+  /** The `terminal_id` handed out by the Nth (0-based) `StartTerminalSession`. Default `bash-<n+1>`. */
+  newTerminalId?: (index: number) => string;
 }
 
 export interface ConnectionServiceBackend extends InMemoryRpcBackend {
@@ -156,6 +166,16 @@ export interface ConnectionServiceBackend extends InMemoryRpcBackend {
   /** Every `sessionId` passed to `ConnectSession`, in call order — used by the fast-session-change
    *  regression test to assert re-selecting an already-attached session does NOT re-connect. */
   readonly connectedSessionIds: string[];
+  /** Every `sessionId` passed to `StartTerminalSession`, in call order. */
+  readonly startTerminalSessionIds: string[];
+  /** The `terminal_id` handed back by each `StartTerminalSession`, in call order. */
+  readonly startedTerminalIds: string[];
+  /** Every `{ sessionId, terminalId }` passed to `StopTerminalSession`, in call order. */
+  readonly stoppedTerminals: { sessionId: string; terminalId: string }[];
+  /** Every `{ sessionId, terminalId, data }` passed to `SendTerminalInput`, in call order. */
+  readonly sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[];
+  /** Every `{ sessionId, terminalId }` an output stream was opened for, in call order. */
+  readonly streamedTerminals: { sessionId: string; terminalId: string }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +194,17 @@ export function aConnectionServiceBackend(
   const executedToolSessionIds: string[] = [];
   const claimedControlSessionIds: string[] = [];
   const connectedSessionIds: string[] = [];
+  const startTerminalSessionIds: string[] = [];
+  const startedTerminalIds: string[] = [];
+  const stoppedTerminals: { sessionId: string; terminalId: string }[] = [];
+  const sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[] = [];
+  const streamedTerminals: { sessionId: string; terminalId: string }[] = [];
+
+  // Live bash-terminal list — mutated by Start/Stop so ListTerminalSessions stays consistent.
+  const liveTerminals: { terminalId: string; kind: string; pid: number }[] = (
+    scenario.terminals ?? []
+  ).map((t, i) => ({ terminalId: t.terminalId, kind: t.kind ?? "bash", pid: t.pid ?? 8000 + i }));
+  const nextTerminalId = scenario.newTerminalId ?? ((index: number) => `bash-${index + 1}`);
 
   const defaultDaemons: DaemonEntry[] = [{ instanceId: "local", label: "local (this daemon)", isLocal: true }];
   const daemons = scenario.daemons ?? defaultDaemons;
@@ -303,6 +334,41 @@ export function aConnectionServiceBackend(
       watchTerminalControl: async function* () {
         yield { $typeName: "connection.TerminalControlEvent", event: { case: "granted", value: "ctrl-1" } } as any;
       },
+      // --- Multiple terminals per session ---
+      listTerminalSessions: async () =>
+        create(ListTerminalSessionsResponseSchema, {
+          terminals: liveTerminals.map((t) => create(TerminalSessionInfoSchema, t)),
+        }),
+      startTerminalSession: async (req) => {
+        const terminalId = nextTerminalId(startTerminalSessionIds.length);
+        startTerminalSessionIds.push(req.sessionId);
+        startedTerminalIds.push(terminalId);
+        liveTerminals.push({ terminalId, kind: "bash", pid: 8000 + liveTerminals.length });
+        return create(StartTerminalSessionResponseSchema, { terminalId });
+      },
+      stopTerminalSession: async (req) => {
+        stoppedTerminals.push({ sessionId: req.sessionId, terminalId: req.terminalId });
+        const at = liveTerminals.findIndex((t) => t.terminalId === req.terminalId);
+        if (at !== -1) liveTerminals.splice(at, 1);
+        return create(StopTerminalSessionResponseSchema, { ok: true, message: "" });
+      },
+      sendTerminalInput: async (req) => {
+        sentTerminalInput.push({
+          sessionId: req.sessionId,
+          terminalId: req.terminalId,
+          data: req.data,
+        });
+        return {};
+      },
+      // Server-streaming output — record the opened stream, emit one identifying frame, then stay
+      // open (a terminal stream that *completes* would signal disconnect and evict the runtime).
+      streamTerminalOutput: async function* (req) {
+        streamedTerminals.push({ sessionId: req.sessionId, terminalId: req.terminalId });
+        yield create(SessionTerminalOutputSchema, {
+          data: new TextEncoder().encode(`term:${req.terminalId || "main"}\r\n`),
+        });
+        await new Promise<never>(() => undefined);
+      },
     });
 
   return Object.assign(backend, {
@@ -311,6 +377,11 @@ export function aConnectionServiceBackend(
     executedToolSessionIds,
     claimedControlSessionIds,
     connectedSessionIds,
+    startTerminalSessionIds,
+    startedTerminalIds,
+    stoppedTerminals,
+    sentTerminalInput,
+    streamedTerminals,
   });
 }
 

@@ -94,6 +94,7 @@ async fn coder_publishes_session_metadata_to_participant() -> Result<()> {
             input_schema_json: r#"{"type":"object"}"#.to_string(),
         }],
         executor: Arc::new(EchoExecutor),
+        worktree: tool_calls_dir.path().to_path_buf(),
     };
 
     let session_token = livekit.generate_token(room_name, SESSION_IDENTITY)?;
