@@ -80,8 +80,10 @@ export function owningHostForSession(session: SessionEntry, fallbackInstanceId: 
 /**
  * Union of the selected host's sessions and the live cross-host sessions. Selected-host entries
  * (which carry full metadata from `ListSessions`) win; a live participant not already present is
- * added as a minimal synthesized row owned by its host — its owner drives interaction routing and
- * the owning-host badge, and its label falls back to the short session id until metadata arrives.
+ * added as a synthesized row owned by its host — its owner drives interaction routing and the
+ * owning-host badge, and its `session` metadata (repo/goal/agent/… published by the coder
+ * participant) is hydrated onto the row so it renders a real name and inspector fields. A live
+ * participant with no metadata block yet keeps the short-session-id label fallback.
  */
 export function mergeActiveAndFetchedSessions(
   selectedHostSessions: SessionEntry[],
@@ -92,12 +94,22 @@ export function mergeActiveAndFetchedSessions(
   for (const s of selectedHostSessions) byId.set(s.sessionId, s);
   for (const p of activeParticipants) {
     if (byId.has(p.sessionId)) continue;
+    const m = p.sessionMetadata;
     byId.set(
       p.sessionId,
       create(SessionEntrySchema, {
         sessionId: p.sessionId,
         daemonInstanceId: p.owningInstanceId || selectedInstanceId,
         isActive: true,
+        repoPath: m?.repoPath ?? "",
+        workflowGoal: m?.workflowGoal ?? "",
+        workflowState: m?.workflowState ?? "",
+        agent: m?.agent ?? "",
+        model: m?.model ?? "",
+        activityStatus: m?.activityStatus ?? "",
+        recipe: m?.recipe ?? "",
+        elapsedDisplay: m?.elapsedDisplay ?? "",
+        pendingElicitation: m?.pendingElicitation ?? false,
       }),
     );
   }
