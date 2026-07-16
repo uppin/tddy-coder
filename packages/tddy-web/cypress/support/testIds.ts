@@ -217,6 +217,9 @@ export const TEST_IDS = {
   // Control-token reset regression harness (SessionRuntimeControlTokenReset.cy.tsx)
   controlTokenDisplay: "control-token-display",
   switchSession: "switch-session",
+  // Steal-claim regression harness (SessionRuntimeStealClaimReattach.cy.tsx)
+  controlIsControllerDisplay: "control-is-controller-display",
+  controlHolderDisplay: "control-holder-display",
 
   // Session inspector — Usage tab
   sessionsInspectorTabUsage: "sessions-inspector-tab-usage",

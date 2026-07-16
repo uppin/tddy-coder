@@ -59,14 +59,14 @@ export interface UseTerminalControlResult {
 // Claim loop
 // ---------------------------------------------------------------------------
 
-async function runControlSession(
+async function autoClaimControl(
   sessionId: string,
   sessionToken: string,
   screenId: string,
   client: ControlClient,
   onConnected: (connected: ConnectedSession) => void,
   onState: (s: TerminalControlState) => void,
-  signal: AbortSignal,
+  isCancelled: () => boolean,
 ): Promise<void> {
   const resp = await client.claimTerminalControl({
     sessionToken,
@@ -74,18 +74,30 @@ async function runControlSession(
     screenId,
     steal: false,
   });
-  const controlToken = resp.granted ? resp.controlToken : "";
+  if (isCancelled()) return;
   if (resp.granted) {
-    onConnected({ sessionId, controlToken });
+    onConnected({ sessionId, controlToken: resp.controlToken });
     onState({ isController: true, holderScreenId: screenId });
   } else {
     onState({ isController: false, holderScreenId: resp.currentHolderScreenId });
   }
+}
 
+async function watchControlLease(
+  sessionId: string,
+  sessionToken: string,
+  controlToken: string,
+  client: ControlClient,
+  onState: (s: TerminalControlState) => void,
+  signal: AbortSignal,
+): Promise<void> {
   for await (const event of client.watchTerminalControl(
     { sessionToken, sessionId, controlToken },
     { signal },
   )) {
+    // A superseded subscription (a steal-claim minted a new token and this effect was replaced)
+    // must not clobber the current state with a stale-token verdict.
+    if (signal.aborted) break;
     onState(
       applyTerminalControlEvent(initialTerminalControlState, {
         holderScreenId: event.holderScreenId,
@@ -123,20 +135,49 @@ export function useTerminalControl(
 
   // On session attach (or when the owning client becomes available): drop any stale lease from a
   // previous session so the new session's terminal input never leaks the previous session's token,
-  // then claim control (steal=false) and subscribe to lease changes. `connected` stays null until
-  // the claim resolves — the terminal gates input on it.
+  // then claim control (steal=false). `connected` stays null until the claim is granted — the
+  // terminal gates input on it.
   useEffect(() => {
     if (!sessionId || !client) return;
     setConnected(null);
     setControlState(initialTerminalControlState);
-    const abortController = new AbortController();
+    let cancelled = false;
 
-    void runControlSession(
+    void autoClaimControl(
       sessionId,
       sessionToken,
       screenId,
       client,
       setConnected,
+      setControlState,
+      () => cancelled,
+    ).catch(() => {
+      // network/auth error — the user can still steal-claim; leave state as-is
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // `session` is intentionally decomposed into `sessionId`/`client` so the effect is keyed on the
+    // stable primitives, not the `Session` object identity (which the caller rebuilds each render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, sessionToken, client, screenId]);
+
+  // Subscribe to lease changes using the token this screen currently holds ("" while it holds none).
+  // Keyed on `heldToken` so a steal-claim (which mints a new token) re-subscribes: the daemon
+  // re-validates the *current* token, so a post-steal change event reports `youAreController: true`
+  // instead of flipping control back against the stale (denied) token — the bug that made the
+  // "Claim terminal" click take effect only on the second press.
+  const heldToken = connected?.controlToken ?? "";
+  useEffect(() => {
+    if (!sessionId || !client) return;
+    const abortController = new AbortController();
+
+    void watchControlLease(
+      sessionId,
+      sessionToken,
+      heldToken,
+      client,
       setControlState,
       abortController.signal,
     ).catch(() => {
@@ -144,10 +185,8 @@ export function useTerminalControl(
     });
 
     return () => abortController.abort();
-    // `session` is intentionally decomposed into `sessionId`/`client` so the effect is keyed on the
-    // stable primitives, not the `Session` object identity (which the caller rebuilds each render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, sessionToken, client, screenId]);
+  }, [sessionId, sessionToken, client, screenId, heldToken]);
 
   const claim = useCallback(async () => {
     if (!sessionId) return;
