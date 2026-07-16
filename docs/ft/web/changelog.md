@@ -4,6 +4,11 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-16 — Session terminal tabs
+
+- The session detail pane now has a terminal tab bar: an **Agent** tab (the coding agent, not closable) plus one closable tab per interactive **bash** terminal, with a `+` to open more; switching tabs keeps every terminal of the session mounted and streaming in the background.
+- Works for local (gRPC) and remote/coder (LiveKit) sessions, reusing the existing `terminal_id`-addressed `ConnectionService` terminal RPCs — no protocol changes. See [session-terminal-tabs.md](session-terminal-tabs.md).
+
 ## 2026-07-12 — Fast session change: per-session runtimes, session-participant RPC, live inspector bytes
 
 - Switching between attached LiveKit sessions is now a focus change, not a reconnect: each attached session owns its own LiveKit `Room` + `GhosttyTerminalLiveKit` instance held in a `SessionRuntimeRegistry`; the focused terminal is CSS-visible while the others stay mounted (`display:none`) and keep streaming. No unmount, no terminal resize, no LiveKit reconnect on switch.
