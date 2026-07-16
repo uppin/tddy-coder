@@ -9,12 +9,15 @@
 import { describe, it, expect } from "bun:test";
 import { create } from "@bufbuild/protobuf";
 import { SessionEntrySchema, type SessionEntry } from "../gen/connection_pb";
+import type { SessionMetadata } from "../lib/sessionParticipantMetadata";
 import {
   mergeActiveAndFetchedSessions,
   owningHostForSession,
   parseSessionParticipantIdentity,
   sessionParticipantsFromParticipants,
+  type SessionParticipant,
 } from "./crossHostSessions";
+import { sessionDrawerLabel } from "./sessionDrawerLabel";
 
 const SID_A = "aaaaaaaa-0000-4000-8000-000000000001";
 const SID_B = "bbbbbbbb-0000-4000-8000-000000000002";
@@ -23,6 +26,31 @@ const OTHER = "server-2";
 
 function aSession(overrides: Partial<SessionEntry>): SessionEntry {
   return create(SessionEntrySchema, { sessionId: "sess-default", daemonInstanceId: "", ...overrides });
+}
+
+function aSessionMetadata(overrides: Partial<SessionMetadata> = {}): SessionMetadata {
+  return {
+    workflowGoal: "Add checkout flow",
+    workflowState: "green",
+    agent: "claude-cli",
+    model: "claude-opus-4-8",
+    activityStatus: "Running",
+    recipe: "tdd",
+    repoPath: "/home/alice/acme-web",
+    elapsedDisplay: "3m 20s",
+    pendingElicitation: false,
+    ...overrides,
+  };
+}
+
+/** A live cross-host participant carrying the coder-published `session` metadata block. */
+function aLiveParticipant(overrides: Partial<SessionParticipant> = {}): SessionParticipant {
+  return {
+    sessionId: SID_B,
+    owningInstanceId: OTHER,
+    sessionMetadata: aSessionMetadata(),
+    ...overrides,
+  };
 }
 
 describe("parseSessionParticipantIdentity", () => {
@@ -103,5 +131,85 @@ describe("mergeActiveAndFetchedSessions", () => {
     const onSelected = aSession({ sessionId: SID_A, daemonInstanceId: SELECTED });
     const merged = mergeActiveAndFetchedSessions([onSelected], [], SELECTED);
     expect(merged.map((s) => s.sessionId)).toEqual([SID_A]);
+  });
+
+  it("hydrates a synthesized cross-host row with the repo path from participant metadata", () => {
+    const participant = aLiveParticipant({
+      sessionMetadata: aSessionMetadata({ repoPath: "/home/alice/acme-web" }),
+    });
+
+    const merged = mergeActiveAndFetchedSessions([], [participant], SELECTED);
+
+    const synthesized = merged.find((s) => s.sessionId === SID_B);
+    expect(synthesized?.repoPath).toBe("/home/alice/acme-web");
+  });
+
+  it("hydrates a synthesized cross-host row with the workflow goal and state from participant metadata", () => {
+    const participant = aLiveParticipant({
+      sessionMetadata: aSessionMetadata({ workflowGoal: "Add checkout flow", workflowState: "green" }),
+    });
+
+    const merged = mergeActiveAndFetchedSessions([], [participant], SELECTED);
+
+    const synthesized = merged.find((s) => s.sessionId === SID_B);
+    expect(synthesized?.workflowGoal).toBe("Add checkout flow");
+    expect(synthesized?.workflowState).toBe("green");
+  });
+
+  it("hydrates a synthesized cross-host row with the agent and model from participant metadata", () => {
+    const participant = aLiveParticipant({
+      sessionMetadata: aSessionMetadata({ agent: "claude-cli", model: "claude-opus-4-8" }),
+    });
+
+    const merged = mergeActiveAndFetchedSessions([], [participant], SELECTED);
+
+    const synthesized = merged.find((s) => s.sessionId === SID_B);
+    expect(synthesized?.agent).toBe("claude-cli");
+    expect(synthesized?.model).toBe("claude-opus-4-8");
+  });
+
+  it("hydrates a synthesized cross-host row with the activity status from participant metadata", () => {
+    const participant = aLiveParticipant({
+      sessionMetadata: aSessionMetadata({ activityStatus: "Running" }),
+    });
+
+    const merged = mergeActiveAndFetchedSessions([], [participant], SELECTED);
+
+    const synthesized = merged.find((s) => s.sessionId === SID_B);
+    expect(synthesized?.activityStatus).toBe("Running");
+  });
+
+  it("keeps the short-session-id fallback when a live participant carries no metadata", () => {
+    const participant = aLiveParticipant({ sessionMetadata: undefined });
+
+    const merged = mergeActiveAndFetchedSessions([], [participant], SELECTED);
+
+    const synthesized = merged.find((s) => s.sessionId === SID_B);
+    expect(synthesized?.repoPath).toBe("");
+    expect(synthesized?.workflowGoal).toBe("");
+  });
+});
+
+describe("cross-host claimed session drawer label", () => {
+  it("shows the repo basename as the drawer name for a claimed session on another screen", () => {
+    const participant = aLiveParticipant({
+      sessionMetadata: aSessionMetadata({ repoPath: "/home/alice/acme-web", workflowGoal: "Add checkout flow" }),
+    });
+
+    const merged = mergeActiveAndFetchedSessions([], [participant], SELECTED);
+
+    const synthesized = merged.find((s) => s.sessionId === SID_B)!;
+    expect(sessionDrawerLabel(synthesized)).toBe("acme-web");
+  });
+
+  it("falls back to the workflow goal when the claimed session has no repo path", () => {
+    const participant = aLiveParticipant({
+      sessionMetadata: aSessionMetadata({ repoPath: "", workflowGoal: "Add checkout flow" }),
+    });
+
+    const merged = mergeActiveAndFetchedSessions([], [participant], SELECTED);
+
+    const synthesized = merged.find((s) => s.sessionId === SID_B)!;
+    expect(sessionDrawerLabel(synthesized)).toBe("Add checkout flow");
   });
 });
