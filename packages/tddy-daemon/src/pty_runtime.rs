@@ -234,6 +234,46 @@ fn resolve_pty_os_user(os_user: &str) -> Result<ResolvedPtyUser, String> {
     })
 }
 
+/// The login shell (`pw_shell`) of `os_user` from the passwd database, or `None` when the entry is
+/// missing or has no shell. Preferred over the daemon's `$SHELL` for Bash terminals, since the
+/// daemon's own `$SHELL` (systemd / nix) is not the target user's interactive shell.
+#[cfg(unix)]
+pub fn login_shell_for_os_user(os_user: &str) -> Option<String> {
+    let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
+    let mut buf = vec![0u8; 16384];
+    let mut result = std::ptr::null_mut();
+    let name = std::ffi::CString::new(os_user).ok()?;
+    let ret = unsafe {
+        libc::getpwnam_r(
+            name.as_ptr(),
+            passwd.as_mut_ptr(),
+            buf.as_mut_ptr() as *mut libc::c_char,
+            buf.len(),
+            &mut result,
+        )
+    };
+    if ret != 0 || result.is_null() {
+        return None;
+    }
+    let passwd = unsafe { &*result };
+    if passwd.pw_shell.is_null() {
+        return None;
+    }
+    let shell = unsafe { std::ffi::CStr::from_ptr(passwd.pw_shell) }
+        .to_string_lossy()
+        .into_owned();
+    if shell.is_empty() || shell.ends_with("/nologin") || shell.ends_with("/false") {
+        None
+    } else {
+        Some(shell)
+    }
+}
+
+#[cfg(not(unix))]
+pub fn login_shell_for_os_user(_os_user: &str) -> Option<String> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

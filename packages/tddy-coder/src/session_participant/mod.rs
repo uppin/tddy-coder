@@ -232,9 +232,10 @@ impl RpcService for SessionConnectionServiceRpc {
                         "decode StartTerminalSessionRequest: {e}"
                     ))));
                 }
-                // Bash terminals run the user's login shell, falling back to /bin/bash. The coder
-                // already runs as the target OS user, so no impersonation is applied.
-                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+                // Bash terminals run the user's login shell (resolved from passwd, not the
+                // possibly-Nix `$SHELL`), falling back to /bin/bash. The coder already runs as the
+                // target OS user, so no impersonation is applied.
+                let shell = terminal_manager::resolve_login_shell();
                 match self
                     .svc
                     .terminal_manager
