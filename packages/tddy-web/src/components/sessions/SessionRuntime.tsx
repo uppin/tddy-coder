@@ -1,10 +1,12 @@
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { createClient, type Client, type Transport } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import { ConnectionService } from "../../gen/connection_pb";
 import type { TokenService } from "../../gen/token_pb";
 import { SessionLiveKitTerminal } from "./SessionLiveKitTerminal";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
+import { SessionTerminalTabs } from "./SessionTerminalTabs";
+import { AGENT_TERMINAL_ID, useSessionTerminals } from "./useSessionTerminals";
 import { TerminalControlOverlay } from "./TerminalControlOverlay";
 import { useTerminalControl, type Session } from "./useTerminalControl";
 import type { SessionRuntimeState } from "./sessionRuntimeRegistry";
@@ -33,7 +35,8 @@ export interface SessionRuntimeProps {
   /** Evict this runtime's terminal (e.g. remote session ended). */
   onSessionDisconnect?: (sessionId: string) => void;
   /** LiveKit transport factory — builds the session-scoped client transport for the explicit
-   *  steal-claim (`ClaimTerminalControl`, session-participant routing). */
+   *  steal-claim (`ClaimTerminalControl`, session-participant routing) and, for `connected-livekit`
+   *  sessions, the bash terminals' I/O. */
   liveKitFactory?: (room: Room, targetIdentity: string) => Transport;
   /** True when `liveKitFactory` is a test double that ignores its `room` argument — the common
    *  room is then an acceptable stand-in for the session's own room. */
@@ -43,15 +46,20 @@ export interface SessionRuntimeProps {
 }
 
 /**
- * One mounted terminal + its own terminal-control lease for a single attached session.
+ * One attached session's runtime: a terminal tab bar (Agent + bash terminals) over a stack of
+ * mounted terminal panes, plus this session's own terminal-control lease.
  *
- * Each runtime owns its `useTerminalControl` hook — and therefore its own `connected` lease state — so
- * switching focus between sessions can never leak one session's control token into another
+ * Each runtime owns its `useTerminalControl` hook — and therefore its own `connected` lease state —
+ * so switching focus between sessions can never leak one session's control token into another
  * session's terminal input (the root cause of the "terminal controlled by another screen" failures
- * on fast session change). The focused runtime additionally carries the
+ * on fast session change). Every terminal of the session (Agent + bash) shares that one lease.
+ *
+ * All of the session's terminals stay mounted simultaneously — the active one is CSS-visible, the
+ * others are `display:none` but keep streaming — so switching tabs (or backgrounding the whole
+ * session) never tears a terminal down. The focused runtime additionally carries the
  * `sessions-detail-terminal-container` marker and the `TerminalControlOverlay`.
  *
- * Feature: `docs/ft/web/session-drawer.md#fast-session-change`.
+ * Feature: `docs/ft/web/session-terminal-tabs.md`, `docs/ft/web/session-drawer.md#fast-session-change`.
  */
 export function SessionRuntime({
   runtime,
@@ -66,9 +74,11 @@ export function SessionRuntime({
   liveKitFactoryIsOverridden = false,
   commonRoom = null,
 }: SessionRuntimeProps) {
-  // The runtime's own connected Room, captured via the terminal's `onRoom`. Stored in a ref (not
-  // state) so capturing it does not re-render — it only feeds the lazy session-scoped client below.
+  // The runtime's own connected Room, captured via the terminal's `onRoom`. Stored both in a ref
+  // (for the lazy steal-claim client) and in state (so the memoized session-scoped terminal client
+  // below rebuilds once the room connects).
   const roomRef = useRef<Room | null>(null);
+  const [sessionRoom, setSessionRoom] = useState<Room | null>(null);
 
   // Lazy session-scoped ConnectionService client (targets the coder participant
   // `daemon-{instanceId}-{sessionId}` = `runtime.livekitServerIdentity`). Used by the explicit
@@ -78,9 +88,9 @@ export function SessionRuntime({
     if (runtime.status !== "connected-livekit") return null;
     const targetIdentity = runtime.livekitServerIdentity;
     if (!targetIdentity || !liveKitFactory) return null;
-    const sessionRoom = roomRef.current ?? (liveKitFactoryIsOverridden ? commonRoom : null);
-    if (!sessionRoom) return null;
-    return createClient(ConnectionService, liveKitFactory(sessionRoom, targetIdentity));
+    const room = roomRef.current ?? (liveKitFactoryIsOverridden ? commonRoom : null);
+    if (!room) return null;
+    return createClient(ConnectionService, liveKitFactory(room, targetIdentity));
   }, [
     runtime.status,
     runtime.livekitServerIdentity,
@@ -102,68 +112,121 @@ export function SessionRuntime({
     buildSessionClient,
   );
 
+  // The client that carries this session's terminal RPCs: the daemon client for gRPC sessions, the
+  // session-scoped client (session-participant routing) for LiveKit sessions. `sessionRoom` is a
+  // dependency so the LiveKit client materialises once the room connects.
+  const terminalClient: ConnectionClient | null = useMemo(() => {
+    if (runtime.status === "connected-grpc") return client ?? null;
+    if (runtime.status === "connected-livekit") return buildSessionClient();
+    return null;
+    // `sessionRoom` intentionally participates so the LiveKit client rebuilds on room connect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runtime.status, client, buildSessionClient, sessionRoom]);
+
+  const { terminals, activeTerminalId, setActive, open, close, dropEnded } = useSessionTerminals({
+    sessionId: runtime.sessionId,
+    sessionToken,
+    client: terminalClient,
+    controlToken: connected?.controlToken,
+  });
+
   const handleRoom = useCallback(
-    (sessionRoom: Room) => {
-      roomRef.current = sessionRoom;
-      onSessionRoom?.(runtime.sessionId, sessionRoom);
+    (room: Room) => {
+      roomRef.current = room;
+      setSessionRoom(room);
+      onSessionRoom?.(runtime.sessionId, room);
     },
     [onSessionRoom, runtime.sessionId],
   );
 
+  const paneClass = (terminalId: string) =>
+    cn("absolute inset-0 h-full w-full", activeTerminalId === terminalId ? "" : "hidden");
+
   return (
     <div
       data-testid={`sessions-runtime-terminal-${runtime.sessionId}`}
-      className={cn("absolute inset-0 h-full w-full", focused ? "" : "hidden")}
+      className={cn("absolute inset-0 flex h-full w-full flex-col", focused ? "" : "hidden")}
       aria-hidden={!focused}
     >
-      {runtime.status === "connected-livekit" && tokenClient && runtime.livekitRoom && (
-        <div className="h-full w-full">
-          <SessionLiveKitTerminal
-            livekitUrl={runtime.livekitUrl ?? ""}
-            livekitRoom={runtime.livekitRoom}
-            livekitServerIdentity={runtime.livekitServerIdentity ?? ""}
-            identity={runtime.identity ?? ""}
-            tokenClient={tokenClient}
-            onDisconnect={() => onSessionDisconnect?.(runtime.sessionId)}
-            mobileShortcuts={focused ? mobileShortcuts : undefined}
-            onRoom={handleRoom}
-          />
-        </div>
-      )}
-      {runtime.status === "connected-livekit" && !tokenClient && (
-        <div className="h-full w-full text-xs text-muted-foreground p-4">
-          Terminal connected to {runtime.livekitRoom}
-        </div>
-      )}
-      {runtime.status === "connected-grpc" && client && (
-        <div className="h-full w-full">
-          <GrpcSessionTerminal
-            sessionId={runtime.sessionId}
-            sessionToken={sessionToken}
-            client={client}
-            connected={connected}
-            onDisconnect={() => onSessionDisconnect?.(runtime.sessionId)}
-            mobileShortcuts={focused ? mobileShortcuts : undefined}
-          />
-        </div>
-      )}
-      {focused && (
-        // The focused runtime carries the terminal-control mutex overlay and the
-        // `sessions-detail-terminal-container` marker (existing acceptance contract). The overlay is
-        // only rendered when a control client is available — without one the lease is not being
-        // managed, so the terminal stays interactive (no spurious "Claim terminal" CTA).
-        // `pointer-events-none` lets clicks reach the terminal below when no overlay is showing;
-        // the overlay itself re-enables pointer events.
-        <div data-testid="sessions-detail-terminal-container" className="absolute inset-0 pointer-events-none">
-          {client && (
-            <TerminalControlOverlay
-              isController={controlState.isController}
-              holderScreenId={controlState.holderScreenId}
-              onClaim={claimControl}
+      <SessionTerminalTabs
+        terminals={terminals}
+        activeTerminalId={activeTerminalId}
+        onSelect={setActive}
+        onOpen={open}
+        onClose={close}
+      />
+
+      <div className="relative min-h-0 flex-1">
+        {/* Agent pane — the reserved "main" terminal. LiveKit sessions render the VirtualTui
+            terminal; gRPC sessions render the direct terminal stream (terminalId ""). */}
+        <div data-testid={`sessions-terminal-pane-${AGENT_TERMINAL_ID}`} className={paneClass(AGENT_TERMINAL_ID)}>
+          {runtime.status === "connected-livekit" && tokenClient && runtime.livekitRoom && (
+            <SessionLiveKitTerminal
+              livekitUrl={runtime.livekitUrl ?? ""}
+              livekitRoom={runtime.livekitRoom}
+              livekitServerIdentity={runtime.livekitServerIdentity ?? ""}
+              identity={runtime.identity ?? ""}
+              tokenClient={tokenClient}
+              onDisconnect={() => onSessionDisconnect?.(runtime.sessionId)}
+              mobileShortcuts={focused && activeTerminalId === AGENT_TERMINAL_ID ? mobileShortcuts : undefined}
+              onRoom={handleRoom}
+            />
+          )}
+          {runtime.status === "connected-livekit" && !tokenClient && (
+            <div className="h-full w-full p-4 text-xs text-muted-foreground">
+              Terminal connected to {runtime.livekitRoom}
+            </div>
+          )}
+          {runtime.status === "connected-grpc" && client && (
+            <GrpcSessionTerminal
+              sessionId={runtime.sessionId}
+              sessionToken={sessionToken}
+              client={client}
+              connected={connected}
+              onDisconnect={() => onSessionDisconnect?.(runtime.sessionId)}
+              mobileShortcuts={focused && activeTerminalId === AGENT_TERMINAL_ID ? mobileShortcuts : undefined}
             />
           )}
         </div>
-      )}
+
+        {/* One mounted pane per bash terminal — kept alive whether focused or backgrounded. A bash
+            terminal's output stream ending removes only its own tab (never the session). */}
+        {terminals.map((id) => (
+          <div key={id} data-testid={`sessions-terminal-pane-${id}`} className={paneClass(id)}>
+            {terminalClient && (
+              <GrpcSessionTerminal
+                sessionId={runtime.sessionId}
+                sessionToken={sessionToken}
+                client={terminalClient}
+                connected={connected}
+                terminalId={id}
+                onDisconnect={() => dropEnded(id)}
+                mobileShortcuts={
+                  focused && activeTerminalId === id ? mobileShortcuts : undefined
+                }
+              />
+            )}
+          </div>
+        ))}
+
+        {focused && (
+          // The focused runtime carries the terminal-control mutex overlay and the
+          // `sessions-detail-terminal-container` marker (existing acceptance contract). The overlay
+          // is only rendered when a control client is available — without one the lease is not being
+          // managed, so the terminal stays interactive (no spurious "Claim terminal" CTA).
+          // `pointer-events-none` lets clicks reach the terminal below when no overlay is showing;
+          // the overlay itself re-enables pointer events.
+          <div data-testid="sessions-detail-terminal-container" className="absolute inset-0 pointer-events-none">
+            {client && (
+              <TerminalControlOverlay
+                isController={controlState.isController}
+                holderScreenId={controlState.holderScreenId}
+                onClaim={claimControl}
+              />
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -1797,6 +1797,10 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         session_id: args.session_id.clone().unwrap_or_default(),
                     },
                 ),
+                worktree: agent_working_dir.clone(),
+                terminal_manager: std::sync::Arc::new(
+                    crate::session_participant::terminal_manager::TerminalManager::new(),
+                ),
             };
             let mut livekit_entries = vec![
                 tddy_rpc::ServiceEntry {
@@ -2860,6 +2864,10 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 task_registry: tddy_task::TaskRegistry::new(),
                 session_id: args.session_id.clone().unwrap_or_default(),
             }),
+            worktree: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            terminal_manager: std::sync::Arc::new(
+                crate::session_participant::terminal_manager::TerminalManager::new(),
+            ),
         };
         let session_connection_entry =
             crate::session_participant::session_connection_service_entry(session_connection_svc);

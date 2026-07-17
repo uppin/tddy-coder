@@ -99,6 +99,7 @@ async fn coder_serves_connection_service_from_participant() -> Result<()> {
             input_schema_json: r#"{"type":"object"}"#.to_string(),
         }],
         executor: Arc::new(EchoExecutor),
+        worktree: tool_calls_dir.path().to_path_buf(),
     };
 
     // When — the coder session participant connects
@@ -229,6 +230,7 @@ async fn coder_session_participant_executes_a_real_read_against_its_worktree() -
             task_registry: tddy_task::TaskRegistry::new(),
             session_id: SESSION_ID.to_string(),
         }),
+        worktree: worktree_root.clone(),
     };
 
     let session_identity = "daemon-local-coder-real-aaaaaaaa-0000-4000-8000-000000000003";

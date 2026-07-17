@@ -22,6 +22,9 @@ interface GrpcSessionTerminalProps {
    *  with an empty/stale token. The output stream (`streamTerminalOutput`) needs no token and opens
    *  immediately. */
   connected: ConnectedSession | null;
+  /** Target terminal within the session. Empty (the default) resolves to the reserved main
+   *  ("claude"/Agent) terminal on the daemon; a bash terminal passes its own `terminal_id`. */
+  terminalId?: string;
   onDisconnect?: () => void;
   mobileShortcuts?: ToolShortcutDef[];
 }
@@ -31,6 +34,7 @@ export function GrpcSessionTerminal({
   sessionToken,
   client,
   connected,
+  terminalId = "",
   onDisconnect,
   mobileShortcuts,
 }: GrpcSessionTerminalProps) {
@@ -69,7 +73,7 @@ export function GrpcSessionTerminal({
         return;
       }
       client
-        .sendTerminalInput({ sessionToken, sessionId, data, controlToken: conn.controlToken })
+        .sendTerminalInput({ sessionToken, sessionId, terminalId, data, controlToken: conn.controlToken })
         .catch((err) => {
           dGrpc(
             "sendTerminalInput failed sessionId=%s error=%o",
@@ -78,7 +82,7 @@ export function GrpcSessionTerminal({
           );
         });
     },
-    [client, sessionId, sessionToken],
+    [client, sessionId, sessionToken, terminalId],
   );
 
   useEffect(() => {
@@ -124,6 +128,7 @@ export function GrpcSessionTerminal({
         for await (const output of client.streamTerminalOutput({
           sessionToken,
           sessionId,
+          terminalId,
           initialCols,
           initialRows,
         }) as AsyncIterable<SessionTerminalOutput>) {
@@ -141,7 +146,7 @@ export function GrpcSessionTerminal({
     return () => {
       closed = true;
     };
-  }, [client, sessionId, sessionToken, sendInputRequest]);
+  }, [client, sessionId, sessionToken, terminalId, sendInputRequest]);
 
   // Release input that was queued while the claim was in flight once `connected` arrives. Keyed on
   // `connected` so it fires exactly when the lease transitions null → ConnectedSession.

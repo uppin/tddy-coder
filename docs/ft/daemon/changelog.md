@@ -2,6 +2,11 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-16 — Shared PTY crate; Bash tool login shell
+
+- The daemon's PTY runtime and registry moved into a shared `tddy-pty` crate (reused by tddy-coder for its bash terminal tabs); OS-user impersonation stays in the daemon over a thin adapter. See [terminal-sessions.md](terminal-sessions.md).
+- The Bash tool (`StartTerminalSession`) now spawns the target user's passwd login shell instead of the daemon's `$SHELL`.
+
 ## 2026-07-12 — Fast session change: daemon-direct delete/signal + inspector `SessionEntry` bytes
 
 - Session-scoped `ConnectionService` methods (tools, terminal control, VNC, screen-sharing) for a LiveKit-backed (tddy-coder) session are served by the coder's own LiveKit participant (`daemon-{instanceId}-{sessionId}`); the daemon no longer relays them. The daemon stays the bootstrap/directory authority (`StartSession`/`ConnectSession`/`ResumeSession` + `ListSessions`/`ListProjects`/…).

@@ -1,0 +1,20 @@
+[package]
+name = "tddy-pty"
+version = "0.1.0"
+edition = "2021"
+description = "Transport-agnostic PTY spawn + I/O pump + master registry, shared by tddy-daemon and tddy-coder"
+
+[lib]
+name = "tddy_pty"
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = "0.1"
+bytes = "1"
+log = "0.4"
+portable-pty = "0.9"
+tddy-task = { path = "../tddy-task" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

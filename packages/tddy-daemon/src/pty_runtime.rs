@@ -1,24 +1,24 @@
 //! PTY action runtime — spawns interactive tools as [`tddy_task::Task`] entries.
+//!
+//! The transport-agnostic PTY core (spawn + I/O pump + master registry) lives in [`tddy_pty`].
+//! This module keeps the daemon-only concern of **OS-user impersonation**: it resolves a target
+//! `os_user` to its uid/gid/home, front-loads a `setpriv` privilege drop when needed, and computes
+//! the child's `HOME`/`PATH` overrides — then hands the fully-resolved `argv`/`env` to
+//! [`tddy_pty::PtyRuntime`], which has no notion of an `os_user`.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use bytes::Bytes;
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
-use tddy_task::{TaskBody, TaskChannel, TaskContext, TaskHandle, TaskRegistry, TaskStatus};
-use tokio::sync::{mpsc, oneshot};
+use tddy_task::{TaskBody, TaskContext, TaskHandle, TaskRegistry, TaskStatus};
+use tokio::sync::oneshot;
 
-use crate::pty_registry::{PtyControl, PtyRegistry};
+use crate::pty_registry::PtyRegistry;
 
-/// Default terminal size for spawned PTY sessions.
-pub const DEFAULT_TERM_ROWS: u16 = 24;
-pub const DEFAULT_TERM_COLS: u16 = 220;
+// Re-exported from the shared core so existing daemon import paths keep working.
+pub use tddy_pty::{PtyReady, DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS};
 
-/// PTY reader buffer size.
-const PTY_READ_BUF: usize = 4096;
-
-/// Specification for spawning a process inside a PTY.
+/// Specification for spawning a process inside a PTY, including the daemon-only target OS user.
 #[derive(Debug, Clone)]
 pub struct PtySpawnSpec {
     pub argv: Vec<String>,
@@ -34,14 +34,11 @@ pub struct PtySpawnSpec {
     pub os_user: Option<String>,
 }
 
-/// Ready signal emitted once the PTY is open and the child has been spawned.
-pub struct PtyReady {
-    pub pid: u32,
-    pub master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
-    pub current_size: Arc<Mutex<PtySize>>,
-}
-
 /// Spawn a PTY-backed tool as a registered task.
+///
+/// Resolves any `os_user` impersonation up front (before allocating a PTY), then delegates the
+/// actual spawn + I/O pump to [`tddy_pty::PtyRuntime`]. An unresolvable user fails loudly via a
+/// task that reaches `Failed` and reports the reason on `ready_tx`, without leaking a PTY pair.
 pub struct PtyRuntime;
 
 impl PtyRuntime {
@@ -51,122 +48,100 @@ impl PtyRuntime {
         spec: PtySpawnSpec,
         ready_tx: oneshot::Sender<Result<PtyReady, String>>,
     ) -> Arc<TaskHandle> {
-        let (channel, stdin_rx) = TaskChannel::pty("0", "pty");
-        let body = PtyTaskBody {
-            spec: spec.clone(),
-            pty_registry: pty_registry.clone(),
-            stdin_rx: stdin_rx.expect("pty channel must have stdin"),
-            ready_tx: Some(ready_tx),
-        };
-        registry
-            .spawn(body, spec.kind, spec.session_id, vec![channel])
-            .await
+        match resolve_final_argv_env(&spec) {
+            Ok((argv, env)) => {
+                let core = tddy_pty::PtySpawnSpec {
+                    argv,
+                    worktree_path: spec.worktree_path,
+                    session_id: spec.session_id,
+                    terminal_id: spec.terminal_id,
+                    kind: spec.kind,
+                    env,
+                };
+                tddy_pty::PtyRuntime::spawn(registry, pty_registry, core, ready_tx).await
+            }
+            Err(msg) => {
+                let _ = ready_tx.send(Err(msg.clone()));
+                let (channel, _stdin_rx) = tddy_task::TaskChannel::pty("0", "pty");
+                registry
+                    .spawn(
+                        FailedSpawnBody { message: msg },
+                        spec.kind,
+                        spec.session_id,
+                        vec![channel],
+                    )
+                    .await
+            }
+        }
     }
 }
 
-struct PtyTaskBody {
-    spec: PtySpawnSpec,
-    pty_registry: PtyRegistry,
-    stdin_rx: mpsc::UnboundedReceiver<Bytes>,
-    ready_tx: Option<oneshot::Sender<Result<PtyReady, String>>>,
-}
-
-struct SetupResult {
-    pid: u32,
-    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
-    current_size: Arc<Mutex<PtySize>>,
-    exit_rx: oneshot::Receiver<TaskStatus>,
+/// Task body for a spawn that failed to resolve before a PTY could be opened. It reaches `Failed`
+/// immediately so the registry retention/cap policy still tracks the attempt.
+struct FailedSpawnBody {
+    message: String,
 }
 
 #[async_trait]
-impl TaskBody for PtyTaskBody {
-    async fn run(self: Box<Self>, ctx: TaskContext) -> TaskStatus {
-        let task_id = ctx.task_id();
-        let task_id_log = task_id.clone();
-        let cancel = ctx.cancel_token();
-        let output_ch = match ctx.channel("0") {
-            Some(ch) => ch,
-            None => {
-                return TaskStatus::Failed {
-                    message: "missing PTY channel".into(),
-                };
-            }
-        };
-
-        let (setup_tx, setup_rx) = oneshot::channel::<Result<SetupResult, String>>();
-        let spec = self.spec.clone();
-        let stdin_rx = self.stdin_rx;
-        let ready_tx = self.ready_tx;
-        let output_ch_thread = Arc::clone(&output_ch);
-
-        std::thread::spawn(move || {
-            if let Err(e) = open_pty_and_pump(spec, stdin_rx, output_ch_thread, setup_tx) {
-                log::warn!(
-                    target: "tddy_daemon::pty_runtime",
-                    "PTY setup failed for task {}: {}",
-                    task_id_log,
-                    e
-                );
-            }
-        });
-
-        let setup = match setup_rx.await {
-            Ok(Ok(s)) => s,
-            Ok(Err(e)) => {
-                if let Some(tx) = ready_tx {
-                    let _ = tx.send(Err(e.clone()));
-                }
-                return TaskStatus::Failed { message: e };
-            }
-            Err(_) => {
-                return TaskStatus::Failed {
-                    message: "PTY setup thread did not respond".into(),
-                };
-            }
-        };
-
-        ctx.register_child_pid(setup.pid);
-
-        if let Some(tx) = ready_tx {
-            let _ = tx.send(Ok(PtyReady {
-                pid: setup.pid,
-                master: Arc::clone(&setup.master),
-                current_size: Arc::clone(&setup.current_size),
-            }));
+impl TaskBody for FailedSpawnBody {
+    async fn run(self: Box<Self>, _ctx: TaskContext) -> TaskStatus {
+        TaskStatus::Failed {
+            message: self.message,
         }
-
-        self.pty_registry
-            .insert(
-                task_id.clone(),
-                PtyControl {
-                    master: Arc::clone(&setup.master),
-                    current_size: Arc::clone(&setup.current_size),
-                    terminal_id: self.spec.terminal_id.clone(),
-                    kind: self.spec.kind.clone(),
-                },
-            )
-            .await;
-
-        let exit_status = tokio::select! {
-            _ = cancel.cancelled() => {
-                #[cfg(unix)]
-                {
-                    let _ = crate::session_deletion::signal_pid(setup.pid as i32, libc::SIGTERM);
-                    let _ = crate::session_deletion::signal_pid(setup.pid as i32, libc::SIGKILL);
-                }
-                ctx.deregister_child_pid(setup.pid);
-                self.pty_registry.remove(&task_id).await;
-                return TaskStatus::Cancelled;
-            }
-            status = setup.exit_rx => status.unwrap_or(TaskStatus::Failed {
-                message: "PTY exit monitor dropped".into(),
-            }),
-        };
-
-        ctx.deregister_child_pid(setup.pid);
-        self.pty_registry.remove(&task_id).await;
-        exit_status
     }
+}
+
+/// The final `(argv, env)` a spawn resolves to: the command line and the environment overrides.
+type ResolvedArgvEnv = (Vec<String>, Vec<(String, String)>);
+
+/// Resolve the daemon's [`PtySpawnSpec`] into the final `(argv, env)` the shared PTY runtime
+/// spawns verbatim. With no `os_user`, argv/env pass through unchanged. With one, the target user's
+/// `HOME`/`PATH` are prepended and — when the target differs from the daemon's own identity — the
+/// argv is front-loaded with a `setpriv` privilege drop.
+#[cfg(unix)]
+fn resolve_final_argv_env(spec: &PtySpawnSpec) -> Result<ResolvedArgvEnv, String> {
+    if spec.argv.is_empty() {
+        return Err("empty argv".into());
+    }
+    match spec.os_user.as_deref() {
+        None => Ok((spec.argv.clone(), spec.env.clone())),
+        Some(user) => {
+            let resolved = resolve_pty_os_user(user)
+                .map_err(|e| format!("cannot resolve os_user '{user}': {e}"))?;
+            let home = std::path::PathBuf::from(&resolved.home_dir);
+            let path_extra = crate::tddy_user_config::spawn_path_extra_for_home(&home);
+            let mut env = pty_user_env_overrides(&home, path_extra.as_deref());
+            // The managed session's explicit overrides win over the impersonation defaults.
+            env.extend(spec.env.iter().cloned());
+            let current_uid = unsafe { libc::getuid() };
+            let current_gid = unsafe { libc::getgid() };
+            let argv = if pty_requires_privilege_drop(
+                resolved.uid,
+                resolved.gid,
+                current_uid,
+                current_gid,
+            ) {
+                log::info!(
+                    target: "tddy_daemon::pty_runtime",
+                    "PTY child for os_user '{user}': dropping to uid={} gid={} via setpriv",
+                    resolved.uid,
+                    resolved.gid
+                );
+                wrap_argv_for_privilege_drop(&spec.argv, resolved.uid, resolved.gid)
+            } else {
+                spec.argv.clone()
+            };
+            Ok((argv, env))
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn resolve_final_argv_env(spec: &PtySpawnSpec) -> Result<ResolvedArgvEnv, String> {
+    if spec.argv.is_empty() {
+        return Err("empty argv".into());
+    }
+    Ok((spec.argv.clone(), spec.env.clone()))
 }
 
 /// Environment overrides applied to a PTY child impersonating a target OS user.
@@ -259,208 +234,44 @@ fn resolve_pty_os_user(os_user: &str) -> Result<ResolvedPtyUser, String> {
     })
 }
 
-fn open_pty_and_pump(
-    spec: PtySpawnSpec,
-    mut stdin_rx: mpsc::UnboundedReceiver<Bytes>,
-    output_ch: Arc<TaskChannel>,
-    setup_tx: oneshot::Sender<Result<SetupResult, String>>,
-) -> Result<(), String> {
-    if spec.argv.is_empty() {
-        let _ = setup_tx.send(Err("empty argv".into()));
-        return Err("empty argv".into());
+/// The login shell (`pw_shell`) of `os_user` from the passwd database, or `None` when the entry is
+/// missing or has no shell. Preferred over the daemon's `$SHELL` for Bash terminals, since the
+/// daemon's own `$SHELL` (systemd / nix) is not the target user's interactive shell.
+#[cfg(unix)]
+pub fn login_shell_for_os_user(os_user: &str) -> Option<String> {
+    let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
+    let mut buf = vec![0u8; 16384];
+    let mut result = std::ptr::null_mut();
+    let name = std::ffi::CString::new(os_user).ok()?;
+    let ret = unsafe {
+        libc::getpwnam_r(
+            name.as_ptr(),
+            passwd.as_mut_ptr(),
+            buf.as_mut_ptr() as *mut libc::c_char,
+            buf.len(),
+            &mut result,
+        )
+    };
+    if ret != 0 || result.is_null() {
+        return None;
     }
-
-    // Resolve OS-user impersonation up front — before allocating a PTY — so an unresolvable user
-    // fails loudly without leaking a pty pair. On success this yields the child's HOME/PATH
-    // overrides plus the final argv (front-loaded with a `setpriv` privilege drop when the target
-    // differs from the daemon's own identity). With no `os_user`, the argv/env pass through as-is.
-    #[cfg(unix)]
-    let (final_argv, user_env): (Vec<String>, Vec<(String, String)>) = match spec.os_user.as_deref()
-    {
-        None => (spec.argv.clone(), Vec::new()),
-        Some(user) => {
-            let resolved = match resolve_pty_os_user(user) {
-                Ok(r) => r,
-                Err(e) => {
-                    let msg = format!("cannot resolve os_user '{user}': {e}");
-                    let _ = setup_tx.send(Err(msg.clone()));
-                    return Err(msg);
-                }
-            };
-            let home = std::path::PathBuf::from(&resolved.home_dir);
-            let path_extra = crate::tddy_user_config::spawn_path_extra_for_home(&home);
-            let env = pty_user_env_overrides(&home, path_extra.as_deref());
-            let current_uid = unsafe { libc::getuid() };
-            let current_gid = unsafe { libc::getgid() };
-            let argv = if pty_requires_privilege_drop(
-                resolved.uid,
-                resolved.gid,
-                current_uid,
-                current_gid,
-            ) {
-                log::info!(
-                    target: "tddy_daemon::pty_runtime",
-                    "PTY child for os_user '{user}': dropping to uid={} gid={} via setpriv",
-                    resolved.uid,
-                    resolved.gid
-                );
-                wrap_argv_for_privilege_drop(&spec.argv, resolved.uid, resolved.gid)
-            } else {
-                spec.argv.clone()
-            };
-            (argv, env)
-        }
-    };
-
-    #[cfg(not(unix))]
-    let (final_argv, user_env): (Vec<String>, Vec<(String, String)>) =
-        (spec.argv.clone(), Vec::new());
-
-    let pty_system = native_pty_system();
-    let initial_size = PtySize {
-        rows: DEFAULT_TERM_ROWS,
-        cols: DEFAULT_TERM_COLS,
-        pixel_width: 0,
-        pixel_height: 0,
-    };
-    let pair = match pty_system.openpty(initial_size) {
-        Ok(pair) => pair,
-        Err(e) => {
-            let msg = format!("openpty failed: {e}");
-            let _ = setup_tx.send(Err(msg.clone()));
-            return Err(msg);
-        }
-    };
-
-    let master = Arc::new(Mutex::new(pair.master));
-    let current_size = Arc::new(Mutex::new(initial_size));
-    let (exit_tx, exit_rx) = oneshot::channel();
-
-    // Reader: start BEFORE child spawn so fast-exiting stubs cannot miss PTY output.
-    let master_for_reader = Arc::clone(&master);
-    let output_ch_reader = Arc::clone(&output_ch);
-    std::thread::spawn(move || {
-        let reader = {
-            let m = master_for_reader.lock().unwrap();
-            m.try_clone_reader()
-        };
-        match reader {
-            Err(e) => {
-                log::warn!(
-                    target: "tddy_daemon::pty_runtime",
-                    "PTY reader: try_clone_reader failed: {e}"
-                );
-            }
-            Ok(mut r) => {
-                let mut buf = vec![0u8; PTY_READ_BUF];
-                loop {
-                    match std::io::Read::read(&mut r, &mut buf) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            output_ch_reader.write(Bytes::copy_from_slice(&buf[..n]));
-                        }
-                        Err(_) => break,
-                    }
-                }
-            }
-        }
-    });
-
-    let mut cmd = CommandBuilder::new(&final_argv[0]);
-    for arg in &final_argv[1..] {
-        cmd.arg(arg);
+    let passwd = unsafe { &*result };
+    if passwd.pw_shell.is_null() {
+        return None;
     }
-    cmd.cwd(&spec.worktree_path);
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-
-    // Impersonation HOME/PATH (empty when no `os_user`), applied before `spec.env` so a managed
-    // session's explicit overrides still win. `setpriv` preserves these across the privilege drop.
-    for (key, value) in &user_env {
-        cmd.env(key, value);
+    let shell = unsafe { std::ffi::CStr::from_ptr(passwd.pw_shell) }
+        .to_string_lossy()
+        .into_owned();
+    if shell.is_empty() || shell.ends_with("/nologin") || shell.ends_with("/false") {
+        None
+    } else {
+        Some(shell)
     }
+}
 
-    for (key, value) in &spec.env {
-        cmd.env(key, value);
-    }
-
-    let child = match pair.slave.spawn_command(cmd) {
-        Ok(child) => child,
-        Err(e) => {
-            let msg = format!("spawn failed: {e}");
-            let _ = setup_tx.send(Err(msg.clone()));
-            return Err(msg);
-        }
-    };
-    drop(pair.slave);
-
-    let pid = match child.process_id() {
-        Some(pid) => pid,
-        None => {
-            let msg = "spawned child has no pid".to_string();
-            let _ = setup_tx.send(Err(msg.clone()));
-            return Err(msg);
-        }
-    };
-
-    let _ = setup_tx.send(Ok(SetupResult {
-        pid,
-        master: Arc::clone(&master),
-        current_size: Arc::clone(&current_size),
-        exit_rx,
-    }));
-
-    // Writer: stdin mpsc → PTY master.
-    let master_for_writer = Arc::clone(&master);
-    std::thread::spawn(move || {
-        let writer = {
-            let m = master_for_writer.lock().unwrap();
-            m.take_writer()
-        };
-        match writer {
-            Err(e) => {
-                log::warn!(
-                    target: "tddy_daemon::pty_runtime",
-                    "PTY writer: take_writer failed: {e}"
-                );
-            }
-            Ok(mut w) => {
-                if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                    tokio::task::block_in_place(|| loop {
-                        let data = handle.block_on(stdin_rx.recv());
-                        match data {
-                            None => break,
-                            Some(bytes) => {
-                                if std::io::Write::write_all(&mut w, &bytes).is_err() {
-                                    break;
-                                }
-                            }
-                        }
-                    });
-                } else {
-                    while let Some(bytes) = stdin_rx.blocking_recv() {
-                        if std::io::Write::write_all(&mut w, &bytes).is_err() {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-    // Exit monitor: wait for child, report terminal status.
-    let mut child_monitor = child;
-    std::thread::spawn(move || {
-        let status = match child_monitor.wait() {
-            Ok(_) => TaskStatus::Completed { exit_code: Some(0) },
-            Err(e) => TaskStatus::Failed {
-                message: format!("child wait error: {e}"),
-            },
-        };
-        let _ = exit_tx.send(status);
-    });
-
-    Ok(())
+#[cfg(not(unix))]
+pub fn login_shell_for_os_user(_os_user: &str) -> Option<String> {
+    None
 }
 
 #[cfg(test)]

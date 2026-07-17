@@ -33,6 +33,7 @@ members = [
     "packages/tddy-workflow-recipes",
     "packages/tddy-actions",
     "packages/tddy-task",
+    "packages/tddy-pty",
     "packages/tddy-tool-engine",
     "packages/tddy-testing-commons",
     "packages/tddy-workflow",
