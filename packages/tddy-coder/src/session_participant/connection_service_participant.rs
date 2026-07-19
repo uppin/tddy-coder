@@ -83,6 +83,10 @@ pub struct SessionConnectionService {
     pub tool_calls_path: PathBuf,
     pub tools: Vec<ToolDef>,
     pub executor: Arc<dyn ToolExecutor>,
+    /// Session worktree where started bash terminals are spawned (the coder's agent working dir).
+    pub worktree: PathBuf,
+    /// Manager for this session's started bash terminals (the terminal "tabs").
+    pub terminal_manager: Arc<super::terminal_manager::TerminalManager>,
 }
 
 impl SessionConnectionService {

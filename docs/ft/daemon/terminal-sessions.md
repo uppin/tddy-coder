@@ -177,9 +177,13 @@ these when no per-session live runtime exists (see
 
 ## Non-goals (out of scope)
 
-- Web UI integration (deferred).
 - Persisting tools across daemon restart (tools are in-memory, like the main terminal today).
-- A LiveKit bridge for Bash tools (the main terminal's LiveKit path is unchanged).
+
+> **Update (session-terminal-tabs):** two former non-goals are now delivered — **Web UI integration**
+> (a terminal tab bar; see [Session Terminal Tabs](../web/session-terminal-tabs.md)) and **a LiveKit
+> bridge for Bash tools** (coder/LiveKit sessions serve `terminal_id`-addressed terminal RPCs from
+> their own participant; see [Session Participant RPC & Metadata](../coder/session-participant-rpc.md)).
+> The PTY plumbing that both the daemon and the coder use now lives in the shared `tddy-pty` crate.
 - Tools that take inputs. The API leaves room for them, but the only tool added now is Bash, which
   takes no inputs. *(Added: 2026-06-25.)*
 - Configurable Bash binary — the Bash tool is built-in (`$SHELL`, fallback `/bin/bash`); no config

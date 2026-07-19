@@ -4224,7 +4224,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let req = request.into_inner();
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let _os_user = self
+        let os_user = self
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
@@ -4238,8 +4238,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::failed_precondition("session has no running terminal"))?;
         let worktree = main.worktree_path.clone();
 
-        // The Bash tool is built-in: the user's login shell, falling back to /bin/bash.
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+        // The Bash tool is built-in: the target user's passwd login shell (not the daemon's own
+        // `$SHELL`, which under systemd/nix is not the user's interactive shell), falling back to
+        // `$SHELL`, then /bin/bash.
+        let shell = crate::pty_runtime::login_shell_for_os_user(os_user)
+            .or_else(|| std::env::var("SHELL").ok())
+            .unwrap_or_else(|| "/bin/bash".to_string());
 
         let handle = self
             .claude_cli_manager
