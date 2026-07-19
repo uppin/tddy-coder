@@ -36,6 +36,7 @@ const dData = tddyDebug("tddy:term:data");
 const dWrite = tddyDebug("tddy:term:write");
 const dResize = tddyDebug("tddy:term:resize");
 const dMouse = tddyDebug("tddy:term:mouse");
+const dScroll = tddyDebug("tddy:term:scroll");
 
 /** Finger separation change (px) required before applying one font step during touch pinch. */
 const PINCH_FONT_STEP_SPAN_PX = 22;
@@ -165,6 +166,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const logWrite = mkLog(dWrite);
     const logResize = mkLog(dResize);
     const logMouse = mkLog(dMouse);
+    const logScroll = mkLog(dScroll);
     const zoomVerbose = debugLogging || isTerminalZoomDebugEnabled();
     const containerRef = useRef<HTMLDivElement>(null);
     const termRef = useRef<Terminal | null>(null);
@@ -586,15 +588,26 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // drag arriving right after the canvas mounts is not missed; `termRef` is read
     // lazily at event time and the handlers no-op until the terminal is available.
     useEffect(() => {
-      if (!sessionActive || fixedViewportGrid) return;
+      if (!sessionActive || fixedViewportGrid) {
+        logScroll(
+          "touch-drag effect skipped sessionActive=%o fixedViewportGrid=%o",
+          sessionActive,
+          !!fixedViewportGrid,
+        );
+        return;
+      }
       const container = containerRef.current;
-      if (!container) return;
+      if (!container) {
+        logScroll("touch-drag effect: no container yet");
+        return;
+      }
 
       let dragging = false;
       let engaged = false;
       let startY = 0;
       let lastY = 0;
       let pixelAccum = 0;
+      let moveCount = 0;
 
       const cellHeightPx = (): number => {
         const term = termRef.current;
@@ -604,8 +617,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       };
 
       const onTouchStart = (e: TouchEvent) => {
+        moveCount = 0;
         if (e.touches.length !== 1) {
           dragging = false;
+          logScroll("touchstart ignored touches=%d (not single finger)", e.touches.length);
           return;
         }
         dragging = true;
@@ -613,22 +628,38 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         pixelAccum = 0;
         startY = e.touches[0].clientY;
         lastY = startY;
+        logScroll("touchstart startY=%d cellPx=%.2f rows=%o", startY, cellHeightPx(), termRef.current?.rows);
       };
 
       const onTouchMove = (e: TouchEvent) => {
+        moveCount += 1;
         // Only a single active finger scrolls — never during a two-finger pinch.
-        if (!dragging || e.touches.length !== 1) return;
+        if (!dragging || e.touches.length !== 1) {
+          logScroll("touchmove#%d bailed dragging=%o touches=%d", moveCount, dragging, e.touches.length);
+          return;
+        }
         const term = termRef.current;
-        if (!term) return;
+        if (!term) {
+          logScroll("touchmove#%d bailed: term not ready", moveCount);
+          return;
+        }
         const y = e.touches[0].clientY;
+        const fromStart = y - startY;
         // A tap (negligible movement) must not scroll — wait for real drag distance.
-        if (!engaged && Math.abs(y - startY) < TOUCH_SCROLL_START_THRESHOLD_PX) return;
+        if (!engaged && Math.abs(fromStart) < TOUCH_SCROLL_START_THRESHOLD_PX) {
+          logScroll("touchmove#%d below threshold fromStart=%.1f cancelable=%o", moveCount, fromStart, e.cancelable);
+          return;
+        }
         engaged = true;
         const cell = cellHeightPx();
-        if (cell <= 0) return;
+        if (cell <= 0) {
+          logScroll("touchmove#%d bailed: cellPx=%.2f (canvas not measured)", moveCount, cell);
+          return;
+        }
         pixelAccum += y - lastY;
         lastY = y;
         const lines = Math.trunc(pixelAccum / cell);
+        const vyBefore = term.getViewportY?.();
         if (lines !== 0) {
           pixelAccum -= lines * cell;
           // Finger down (positive delta) reveals older output. `scrollLines` moves the
@@ -637,11 +668,25 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           term.scrollLines(-lines);
           logMouse("touch-scroll lines=%d viewportY=%d", -lines, term.getViewportY?.());
         }
+        logScroll(
+          "touchmove#%d y=%d fromStart=%.1f cellPx=%.2f accum=%.1f lines=%d vy=%o->%o cancelable=%o",
+          moveCount,
+          y,
+          fromStart,
+          cell,
+          pixelAccum,
+          lines,
+          vyBefore,
+          term.getViewportY?.(),
+          e.cancelable,
+        );
         // Non-passive listener: stop the page from scrolling while dragging the terminal.
-        e.preventDefault();
+        // If the browser already claimed the gesture, the event is non-cancelable and this is a no-op.
+        if (e.cancelable) e.preventDefault();
       };
 
-      const endDrag = () => {
+      const endDrag = (e: TouchEvent) => {
+        logScroll("%s dragging=%o engaged=%o moves=%d", e.type, dragging, engaged, moveCount);
         dragging = false;
         engaged = false;
         pixelAccum = 0;
@@ -651,6 +696,20 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       container.addEventListener("touchmove", onTouchMove, { passive: false });
       container.addEventListener("touchend", endDrag, { passive: true });
       container.addEventListener("touchcancel", endDrag, { passive: true });
+
+      // `touch-action` decides whether the browser hands touchmove to us or pans the page
+      // itself (and cancels our events). If it isn't `none`/`pan-*`, real-device drags
+      // never reach the handler even though synthetic test events do.
+      const touchAction =
+        typeof window !== "undefined" && window.getComputedStyle
+          ? window.getComputedStyle(container).touchAction
+          : "(unknown)";
+      logScroll(
+        "touch-drag listeners attached touchAction=%s containerSize=%dx%d",
+        touchAction,
+        container.clientWidth,
+        container.clientHeight,
+      );
 
       return () => {
         container.removeEventListener("touchstart", onTouchStart);
