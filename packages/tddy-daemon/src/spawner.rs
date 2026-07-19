@@ -412,6 +412,20 @@ pub struct SpawnOptions<'a> {
     pub stack_parent: Option<&'a str>,
     /// Model for tool-session model selection. Passed to spawned `tddy-coder` as `--model` when set.
     pub model: Option<&'a str>,
+    /// When true, spawn the child with `--stdio` and piped stdin/stdout so the daemon can host a
+    /// reverse RPC channel over the pipe (used for `spawn_conversation` from a tddy-coder session).
+    /// Only meaningful for a LOCAL spawn — a remote/`spawn_worker` child's pipes can't reach the
+    /// daemon. When false, keeps the legacy `stdin=null` / `stdout=file` wiring.
+    pub stdio_reverse: bool,
+}
+
+/// The local child's piped stdin/stdout handles, returned from [`spawn_as_user`] when
+/// [`SpawnOptions::stdio_reverse`] is set so the caller can bridge them into an RPC endpoint.
+/// Not part of [`SpawnResult`] (which is `Serialize`d across the `spawn_worker` boundary — these
+/// OS handles can't cross it).
+pub struct LocalChildStdio {
+    pub stdin: std::process::ChildStdin,
+    pub stdout: std::process::ChildStdout,
 }
 
 /// Merge the daemon process `PATH` with an optional prefix (from the target user's `~/.tddy/config.yaml`).
@@ -698,7 +712,7 @@ pub fn spawn_as_user(
     child_log_level: &str,
     child_log_format: &str,
     coder_log_config_yaml: Option<&str>,
-) -> anyhow::Result<SpawnResult> {
+) -> anyhow::Result<(SpawnResult, Option<LocalChildStdio>)> {
     use std::os::unix::process::CommandExt;
 
     let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
@@ -784,9 +798,15 @@ pub fn spawn_as_user(
     let resolved_tddy_data_dir = resolve_tddy_data_dir(tddy_data_dir, &daemon_toolchain_root);
 
     let mut cmd = std::process::Command::new(&resolved_tool_path);
+    // `--stdio` reverse channel (grill-me): dedicate the child's stdin/stdout to RPC framing so the
+    // daemon can host a reverse `HostSessionService` over the pipe (see connection_service). Else
+    // keep the legacy wiring (stdin=/dev/null, stdout → log file).
+    if opts.stdio_reverse {
+        cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
+    } else {
+        cmd.stdin(Stdio::null()).stdout(Stdio::from(logs.stdout));
+    }
     cmd.current_dir(repo_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(logs.stdout))
         .stderr(Stdio::from(logs.stderr))
         .env("HOME", &home_dir)
         .env("PATH", &child_path)
@@ -851,6 +871,10 @@ pub fn spawn_as_user(
             log::debug!("spawner: passing --stack-parent {}", sp);
             cmd.arg("--stack-parent").arg(sp);
         }
+    }
+
+    if opts.stdio_reverse {
+        cmd.arg("--stdio");
     }
 
     cmd.arg("--config").arg(&logs.config_path);
@@ -990,6 +1014,17 @@ pub fn spawn_as_user(
         ));
     }
 
+    // Take the piped stdio handles (if any) before the Child is moved into the wait thread, so the
+    // caller can bridge them into a reverse RPC endpoint.
+    let local_stdio = if opts.stdio_reverse {
+        match (child.stdin.take(), child.stdout.take()) {
+            (Some(stdin), Some(stdout)) => Some(LocalChildStdio { stdin, stdout }),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     let session_id_exit = session_id.clone();
     std::thread::spawn(move || match child.wait() {
         Ok(status) => log::info!(
@@ -1006,14 +1041,17 @@ pub fn spawn_as_user(
         ),
     });
 
-    Ok(SpawnResult {
-        session_id: session_id.clone(),
-        livekit_room,
-        livekit_server_identity: identity,
-        livekit_url: livekit.url.clone(),
-        pid,
-        grpc_port,
-    })
+    Ok((
+        SpawnResult {
+            session_id: session_id.clone(),
+            livekit_room,
+            livekit_server_identity: identity,
+            livekit_url: livekit.url.clone(),
+            pid,
+            grpc_port,
+        },
+        local_stdio,
+    ))
 }
 
 #[cfg(not(unix))]
@@ -1028,7 +1066,7 @@ pub fn spawn_as_user(
     _child_log_level: &str,
     _child_log_format: &str,
     _coder_log_config_yaml: Option<&str>,
-) -> anyhow::Result<SpawnResult> {
+) -> anyhow::Result<(SpawnResult, Option<LocalChildStdio>)> {
     anyhow::bail!("spawn_as_user is only supported on Unix")
 }
 
@@ -1350,7 +1388,8 @@ mod startup_grace_period_tests {
 
         // Then — spawn_as_user does not wait for the child to exit; it only guards against an
         // immediate crash, so a long-running child is reported as a successful spawn
-        let spawned = result.expect("a long-running child must be reported as a successful spawn");
+        let (spawned, _stdio) =
+            result.expect("a long-running child must be reported as a successful spawn");
         assert!(spawned.pid > 0);
     }
 }

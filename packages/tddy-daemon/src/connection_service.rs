@@ -311,6 +311,19 @@ pub struct ConnectionServiceImpl {
     idle_tracker: Option<Arc<crate::relay_idle::IdleTimeoutTracker>>,
     /// Per-session demo VM state — keyed by session_id.
     demo_vm_state: Arc<tokio::sync::Mutex<std::collections::HashMap<String, DemoVmHandle>>>,
+    /// Per-session reverse stdio RPC endpoint to a spawned tddy-coder child (grill-me), keyed by
+    /// session_id. Hosts [`crate::host_session_service::HostSessionService`] so the coder can relay
+    /// `spawn_conversation` back to the daemon over the pipe. Kept alive for the session's lifetime.
+    session_stdio: Arc<tokio::sync::Mutex<std::collections::HashMap<String, SessionStdioEndpoint>>>,
+}
+
+/// A live reverse stdio endpoint to one spawned tddy-coder session. Holding it keeps the pipe's
+/// read/dispatch loop running; dropping it (on session teardown) ends the loop.
+struct SessionStdioEndpoint {
+    #[allow(dead_code)]
+    client: Arc<tddy_stdio::StdioRpcClient>,
+    #[allow(dead_code)]
+    task: tokio::task::JoinHandle<()>,
 }
 
 impl ConnectionServiceImpl {
@@ -350,6 +363,7 @@ impl ConnectionServiceImpl {
         ));
         let task_registry = claude_cli_manager.task_registry();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+        let session_stdio = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         Self {
             config,
             sessions_base_for_user,
@@ -365,6 +379,7 @@ impl ConnectionServiceImpl {
             task_registry,
             idle_tracker: None,
             demo_vm_state,
+            session_stdio,
         }
     }
 
@@ -601,8 +616,63 @@ impl ConnectionServiceImpl {
             project_id: project_id.to_string(),
             sessions_base: sessions_base.to_path_buf(),
             orchestrator_session_id: session_id.to_string(),
+            model_override: None,
             orchestrator_session_dir: orchestrator_session_dir.to_path_buf(),
         }))
+    }
+
+    /// Bridge a freshly-spawned grill-me tool session's stdio pipes into a reverse RPC endpoint that
+    /// hosts [`HostSessionService`](crate::host_session_service::HostSessionService), so the coder
+    /// can relay `spawn_conversation` back to the daemon over the pipe. The endpoint is stored in
+    /// `session_stdio` keyed by `session_id` and kept alive for the session's lifetime. The
+    /// orchestrator context (this session) is baked into the handler, so a call arriving on this
+    /// pipe is unambiguously that session — no auth token or caller-identity check needed.
+    async fn wire_session_stdio_endpoint(
+        &self,
+        session_id: &str,
+        os_user: &str,
+        project_id: &str,
+        model: Option<String>,
+        stdio: crate::spawner::LocalChildStdio,
+    ) {
+        use std::os::fd::OwnedFd;
+        let sessions_base = self.tddy_data_dir.clone();
+        let orchestrator_session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+        let handler = Arc::new(GrillMeConversationSpawnHandler {
+            config: self.config.clone(),
+            tddy_data_dir: self.tddy_data_dir.clone(),
+            claude_cli_manager: Arc::clone(&self.claude_cli_manager),
+            os_user: os_user.to_string(),
+            project_id: project_id.to_string(),
+            sessions_base,
+            orchestrator_session_id: session_id.to_string(),
+            orchestrator_session_dir,
+            model_override: model,
+        });
+        let service = crate::host_session_service::HostSessionService::new(handler);
+        let sender = match tokio::net::unix::pipe::Sender::from_owned_fd(OwnedFd::from(stdio.stdin))
+        {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!("wire_session_stdio_endpoint({session_id}): wrap child stdin: {e}");
+                return;
+            }
+        };
+        let receiver =
+            match tokio::net::unix::pipe::Receiver::from_owned_fd(OwnedFd::from(stdio.stdout)) {
+                Ok(r) => r,
+                Err(e) => {
+                    log::warn!("wire_session_stdio_endpoint({session_id}): wrap child stdout: {e}");
+                    return;
+                }
+            };
+        let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(receiver, sender, service);
+        let task = tokio::spawn(endpoint.run());
+        self.session_stdio.lock().await.insert(
+            session_id.to_string(),
+            SessionStdioEndpoint { client, task },
+        );
+        log::info!("wire_session_stdio_endpoint({session_id}): reverse stdio endpoint ready");
     }
 }
 
@@ -2556,6 +2626,10 @@ struct GrillMeConversationSpawnHandler {
     sessions_base: PathBuf,
     orchestrator_session_id: String,
     orchestrator_session_dir: PathBuf,
+    /// Fallback model when the orchestrator session's metadata has none (a tddy-coder *tool*
+    /// session writes `model: None` to its metadata, unlike a claude-cli session). The daemon knows
+    /// the model at spawn time and supplies it here so `spawn_conversation` can still inherit one.
+    model_override: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -2578,7 +2652,12 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
         // empty model is rejected by the spawn path.
         let meta = tddy_core::read_session_metadata(&self.orchestrator_session_dir)
             .map_err(|e| format!("failed to read orchestrator session metadata: {e}"))?;
-        let model = meta.model.clone().unwrap_or_default();
+        let model = meta
+            .model
+            .clone()
+            .filter(|m| !m.trim().is_empty())
+            .or_else(|| self.model_override.clone())
+            .unwrap_or_default();
         if model.trim().is_empty() {
             return Err(
                 "orchestrator session has no model to inherit for the conversation".to_string(),
@@ -3470,68 +3549,92 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let timeout = self.config.spawn_worker_request_timeout();
         let daemon_log = self.config.log.clone();
         let coder_config_path = self.config.coder_config_path.clone();
-        let result = spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
-            log::debug!(
-                "StartSession: spawn_blocking running, using_spawn_worker={}",
-                spawn_client.is_some()
-            );
-            let pid = Some(pid_for_spawn.as_str());
-            let agent = agent_for_spawn.as_deref();
-            let recipe = recipe_for_spawn.as_deref();
-            let stack_parent = stack_parent_for_spawn.as_deref();
-            let model = model_for_spawn.as_deref();
-            let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
-            if let Some(ref client) = spawn_client {
-                let spawn_req = spawn_worker::build_spawn_request(
-                    &os_user,
-                    &tool_path,
-                    &tddy_data_dir_for_spawn,
-                    &repo_path,
-                    &livekit,
-                    SpawnOptions {
-                        resume_session_id: None,
-                        new_session_id: None,
-                        project_id: pid,
-                        agent,
-                        mouse: spawn_mouse,
-                        recipe,
-                        stack_parent,
-                        model,
-                    },
-                    daemon_log.as_ref(),
-                    coder_log_yaml,
+        // Cloned for wiring the reverse stdio endpoint after the (move) spawn closure.
+        let os_user_for_wire = os_user.clone();
+        let project_id_for_wire = pid_for_spawn.clone();
+        let model_for_wire = model_for_spawn.clone();
+        let (result, local_stdio) =
+            spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
+                log::debug!(
+                    "StartSession: spawn_blocking running, using_spawn_worker={}",
+                    spawn_client.is_some()
                 );
-                client.spawn(spawn_req)
-            } else {
-                let (child_log_level, child_log_format) =
-                    spawner::child_log_yaml_tuning(daemon_log.as_ref());
-                spawner::spawn_as_user(
-                    &os_user,
-                    &tool_path,
-                    &tddy_data_dir_for_spawn,
-                    &repo_path,
-                    &livekit,
-                    SpawnOptions {
-                        resume_session_id: None,
-                        new_session_id: None,
-                        project_id: pid,
-                        agent,
-                        mouse: spawn_mouse,
-                        recipe,
-                        stack_parent,
-                        model,
-                    },
-                    child_log_level.as_str(),
-                    child_log_format.as_str(),
-                    coder_log_yaml.as_deref(),
-                )
-            }
-        })
-        .await?;
+                let pid = Some(pid_for_spawn.as_str());
+                let agent = agent_for_spawn.as_deref();
+                let recipe = recipe_for_spawn.as_deref();
+                let stack_parent = stack_parent_for_spawn.as_deref();
+                let model = model_for_spawn.as_deref();
+                // Grill-me tool sessions get a piped-stdio reverse channel so the coder can relay
+                // `spawn_conversation` back to the daemon. Only for the LOCAL (non-spawn_worker) path.
+                let stdio_reverse = recipe
+                    .map(recipe_enables_conversation_spawn)
+                    .unwrap_or(false);
+                let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
+                if let Some(ref client) = spawn_client {
+                    let spawn_req = spawn_worker::build_spawn_request(
+                        &os_user,
+                        &tool_path,
+                        &tddy_data_dir_for_spawn,
+                        &repo_path,
+                        &livekit,
+                        SpawnOptions {
+                            resume_session_id: None,
+                            new_session_id: None,
+                            project_id: pid,
+                            agent,
+                            mouse: spawn_mouse,
+                            recipe,
+                            stack_parent,
+                            model,
+                            stdio_reverse: false,
+                        },
+                        daemon_log.as_ref(),
+                        coder_log_yaml,
+                    );
+                    client.spawn(spawn_req).map(|r| (r, None))
+                } else {
+                    let (child_log_level, child_log_format) =
+                        spawner::child_log_yaml_tuning(daemon_log.as_ref());
+                    spawner::spawn_as_user(
+                        &os_user,
+                        &tool_path,
+                        &tddy_data_dir_for_spawn,
+                        &repo_path,
+                        &livekit,
+                        SpawnOptions {
+                            resume_session_id: None,
+                            new_session_id: None,
+                            project_id: pid,
+                            agent,
+                            mouse: spawn_mouse,
+                            recipe,
+                            stack_parent,
+                            model,
+                            stdio_reverse,
+                        },
+                        child_log_level.as_str(),
+                        child_log_format.as_str(),
+                        coder_log_yaml.as_deref(),
+                    )
+                }
+            })
+            .await?;
         log::debug!(
             "StartSession: spawn_blocking returned, session_id={}",
             result.session_id
         );
+        // A grill-me tool session was spawned with piped stdio: bridge it into a reverse RPC
+        // endpoint hosting `HostSessionService`, so the coder can relay `spawn_conversation` back.
+        if let Some(stdio) = local_stdio {
+            self.wire_session_stdio_endpoint(
+                &result.session_id,
+                &os_user_for_wire,
+                &project_id_for_wire,
+                model_for_wire,
+                stdio,
+            )
+            .await;
+        }
         self.maybe_spawn_telegram_observer(&result.session_id, result.grpc_port);
         Ok(Response::new(StartSessionResponse {
             session_id: result.session_id,
@@ -3664,60 +3767,65 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let timeout = self.config.spawn_worker_request_timeout();
         let daemon_log = self.config.log.clone();
         let coder_config_path = self.config.coder_config_path.clone();
-        let result = spawn_blocking_with_timeout(timeout, "ResumeSession: spawn", move || {
-            let pid = if project_id_resume.is_empty() {
-                None
-            } else {
-                Some(project_id_resume.as_str())
-            };
-            let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
-            if let Some(ref client) = spawn_client {
-                let spawn_req = spawn_worker::build_spawn_request(
-                    &os_user,
-                    &tool_path,
-                    &tddy_data_dir_for_spawn,
-                    &repo_path,
-                    &livekit,
-                    SpawnOptions {
-                        resume_session_id: Some(session_id.as_str()),
-                        new_session_id: None,
-                        project_id: pid,
-                        agent: resume_agent.as_deref(),
-                        mouse: spawn_mouse,
-                        recipe: resume_recipe.as_deref(),
-                        stack_parent: None,
-                        model: None,
-                    },
-                    daemon_log.as_ref(),
-                    coder_log_yaml,
-                );
-                client.spawn(spawn_req)
-            } else {
-                let (child_log_level, child_log_format) =
-                    spawner::child_log_yaml_tuning(daemon_log.as_ref());
-                spawner::spawn_as_user(
-                    &os_user,
-                    &tool_path,
-                    &tddy_data_dir_for_spawn,
-                    &repo_path,
-                    &livekit,
-                    SpawnOptions {
-                        resume_session_id: Some(session_id.as_str()),
-                        new_session_id: None,
-                        project_id: pid,
-                        agent: resume_agent.as_deref(),
-                        mouse: spawn_mouse,
-                        recipe: resume_recipe.as_deref(),
-                        stack_parent: None,
-                        model: None,
-                    },
-                    child_log_level.as_str(),
-                    child_log_format.as_str(),
-                    coder_log_yaml.as_deref(),
-                )
-            }
-        })
-        .await?;
+        let (result, _local_stdio) =
+            spawn_blocking_with_timeout(timeout, "ResumeSession: spawn", move || {
+                let pid = if project_id_resume.is_empty() {
+                    None
+                } else {
+                    Some(project_id_resume.as_str())
+                };
+                let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
+                if let Some(ref client) = spawn_client {
+                    let spawn_req = spawn_worker::build_spawn_request(
+                        &os_user,
+                        &tool_path,
+                        &tddy_data_dir_for_spawn,
+                        &repo_path,
+                        &livekit,
+                        SpawnOptions {
+                            resume_session_id: Some(session_id.as_str()),
+                            new_session_id: None,
+                            project_id: pid,
+                            agent: resume_agent.as_deref(),
+                            mouse: spawn_mouse,
+                            recipe: resume_recipe.as_deref(),
+                            stack_parent: None,
+                            model: None,
+                            // TODO(stdio-relay): wire the resume path's reverse stdio endpoint too.
+                            stdio_reverse: false,
+                        },
+                        daemon_log.as_ref(),
+                        coder_log_yaml,
+                    );
+                    client.spawn(spawn_req).map(|r| (r, None))
+                } else {
+                    let (child_log_level, child_log_format) =
+                        spawner::child_log_yaml_tuning(daemon_log.as_ref());
+                    spawner::spawn_as_user(
+                        &os_user,
+                        &tool_path,
+                        &tddy_data_dir_for_spawn,
+                        &repo_path,
+                        &livekit,
+                        SpawnOptions {
+                            resume_session_id: Some(session_id.as_str()),
+                            new_session_id: None,
+                            project_id: pid,
+                            agent: resume_agent.as_deref(),
+                            mouse: spawn_mouse,
+                            recipe: resume_recipe.as_deref(),
+                            stack_parent: None,
+                            model: None,
+                            // TODO(stdio-relay): wire the resume path's reverse stdio endpoint too.
+                            stdio_reverse: false,
+                        },
+                        child_log_level.as_str(),
+                        child_log_format.as_str(),
+                        coder_log_yaml.as_deref(),
+                    )
+                }
+            })
+            .await?;
         self.maybe_spawn_telegram_observer(&result.session_id, result.grpc_port);
         Ok(Response::new(ResumeSessionResponse {
             session_id: result.session_id,

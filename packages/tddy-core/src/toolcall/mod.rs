@@ -14,7 +14,8 @@ pub use build::{
     build_executor, register_build_executor, BuildExecutor, BuildListQuery, BuildOptions,
 };
 pub use listener::{
-    set_toolcall_log_dir, start_toolcall_listener, ChildSpawnHandler, ConversationSpawnHandler,
+    set_toolcall_log_dir, start_toolcall_listener,
+    start_toolcall_listener_with_conversation_handler, ChildSpawnHandler, ConversationSpawnHandler,
     ToolcallRpcService,
 };
 pub use transition::{
@@ -324,6 +325,14 @@ pub struct SpawnConversationRequestWire {
     #[serde(default)]
     pub base_ref: Option<String>,
 }
+
+/// RPC service name a tddy-coder session addresses to relay `spawn_conversation` back to the daemon
+/// over its **stdio** pipe (the daemon hosts this service; the coder is the client). Shared here so
+/// the daemon-hosted service and the coder-side relay client agree on the address without either
+/// crate depending on the other.
+pub const HOST_SESSION_SERVICE: &str = "tddy.host.HostSessionService";
+/// Unary method on [`HOST_SESSION_SERVICE`]: spawn a new conversation for the calling session.
+pub const SPAWN_CONVERSATION_METHOD: &str = "SpawnConversation";
 
 /// Wire format for `list-actions` request (from tddy-tools).
 #[derive(Debug, Deserialize)]

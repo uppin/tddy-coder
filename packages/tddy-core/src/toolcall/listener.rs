@@ -96,6 +96,27 @@ pub fn start_toolcall_listener(
     ),
     std::io::Error,
 > {
+    start_toolcall_listener_with_conversation_handler(session_dir, repo_root, tddy_data_dir, None)
+}
+
+/// Like [`start_toolcall_listener`], but binds a per-instance [`ConversationSpawnHandler`] onto
+/// every accepted connection's [`ToolcallRpcService`]. This is how a session that hosts its **own**
+/// toolcall socket (a `tddy-coder --daemon` process) makes `spawn-conversation` work: the plain
+/// 3-arg listener always builds the service with no handler, so `SpawnConversation` is rejected.
+/// A coder-run grill-me session passes a handler here that relays the spawn back to the daemon.
+#[cfg(unix)]
+pub fn start_toolcall_listener_with_conversation_handler(
+    session_dir: Option<PathBuf>,
+    repo_root: Option<PathBuf>,
+    tddy_data_dir: PathBuf,
+    conversation_spawn_handler: Option<Arc<dyn ConversationSpawnHandler>>,
+) -> Result<
+    (
+        std::path::PathBuf,
+        std::sync::mpsc::Receiver<ToolCallRequest>,
+    ),
+    std::io::Error,
+> {
     let dir = std::env::temp_dir();
     let socket_path = dir.join(format!("tddy-toolcall-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&socket_path);
@@ -106,13 +127,22 @@ pub fn start_toolcall_listener(
     let session_dir = Arc::new(session_dir);
     let repo_root = Arc::new(repo_root);
     let tddy_data_dir = Arc::new(tddy_data_dir);
+    let conversation_spawn_handler = Arc::new(conversation_spawn_handler);
 
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         rt.block_on(async {
             let listener = UnixListener::bind(&socket_path_cleanup).expect("bind socket");
             path_tx.send(socket_path_cleanup.clone()).ok();
-            accept_loop(listener, tx, session_dir, repo_root, tddy_data_dir).await;
+            accept_loop(
+                listener,
+                tx,
+                session_dir,
+                repo_root,
+                tddy_data_dir,
+                conversation_spawn_handler,
+            )
+            .await;
         });
         let _ = std::fs::remove_file(&socket_path_cleanup);
     });
@@ -148,6 +178,7 @@ async fn accept_loop(
     session_dir: Arc<Option<PathBuf>>,
     repo_root: Arc<Option<PathBuf>>,
     tddy_data_dir: Arc<PathBuf>,
+    conversation_spawn_handler: Arc<Option<Arc<dyn ConversationSpawnHandler>>>,
 ) {
     loop {
         let (stream, _) = match listener.accept().await {
@@ -159,7 +190,8 @@ async fn accept_loop(
             Arc::clone(&session_dir),
             Arc::clone(&repo_root),
             Arc::clone(&tddy_data_dir),
-        );
+        )
+        .with_conversation_spawn_handler((*conversation_spawn_handler).clone());
         let (reader, writer) = stream.into_split();
         let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(reader, writer, service);
         tokio::spawn(endpoint.run());
@@ -956,5 +988,68 @@ mod tests {
             !v["message"].as_str().unwrap_or_default().is_empty(),
             "expected an actionable rejection message, got: {v}"
         );
+    }
+
+    /// A listener started via [`start_toolcall_listener_with_conversation_handler`] binds the
+    /// handler onto every accepted connection, so a `spawn-conversation` sent over the real socket
+    /// reaches it — proving the coder-run path (its own toolcall socket) can now spawn, unlike the
+    /// plain 3-arg listener which always rejects for lack of a handler.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn start_toolcall_listener_with_handler_routes_spawn_conversation_over_the_socket() {
+        use tddy_rpc::RpcClientTransport;
+
+        /// Answers with a fixed child id so the test can tell the injected handler was reached.
+        struct FakeConversationSpawn;
+        #[async_trait]
+        impl ConversationSpawnHandler for FakeConversationSpawn {
+            async fn spawn_conversation(
+                &self,
+                prompt: &str,
+                _branch: Option<&str>,
+                _base_ref: Option<&str>,
+            ) -> Result<String, String> {
+                assert_eq!(prompt, "Implement plans/foo.md");
+                Ok("child-from-listener".to_string())
+            }
+        }
+
+        // Given a listener that owns its own socket and was started with a bound handler
+        let (socket_path, _rx) = start_toolcall_listener_with_conversation_handler(
+            None,
+            None,
+            std::env::temp_dir(),
+            Some(Arc::new(FakeConversationSpawn)),
+        )
+        .expect("start listener");
+
+        // When a client connects to that socket and dispatches a SpawnConversation
+        let stream = tokio::net::UnixStream::connect(&socket_path)
+            .await
+            .expect("connect socket");
+        let (read_half, write_half) = tokio::io::split(stream);
+        // The client end hosts a throwaway service — it never receives inbound requests here.
+        let (client_service, _crx, _crepo) = a_toolcall_service();
+        let (client, endpoint) =
+            tddy_stdio::StdioEndpoint::from_duplex(read_half, write_half, client_service);
+        tokio::spawn(endpoint.run());
+
+        let payload = serde_json::to_vec(
+            &json!({"type":"spawn-conversation","prompt":"Implement plans/foo.md"}),
+        )
+        .unwrap();
+        let bytes = client
+            .call_unary(
+                "tddy.toolcall.ToolcallService",
+                "SpawnConversation",
+                payload,
+            )
+            .await
+            .expect("call_unary");
+
+        // Then the injected handler's child session id comes back over the wire
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["status"], "ok");
+        assert_eq!(v["session_id"], "child-from-listener");
     }
 }

@@ -13,6 +13,7 @@ pub mod connection_service;
 pub mod connection_tonic_adapter;
 pub mod cursor_cli_spawn;
 pub mod elicitation;
+pub mod host_session_service;
 pub mod livekit_peer_discovery;
 pub mod local_socket_server;
 pub mod multi_host;

@@ -47,6 +47,15 @@ pub struct AskArgs {
     pub data: Option<String>,
 }
 
+/// Start a new implementation conversation on a fresh worktree (grill-me handoff).
+#[derive(Parser)]
+#[command(name = "spawn_conversation")]
+pub struct SpawnConversationArgs {
+    /// JSON payload: `{"prompt":"...","branch":"optional-slug","base_ref":null}`
+    #[arg(long)]
+    pub data: Option<String>,
+}
+
 /// Transition the workflow state machine to another goal (agent-driven orchestration).
 ///
 /// The orchestrator agent calls this (without `--provisional`) to commit a transition and receive
@@ -422,6 +431,42 @@ async fn relay_ask(socket_path: &std::path::Path, questions: &[AskQuestionItem])
         output_error(response.error.as_deref().unwrap_or("ask failed"), 1);
     }
 
+    Ok(())
+}
+
+pub async fn run_spawn_conversation(args: SpawnConversationArgs) -> Result<()> {
+    let json_str = read_input(&args.data, false)?;
+    let parsed: serde_json::Value = serde_json::from_str(&json_str).map_err(|e| {
+        output_error(&format!("invalid JSON: {}", e), 1);
+        e
+    })?;
+    let prompt = parsed
+        .get("prompt")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            output_error("missing or invalid 'prompt' string", 2);
+            anyhow::anyhow!("invalid spawn_conversation format")
+        })?;
+    let branch = parsed.get("branch").and_then(|v| v.as_str());
+    let base_ref = parsed.get("base_ref").and_then(|v| v.as_str());
+    let request = serde_json::json!({
+        "type": "spawn-conversation",
+        "prompt": prompt,
+        "branch": branch,
+        "base_ref": base_ref,
+    });
+    let Some(socket_path) = std::env::var_os("TDDY_SOCKET") else {
+        output_error("TDDY_SOCKET not set; spawn_conversation not relayed", 1);
+        return Ok(());
+    };
+    let response_json =
+        tddy_tools::toolcall_client::dispatch_toolcall(std::path::Path::new(&socket_path), request)
+            .await
+            .map_err(|e| {
+                output_error(&e, 1);
+                anyhow::anyhow!(e)
+            })?;
+    println!("{}", response_json);
     Ok(())
 }
 

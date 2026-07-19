@@ -2,6 +2,7 @@
 
 pub mod build_executor;
 pub mod config;
+pub mod conversation_spawn_relay;
 pub mod plain;
 pub mod recipe;
 pub mod remote;

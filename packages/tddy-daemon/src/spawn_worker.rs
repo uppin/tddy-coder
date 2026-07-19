@@ -310,11 +310,15 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                         recipe: req.recipe.as_deref(),
                         stack_parent: req.stack_parent.as_deref(),
                         model: req.model.as_deref(),
+                        // Remote/worker-spawned child: its stdio pipes can't reach the daemon, so
+                        // no reverse stdio channel. // TODO(stdio-relay): remote path.
+                        stdio_reverse: false,
                     },
                     req.child_log_level.as_str(),
                     req.child_log_format.as_str(),
                     req.coder_log_config_yaml.as_deref(),
-                );
+                )
+                .map(|(r, _stdio)| r);
                 log::info!(
                     "spawn_worker: spawn_as_user returned session_id={}",
                     req.resume_session_id

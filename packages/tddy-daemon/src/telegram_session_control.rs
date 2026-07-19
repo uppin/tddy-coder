@@ -1071,6 +1071,7 @@ impl TelegramWorkflowSpawn {
             recipe: recipe_for_spawn.as_deref(),
             stack_parent: None,
             model: None,
+            stdio_reverse: false,
         };
         let coder_log_yaml =
             spawner::coder_log_config_yaml(self.config.coder_config_path.as_deref());
@@ -1100,6 +1101,7 @@ impl TelegramWorkflowSpawn {
                 child_log_format.as_str(),
                 coder_log_yaml.as_deref(),
             )
+            .map(|(r, _stdio)| r)
         }
     }
 }

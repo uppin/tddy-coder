@@ -97,7 +97,7 @@ Once **both** brief files exist, commit the working-copy brief (e.g. **`plans/<s
 **Command shape** (escape JSON for your shell). Reference the **absolute** session-artifact brief path — **`{session_dir}/artifacts/{basename}`** — and the committed working-copy brief so the implementer can read both:
 
 ```text
-tddy-tools spawn_conversation --data '{{"prompt":"Read the plan brief at {session_dir}/artifacts/{basename} and plans/<slug>.md, then implement it.","branch":"<slug>"}}'
+tddy-tools spawn-conversation --data '{{"prompt":"Read the plan brief at {session_dir}/artifacts/{basename} and plans/<slug>.md, then implement it.","branch":"<slug>"}}'
 ```
 
 Derive **`<slug>`** from the feature intent (a short, kebab-case label). Omit **`branch`** to let the daemon derive one from the prompt.
