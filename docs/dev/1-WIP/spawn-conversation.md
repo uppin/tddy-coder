@@ -5,6 +5,44 @@
 **Packages:** `tddy-tools`, `tddy-core`, `tddy-daemon`, `tddy-workflow-recipes`, `tddy-web`
 **Feature PRD:** [docs/ft/coder/spawn-conversation.md](../../ft/coder/spawn-conversation.md)
 
+## Follow-up fix (commit `fe8ca30d`): stdio reverse-RPC transport
+
+**Problem found in live testing:** the wiring above binds `spawn_conversation` only into the
+daemon's **claude-cli** managed listener (`session_toolcall.rs`). A grill-me session started from
+tddy-web actually runs as a **tddy-coder tool session** (`agent: cursor`) that serves its **own**
+toolcall socket (`start_toolcall_listener`, coder pid owns it), so the request found no handler and
+returned *"spawn_conversation is only available in a managed session."* The coder had no channel to
+call the daemon.
+
+**Fix:** a **stdio reverse-RPC channel** between daemon (parent) and each spawned grill-me coder
+(child). Auth-free: the OS pipe is bound 1:1 to the child the daemon spawned, so the orchestrator
+context is captured at spawn time — no token or caller-identity check.
+
+- [x] `tddy-core`: `start_toolcall_listener_with_conversation_handler` (3-arg form delegates with
+  `None`); shared `HOST_SESSION_SERVICE` / `SPAWN_CONVERSATION_METHOD` consts (`toolcall/{listener,mod}.rs`)
+- [x] `tddy-daemon`: `HostSessionService` (JSON reverse RPC over `tddy_stdio`, reuses
+  `GrillMeConversationSpawnHandler`) (`host_session_service.rs`); `spawner` pipes child stdio +
+  returns `LocalChildStdio` gated on `stdio_reverse`; `connection_service` bridges each grill-me
+  child's fds via `StdioEndpoint::from_duplex` into a per-session `session_stdio` registry;
+  `model_override` so tool sessions (persist `model: None`) still inherit a model. `--grpc` retained.
+- [x] `tddy-coder`: `run_daemon` sets up the reverse stdio endpoint under `--stdio` and binds
+  `DaemonRelayConversationSpawnHandler` (awaits the client via a `watch` channel)
+  (`conversation_spawn_relay.rs`, `run.rs`)
+- [x] `tddy-tools`: `spawn-conversation` CLI subcommand (kebab) + `spawn-conversation→SpawnConversation`
+  wire mapping; grill-me prompt updated to the kebab CLI name.
+- [ ] **Follow-up (deferred):** migrate daemon→coder presenter-intent off localhost `--grpc` onto the
+  stdio client (the "full switch"); wire the **resume** and **remote/multi-host** spawn paths
+  (marked `TODO(stdio-relay)`).
+
+### Validation (stdio-relay fix)
+- `tddy-coder`: relay round-trip over **real stdio** — `conversation_spawn_relay` 2/2.
+- `tddy-daemon`: `host_session_service` 3/3. `tddy-core`: 258/0 (incl. handler-aware listener).
+- `tddy-workflow-recipes`: prompt + pr-stack acceptance green (no regression). `tddy-tools`: green.
+- `cargo fmt --check` clean. Runtime smoke: `tddy-coder --daemon --stdio` starts + logs
+  *"stdio reverse RPC endpoint ready"*.
+- **Not automated:** the full daemon-spawns-coder interactive grill-me run — verify in the UI
+  (restart `web-dev`, start a **cursor** grill-me session, let it write the brief; a child tab appears).
+
 ## TODO
 
 - [x] Create/update PRD documentation
