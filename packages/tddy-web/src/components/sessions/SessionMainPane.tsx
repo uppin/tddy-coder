@@ -52,6 +52,9 @@ interface SessionMainPaneProps {
   traffic?: { bytesIn: number; bytesOut: number; lastDataReceivedAt: number | null } | null;
   /** Attached runtimes — one mounted terminal per entry (focused visible, others hidden). */
   runtimes?: ReadonlyArray<SessionRuntimeState>;
+  /** The full drawer session list — passed to each runtime so it can render its spawned child
+   *  conversations (`orchestratorSessionId === session`) as tabs. */
+  sessions?: ReadonlyArray<SessionEntry>;
   /** The focused runtime's session id (visible); others are `display:none` but stay mounted. */
   focusedRuntimeId?: string | null;
   /** Capture a session's connected LiveKit `Room` so session-scoped RPCs can route over it. */
@@ -90,6 +93,7 @@ export function SessionMainPane({
   onChildSessionStarted,
   traffic,
   runtimes = [],
+  sessions = [],
   focusedRuntimeId = null,
   onSessionRoom,
   onSessionDisconnect,
@@ -183,6 +187,7 @@ export function SessionMainPane({
                       liveKitFactory={liveKitFactory}
                       liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
                       commonRoom={room}
+                      sessions={sessions}
                     />
                   ))}
                 </div>

@@ -90,6 +90,18 @@ Use a **title line** (`# …`) that names the feature by intent, not a generic l
 
 Do **not** rely on `tddy-tools submit` to finish the workflow; normal assistant output is enough after the files are written.
 
+## Hand off to implementation (required)
+
+Once **both** brief files exist, commit the working-copy brief (e.g. **`plans/<slug>.md`**), then start a fresh implementation conversation by calling the **`spawn_conversation`** tool from a shell (the session sets **`TDDY_SOCKET`**; run the CLI from **Bash**). This spawns a new interactive conversation on its own worktree, tagged with this session as its orchestrator, and does **not** replace this planning turn.
+
+**Command shape** (escape JSON for your shell). Reference the **absolute** session-artifact brief path — **`{session_dir}/artifacts/{basename}`** — and the committed working-copy brief so the implementer can read both:
+
+```text
+tddy-tools spawn_conversation --data '{{"prompt":"Read the plan brief at {session_dir}/artifacts/{basename} and plans/<slug>.md, then implement it.","branch":"<slug>"}}'
+```
+
+Derive **`<slug>`** from the feature intent (a short, kebab-case label). Omit **`branch`** to let the daemon derive one from the prompt.
+
 ## Style
 
 Be concise but complete; prefer bullet lists where they aid scanning."#,
@@ -154,5 +166,17 @@ mod tests {
         ] {
             assert!(p.contains(needle), "missing section: {needle}");
         }
+    }
+
+    #[test]
+    fn create_plan_prompt_instructs_calling_spawn_conversation_after_writing_the_brief() {
+        // When
+        let p = create_plan_system_prompt("/sess", "/repo");
+
+        // Then the agent is told to hand the plan to a fresh conversation via the spawn tool
+        assert!(
+            p.contains("spawn_conversation"),
+            "create-plan prompt must instruct the agent to call spawn_conversation: {p}"
+        );
     }
 }

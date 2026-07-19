@@ -18,7 +18,8 @@ use std::sync::{Arc, Mutex};
 use tddy_core::backend::{CodingBackend, GoalId, WorkflowRecipe};
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::toolcall::{
-    ChildSpawnHandler, ToolCallRequest, ToolcallRpcService, TransitionHandler,
+    ChildSpawnHandler, ConversationSpawnHandler, ToolCallRequest, ToolcallRpcService,
+    TransitionHandler,
 };
 use tddy_core::workflow::controller::WorkflowController;
 use tddy_core::StubBackend;
@@ -79,6 +80,7 @@ pub fn start_session_toolcall_listener(
     tddy_data_dir: PathBuf,
     controller: Arc<WorkflowController>,
     child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
+    conversation_spawn_handler: Option<Arc<dyn ConversationSpawnHandler>>,
 ) -> std::io::Result<SessionToolcallListener> {
     let socket_path = socket_dir.join(format!("tddy-wf-{session_id}.sock"));
     let _ = std::fs::remove_file(&socket_path);
@@ -103,7 +105,8 @@ pub fn start_session_toolcall_listener(
                 Arc::clone(&tddy_data_dir),
                 Some(Arc::clone(&handler)),
             )
-            .with_child_spawn_handler(child_spawn_handler.clone());
+            .with_child_spawn_handler(child_spawn_handler.clone())
+            .with_conversation_spawn_handler(conversation_spawn_handler.clone());
             let (reader, writer) = stream.into_split();
             let (_client, endpoint) =
                 tddy_stdio::StdioEndpoint::from_duplex(reader, writer, service);
@@ -131,6 +134,7 @@ pub fn set_up_managed_workflow(
     tddy_data_dir: &Path,
     socket_dir: &Path,
     child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
+    conversation_spawn_handler: Option<Arc<dyn ConversationSpawnHandler>>,
 ) -> Result<ManagedWorkflow, String> {
     let start = recipe.start_goal();
     build_managed_workflow(
@@ -142,6 +146,7 @@ pub fn set_up_managed_workflow(
         socket_dir,
         start,
         child_spawn_handler,
+        conversation_spawn_handler,
     )
 }
 
@@ -159,6 +164,7 @@ pub fn resume_managed_workflow(
     socket_dir: &Path,
     resume_at: GoalId,
     child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
+    conversation_spawn_handler: Option<Arc<dyn ConversationSpawnHandler>>,
 ) -> Result<ManagedWorkflow, String> {
     build_managed_workflow(
         session_id,
@@ -169,6 +175,7 @@ pub fn resume_managed_workflow(
         socket_dir,
         resume_at,
         child_spawn_handler,
+        conversation_spawn_handler,
     )
 }
 
@@ -184,6 +191,7 @@ fn build_managed_workflow(
     socket_dir: &Path,
     start: GoalId,
     child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
+    conversation_spawn_handler: Option<Arc<dyn ConversationSpawnHandler>>,
 ) -> Result<ManagedWorkflow, String> {
     // The controller only reads the graph's topology (`successors`); tasks are never executed, so a
     // stub backend is sufficient for graph construction.
@@ -208,6 +216,7 @@ fn build_managed_workflow(
         tddy_data_dir.to_path_buf(),
         controller.clone(),
         child_spawn_handler,
+        conversation_spawn_handler,
     )
     .map_err(|e| format!("failed to start session toolcall listener: {e}"))?;
 

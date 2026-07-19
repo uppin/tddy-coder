@@ -14,7 +14,8 @@ pub use build::{
     build_executor, register_build_executor, BuildExecutor, BuildListQuery, BuildOptions,
 };
 pub use listener::{
-    set_toolcall_log_dir, start_toolcall_listener, ChildSpawnHandler, ToolcallRpcService,
+    set_toolcall_log_dir, start_toolcall_listener, ChildSpawnHandler, ConversationSpawnHandler,
+    ToolcallRpcService,
 };
 pub use transition::{
     clear_transition_handler, register_transition_handler, transition_handler, TransitionHandler,
@@ -306,6 +307,24 @@ pub struct SpawnChildRequestWire {
     pub node_id: String,
 }
 
+/// Wire format for `spawn-conversation` request (from tddy-tools, generic managed session).
+///
+/// The generic sibling of [`SpawnChildRequestWire`]: instead of resolving a planned PR-stack node
+/// id, it carries a free-form `prompt` for a brand-new interactive conversation, plus an optional
+/// `branch` name and `base_ref` to root the new worktree on.
+#[derive(Debug, Deserialize)]
+pub struct SpawnConversationRequestWire {
+    pub r#type: String,
+    /// Prompt to seed the new interactive conversation with.
+    pub prompt: String,
+    /// Optional branch name for the new worktree; derived from the prompt when absent.
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// Optional base ref to root the new worktree on; defaults to the session's base when absent.
+    #[serde(default)]
+    pub base_ref: Option<String>,
+}
+
 /// Wire format for `list-actions` request (from tddy-tools).
 #[derive(Debug, Deserialize)]
 pub struct ListActionsRequestWire {
@@ -469,5 +488,42 @@ mod build_wire_tests {
             executor.is_none(),
             "no executor should be registered in tddy-core"
         );
+    }
+}
+
+#[cfg(test)]
+mod spawn_conversation_wire_tests {
+    use super::SpawnConversationRequestWire;
+    use serde_json::json;
+
+    #[test]
+    fn spawn_conversation_request_wire_parses_prompt_and_optional_branch() {
+        // Given a fully populated spawn-conversation request
+        let wire: SpawnConversationRequestWire = serde_json::from_value(json!({
+            "type": "spawn-conversation",
+            "prompt": "Implement the plan in plans/foo.md",
+            "branch": "implement-foo",
+            "base_ref": "feature/foo",
+        }))
+        .unwrap();
+
+        // Then every field is captured
+        assert_eq!(wire.prompt, "Implement the plan in plans/foo.md");
+        assert_eq!(wire.branch.as_deref(), Some("implement-foo"));
+        assert_eq!(wire.base_ref.as_deref(), Some("feature/foo"));
+    }
+
+    #[test]
+    fn spawn_conversation_request_wire_defaults_branch_and_base_ref_to_none() {
+        // Given a minimal request carrying only the required prompt
+        let wire: SpawnConversationRequestWire = serde_json::from_value(json!({
+            "type": "spawn-conversation",
+            "prompt": "Start implementing",
+        }))
+        .unwrap();
+
+        // Then the optional fields default to None
+        assert_eq!(wire.branch, None);
+        assert_eq!(wire.base_ref, None);
     }
 }

@@ -470,6 +470,14 @@ export const sessionsTerminalTabClose = (terminalId: string) =>
 export const sessionsTerminalPane = (terminalId: string) =>
   `sessions-terminal-pane-${terminalId}`;
 
+/** `[data-testid="sessions-child-tab-<sessionId>"]` — a tab for a spawned child conversation
+ *  (a child session whose `orchestratorSessionId` is the parent runtime's session). */
+export const sessionsChildTab = (sessionId: string) => `sessions-child-tab-${sessionId}`;
+
+/** `[data-testid="sessions-child-pane-<sessionId>"]` — the mounted runtime pane for a spawned
+ *  child conversation, shown when its tab is selected. */
+export const sessionsChildPane = (sessionId: string) => `sessions-child-pane-${sessionId}`;
+
 // ---------------------------------------------------------------------------
 // Tasks drawer screen dynamic helpers
 // ---------------------------------------------------------------------------
