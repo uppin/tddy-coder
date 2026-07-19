@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "packages/tddy-acp",
     "packages/tddy-acp-stub",
     "packages/tddy-build",
     "packages/tddy-build-rust",

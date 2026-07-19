@@ -527,8 +527,29 @@ control (`tddy-service/proto/tddy/v1/remote.proto`), not a new backend concept:
   re-reads `stackPlanJson` after a `WorkflowComplete` / `StateChanged` event so edits appear
   without a manual refresh.
 
-**Component:** `PrStackChat` (`src/components/sessions/prstack/PrStackChat.tsx`) +
-`usePresenterChat` hook.
+**Component:** the reusable **`AgentChat`** (`src/components/chat/AgentChat.tsx`) +
+`useAgentChat` hook — see [Agent Chat](#agent-chat) below. `PrStackScreen` mounts `AgentChat`
+with a pr-stack-appropriate placeholder; the component itself is recipe-agnostic.
+
+## Agent Chat
+
+`AgentChat` is the recipe-agnostic chat window extracted from the PR-Stack screen. It is a thin
+UI over a session's remote Presenter (`TddyRemote.Stream`) and knows nothing about PR stacks — any
+recipe (or any future ACP-backed agent surface) can mount it.
+
+- **Inputs:** `room: Room | null` + `livekitServerIdentity` select the LiveKit transport target;
+  `placeholder` / `title` are display-only. There is no dependency on `SessionEntry` or any
+  pr-stack type.
+- **Behavior:** inbound `AgentOutput` chunks are merged into one growing agent bubble (mirroring
+  the TUI's `AgentOutputActivityLogMerge`); `ModeChanged` select / multi-select renders a
+  clarification panel; outbound text sends `SubmitFeatureInput` (first message on a fresh
+  connection) or `QueuePrompt`.
+- **Test ids:** `agent-chat-*` (e.g. `agent-chat-messages`, `agent-chat-message-<i>`,
+  `agent-chat-input`, `agent-chat-option-<i>`), centralized in `cypress/support/testIds.ts`.
+
+**Hook:** `useAgentChat(room, serverIdentity)` owns the `TddyRemote.Stream` bidi RPC and exposes
+`messages`, `sendPrompt`, `pendingQuestion`, `answerSelect` / `answerOther` / `answerMultiSelect`,
+and the `streamError` / `sendError` / `workflowError` surfaces.
 
 ### New RPCs / proto fields used
 

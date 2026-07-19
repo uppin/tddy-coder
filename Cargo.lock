@@ -8444,6 +8444,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
 
 [[package]]
+name = "tddy-acp"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "tddy-core",
+]
+
+[[package]]
 name = "tddy-acp-stub"
 version = "0.1.0"
 dependencies = [
@@ -8581,6 +8589,7 @@ dependencies = [
 name = "tddy-coder"
 version = "0.1.0"
 dependencies = [
+ "agent-client-protocol",
  "anyhow",
  "assert_cmd",
  "async-trait",
@@ -8603,6 +8612,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "serial_test",
+ "tddy-acp",
  "tddy-build",
  "tddy-build-buildroot",
  "tddy-build-docker",
@@ -8627,6 +8637,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tonic 0.12.3",
  "tower-http",
  "uuid",
@@ -8905,6 +8916,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "serial_test",
+ "tddy-coder",
  "tddy-core",
  "tddy-daemon",
  "tddy-rpc",

@@ -6,14 +6,14 @@ import { AsyncQueue } from "tddy-livekit-web";
 import {
   useLiveKitTransportFactory,
   useLiveKitTransportFactoryIsOverridden,
-} from "../../../rpc/transportProvider";
+} from "../../rpc/transportProvider";
 import {
   ClientMessageSchema,
   TddyRemote,
   type AppModeProto,
   type ClientMessage,
-} from "../../../gen/tddy/v1/remote_pb";
-import { tddyDebug } from "../../../lib/debugMask";
+} from "../../gen/tddy/v1/remote_pb";
+import { tddyDebug } from "../../lib/debugMask";
 
 /** Presenter-stream diagnostics. Enable in DevTools: `localStorage.debug = 'tddy:presenter:*'`
  *  (or via the daemon `debug` config). Traces stream open/close, every inbound Presenter event,
@@ -42,7 +42,7 @@ export interface PendingQuestion {
   allowOther: boolean;
 }
 
-export interface UsePresenterChatResult {
+export interface UseAgentChatResult {
   messages: ChatMessage[];
   /** Enqueues `text` onto the open stream. Returns `false` (and enqueues nothing) when there is no live client to send over, or when the presenter's own participant is no longer in the room. */
   sendPrompt: (text: string) => boolean;
@@ -64,10 +64,10 @@ export interface UsePresenterChatResult {
 }
 
 /**
- * Owns the `TddyRemote.Stream` bidirectional RPC for the PR-Stack Chat Screen — a thin UI over
- * the session's remote Presenter protocol (docs/ft/web/session-drawer.md § PR-Stack Chat
- * Screen). Inbound `AgentOutput` events become chat bubbles; `sendPrompt` writes a `ClientMessage`
- * intent onto the same open stream.
+ * Owns the `TddyRemote.Stream` bidirectional RPC for the Agent Chat panel — a thin UI over the
+ * session's remote Presenter protocol (docs/ft/web/session-drawer.md § Agent Chat). Inbound
+ * `AgentOutput` events become chat bubbles; `sendPrompt` writes a `ClientMessage` intent onto the
+ * same open stream.
  *
  * The presenter only starts the workflow on a `SubmitFeatureInput` intent (sent while in
  * `AppMode::FeatureInput`); `QueuePrompt` is for nudging an already-running workflow and is a
@@ -101,10 +101,10 @@ export interface UsePresenterChatResult {
  * attachment.status" requirement) — until then chat has no client and cannot send/receive in
  * production.
  */
-export function usePresenterChat(
+export function useAgentChat(
   room: Room | null,
   serverIdentity: string,
-): UsePresenterChatResult {
+): UseAgentChatResult {
   const liveKitFactory = useLiveKitTransportFactory();
   const factoryIsOverridden = useLiveKitTransportFactoryIsOverridden();
   const canBuildClient = room !== null || factoryIsOverridden;
@@ -313,7 +313,7 @@ export function usePresenterChat(
       } catch (err) {
         if (!cancelled) {
           dbg("stream error after %d event(s): %o", eventCount, err);
-          console.debug("[usePresenterChat] stream error", err);
+          console.debug("[useAgentChat] stream error", err);
           setStreamError(err instanceof Error ? err.message : String(err));
         }
       }

@@ -309,9 +309,10 @@ pub fn run_main(mut args: Args) {
     }
 
     let mut log_config = effective_log_config(&args);
-    if args.stdio {
-        // --stdio dedicates fd 1 to RPC framing; a misconfigured `output: stdout` logger would
-        // corrupt it. Must run before init_tddy_logger — log::set_logger only succeeds once.
+    if args.stdio || args.acp {
+        // --stdio and --acp both dedicate fd 1 to RPC framing (line-delimited RPC / ACP JSON-RPC);
+        // a misconfigured `output: stdout` logger would corrupt the stream. Must run before
+        // init_tddy_logger — log::set_logger only succeeds once.
         tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut log_config);
     }
     let has_file_output = tddy_core::config_has_file_output(&log_config);
@@ -427,6 +428,9 @@ pub struct Args {
     /// `tddy-stdio`) instead of `--grpc`'s TCP socket. No local TUI is rendered — physical fd 1
     /// is dedicated to RPC framing.
     pub stdio: bool,
+    /// When true, expose the workflow engine as a standard ACP agent over stdin/stdout (JSON-RPC
+    /// Agent Client Protocol). No local TUI is rendered — physical fd 1 is the ACP channel.
+    pub acp: bool,
     /// LiveKit server WebSocket URL (e.g. ws://localhost:7880)
     pub livekit_url: Option<String>,
     /// LiveKit access token for room join
@@ -578,6 +582,11 @@ pub struct CoderArgs {
     /// TCP socket. No local TUI is rendered.
     #[arg(long)]
     pub stdio: bool,
+
+    /// Expose the workflow engine as a standard ACP agent (Agent Client Protocol) over
+    /// stdin/stdout. No local TUI is rendered. Honors --agent, --recipe, --tddy-data-dir.
+    #[arg(long)]
+    pub acp: bool,
 
     /// LiveKit server WebSocket URL (e.g. ws://localhost:7880). Requires --livekit-token, --livekit-room, --livekit-identity.
     #[arg(long)]
@@ -923,6 +932,7 @@ impl From<CoderArgs> for Args {
             resume_from: a.resume_from,
             daemon: a.daemon,
             stdio: a.stdio,
+            acp: a.acp,
             livekit_url: a.livekit_url,
             livekit_token: a.livekit_token,
             livekit_room: a.livekit_room,
@@ -978,6 +988,7 @@ impl From<DemoArgs> for Args {
             resume_from: a.resume_from,
             daemon: a.daemon,
             stdio: a.stdio,
+            acp: false,
             livekit_url: a.livekit_url,
             livekit_token: a.livekit_token,
             livekit_room: a.livekit_room,
@@ -1180,6 +1191,9 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
     }
     if args.daemon {
         return run_daemon(args, shutdown);
+    }
+    if args.acp {
+        return run_acp_agent(args, shutdown);
     }
     if args.goal.is_none() {
         // --stdio dedicates real stdin/stdout to RPC framing — never a TTY in practice, but must
@@ -1426,6 +1440,29 @@ fn resolve_agent_home_dir() -> PathBuf {
 
 /// Run as headless gRPC daemon. Serves GetSession and ListSessions; blocks until shutdown.
 /// When LiveKit args are present, also joins the room as a participant serving RPC over the data channel.
+/// Serve the workflow engine as a standard ACP agent over stdio (`--acp`).
+///
+/// Honors `--agent` (coding backend), `--recipe` (workflow), and `--tddy-data-dir` (session root).
+/// No TUI is rendered: physical fd 1 is the JSON-RPC channel.
+fn run_acp_agent(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
+    let agent_str = args.agent.as_deref().unwrap_or("claude").to_string();
+    let backend = create_backend(
+        &agent_str,
+        args.cursor_agent_path.as_deref(),
+        args.codex_cli_path.as_deref(),
+        args.codex_acp_cli_path.as_deref(),
+        None,
+        None,
+        args.fastcontext_url.as_deref(),
+        args.fastcontext_max_turns,
+        args.fastcontext_model.as_deref(),
+        &resolve_specialized_agent_defs(args),
+    );
+    let recipe = recipe_arc_for_args(args)?;
+    let data_dir = resolve_tddy_data_dir(args);
+    crate::acp_agent::run_acp(backend, recipe, data_dir, shutdown)
+}
+
 fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     // Logger is already initialized in `run_main` with `effective_log_config(args)`.
     // Do not call `init_tddy_logger` again: `log::set_logger` only succeeds once; a second
@@ -3712,6 +3749,7 @@ mod resume_session_config_tests {
             resume_from: Some(sid.to_string()),
             daemon: false,
             stdio: false,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3783,6 +3821,7 @@ mod resume_session_identity_tests {
             resume_from: Some(sid.to_string()),
             daemon: false,
             stdio: false,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3855,6 +3894,7 @@ mod session_dir_sync_tests {
             resume_from: Some(sid.to_string()),
             daemon: false,
             stdio: false,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3943,6 +3983,7 @@ mod changeset_agent_resume_tests {
             resume_from: Some(sid.to_string()),
             daemon: false,
             stdio: false,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -4048,6 +4089,7 @@ mod post_tui_workflow_exit_tests {
             resume_from: None,
             daemon: false,
             stdio: false,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
