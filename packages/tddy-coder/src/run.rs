@@ -427,6 +427,9 @@ pub struct Args {
     /// `tddy-stdio`) instead of `--grpc`'s TCP socket. No local TUI is rendered — physical fd 1
     /// is dedicated to RPC framing.
     pub stdio: bool,
+    /// Per-session unix socket path (set by the daemon) hosting the reverse `HostSessionService`.
+    /// When present, `run_daemon` connects to it and binds the `spawn_conversation` relay handler.
+    pub host_session_socket: Option<String>,
     /// LiveKit server WebSocket URL (e.g. ws://localhost:7880)
     pub livekit_url: Option<String>,
     /// LiveKit access token for room join
@@ -578,6 +581,11 @@ pub struct CoderArgs {
     /// TCP socket. No local TUI is rendered.
     #[arg(long)]
     pub stdio: bool,
+
+    /// Per-session unix socket path (set by the daemon) hosting the reverse `HostSessionService`.
+    /// When set, connect to it and relay `spawn_conversation` back to the daemon over it.
+    #[arg(long, value_name = "PATH")]
+    pub host_session_socket: Option<String>,
 
     /// LiveKit server WebSocket URL (e.g. ws://localhost:7880). Requires --livekit-token, --livekit-room, --livekit-identity.
     #[arg(long)]
@@ -782,6 +790,11 @@ pub struct DemoArgs {
     #[arg(long)]
     pub stdio: bool,
 
+    /// Per-session unix socket path (set by the daemon) hosting the reverse `HostSessionService`.
+    /// When set, connect to it and relay `spawn_conversation` back to the daemon over it.
+    #[arg(long, value_name = "PATH")]
+    pub host_session_socket: Option<String>,
+
     /// LiveKit WebSocket URL for terminal streaming (e.g. ws://127.0.0.1:7880)
     #[arg(long)]
     pub livekit_url: Option<String>,
@@ -923,6 +936,7 @@ impl From<CoderArgs> for Args {
             resume_from: a.resume_from,
             daemon: a.daemon,
             stdio: a.stdio,
+            host_session_socket: a.host_session_socket,
             livekit_url: a.livekit_url,
             livekit_token: a.livekit_token,
             livekit_room: a.livekit_room,
@@ -978,6 +992,7 @@ impl From<DemoArgs> for Args {
             resume_from: a.resume_from,
             daemon: a.daemon,
             stdio: a.stdio,
+            host_session_socket: a.host_session_socket,
             livekit_url: a.livekit_url,
             livekit_token: a.livekit_token,
             livekit_room: a.livekit_room,
@@ -1509,12 +1524,12 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         tddy_core::toolcall::set_toolcall_log_dir(&logs);
         crate::build_executor::register();
 
-        // With `--stdio`, bind the daemon-relay `spawn_conversation` handler so the agent's
-        // `spawn_conversation` tool call is forwarded to the daemon over the stdio reverse channel.
-        // Without it, the plain listener rejects `spawn_conversation` (no handler bound).
+        // When the daemon gave us a `--host-session-socket`, bind the daemon-relay
+        // `spawn_conversation` handler so the agent's `spawn_conversation` tool call is forwarded to
+        // the daemon over the reverse channel. Without it, the plain listener rejects it.
         let conversation_spawn_handler: Option<
             Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>,
-        > = if args.stdio {
+        > = if args.host_session_socket.is_some() {
             Some(Arc::new(
                 crate::conversation_spawn_relay::DaemonRelayConversationSpawnHandler::new(
                     stdio_client_rx.clone(),
@@ -1628,17 +1643,31 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             .context("bind gRPC port")?;
         log::info!("tddy-coder daemon listening on port {}", port);
 
-        // `--stdio`: host a no-op service on our stdin/stdout (the daemon reaches us over
-        // gRPC/LiveKit, not stdio) and publish the reverse client — which calls the daemon's
-        // `HostSessionService` — to the `spawn_conversation` relay handler bound on the toolcall
-        // listener above. fd 1 is already reserved for RPC framing (`enforce_stdio_safe_log_output`).
-        if args.stdio {
-            let (stdio_client, stdio_endpoint) = tddy_stdio::StdioEndpoint::from_process_stdio(
-                crate::conversation_spawn_relay::NoopRpcService,
-            );
-            let _ = stdio_client_tx.send(Some(stdio_client));
-            tokio::spawn(stdio_endpoint.run());
-            log::info!("tddy-coder daemon: stdio reverse RPC endpoint ready");
+        // `--host-session-socket`: connect to the daemon's per-session unix socket and publish the
+        // reverse client — which calls the daemon's `HostSessionService` — to the
+        // `spawn_conversation` relay handler bound on the toolcall listener above. We host a no-op
+        // service on our side (the daemon reaches us over gRPC/LiveKit, not this socket). A socket
+        // path (unlike stdio fds) survives the daemon's forked `spawn_worker`, which is why the
+        // channel is a socket rather than our stdin/stdout.
+        if let Some(sock_path) = args.host_session_socket.clone() {
+            match tokio::net::UnixStream::connect(&sock_path).await {
+                Ok(stream) => {
+                    let (reader, writer) = tokio::io::split(stream);
+                    let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+                        reader,
+                        writer,
+                        crate::conversation_spawn_relay::NoopRpcService,
+                    );
+                    let _ = stdio_client_tx.send(Some(client));
+                    tokio::spawn(endpoint.run());
+                    log::info!(
+                        "tddy-coder daemon: reverse spawn_conversation endpoint connected ({sock_path})"
+                    );
+                }
+                Err(e) => log::warn!(
+                    "tddy-coder daemon: connect host-session-socket {sock_path} failed: {e}"
+                ),
+            }
         }
 
         // The chat stream (`tddy.v1.TddyRemote/Stream`) is served by the Presenter — the single
@@ -3746,6 +3775,7 @@ mod resume_session_config_tests {
             resume_from: Some(sid.to_string()),
             daemon: false,
             stdio: false,
+            host_session_socket: None,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3817,6 +3847,7 @@ mod resume_session_identity_tests {
             resume_from: Some(sid.to_string()),
             daemon: false,
             stdio: false,
+            host_session_socket: None,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3889,6 +3920,7 @@ mod session_dir_sync_tests {
             resume_from: Some(sid.to_string()),
             daemon: false,
             stdio: false,
+            host_session_socket: None,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3977,6 +4009,7 @@ mod changeset_agent_resume_tests {
             resume_from: Some(sid.to_string()),
             daemon: false,
             stdio: false,
+            host_session_socket: None,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -4082,6 +4115,7 @@ mod post_tui_workflow_exit_tests {
             resume_from: None,
             daemon: false,
             stdio: false,
+            host_session_socket: None,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,

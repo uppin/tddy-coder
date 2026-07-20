@@ -59,6 +59,12 @@ pub struct SpawnRequest {
     /// Passed to spawned `tddy-coder` as `--model` when set (tool-session model selection).
     #[serde(default)]
     pub model: Option<String>,
+    /// Per-session unix socket path for the reverse `HostSessionService` (grill-me
+    /// `spawn_conversation`). Passed to the child as `--host-session-socket`. A plain string, so it
+    /// crosses this worker's JSON IPC unchanged — the reason the reverse channel is a socket path
+    /// rather than the child's stdio fds (which can't cross the fork boundary).
+    #[serde(default)]
+    pub host_session_socket: Option<String>,
     /// `log.default.level` for the child's `--config` (from daemon YAML `log:`, e.g. `dev.desktop.yaml`).
     #[serde(default = "default_child_log_level")]
     pub child_log_level: String,
@@ -310,15 +316,15 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                         recipe: req.recipe.as_deref(),
                         stack_parent: req.stack_parent.as_deref(),
                         model: req.model.as_deref(),
-                        // Remote/worker-spawned child: its stdio pipes can't reach the daemon, so
-                        // no reverse stdio channel. // TODO(stdio-relay): remote path.
-                        stdio_reverse: false,
+                        // The reverse `spawn_conversation` channel is a per-session unix socket whose
+                        // path crosses this fork boundary as a plain string (unlike stdio fds), so it
+                        // works from the worker-spawned child just like the direct path.
+                        host_session_socket: req.host_session_socket.as_deref(),
                     },
                     req.child_log_level.as_str(),
                     req.child_log_format.as_str(),
                     req.coder_log_config_yaml.as_deref(),
-                )
-                .map(|(r, _stdio)| r);
+                );
                 log::info!(
                     "spawn_worker: spawn_as_user returned session_id={}",
                     req.resume_session_id
@@ -410,6 +416,7 @@ pub fn build_spawn_request(
         recipe: opts.recipe.map(String::from),
         stack_parent: opts.stack_parent.map(String::from),
         model: opts.model.map(String::from),
+        host_session_socket: opts.host_session_socket.map(String::from),
         child_log_level,
         child_log_format,
         coder_log_config_yaml,
