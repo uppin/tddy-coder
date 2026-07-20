@@ -166,11 +166,75 @@ pub struct CoderSessionToolExecutor {
     pub worktree_root: PathBuf,
     pub task_registry: TaskRegistry,
     pub session_id: String,
+    /// The session's toolcall socket (`TDDY_SOCKET`). Set so non-engine tools invoked from the web
+    /// Inspector — routed through `tddy-tools call-tool` — reach the session the same way the agent
+    /// does (workflow tools like `spawn_conversation`/`submit` relay over it).
+    pub toolcall_socket_path: Option<PathBuf>,
+    /// The session artifact dir (`TDDY_SESSION_DIR`), needed by in-process MCP tools (github_*/pr_*).
+    pub session_dir: PathBuf,
+}
+
+/// True if `name` is one of the shared `tddy-tool-engine` exec tools (Read/Write/Shell/…), which
+/// run in-process; everything else is routed to `tddy-tools call-tool`.
+fn is_engine_tool(name: &str) -> bool {
+    tddy_tool_engine::tool_catalog()
+        .iter()
+        .any(|t| t.name == name)
+}
+
+impl CoderSessionToolExecutor {
+    /// Invoke a non-engine tool (workflow MCP tool or Bash CLI subcommand) by shelling out to
+    /// `tddy-tools call-tool`, with the session's `TDDY_SOCKET`/`TDDY_SESSION_DIR`/`TDDY_REPO_DIR`
+    /// in the child env so it behaves exactly as the agent's invocation would. Errors are surfaced
+    /// as the tool result (not hidden) so the Inspector shows them.
+    async fn execute_via_call_tool(&self, tool_name: &str, args_json: &str) -> ToolOutcome {
+        let args = if args_json.trim().is_empty() {
+            "{}"
+        } else {
+            args_json
+        };
+        let mut cmd = tokio::process::Command::new(tddy_tools_binary());
+        cmd.arg("call-tool")
+            .arg(tool_name)
+            .arg("--data")
+            .arg(args)
+            .env("TDDY_SESSION_DIR", &self.session_dir)
+            .env("TDDY_REPO_DIR", &self.worktree_root);
+        if let Some(sock) = &self.toolcall_socket_path {
+            cmd.env("TDDY_SOCKET", sock);
+        }
+        match cmd.output().await {
+            Ok(out) => {
+                let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                if out.status.success() {
+                    ToolOutcome {
+                        result_json: stdout,
+                        ..Default::default()
+                    }
+                } else {
+                    ToolOutcome {
+                        is_error: true,
+                        error_message: if stderr.is_empty() { stdout } else { stderr },
+                        ..Default::default()
+                    }
+                }
+            }
+            Err(e) => ToolOutcome {
+                is_error: true,
+                error_message: format!("failed to run `tddy-tools call-tool {tool_name}`: {e}"),
+                ..Default::default()
+            },
+        }
+    }
 }
 
 #[async_trait]
 impl ToolExecutor for CoderSessionToolExecutor {
     async fn execute(&self, tool_name: &str, args_json: &str) -> ToolOutcome {
+        if !is_engine_tool(tool_name) {
+            return self.execute_via_call_tool(tool_name, args_json).await;
+        }
         let outcome = tddy_tool_engine::execute_tool(
             &self.worktree_root,
             tool_name,

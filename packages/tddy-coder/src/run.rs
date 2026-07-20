@@ -1486,6 +1486,10 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     // first message; the Presenter created below (the single source of truth, bound to this
     // session) serves the chat stream `tddy.v1.TddyRemote/Stream` over both gRPC and LiveKit via
     // its `connect_view` `view_factory`.
+    // Set inside the `livekit_enabled` block below (where the toolcall listener is created) and read
+    // later in the async serve block by the session participant's tool executor, which relays
+    // non-engine Inspector tool invocations over this socket.
+    let mut toolcall_socket_path_for_exec: Option<std::path::PathBuf> = None;
     #[allow(clippy::type_complexity)]
     let (view_factory, presenter_observer, presenter_intent_tx, usage_event_tx): (
         Option<Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>>,
@@ -1548,6 +1552,10 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 Ok((path, rx)) => (Some(path), Some(rx)),
                 Err(_) => (None, None),
             };
+        // Captured for the session participant's tool executor (declared at fn scope above), which
+        // relays non-engine Inspector tool invocations over this socket; `toolcall_socket_path`
+        // itself is moved into the workflow below.
+        toolcall_socket_path_for_exec = toolcall_socket_path.clone();
 
         tddy_core::write_initial_tool_session_metadata(
             &session_artifact_dir,
@@ -1858,6 +1866,8 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         worktree_root: agent_working_dir.clone(),
                         task_registry: tddy_task::TaskRegistry::new(),
                         session_id: args.session_id.clone().unwrap_or_default(),
+                        toolcall_socket_path: toolcall_socket_path_for_exec.clone(),
+                        session_dir: session_artifact_dir.clone(),
                     },
                 ),
                 worktree: agent_working_dir.clone(),
@@ -2750,6 +2760,9 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         Ok((path, rx)) => (Some(path), Some(rx)),
         Err(_) => (None, None),
     };
+    // At fn scope so the async serve block below can capture it for the session participant's tool
+    // executor (relays non-engine Inspector tool invocations over this socket).
+    let socket_path_for_exec = socket_path.clone();
     let (event_tx, _) = tokio::sync::broadcast::channel(256);
     let (intent_tx, intent_rx) = std::sync::mpsc::channel();
     let presenter = match args.agent.as_deref() {
@@ -2926,6 +2939,11 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     .unwrap_or_else(|_| std::path::PathBuf::from(".")),
                 task_registry: tddy_task::TaskRegistry::new(),
                 session_id: args.session_id.clone().unwrap_or_default(),
+                toolcall_socket_path: socket_path_for_exec.clone(),
+                session_dir: args
+                    .session_dir
+                    .clone()
+                    .unwrap_or_else(|| std::path::PathBuf::from(".")),
             }),
             worktree: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             terminal_manager: std::sync::Arc::new(

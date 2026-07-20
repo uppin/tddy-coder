@@ -249,6 +249,52 @@ impl PermissionServer {
         defs
     }
 
+    /// Invoke one of the workflow `#[tool]` methods by name with JSON `args`, returning its result
+    /// string. Used by `tddy-tools call-tool` (the web Inspector → Tools "invoke" button) to run a
+    /// tool exactly as the agent would over MCP. We dispatch to the methods directly rather than via
+    /// the rmcp `ToolRouter`, because a router call needs a live `Peer`/`RequestContext` that can't
+    /// be fabricated outside a real MCP connection. Relay tools (`spawn_conversation`,
+    /// `pr_spawn_child`) still relay over `TDDY_SOCKET` from inside their methods; the rest run
+    /// in-process against `TDDY_SESSION_DIR`/`TDDY_REPO_DIR`.
+    pub async fn call_tool_by_name(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+    ) -> Result<String, String> {
+        fn parse<T: serde::de::DeserializeOwned>(args: serde_json::Value) -> Result<T, String> {
+            let args = if args.is_null() {
+                serde_json::Value::Object(Default::default())
+            } else {
+                args
+            };
+            serde_json::from_value(args).map_err(|e| {
+                format!(
+                    "invalid arguments for `{}`: {e}",
+                    std::any::type_name::<T>()
+                )
+            })
+        }
+        Ok(match name {
+            "approval_prompt" => self.approval_prompt(Parameters(parse(args)?)),
+            "github_create_pull_request" => {
+                self.github_create_pull_request(Parameters(parse(args)?))
+            }
+            "github_update_pull_request" => {
+                self.github_update_pull_request(Parameters(parse(args)?))
+            }
+            "pr_stack_status" => self.pr_stack_status(),
+            "pr_merge" => self.pr_merge(Parameters(parse(args)?)),
+            "pr_close" => self.pr_close(Parameters(parse(args)?)),
+            "pr_repoint" => self.pr_repoint(Parameters(parse(args)?)),
+            "pr_resolve_conflicts" => self.pr_resolve_conflicts(Parameters(parse(args)?)),
+            "pr_set_status" => self.pr_set_status(Parameters(parse(args)?)),
+            "pr_add_planned" => self.pr_add_planned(Parameters(parse(args)?)),
+            "pr_spawn_child" => self.pr_spawn_child(Parameters(parse(args)?)).await,
+            "spawn_conversation" => self.spawn_conversation(Parameters(parse(args)?)).await,
+            other => return Err(format!("unknown MCP tool: {other}")),
+        })
+    }
+
     /// Allowed dirs from TDDY_SESSION_DIR and TDDY_REPO_DIR (canonicalized).
     fn allowed_dirs() -> Vec<PathBuf> {
         let session_dir = std::env::var_os("TDDY_SESSION_DIR").map(PathBuf::from);
@@ -1848,6 +1894,29 @@ mod tests {
                 .contains("TDDY_SOCKET"),
             "expected a TDDY_SOCKET error, got: {result}"
         );
+    }
+
+    /// `call_tool_by_name` (the web Inspector invoke path) dispatches a side-effect-free MCP tool
+    /// in-process and returns its result; an unknown name is a clean error, not a panic.
+    #[tokio::test]
+    async fn call_tool_by_name_dispatches_mcp_tool_and_rejects_unknown() {
+        let server = PermissionServer::new();
+
+        // pr_stack_status runs in-process; with no TDDY_SESSION_DIR it returns its own error JSON
+        // (a real result string), proving the dispatch reached the tool.
+        let out = server
+            .call_tool_by_name("pr_stack_status", serde_json::json!({}))
+            .await
+            .expect("known tool dispatches");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&out).is_ok(),
+            "pr_stack_status must return JSON, got: {out}"
+        );
+
+        let err = server
+            .call_tool_by_name("definitely_not_a_tool", serde_json::json!({}))
+            .await;
+        assert!(err.is_err(), "unknown tool must be an error");
     }
 
     /// The relayed request carries the `spawn-conversation` verb with the prompt and branch, so the

@@ -229,6 +229,8 @@ async fn coder_session_participant_executes_a_real_read_against_its_worktree() -
             worktree_root: worktree_root.clone(),
             task_registry: tddy_task::TaskRegistry::new(),
             session_id: SESSION_ID.to_string(),
+            toolcall_socket_path: None,
+            session_dir: worktree_root.clone(),
         }),
         worktree: worktree_root.clone(),
     };
