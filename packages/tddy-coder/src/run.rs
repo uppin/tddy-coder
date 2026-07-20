@@ -1852,7 +1852,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 session_id: args.session_id.clone().unwrap_or_default(),
                 session_token: args.livekit_token.clone().unwrap_or_default(),
                 tool_calls_path: session_artifact_dir.join("tool-calls.jsonl"),
-                tools: crate::session_participant::coder_session_tool_catalog(),
+                tools: crate::session_participant::coder_session_tool_catalog_full(),
                 executor: std::sync::Arc::new(
                     crate::session_participant::CoderSessionToolExecutor {
                         worktree_root: agent_working_dir.clone(),
@@ -2920,7 +2920,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 .clone()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join("tool-calls.jsonl"),
-            tools: crate::session_participant::coder_session_tool_catalog(),
+            tools: crate::session_participant::coder_session_tool_catalog_full(),
             executor: std::sync::Arc::new(crate::session_participant::CoderSessionToolExecutor {
                 worktree_root: std::env::current_dir()
                     .unwrap_or_else(|_| std::path::PathBuf::from(".")),

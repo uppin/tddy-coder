@@ -222,6 +222,33 @@ impl PermissionServer {
             .collect()
     }
 
+    /// Enumerate every tool this server would advertise to an agent, as [`RemoteToolDef`]s
+    /// (name + description + JSON input schema): the static workflow `#[tool]`s, the exec-tool
+    /// catalog (unconditionally — Read/Write/Shell/…), and the subagent tools when a subagent is
+    /// configured. Pure enumeration (no socket/session) for `tddy-tools list-tools`, which feeds the
+    /// web Inspector → Tools panel. Does NOT include the Bash CLI subcommands (submit/ask/…); the
+    /// `list-tools` command appends those.
+    pub fn advertised_tool_defs() -> Vec<RemoteToolDef> {
+        fn map_tool(t: rmcp::model::Tool) -> RemoteToolDef {
+            RemoteToolDef {
+                name: t.name.to_string(),
+                description: t.description.map(|d| d.to_string()).unwrap_or_default(),
+                input_schema_json: serde_json::to_string(&*t.input_schema)
+                    .unwrap_or_else(|_| "{}".to_string()),
+            }
+        }
+        let mut defs: Vec<RemoteToolDef> = Self::tool_router()
+            .list_all()
+            .into_iter()
+            .map(map_tool)
+            .collect();
+        defs.extend(exec_tool_catalog());
+        if subagent_enabled() {
+            defs.extend(subagent_tool_router().list_all().into_iter().map(map_tool));
+        }
+        defs
+    }
+
     /// Allowed dirs from TDDY_SESSION_DIR and TDDY_REPO_DIR (canonicalized).
     fn allowed_dirs() -> Vec<PathBuf> {
         let session_dir = std::env::var_os("TDDY_SESSION_DIR").map(PathBuf::from);

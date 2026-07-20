@@ -56,6 +56,13 @@ pub struct SpawnConversationArgs {
     pub data: Option<String>,
 }
 
+/// Print every tool available to the session as a JSON array (name, description,
+/// input_schema_json) — the workflow MCP tools + exec catalog + subagent tools + the Bash CLI
+/// subcommands. Consumed by the web Inspector → Tools panel (via the coder's `ListExecTools`).
+#[derive(Parser)]
+#[command(name = "list-tools")]
+pub struct ListToolsArgs {}
+
 /// Transition the workflow state machine to another goal (agent-driven orchestration).
 ///
 /// The orchestrator agent calls this (without `--provisional`) to commit a transition and receive
@@ -468,6 +475,82 @@ pub async fn run_spawn_conversation(args: SpawnConversationArgs) -> Result<()> {
             })?;
     println!("{}", response_json);
     Ok(())
+}
+
+/// The Bash CLI subcommands the agent invokes via `Bash(tddy-tools <cmd> …)` — not MCP tools, but
+/// part of the session's real toolset, so the Inspector lists them alongside the MCP/exec tools.
+const CLI_SUBCOMMAND_TOOLS: &[(&str, &str)] = &[
+    (
+        "submit",
+        "Submit a PRD/goal document to the workflow (relayed over TDDY_SOCKET).",
+    ),
+    (
+        "ask",
+        "Ask the user clarification question(s); blocks until answered in the session UI.",
+    ),
+    (
+        "transition",
+        "Transition the workflow state machine to another goal.",
+    ),
+    (
+        "get-schema",
+        "Print the JSON schema for a workflow document type.",
+    ),
+    (
+        "build",
+        "Run a build for the session's codebase and stream results.",
+    ),
+];
+
+/// One `list-tools` entry — matches the coder-side `ToolDef` shape (name/description/schema).
+#[derive(serde::Serialize)]
+struct ListToolsEntry {
+    name: String,
+    description: String,
+    input_schema_json: String,
+}
+
+/// The full session toolset: MCP workflow tools + exec catalog + subagent tools (when enabled) +
+/// the Bash CLI subcommands. Pure — safe to call without a live session/socket.
+fn all_session_tools() -> Vec<ListToolsEntry> {
+    let mut out: Vec<ListToolsEntry> = tddy_tools::server::PermissionServer::advertised_tool_defs()
+        .into_iter()
+        .map(|t| ListToolsEntry {
+            name: t.name,
+            description: t.description,
+            input_schema_json: t.input_schema_json,
+        })
+        .collect();
+    for (name, description) in CLI_SUBCOMMAND_TOOLS {
+        out.push(ListToolsEntry {
+            name: (*name).to_string(),
+            description: (*description).to_string(),
+            input_schema_json: "{}".to_string(),
+        });
+    }
+    out
+}
+
+/// `list-tools`: print the full session toolset as a JSON array (see [`ListToolsArgs`]).
+pub fn run_list_tools(_args: ListToolsArgs) -> Result<()> {
+    println!("{}", serde_json::to_string(&all_session_tools())?);
+    Ok(())
+}
+
+#[cfg(test)]
+mod list_tools_tests {
+    use super::all_session_tools;
+
+    #[test]
+    fn list_tools_includes_mcp_exec_and_cli_tools() {
+        let names: Vec<String> = all_session_tools().into_iter().map(|t| t.name).collect();
+        for expected in ["spawn_conversation", "Read", "Shell", "submit"] {
+            assert!(
+                names.iter().any(|n| n == expected),
+                "list-tools must advertise {expected}; got {names:?}"
+            );
+        }
+    }
 }
 
 pub async fn run_transition(args: TransitionArgs) -> Result<()> {

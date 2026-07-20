@@ -11,8 +11,8 @@ pub mod metadata_publisher;
 pub mod terminal_manager;
 
 pub use connection_service_participant::{
-    coder_session_tool_catalog, CoderSessionToolExecutor, SessionConnectionService, ToolDef,
-    ToolExecutor, ToolOutcome,
+    coder_session_tool_catalog, coder_session_tool_catalog_full, CoderSessionToolExecutor,
+    SessionConnectionService, ToolDef, ToolExecutor, ToolOutcome,
 };
 pub use metadata_publisher::{
     session_metadata_json, spawn_session_metadata_tap, SessionMetadata, SessionMetadataSeed,

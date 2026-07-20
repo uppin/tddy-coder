@@ -39,6 +39,9 @@ enum Subcommand {
     /// Start a new implementation conversation on a fresh worktree (grill-me handoff).
     SpawnConversation(cli::SpawnConversationArgs),
 
+    /// List every tool available to the session as JSON (web Inspector → Tools panel).
+    ListTools(cli::ListToolsArgs),
+
     /// Transition the workflow state machine to another goal (agent-driven orchestration).
     /// Relays to tddy-coder; returns the next goal's instructions (or a rejection).
     Transition(cli::TransitionArgs),
@@ -126,6 +129,7 @@ async fn main() -> Result<()> {
         Some(Subcommand::Submit(s)) => cli::run_submit(s).await?,
         Some(Subcommand::Ask(s)) => cli::run_ask(s).await?,
         Some(Subcommand::SpawnConversation(s)) => cli::run_spawn_conversation(s).await?,
+        Some(Subcommand::ListTools(s)) => cli::run_list_tools(s)?,
         Some(Subcommand::Transition(s)) => cli::run_transition(s).await?,
         Some(Subcommand::GetSchema(s)) => cli::run_get_schema(s)?,
         Some(Subcommand::ListSchemas(s)) => cli::run_list_schemas(s)?,
