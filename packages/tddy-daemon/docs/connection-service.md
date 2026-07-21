@@ -253,6 +253,30 @@ carry an optional `terminal_id` (empty ⇒ `"main"`) and resolve the target via
 `get_terminal(session_id, terminal_id)`. All four new/extended RPCs authenticate `session_token`
 via the same GitHub → OS user path as the other endpoints.
 
+## Host stats (Host Stats Footer)
+
+Two unary RPCs feed the web's bottom **Host Stats Footer** (see
+[docs/ft/web/host-stats-footer.md](../../../../docs/ft/web/host-stats-footer.md)) with host-level
+telemetry for the daemon the client is addressing:
+
+- `GetHostCpuStats()` → `per_core_percent: []float` — utilization (0..100) of each logical core,
+  core 0 first. The web polls it every 5 s.
+- `GetHostDiskStats()` → `{available_bytes, total_bytes, project_dir}` for the filesystem holding
+  the daemon's default project directory. The web polls it every 60 s.
+
+Both authenticate `session_token` via the same GitHub → OS user path as the other endpoints, and are
+addressed to the daemon participant directly (no `daemon_instance_id` payload — the LiveKit transport
+already targets `daemon-{instanceId}`).
+
+Backed by **`host_stats.rs`**: the `HostStats` trait — injected via
+`ConnectionServiceImpl::with_host_stats` so tests substitute a deterministic fake — with a
+`sysinfo`-backed `SysinfoHostStats`. CPU sampling holds a long-lived `sysinfo::System` (constructed
+once with the service) so successive ~5 s-apart refreshes report real per-core deltas; the first
+sample reads ~0. Disk resolution enumerates mounts and picks the filesystem whose mount point is the
+longest **path-component** prefix of the project directory (`select_mount_for_path`), falling back to
+the largest mount by capacity if none is a prefix. The default project directory resolves to
+`$HOME/<repos_base_path_or_default>` (`DaemonConfig` has no explicit project-dir override today).
+
 ## Spawn worker
 
 Spawn and **git clone** requests run through a forked single-threaded worker (`spawn_worker`) so fork+setuid from a Tokio process avoids deadlocks. JSON protocol: `WorkerRequest` (`spawn` | `clone`) and `WorkerResponse` (`spawn_ok` | `clone_ok` | `error`).

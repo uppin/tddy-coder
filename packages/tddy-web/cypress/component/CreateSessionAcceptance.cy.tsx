@@ -376,6 +376,10 @@ describe("CreateSession acceptance — post-creation list refresh", () => {
     byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
     byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
 
+    // Creation auto-collapses the drawer so the new terminal is unobstructed; re-open it
+    // to observe the refetched list.
+    sessionsDrawerPage.drawerOpenBtn().click();
+
     // Then — the new session appears in the drawer once the post-creation refetch lands
     sessionsDrawerPage.drawerItem(NEW_SESSION_ID).should("exist");
   });

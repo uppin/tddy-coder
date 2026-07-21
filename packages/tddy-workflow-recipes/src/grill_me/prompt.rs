@@ -79,6 +79,12 @@ Using the **user message** below (original request, prior grill-phase output, an
 
    Keep session output and repo layout distinct: the canonical runtime path is **`{session_dir}/artifacts/{basename}`** above. Only use an **`artifacts/`** directory under the repo root if this repository’s own documentation tells you to — otherwise place the brief under whatever persisted-doc convention the repo documents (you must determine that from the tree).
 
+3. **Exploration artifact (code-discovery knowledge)** — Write the code-discovery knowledge you gathered into:
+
+   **`{session_dir}/artifacts/exploration.md`**
+
+   You have write access, so create this file directly. Downstream implementation steps read it to reuse your findings instead of re-exploring. Structure it with these sections: **Code Map** (file paths with line/column references to relevant code, each with a one-line "why it matters"), **Diagrams** (```mermaid fenced blocks for non-trivial structure), **Documentation** (authoritative doc references), and **Conventions & Gotchas** (repo-specific conventions and traps). Skip the file only when you gathered no reusable knowledge.
+
 The document must include these top-level sections (in order), with clear prose:
 
 - **Problem** — what the user wants and why it matters
@@ -177,6 +183,23 @@ mod tests {
         assert!(
             p.contains("spawn_conversation"),
             "create-plan prompt must instruct the agent to call spawn_conversation: {p}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod exploration_artifact_tests {
+    use super::*;
+
+    #[test]
+    fn create_plan_prompt_instructs_writing_exploration_md() {
+        // When
+        let prompt = create_plan_system_prompt("/tmp/session", "/tmp/repo");
+
+        // Then — grill-me has write access, so it writes the artifact directly
+        assert!(
+            prompt.contains("exploration.md"),
+            "create-plan prompt must instruct writing exploration.md into the session artifacts: {prompt}"
         );
     }
 }

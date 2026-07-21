@@ -187,7 +187,10 @@ impl WorkflowRecipe for GrillMeRecipe {
 
 impl SessionArtifactManifest for GrillMeRecipe {
     fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
-        &[("grill_brief", GRILL_ME_BRIEF_BASENAME)]
+        &[
+            ("grill_brief", GRILL_ME_BRIEF_BASENAME),
+            ("exploration", "exploration.md"),
+        ]
     }
 
     fn default_artifacts(&self) -> BTreeMap<String, String> {
@@ -218,5 +221,26 @@ mod plan_refinement_tests {
         // When / Then — refinement goal must be create-plan, not the entry grill goal
         assert_eq!(r.plan_refinement_goal(), GoalId::new("create-plan"));
         assert_ne!(r.plan_refinement_goal(), r.start_goal());
+    }
+}
+
+#[cfg(test)]
+mod exploration_artifact_tests {
+    use super::GrillMeRecipe;
+    use crate::SessionArtifactManifest;
+
+    #[test]
+    fn grill_me_manifest_registers_the_exploration_artifact() {
+        // Given
+        let recipe = GrillMeRecipe;
+
+        // When / Then
+        assert!(
+            recipe
+                .known_artifacts()
+                .contains(&("exploration", "exploration.md")),
+            "GrillMeRecipe known_artifacts must register exploration.md; got {:?}",
+            recipe.known_artifacts()
+        );
     }
 }

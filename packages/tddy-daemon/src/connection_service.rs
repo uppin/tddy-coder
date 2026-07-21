@@ -39,6 +39,7 @@ use uuid::Uuid;
 use crate::agent_list_mapping::agent_allowlist_rows;
 use crate::cli_session_manager::{ClaimOutcome, CliSessionManager, MAIN_TERMINAL_ID};
 use crate::config::DaemonConfig;
+use crate::host_stats::{HostStats, SysinfoHostStats};
 use crate::livekit_peer_discovery::{local_instance_id_for_config, LiveKitDiscoveryHandles};
 use crate::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
 use crate::project_storage::{self, ProjectData};
@@ -56,7 +57,8 @@ use crate::workspace_session;
 use crate::worktrees::{self, RemoveWorktreeError, WorktreeStatsCache};
 use tddy_service::proto::connection::{
     DemoVmState, ExecuteToolRequest, ExecuteToolResponse, GetDemoVmStatusRequest,
-    GetDemoVmStatusResponse, ListExecToolsRequest, ListExecToolsResponse,
+    GetDemoVmStatusResponse, GetHostCpuStatsRequest, GetHostCpuStatsResponse,
+    GetHostDiskStatsRequest, GetHostDiskStatsResponse, ListExecToolsRequest, ListExecToolsResponse,
     ListSessionToolCallsRequest, ListSessionToolCallsResponse, StartDemoVmRequest,
     StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, ToolCallInfo as ProtoToolCallInfo,
 };
@@ -309,6 +311,8 @@ pub struct ConnectionServiceImpl {
     task_registry: TaskRegistry,
     /// Optional idle-timeout tracker for relay mode — bumped on every RPC call.
     idle_tracker: Option<Arc<crate::relay_idle::IdleTimeoutTracker>>,
+    /// Host machine stats provider (per-core CPU + project-dir disk) for the Host Stats Footer.
+    host_stats: Arc<dyn HostStats>,
     /// Per-session demo VM state — keyed by session_id.
     demo_vm_state: Arc<tokio::sync::Mutex<std::collections::HashMap<String, DemoVmHandle>>>,
     /// Per-session reverse stdio RPC endpoint to a spawned tddy-coder child (grill-me), keyed by
@@ -364,6 +368,8 @@ impl ConnectionServiceImpl {
         let task_registry = claude_cli_manager.task_registry();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let session_stdio = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+        let host_stats: Arc<dyn HostStats> =
+            Arc::new(SysinfoHostStats::new(resolve_default_project_dir(&config)));
         Self {
             config,
             sessions_base_for_user,
@@ -378,6 +384,7 @@ impl ConnectionServiceImpl {
             sandbox_manager: Arc::new(crate::sandbox_session::SandboxSessionManager::new()),
             task_registry,
             idle_tracker: None,
+            host_stats,
             demo_vm_state,
             session_stdio,
         }
@@ -397,6 +404,13 @@ impl ConnectionServiceImpl {
         tracker: Arc<crate::relay_idle::IdleTimeoutTracker>,
     ) -> Self {
         self.idle_tracker = Some(tracker);
+        self
+    }
+
+    /// Substitute the host machine stats provider (builder pattern) — lets tests inject a
+    /// deterministic fake in place of the live `sysinfo`-backed provider.
+    pub fn with_host_stats(mut self, host_stats: Arc<dyn HostStats>) -> Self {
+        self.host_stats = host_stats;
         self
     }
 
@@ -5103,6 +5117,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         if let Some(ref telegram) = self.telegram {
             let mut w = telegram.watcher.lock().await;
             w.on_claude_cli_activity_status_changed(
+                &telegram.config,
                 &*telegram.sender,
                 &req.session_id,
                 &req.status,
@@ -5461,6 +5476,48 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             "local token minting is only available over the local socket",
         ))
     }
+
+    async fn get_host_cpu_stats(
+        &self,
+        request: Request<GetHostCpuStatsRequest>,
+    ) -> Result<Response<GetHostCpuStatsResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let _github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let per_core_percent = self.host_stats.cpu_per_core_percent();
+        Ok(Response::new(GetHostCpuStatsResponse { per_core_percent }))
+    }
+
+    async fn get_host_disk_stats(
+        &self,
+        request: Request<GetHostDiskStatsRequest>,
+    ) -> Result<Response<GetHostDiskStatsResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let _github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let usage = self.host_stats.disk_for_project_dir();
+        Ok(Response::new(GetHostDiskStatsResponse {
+            available_bytes: usage.available_bytes,
+            total_bytes: usage.total_bytes,
+            project_dir: usage.project_dir,
+        }))
+    }
+}
+
+/// Resolve the daemon's default project directory — the filesystem the Host Stats Footer reports
+/// disk capacity for. Uses `$HOME` joined with the configured repos base subdirectory
+/// (`repos_base_path`, default `repos`); when `$HOME` is unset the bare subdirectory is used.
+///
+// TODO(host-stats-footer): `DaemonConfig` currently exposes no explicit project-dir override; if
+// one is added, prefer it here over the `$HOME`/`repos_base_path` derivation.
+fn resolve_default_project_dir(config: &DaemonConfig) -> PathBuf {
+    let repos_base = config.repos_base_path_or_default();
+    match std::env::var_os("HOME") {
+        Some(home) => PathBuf::from(home).join(repos_base),
+        None => PathBuf::from(repos_base),
+    }
 }
 
 /// Guard for any RPC that mutates a `"pr-stack"` orchestrator's `Changeset.stack`: rejects a
@@ -5670,6 +5727,156 @@ mod signal_session_unit_tests {
 
         let status = child.wait().unwrap();
         assert!(!status.success(), "process should have been killed");
+    }
+}
+
+#[cfg(test)]
+mod host_stats_handler_unit_tests {
+    use super::*;
+    use crate::host_stats::{DiskUsage, HostStats};
+
+    /// Deterministic host-stats double returning fixed per-core CPU and disk figures.
+    struct FakeHostStats {
+        per_core_percent: Vec<f32>,
+        available_bytes: u64,
+        total_bytes: u64,
+        project_dir: String,
+    }
+
+    impl HostStats for FakeHostStats {
+        fn cpu_per_core_percent(&self) -> Vec<f32> {
+            self.per_core_percent.clone()
+        }
+        fn disk_for_project_dir(&self) -> DiskUsage {
+            DiskUsage {
+                available_bytes: self.available_bytes,
+                total_bytes: self.total_bytes,
+                project_dir: self.project_dir.clone(),
+            }
+        }
+    }
+
+    fn make_unit_config() -> crate::config::DaemonConfig {
+        let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        crate::config::DaemonConfig::load(&path).unwrap()
+    }
+
+    fn make_unit_service() -> ConnectionServiceImpl {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().to_path_buf();
+        let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
+        let user_resolver: SessionUserResolver = Arc::new(|token| {
+            if token == "valid" {
+                Some("u".to_string())
+            } else {
+                None
+            }
+        });
+        ConnectionServiceImpl::new(
+            make_unit_config(),
+            sessions_base_resolver,
+            temp.path().to_path_buf(),
+            user_resolver,
+            None,
+            None,
+            None,
+            Arc::new(CliSessionManager::new()),
+        )
+    }
+
+    #[tokio::test]
+    async fn get_host_cpu_stats_rejects_an_invalid_token() {
+        // Given a service whose host stats would report four busy cores
+        let service = make_unit_service().with_host_stats(Arc::new(FakeHostStats {
+            per_core_percent: vec![10.0, 55.0, 90.0, 30.0],
+            available_bytes: 0,
+            total_bytes: 0,
+            project_dir: String::new(),
+        }));
+
+        // When an unauthenticated caller asks for CPU stats
+        let result = service
+            .get_host_cpu_stats(Request::new(GetHostCpuStatsRequest {
+                session_token: "bad-token".to_string(),
+            }))
+            .await;
+
+        // Then the request is rejected as unauthenticated
+        assert_eq!(result.unwrap_err().code, tddy_rpc::Code::Unauthenticated);
+    }
+
+    #[tokio::test]
+    async fn get_host_cpu_stats_returns_per_core_percentages_for_a_valid_token() {
+        // Given a service reporting four cores at 10 / 55 / 90 / 30 %
+        let service = make_unit_service().with_host_stats(Arc::new(FakeHostStats {
+            per_core_percent: vec![10.0, 55.0, 90.0, 30.0],
+            available_bytes: 0,
+            total_bytes: 0,
+            project_dir: String::new(),
+        }));
+
+        // When an authenticated caller asks for CPU stats
+        let response = service
+            .get_host_cpu_stats(Request::new(GetHostCpuStatsRequest {
+                session_token: "valid".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // Then the provider's per-core percentages are returned in core order
+        assert_eq!(
+            response.into_inner().per_core_percent,
+            vec![10.0, 55.0, 90.0, 30.0]
+        );
+    }
+
+    #[tokio::test]
+    async fn get_host_disk_stats_rejects_an_invalid_token() {
+        // Given a service whose host stats would report free/total disk space
+        let service = make_unit_service().with_host_stats(Arc::new(FakeHostStats {
+            per_core_percent: Vec::new(),
+            available_bytes: 42_100_000_000,
+            total_bytes: 100_000_000_000,
+            project_dir: "/home/dev/repos".to_string(),
+        }));
+
+        // When an unauthenticated caller asks for disk stats
+        let result = service
+            .get_host_disk_stats(Request::new(GetHostDiskStatsRequest {
+                session_token: "bad-token".to_string(),
+            }))
+            .await;
+
+        // Then the request is rejected as unauthenticated
+        assert_eq!(result.unwrap_err().code, tddy_rpc::Code::Unauthenticated);
+    }
+
+    #[tokio::test]
+    async fn get_host_disk_stats_returns_project_dir_capacity_for_a_valid_token() {
+        // Given a service reporting 42.1 GB free of a 100 GB filesystem at /home/dev/repos
+        let service = make_unit_service().with_host_stats(Arc::new(FakeHostStats {
+            per_core_percent: Vec::new(),
+            available_bytes: 42_100_000_000,
+            total_bytes: 100_000_000_000,
+            project_dir: "/home/dev/repos".to_string(),
+        }));
+
+        // When an authenticated caller asks for disk stats
+        let response = service
+            .get_host_disk_stats(Request::new(GetHostDiskStatsRequest {
+                session_token: "valid".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Then the provider's free/total bytes and project directory are returned
+        assert_eq!(response.available_bytes, 42_100_000_000);
+        assert_eq!(response.total_bytes, 100_000_000_000);
+        assert_eq!(response.project_dir, "/home/dev/repos");
     }
 }
 

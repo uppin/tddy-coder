@@ -43,6 +43,13 @@ The TODO section is part of the PRD body, not a separate field. Example:
 
 **demo_plan** (optional): When the feature has a user-facing demo (CLI, API, UI), include demo_type, setup_instructions, steps with description/command_or_action/expected_result, and verification criteria.
 
+**exploration** (optional but strongly encouraged): The full markdown content of an exploration document capturing the code-discovery knowledge you gathered while planning, so downstream steps can reuse it instead of re-exploring. The engine persists it verbatim as `artifacts/exploration.md`. Structure it with these sections:
+  - **Code Map** — file paths with line (and column where meaningful) references to the code segments relevant to the feature (e.g. `src/auth/mod.rs:42:5`), each with a one-line "why it matters".
+  - **Diagrams** — mermaid diagrams (```mermaid fenced blocks) of the relevant module/data flow when the structure is non-trivial.
+  - **Documentation** — references to authoritative docs (repo docs, package docs, external URLs).
+  - **Conventions & Gotchas** — repo-specific conventions and traps discovered while exploring.
+Omit the field (or leave it blank) only when you truly gathered no reusable knowledge.
+
 **CRITICAL**: You MUST call tddy-tools submit with your complete PRD content (including the TODO section). Use the heredoc form above — do NOT use Write/cat/python workarounds. Do NOT return a summary, meta-commentary, or description of what you created. The submit call delivers the output to the workflow — if you do not call it, the workflow fails."#
         .to_string()
 }
@@ -159,6 +166,31 @@ mod tests {
         assert!(
             prompt.contains("\"name\"") || prompt.contains("`name`") || prompt.contains("name"),
             "system prompt must guide agent to provide a changeset 'name' field"
+        );
+    }
+}
+
+#[cfg(test)]
+mod exploration_artifact_tests {
+    use super::*;
+
+    #[test]
+    fn system_prompt_documents_the_exploration_submit_field() {
+        // When
+        let prompt = system_prompt();
+
+        // Then — the plan agent must be told to return its code-discovery knowledge
+        assert!(
+            prompt.contains("exploration"),
+            "planning system prompt must document the exploration submit field"
+        );
+        assert!(
+            prompt.contains("Code Map"),
+            "planning system prompt must ask for a Code Map with file:line references"
+        );
+        assert!(
+            prompt.contains("mermaid"),
+            "planning system prompt must ask for mermaid diagrams in the exploration content"
         );
     }
 }

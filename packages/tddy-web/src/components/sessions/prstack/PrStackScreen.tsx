@@ -3,7 +3,7 @@ import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../../gen/connection_pb";
 import type { SessionAttachmentState } from "../useSessionAttachment";
 import { Button } from "../../ui/button";
-import { usePresenterLiveKitRoom } from "./usePresenterLiveKitRoom";
+import { usePresenterLiveKitRoom } from "../usePresenterLiveKitRoom";
 import { PlannedPrList } from "./PlannedPrList";
 import { AddPlannedPrForm, type AddPlannedPrFormSubmission } from "./AddPlannedPrForm";
 import { PrStackChat } from "./PrStackChat";

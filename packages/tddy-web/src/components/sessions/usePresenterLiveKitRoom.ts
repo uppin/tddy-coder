@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import type { Room } from "livekit-client";
-import { useCommonRoom, type CommonRoomStatus } from "../../../hooks/useCommonRoom";
-import type { SessionAttachmentState } from "../useSessionAttachment";
+import { useCommonRoom, type CommonRoomStatus } from "../../hooks/useCommonRoom";
+import type { SessionAttachmentState } from "./useSessionAttachment";
 import { presenterRoomTargetFor } from "./presenterRoomTarget";
 
 const IDENTITY_UNUSED = () => "";

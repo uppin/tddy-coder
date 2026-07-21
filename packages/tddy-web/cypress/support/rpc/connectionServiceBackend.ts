@@ -31,6 +31,8 @@ import {
   ToolInfoSchema,
   ClaimTerminalControlResponseSchema,
   ExecuteToolResponseSchema,
+  GetHostCpuStatsResponseSchema,
+  GetHostDiskStatsResponseSchema,
   ListExecToolsResponseSchema,
   ListSessionToolCallsResponseSchema,
   ListTerminalSessionsResponseSchema,
@@ -152,6 +154,10 @@ export interface ConnectionServiceScenario {
   terminals?: Array<{ terminalId: string; kind?: string; pid?: number }>;
   /** The `terminal_id` handed out by the Nth (0-based) `StartTerminalSession`. Default `bash-<n+1>`. */
   newTerminalId?: (index: number) => string;
+  /** `GetHostCpuStats` response — per-logical-core utilization percentages (0..100). Default empty. */
+  hostCpuPerCore?: number[];
+  /** `GetHostDiskStats` response — free/total bytes for the daemon's default project directory. */
+  hostDisk?: { availableBytes: bigint; totalBytes: bigint; projectDir: string };
 }
 
 export interface ConnectionServiceBackend extends InMemoryRpcBackend {
@@ -176,6 +182,10 @@ export interface ConnectionServiceBackend extends InMemoryRpcBackend {
   readonly sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[];
   /** Every `{ sessionId, terminalId }` an output stream was opened for, in call order. */
   readonly streamedTerminals: { sessionId: string; terminalId: string }[];
+  /** Number of `GetHostCpuStats` calls — lets tests assert the 5 s poll cadence. */
+  readonly hostCpuStatsCallCount: () => number;
+  /** Number of `GetHostDiskStats` calls — lets tests assert the 60 s poll cadence. */
+  readonly hostDiskStatsCallCount: () => number;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +209,8 @@ export function aConnectionServiceBackend(
   const stoppedTerminals: { sessionId: string; terminalId: string }[] = [];
   const sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[] = [];
   const streamedTerminals: { sessionId: string; terminalId: string }[] = [];
+  let hostCpuCalls = 0;
+  let hostDiskCalls = 0;
 
   // Live bash-terminal list — mutated by Start/Stop so ListTerminalSessions stays consistent.
   const liveTerminals: { terminalId: string; kind: string; pid: number }[] = (
@@ -360,6 +372,21 @@ export function aConnectionServiceBackend(
         });
         return {};
       },
+      // --- Host stats footer ---
+      getHostCpuStats: async () => {
+        hostCpuCalls += 1;
+        return create(GetHostCpuStatsResponseSchema, {
+          perCorePercent: scenario.hostCpuPerCore ?? [],
+        });
+      },
+      getHostDiskStats: async () => {
+        hostDiskCalls += 1;
+        return create(GetHostDiskStatsResponseSchema, {
+          availableBytes: scenario.hostDisk?.availableBytes ?? 0n,
+          totalBytes: scenario.hostDisk?.totalBytes ?? 0n,
+          projectDir: scenario.hostDisk?.projectDir ?? "",
+        });
+      },
       // Server-streaming output — record the opened stream, emit one identifying frame, then stay
       // open (a terminal stream that *completes* would signal disconnect and evict the runtime).
       streamTerminalOutput: async function* (req) {
@@ -382,6 +409,8 @@ export function aConnectionServiceBackend(
     stoppedTerminals,
     sentTerminalInput,
     streamedTerminals,
+    hostCpuStatsCallCount: () => hostCpuCalls,
+    hostDiskStatsCallCount: () => hostDiskCalls,
   });
 }
 

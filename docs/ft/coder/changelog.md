@@ -9,6 +9,11 @@ Release note history for the Coder product area.
 - Replacing `Write`/`StrReplace`/`Delete` makes a def the session's coder: native edit aliases hard-disabled; the subagent loop gains Managed-only `WRITE`/`STR_REPLACE`/`DELETE` tools (binding validated before spawn).
 - Shared authored-manifest validation (`tddy_core::session_actions::validate_authored_manifest`); host-side `EstablishAction`/`ListActions`/`InvokeAction` handlers in `tddy-sandbox-app`; `Shell`/`Await` hard-rejected at the host relay when Shell is replaced.
 - Follow-ups: Linux/daemon path, non-HTTP backend kinds as a def-schema extension, async invoke via `session_action_jobs`, repo-catalog promotion.
+## 2026-07-21 — Exploration artifact (`exploration.md`) shared across workflow steps
+
+- Workflow planning now produces a persisted `session_dir/artifacts/exploration.md` capturing code-discovery knowledge — a Code Map (file:line/col references), mermaid diagrams, documentation pointers, and conventions/gotchas — so every step that runs after the user interview reuses it instead of re-exploring the codebase. See [exploration-artifact.md](exploration-artifact.md).
+- The plan agent stays read-only: it returns the content inline via a new optional `exploration` field on the plan (and bugfix `analyze`) submit schema, and the engine writes the file (blank/absent → no file). grill-me's create-plan writes it directly.
+- `exploration.md` is registered in `known_artifacts()` for tdd, tdd_small, bugfix, and grill-me, so it is advertised (absolute path) in the `<context-reminder>` header — now extended past acceptance-tests/red to green, evaluate, demo, validate, and refactor. The acceptance-tests, red, and green prompts instruct agents to read it before exploring and append new discoveries as a living document.
 
 ## 2026-07-21 — ACP over LiveKit: `AcpService` protobuf mirror + reusable Agent Chat
 

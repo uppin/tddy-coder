@@ -15,6 +15,8 @@ EOF
 
 Use --data-stdin and a heredoc. Do NOT use --data with inline JSON for large payloads. Do NOT use Write, cat, or python to build the JSON first — put the JSON directly in the heredoc.
 
+**Reuse prior exploration**: Before exploring the codebase, read `exploration.md` when it exists (its absolute path is listed in the context-reminder header). Reuse its knowledge — file/line references, diagrams, documentation pointers — instead of re-discovering it. When you learn something new not already captured (new file:line references, diagrams, or gotchas), append it to `exploration.md` as a living document; do not delete or truncate existing content.
+
 If you need to ask the user clarification questions, call:
   tddy-tools ask --data '{"questions":[{"header":"...","question":"...","options":[...],"multiSelect":false}]}'
 The call will block until the user answers. The response contains the user's answers.
@@ -102,6 +104,27 @@ mod tests {
         assert!(
             prompt.contains("if you do not call it, the workflow fails"),
             "acceptance-tests system prompt must state that omitting tddy-tools submit fails the workflow (same contract as plan and update-docs)"
+        );
+    }
+}
+
+#[cfg(test)]
+mod exploration_artifact_tests {
+    use super::*;
+
+    #[test]
+    fn system_prompt_instructs_reusing_and_extending_exploration_md() {
+        // When
+        let prompt = system_prompt();
+
+        // Then
+        assert!(
+            prompt.contains("exploration.md"),
+            "acceptance-tests system prompt must instruct reading exploration.md before exploring the codebase"
+        );
+        assert!(
+            prompt.contains("append"),
+            "acceptance-tests system prompt must instruct appending new discoveries to exploration.md"
         );
     }
 }

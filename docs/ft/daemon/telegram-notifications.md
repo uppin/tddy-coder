@@ -51,9 +51,15 @@ When the daemon spawns a **`tddy-coder --daemon`** session, it connects to the c
 ## Claude Code CLI session activity alerts
 
 When a **claude-cli** session's activity status transitions to **`WaitingForInput`** or **`Done`**,
-the daemon sends a Telegram alert to each chat that is currently **tracking** that session (bound via
-the **Enter session** flow or the `/start-claude` command). If no chat tracks the session, no message
-is sent.
+the daemon sends a Telegram alert. Recipients are resolved with a **tracked-first fallback**:
+
+- If one or more chats are **tracking** that session (bound via the **Enter session** flow or the
+  `/start-claude` command), the alert goes **only** to those chats.
+- Otherwise — e.g. a session started from the **web UI** or `claude` directly, which no chat is
+  tracking — the daemon falls back to the configured **`telegram.chat_ids`** broadcast list (the same
+  recipients used for lifecycle and metadata-tick notifications).
+- If no chat tracks the session **and** `telegram.chat_ids` is empty, there is nobody to notify and
+  no message is sent.
 
 ### Trigger conditions
 
@@ -75,9 +81,11 @@ change in between) does **not** send a second message. Only a genuine transition
 
 ### Routing
 
-Routing uses the **tracked session** binding — the same `SharedTelegramTrackedSessionCoordinator`
-used for workflow keyboard suppression. A chat must have the session marked as tracked (via
-`/start-claude` completion or **Enter session**) to receive an alert.
+Routing prefers the **tracked session** binding — the same `SharedTelegramTrackedSessionCoordinator`
+used for workflow keyboard suppression. When a chat has the session marked as tracked (via
+`/start-claude` completion or **Enter session**), only those chats receive the alert. When **no** chat
+tracks the session, routing falls back to the configured **`telegram.chat_ids`** broadcast list so
+sessions started outside Telegram (web UI / direct `claude`) still notify operators.
 
 ### Source of the `WaitingForInput` signal
 
@@ -92,7 +100,8 @@ No PTY/ANSI scraping is involved.
 **`TelegramSessionWatcher::on_claude_cli_activity_status_changed`** — called from
 **`connection_service::report_session_status`** after `update_activity_status` succeeds, when
 `self.telegram` is configured. Holds `last_activity_status: HashMap<session_id, String>` to detect
-transitions. Routes via `chats_tracking_session(session_id)` on the shared tracked coordinator.
+transitions. It takes the `DaemonConfig` and resolves recipients tracked-first: `chats_tracking_session(session_id)`
+on the shared tracked coordinator when non-empty, otherwise the enabled `telegram.chat_ids` broadcast list.
 
 ## Presenter stream: elicitation (`ModeChanged`)
 

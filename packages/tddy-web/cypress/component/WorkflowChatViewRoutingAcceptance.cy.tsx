@@ -1,9 +1,9 @@
 /**
- * Acceptance tests: per-workflow session views — the PR-Stack Chat Screen opens instead of the
- * terminal for "pr-stack" sessions, and every other session keeps the existing terminal view.
+ * Acceptance tests: per-workflow session views — every non-"pr-stack" tddy-coder `tool` workflow
+ * session opens the full-screen Workflow Chat Screen instead of the terminal, while `pr-stack` keeps
+ * its own two-pane screen and non-tool (claude-cli / cursor-cli) sessions keep the terminal.
  *
  * PRD: docs/ft/web/session-drawer.md § Per-Workflow Session Views.
- * Changeset: docs/dev/1-WIP/pr-stack-workflow-views.md.
  *
  * All RPC calls flow through the in-memory backend — no HTTP intercepts.
  */
@@ -25,10 +25,10 @@ function aSession(overrides: Record<string, unknown>) {
   return {
     createdAt: "2026-07-01T09:00:00Z",
     status: "idle",
-    repoPath: "/home/dev/pr-stack-project",
+    repoPath: "/home/dev/workflow-chat-project",
     pid: 0,
     isActive: false,
-    projectId: "proj-pr-stack",
+    projectId: "proj-workflow-chat",
     daemonInstanceId: "",
     workflowGoal: "",
     pendingElicitation: false,
@@ -39,17 +39,14 @@ function aSession(overrides: Record<string, unknown>) {
   };
 }
 
-const PR_STACK_SESSION = aSession({
-  sessionId: "pr-stack-session-0000-0000-0000-000000000001",
-  recipe: "pr-stack",
+const TDD_SESSION = aSession({
+  sessionId: "tdd-session-0000-0000-0000-000000000001",
+  recipe: "tdd",
 });
 
-// A genuine Claude Code PTY session: it has no tddy-coder Presenter, so even though it carries a
-// managed `recipe` it must keep the terminal — the routing gate keys on `sessionType`, not recipe.
-const CLAUDE_CLI_SESSION = aSession({
-  sessionId: "claude-cli-session-0000-0000-0000-000000000002",
-  recipe: "tdd",
-  sessionType: "claude-cli",
+const PR_STACK_SESSION = aSession({
+  sessionId: "pr-stack-session-0000-0000-0000-000000000002",
+  recipe: "pr-stack",
 });
 
 // ---------------------------------------------------------------------------
@@ -67,30 +64,32 @@ beforeEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-it("opens the PR-Stack Chat Screen instead of the terminal for a pr-stack session", () => {
+it("opens the full-screen Workflow Chat Screen instead of the terminal for a tool workflow session", () => {
   // Given
-  const backend = aSessionsDrawerBackend([PR_STACK_SESSION, CLAUDE_CLI_SESSION]);
+  const backend = aSessionsDrawerBackend([TDD_SESSION, PR_STACK_SESSION]);
+
+  // When
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+  sessionsDrawerPage.drawerItem(TDD_SESSION.sessionId).click();
+
+  // Then — the chat replaces the terminal, and it is full-screen: no pr-stack planned-PR list pane.
+  workflowChatScreenPage.screen().should("exist");
+  workflowChatScreenPage.chat().should("exist");
+  sessionsDrawerPage.detailTerminalContainer().should("not.exist");
+  prStackScreenPage.plannedPrList().should("not.exist");
+  prStackScreenPage.screen().should("not.exist");
+});
+
+it("keeps the two-pane PR-Stack Chat Screen for a pr-stack session (not the full-screen chat)", () => {
+  // Given
+  const backend = aSessionsDrawerBackend([TDD_SESSION, PR_STACK_SESSION]);
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
-  // Then
+  // Then — pr-stack still routes to its own dedicated screen, never the generic full-screen chat.
   prStackScreenPage.screen().should("exist");
-  sessionsDrawerPage.detailTerminalContainer().should("not.exist");
-});
-
-it("keeps the terminal placeholder for a claude-cli session even when it carries a recipe", () => {
-  // Given
-  const backend = aSessionsDrawerBackend([PR_STACK_SESSION, CLAUDE_CLI_SESSION]);
-
-  // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(CLAUDE_CLI_SESSION.sessionId).click();
-
-  // Then — neither custom view renders for a claude-cli PTY session (it has no Presenter); the
-  // existing disconnected-terminal placeholder is unaffected by the view registry.
-  prStackScreenPage.screen().should("not.exist");
+  prStackScreenPage.plannedPrList().should("exist");
   workflowChatScreenPage.screen().should("not.exist");
-  sessionsDrawerPage.detailPane().should("contain.text", "Select Resume to reconnect");
 });

@@ -4,6 +4,12 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-21 — Host stats footer (disk + per-core CPU; traffic relocated)
+
+- The sessions drawer gains a persistent bottom **Host Stats Footer**. The byte-traffic readout moves out of the top header into this footer; the top header now holds only the daemon selector.
+- The footer adds two host-level indicators for the currently selected daemon: **available disk space** on the filesystem holding the daemon's default project directory (refreshed every 60 s), and a row of **per-core CPU** mini bars (refreshed every 5 s). Switching the selected daemon re-fetches both for the new host.
+- Backed by two new `ConnectionService` RPCs (`GetHostCpuStats` / `GetHostDiskStats`, sourced from `sysinfo` on the daemon). See [host-stats-footer.md](host-stats-footer.md).
+
 ## 2026-07-21 — Reusable Agent Chat, ACP transport, transcript export
 
 - The PR-Stack chat is extracted into a recipe-agnostic `AgentChat` / `useAgentChat` (with `agent-chat-*` test ids and an `AgentChat.stories.tsx` covering empty / streaming / select / multiSelect / error / connecting); any recipe can mount it. See [session-drawer.md § Agent Chat](session-drawer.md#agent-chat).

@@ -1,17 +1,10 @@
 /**
- * Cypress component tests: SessionTrafficStrip — top-toolbar structural invariants
+ * Cypress component tests: SessionTrafficStrip — bottom Host Stats Footer structural invariants
  *
- * RED PHASE — these tests define the expected DOM structure where the traffic
- * strip is rendered as a top toolbar OUTSIDE `sessions-detail-pane`, so no
- * absolutely-positioned overlay can ever cover it.
- *
- * All tests in this file FAIL until the production code is refactored:
- *   - Move `SessionTrafficStrip` rendering out of `SessionMainPane` (where it
- *     lives as a child of `sessions-detail-pane`) and into `SessionsDrawerScreen`
- *     as a sibling that precedes `SessionMainPane` / `sessions-detail-pane`.
- *
- * After the GREEN phase the failing assertion in each test will be:
- *   `sessionsDrawerPage.detailPane().find(strip)` → not.exist
+ * The traffic strip lives in the screen-level Host Stats Footer at the BOTTOM of
+ * `SessionsDrawerScreen` (see `docs/ft/web/host-stats-footer.md`), rendered as a sibling that
+ * FOLLOWS `SessionMainPane` / `sessions-detail-pane` — never as a descendant of the detail pane,
+ * so no absolutely-positioned overlay inside the pane can ever cover it.
  *
  * `ConnectionService` is daemon-level RPC (`useDaemonClient`), routed over the shared
  * common-room LiveKit connection — see `aConnectionServiceBackend` (in-memory fake) and
@@ -24,6 +17,7 @@ import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aConnectionServiceBackend, type ConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { hostStatsFooterPage } from "../support/pages/hostStatsFooterPage";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
@@ -31,21 +25,21 @@ import { byTestId, TEST_IDS } from "../support/testIds";
 // ---------------------------------------------------------------------------
 
 const CONNECTED_SESSION = {
-  sessionId: "traffic-topbar-aaaa-0000-0000-0000-000000000001",
+  sessionId: "traffic-footer-aaaa-0000-0000-0000-000000000001",
   createdAt: "2026-06-26T10:00:00Z",
   status: "active",
-  repoPath: "/home/dev/topbar-test",
+  repoPath: "/home/dev/footer-test",
   pid: 52001,
   isActive: true,
-  projectId: "proj-topbar-1",
+  projectId: "proj-footer-1",
   daemonInstanceId: "",
-  workflowGoal: "Traffic strip topbar structural test",
+  workflowGoal: "Traffic strip footer structural test",
   pendingElicitation: false,
 };
 
 // ---------------------------------------------------------------------------
 
-describe("StatusBar — rendered as top toolbar, outside sessions-detail-pane", () => {
+describe("StatusBar — rendered in the bottom Host Stats Footer, outside sessions-detail-pane", () => {
   let backend: ConnectionServiceBackend;
 
   beforeEach(() => {
@@ -56,58 +50,56 @@ describe("StatusBar — rendered as top toolbar, outside sessions-detail-pane", 
     backend = aConnectionServiceBackend({
       sessions: [CONNECTED_SESSION],
       // Use a LiveKit session to avoid GrpcSessionTerminal streaming RPCs in tests
-      connectSession: { livekitRoom: "room-topbar-001", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
+      connectSession: { livekitRoom: "room-footer-001", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
     });
   });
 
-  // -------------------------------------------------------------------------
-  // AC1: Strip exists at screen level
-  // -------------------------------------------------------------------------
-
   it("renders the traffic strip somewhere in the sessions screen when session is connected", () => {
+    // Given a connected session
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+
+    // When it is selected
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION.sessionId).click();
 
+    // Then the traffic strip is present on the screen
     byTestId(TEST_IDS.sessionTrafficStrip).should("exist");
   });
 
-  // -------------------------------------------------------------------------
-  // AC2: Strip is NOT inside sessions-detail-pane
-  //
-  // FAILS currently: strip is a child of sessions-detail-pane (SessionMainPane.tsx:109)
-  // PASSES after: strip moved to SessionsDrawerScreen level, above SessionMainPane
-  // -------------------------------------------------------------------------
-
-  it("does NOT render the traffic strip inside sessions-detail-pane", () => {
+  it("renders the traffic strip inside the bottom host stats footer", () => {
+    // Given a connected session
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+
+    // When it is selected
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION.sessionId).click();
 
-    // Strip must exist somewhere in the screen...
-    byTestId(TEST_IDS.sessionTrafficStrip).should("exist");
+    // Then the traffic strip lives inside the host stats footer
+    hostStatsFooterPage.trafficStripInFooter().should("exist");
+  });
 
-    // ...but NOT as a descendant of sessions-detail-pane.
-    // This fails today: strip IS inside sessions-detail-pane.
+  it("does NOT render the traffic strip inside sessions-detail-pane", () => {
+    // Given a connected session
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+
+    // When it is selected
+    sessionsDrawerPage.drawerItem(CONNECTED_SESSION.sessionId).click();
+
+    // Then the strip is not a descendant of the detail pane (so a pane overlay cannot cover it)
+    byTestId(TEST_IDS.sessionTrafficStrip).should("exist");
     sessionsDrawerPage
       .detailPane()
       .find(`[data-testid="${TEST_IDS.sessionTrafficStrip}"]`)
       .should("not.exist");
   });
 
-  // -------------------------------------------------------------------------
-  // AC3: Strip precedes sessions-detail-pane in DOM order (not contained by it)
-  //
-  // FAILS currently: strip is a descendant of the pane, so compareDocumentPosition
-  //   returns CONTAINS | PRECEDING (10), not FOLLOWING (4).
-  // PASSES after: strip is a sibling before the pane — pane FOLLOWS strip (4).
-  // -------------------------------------------------------------------------
-
-  it("places the traffic strip before sessions-detail-pane in DOM order as a sibling, not a descendant", () => {
+  it("places the traffic strip after sessions-detail-pane in DOM order as a sibling, not a descendant", () => {
+    // Given a connected session
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    sessionsDrawerPage.drawerItem(CONNECTED_SESSION.sessionId).click();
 
-    // Wait for the strip to be present before doing the DOM comparison
+    // When it is selected
+    sessionsDrawerPage.drawerItem(CONNECTED_SESSION.sessionId).click();
     byTestId(TEST_IDS.sessionTrafficStrip).should("exist");
 
+    // Then the strip (in the bottom footer) follows the detail pane as a sibling, not a descendant
     byTestId(TEST_IDS.sessionsDrawerScreen).then(($screen) => {
       const stripEl = $screen[0].querySelector(
         `[data-testid="${TEST_IDS.sessionTrafficStrip}"]`,
@@ -119,41 +111,32 @@ describe("StatusBar — rendered as top toolbar, outside sessions-detail-pane", 
       expect(stripEl, "traffic strip must be present in the screen").to.not.be.null;
       expect(paneEl, "sessions-detail-pane must be present in the screen").to.not.be.null;
 
-      // DOCUMENT_POSITION_FOLLOWING (4): paneEl comes AFTER stripEl in document order.
-      // When strip is INSIDE pane this returns CONTAINS | PRECEDING (10), not 4.
+      // DOCUMENT_POSITION_PRECEDING (2): paneEl comes BEFORE stripEl in document order — the strip
+      // is a following sibling in the bottom footer, not a descendant of the pane.
       const position = stripEl!.compareDocumentPosition(paneEl!);
       expect(
-        position & Node.DOCUMENT_POSITION_FOLLOWING,
-        "sessions-detail-pane must follow (not contain) the traffic strip in document order — strip must be a preceding sibling, not a descendant",
+        position & Node.DOCUMENT_POSITION_PRECEDING,
+        "sessions-detail-pane must precede (not contain) the traffic strip — the strip is a following sibling in the bottom footer",
       ).to.not.equal(0);
     });
   });
 
-  // -------------------------------------------------------------------------
-  // AC4: Strip stays outside sessions-detail-pane when the inspector is expanded
-  //
-  // FAILS currently: strip is inside sessions-detail-pane regardless of inspector state.
-  // PASSES after: strip is at a higher level, unaffected by the inspector's DOM position.
-  // -------------------------------------------------------------------------
-
   it("remains outside sessions-detail-pane when the inspector is expanded to full screen", () => {
+    // Given a connected session
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION.sessionId).click();
 
     // Wait for the attachment useEffect to settle (connected → inspector auto-closes)
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "closed");
 
-    // Open the inspector, then expand it to full screen
+    // When the inspector is opened, then expanded to full screen
     sessionsDrawerPage.inspectorToggle().click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
     sessionsDrawerPage.inspectorExpand().click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "expanded");
 
-    // Strip must still exist...
+    // Then the strip is still present and still not inside the detail pane
     byTestId(TEST_IDS.sessionTrafficStrip).should("exist");
-
-    // ...and still NOT be inside sessions-detail-pane, even with the inspector expanded.
-    // This fails today: strip is a child of sessions-detail-pane regardless of inspector state.
     sessionsDrawerPage
       .detailPane()
       .find(`[data-testid="${TEST_IDS.sessionTrafficStrip}"]`)

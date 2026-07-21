@@ -194,6 +194,13 @@ export const TEST_IDS = {
   shortcutDrawer: "shortcut-drawer",
   shortcutDragHandle: "shortcut-drag-handle",
 
+  // Host stats footer (screen-level bottom strip: relocated traffic + disk + per-core CPU)
+  hostStatsFooter: "host-stats-footer",
+  /** Free-space readout for the daemon's default project directory filesystem. */
+  diskSpaceAvailable: "disk-space-available",
+  /** Container holding one mini bar per logical core. */
+  cpuCores: "cpu-cores",
+
   // Session traffic strip
   sessionTrafficStrip: "session-traffic-strip",
   sessionTrafficBytesIn: "session-traffic-bytes-in",
@@ -285,6 +292,9 @@ export const TEST_IDS = {
   // PR-Stack Chat Screen (per-workflow session view for the "pr-stack" recipe)
   prStackScreen: "pr-stack-screen",
   prStackPlannedPrList: "pr-stack-planned-pr-list",
+
+  // Full-screen Workflow Chat Screen (per-workflow session view for every non-"pr-stack" tool recipe)
+  workflowChatScreen: "workflow-chat-screen",
 
   // Reusable Agent Chat (recipe-agnostic; the PR-Stack chat view renders it via PrStackChat)
   agentChat: "agent-chat",
@@ -646,3 +656,10 @@ export const projectHostBaseLocation = (daemonInstanceId: string) =>
 
 /** `[data-testid="daemon-selector-option-<instanceId>"]` — one option in the daemon selector */
 export const daemonSelectorOption = (instanceId: string) => `daemon-selector-option-${instanceId}`;
+
+// ---------------------------------------------------------------------------
+// Host stats footer dynamic helpers
+// ---------------------------------------------------------------------------
+
+/** `[data-testid="cpu-core-bar-<index>"]` — the mini bar for logical core `<index>` (0-based). */
+export const cpuCoreBar = (index: number) => `cpu-core-bar-${index}`;
