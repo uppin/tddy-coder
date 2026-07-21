@@ -17,18 +17,13 @@
  */
 
 import React from "react";
-import { create } from "@bufbuild/protobuf";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import {
-  TddyRemote,
-  ServerMessageSchema,
-  type ClientMessage,
-  type ServerMessage,
-  type ClarificationQuestionProto,
-} from "../../src/gen/tddy/v1/remote_pb";
+import { TddyRemote } from "../../src/gen/tddy/v1/remote_pb";
+import { AcpService, type AcpAgentMessage, type AcpClientMessage } from "../../src/gen/tddy/acp/v1/acp_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
+import { acpQuestion, selectedOptionId } from "../support/rpc/acpSession";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 
@@ -52,88 +47,61 @@ const PR_STACK_SESSION = {
   stackPlanJson: "",
 };
 
-function aClarificationQuestion(
-  overrides: Partial<ClarificationQuestionProto> = {},
-): ClarificationQuestionProto {
+interface QuestionSpec {
+  header: string;
+  question: string;
+  labels: string[];
+  multiSelect: boolean;
+  allowOther: boolean;
+}
+
+function aClarificationQuestion(overrides: Partial<QuestionSpec> = {}): QuestionSpec {
   return {
     header: "Backend",
     question: "Which coding backend should drive this PR stack?",
-    options: [
-      { label: "Claude", description: "Anthropic's Claude Code CLI" },
-      { label: "Cursor", description: "Cursor's composer agent" },
-    ],
+    labels: ["Claude", "Cursor"],
     multiSelect: false,
     allowOther: true,
-    recommendedOther: "",
     ...overrides,
-  } as ClarificationQuestionProto;
+  };
 }
 
-function selectModeMessage(question: ClarificationQuestionProto): ServerMessage {
-  return create(ServerMessageSchema, {
-    event: {
-      case: "modeChanged",
-      value: {
-        mode: {
-          variant: {
-            case: "select",
-            value: { question, questionIndex: 0, totalQuestions: 1, initialSelected: 0 },
-          },
-        },
-      },
-    },
-  });
-}
-
-function multiSelectModeMessage(question: ClarificationQuestionProto): ServerMessage {
-  return create(ServerMessageSchema, {
-    event: {
-      case: "modeChanged",
-      value: {
-        mode: {
-          variant: {
-            case: "multiSelect",
-            value: { question, questionIndex: 0, totalQuestions: 1 },
-          },
-        },
-      },
-    },
-  });
-}
-
-function runningModeMessage(): ServerMessage {
-  return create(ServerMessageSchema, {
-    event: { case: "modeChanged", value: { mode: { variant: { case: "running", value: {} } } } },
+/** The agent's `request_permission` for a (single- or multi-select) clarification. */
+function questionMessage(q: QuestionSpec): AcpAgentMessage {
+  return acpQuestion(q.labels, {
+    multi: q.multiSelect,
+    allowOther: q.allowOther,
+    header: q.header,
+    question: q.question,
   });
 }
 
 /**
- * A backend that immediately yields `initialMessage` on stream open, records every intent the
- * operator sends afterward, and optionally reacts to a recorded intent with a follow-up
- * `ServerMessage` (e.g. the workflow resuming to `Running` after the question is answered).
+ * A backend that yields the clarification's `request_permission` on stream open, records every
+ * prompt/permission reply the operator sends, and optionally reacts to a reply with a follow-up
+ * `AcpAgentMessage`.
  */
 function aScriptedQuestionBackend(
-  initialMessage: ServerMessage,
-  onIntent?: (intent: ClientMessage) => ServerMessage | undefined,
+  initialMessage: AcpAgentMessage,
+  onReply?: (reply: AcpClientMessage) => AcpAgentMessage | undefined,
 ) {
-  const sentIntents: ClientMessage[] = [];
-  async function* stream(requests: AsyncIterable<ClientMessage>) {
-    const it = requests[Symbol.asyncIterator]();
-    await it.next(); // eager empty open frame — no intent, not under test
+  const sentIntents: AcpClientMessage[] = [];
+  async function* session(requests: AsyncIterable<AcpClientMessage>) {
     yield initialMessage;
-    for (;;) {
-      const { value, done } = await it.next();
-      if (done) return;
-      if (value.intent.case !== undefined) sentIntents.push(value);
-      const follow = onIntent?.(value);
+    for await (const req of requests) {
+      const c = req.msg.case;
+      if (c !== "prompt" && c !== "requestPermission") continue;
+      sentIntents.push(req);
+      const follow = onReply?.(req);
       if (follow) yield follow;
     }
   }
-  const backend = aSessionsDrawerBackend([PR_STACK_SESSION]).implement(TddyRemote, {
-    stream,
-    getSession: async () => ({}),
-    listSessions: async () => ({ sessions: [] }),
-  });
+  const backend = aSessionsDrawerBackend([PR_STACK_SESSION])
+    .implement(TddyRemote, {
+      getSession: async () => ({}),
+      listSessions: async () => ({ sessions: [] }),
+    })
+    .implement(AcpService, { session });
   return { backend, sentIntents };
 }
 
@@ -154,7 +122,7 @@ beforeEach(() => {
 
 it("renders the clarification question's header, text, and options when the presenter enters Select mode", () => {
   // Given
-  const { backend } = aScriptedQuestionBackend(selectModeMessage(aClarificationQuestion()));
+  const { backend } = aScriptedQuestionBackend(questionMessage(aClarificationQuestion()));
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -173,7 +141,7 @@ it("renders the clarification question's header, text, and options when the pres
 it("hides the free-text chat input while a select question is pending", () => {
   // Given / When — this is the exact bug: typing here would send QueuePrompt, which the
   // presenter drains into an inbox instead of answering the pending question
-  const { backend } = aScriptedQuestionBackend(selectModeMessage(aClarificationQuestion()));
+  const { backend } = aScriptedQuestionBackend(questionMessage(aClarificationQuestion()));
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
@@ -189,7 +157,7 @@ it("hides the free-text chat input while a select question is pending", () => {
 it("sends an AnswerSelect intent with the chosen option's index when an option is clicked", () => {
   // Given
   const { backend, sentIntents } = aScriptedQuestionBackend(
-    selectModeMessage(aClarificationQuestion()),
+    questionMessage(aClarificationQuestion()),
   );
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
@@ -197,17 +165,16 @@ it("sends an AnswerSelect intent with the chosen option's index when an option i
   // When
   prStackScreenPage.chatOption(1).click();
 
-  // Then
-  cy.wrap(sentIntents).should((intents) => {
-    expect(intents).to.have.length(1);
-    expect(intents[0].intent.case).to.equal("answerSelect");
-    expect(intents[0].intent.value.index).to.equal(1);
+  // Then — the reply selects option-1 (the agent decodes it to AnswerSelect(1)).
+  cy.wrap(sentIntents).should((sent) => {
+    expect(sent).to.have.length(1);
+    expect(selectedOptionId(sent[0])).to.equal("option-1");
   });
 });
 
 it("echoes the chosen option's label as a user chat bubble after answering a select question", () => {
   // Given
-  const { backend } = aScriptedQuestionBackend(selectModeMessage(aClarificationQuestion()));
+  const { backend } = aScriptedQuestionBackend(questionMessage(aClarificationQuestion()));
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
@@ -218,12 +185,9 @@ it("echoes the chosen option's label as a user chat bubble after answering a sel
   prStackScreenPage.chatMessage(0).should("exist").and("contain.text", "Cursor");
 });
 
-it("restores the free-text chat input after the workflow resumes running following an answered question", () => {
-  // Given — the presenter resumes Running once the operator answers
-  const { backend } = aScriptedQuestionBackend(
-    selectModeMessage(aClarificationQuestion()),
-    (intent) => (intent.intent.case === "answerSelect" ? runningModeMessage() : undefined),
-  );
+it("restores the free-text chat input after answering a question", () => {
+  // Given — a pending clarification (answering clears it client-side, restoring the free-text box)
+  const { backend } = aScriptedQuestionBackend(questionMessage(aClarificationQuestion()));
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
@@ -242,7 +206,7 @@ it("restores the free-text chat input after the workflow resumes running followi
 it("renders an Other input for a select question that allows a custom answer", () => {
   // Given / When
   const { backend } = aScriptedQuestionBackend(
-    selectModeMessage(aClarificationQuestion({ allowOther: true })),
+    questionMessage(aClarificationQuestion({ allowOther: true })),
   );
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
@@ -254,7 +218,7 @@ it("renders an Other input for a select question that allows a custom answer", (
 it("does not render an Other input for a select question that disallows a custom answer", () => {
   // Given / When
   const { backend } = aScriptedQuestionBackend(
-    selectModeMessage(aClarificationQuestion({ allowOther: false })),
+    questionMessage(aClarificationQuestion({ allowOther: false })),
   );
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
@@ -266,7 +230,7 @@ it("does not render an Other input for a select question that disallows a custom
 it("sends an AnswerOther intent with the typed text when a custom answer is submitted", () => {
   // Given
   const { backend, sentIntents } = aScriptedQuestionBackend(
-    selectModeMessage(aClarificationQuestion({ allowOther: true })),
+    questionMessage(aClarificationQuestion({ allowOther: true })),
   );
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
@@ -274,11 +238,10 @@ it("sends an AnswerOther intent with the typed text when a custom answer is subm
   // When
   prStackScreenPage.answerOther("Codex, actually.");
 
-  // Then
-  cy.wrap(sentIntents).should((intents) => {
-    expect(intents).to.have.length(1);
-    expect(intents[0].intent.case).to.equal("answerOther");
-    expect(intents[0].intent.value.text).to.equal("Codex, actually.");
+  // Then — the custom answer rides the option id (agent decodes it to AnswerOther(text)).
+  cy.wrap(sentIntents).should((sent) => {
+    expect(sent).to.have.length(1);
+    expect(selectedOptionId(sent[0])).to.equal("other:Codex, actually.");
   });
 });
 
@@ -291,14 +254,10 @@ it("renders the header, text, and a checkbox per option for a multi-select clari
   const question = aClarificationQuestion({
     header: "Reviewers",
     question: "Which reviewers should be requested on every PR in the stack?",
-    options: [
-      { label: "Alice", description: "Backend owner" },
-      { label: "Bob", description: "Frontend owner" },
-      { label: "Carol", description: "Infra owner" },
-    ],
+    labels: ["Alice", "Bob", "Carol"],
     multiSelect: true,
   });
-  const { backend } = aScriptedQuestionBackend(multiSelectModeMessage(question));
+  const { backend } = aScriptedQuestionBackend(questionMessage(question));
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -317,14 +276,10 @@ it("renders the header, text, and a checkbox per option for a multi-select clari
 it("sends an AnswerMultiSelect intent with all checked indices when Submit is clicked", () => {
   // Given
   const question = aClarificationQuestion({
-    options: [
-      { label: "Alice", description: "" },
-      { label: "Bob", description: "" },
-      { label: "Carol", description: "" },
-    ],
+    labels: ["Alice", "Bob", "Carol"],
     multiSelect: true,
   });
-  const { backend, sentIntents } = aScriptedQuestionBackend(multiSelectModeMessage(question));
+  const { backend, sentIntents } = aScriptedQuestionBackend(questionMessage(question));
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
@@ -333,26 +288,21 @@ it("sends an AnswerMultiSelect intent with all checked indices when Submit is cl
   prStackScreenPage.toggleMultiSelectOption(2);
   prStackScreenPage.submitMultiSelect();
 
-  // Then
-  cy.wrap(sentIntents).should((intents) => {
-    expect(intents).to.have.length(1);
-    expect(intents[0].intent.case).to.equal("answerMultiSelect");
-    expect(intents[0].intent.value.indices).to.deep.equal([0, 2]);
-    expect(intents[0].intent.value.other).to.equal("");
+  // Then — the reply encodes the checked indices (agent decodes to AnswerMultiSelect([0,2])).
+  cy.wrap(sentIntents).should((sent) => {
+    expect(sent).to.have.length(1);
+    expect(selectedOptionId(sent[0])).to.equal("multi:0,2");
   });
 });
 
 it("includes the typed Other text in the AnswerMultiSelect intent when submitted", () => {
   // Given
   const question = aClarificationQuestion({
-    options: [
-      { label: "Alice", description: "" },
-      { label: "Bob", description: "" },
-    ],
+    labels: ["Alice", "Bob"],
     multiSelect: true,
     allowOther: true,
   });
-  const { backend, sentIntents } = aScriptedQuestionBackend(multiSelectModeMessage(question));
+  const { backend, sentIntents } = aScriptedQuestionBackend(questionMessage(question));
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 
@@ -361,19 +311,17 @@ it("includes the typed Other text in the AnswerMultiSelect intent when submitted
   prStackScreenPage.typeOtherText("Dave too, he's on-call.");
   prStackScreenPage.submitMultiSelect();
 
-  // Then
-  cy.wrap(sentIntents).should((intents) => {
-    expect(intents).to.have.length(1);
-    expect(intents[0].intent.case).to.equal("answerMultiSelect");
-    expect(intents[0].intent.value.indices).to.deep.equal([1]);
-    expect(intents[0].intent.value.other).to.equal("Dave too, he's on-call.");
+  // Then — the checked index + custom text ride the option id (agent decodes to AnswerMultiSelect).
+  cy.wrap(sentIntents).should((sent) => {
+    expect(sent).to.have.length(1);
+    expect(selectedOptionId(sent[0])).to.equal("multi:1;other=Dave too, he's on-call.");
   });
 });
 
 it("does not render an Other input for a multi-select question that disallows a custom answer", () => {
   // Given / When
   const question = aClarificationQuestion({ multiSelect: true, allowOther: false });
-  const { backend } = aScriptedQuestionBackend(multiSelectModeMessage(question));
+  const { backend } = aScriptedQuestionBackend(questionMessage(question));
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
 

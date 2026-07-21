@@ -1839,7 +1839,11 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     crate::session_participant::terminal_manager::TerminalManager::new(),
                 ),
             };
-            let mut livekit_entries = vec![
+            // Transport-specific base services; the Presenter view-adapters (`TddyRemote` **and** the
+            // ACP mirror `AcpService`) + reflection are mounted by `session_view_adapter_surface` so
+            // this LiveKit surface can never diverge from the other transports on which services the
+            // PR-Stack Chat Screen can reach (the exact bug that left `AcpService` unregistered here).
+            let livekit_base = vec![
                 tddy_rpc::ServiceEntry {
                     name: "terminal.TerminalService",
                     service: std::sync::Arc::new(tddy_service::TerminalServiceServer::new(
@@ -1854,27 +1858,16 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         tddy_service::LoopbackTunnelServiceImpl,
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
-                // The PR-Stack Chat Screen reaches the session's workflow through this entry — the
-                // Presenter (single source of truth) exposed via its `connect_view` view-factory,
-                // identical to the interactive TUI's LiveKit surface. Without it, TddyRemote.Stream
-                // requests over the LiveKit data channel have no handler and vanish silently.
-                tddy_rpc::ServiceEntry {
-                    name: tddy_service::TddyRemoteServer::<tddy_service::TddyRemoteService>::NAME,
-                    service: std::sync::Arc::new(tddy_service::TddyRemoteServer::new(
-                        tddy_service::TddyRemoteService::with_view_factory(
-                            view_factory
-                                .clone()
-                                .expect("view_factory present when livekit_enabled"),
-                        ),
-                    )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
-                },
                 crate::session_participant::session_connection_service_entry(
                     session_connection_svc,
                 ),
             ];
-            let livekit_names: Vec<&str> = livekit_entries.iter().map(|e| e.name).collect();
-            livekit_entries.push(tddy_service::reflection_entry_from(&livekit_names));
-            let livekit_multi = tddy_rpc::MultiRpcService::new(livekit_entries);
+            let livekit_multi = tddy_service::session_view_adapter_surface(
+                livekit_base,
+                view_factory
+                    .clone()
+                    .expect("view_factory present when livekit_enabled"),
+            );
             if has_key_secret {
                 let token_generator = tddy_livekit::TokenGenerator::new(
                     args.livekit_api_key.as_ref().unwrap().clone(),

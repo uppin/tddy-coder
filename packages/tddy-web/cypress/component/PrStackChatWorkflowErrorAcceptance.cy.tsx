@@ -12,12 +12,13 @@
  */
 
 import React from "react";
-import { create } from "@bufbuild/protobuf";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { TddyRemote, ServerMessageSchema } from "../../src/gen/tddy/v1/remote_pb";
+import { TddyRemote } from "../../src/gen/tddy/v1/remote_pb";
+import { AcpService } from "../../src/gen/tddy/acp/v1/acp_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
+import { acpError, acpScriptedSession } from "../support/rpc/acpSession";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 
@@ -42,21 +43,14 @@ const PR_STACK_SESSION = {
 };
 
 /**
- * Yields a single failed `WorkflowComplete` — exactly what the daemon emits when the workflow's
- * coding agent invocation fails hard, instead of ever producing an `AgentOutput`.
+ * A failed workflow: the daemon maps `WorkflowComplete { ok: false }` to an ACP `error` frame, which
+ * the chat surfaces in its inline error banner (instead of ever producing an `AgentMessageChunk`).
  */
-async function* aFailedWorkflowCompleteMessage() {
-  yield create(ServerMessageSchema, {
-    event: {
-      case: "workflowComplete",
-      value: {
-        ok: false,
-        message:
-          "Claude Code CLI exited with code 1: No conversation found with session ID: pr-stack-workflow-error",
-      },
-    },
-  });
-}
+const aFailedWorkflowCompleteMessage = acpScriptedSession(
+  acpError(
+    "Claude Code CLI exited with code 1: No conversation found with session ID: pr-stack-workflow-error",
+  ),
+);
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -75,11 +69,12 @@ beforeEach(() => {
 
 it("shows an inline error when the workflow fails instead of leaving the chat silently empty", () => {
   // Given — a presenter stream whose workflow fails (a failed WorkflowComplete, never an AgentOutput)
-  const backend = aSessionsDrawerBackend([PR_STACK_SESSION]).implement(TddyRemote, {
-    stream: aFailedWorkflowCompleteMessage,
-    getSession: async () => ({}),
-    listSessions: async () => ({ sessions: [] }),
-  });
+  const backend = aSessionsDrawerBackend([PR_STACK_SESSION])
+    .implement(TddyRemote, {
+      getSession: async () => ({}),
+      listSessions: async () => ({ sessions: [] }),
+    })
+    .implement(AcpService, { session: aFailedWorkflowCompleteMessage });
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);

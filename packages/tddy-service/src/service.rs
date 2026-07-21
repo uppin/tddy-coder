@@ -132,12 +132,21 @@ pub fn session_view_adapter_surface(
     mut base_entries: Vec<tddy_rpc::ServiceEntry>,
     view_factory: std::sync::Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>,
 ) -> tddy_rpc::MultiRpcService {
+    use crate::proto::acp::AcpServiceServer;
     use crate::proto::remote::TddyRemoteServer;
     base_entries.push(tddy_rpc::ServiceEntry {
         name: TddyRemoteServer::<TddyRemoteService>::NAME,
         service: std::sync::Arc::new(TddyRemoteServer::new(TddyRemoteService::with_view_factory(
-            view_factory,
+            view_factory.clone(),
         ))) as std::sync::Arc<dyn tddy_rpc::RpcService>,
+    });
+    // ACP mirror over the same Presenter view: a browser (or any ACP client) can drive this
+    // session via `AcpService.Session` on the very same transport that carries `TddyRemote`.
+    base_entries.push(tddy_rpc::ServiceEntry {
+        name: AcpServiceServer::<crate::service_acp::TddyAcpService>::NAME,
+        service: std::sync::Arc::new(AcpServiceServer::new(
+            crate::service_acp::TddyAcpService::with_view_factory(view_factory),
+        )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
     });
     let names: Vec<&str> = base_entries.iter().map(|e| e.name).collect();
     base_entries.push(crate::reflection_entry_from(&names));

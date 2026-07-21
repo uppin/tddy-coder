@@ -27,6 +27,19 @@ export interface ChatMessage {
   key: string;
   text: string;
   from: "user" | "agent" | "goal" | "activity";
+  /** Epoch ms when this message was first shown — used for the exported transcript timeline. */
+  at: number;
+}
+
+/** A clarification the workflow paused on, recorded for the transcript timeline (kept separate from
+ *  `messages` so it doesn't shift the index-addressed chat bubbles). */
+export interface ElicitationPoint {
+  at: number;
+  kind: "select" | "multiSelect";
+  header: string;
+  question: string;
+  options: string[];
+  allowOther: boolean;
 }
 
 export interface PendingQuestionOption {
@@ -44,6 +57,8 @@ export interface PendingQuestion {
 
 export interface UseAgentChatResult {
   messages: ChatMessage[];
+  /** Clarification points, in arrival order — merged with `messages` by timestamp for the export. */
+  elicitations: ElicitationPoint[];
   /** Enqueues `text` onto the open stream. Returns `false` (and enqueues nothing) when there is no live client to send over, or when the presenter's own participant is no longer in the room. */
   sendPrompt: (text: string) => boolean;
   /** The clarification question the presenter is currently blocked on (`AppMode::Select` /
@@ -128,6 +143,12 @@ export function useAgentChat(
   }, [liveKitFactory, canBuildClient, room, serverIdentity]);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [elicitations, setElicitations] = useState<ElicitationPoint[]>([]);
+  const elicitationsRef = useRef<ElicitationPoint[]>([]);
+  const recordElicitation = (e: ElicitationPoint) => {
+    elicitationsRef.current = [...elicitationsRef.current, e];
+    setElicitations(elicitationsRef.current);
+  };
   const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -163,7 +184,7 @@ export function useAgentChat(
     messagesRef.current[i] = { ...messagesRef.current[i], text };
   };
   const pushAgentLine = (text: string) => {
-    messagesRef.current.push({ key: `agent-line-${agentKeyRef.current++}`, text, from: "agent" });
+    messagesRef.current.push({ key: `agent-line-${agentKeyRef.current++}`, text, from: "agent", at: Date.now() });
   };
   /** A finalized line (delta buffer flushed on `\n`): replace the in-progress partial row, else
    *  append — but drop a re-emitted snapshot identical to the line already shown. */
@@ -215,6 +236,8 @@ export function useAgentChat(
 
   useEffect(() => {
     setMessages([]);
+    setElicitations([]);
+    elicitationsRef.current = [];
     setPendingQuestion(null);
     setStreamError(null);
     setSendError(null);
@@ -275,6 +298,16 @@ export function useAgentChat(
                     }
                   : null,
               );
+              if (question) {
+                recordElicitation({
+                  at: Date.now(),
+                  kind: variant.case,
+                  header: question.header,
+                  question: question.question,
+                  options: question.options.map((o) => o.label),
+                  allowOther: question.allowOther,
+                });
+              }
             } else {
               setPendingQuestion(null);
             }
@@ -289,7 +322,7 @@ export function useAgentChat(
           } else if (kind === "goalStarted") {
             const goal = serverMessage.event.value.goal;
             dbg("recv #%d goalStarted -> %o", eventCount, goal);
-            messagesRef.current.push({ key: `system-${systemKeyRef.current++}`, text: goal, from: "goal" });
+            messagesRef.current.push({ key: `system-${systemKeyRef.current++}`, text: goal, from: "goal", at: Date.now() });
             setMessages(messagesRef.current.slice());
           } else if (kind === "activityLogged") {
             const activity = serverMessage.event.value;
@@ -299,6 +332,7 @@ export function useAgentChat(
                 key: `system-${systemKeyRef.current++}`,
                 text: activity.text,
                 from: "activity",
+                at: Date.now(),
               });
               setMessages(messagesRef.current.slice());
             }
@@ -349,7 +383,7 @@ export function useAgentChat(
       : create(ClientMessageSchema, { intent: { case: "queuePrompt", value: { text } } });
     queueRef.current.enqueue(clientMessage);
     setSendError(null);
-    messagesRef.current.push({ key: `user-sent-${sentIndexRef.current++}`, text, from: "user" });
+    messagesRef.current.push({ key: `user-sent-${sentIndexRef.current++}`, text, from: "user", at: Date.now() });
     setMessages(messagesRef.current.slice());
     return true;
   };
@@ -376,7 +410,7 @@ export function useAgentChat(
     );
     setSendError(null);
     const label = pendingQuestion?.options[index]?.label ?? "";
-    messagesRef.current.push({ key: `user-sent-${sentIndexRef.current++}`, text: label, from: "user" });
+    messagesRef.current.push({ key: `user-sent-${sentIndexRef.current++}`, text: label, from: "user", at: Date.now() });
     setMessages(messagesRef.current.slice());
     return true;
   };
@@ -388,7 +422,7 @@ export function useAgentChat(
       create(ClientMessageSchema, { intent: { case: "answerOther", value: { text } } }),
     );
     setSendError(null);
-    messagesRef.current.push({ key: `user-sent-${sentIndexRef.current++}`, text, from: "user" });
+    messagesRef.current.push({ key: `user-sent-${sentIndexRef.current++}`, text, from: "user", at: Date.now() });
     setMessages(messagesRef.current.slice());
     return true;
   };
@@ -407,6 +441,7 @@ export function useAgentChat(
 
   return {
     messages,
+    elicitations,
     sendPrompt,
     pendingQuestion,
     answerSelect,

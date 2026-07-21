@@ -16,8 +16,9 @@ export interface PrStackChatProps {
 
 /**
  * PR-Stack-specific adapter over the reusable {@link AgentChat}: derives the input placeholder from
- * the session id and forwards the presenter room wiring. The chat behavior itself now lives in the
- * recipe-agnostic `AgentChat` / `useAgentChat`.
+ * the session id and forwards the presenter room wiring. Drives the chat over the **ACP mirror**
+ * (`AcpService.Session`, via `useAcpSession`) rather than `TddyRemote.Stream` — both ride the same
+ * LiveKit session connection; `acp` selects the ACP client.
  */
 export function PrStackChat({
   session,
@@ -28,6 +29,7 @@ export function PrStackChat({
 }: PrStackChatProps) {
   return (
     <AgentChat
+      acp
       room={room}
       livekitServerIdentity={livekitServerIdentity}
       placeholder={`Message ${session.sessionId.slice(0, 8)}…`}

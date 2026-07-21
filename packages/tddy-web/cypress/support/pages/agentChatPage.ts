@@ -39,6 +39,10 @@ export const agentChatPage = {
   chatSendBtn: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.agentChatSendBtn, { timeout: 5000, ...options }),
 
+  /** The transcript-export button. */
+  chatExportBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.agentChatExportBtn, { timeout: 5000, ...options }),
+
   /** The chat's inline error banner. */
   chatError: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.agentChatError, { timeout: 5000, ...options }),

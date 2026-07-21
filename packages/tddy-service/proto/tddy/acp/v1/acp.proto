@@ -1,0 +1,388 @@
+syntax = "proto3";
+
+package tddy.acp.v1;
+
+// AcpService: a protobuf mirror of the Agent Client Protocol (ACP), carried on the same
+// transport-agnostic `tddy_rpc` surface as `TddyRemote` (LiveKit session connection, gRPC, stdio).
+//
+// ACP is a *bidirectional* JSON-RPC protocol: the client calls the agent (initialize, new_session,
+// load_session, prompt, cancel) and the agent calls the client back (session/update notifications,
+// session/request_permission). We mirror that over one bidi stream whose envelopes carry an
+// application-level `id` for request/response correlation — exactly like JSON-RPC ids, and distinct
+// from the `tddy_rpc` (peer, request_id) that identifies the single `Session` bidi call itself.
+//
+// Message, field and enum names are kept 1:1 with the `agent-client-protocol` crate so translating
+// a JSON-RPC ACP peer to/from this RPC is mechanical. Where a type is not yet exercised by tddy
+// (fs/*, terminal/*, some SessionUpdate variants) the name is mirrored but the agent leaves it
+// unhandled; full behavioural parity is a follow-on.
+service AcpService {
+  rpc Session(stream AcpClientMessage) returns (stream AcpAgentMessage);
+}
+
+// --- Bidi envelopes -------------------------------------------------------------------------
+
+// Client -> Agent. `id` correlates a request with its `AcpAgentMessage` reply (0 for the `cancel`
+// notification, which has no reply). `request_permission` is the client's *reply* to an agent's
+// RequestPermissionRequest and echoes that request's `id`.
+message AcpClientMessage {
+  uint64 id = 1;
+  oneof msg {
+    InitializeRequest initialize = 2;
+    AuthenticateRequest authenticate = 3;
+    NewSessionRequest new_session = 4;
+    LoadSessionRequest load_session = 5;
+    PromptRequest prompt = 6;
+    CancelNotification cancel = 7;
+    RequestPermissionResponse request_permission = 8;
+  }
+}
+
+// Agent -> Client. Responses echo the initiating `AcpClientMessage.id`. `session_update` is an
+// unsolicited notification (no correlation). `request_permission` is an agent-initiated request
+// whose reply comes back as an `AcpClientMessage.request_permission` with the same `id`.
+message AcpAgentMessage {
+  uint64 id = 1;
+  oneof msg {
+    InitializeResponse initialize = 2;
+    AuthenticateResponse authenticate = 3;
+    NewSessionResponse new_session = 4;
+    LoadSessionResponse load_session = 5;
+    PromptResponse prompt = 6;
+    SessionNotification session_update = 7;
+    RequestPermissionRequest request_permission = 8;
+    AcpError error = 9;
+  }
+}
+
+// JSON-RPC-style error reply, correlated to a request by `AcpAgentMessage.id`. Mirrors
+// `acp::Error` (internal_error / invalid_params / method_not_found …).
+message AcpError {
+  int64 code = 1;
+  string message = 2;
+  optional string data = 3; // optional structured data, JSON-encoded
+}
+
+// --- Initialize -----------------------------------------------------------------------------
+
+enum ProtocolVersion {
+  PROTOCOL_VERSION_UNSPECIFIED = 0;
+  PROTOCOL_VERSION_V1 = 1;
+}
+
+message Implementation {
+  string name = 1;
+  string version = 2;
+  optional string title = 3;
+}
+
+// Only `load_session` is advertised today; remaining ACP capabilities are name-mirrored follow-ons.
+message AgentCapabilities {
+  bool load_session = 1;
+}
+
+message ClientCapabilities {
+  // fs/terminal client capabilities — mirrored later.
+}
+
+message InitializeRequest {
+  ProtocolVersion protocol_version = 1;
+  optional Implementation client_info = 2;
+  ClientCapabilities client_capabilities = 3;
+}
+
+message InitializeResponse {
+  ProtocolVersion protocol_version = 1;
+  AgentCapabilities agent_capabilities = 2;
+  optional Implementation agent_info = 3;
+}
+
+// --- Authenticate ---------------------------------------------------------------------------
+
+message AuthenticateRequest {
+  optional string method_id = 1;
+}
+
+message AuthenticateResponse {}
+
+// --- Sessions -------------------------------------------------------------------------------
+
+// ACP `SessionId` is a newtype around a string.
+message SessionId {
+  string value = 1;
+}
+
+message NewSessionRequest {
+  string cwd = 1;
+  // mcp_servers etc. mirrored later.
+}
+
+message NewSessionResponse {
+  SessionId session_id = 1;
+  optional SessionModelState models = 2;
+}
+
+message LoadSessionRequest {
+  SessionId session_id = 1;
+  string cwd = 2;
+}
+
+message LoadSessionResponse {
+  optional SessionModelState models = 1;
+}
+
+message CancelNotification {
+  SessionId session_id = 1;
+}
+
+// --- Model catalog --------------------------------------------------------------------------
+
+message ModelInfo {
+  string model_id = 1;
+  string name = 2;
+}
+
+message SessionModelState {
+  repeated ModelInfo available_models = 1;
+  string current_model_id = 2;
+}
+
+// --- Prompt / turn --------------------------------------------------------------------------
+
+message PromptRequest {
+  SessionId session_id = 1;
+  repeated ContentBlock prompt = 2;
+}
+
+enum StopReason {
+  STOP_REASON_UNSPECIFIED = 0;
+  STOP_REASON_END_TURN = 1;
+  STOP_REASON_CANCELLED = 2;
+  STOP_REASON_MAX_TOKENS = 3;
+  STOP_REASON_MAX_TURN_REQUESTS = 4;
+  STOP_REASON_REFUSAL = 5;
+}
+
+message PromptResponse {
+  StopReason stop_reason = 1;
+}
+
+// --- Content blocks -------------------------------------------------------------------------
+
+message ContentBlock {
+  oneof block {
+    TextContent text = 1;
+    ImageContent image = 2;
+    AudioContent audio = 3;
+    ResourceLink resource_link = 4;
+    EmbeddedResource resource = 5;
+  }
+}
+
+message TextContent {
+  string text = 1;
+}
+
+message ImageContent {
+  string data = 1; // base64
+  string mime_type = 2;
+  optional string uri = 3;
+}
+
+message AudioContent {
+  string data = 1; // base64
+  string mime_type = 2;
+}
+
+message ResourceLink {
+  string uri = 1;
+  string name = 2;
+  optional string title = 3;
+  optional string description = 4;
+  optional string mime_type = 5;
+  optional int64 size = 6;
+}
+
+message EmbeddedResource {
+  oneof resource {
+    TextResourceContents text = 1;
+    BlobResourceContents blob = 2;
+  }
+}
+
+message TextResourceContents {
+  string uri = 1;
+  optional string mime_type = 2;
+  string text = 3;
+}
+
+message BlobResourceContents {
+  string uri = 1;
+  optional string mime_type = 2;
+  string blob = 3; // base64
+}
+
+// --- Session updates ------------------------------------------------------------------------
+
+message ContentChunk {
+  ContentBlock content = 1;
+}
+
+message SessionNotification {
+  SessionId session_id = 1;
+  SessionUpdate update = 2;
+}
+
+message SessionUpdate {
+  oneof update {
+    ContentChunk user_message_chunk = 1;
+    ContentChunk agent_message_chunk = 2;
+    ContentChunk agent_thought_chunk = 3;
+    ToolCall tool_call = 4;
+    ToolCallUpdate tool_call_update = 5;
+    Plan plan = 6;
+    AvailableCommandsUpdate available_commands_update = 7;
+    CurrentModeUpdate current_mode_update = 8;
+  }
+}
+
+// --- Tool calls -----------------------------------------------------------------------------
+
+message ToolCallId {
+  string value = 1;
+}
+
+enum ToolCallStatus {
+  TOOL_CALL_STATUS_UNSPECIFIED = 0;
+  TOOL_CALL_STATUS_PENDING = 1;
+  TOOL_CALL_STATUS_IN_PROGRESS = 2;
+  TOOL_CALL_STATUS_COMPLETED = 3;
+  TOOL_CALL_STATUS_FAILED = 4;
+}
+
+enum ToolKind {
+  TOOL_KIND_UNSPECIFIED = 0;
+  TOOL_KIND_READ = 1;
+  TOOL_KIND_EDIT = 2;
+  TOOL_KIND_DELETE = 3;
+  TOOL_KIND_MOVE = 4;
+  TOOL_KIND_SEARCH = 5;
+  TOOL_KIND_EXECUTE = 6;
+  TOOL_KIND_THINK = 7;
+  TOOL_KIND_FETCH = 8;
+  TOOL_KIND_OTHER = 9;
+}
+
+message ToolCallLocation {
+  string path = 1;
+  optional uint32 line = 2;
+}
+
+// `content` (ToolCallContent) is mirrored later; the used subset is id + title (+ optional kind,
+// status, locations, raw_input). `raw_input`/`raw_output` carry ACP's arbitrary JSON as strings.
+message ToolCall {
+  ToolCallId tool_call_id = 1;
+  string title = 2;
+  ToolKind kind = 3;
+  ToolCallStatus status = 4;
+  repeated ToolCallLocation locations = 5;
+  optional string raw_input = 6;
+  optional string raw_output = 7;
+}
+
+message ToolCallUpdate {
+  ToolCallId tool_call_id = 1;
+  ToolCallUpdateFields fields = 2;
+}
+
+message ToolCallUpdateFields {
+  optional string title = 1;
+  optional ToolKind kind = 2;
+  optional ToolCallStatus status = 3;
+  repeated ToolCallLocation locations = 4;
+  optional string raw_input = 5;
+  optional string raw_output = 6;
+}
+
+// --- Plan -----------------------------------------------------------------------------------
+
+enum PlanEntryPriority {
+  PLAN_ENTRY_PRIORITY_UNSPECIFIED = 0;
+  PLAN_ENTRY_PRIORITY_HIGH = 1;
+  PLAN_ENTRY_PRIORITY_MEDIUM = 2;
+  PLAN_ENTRY_PRIORITY_LOW = 3;
+}
+
+enum PlanEntryStatus {
+  PLAN_ENTRY_STATUS_UNSPECIFIED = 0;
+  PLAN_ENTRY_STATUS_PENDING = 1;
+  PLAN_ENTRY_STATUS_IN_PROGRESS = 2;
+  PLAN_ENTRY_STATUS_COMPLETED = 3;
+}
+
+message PlanEntry {
+  string content = 1;
+  PlanEntryPriority priority = 2;
+  PlanEntryStatus status = 3;
+}
+
+message Plan {
+  repeated PlanEntry entries = 1;
+}
+
+// --- Slash commands / modes (name-mirrored, unhandled today) --------------------------------
+
+message AvailableCommand {
+  string name = 1;
+  string description = 2;
+}
+
+message AvailableCommandsUpdate {
+  repeated AvailableCommand available_commands = 1;
+}
+
+message CurrentModeUpdate {
+  string current_mode_id = 1;
+}
+
+// --- Permissions ----------------------------------------------------------------------------
+
+message PermissionOptionId {
+  string value = 1;
+}
+
+enum PermissionOptionKind {
+  PERMISSION_OPTION_KIND_UNSPECIFIED = 0;
+  PERMISSION_OPTION_KIND_ALLOW_ONCE = 1;
+  PERMISSION_OPTION_KIND_ALLOW_ALWAYS = 2;
+  PERMISSION_OPTION_KIND_REJECT_ONCE = 3;
+  PERMISSION_OPTION_KIND_REJECT_ALWAYS = 4;
+}
+
+message PermissionOption {
+  PermissionOptionId option_id = 1;
+  string name = 2;
+  PermissionOptionKind kind = 3;
+}
+
+message RequestPermissionRequest {
+  SessionId session_id = 1;
+  ToolCallUpdate tool_call = 2;
+  repeated PermissionOption options = 3;
+}
+
+message RequestPermissionResponse {
+  RequestPermissionOutcome outcome = 1;
+}
+
+message RequestPermissionOutcome {
+  oneof outcome {
+    Cancelled cancelled = 1;
+    SelectedPermissionOutcome selected = 2;
+  }
+}
+
+message Cancelled {}
+
+message SelectedPermissionOutcome {
+  PermissionOptionId option_id = 1;
+}

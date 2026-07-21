@@ -10,12 +10,13 @@
  */
 
 import React from "react";
-import { create } from "@bufbuild/protobuf";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { TddyRemote, ServerMessageSchema } from "../../src/gen/tddy/v1/remote_pb";
+import { TddyRemote } from "../../src/gen/tddy/v1/remote_pb";
+import { AcpService } from "../../src/gen/tddy/acp/v1/acp_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
+import { acpAgentChunk, acpScriptedSession } from "../support/rpc/acpSession";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 
@@ -40,22 +41,15 @@ const SENTENCE = 'The feature request is only "hi".';
 /**
  * Streams the sentence token-by-token (as the cursor backend does), then the terminating newline,
  * then the whole sentence again as one full-line snapshot — the exact double-emit that produced
- * per-token line breaks + a duplicated compound sentence in the UI.
+ * per-token line breaks + a duplicated compound sentence in the UI. Over ACP each is an
+ * `agent_message_chunk`.
  */
-async function* streamedTokensThenDuplicateFullLine() {
-  const tokens = ["The", " feature", " request", " is", " only", ' "', "hi", '".'];
-  for (const token of tokens) {
-    yield create(ServerMessageSchema, {
-      event: { case: "agentOutput", value: { text: token } },
-    });
-  }
-  yield create(ServerMessageSchema, {
-    event: { case: "agentOutput", value: { text: "\n" } },
-  });
-  yield create(ServerMessageSchema, {
-    event: { case: "agentOutput", value: { text: `${SENTENCE}\n` } },
-  });
-}
+const STREAMED_TOKENS = ["The", " feature", " request", " is", " only", ' "', "hi", '".'];
+const streamedTokensThenDuplicateFullLine = acpScriptedSession(
+  ...STREAMED_TOKENS.map(acpAgentChunk),
+  acpAgentChunk("\n"),
+  acpAgentChunk(`${SENTENCE}\n`),
+);
 
 beforeEach(() => {
   cy.viewport(1280, 800);
@@ -66,11 +60,12 @@ beforeEach(() => {
 
 it("merges streamed agent tokens into a single chat bubble with no per-token lines or duplicate", () => {
   // Given — a presenter stream that emits the sentence token-by-token, then a duplicate full line
-  const backend = aSessionsDrawerBackend([PR_STACK_SESSION]).implement(TddyRemote, {
-    stream: streamedTokensThenDuplicateFullLine,
-    getSession: async () => ({}),
-    listSessions: async () => ({ sessions: [] }),
-  });
+  const backend = aSessionsDrawerBackend([PR_STACK_SESSION])
+    .implement(TddyRemote, {
+      getSession: async () => ({}),
+      listSessions: async () => ({ sessions: [] }),
+    })
+    .implement(AcpService, { session: streamedTokensThenDuplicateFullLine });
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);

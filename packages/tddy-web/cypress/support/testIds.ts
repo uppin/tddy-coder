@@ -287,6 +287,7 @@ export const TEST_IDS = {
   agentChatMessages: "agent-chat-messages",
   agentChatInput: "agent-chat-input",
   agentChatSendBtn: "agent-chat-send-btn",
+  agentChatExportBtn: "agent-chat-export-btn",
   agentChatError: "agent-chat-error",
   agentChatConnecting: "agent-chat-connecting",
   agentChatStatus: "agent-chat-status",

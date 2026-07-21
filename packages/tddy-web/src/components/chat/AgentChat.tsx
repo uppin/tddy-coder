@@ -2,7 +2,9 @@ import React, { useEffect, useState } from "react";
 import type { Room } from "livekit-client";
 import type { CommonRoomStatus } from "../../hooks/useCommonRoom";
 import { Button } from "../ui/button";
-import { useAgentChat } from "./useAgentChat";
+import { useAgentChat, type UseAgentChatResult } from "./useAgentChat";
+import { useAcpSession } from "./useAcpSession";
+import { buildChatTranscript, downloadTextFile } from "./chatTranscript";
 
 const STATUS_LABEL: Record<CommonRoomStatus, string> = {
   idle: "Not connected",
@@ -20,22 +22,40 @@ export interface AgentChatProps {
   roomStatus?: CommonRoomStatus;
   /** Error from the room connection attempt — only meaningful when `roomStatus === "error"`. */
   roomError?: string | null;
+  /** Drive the session over the ACP protobuf mirror (`AcpService.Session`) instead of the default
+   *  `TddyRemote.Stream`. Both ride the same LiveKit session connection and render identically. */
+  acp?: boolean;
 }
 
 /**
- * Recipe-agnostic chat window over a session's remote Presenter (`TddyRemote.Stream`). Inbound
- * `AgentOutput` events render as bubbles; the operator's input is sent as `UserIntent`s. Takes a
- * plain `placeholder` string rather than any session/recipe type, so it can back any workflow view.
+ * Recipe-agnostic chat window over a session's remote agent. By default it speaks the Presenter's
+ * `TddyRemote.Stream`; with `acp`, it speaks the ACP protobuf mirror (`AcpService.Session`) over the
+ * same LiveKit session connection. Hook selection lives in the two backed wrappers below so neither
+ * hook is called conditionally; the presentation (`AgentChatView`) is shared.
  */
-export function AgentChat({
-  room,
-  livekitServerIdentity,
+export function AgentChat(props: AgentChatProps) {
+  return props.acp ? <AcpBackedChat {...props} /> : <RemoteBackedChat {...props} />;
+}
+
+function RemoteBackedChat(props: AgentChatProps) {
+  const chat = useAgentChat(props.room, props.livekitServerIdentity || "server");
+  return <AgentChatView {...props} chat={chat} />;
+}
+
+function AcpBackedChat(props: AgentChatProps) {
+  const chat = useAcpSession(props.room, props.livekitServerIdentity || "server");
+  return <AgentChatView {...props} chat={chat} />;
+}
+
+function AgentChatView({
   placeholder,
   roomStatus = "idle",
   roomError = null,
-}: AgentChatProps) {
+  chat,
+}: AgentChatProps & { chat: UseAgentChatResult }) {
   const {
     messages,
+    elicitations,
     sendPrompt,
     pendingQuestion,
     answerSelect,
@@ -44,8 +64,13 @@ export function AgentChat({
     streamError,
     sendError,
     workflowError,
-  } = useAgentChat(room, livekitServerIdentity || "server");
+  } = chat;
   const [draft, setDraft] = useState("");
+
+  const handleExport = () => {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    downloadTextFile(`chat-transcript-${stamp}.txt`, buildChatTranscript(messages, elicitations));
+  };
   const [checkedIndices, setCheckedIndices] = useState<number[]>([]);
   const [otherDraft, setOtherDraft] = useState("");
   const isConnecting = roomStatus === "connecting";
@@ -91,11 +116,21 @@ export function AgentChat({
 
   return (
     <div data-testid="agent-chat" className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
-      <div
-        data-testid="agent-chat-status"
-        className="flex-shrink-0 px-3 pt-2 text-xs text-muted-foreground"
-      >
-        {STATUS_LABEL[roomStatus]}
+      <div className="flex-shrink-0 flex items-center justify-between px-3 pt-2">
+        <span data-testid="agent-chat-status" className="text-xs text-muted-foreground">
+          {STATUS_LABEL[roomStatus]}
+        </span>
+        <Button
+          data-testid="agent-chat-export-btn"
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-xs"
+          onClick={handleExport}
+          disabled={messages.length === 0 && elicitations.length === 0}
+          title="Export the chat transcript (with timestamps and clarification points) as a .txt file"
+        >
+          Export
+        </Button>
       </div>
       {isConnecting && (
         <div

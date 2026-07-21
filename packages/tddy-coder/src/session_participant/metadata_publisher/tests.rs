@@ -215,6 +215,7 @@ fn apply_mode_changed_sets_pending_elicitation_for_an_elicitation_mode() {
             },
             plan_refinement_pending: false,
             skills_project_root: None,
+            awaiting_open_answer: false,
         }),
     );
 
@@ -238,6 +239,7 @@ fn apply_mode_changed_seeds_state_from_running_only_when_state_is_empty() {
             mode: AppMode::Running,
             plan_refinement_pending: false,
             skills_project_root: None,
+            awaiting_open_answer: false,
         }),
     );
 
@@ -260,6 +262,7 @@ fn apply_mode_changed_seeds_state_from_running_only_when_state_is_empty() {
             mode: AppMode::Running,
             plan_refinement_pending: false,
             skills_project_root: None,
+            awaiting_open_answer: false,
         }),
     );
     assert!(
