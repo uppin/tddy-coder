@@ -25,41 +25,68 @@ pub struct SubagentReplacement<'a> {
 /// the listed tools. With an empty `replacements` slice (or every entry's `replaced` empty), this
 /// is exactly [`SANDBOX_REMOTE_APPENDIX`]. Otherwise one enforcement paragraph is appended naming
 /// each replacing agent next to its own replaced tools.
+///
+/// A replaced `Shell` gets its own paragraph instead of the generic subagent-delegation hint:
+/// commands then run only through declarative **session actions** (`request_action` — authored
+/// by the Shell-replacing agent — then `invoke_action`; see docs/ft/coder/no-bash-mode.md).
 pub fn sandbox_remote_appendix(replacements: &[SubagentReplacement<'_>]) -> String {
     let mut appendix = SANDBOX_REMOTE_APPENDIX.to_string();
 
-    let active: Vec<&SubagentReplacement> = replacements
+    let shell_author = replacements
         .iter()
-        .filter(|r| !r.replaced.is_empty())
-        .collect();
-    if active.is_empty() {
-        return appendix;
-    }
+        .find(|r| r.replaced.contains(&"Shell"))
+        .map(|r| r.name);
 
-    let clauses: Vec<String> = active
+    // Generic delegation clauses cover every replaced tool except Shell, whose replacement is
+    // surfaced through the session-action tools rather than subagent_prompt.
+    let clauses: Vec<String> = replacements
         .iter()
-        .map(|r| {
-            format!(
+        .filter_map(|r| {
+            let delegated: Vec<&str> = r
+                .replaced
+                .iter()
+                .filter(|t| **t != "Shell")
+                .copied()
+                .collect();
+            if delegated.is_empty() {
+                return None;
+            }
+            Some(format!(
                 "{} — handled by the `{}` subagent",
-                r.replaced.join(", "),
+                delegated.join(", "),
                 r.name
-            )
+            ))
         })
         .collect();
-    let agent_hint = if active.len() > 1 {
-        " (pass `agent: \"<name>\"` to select which subagent)"
-    } else {
-        ""
-    };
-    appendix.push_str(&format!(
-        "\n\
+    if !clauses.is_empty() {
+        let agent_hint = if clauses.len() > 1 {
+            " (pass `agent: \"<name>\"` to select which subagent)"
+        } else {
+            ""
+        };
+        appendix.push_str(&format!(
+            "\n\
 The following tools are NOT available as direct tools — they are handled by specialized \
 subagents instead: {}.\n\
 Use `mcp__tddy-tools__subagent_new_session`{} and `mcp__tddy-tools__subagent_prompt` to perform \
 those operations.\n",
-        clauses.join("; "),
-        agent_hint
-    ));
+            clauses.join("; "),
+            agent_hint
+        ));
+    }
+
+    if let Some(author) = shell_author {
+        appendix.push_str(&format!(
+            "\n\
+Shell is NOT available in this session. Commands run only through declarative session actions:\n\
+1. `mcp__tddy-tools__request_action` — describe the command you need in natural language; the \
+`{author}` agent writes a bounded action manifest for it.\n\
+2. `mcp__tddy-tools__list_actions` — list the actions already established.\n\
+3. `mcp__tddy-tools__invoke_action` — run an established action by id.\n\
+Prefer reusing an established action over requesting a near-duplicate; request narrow, \
+single-purpose actions (e.g. one per test suite) rather than broad wrappers.\n"
+        ));
+    }
     appendix
 }
 
@@ -316,6 +343,58 @@ mod tests {
             rendered.contains("agent:"),
             "appendix must hint how to address a specific agent when more than one replaces \
              something: {rendered}"
+        );
+    }
+
+    /// A replaced `Shell` renders the session-action guidance (request_action → invoke_action,
+    /// naming the authoring agent) instead of the generic subagent-delegation hint — the actions
+    /// surface, not `subagent_prompt`, is how commands run in that session.
+    /// Feature: docs/ft/coder/no-bash-mode.md
+    #[test]
+    fn appendix_renders_the_session_action_surface_for_a_replaced_shell() {
+        // When
+        let rendered = sandbox_remote_appendix(&[SubagentReplacement {
+            name: "action-author",
+            replaced: &["Shell"],
+        }]);
+
+        // Then — the actions surface is described and attributed to the author
+        for needle in [
+            "request_action",
+            "list_actions",
+            "invoke_action",
+            "action-author",
+        ] {
+            assert!(
+                rendered.contains(needle),
+                "appendix must mention {needle}: {rendered}"
+            );
+        }
+        // And — Shell is not presented as subagent-delegated prompt work
+        assert!(
+            !rendered.contains("Shell — handled by"),
+            "a replaced Shell must not use the generic delegation clause: {rendered}"
+        );
+    }
+
+    /// An agent replacing Shell *and* other tools splits cleanly: the other tools get the
+    /// generic delegation clause, Shell gets the session-action paragraph.
+    #[test]
+    fn appendix_splits_shell_from_an_agents_other_replacements() {
+        // When
+        let rendered = sandbox_remote_appendix(&[SubagentReplacement {
+            name: "do-everything",
+            replaced: &["Shell", "Grep"],
+        }]);
+
+        // Then
+        assert!(
+            rendered.contains("Grep — handled by the `do-everything` subagent"),
+            "non-shell tools keep the delegation clause: {rendered}"
+        );
+        assert!(
+            rendered.contains("request_action"),
+            "the shell replacement renders the actions surface: {rendered}"
         );
     }
 

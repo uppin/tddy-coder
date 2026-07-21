@@ -15,6 +15,8 @@ mod config;
 #[cfg(target_os = "linux")]
 mod daemon_client;
 #[cfg(target_os = "macos")]
+mod host_actions;
+#[cfg(target_os = "macos")]
 mod spawn;
 
 use std::path::PathBuf;
@@ -253,8 +255,7 @@ async fn run_linux(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
              resolves specialized agents from its own <tddyhome>/agents. Use `--specialized-agent \
              <name>` / config `specialized_agents:` with agents the daemon already knows."
         );
-    }
-    let mut specialized_agents = args.specialized_agent;
+    }    let mut specialized_agents = args.specialized_agent;
     specialized_agents.extend(cfg.specialized_agents);
 
     // Config `claude_args` first, then CLI `-- <args>` — a trailing positional prompt lands last.
@@ -356,6 +357,19 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     named_agents.extend(cfg.specialized_agents);
     let specialized_defs =
         config::resolve_session_agents(&named_agents, &cfg.subagents, &agents_dir)?;
+
+    // Every tool restriction is declared on the defs themselves (`replaces:` — see
+    // docs/ft/coder/no-bash-mode.md): a def replacing Shell is the session's action author; a
+    // def replacing the mutation tools is its coder. Validate the composition up front and keep
+    // the replaced set for the host-side policy checks.
+    config::validate_tool_replacements(&specialized_defs)?;
+    let replaced_tools =
+        tddy_discovery::subagent::resolve_replaced_tools_for_defs(&specialized_defs);
+    if replaced_tools.iter().any(|t| t == "Shell") {
+        eprintln!(
+            "Shell replaced: commands run only through session actions (request_action/invoke_action)"
+        );
+    }
     if !specialized_defs.is_empty() {
         eprintln!(
             "specialized_agents={}",
@@ -463,8 +477,10 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
         &spawned.ready_marker,
         &spawned.session_id,
         &spawned.worktree_path,
+        &session_dir,
         task_registry,
         Arc::clone(&main_process_exited),
+        replaced_tools,
     )
     .await;
 

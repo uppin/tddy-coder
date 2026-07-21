@@ -25,4 +25,4 @@ pub use runtime::run_manifest_blocking;
 pub use summary::{
     invocation_record_summary_value, parse_test_summary_from_process_output, TestSummary,
 };
-pub use validate::validate_action_arguments_json;
+pub use validate::{validate_action_arguments_json, validate_authored_manifest};

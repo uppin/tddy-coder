@@ -43,6 +43,37 @@ subagents:
     # system_prompt: "You are a fast codebase explorer."
     # system_prompt_path: ./prompts/fastcontext.md
 
+# ── Replacing Shell / the write tools (docs/ft/coder/no-bash-mode.md) ───────────────────────────
+# Every tool restriction is declared on the agent defs themselves — `replaces:` can name ANY exec
+# tool, and each replacement hard-disables the tool for the main agent (both the mcp form and its
+# Claude-native aliases: Bash/BashOutput/KillShell for Shell; Edit/MultiEdit/NotebookEdit for
+# Write). The bindings are rendered into the in-jail CLAUDE.md/AGENTS.md appendix so the main
+# agent knows where each capability went. There are no mode flags.
+#
+# Replacing `Shell` makes that agent the session's ACTION AUTHOR: commands then run only through
+# declarative session actions — the main agent describes what it needs to
+# mcp__tddy-tools__request_action, the author writes a bounded YAML manifest (fixed argv, optional
+# JSON input schema), and after host-side validation it is auto-established under
+# <session-dir>/actions/ and runnable via invoke_action. At most one agent may replace Shell.
+#
+# Replacing `Write`/`StrReplace`/`Delete` makes that agent the session's CODER: edits are
+# delegated via subagent_new_session/subagent_prompt. Its def MUST bind the matching internal
+# tools (tools: [..., WRITE, STR_REPLACE, DELETE]) or the session is rejected at startup.
+#
+# Declaring a def here activates it (including the pre-spawn warm-up gate — its model server must
+# be reachable); a def kept in <session-base>/agents/*.yaml instead stays inert until named via
+# --specialized-agent <name>, giving per-session opt-in.
+# subagents:
+#   - name: action-author
+#     model: gemma4:e4b-mlx           # any local Ollama model with decent YAML discipline
+#     base_url: http://localhost:11434
+#     replaces: [Shell]
+#   - name: coder
+#     model: <a stronger local model>
+#     base_url: http://localhost:11434
+#     replaces: [Write, StrReplace, Delete]
+#     tools: [READ, GLOB, GREP, WRITE, STR_REPLACE, DELETE]
+
 # Optional — extra args always forwarded to the in-jail `claude`, before any `-- <args>` given on
 # the ./claude-sandbox command line (a trailing positional prompt from the CLI therefore lands last):
 # claude_args:

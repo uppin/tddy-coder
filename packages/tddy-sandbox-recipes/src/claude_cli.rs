@@ -170,10 +170,38 @@ const SUBAGENT_TOOLS: &[&str] = &[
     "mcp__tddy-tools__subagent_cancel",
 ];
 
+/// Session-action tools a session with a replaced `Shell` must be allowed to call instead
+/// (see docs/ft/coder/no-bash-mode.md): request a new action from the Shell-replacing author
+/// subagent, list established actions, invoke one.
+const ACTION_TOOLS: &[&str] = &[
+    "mcp__tddy-tools__request_action",
+    "mcp__tddy-tools__list_actions",
+    "mcp__tddy-tools__invoke_action",
+];
+
+/// Claude-native aliases of exec-catalog tools: replacing the exec tool must also hard-disable
+/// these, or the agent falls back to the native built-in (`PermissionServer::decide` pre-allows
+/// native calls on in-repo paths). The pairwise native+mcp disallow already covers same-named
+/// built-ins (`Grep`, `Write`, …); this maps the *differently named* native routes.
+fn native_aliases(exec_tool: &str) -> &'static [&'static str] {
+    match exec_tool {
+        "Shell" => &["Bash", "BashOutput", "KillShell"],
+        "Write" => &["Edit", "MultiEdit", "NotebookEdit"],
+        _ => &[],
+    }
+}
+
+/// True when the session's replaced-tool set removes direct shell — the trigger for the
+/// session-action surface ([`ACTION_TOOLS`]).
+pub fn shell_is_replaced(replaced: &[&str]) -> bool {
+    replaced.contains(&"Shell")
+}
+
 /// `--allowedTools` entries for sandbox claude: `mcp__tddy-tools__*` exec tools (minus any tool
 /// named in `replaced` — a subagent that declares it replaces that tool means a direct call must
 /// be impossible, not merely discouraged) + `AskUserQuestion`, plus the subagent tools when
-/// `subagent_enabled` is `true`.
+/// `subagent_enabled` is `true`, plus the session-action tools when `Shell` itself is replaced
+/// (with no direct shell, established session actions are the only way to run a command).
 pub fn build_claude_allowlist(subagent_enabled: bool, replaced: &[&str]) -> Vec<String> {
     let remaining_tools: Vec<&str> = workspace_exec_tool_names()
         .iter()
@@ -185,21 +213,34 @@ pub fn build_claude_allowlist(subagent_enabled: bool, replaced: &[&str]) -> Vec<
     if subagent_enabled {
         allowlist.extend(SUBAGENT_TOOLS.iter().map(|s| s.to_string()));
     }
+    if shell_is_replaced(replaced) {
+        allowlist.extend(ACTION_TOOLS.iter().map(|s| s.to_string()));
+    }
     allowlist
 }
 
-/// `--disallowedTools` entries for sandbox claude: each tool a wired-in subagent `replaced` must be
-/// *unreachable*, not merely absent from the allowlist. Dropping it from `--allowedTools` only
+/// `--disallowedTools` entries for sandbox claude: each tool a wired-in subagent `replaced` must
+/// be *unreachable*, not merely absent from the allowlist. Dropping it from `--allowedTools` only
 /// un-pre-approves it — Claude's native built-in (`Grep`/`Glob`/…) and the still-advertised
 /// `mcp__tddy-tools__*` form stay callable via the permission prompt. `--disallowedTools` takes
-/// precedence and removes them outright, so the only route to a replaced tool is the subagent. Both
-/// forms are listed; a name with no native Claude built-in (e.g. `SemanticSearch`) simply has no
-/// native counterpart to match, which is harmless. Empty when nothing is replaced.
+/// precedence and removes them outright, so the only route to a replaced tool is the subagent (or,
+/// for `Shell`, the session-action surface). Both forms are listed; a name with no native Claude
+/// built-in (e.g. `SemanticSearch`) simply has no native counterpart to match, which is harmless.
+/// Differently-named native aliases ([`native_aliases`]: `Bash*` for `Shell`, `Edit`/`MultiEdit`/
+/// `NotebookEdit` for `Write`) are appended so a replacement covers every native route. Empty when
+/// nothing is replaced.
 pub fn build_claude_disallowlist(replaced: &[&str]) -> Vec<String> {
     let mut disallowed = Vec::with_capacity(replaced.len() * 2);
     for tool in replaced {
         disallowed.push((*tool).to_string());
         disallowed.push(format!("mcp__tddy-tools__{tool}"));
+    }
+    for tool in replaced {
+        for alias in native_aliases(tool) {
+            if !disallowed.iter().any(|t| t == alias) {
+                disallowed.push((*alias).to_string());
+            }
+        }
     }
     disallowed
 }
@@ -236,7 +277,7 @@ pub fn write_claude_mcp_config(
 /// Append `--allowedTools`, `--permission-prompt-tool`, and `--mcp-config` for sandbox spawn.
 /// `subagent_enabled` mirrors `tddy_tools::server::subagent_enabled()`'s `TDDY_SUBAGENT` check —
 /// the caller decides, so this crate stays free of an env-reading dependency of its own. `replaced`
-/// is the set of exec tools the wired-in subagent declares it replaces (see
+/// is the set of exec tools the wired-in subagents declare they replace (see
 /// [`build_claude_allowlist`]).
 pub fn append_claude_mcp_args(
     argv: &mut Vec<String>,
@@ -573,6 +614,163 @@ mod tests {
             assert!(
                 disallowed.contains(tool),
                 "MCP form {tool} must be hard-disabled; disallowed set: {disallowed:?}"
+            );
+        }
+    }
+
+    // ─── tool replacement: Shell / write tools (no-bash & no-write via `replaces`) ───
+    //
+    // Feature: docs/ft/coder/no-bash-mode.md
+    // Everything is driven by the defs' `replaces` sets: replacing `Shell` swaps in the
+    // session-action surface and hard-disables the native Bash family; replacing `Write` also
+    // hard-disables the native edit aliases. No dedicated mode flags exist.
+
+    /// Replacing `Shell` drops it from the allowlist, adds the three session-action tools, and
+    /// keeps every other exec tool (including the write tools).
+    #[test]
+    fn replacing_shell_swaps_it_for_the_action_tools() {
+        let allowlist = build_claude_allowlist(true, &["Shell"]);
+        let allowset: HashSet<_> = allowlist.iter().cloned().collect();
+
+        assert!(
+            !allowset.contains("mcp__tddy-tools__Shell"),
+            "Shell must leave the allowlist when replaced: {allowlist:?}"
+        );
+        for tool in ACTION_TOOLS {
+            assert!(
+                allowset.contains(*tool),
+                "a Shell replacement must advertise {tool}: {allowlist:?}"
+            );
+        }
+        for name in workspace_exec_tool_names().iter().filter(|n| **n != "Shell") {
+            let prefixed = format!("mcp__tddy-tools__{name}");
+            assert!(
+                allowset.contains(&prefixed),
+                "non-shell tool {prefixed} must stay: {allowlist:?}"
+            );
+        }
+    }
+
+    /// Replacing `Shell` hard-disables both its forms AND Claude's native Bash family — the
+    /// differently-named native aliases the pairwise disallow can't cover.
+    #[test]
+    fn replacing_shell_hard_disables_the_native_bash_family() {
+        let disallowed: HashSet<_> = build_claude_disallowlist(&["Shell"]).into_iter().collect();
+        for tool in [
+            "Shell",
+            "mcp__tddy-tools__Shell",
+            "Bash",
+            "BashOutput",
+            "KillShell",
+        ] {
+            assert!(
+                disallowed.contains(tool),
+                "a Shell replacement must hard-disable {tool}: {disallowed:?}"
+            );
+        }
+    }
+
+    /// Replacing the write tools drops them from the allowlist while `Shell` and the read tools
+    /// stay, and the action tools are NOT advertised (they belong to a Shell replacement).
+    #[test]
+    fn replacing_the_write_tools_keeps_shell_and_adds_no_action_tools() {
+        let allowlist = build_claude_allowlist(true, &["Write", "StrReplace", "Delete"]);
+        let allowset: HashSet<_> = allowlist.iter().cloned().collect();
+
+        for tool in [
+            "mcp__tddy-tools__Write",
+            "mcp__tddy-tools__StrReplace",
+            "mcp__tddy-tools__Delete",
+        ] {
+            assert!(
+                !allowset.contains(tool),
+                "replaced mutation tool {tool} must leave the allowlist: {allowlist:?}"
+            );
+        }
+        for tool in [
+            "mcp__tddy-tools__Shell",
+            "mcp__tddy-tools__Read",
+            "mcp__tddy-tools__Grep",
+        ] {
+            assert!(
+                allowset.contains(tool),
+                "{tool} must stay: {allowlist:?}"
+            );
+        }
+        for tool in ACTION_TOOLS {
+            assert!(
+                !allowset.contains(*tool),
+                "a write-only replacement must not advertise {tool}: {allowlist:?}"
+            );
+        }
+    }
+
+    /// Replacing `Write` hard-disables Claude's native edit aliases (`Edit`/`MultiEdit`/
+    /// `NotebookEdit`) alongside the pairwise forms — otherwise the agent falls back to the
+    /// native built-ins, which the permission server pre-allows on in-repo paths.
+    #[test]
+    fn replacing_write_hard_disables_the_native_edit_aliases() {
+        let disallowed: HashSet<_> =
+            build_claude_disallowlist(&["Write", "StrReplace", "Delete"])
+                .into_iter()
+                .collect();
+        for tool in [
+            "Write",
+            "mcp__tddy-tools__Write",
+            "StrReplace",
+            "Delete",
+            "Edit",
+            "MultiEdit",
+            "NotebookEdit",
+        ] {
+            assert!(
+                disallowed.contains(tool),
+                "a Write replacement must hard-disable {tool}: {disallowed:?}"
+            );
+        }
+    }
+
+    /// Shell and write replacements compose (e.g. one gemma action-author plus one coder def)
+    /// into a deduplicated union.
+    #[test]
+    fn shell_and_write_replacements_compose_without_duplicates() {
+        let disallowed =
+            build_claude_disallowlist(&["Shell", "Write", "StrReplace", "Delete"]);
+        let disallowset: HashSet<_> = disallowed.iter().cloned().collect();
+        assert_eq!(
+            disallowed.len(),
+            disallowset.len(),
+            "composed disallowlist must not contain duplicates: {disallowed:?}"
+        );
+        for tool in ["Shell", "Bash", "Write", "Edit", "mcp__tddy-tools__Delete"] {
+            assert!(disallowset.contains(tool), "missing {tool}: {disallowed:?}");
+        }
+
+        let allowlist =
+            build_claude_allowlist(true, &["Shell", "Write", "StrReplace", "Delete"]);
+        let allowset: HashSet<_> = allowlist.iter().cloned().collect();
+        for tool in ACTION_TOOLS {
+            assert!(
+                allowset.contains(*tool),
+                "the composed session must still advertise {tool}: {allowlist:?}"
+            );
+        }
+    }
+
+    /// Regression guard: with no replacements the lists are exactly the pre-existing ones —
+    /// empty disallow, full exec allowlist, no action tools.
+    #[test]
+    fn no_replacements_changes_nothing() {
+        assert!(build_claude_disallowlist(&[]).is_empty());
+        let allowlist = build_claude_allowlist(true, &[]);
+        let allowset: HashSet<_> = allowlist.iter().cloned().collect();
+        for name in workspace_exec_tool_names() {
+            assert!(allowset.contains(&format!("mcp__tddy-tools__{name}")));
+        }
+        for tool in ACTION_TOOLS {
+            assert!(
+                !allowset.contains(*tool),
+                "no replacement must not advertise {tool}"
             );
         }
     }

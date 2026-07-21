@@ -8,17 +8,36 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// One bound tool a specialized subagent's internal READ/GLOB/GREP loop may call. An extensible
-/// registry: v1 ships exactly these three (the existing read-only codebase tools); a future tool
-/// kind is one new variant, not a schema rework. An unrecognized name in a YAML `tools:` list is a
-/// deserialization error (`serde`'s built-in unknown-variant rejection) — not a silently-dropped
-/// entry.
+/// One bound tool a specialized subagent's internal tool loop may call. An extensible registry:
+/// the read-only codebase tools (`READ`/`GLOB`/`GREP`, the shipped defaults) plus the opt-in
+/// mutation tools (`WRITE`/`STR_REPLACE`/`DELETE`) a coder-role subagent binds explicitly. An
+/// unrecognized name in a YAML `tools:` list is a deserialization error (`serde`'s built-in
+/// unknown-variant rejection) — not a silently-dropped entry.
+///
+/// The mutation tools only work over [`crate::subagent::CodebaseAccess::Managed`], where path
+/// confinement is enforced host-side by the tool engine; a `Local` subagent gets a typed error
+/// (local access has no confinement layer, so unrestricted host writes must not be grantable by
+/// a YAML field alone).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum SubagentTool {
     Read,
     Glob,
     Grep,
+    Write,
+    #[serde(rename = "STR_REPLACE")]
+    StrReplace,
+    Delete,
+}
+
+impl SubagentTool {
+    /// Whether this tool mutates the codebase (vs read-only discovery).
+    pub fn is_mutating(self) -> bool {
+        matches!(
+            self,
+            SubagentTool::Write | SubagentTool::StrReplace | SubagentTool::Delete
+        )
+    }
 }
 
 fn default_base_url() -> String {
