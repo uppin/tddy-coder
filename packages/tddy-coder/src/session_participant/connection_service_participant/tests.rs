@@ -120,6 +120,8 @@ async fn coder_session_tool_executor_runs_a_real_read_after_write_against_the_wo
         worktree_root: root.clone(),
         task_registry: tddy_task::TaskRegistry::new(),
         session_id: "test-session".to_string(),
+        toolcall_socket_path: None,
+        session_dir: root.clone(),
     };
 
     // When — Write a file via the executor seam

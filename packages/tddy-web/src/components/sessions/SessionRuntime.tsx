@@ -1,12 +1,14 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient, type Client, type Transport } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
-import { ConnectionService } from "../../gen/connection_pb";
+import { ConnectionService, type SessionEntry } from "../../gen/connection_pb";
 import type { TokenService } from "../../gen/token_pb";
 import { SessionLiveKitTerminal } from "./SessionLiveKitTerminal";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
 import { SessionTerminalTabs } from "./SessionTerminalTabs";
 import { AGENT_TERMINAL_ID, useSessionTerminals } from "./useSessionTerminals";
+import { useChildSessions } from "./useChildSessions";
+import { useSessionAttachment } from "./useSessionAttachment";
 import { TerminalControlOverlay } from "./TerminalControlOverlay";
 import { useTerminalControl, type Session } from "./useTerminalControl";
 import type { SessionRuntimeState } from "./sessionRuntimeRegistry";
@@ -43,6 +45,9 @@ export interface SessionRuntimeProps {
   liveKitFactoryIsOverridden?: boolean;
   /** Shared common room — used as the session-room stand-in when the factory is overridden. */
   commonRoom?: Room | null;
+  /** The drawer's full session list — used to discover this session's spawned child conversations
+   *  (`orchestratorSessionId === this session`) and render them as tabs. */
+  sessions?: ReadonlyArray<SessionEntry>;
 }
 
 /**
@@ -73,6 +78,7 @@ export function SessionRuntime({
   liveKitFactory,
   liveKitFactoryIsOverridden = false,
   commonRoom = null,
+  sessions = [],
 }: SessionRuntimeProps) {
   // The runtime's own connected Room, captured via the terminal's `onRoom`. Stored both in a ref
   // (for the lazy steal-claim client) and in state (so the memoized session-scoped terminal client
@@ -130,6 +136,34 @@ export function SessionRuntime({
     controlToken: connected?.controlToken,
   });
 
+  // Spawned child conversations of this session (tagged with `orchestratorSessionId = this session`).
+  // Each renders as a tab after the bash tabs; selecting one attaches that child and shows its pane.
+  const childSessions = useChildSessions(runtime.sessionId, sessions);
+
+  // The selected child conversation, or `null` when a terminal (Agent/bash) tab is active. Children
+  // are attached lazily: a child's runtime pane is only mounted (and its `ConnectSession` fired)
+  // once its tab has been selected, and it then stays mounted across further tab switches.
+  const [activeChildSessionId, setActiveChildSessionId] = useState<string | null>(null);
+  const [attachedChildIds, setAttachedChildIds] = useState<string[]>([]);
+
+  const selectTerminal = useCallback(
+    (id: string) => {
+      setActiveChildSessionId(null);
+      setActive(id);
+    },
+    [setActive],
+  );
+
+  const selectChild = useCallback((sessionId: string) => {
+    setActiveChildSessionId(sessionId);
+    setAttachedChildIds((prev) => (prev.includes(sessionId) ? prev : [...prev, sessionId]));
+  }, []);
+
+  const dropChild = useCallback((sessionId: string) => {
+    setAttachedChildIds((prev) => prev.filter((id) => id !== sessionId));
+    setActiveChildSessionId((prev) => (prev === sessionId ? null : prev));
+  }, []);
+
   const handleRoom = useCallback(
     (room: Room) => {
       roomRef.current = room;
@@ -139,8 +173,13 @@ export function SessionRuntime({
     [onSessionRoom, runtime.sessionId],
   );
 
+  // A terminal pane (Agent/bash) is visible only when its tab is active AND no child conversation
+  // is selected — a selected child's pane overlays the terminal stack.
   const paneClass = (terminalId: string) =>
-    cn("absolute inset-0 h-full w-full", activeTerminalId === terminalId ? "" : "hidden");
+    cn(
+      "absolute inset-0 h-full w-full",
+      activeChildSessionId === null && activeTerminalId === terminalId ? "" : "hidden",
+    );
 
   return (
     <div
@@ -151,9 +190,12 @@ export function SessionRuntime({
       <SessionTerminalTabs
         terminals={terminals}
         activeTerminalId={activeTerminalId}
-        onSelect={setActive}
+        onSelect={selectTerminal}
         onOpen={open}
         onClose={close}
+        childSessions={childSessions}
+        activeChildSessionId={activeChildSessionId}
+        onSelectChild={selectChild}
       />
 
       <div className="relative min-h-0 flex-1">
@@ -209,6 +251,35 @@ export function SessionRuntime({
           </div>
         ))}
 
+        {/* One mounted pane per attached child conversation — a nested runtime that attaches the
+            child session over its own `ConnectSession` and renders the child's terminal. Visible
+            only while its tab is active; kept mounted (streaming) once opened. */}
+        {attachedChildIds.map((childId) => (
+          <div
+            key={childId}
+            data-testid={`sessions-child-pane-${childId}`}
+            className={cn(
+              "absolute inset-0 h-full w-full",
+              activeChildSessionId === childId ? "" : "hidden",
+            )}
+          >
+            <SessionChildRuntime
+              sessionId={childId}
+              focused={focused && activeChildSessionId === childId}
+              sessionToken={sessionToken}
+              client={client}
+              tokenClient={tokenClient}
+              mobileShortcuts={mobileShortcuts}
+              onSessionRoom={onSessionRoom}
+              onDisconnect={dropChild}
+              liveKitFactory={liveKitFactory}
+              liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
+              commonRoom={commonRoom}
+              sessions={sessions}
+            />
+          </div>
+        ))}
+
         {focused && (
           // The focused runtime carries the terminal-control mutex overlay and the
           // `sessions-detail-terminal-container` marker (existing acceptance contract). The overlay
@@ -228,5 +299,105 @@ export function SessionRuntime({
         )}
       </div>
     </div>
+  );
+}
+
+interface SessionChildRuntimeProps {
+  /** The spawned child conversation's session id. */
+  sessionId: string;
+  /** True when this child pane is the visible/interactive one. */
+  focused: boolean;
+  sessionToken: string;
+  client?: ConnectionClient | null;
+  tokenClient?: TokenClient;
+  mobileShortcuts?: ToolShortcutDef[];
+  onSessionRoom?: (sessionId: string, room: Room) => void;
+  /** Drop this child (its output stream ended) — removes the pane and returns focus to the parent. */
+  onDisconnect?: (sessionId: string) => void;
+  liveKitFactory?: (room: Room, targetIdentity: string) => Transport;
+  liveKitFactoryIsOverridden?: boolean;
+  commonRoom?: Room | null;
+  sessions?: ReadonlyArray<SessionEntry>;
+}
+
+/**
+ * A spawned child conversation rendered inside its parent's runtime. It owns its own attachment —
+ * attaching the child over `ConnectSession` the first time it is mounted (i.e. when its tab is
+ * first selected) — and, once connected, renders a nested {@link SessionRuntime} for the child so
+ * the child gets its own Agent + bash terminals (and, recursively, its own spawned conversations).
+ */
+function SessionChildRuntime({
+  sessionId,
+  focused,
+  sessionToken,
+  client,
+  tokenClient,
+  mobileShortcuts,
+  onSessionRoom,
+  onDisconnect,
+  liveKitFactory,
+  liveKitFactoryIsOverridden,
+  commonRoom,
+  sessions = [],
+}: SessionChildRuntimeProps) {
+  const { state: attachment, connectSession } = useSessionAttachment();
+
+  useEffect(() => {
+    if (!client) return;
+    void connectSession(sessionId, sessionToken, client).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, sessionId, sessionToken]);
+
+  // Project the attachment into a `SessionRuntimeState` the nested runtime can render. Until the
+  // child's `ConnectSession` resolves there is nothing to render yet.
+  const runtime = useMemo<SessionRuntimeState | null>(() => {
+    if (attachment.status === "connected-livekit") {
+      return {
+        sessionId,
+        attached: true,
+        status: "connected-livekit",
+        livekitUrl: attachment.livekitUrl,
+        livekitRoom: attachment.livekitRoom,
+        livekitServerIdentity: attachment.livekitServerIdentity,
+        identity: attachment.identity,
+        bytesIn: 0,
+        bytesOut: 0,
+        lastDataReceivedAt: null,
+      };
+    }
+    if (attachment.status === "connected-grpc") {
+      return {
+        sessionId,
+        attached: true,
+        status: "connected-grpc",
+        livekitUrl: "",
+        livekitRoom: "",
+        livekitServerIdentity: "",
+        identity: "",
+        bytesIn: 0,
+        bytesOut: 0,
+        lastDataReceivedAt: null,
+      };
+    }
+    return null;
+  }, [attachment, sessionId]);
+
+  if (!runtime) return null;
+
+  return (
+    <SessionRuntime
+      runtime={runtime}
+      focused={focused}
+      sessionToken={sessionToken}
+      client={client}
+      tokenClient={tokenClient}
+      mobileShortcuts={mobileShortcuts}
+      onSessionRoom={onSessionRoom}
+      onSessionDisconnect={onDisconnect}
+      liveKitFactory={liveKitFactory}
+      liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
+      commonRoom={commonRoom}
+      sessions={sessions}
+    />
   );
 }

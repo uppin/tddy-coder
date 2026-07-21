@@ -142,6 +142,38 @@ pub struct PrSpawnChildInput {
     pub node_id: String,
 }
 
+/// Parameters for [`spawn_conversation`](PermissionServer::spawn_conversation).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SpawnConversationInput {
+    #[schemars(description = "Prompt to seed the new interactive conversation with.")]
+    pub prompt: String,
+    #[schemars(
+        description = "Optional branch name for the new worktree (derived from the prompt when omitted)."
+    )]
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[schemars(
+        description = "Optional base ref to root the new worktree on (defaults to the session's base)."
+    )]
+    #[serde(default)]
+    pub base_ref: Option<String>,
+}
+
+/// Build the `spawn-conversation` relay request. Pure so it can be unit-tested without a socket;
+/// `None` options serialize to JSON `null`.
+fn spawn_conversation_request_json(
+    prompt: &str,
+    branch: Option<&str>,
+    base_ref: Option<&str>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": "spawn-conversation",
+        "prompt": prompt,
+        "branch": branch,
+        "base_ref": base_ref,
+    })
+}
+
 /// MCP server that handles permission prompts for Claude Code.
 #[derive(Debug, Clone)]
 pub struct PermissionServer {
@@ -188,6 +220,79 @@ impl PermissionServer {
             .into_iter()
             .map(|t| t.name.to_string())
             .collect()
+    }
+
+    /// Enumerate every tool this server would advertise to an agent, as [`RemoteToolDef`]s
+    /// (name + description + JSON input schema): the static workflow `#[tool]`s, the exec-tool
+    /// catalog (unconditionally — Read/Write/Shell/…), and the subagent tools when a subagent is
+    /// configured. Pure enumeration (no socket/session) for `tddy-tools list-tools`, which feeds the
+    /// web Inspector → Tools panel. Does NOT include the Bash CLI subcommands (submit/ask/…); the
+    /// `list-tools` command appends those.
+    pub fn advertised_tool_defs() -> Vec<RemoteToolDef> {
+        fn map_tool(t: rmcp::model::Tool) -> RemoteToolDef {
+            RemoteToolDef {
+                name: t.name.to_string(),
+                description: t.description.map(|d| d.to_string()).unwrap_or_default(),
+                input_schema_json: serde_json::to_string(&*t.input_schema)
+                    .unwrap_or_else(|_| "{}".to_string()),
+            }
+        }
+        let mut defs: Vec<RemoteToolDef> = Self::tool_router()
+            .list_all()
+            .into_iter()
+            .map(map_tool)
+            .collect();
+        defs.extend(exec_tool_catalog());
+        if subagent_enabled() {
+            defs.extend(subagent_tool_router().list_all().into_iter().map(map_tool));
+        }
+        defs
+    }
+
+    /// Invoke one of the workflow `#[tool]` methods by name with JSON `args`, returning its result
+    /// string. Used by `tddy-tools call-tool` (the web Inspector → Tools "invoke" button) to run a
+    /// tool exactly as the agent would over MCP. We dispatch to the methods directly rather than via
+    /// the rmcp `ToolRouter`, because a router call needs a live `Peer`/`RequestContext` that can't
+    /// be fabricated outside a real MCP connection. Relay tools (`spawn_conversation`,
+    /// `pr_spawn_child`) still relay over `TDDY_SOCKET` from inside their methods; the rest run
+    /// in-process against `TDDY_SESSION_DIR`/`TDDY_REPO_DIR`.
+    pub async fn call_tool_by_name(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+    ) -> Result<String, String> {
+        fn parse<T: serde::de::DeserializeOwned>(args: serde_json::Value) -> Result<T, String> {
+            let args = if args.is_null() {
+                serde_json::Value::Object(Default::default())
+            } else {
+                args
+            };
+            serde_json::from_value(args).map_err(|e| {
+                format!(
+                    "invalid arguments for `{}`: {e}",
+                    std::any::type_name::<T>()
+                )
+            })
+        }
+        Ok(match name {
+            "approval_prompt" => self.approval_prompt(Parameters(parse(args)?)),
+            "github_create_pull_request" => {
+                self.github_create_pull_request(Parameters(parse(args)?))
+            }
+            "github_update_pull_request" => {
+                self.github_update_pull_request(Parameters(parse(args)?))
+            }
+            "pr_stack_status" => self.pr_stack_status(),
+            "pr_merge" => self.pr_merge(Parameters(parse(args)?)),
+            "pr_close" => self.pr_close(Parameters(parse(args)?)),
+            "pr_repoint" => self.pr_repoint(Parameters(parse(args)?)),
+            "pr_resolve_conflicts" => self.pr_resolve_conflicts(Parameters(parse(args)?)),
+            "pr_set_status" => self.pr_set_status(Parameters(parse(args)?)),
+            "pr_add_planned" => self.pr_add_planned(Parameters(parse(args)?)),
+            "pr_spawn_child" => self.pr_spawn_child(Parameters(parse(args)?)).await,
+            "spawn_conversation" => self.spawn_conversation(Parameters(parse(args)?)).await,
+            other => return Err(format!("unknown MCP tool: {other}")),
+        })
     }
 
     /// Allowed dirs from TDDY_SESSION_DIR and TDDY_REPO_DIR (canonicalized).
@@ -612,6 +717,30 @@ impl PermissionServer {
             .to_string();
         };
         let request = serde_json::json!({ "type": "spawn-child", "node_id": p.node_id });
+        match crate::toolcall_client::dispatch_toolcall(&socket, request).await {
+            Ok(resp) => resp.to_string(),
+            Err(e) => serde_json::json!({ "error": e }).to_string(),
+        }
+    }
+
+    #[tool(
+        description = "Start a brand-new interactive coding conversation on a fresh worktree, seeded with the given prompt and tagged with the current session as its orchestrator. Returns the new child session id."
+    )]
+    async fn spawn_conversation(
+        &self,
+        Parameters(p): Parameters<SpawnConversationInput>,
+    ) -> String {
+        // Relay to the daemon over the per-session TDDY_SOCKET. The daemon spawns a new claude-cli
+        // conversation on a new worktree tagged with this session as its orchestrator — the generic
+        // sibling of `pr_spawn_child`, available to any managed session (e.g. grill-me).
+        let Some(socket) = permission_relay_socket_path() else {
+            return serde_json::json!({
+                "error": "TDDY_SOCKET is not set; spawn_conversation requires a managed session"
+            })
+            .to_string();
+        };
+        let request =
+            spawn_conversation_request_json(&p.prompt, p.branch.as_deref(), p.base_ref.as_deref());
         match crate::toolcall_client::dispatch_toolcall(&socket, request).await {
             Ok(resp) => resp.to_string(),
             Err(e) => serde_json::json!({ "error": e }).to_string(),
@@ -1737,5 +1866,70 @@ mod tests {
             tools.contains(&"Grep".to_string()),
             "Grep must be advertised when nothing is replaced; got: {tools:?}"
         );
+    }
+
+    /// `spawn_conversation` refuses to act when there is no `TDDY_SOCKET` to relay over — a plain
+    /// (non-managed) session cannot spawn a follow-up conversation. In test builds the socket is
+    /// disabled unless `TDDY_TOOLS_TEST_ALLOW_SOCKET=1`, so this exercises the guard deterministically.
+    #[tokio::test]
+    async fn spawn_conversation_errors_when_tddy_socket_is_unset() {
+        // Given a permission server with no relay socket
+        let server = PermissionServer::new();
+
+        // When the agent calls spawn_conversation
+        let result = server
+            .spawn_conversation(Parameters(SpawnConversationInput {
+                prompt: "Implement plans/foo.md".to_string(),
+                branch: None,
+                base_ref: None,
+            }))
+            .await;
+
+        // Then it returns an error naming TDDY_SOCKET rather than attempting a spawn
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert!(
+            parsed["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("TDDY_SOCKET"),
+            "expected a TDDY_SOCKET error, got: {result}"
+        );
+    }
+
+    /// `call_tool_by_name` (the web Inspector invoke path) dispatches a side-effect-free MCP tool
+    /// in-process and returns its result; an unknown name is a clean error, not a panic.
+    #[tokio::test]
+    async fn call_tool_by_name_dispatches_mcp_tool_and_rejects_unknown() {
+        let server = PermissionServer::new();
+
+        // pr_stack_status runs in-process; with no TDDY_SESSION_DIR it returns its own error JSON
+        // (a real result string), proving the dispatch reached the tool.
+        let out = server
+            .call_tool_by_name("pr_stack_status", serde_json::json!({}))
+            .await
+            .expect("known tool dispatches");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&out).is_ok(),
+            "pr_stack_status must return JSON, got: {out}"
+        );
+
+        let err = server
+            .call_tool_by_name("definitely_not_a_tool", serde_json::json!({}))
+            .await;
+        assert!(err.is_err(), "unknown tool must be an error");
+    }
+
+    /// The relayed request carries the `spawn-conversation` verb with the prompt and branch, so the
+    /// daemon's `ConversationSpawnHandler` receives an explicit prompt (not a PR-stack node id).
+    #[test]
+    fn spawn_conversation_request_relays_the_spawn_conversation_shape() {
+        // Given a prompt and an explicit branch
+        let request =
+            spawn_conversation_request_json("Implement plans/foo.md", Some("implement-foo"), None);
+
+        // Then the relayed request carries the spawn-conversation verb and fields
+        assert_eq!(request["type"], "spawn-conversation");
+        assert_eq!(request["prompt"], "Implement plans/foo.md");
+        assert_eq!(request["branch"], "implement-foo");
     }
 }

@@ -412,6 +412,11 @@ pub struct SpawnOptions<'a> {
     pub stack_parent: Option<&'a str>,
     /// Model for tool-session model selection. Passed to spawned `tddy-coder` as `--model` when set.
     pub model: Option<&'a str>,
+    /// Per-session unix socket path the daemon listens on for the reverse `HostSessionService`
+    /// (used for `spawn_conversation` from a tddy-coder session). Passed to the child as
+    /// `--host-session-socket <path>`. A plain string, so it crosses the `spawn_worker` JSON-IPC
+    /// boundary trivially (unlike OS fds). `None` keeps the legacy wiring with no reverse channel.
+    pub host_session_socket: Option<&'a str>,
 }
 
 /// Merge the daemon process `PATH` with an optional prefix (from the target user's `~/.tddy/config.yaml`).
@@ -784,6 +789,10 @@ pub fn spawn_as_user(
     let resolved_tddy_data_dir = resolve_tddy_data_dir(tddy_data_dir, &daemon_toolchain_root);
 
     let mut cmd = std::process::Command::new(&resolved_tool_path);
+    // Legacy stdio wiring (stdin=/dev/null, stdout → log file). The reverse `spawn_conversation`
+    // channel now rides a per-session unix socket (`--host-session-socket`, added below), not the
+    // child's stdin/stdout — so those pipes stay untouched and the channel survives the forked
+    // `spawn_worker` boundary (OS fds can't cross it; a socket path can).
     cmd.current_dir(repo_path)
         .stdin(Stdio::null())
         .stdout(Stdio::from(logs.stdout))
@@ -851,6 +860,10 @@ pub fn spawn_as_user(
             log::debug!("spawner: passing --stack-parent {}", sp);
             cmd.arg("--stack-parent").arg(sp);
         }
+    }
+
+    if let Some(sock) = opts.host_session_socket {
+        cmd.arg("--host-session-socket").arg(sock);
     }
 
     cmd.arg("--config").arg(&logs.config_path);

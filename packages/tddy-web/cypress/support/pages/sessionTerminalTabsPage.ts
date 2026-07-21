@@ -9,6 +9,8 @@ import {
   sessionsTerminalTab,
   sessionsTerminalTabClose,
   sessionsTerminalPane,
+  sessionsChildTab,
+  sessionsChildPane,
   TEST_IDS,
 } from "../testIds";
 
@@ -42,4 +44,16 @@ export const sessionTerminalTabsPage = {
     byTestId(sessionsTerminalPane(terminalId), { timeout: 10000, ...options }).find(
       `[data-testid='${TEST_IDS.ghosttyTerminal}']`,
     ),
+
+  /** A tab for a spawned child conversation, keyed by the child's session id. */
+  childTab: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsChildTab(sessionId), { timeout: 10000, ...options }),
+
+  /** All child-conversation tabs currently rendered (prefix match) — for "no children" assertions. */
+  childTabs: (options?: Parameters<typeof cy.get>[1]) =>
+    cy.get("[data-testid^='sessions-child-tab-']", { timeout: 10000, ...options }),
+
+  /** The mounted runtime pane for a selected child conversation, keyed by the child's session id. */
+  childPane: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsChildPane(sessionId), { timeout: 10000, ...options }),
 };

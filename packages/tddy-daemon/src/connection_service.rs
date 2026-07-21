@@ -311,6 +311,19 @@ pub struct ConnectionServiceImpl {
     idle_tracker: Option<Arc<crate::relay_idle::IdleTimeoutTracker>>,
     /// Per-session demo VM state — keyed by session_id.
     demo_vm_state: Arc<tokio::sync::Mutex<std::collections::HashMap<String, DemoVmHandle>>>,
+    /// Per-session reverse stdio RPC endpoint to a spawned tddy-coder child (grill-me), keyed by
+    /// session_id. Hosts [`crate::host_session_service::HostSessionService`] so the coder can relay
+    /// `spawn_conversation` back to the daemon over the pipe. Kept alive for the session's lifetime.
+    session_stdio: Arc<tokio::sync::Mutex<std::collections::HashMap<String, SessionStdioEndpoint>>>,
+}
+
+/// A live reverse stdio endpoint to one spawned tddy-coder session. Holding it keeps the pipe's
+/// read/dispatch loop running; dropping it (on session teardown) ends the loop.
+struct SessionStdioEndpoint {
+    #[allow(dead_code)]
+    client: Arc<tddy_stdio::StdioRpcClient>,
+    #[allow(dead_code)]
+    task: tokio::task::JoinHandle<()>,
 }
 
 impl ConnectionServiceImpl {
@@ -350,6 +363,7 @@ impl ConnectionServiceImpl {
         ));
         let task_registry = claude_cli_manager.task_registry();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+        let session_stdio = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         Self {
             config,
             sessions_base_for_user,
@@ -365,6 +379,7 @@ impl ConnectionServiceImpl {
             task_registry,
             idle_tracker: None,
             demo_vm_state,
+            session_stdio,
         }
     }
 
@@ -486,6 +501,7 @@ impl ConnectionServiceImpl {
         prompt_dir: &Path,
         tddy_tools_path: &str,
         resume_at: Option<tddy_core::backend::GoalId>,
+        conversation_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
     ) -> Result<ManagedLaunch, Status> {
         prepare_managed_workflow_inner(
             &self.tddy_data_dir,
@@ -497,6 +513,7 @@ impl ConnectionServiceImpl {
             tddy_tools_path,
             resume_at,
             None,
+            conversation_spawn_handler,
         )
     }
 
@@ -540,6 +557,18 @@ impl ConnectionServiceImpl {
             } else {
                 None
             };
+        // A grill-me session instead gets a conversation-spawn handler so the agent's
+        // `spawn_conversation` relay can start a fresh implementation conversation.
+        let conversation_spawn_handler = managed_recipe.as_ref().and_then(|recipe| {
+            self.conversation_spawn_handler_for(
+                recipe,
+                os_user,
+                session_id,
+                project_id,
+                &sessions_base,
+                &sessions_base.join(SESSIONS_SUBDIR).join(session_id),
+            )
+        });
         spawn_claude_cli_session_inner(
             &self.config,
             &self.tddy_data_dir,
@@ -558,8 +587,108 @@ impl ConnectionServiceImpl {
             stack_parent,
             managed_recipe,
             child_spawn_handler,
+            conversation_spawn_handler,
         )
         .await
+    }
+
+    /// Build the per-session [`ConversationSpawnHandler`] for a managed session when its recipe
+    /// enables conversation spawning (grill-me). Returns `None` for recipes that don't (a plain TDD
+    /// session, or a PR-stack orchestrator which uses `spawn-child` instead), so `spawn_conversation`
+    /// is rejected there rather than silently spawning.
+    fn conversation_spawn_handler_for(
+        &self,
+        recipe: &Arc<dyn tddy_core::backend::WorkflowRecipe>,
+        os_user: &str,
+        session_id: &str,
+        project_id: &str,
+        sessions_base: &Path,
+        orchestrator_session_dir: &Path,
+    ) -> Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>> {
+        if !recipe_enables_conversation_spawn(recipe.name()) {
+            return None;
+        }
+        Some(Arc::new(GrillMeConversationSpawnHandler {
+            config: self.config.clone(),
+            tddy_data_dir: self.tddy_data_dir.clone(),
+            claude_cli_manager: Arc::clone(&self.claude_cli_manager),
+            os_user: os_user.to_string(),
+            project_id: project_id.to_string(),
+            sessions_base: sessions_base.to_path_buf(),
+            orchestrator_session_id: session_id.to_string(),
+            model_override: None,
+            orchestrator_session_dir: orchestrator_session_dir.to_path_buf(),
+        }))
+    }
+
+    /// Bind a per-session unix socket hosting
+    /// [`HostSessionService`](crate::host_session_service::HostSessionService) and return its path,
+    /// to be passed to the spawned grill-me coder as `--host-session-socket`. The coder connects and
+    /// relays `spawn_conversation` back over it. The orchestrator context (this session) is baked
+    /// into the handler, and the path is unique per session and handed only to that session's coder,
+    /// so a call arriving here is unambiguously that session — no auth token or caller id needed.
+    ///
+    /// A socket **path** (unlike the child's stdio fds) crosses the forked `spawn_worker` boundary as
+    /// a plain string, so this works for both the worker-spawned and direct spawn paths. Binding
+    /// happens before the spawn, so the coder's later `connect()` finds the listener ready.
+    async fn spawn_host_session_socket(
+        &self,
+        session_id: &str,
+        os_user: &str,
+        project_id: &str,
+        model: Option<String>,
+    ) -> Option<String> {
+        let path = std::env::temp_dir().join(format!("tddy-host-{session_id}.sock"));
+        let _ = std::fs::remove_file(&path); // clear any stale socket from a prior run
+        let listener = match tokio::net::UnixListener::bind(&path) {
+            Ok(l) => l,
+            Err(e) => {
+                log::warn!("spawn_host_session_socket({session_id}): bind {path:?}: {e}");
+                return None;
+            }
+        };
+        // Dev runs the coder as the same OS user; loosen perms so a cross-user child can still
+        // connect. TODO(stdio-relay): tighten perms / socket ownership for cross-user production.
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o777));
+
+        let sessions_base = self.tddy_data_dir.clone();
+        let orchestrator_session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+        let handler = Arc::new(GrillMeConversationSpawnHandler {
+            config: self.config.clone(),
+            tddy_data_dir: self.tddy_data_dir.clone(),
+            claude_cli_manager: Arc::clone(&self.claude_cli_manager),
+            os_user: os_user.to_string(),
+            project_id: project_id.to_string(),
+            sessions_base,
+            orchestrator_session_id: session_id.to_string(),
+            orchestrator_session_dir,
+            model_override: model,
+        });
+        let service = crate::host_session_service::HostSessionService::new(handler);
+        let session_stdio = Arc::clone(&self.session_stdio);
+        let sid = session_id.to_string();
+        // Accept the coder's single connection, then run the reverse RPC endpoint over it.
+        tokio::spawn(async move {
+            let stream = match listener.accept().await {
+                Ok((stream, _addr)) => stream,
+                Err(e) => {
+                    log::warn!("spawn_host_session_socket({sid}): accept: {e}");
+                    return;
+                }
+            };
+            let (reader, writer) = tokio::io::split(stream);
+            let (client, endpoint) =
+                tddy_stdio::StdioEndpoint::from_duplex(reader, writer, service);
+            let task = tokio::spawn(endpoint.run());
+            session_stdio
+                .lock()
+                .await
+                .insert(sid.clone(), SessionStdioEndpoint { client, task });
+            log::info!("spawn_host_session_socket({sid}): reverse endpoint connected + ready");
+        });
+        log::info!("spawn_host_session_socket({session_id}): listening at {path:?}");
+        Some(path.to_string_lossy().into_owned())
     }
 }
 
@@ -591,6 +720,7 @@ async fn spawn_claude_cli_session_inner(
     stack_parent: Option<&str>,
     managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
     child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
+    conversation_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
         return Err(Status::invalid_argument(
@@ -795,6 +925,7 @@ async fn spawn_claude_cli_session_inner(
             &tddy_tools_path,
             None,
             child_spawn_handler.clone(),
+            conversation_spawn_handler.clone(),
         )?;
         append_system_prompt_file = Some(launch.prompt_file);
         env_extra = launch.env;
@@ -1280,6 +1411,16 @@ impl ConnectionServiceImpl {
         let mut append_system_prompt_file: Option<PathBuf> = None;
         let mut session_env: Vec<(String, String)> = Vec::new();
         if let Some(recipe) = managed_recipe.clone() {
+            // A grill-me session gets a conversation-spawn handler bound to its toolcall listener so
+            // the agent's `spawn_conversation` relay can start a fresh implementation conversation.
+            let conversation_spawn_handler = self.conversation_spawn_handler_for(
+                &recipe,
+                os_user,
+                session_id,
+                project_id,
+                &sessions_base,
+                &session_dir,
+            );
             let launch = self.prepare_managed_workflow(
                 session_id,
                 recipe,
@@ -1288,6 +1429,7 @@ impl ConnectionServiceImpl {
                 &context_dir,
                 &tddy_tools_path,
                 None,
+                conversation_spawn_handler,
             )?;
             append_system_prompt_file = Some(launch.prompt_file);
             session_env = launch.env;
@@ -1681,6 +1823,7 @@ impl ConnectionServiceImpl {
                 &context_dir,
                 &tddy_tools_path,
                 None,
+                None,
             )?;
             if let Ok(prompt) = std::fs::read_to_string(&launch.prompt_file) {
                 let rules_dir = worktree_path.join(".cursor").join("rules");
@@ -1917,6 +2060,7 @@ impl ConnectionServiceImpl {
                 &session_dir,
                 &tddy_tools_path,
                 Some(resume_goal),
+                None,
             )?;
             append_system_prompt_file = Some(launch.prompt_file);
             env_extra = launch.env;
@@ -2116,6 +2260,7 @@ impl ConnectionServiceImpl {
                 &context_dir,
                 &tddy_tools_path,
                 Some(resume_goal),
+                None,
             )?;
             append_system_prompt_file = Some(launch.prompt_file);
             session_env = launch.env;
@@ -2304,6 +2449,7 @@ fn prepare_managed_workflow_inner(
     tddy_tools_path: &str,
     resume_at: Option<tddy_core::backend::GoalId>,
     child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
+    conversation_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
 ) -> Result<ManagedLaunch, Status> {
     let mw = match resume_at {
         Some(goal) => crate::session_toolcall::resume_managed_workflow(
@@ -2315,6 +2461,7 @@ fn prepare_managed_workflow_inner(
             &std::env::temp_dir(),
             goal,
             child_spawn_handler,
+            conversation_spawn_handler,
         ),
         None => crate::session_toolcall::set_up_managed_workflow(
             session_id,
@@ -2324,6 +2471,7 @@ fn prepare_managed_workflow_inner(
             tddy_data_dir,
             &std::env::temp_dir(),
             child_spawn_handler,
+            conversation_spawn_handler,
         ),
     }
     .map_err(Status::internal)?;
@@ -2436,6 +2584,120 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             &initial_prompt,
             "auto",
             Some(&self.orchestrator_session_id),
+            None,
+            None,
+            None,
+        )
+        .await
+        .map_err(|status| status.message().to_string())?;
+        Ok(response.into_inner().session_id)
+    }
+}
+
+/// Whether a managed session running `recipe_name` binds a `spawn-conversation` handler on its
+/// toolcall listener. Only the grill-me recipe does — a plain TDD session has nothing to hand off,
+/// and the PR-stack orchestrator uses `spawn-child` (resolving a planned node) instead.
+pub(crate) fn recipe_enables_conversation_spawn(recipe_name: &str) -> bool {
+    recipe_name == "grill-me"
+}
+
+/// Derive a git-friendly branch slug from a free-form conversation prompt when the agent did not
+/// supply an explicit `branch`. Lowercased, non-alphanumeric runs collapsed to a single `-`, and
+/// truncated so the worktree branch name stays reasonable. Falls back to a stable label when the
+/// prompt has no usable characters.
+fn conversation_branch_slug(prompt: &str) -> String {
+    let mut slug = String::new();
+    let mut last_dash = false;
+    for ch in prompt.chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash && !slug.is_empty() {
+            slug.push('-');
+            last_dash = true;
+        }
+        if slug.len() >= 40 {
+            break;
+        }
+    }
+    let trimmed = slug.trim_matches('-');
+    if trimmed.is_empty() {
+        "spawned-conversation".to_string()
+    } else {
+        format!("conversation/{trimmed}")
+    }
+}
+
+/// Per-session [`ConversationSpawnHandler`] for a managed session (grill-me): spawns a brand-new
+/// interactive claude-cli conversation on a fresh worktree, tagged with the calling session as its
+/// orchestrator, reusing the same [`spawn_claude_cli_session_inner`] the `StartSession` RPC uses.
+/// The generic sibling of [`StackChildSpawnHandler`] — it takes a free-form prompt instead of
+/// resolving a planned PR-stack node id, and the spawned conversation is itself unmanaged.
+struct GrillMeConversationSpawnHandler {
+    config: DaemonConfig,
+    tddy_data_dir: PathBuf,
+    claude_cli_manager: Arc<CliSessionManager>,
+    os_user: String,
+    project_id: String,
+    sessions_base: PathBuf,
+    orchestrator_session_id: String,
+    orchestrator_session_dir: PathBuf,
+    /// Fallback model when the orchestrator session's metadata has none (a tddy-coder *tool*
+    /// session writes `model: None` to its metadata, unlike a claude-cli session). The daemon knows
+    /// the model at spawn time and supplies it here so `spawn_conversation` can still inherit one.
+    model_override: Option<String>,
+}
+
+#[async_trait::async_trait]
+impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnHandler {
+    async fn spawn_conversation(
+        &self,
+        prompt: &str,
+        branch: Option<&str>,
+        base_ref: Option<&str>,
+    ) -> Result<String, String> {
+        if prompt.trim().is_empty() {
+            return Err("spawn_conversation requires a non-empty prompt".to_string());
+        }
+        let new_branch_name = branch
+            .map(str::to_string)
+            .filter(|b| !b.trim().is_empty())
+            .unwrap_or_else(|| conversation_branch_slug(prompt));
+
+        // Inherit the orchestrator's model — the daemon has no standalone model default and an
+        // empty model is rejected by the spawn path.
+        let meta = tddy_core::read_session_metadata(&self.orchestrator_session_dir)
+            .map_err(|e| format!("failed to read orchestrator session metadata: {e}"))?;
+        let model = meta
+            .model
+            .clone()
+            .filter(|m| !m.trim().is_empty())
+            .or_else(|| self.model_override.clone())
+            .unwrap_or_default();
+        if model.trim().is_empty() {
+            return Err(
+                "orchestrator session has no model to inherit for the conversation".to_string(),
+            );
+        }
+
+        let child_session_id = Uuid::new_v4().to_string();
+        let response = spawn_claude_cli_session_inner(
+            &self.config,
+            &self.tddy_data_dir,
+            &self.claude_cli_manager,
+            &self.os_user,
+            &child_session_id,
+            self.sessions_base.clone(),
+            &model,
+            &self.project_id,
+            "new_branch_from_base",
+            &new_branch_name,
+            base_ref.unwrap_or_default(),
+            "",
+            prompt,
+            "auto",
+            Some(&self.orchestrator_session_id),
+            None,
             None,
             None,
         )
@@ -3303,6 +3565,29 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let timeout = self.config.spawn_worker_request_timeout();
         let daemon_log = self.config.log.clone();
         let coder_config_path = self.config.coder_config_path.clone();
+        // Grill-me tool sessions relay `spawn_conversation` back over a per-session unix socket.
+        // Because the coder needs the socket path (and orchestrator id) at spawn time — and the
+        // socket path is what crosses the forked `spawn_worker` boundary — bind it and pre-generate
+        // the session id BEFORE the spawn, so both the worker and direct paths carry it identically.
+        let enable_conversation_spawn = recipe_for_spawn
+            .as_deref()
+            .map(recipe_enables_conversation_spawn)
+            .unwrap_or(false);
+        let (pre_session_id, host_session_socket): (Option<String>, Option<String>) =
+            if enable_conversation_spawn {
+                let sid = Uuid::now_v7().to_string();
+                let sock = self
+                    .spawn_host_session_socket(
+                        &sid,
+                        &os_user,
+                        &pid_for_spawn,
+                        model_for_spawn.clone(),
+                    )
+                    .await;
+                (Some(sid), sock)
+            } else {
+                (None, None)
+            };
         let result = spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
             log::debug!(
                 "StartSession: spawn_blocking running, using_spawn_worker={}",
@@ -3313,6 +3598,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             let recipe = recipe_for_spawn.as_deref();
             let stack_parent = stack_parent_for_spawn.as_deref();
             let model = model_for_spawn.as_deref();
+            let new_session_id = pre_session_id.as_deref();
+            let host_socket = host_session_socket.as_deref();
             let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
             if let Some(ref client) = spawn_client {
                 let spawn_req = spawn_worker::build_spawn_request(
@@ -3323,13 +3610,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     &livekit,
                     SpawnOptions {
                         resume_session_id: None,
-                        new_session_id: None,
+                        new_session_id,
                         project_id: pid,
                         agent,
                         mouse: spawn_mouse,
                         recipe,
                         stack_parent,
                         model,
+                        host_session_socket: host_socket,
                     },
                     daemon_log.as_ref(),
                     coder_log_yaml,
@@ -3346,13 +3634,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     &livekit,
                     SpawnOptions {
                         resume_session_id: None,
-                        new_session_id: None,
+                        new_session_id,
                         project_id: pid,
                         agent,
                         mouse: spawn_mouse,
                         recipe,
                         stack_parent,
                         model,
+                        host_session_socket: host_socket,
                     },
                     child_log_level.as_str(),
                     child_log_format.as_str(),
@@ -3520,6 +3809,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         recipe: resume_recipe.as_deref(),
                         stack_parent: None,
                         model: None,
+                        // TODO(stdio-relay): wire the resume path's reverse channel too.
+                        host_session_socket: None,
                     },
                     daemon_log.as_ref(),
                     coder_log_yaml,
@@ -3543,6 +3834,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         recipe: resume_recipe.as_deref(),
                         stack_parent: None,
                         model: None,
+                        // TODO(stdio-relay): wire the resume path's reverse channel too.
+                        host_session_socket: None,
                     },
                     child_log_level.as_str(),
                     child_log_format.as_str(),
@@ -6621,5 +6914,30 @@ mod terminal_output_chunking_tests {
             assert!(TERMINAL_OUTPUT_FRAME_MAX_BYTES > 0);
             assert!(TERMINAL_OUTPUT_FRAME_MAX_BYTES < 1024 * 1024);
         };
+    }
+}
+
+#[cfg(test)]
+mod conversation_spawn_wiring_tests {
+    use super::recipe_enables_conversation_spawn;
+
+    /// Only the grill-me recipe binds a conversation-spawn handler on its managed session; other
+    /// recipes (a plain TDD session, or the PR-stack orchestrator which uses `spawn-child` instead)
+    /// must not, so `spawn_conversation` is rejected there rather than silently spawning.
+    #[test]
+    fn grill_me_recipe_enables_conversation_spawn_but_others_do_not() {
+        // Then
+        assert!(
+            recipe_enables_conversation_spawn("grill-me"),
+            "grill-me must enable the conversation-spawn handler"
+        );
+        assert!(
+            !recipe_enables_conversation_spawn("tdd"),
+            "a plain tdd session must not enable the conversation-spawn handler"
+        );
+        assert!(
+            !recipe_enables_conversation_spawn("pr-stack"),
+            "pr-stack uses spawn-child, not spawn-conversation"
+        );
     }
 }

@@ -428,6 +428,9 @@ pub struct Args {
     /// `tddy-stdio`) instead of `--grpc`'s TCP socket. No local TUI is rendered — physical fd 1
     /// is dedicated to RPC framing.
     pub stdio: bool,
+    /// Per-session unix socket path (set by the daemon) hosting the reverse `HostSessionService`.
+    /// When present, `run_daemon` connects to it and binds the `spawn_conversation` relay handler.
+    pub host_session_socket: Option<String>,
     /// When true, expose the workflow engine as a standard ACP agent over stdin/stdout (JSON-RPC
     /// Agent Client Protocol). No local TUI is rendered — physical fd 1 is the ACP channel.
     pub acp: bool,
@@ -583,6 +586,10 @@ pub struct CoderArgs {
     #[arg(long)]
     pub stdio: bool,
 
+    /// Per-session unix socket path (set by the daemon) hosting the reverse `HostSessionService`.
+    /// When set, connect to it and relay `spawn_conversation` back to the daemon over it.
+    #[arg(long, value_name = "PATH")]
+    pub host_session_socket: Option<String>,
     /// Expose the workflow engine as a standard ACP agent (Agent Client Protocol) over
     /// stdin/stdout. No local TUI is rendered. Honors --agent, --recipe, --tddy-data-dir.
     #[arg(long)]
@@ -791,6 +798,11 @@ pub struct DemoArgs {
     #[arg(long)]
     pub stdio: bool,
 
+    /// Per-session unix socket path (set by the daemon) hosting the reverse `HostSessionService`.
+    /// When set, connect to it and relay `spawn_conversation` back to the daemon over it.
+    #[arg(long, value_name = "PATH")]
+    pub host_session_socket: Option<String>,
+
     /// LiveKit WebSocket URL for terminal streaming (e.g. ws://127.0.0.1:7880)
     #[arg(long)]
     pub livekit_url: Option<String>,
@@ -932,6 +944,7 @@ impl From<CoderArgs> for Args {
             resume_from: a.resume_from,
             daemon: a.daemon,
             stdio: a.stdio,
+            host_session_socket: a.host_session_socket,
             acp: a.acp,
             livekit_url: a.livekit_url,
             livekit_token: a.livekit_token,
@@ -988,6 +1001,7 @@ impl From<DemoArgs> for Args {
             resume_from: a.resume_from,
             daemon: a.daemon,
             stdio: a.stdio,
+            host_session_socket: a.host_session_socket,
             acp: false,
             livekit_url: a.livekit_url,
             livekit_token: a.livekit_token,
@@ -1473,6 +1487,12 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     std::fs::create_dir_all(&sessions_root).context("create sessions base dir")?;
 
     let port = args.grpc.unwrap_or(50051);
+    // When spawned with `--stdio` (grill-me tool sessions), the daemon hosts a reverse
+    // `HostSessionService` over our stdin/stdout so we can relay `spawn_conversation` back to it.
+    // The toolcall listener that owns the relay handler is created below, before the tokio runtime
+    // that sets up the stdio endpoint — so the endpoint's client is handed over via this slot.
+    let (stdio_client_tx, stdio_client_rx) =
+        crate::conversation_spawn_relay::reverse_client_channel();
     let agent_str = args.agent.as_deref().unwrap_or("claude");
     if args.agent.is_none() {
         verify_tddy_tools_available(agent_str)?;
@@ -1502,6 +1522,10 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     // first message; the Presenter created below (the single source of truth, bound to this
     // session) serves the chat stream `tddy.v1.TddyRemote/Stream` over both gRPC and LiveKit via
     // its `connect_view` `view_factory`.
+    // Set inside the `livekit_enabled` block below (where the toolcall listener is created) and read
+    // later in the async serve block by the session participant's tool executor, which relays
+    // non-engine Inspector tool invocations over this socket.
+    let mut toolcall_socket_path_for_exec: Option<std::path::PathBuf> = None;
     #[allow(clippy::type_complexity)]
     let (view_factory, presenter_observer, presenter_intent_tx, usage_event_tx): (
         Option<Arc<dyn Fn() -> Option<tddy_core::ViewConnection> + Send + Sync>>,
@@ -1540,15 +1564,34 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         tddy_core::toolcall::set_toolcall_log_dir(&logs);
         crate::build_executor::register();
 
+        // When the daemon gave us a `--host-session-socket`, bind the daemon-relay
+        // `spawn_conversation` handler so the agent's `spawn_conversation` tool call is forwarded to
+        // the daemon over the reverse channel. Without it, the plain listener rejects it.
+        let conversation_spawn_handler: Option<
+            Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>,
+        > = if args.host_session_socket.is_some() {
+            Some(Arc::new(
+                crate::conversation_spawn_relay::DaemonRelayConversationSpawnHandler::new(
+                    stdio_client_rx.clone(),
+                ),
+            ))
+        } else {
+            None
+        };
         let (toolcall_socket_path, tool_call_rx) =
-            match tddy_core::toolcall::start_toolcall_listener(
+            match tddy_core::toolcall::start_toolcall_listener_with_conversation_handler(
                 Some(session_artifact_dir.clone()),
                 std::env::current_dir().ok(),
                 tddy_data_dir.clone(),
+                conversation_spawn_handler,
             ) {
                 Ok((path, rx)) => (Some(path), Some(rx)),
                 Err(_) => (None, None),
             };
+        // Captured for the session participant's tool executor (declared at fn scope above), which
+        // relays non-engine Inspector tool invocations over this socket; `toolcall_socket_path`
+        // itself is moved into the workflow below.
+        toolcall_socket_path_for_exec = toolcall_socket_path.clone();
 
         tddy_core::write_initial_tool_session_metadata(
             &session_artifact_dir,
@@ -1643,6 +1686,33 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             .await
             .context("bind gRPC port")?;
         log::info!("tddy-coder daemon listening on port {}", port);
+
+        // `--host-session-socket`: connect to the daemon's per-session unix socket and publish the
+        // reverse client — which calls the daemon's `HostSessionService` — to the
+        // `spawn_conversation` relay handler bound on the toolcall listener above. We host a no-op
+        // service on our side (the daemon reaches us over gRPC/LiveKit, not this socket). A socket
+        // path (unlike stdio fds) survives the daemon's forked `spawn_worker`, which is why the
+        // channel is a socket rather than our stdin/stdout.
+        if let Some(sock_path) = args.host_session_socket.clone() {
+            match tokio::net::UnixStream::connect(&sock_path).await {
+                Ok(stream) => {
+                    let (reader, writer) = tokio::io::split(stream);
+                    let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+                        reader,
+                        writer,
+                        crate::conversation_spawn_relay::NoopRpcService,
+                    );
+                    let _ = stdio_client_tx.send(Some(client));
+                    tokio::spawn(endpoint.run());
+                    log::info!(
+                        "tddy-coder daemon: reverse spawn_conversation endpoint connected ({sock_path})"
+                    );
+                }
+                Err(e) => log::warn!(
+                    "tddy-coder daemon: connect host-session-socket {sock_path} failed: {e}"
+                ),
+            }
+        }
 
         // The chat stream (`tddy.v1.TddyRemote/Stream`) is served by the Presenter — the single
         // source of truth — via its `connect_view` `view_factory`, on both the gRPC port (here)
@@ -1826,12 +1896,14 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 session_id: args.session_id.clone().unwrap_or_default(),
                 session_token: args.livekit_token.clone().unwrap_or_default(),
                 tool_calls_path: session_artifact_dir.join("tool-calls.jsonl"),
-                tools: crate::session_participant::coder_session_tool_catalog(),
+                tools: crate::session_participant::coder_session_tool_catalog_full(),
                 executor: std::sync::Arc::new(
                     crate::session_participant::CoderSessionToolExecutor {
                         worktree_root: agent_working_dir.clone(),
                         task_registry: tddy_task::TaskRegistry::new(),
                         session_id: args.session_id.clone().unwrap_or_default(),
+                        toolcall_socket_path: toolcall_socket_path_for_exec.clone(),
+                        session_dir: session_artifact_dir.clone(),
                     },
                 ),
                 worktree: agent_working_dir.clone(),
@@ -2717,6 +2789,9 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         Ok((path, rx)) => (Some(path), Some(rx)),
         Err(_) => (None, None),
     };
+    // At fn scope so the async serve block below can capture it for the session participant's tool
+    // executor (relays non-engine Inspector tool invocations over this socket).
+    let socket_path_for_exec = socket_path.clone();
     let (event_tx, _) = tokio::sync::broadcast::channel(256);
     let (intent_tx, intent_rx) = std::sync::mpsc::channel();
     let presenter = match args.agent.as_deref() {
@@ -2887,12 +2962,17 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 .clone()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join("tool-calls.jsonl"),
-            tools: crate::session_participant::coder_session_tool_catalog(),
+            tools: crate::session_participant::coder_session_tool_catalog_full(),
             executor: std::sync::Arc::new(crate::session_participant::CoderSessionToolExecutor {
                 worktree_root: std::env::current_dir()
                     .unwrap_or_else(|_| std::path::PathBuf::from(".")),
                 task_registry: tddy_task::TaskRegistry::new(),
                 session_id: args.session_id.clone().unwrap_or_default(),
+                toolcall_socket_path: socket_path_for_exec.clone(),
+                session_dir: args
+                    .session_dir
+                    .clone()
+                    .unwrap_or_else(|| std::path::PathBuf::from(".")),
             }),
             worktree: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             terminal_manager: std::sync::Arc::new(
@@ -3742,6 +3822,7 @@ mod resume_session_config_tests {
             resume_from: Some(sid.to_string()),
             daemon: false,
             stdio: false,
+            host_session_socket: None,
             acp: false,
             livekit_url: None,
             livekit_token: None,
@@ -3814,6 +3895,7 @@ mod resume_session_identity_tests {
             resume_from: Some(sid.to_string()),
             daemon: false,
             stdio: false,
+            host_session_socket: None,
             acp: false,
             livekit_url: None,
             livekit_token: None,
@@ -3887,6 +3969,7 @@ mod session_dir_sync_tests {
             resume_from: Some(sid.to_string()),
             daemon: false,
             stdio: false,
+            host_session_socket: None,
             acp: false,
             livekit_url: None,
             livekit_token: None,
@@ -3976,6 +4059,7 @@ mod changeset_agent_resume_tests {
             resume_from: Some(sid.to_string()),
             daemon: false,
             stdio: false,
+            host_session_socket: None,
             acp: false,
             livekit_url: None,
             livekit_token: None,
@@ -4082,6 +4166,7 @@ mod post_tui_workflow_exit_tests {
             resume_from: None,
             daemon: false,
             stdio: false,
+            host_session_socket: None,
             acp: false,
             livekit_url: None,
             livekit_token: None,

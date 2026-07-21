@@ -1071,6 +1071,9 @@ impl TelegramWorkflowSpawn {
             recipe: recipe_for_spawn.as_deref(),
             stack_parent: None,
             model: None,
+            // Telegram-spawned sessions don't wire the reverse spawn_conversation channel.
+            // TODO(stdio-relay): telegram path.
+            host_session_socket: None,
         };
         let coder_log_yaml =
             spawner::coder_log_config_yaml(self.config.coder_config_path.as_deref());

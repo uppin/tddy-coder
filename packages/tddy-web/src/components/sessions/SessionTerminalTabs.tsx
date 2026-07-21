@@ -1,6 +1,7 @@
 import React from "react";
 import { Plus, X } from "lucide-react";
 import { AGENT_TERMINAL_ID } from "./useSessionTerminals";
+import type { ChildSession } from "./useChildSessions";
 import { cn } from "../../lib/utils";
 
 interface SessionTerminalTabsProps {
@@ -14,6 +15,12 @@ interface SessionTerminalTabsProps {
   onOpen: () => void;
   /** Close a bash terminal (the ✕ control on its tab). */
   onClose: (terminalId: string) => void;
+  /** Spawned child conversations of this session, rendered as tabs after the bash tabs. */
+  childSessions?: readonly ChildSession[];
+  /** The selected child conversation's session id, or `null` when a terminal tab is active. */
+  activeChildSessionId?: string | null;
+  /** Select a child conversation tab. */
+  onSelectChild?: (sessionId: string) => void;
 }
 
 const TAB_CLASSES =
@@ -30,6 +37,11 @@ function terminalLabel(terminalId: string): string {
   return terminalId.replace(/-/g, " ");
 }
 
+/** Display label for a spawned child-conversation tab (its recipe, e.g. "grill me"). */
+function childLabel(child: ChildSession): string {
+  return (child.recipe || "conversation").replace(/-/g, " ");
+}
+
 /**
  * The terminal tab strip at the top of a session's runtime area: a fixed, non-closable Agent tab
  * (the reserved `main` terminal) followed by one tab per open bash terminal, and a trailing "+"
@@ -41,7 +53,14 @@ export function SessionTerminalTabs({
   onSelect,
   onOpen,
   onClose,
+  childSessions = [],
+  activeChildSessionId = null,
+  onSelectChild,
 }: SessionTerminalTabsProps) {
+  // A terminal tab (Agent or bash) is only selected when no child conversation is active.
+  const childActive = activeChildSessionId !== null;
+  const agentSelected = !childActive && activeTerminalId === AGENT_TERMINAL_ID;
+
   return (
     <div
       data-testid="sessions-terminal-tabs"
@@ -50,15 +69,15 @@ export function SessionTerminalTabs({
       <button
         type="button"
         data-testid="sessions-terminal-tab-agent"
-        aria-selected={activeTerminalId === AGENT_TERMINAL_ID}
+        aria-selected={agentSelected}
         onClick={() => onSelect(AGENT_TERMINAL_ID)}
-        className={cn(TAB_CLASSES, tabColorClasses(activeTerminalId === AGENT_TERMINAL_ID))}
+        className={cn(TAB_CLASSES, tabColorClasses(agentSelected))}
       >
         Agent
       </button>
 
       {terminals.map((id) => {
-        const selected = activeTerminalId === id;
+        const selected = !childActive && activeTerminalId === id;
         return (
           <div key={id} className="flex items-center">
             <button
@@ -80,6 +99,23 @@ export function SessionTerminalTabs({
               <X className="h-3 w-3" />
             </button>
           </div>
+        );
+      })}
+
+      {childSessions.map((child) => {
+        const selected = activeChildSessionId === child.sessionId;
+        return (
+          <button
+            key={child.sessionId}
+            type="button"
+            role="tab"
+            data-testid={`sessions-child-tab-${child.sessionId}`}
+            aria-selected={selected}
+            onClick={() => onSelectChild?.(child.sessionId)}
+            className={cn(TAB_CLASSES, tabColorClasses(selected))}
+          >
+            {childLabel(child)}
+          </button>
         );
       })}
 

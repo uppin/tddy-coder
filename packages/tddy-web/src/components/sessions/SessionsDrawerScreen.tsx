@@ -496,6 +496,7 @@ export function SessionsDrawerScreen() {
             onChildSessionStarted={handleChildSessionStarted}
             traffic={selectedTraffic}
             runtimes={runtimes}
+            sessions={sortedSessions}
             focusedRuntimeId={runtimeRegistry.focusedSessionId}
             onSessionRoom={onSessionRoom}
             onSessionDisconnect={onSessionDisconnect}
