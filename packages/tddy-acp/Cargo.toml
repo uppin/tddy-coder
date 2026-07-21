@@ -1,0 +1,9 @@
+[package]
+name = "tddy-acp"
+version = "0.1.0"
+edition = "2021"
+description = "Shared ACP glue for tddy: unified client, the workflow ACP agent, and event/intent mapping"
+
+[dependencies]
+agent-client-protocol = { version = "=0.10.4", features = ["unstable"] }
+tddy-core = { path = "../tddy-core" }

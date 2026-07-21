@@ -24,7 +24,6 @@
  */
 
 import React from "react";
-import { create } from "@bufbuild/protobuf";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { Room } from "livekit-client";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
@@ -32,13 +31,11 @@ import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDraw
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { PrStackChat } from "../../src/components/sessions/prstack/PrStackChat";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
-import {
-  TddyRemote,
-  ServerMessageSchema,
-  type ClientMessage,
-} from "../../src/gen/tddy/v1/remote_pb";
+import { TddyRemote } from "../../src/gen/tddy/v1/remote_pb";
+import { AcpService } from "../../src/gen/tddy/acp/v1/acp_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
+import { acpAgentChunk, acpRecordingSession } from "../support/rpc/acpSession";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 
@@ -79,9 +76,7 @@ const LIVEKIT_ATTACHMENT: SessionAttachmentState = {
  * the wire intact.
  */
 async function* streamThatDropsAfterOneMessage() {
-  yield create(ServerMessageSchema, {
-    event: { case: "agentOutput", value: { text: "Analyzing the feature into a PR stack…" } },
-  });
+  yield acpAgentChunk("Analyzing the feature into a PR stack…");
   throw new ConnectError("presenter disconnected unexpectedly", Code.Unknown);
 }
 
@@ -194,12 +189,13 @@ it("keeps the typed draft and shows an error instead of clearing the input when 
 // ---------------------------------------------------------------------------
 
 it("shows an inline error when the presenter stream fails after the workflow was already talking", () => {
-  // Given — a presenter stream that delivers one message, then dies
-  const backend = aSessionsDrawerBackend([PR_STACK_SESSION]).implement(TddyRemote, {
-    stream: streamThatDropsAfterOneMessage,
-    getSession: async () => ({}),
-    listSessions: async () => ({ sessions: [] }),
-  });
+  // Given — an ACP session that delivers one message, then dies
+  const backend = aSessionsDrawerBackend([PR_STACK_SESSION])
+    .implement(TddyRemote, {
+      getSession: async () => ({}),
+      listSessions: async () => ({ sessions: [] }),
+    })
+    .implement(AcpService, { session: streamThatDropsAfterOneMessage });
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -223,20 +219,13 @@ it("shows an error and preserves the draft when the presenter's own participant 
   // a LiveKit server restart) while the browser's own presenter connection is otherwise healthy.
   // A stream is registered so a client can build, but no intent should ever reach it — the
   // presence check must block the send before anything is transmitted.
-  const sentIntents: ClientMessage[] = [];
-  async function* recordingStream(requests: AsyncIterable<ClientMessage>) {
-    for await (const req of requests) {
-      // Ignore the eager stream-open frame (an intent-less ClientMessage the hook enqueues to open
-      // the stream); only the operator's actual intents are under test.
-      if (req.intent.case === undefined) continue;
-      sentIntents.push(req);
-    }
-  }
-  const backend = aSessionsDrawerBackend([PR_STACK_SESSION]).implement(TddyRemote, {
-    stream: recordingStream,
-    getSession: async () => ({}),
-    listSessions: async () => ({ sessions: [] }),
-  });
+  const { session, sent: sentIntents } = acpRecordingSession();
+  const backend = aSessionsDrawerBackend([PR_STACK_SESSION])
+    .implement(TddyRemote, {
+      getSession: async () => ({}),
+      listSessions: async () => ({ sessions: [] }),
+    })
+    .implement(AcpService, { session });
 
   // When
   mountWithRpc(

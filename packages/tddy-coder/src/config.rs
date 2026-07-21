@@ -386,6 +386,7 @@ github:
             resume_from: None,
             daemon: false,
             stdio: false,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -479,6 +480,7 @@ github:
             fastcontext_model: Some("cli-model".to_string()),
             tddy_data_dir: None,
             stdio: false,
+            acp: false,
         };
         // When
         merge_config_into_args(&mut args, config);
@@ -539,6 +541,7 @@ github:
             fastcontext_model: None,
             tddy_data_dir: None,
             stdio: false,
+            acp: false,
         };
         // When
         merge_config_into_args(&mut args, config);
@@ -566,6 +569,7 @@ github:
             resume_from: None,
             daemon: false,
             stdio: false,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -629,6 +633,7 @@ github:
             resume_from: None,
             daemon: false,
             stdio: false,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -689,6 +694,7 @@ github:
             resume_from: None,
             daemon: false,
             stdio: false,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -816,6 +822,7 @@ log:
             resume_from: None,
             daemon: false,
             stdio: false,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,

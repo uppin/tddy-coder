@@ -16,12 +16,13 @@
  */
 
 import React from "react";
-import { create } from "@bufbuild/protobuf";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { TddyRemote, ServerMessageSchema, type ClientMessage, type ServerMessage } from "../../src/gen/tddy/v1/remote_pb";
+import { TddyRemote } from "../../src/gen/tddy/v1/remote_pb";
+import { AcpService, type AcpAgentMessage, type AcpClientMessage } from "../../src/gen/tddy/acp/v1/acp_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
+import { acpActivity, acpGoal, acpUserMessage } from "../support/rpc/acpSession";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 
@@ -45,40 +46,31 @@ const PR_STACK_SESSION = {
   stackPlanJson: "",
 };
 
-function goalStartedMessage(goal: string): ServerMessage {
-  return create(ServerMessageSchema, { event: { case: "goalStarted", value: { goal } } });
-}
-
-function activityLoggedMessage(text: string, kind: string): ServerMessage {
-  return create(ServerMessageSchema, { event: { case: "activityLogged", value: { text, kind } } });
-}
-
-/** Yields `initialMessages` on stream open, then records every intent sent afterward and
- *  reacts via `onIntent` (mirrors the harness already used in the elicitation acceptance tests). */
+/** Yields `initialMessages` on stream open, then records every prompt/permission the client sends
+ *  and reacts via `onPrompt` (the ACP counterpart of the old ServerMessage stream harness). */
 function aScriptedSystemMessageBackend(
-  initialMessages: ServerMessage[],
-  onIntent?: (intent: ClientMessage) => ServerMessage | undefined,
+  initialMessages: AcpAgentMessage[],
+  onPrompt?: () => AcpAgentMessage | undefined,
 ) {
-  const sentIntents: ClientMessage[] = [];
-  async function* stream(requests: AsyncIterable<ClientMessage>) {
-    const it = requests[Symbol.asyncIterator]();
-    await it.next(); // eager empty open frame — no intent, not under test
+  const sentIntents: AcpClientMessage[] = [];
+  async function* session(requests: AsyncIterable<AcpClientMessage>) {
     for (const msg of initialMessages) {
       yield msg;
     }
-    for (;;) {
-      const { value, done } = await it.next();
-      if (done) return;
-      if (value.intent.case !== undefined) sentIntents.push(value);
-      const follow = onIntent?.(value);
+    for await (const req of requests) {
+      const c = req.msg.case;
+      if (c !== "prompt" && c !== "requestPermission") continue;
+      sentIntents.push(req);
+      const follow = c === "prompt" ? onPrompt?.() : undefined;
       if (follow) yield follow;
     }
   }
-  const backend = aSessionsDrawerBackend([PR_STACK_SESSION]).implement(TddyRemote, {
-    stream,
-    getSession: async () => ({}),
-    listSessions: async () => ({ sessions: [] }),
-  });
+  const backend = aSessionsDrawerBackend([PR_STACK_SESSION])
+    .implement(TddyRemote, {
+      getSession: async () => ({}),
+      listSessions: async () => ({ sessions: [] }),
+    })
+    .implement(AcpService, { session });
   return { backend, sentIntents };
 }
 
@@ -99,7 +91,7 @@ beforeEach(() => {
 
 it("renders a goalStarted event as a goal bubble labeled with the goal name", () => {
   // Given
-  const { backend } = aScriptedSystemMessageBackend([goalStartedMessage("analyze-stack")]);
+  const { backend } = aScriptedSystemMessageBackend([acpGoal("analyze-stack")]);
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -113,7 +105,7 @@ it("renders a goalStarted event as a goal bubble labeled with the goal name", ()
 it("renders a non-UserPrompt activityLogged event as an activity bubble with its text", () => {
   // Given
   const { backend } = aScriptedSystemMessageBackend([
-    activityLoggedMessage("Tool: grep pattern=\"analyze-stack\"", "ToolUse"),
+    acpActivity("Tool: grep pattern=\"analyze-stack\""),
   ]);
 
   // When
@@ -132,10 +124,10 @@ it("does not render a duplicate bubble for a UserPrompt-kind activityLogged even
   // Given — the server echoes the operator's own queued prompt back as an ActivityLogged
   // entry with kind=UserPrompt (matches the real presenter's `QueuePrompt` handler), after the
   // operator's own message has already been echoed client-side by `sendPrompt`
-  const { backend } = aScriptedSystemMessageBackend([], (intent) =>
-    intent.intent.case === "queuePrompt" || intent.intent.case === "submitFeatureInput"
-      ? activityLoggedMessage("Queued: Split this into three PRs.", "UserPrompt")
-      : undefined,
+  const { backend } = aScriptedSystemMessageBackend([], () =>
+    // The agent echoes the operator's queued prompt back as a user_message_chunk; useAcpSession
+    // ignores it (already echoed locally), so it must not produce a second bubble.
+    acpUserMessage("Queued: Split this into three PRs."),
   );
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();

@@ -281,22 +281,22 @@ export const TEST_IDS = {
   // PR-Stack Chat Screen (per-workflow session view for the "pr-stack" recipe)
   prStackScreen: "pr-stack-screen",
   prStackPlannedPrList: "pr-stack-planned-pr-list",
-  prStackChat: "pr-stack-chat",
-  prStackChatMessages: "pr-stack-chat-messages",
-  prStackChatInput: "pr-stack-chat-input",
-  prStackChatSendBtn: "pr-stack-chat-send-btn",
-  prStackChatError: "pr-stack-chat-error",
-  prStackChatConnecting: "pr-stack-chat-connecting",
-  prStackChatStatus: "pr-stack-chat-status",
-  prStackChatActivity: "pr-stack-chat-activity",
 
-  // PR-Stack Chat Screen — clarification question elicitation (AppMode::Select / MultiSelect)
-  prStackChatQuestion: "pr-stack-chat-question",
-  prStackChatQuestionHeader: "pr-stack-chat-question-header",
-  prStackChatQuestionText: "pr-stack-chat-question-text",
-  prStackChatQuestionOtherInput: "pr-stack-chat-question-other-input",
-  prStackChatQuestionOtherSubmit: "pr-stack-chat-question-other-submit",
-  prStackChatMultiSelectSubmit: "pr-stack-chat-multiselect-submit",
+  // Reusable Agent Chat (recipe-agnostic; the PR-Stack chat view renders it via PrStackChat)
+  agentChat: "agent-chat",
+  agentChatMessages: "agent-chat-messages",
+  agentChatInput: "agent-chat-input",
+  agentChatSendBtn: "agent-chat-send-btn",
+  agentChatExportBtn: "agent-chat-export-btn",
+  agentChatError: "agent-chat-error",
+  agentChatConnecting: "agent-chat-connecting",
+  agentChatStatus: "agent-chat-status",
+  agentChatQuestion: "agent-chat-question",
+  agentChatQuestionHeader: "agent-chat-question-header",
+  agentChatQuestionText: "agent-chat-question-text",
+  agentChatQuestionOtherInput: "agent-chat-question-other-input",
+  agentChatQuestionOtherSubmit: "agent-chat-question-other-submit",
+  agentChatMultiSelectSubmit: "agent-chat-multiselect-submit",
 
   // PR-Stack Chat Screen — manually adding a planned PR (deterministic, non-chat path)
   prStackAddPlannedPrBtn: "pr-stack-add-planned-pr-btn",
@@ -582,14 +582,14 @@ export const prStackStatusChip = (nodeId: string) => `pr-stack-status-chip-${nod
 export const prStackInternalStatusBadge = (nodeId: string) =>
   `pr-stack-internal-status-badge-${nodeId}`;
 
-/** `[data-testid="pr-stack-chat-message-<index>"]` — a single rendered chat bubble */
-export const prStackChatMessage = (index: number) => `pr-stack-chat-message-${index}`;
+/** `[data-testid="agent-chat-message-<index>"]` — a single rendered chat bubble (reusable AgentChat) */
+export const agentChatMessage = (index: number) => `agent-chat-message-${index}`;
 
-/** `[data-testid="pr-stack-chat-option-<index>"]` — a single-select option button */
-export const prStackChatOption = (index: number) => `pr-stack-chat-option-${index}`;
+/** `[data-testid="agent-chat-option-<index>"]` — a single-select option button (reusable AgentChat) */
+export const agentChatOption = (index: number) => `agent-chat-option-${index}`;
 
-/** `[data-testid="pr-stack-chat-multiselect-option-<index>"]` — a multi-select option checkbox */
-export const prStackChatMultiSelectOption = (index: number) => `pr-stack-chat-multiselect-option-${index}`;
+/** `[data-testid="agent-chat-multiselect-option-<index>"]` — a multi-select option checkbox (reusable AgentChat) */
+export const agentChatMultiSelectOption = (index: number) => `agent-chat-multiselect-option-${index}`;
 
 /** `[data-testid="pr-stack-add-planned-pr-ancestor-<nodeId>"]` — an ancestor checkbox in the "New planned PR" form */
 export const prStackAddPlannedPrAncestorCheckbox = (nodeId: string) =>

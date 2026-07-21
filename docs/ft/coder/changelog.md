@@ -2,6 +2,12 @@
 
 Release note history for the Coder product area.
 
+## 2026-07-21 — ACP over LiveKit: `AcpService` protobuf mirror + reusable Agent Chat
+
+- The TDD workflow is now addressable as an ACP agent two ways: `tddy-coder --acp` (JSON-RPC over stdio, for external hosts like Zed) and `AcpService` — a 1:1 protobuf mirror of the Agent Client Protocol served over the same `tddy_rpc` LiveKit session connection that carries `TddyRemote`, so the browser drives a session using ACP semantics with no extra process hop. See [acp-agent.md](acp-agent.md), [acp-protobuf-rpc.md](acp-protobuf-rpc.md).
+- `AcpService`'s server (`TddyAcpService`) is a Presenter view-adapter mounted beside `TddyRemoteServer`; it maps the full view-adapter signal set to ACP — message chunks, a tool-call lifecycle (stable ids + completion/progress), a synthesized `Plan`, agent-initiated `request_permission` for clarifications, and `PromptResponse(EndTurn)` at both workflow completion and the free-prompting turn boundary. Names mirror `agent-client-protocol` verbatim so a JSON-RPC ACP peer translates mechanically.
+- The stdio JSON-RPC `--acp` agent runs `enforce_stdio_safe_log_output` (a `stdout` logger would corrupt the JSON-RPC stream) and selects the agent's first *offered* permission option (denying via `Cancelled` when none is offered).
+
 ## 2026-07-16 — Bash terminals on the session participant
 
 - A tddy-coder session's LiveKit participant now serves the `terminal_id`-addressed terminal RPCs (start/stop/list/send/stream), spawning interactive bash shells in the session worktree via the new shared `tddy-pty` crate; the reserved `main` terminal remains the workflow VirtualTui and cannot be stopped via `StopTerminalSession`. See [session-participant-rpc.md](session-participant-rpc.md).

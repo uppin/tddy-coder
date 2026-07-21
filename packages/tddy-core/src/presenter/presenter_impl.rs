@@ -235,6 +235,7 @@ impl Presenter {
             mode: self.state.mode.clone(),
             plan_refinement_pending: self.state.plan_refinement_pending,
             skills_project_root: self.state.skills_project_root.clone(),
+            awaiting_open_answer: self.awaiting_open_answer,
         }));
     }
 

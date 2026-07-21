@@ -27,6 +27,8 @@ serde_yaml = "0.9"
 [dev-dependencies]
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
 tddy-service = { path = "../tddy-service" }
+tddy-core = { path = "../tddy-core" }
+tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-rpc = { path = "../tddy-rpc" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tokio-stream = "0.1"

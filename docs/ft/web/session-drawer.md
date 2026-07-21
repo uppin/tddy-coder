@@ -527,8 +527,40 @@ control (`tddy-service/proto/tddy/v1/remote.proto`), not a new backend concept:
   re-reads `stackPlanJson` after a `WorkflowComplete` / `StateChanged` event so edits appear
   without a manual refresh.
 
-**Component:** `PrStackChat` (`src/components/sessions/prstack/PrStackChat.tsx`) +
-`usePresenterChat` hook.
+**Component:** the reusable **`AgentChat`** (`src/components/chat/AgentChat.tsx`) +
+`useAgentChat` hook — see [Agent Chat](#agent-chat) below. `PrStackScreen` mounts `AgentChat`
+with a pr-stack-appropriate placeholder; the component itself is recipe-agnostic.
+
+## Agent Chat
+
+`AgentChat` is the recipe-agnostic chat window extracted from the PR-Stack screen. It is a thin
+UI over a session's remote agent and knows nothing about PR stacks — any recipe can mount it. It
+speaks one of two wire protocols over the same LiveKit session connection, chosen by an `acp` prop:
+the default Presenter `TddyRemote.Stream`, or the ACP protobuf mirror `AcpService.Session` (see
+[acp-protobuf-rpc](../coder/acp-protobuf-rpc.md)). **The pr-stack chat uses ACP** (`acp`), at full
+behavior parity with the Presenter path.
+
+- **Inputs:** `room: Room | null` + `livekitServerIdentity` select the LiveKit transport target;
+  `placeholder` is display-only; `acp` selects the ACP transport. There is no dependency on
+  `SessionEntry` or any pr-stack type.
+- **Behavior:** inbound agent output chunks are merged into one growing agent bubble (mirroring
+  the TUI's `AgentOutputActivityLogMerge`); a select / multi-select clarification renders a
+  clarification panel; outbound text starts (first message on a fresh connection) or nudges the
+  workflow.
+- **Export:** an "Export" button downloads a plain-text transcript with ISO timestamps, merging
+  chat messages and clarification (elicitation) points into one chronological timeline
+  (`chatTranscript.buildChatTranscript` + `downloadTextFile`) — so an operator can see what the
+  agent did and when, including where it paused for input. Works on both transports.
+- **Test ids:** `agent-chat-*` (e.g. `agent-chat-messages`, `agent-chat-message-<i>`,
+  `agent-chat-input`, `agent-chat-option-<i>`, `agent-chat-export-btn`), centralized in
+  `cypress/support/testIds.ts`. Storybook: `AgentChat.stories.tsx` (empty / streaming / select /
+  multiSelect / error / connecting).
+
+**Hooks:** `useAgentChat(room, serverIdentity)` owns the `TddyRemote.Stream` bidi RPC;
+`useAcpSession(room, serverIdentity)` is its ACP counterpart over `AcpService.Session`. Both return
+the identical `UseAgentChatResult` — `messages`, `elicitations`, `sendPrompt`, `pendingQuestion`,
+`answerSelect` / `answerOther` / `answerMultiSelect`, and the `streamError` / `sendError` /
+`workflowError` surfaces — so `AgentChat` renders either through a shared `AgentChatView`.
 
 ### New RPCs / proto fields used
 
