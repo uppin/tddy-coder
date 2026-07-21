@@ -60,3 +60,4 @@ exclude = [
 [workspace.dependencies]
 rstest = "0.24"
 pretty_assertions = "1"
+sysinfo = "0.33"

@@ -21,7 +21,7 @@ import { DaemonSelectorConnected } from "../shell/DaemonSelector";
 import { TooltipProvider } from "../ui/tooltip";
 import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
-import { StatusBar } from "./StatusBar";
+import { HostStatsFooter } from "./HostStatsFooter";
 import { useSessionAttachment, type SessionAttachmentState } from "./useSessionAttachment";
 import { nextInspectorState } from "./inspectorState";
 import { sessionsDrawerPathForSession, parseSessionsDrawerSessionId } from "../../routing/appRoutes";
@@ -441,11 +441,9 @@ export function SessionsDrawerScreen() {
         // browser chrome, which pushes the bottom keyboard bar off the visible screen.
         className="flex flex-col h-[100dvh] w-full overflow-hidden font-sans text-foreground"
       >
-        <div className="flex items-center flex-shrink-0">
-          <div className="flex-1 min-w-0">
-            <StatusBar attachment={attachment} />
-          </div>
-          <div className="flex items-center px-2 border-b border-border">
+        <div className="flex items-center flex-shrink-0 border-b border-border">
+          <div className="flex-1 min-w-0" />
+          <div className="flex items-center px-2">
             <DaemonSelectorConnected />
           </div>
         </div>
@@ -505,6 +503,7 @@ export function SessionsDrawerScreen() {
             liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
           />
         </div>
+        <HostStatsFooter attachment={attachment} />
       </div>
     </TooltipProvider>
   );
