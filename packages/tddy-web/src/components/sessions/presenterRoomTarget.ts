@@ -1,4 +1,4 @@
-import type { SessionAttachmentState } from "../useSessionAttachment";
+import type { SessionAttachmentState } from "./useSessionAttachment";
 
 export interface PresenterRoomTarget {
   url: string;

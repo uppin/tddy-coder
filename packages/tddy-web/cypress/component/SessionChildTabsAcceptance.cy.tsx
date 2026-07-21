@@ -28,6 +28,12 @@ import { sessionTerminalTabsPage as tabs } from "../support/pages/sessionTermina
 // Fixtures — a grill-me parent session and a spawned child conversation
 // ---------------------------------------------------------------------------
 
+// A cursor-cli grill-me session: this is the real-world flow that spawns child conversations
+// (grill-me on Cursor relays `spawn_conversation` to the daemon). `sessionType: "cursor-cli"` is a
+// genuine PTY terminal, so it renders the terminal runtime that hosts the child-conversation tabs —
+// unlike a `tool` workflow session, which now opens the full-screen chat instead (WorkflowChatScreen)
+// and has no terminal tab bar. Leaving `sessionType` unset here would proto-default to "" (tool) and
+// route to chat, so it must be set explicitly.
 const PARENT = {
   sessionId: "child-tabs-aaaaaaaa-0000-0000-0000-000000000001",
   createdAt: "2026-07-19T09:00:00Z",
@@ -38,6 +44,7 @@ const PARENT = {
   projectId: "proj-child-1",
   daemonInstanceId: "local",
   recipe: "grill-me",
+  sessionType: "cursor-cli",
   pendingElicitation: false,
 };
 

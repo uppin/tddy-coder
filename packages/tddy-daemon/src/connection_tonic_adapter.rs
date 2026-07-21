@@ -35,13 +35,14 @@ use tddy_service::proto::connection::{
     ClaimTerminalControlRequest, ClaimTerminalControlResponse, ConnectSessionRequest,
     ConnectSessionResponse, CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest,
     DeleteSessionResponse, ExecuteToolRequest, ExecuteToolResponse, GetDemoVmStatusRequest,
-    GetDemoVmStatusResponse, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
-    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
-    ListExecToolsRequest, ListExecToolsResponse, ListProjectBranchesRequest,
-    ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ListSessionWorkflowFilesRequest,
-    ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
+    GetDemoVmStatusResponse, GetHostCpuStatsRequest, GetHostCpuStatsResponse,
+    GetHostDiskStatsRequest, GetHostDiskStatsResponse, ListAgentModelsRequest,
+    ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
+    ListEligibleDaemonsResponse, ListExecToolsRequest, ListExecToolsResponse,
+    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
+    ListProjectsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
+    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreesForProjectRequest, ListWorktreesForProjectResponse, MintLocalTokenRequest,
     MintLocalTokenResponse, ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse,
@@ -672,5 +673,31 @@ where
         Ok(tonic::Response::new(MintLocalTokenResponse {
             session_token,
         }))
+    }
+
+    async fn get_host_cpu_stats(
+        &self,
+        request: tonic::Request<GetHostCpuStatsRequest>,
+    ) -> Result<tonic::Response<GetHostCpuStatsResponse>, tonic::Status> {
+        let resp = RpcConnectionService::get_host_cpu_stats(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn get_host_disk_stats(
+        &self,
+        request: tonic::Request<GetHostDiskStatsRequest>,
+    ) -> Result<tonic::Response<GetHostDiskStatsResponse>, tonic::Status> {
+        let resp = RpcConnectionService::get_host_disk_stats(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
     }
 }
