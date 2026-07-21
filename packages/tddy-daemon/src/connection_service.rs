@@ -5103,6 +5103,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         if let Some(ref telegram) = self.telegram {
             let mut w = telegram.watcher.lock().await;
             w.on_claude_cli_activity_status_changed(
+                &telegram.config,
                 &*telegram.sender,
                 &req.session_id,
                 &req.status,

@@ -262,18 +262,19 @@ async fn repeated_same_status_does_not_realert() {
     );
 }
 
-/// **no_alert_when_no_chat_tracks_session**: `report_session_status` with `WaitingForInput`
-/// when no chat is tracking the session must NOT send any Telegram message. The RPC must still
-/// return `ok = true`.
+/// **untracked_session_falls_back_to_configured_chat_ids**: `report_session_status` with
+/// `WaitingForInput` for a session no chat is tracking (e.g. started from the web UI) must fall
+/// back to the daemon's configured `telegram.chat_ids` broadcast. The RPC must still return
+/// `ok = true`.
 #[tokio::test]
-async fn no_alert_when_no_chat_tracks_session() {
+async fn untracked_session_falls_back_to_configured_chat_ids() {
     // Given
     let sessions_tmp = tempfile::tempdir().unwrap();
     let session_dir = sessions_tmp.path().join("sessions").join(SESSION_ID);
     write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN, Some("Running"));
 
     let sender = Arc::new(InMemoryTelegramSender::new());
-    // No bind — untracked session.
+    // No bind — untracked session. Config still lists BOUND_CHAT in chat_ids (see test_daemon_config).
     let tracked = Arc::new(std::sync::Mutex::new(
         TelegramTrackedSessionCoordinator::new(),
     ));
@@ -296,10 +297,16 @@ async fn no_alert_when_no_chat_tracks_session() {
 
     // Then
     assert!(resp.into_inner().ok, "response.ok must be true");
-    assert!(
-        sender.recorded().is_empty(),
-        "no chat tracks the session — no Telegram message must be sent; got {:?}",
-        sender.recorded()
+    let recorded = sender.recorded();
+    assert_eq!(
+        recorded.len(),
+        1,
+        "untracked session must fall back to the configured chat_ids broadcast; got {recorded:?}"
+    );
+    assert_eq!(
+        recorded[0].0, BOUND_CHAT,
+        "fallback message must go to the configured chat_id; got chat_id={}",
+        recorded[0].0
     );
 }
 
