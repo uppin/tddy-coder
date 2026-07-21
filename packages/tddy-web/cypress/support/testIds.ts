@@ -286,6 +286,9 @@ export const TEST_IDS = {
   prStackScreen: "pr-stack-screen",
   prStackPlannedPrList: "pr-stack-planned-pr-list",
 
+  // Full-screen Workflow Chat Screen (per-workflow session view for every non-"pr-stack" tool recipe)
+  workflowChatScreen: "workflow-chat-screen",
+
   // Reusable Agent Chat (recipe-agnostic; the PR-Stack chat view renders it via PrStackChat)
   agentChat: "agent-chat",
   agentChatMessages: "agent-chat-messages",

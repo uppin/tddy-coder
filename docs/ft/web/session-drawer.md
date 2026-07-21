@@ -428,8 +428,12 @@ See [PR Stack Parent Picker](#pr-stack-parent-picker) in the Create Session sect
 ## Per-Workflow Session Views
 
 > **Added: 2026-07-01** — a session's `recipe` can now select a fully custom main-pane
-> screen instead of the terminal. First (and currently only) consumer: the PR-Stack Chat
-> Screen below.
+> screen instead of the terminal. First consumer: the PR-Stack Chat Screen below.
+>
+> **Updated: 2026-07-21** — chat is now the default surface for **every** tddy-coder workflow.
+> `pr-stack` keeps its dedicated two-pane screen; every other `tool` workflow recipe opens the
+> single-pane full-screen [Workflow Chat Screen](#workflow-chat-screen). `claude-cli` / `cursor-cli`
+> PTY sessions keep the terminal (they have no Presenter).
 
 ### View registry
 
@@ -442,25 +446,31 @@ if (customView) return customView;
 ```
 
 `resolveWorkflowView(session)` (`src/components/sessions/workflowViews.tsx`) is a small
-registry keyed by `session.recipe`:
+registry keyed by `session.recipe` and `session.sessionType`:
 
 ```typescript
-resolveWorkflowView({ recipe: "pr-stack", ... }) → <PrStackScreen session={...} />
-resolveWorkflowView({ recipe: "tdd", ... })       → null   // falls through to the terminal
+resolveWorkflowView({ recipe: "pr-stack", ... })              → <PrStackScreen session={...} />
+resolveWorkflowView({ recipe: "tdd", sessionType: "tool" })   → <WorkflowChatScreen session={...} />
+resolveWorkflowView({ recipe: "tdd", sessionType: "claude-cli" }) → null  // terminal (PTY, no Presenter)
+resolveWorkflowView({ recipe: "", sessionType: "claude-cli" }) → null      // terminal
 ```
 
+The gate for the generic chat screen is `sessionType ∈ {"", "tool"} && recipe != ""` — only
+tddy-coder `tool` sessions run a Presenter/ACP surface the chat can reach, so a `claude-cli` /
+`cursor-cli` session keeps the terminal even when it carries a managed `recipe`. `pr-stack` is
+matched first and routes to its own two-pane screen.
+
 Custom views own their own connection/chrome and render **in place of** the terminal
-container — they are not gated on `attachment.status`; a `pr-stack` session shows its
-screen whether or not a terminal is attached, since the whole point is that the operator
-never needs the raw terminal for this workflow. Every other recipe is unaffected: the
-existing terminal / placeholder behaviour is the fallback when no custom view is
-registered.
+container — they are not gated on `attachment.status`; a workflow session shows its chat screen
+whether or not a terminal is attached, since the whole point is that the operator never needs the
+raw terminal for these workflows. Non-tool sessions are unaffected: the existing terminal /
+placeholder behaviour is the fallback when no custom view is registered.
 
 ### Data source
 
-`SessionEntry.recipe` (proto field 22, already surfaced for the recipe dropdown and stack
-grouping above) is the sole routing key — no new field was needed to decide *which* view
-opens.
+`SessionEntry.recipe` (proto field 22) and `SessionEntry.sessionType` (proto field 17), both
+already surfaced for the create-session form / inspector, are the routing keys — no new field was
+needed to decide *which* view opens.
 
 ## PR-Stack Chat Screen
 
@@ -530,6 +540,19 @@ control (`tddy-service/proto/tddy/v1/remote.proto`), not a new backend concept:
 **Component:** the reusable **`AgentChat`** (`src/components/chat/AgentChat.tsx`) +
 `useAgentChat` hook — see [Agent Chat](#agent-chat) below. `PrStackScreen` mounts `AgentChat`
 with a pr-stack-appropriate placeholder; the component itself is recipe-agnostic.
+
+## Workflow Chat Screen
+
+The custom screen for every non-`pr-stack` tddy-coder `tool` workflow session (`tdd`, `tdd-small`,
+`bugfix`, `free-prompting`, `grill-me`, `review`, `merge-pr`). Replaces the terminal with a single,
+full-screen chat window — no second pane. The operator drives the workflow entirely by prompting and
+answering clarifications, exactly as with pr-stack, minus the planned-PR list.
+
+**Component:** `WorkflowChatScreen` (`src/components/sessions/WorkflowChatScreen.tsx`) — a thin
+single-pane wrapper that derives its own presenter LiveKit room from the session's attachment
+(`usePresenterLiveKitRoom`, shared with `PrStackScreen`) and mounts the reusable [`AgentChat`](#agent-chat)
+over the **ACP mirror** (`acp`), matching pr-stack's chat and tddy-coder's ACP-agent direction. Root
+marker: `data-testid="workflow-chat-screen"`.
 
 ## Agent Chat
 
