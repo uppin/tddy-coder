@@ -29,6 +29,7 @@ pretty_assertions = { workspace = true }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 
 [dev-dependencies]
+tddy-coder = { path = "../tddy-coder" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 bytes = "1"
 tempfile = "3"

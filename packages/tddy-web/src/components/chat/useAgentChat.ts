@@ -6,14 +6,14 @@ import { AsyncQueue } from "tddy-livekit-web";
 import {
   useLiveKitTransportFactory,
   useLiveKitTransportFactoryIsOverridden,
-} from "../../../rpc/transportProvider";
+} from "../../rpc/transportProvider";
 import {
   ClientMessageSchema,
   TddyRemote,
   type AppModeProto,
   type ClientMessage,
-} from "../../../gen/tddy/v1/remote_pb";
-import { tddyDebug } from "../../../lib/debugMask";
+} from "../../gen/tddy/v1/remote_pb";
+import { tddyDebug } from "../../lib/debugMask";
 
 /** Presenter-stream diagnostics. Enable in DevTools: `localStorage.debug = 'tddy:presenter:*'`
  *  (or via the daemon `debug` config). Traces stream open/close, every inbound Presenter event,
@@ -27,6 +27,19 @@ export interface ChatMessage {
   key: string;
   text: string;
   from: "user" | "agent" | "goal" | "activity";
+  /** Epoch ms when this message was first shown — used for the exported transcript timeline. */
+  at: number;
+}
+
+/** A clarification the workflow paused on, recorded for the transcript timeline (kept separate from
+ *  `messages` so it doesn't shift the index-addressed chat bubbles). */
+export interface ElicitationPoint {
+  at: number;
+  kind: "select" | "multiSelect";
+  header: string;
+  question: string;
+  options: string[];
+  allowOther: boolean;
 }
 
 export interface PendingQuestionOption {
@@ -42,8 +55,10 @@ export interface PendingQuestion {
   allowOther: boolean;
 }
 
-export interface UsePresenterChatResult {
+export interface UseAgentChatResult {
   messages: ChatMessage[];
+  /** Clarification points, in arrival order — merged with `messages` by timestamp for the export. */
+  elicitations: ElicitationPoint[];
   /** Enqueues `text` onto the open stream. Returns `false` (and enqueues nothing) when there is no live client to send over, or when the presenter's own participant is no longer in the room. */
   sendPrompt: (text: string) => boolean;
   /** The clarification question the presenter is currently blocked on (`AppMode::Select` /
@@ -64,10 +79,10 @@ export interface UsePresenterChatResult {
 }
 
 /**
- * Owns the `TddyRemote.Stream` bidirectional RPC for the PR-Stack Chat Screen — a thin UI over
- * the session's remote Presenter protocol (docs/ft/web/session-drawer.md § PR-Stack Chat
- * Screen). Inbound `AgentOutput` events become chat bubbles; `sendPrompt` writes a `ClientMessage`
- * intent onto the same open stream.
+ * Owns the `TddyRemote.Stream` bidirectional RPC for the Agent Chat panel — a thin UI over the
+ * session's remote Presenter protocol (docs/ft/web/session-drawer.md § Agent Chat). Inbound
+ * `AgentOutput` events become chat bubbles; `sendPrompt` writes a `ClientMessage` intent onto the
+ * same open stream.
  *
  * The presenter only starts the workflow on a `SubmitFeatureInput` intent (sent while in
  * `AppMode::FeatureInput`); `QueuePrompt` is for nudging an already-running workflow and is a
@@ -101,10 +116,10 @@ export interface UsePresenterChatResult {
  * attachment.status" requirement) — until then chat has no client and cannot send/receive in
  * production.
  */
-export function usePresenterChat(
+export function useAgentChat(
   room: Room | null,
   serverIdentity: string,
-): UsePresenterChatResult {
+): UseAgentChatResult {
   const liveKitFactory = useLiveKitTransportFactory();
   const factoryIsOverridden = useLiveKitTransportFactoryIsOverridden();
   const canBuildClient = room !== null || factoryIsOverridden;
@@ -128,6 +143,12 @@ export function usePresenterChat(
   }, [liveKitFactory, canBuildClient, room, serverIdentity]);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [elicitations, setElicitations] = useState<ElicitationPoint[]>([]);
+  const elicitationsRef = useRef<ElicitationPoint[]>([]);
+  const recordElicitation = (e: ElicitationPoint) => {
+    elicitationsRef.current = [...elicitationsRef.current, e];
+    setElicitations(elicitationsRef.current);
+  };
   const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -163,7 +184,7 @@ export function usePresenterChat(
     messagesRef.current[i] = { ...messagesRef.current[i], text };
   };
   const pushAgentLine = (text: string) => {
-    messagesRef.current.push({ key: `agent-line-${agentKeyRef.current++}`, text, from: "agent" });
+    messagesRef.current.push({ key: `agent-line-${agentKeyRef.current++}`, text, from: "agent", at: Date.now() });
   };
   /** A finalized line (delta buffer flushed on `\n`): replace the in-progress partial row, else
    *  append — but drop a re-emitted snapshot identical to the line already shown. */
@@ -215,6 +236,8 @@ export function usePresenterChat(
 
   useEffect(() => {
     setMessages([]);
+    setElicitations([]);
+    elicitationsRef.current = [];
     setPendingQuestion(null);
     setStreamError(null);
     setSendError(null);
@@ -275,6 +298,16 @@ export function usePresenterChat(
                     }
                   : null,
               );
+              if (question) {
+                recordElicitation({
+                  at: Date.now(),
+                  kind: variant.case,
+                  header: question.header,
+                  question: question.question,
+                  options: question.options.map((o) => o.label),
+                  allowOther: question.allowOther,
+                });
+              }
             } else {
               setPendingQuestion(null);
             }
@@ -289,7 +322,7 @@ export function usePresenterChat(
           } else if (kind === "goalStarted") {
             const goal = serverMessage.event.value.goal;
             dbg("recv #%d goalStarted -> %o", eventCount, goal);
-            messagesRef.current.push({ key: `system-${systemKeyRef.current++}`, text: goal, from: "goal" });
+            messagesRef.current.push({ key: `system-${systemKeyRef.current++}`, text: goal, from: "goal", at: Date.now() });
             setMessages(messagesRef.current.slice());
           } else if (kind === "activityLogged") {
             const activity = serverMessage.event.value;
@@ -299,6 +332,7 @@ export function usePresenterChat(
                 key: `system-${systemKeyRef.current++}`,
                 text: activity.text,
                 from: "activity",
+                at: Date.now(),
               });
               setMessages(messagesRef.current.slice());
             }
@@ -313,7 +347,7 @@ export function usePresenterChat(
       } catch (err) {
         if (!cancelled) {
           dbg("stream error after %d event(s): %o", eventCount, err);
-          console.debug("[usePresenterChat] stream error", err);
+          console.debug("[useAgentChat] stream error", err);
           setStreamError(err instanceof Error ? err.message : String(err));
         }
       }
@@ -349,7 +383,7 @@ export function usePresenterChat(
       : create(ClientMessageSchema, { intent: { case: "queuePrompt", value: { text } } });
     queueRef.current.enqueue(clientMessage);
     setSendError(null);
-    messagesRef.current.push({ key: `user-sent-${sentIndexRef.current++}`, text, from: "user" });
+    messagesRef.current.push({ key: `user-sent-${sentIndexRef.current++}`, text, from: "user", at: Date.now() });
     setMessages(messagesRef.current.slice());
     return true;
   };
@@ -376,7 +410,7 @@ export function usePresenterChat(
     );
     setSendError(null);
     const label = pendingQuestion?.options[index]?.label ?? "";
-    messagesRef.current.push({ key: `user-sent-${sentIndexRef.current++}`, text: label, from: "user" });
+    messagesRef.current.push({ key: `user-sent-${sentIndexRef.current++}`, text: label, from: "user", at: Date.now() });
     setMessages(messagesRef.current.slice());
     return true;
   };
@@ -388,7 +422,7 @@ export function usePresenterChat(
       create(ClientMessageSchema, { intent: { case: "answerOther", value: { text } } }),
     );
     setSendError(null);
-    messagesRef.current.push({ key: `user-sent-${sentIndexRef.current++}`, text, from: "user" });
+    messagesRef.current.push({ key: `user-sent-${sentIndexRef.current++}`, text, from: "user", at: Date.now() });
     setMessages(messagesRef.current.slice());
     return true;
   };
@@ -407,6 +441,7 @@ export function usePresenterChat(
 
   return {
     messages,
+    elicitations,
     sendPrompt,
     pendingQuestion,
     answerSelect,

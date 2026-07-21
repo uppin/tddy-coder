@@ -197,6 +197,7 @@ pub fn snapshot_replay_messages(state: &PresenterState) -> Vec<ServerMessage> {
         mode: state.mode.clone(),
         plan_refinement_pending: state.plan_refinement_pending,
         skills_project_root: state.skills_project_root.clone(),
+        awaiting_open_answer: false,
     }));
     for entry in &state.activity_log {
         events.push(match entry.kind {
@@ -361,6 +362,7 @@ mod acceptance_plan_approval_rpc {
                 },
                 plan_refinement_pending: false,
                 skills_project_root: None,
+                awaiting_open_answer: false,
             }));
 
         // Then

@@ -1,5 +1,7 @@
 //! tddy-coder library — shared by tddy-coder and tddy-demo binaries.
 
+pub mod acp_agent;
+pub mod acp_host;
 pub mod build_executor;
 pub mod config;
 pub mod conversation_spawn_relay;

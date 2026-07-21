@@ -387,6 +387,7 @@ github:
             daemon: false,
             stdio: false,
             host_session_socket: None,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -481,6 +482,7 @@ github:
             tddy_data_dir: None,
             stdio: false,
             host_session_socket: None,
+            acp: false,
         };
         // When
         merge_config_into_args(&mut args, config);
@@ -542,6 +544,7 @@ github:
             tddy_data_dir: None,
             stdio: false,
             host_session_socket: None,
+            acp: false,
         };
         // When
         merge_config_into_args(&mut args, config);
@@ -570,6 +573,7 @@ github:
             daemon: false,
             stdio: false,
             host_session_socket: None,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -634,6 +638,7 @@ github:
             daemon: false,
             stdio: false,
             host_session_socket: None,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -695,6 +700,7 @@ github:
             daemon: false,
             stdio: false,
             host_session_socket: None,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -823,6 +829,7 @@ log:
             daemon: false,
             stdio: false,
             host_session_socket: None,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,

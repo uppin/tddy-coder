@@ -1,6 +1,14 @@
 import React, { useRef } from "react";
 import { aGhosttyTerminal } from "../support/drivers/ghosttyTerminalDriver";
 
+/** Deterministic overflow content: row-001 .. row-<count>, each on its own line (CRLF). */
+function numberedLines(count: number): string {
+  return Array.from(
+    { length: count },
+    (_, i) => `row-${String(i + 1).padStart(3, "0")}`,
+  ).join("\r\n");
+}
+
 describe("GhosttyTerminal", () => {
   it("renders ANSI content passed via initialContent prop", () => {
     // Given
@@ -8,6 +16,26 @@ describe("GhosttyTerminal", () => {
 
     // When / Then
     aGhosttyTerminal({ initialContent: ansiContent }).mount().expectExists().expectCanvasExists();
+  });
+
+  it("reveals earlier output when the user drags one finger down to scroll back", () => {
+    // Bug: the terminal wires two-finger pinch-to-zoom and SGR tap forwarding for
+    // touch, but has no single-finger drag-to-scroll handler. On mobile there is
+    // no mouse wheel, so a drag is the only way to scroll — and it does nothing,
+    // leaving earlier output unreachable.
+
+    // Given — more output than fits in the viewport, sitting pinned at the bottom
+    const driver = aGhosttyTerminal({
+      initialContent: numberedLines(200),
+      withHandleCapture: true,
+    }).mount();
+    driver.expectExists().expectCanvasExists();
+
+    // When — the user drags one finger down to pull earlier output back into view
+    driver.dragDownOneFinger();
+
+    // Then — the viewport scrolls back from the bottom, exposing earlier output
+    driver.expectRevealsEarlierOutput();
   });
 
   it("fires onData when keyboard input is sent", () => {

@@ -18,6 +18,12 @@ pub struct ModeChangedDetails {
     pub plan_refinement_pending: bool,
     /// Workflow output directory for `.agents/skills` resolution in the feature prompt slash menu.
     pub skills_project_root: Option<PathBuf>,
+    /// True when this `ModeChanged` marks a free-prompting **turn boundary**: the workflow finished
+    /// one prompt's turn and is now awaiting the next open-ended answer (an empty
+    /// `ClarificationNeeded`). Mirrors the presenter's internal `awaiting_open_answer`. Consumers that
+    /// speak a turn-based protocol (e.g. the ACP `AcpService`) use this to emit an end-of-turn signal;
+    /// the TUI/web `TddyRemote` paths ignore it (they read `mode` only).
+    pub awaiting_open_answer: bool,
 }
 
 /// Events the Presenter broadcasts to subscribers (e.g. gRPC clients).

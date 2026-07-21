@@ -986,6 +986,270 @@ mod session_view_adapter_surface_acceptance {
         );
     }
 
+    /// The ACP mirror rides the *same* session surface as `TddyRemote` (the user's requirement:
+    /// "the ACP mirror should be done via the LiveKit session connection"). This pins that a real
+    /// `tddy.acp.v1.AcpService/Session` bidi call, dispatched by the surface's `MultiRpcService`,
+    /// (a) completes the `initialize` handshake with a correlated `InitializeResponse`, and (b)
+    /// forwards a live Presenter `AgentOutput` back as an ACP `AgentMessageChunk` session update —
+    /// i.e. a browser can drive this session over ACP and see the agent talk.
+    #[tokio::test]
+    async fn acp_session_handshakes_then_streams_agent_output_as_a_session_update() {
+        use crate::proto::acp::{
+            acp_agent_message, acp_client_message, content_block, session_update, AcpAgentMessage,
+            AcpClientMessage, InitializeRequest,
+        };
+
+        // Given — the session surface (Presenter + mounted TddyRemote + AcpService)
+        let (event_tx, view_factory, _presenter) = a_running_presenter();
+        let surface = session_view_adapter_surface(vec![], view_factory);
+
+        // When — an ACP client opens Session and sends `initialize` (id = 1)
+        let (tx, rx) = tokio_mpsc::channel::<RpcMessage>(64);
+        tx.send(RpcMessage {
+            payload: AcpClientMessage {
+                id: 1,
+                msg: Some(acp_client_message::Msg::Initialize(
+                    InitializeRequest::default(),
+                )),
+            }
+            .encode_to_vec(),
+            metadata: RequestMetadata::default(),
+        })
+        .await
+        .unwrap();
+
+        let handle = RpcBridge::new(surface)
+            .start_bidi_stream("tddy.acp.v1.AcpService", "Session", rx)
+            .await
+            .expect("session surface must route tddy.acp.v1.AcpService/Session");
+        let mut output_rx = match handle.output {
+            ResponseBody::Streaming(rx) => rx,
+            ResponseBody::Complete(_) => panic!("expected a streaming response body"),
+        };
+
+        // Then (a) — the handshake replies with a correlated InitializeResponse
+        let init = match tokio::time::timeout(Duration::from_millis(300), output_rx.recv()).await {
+            Ok(Some(Ok(bytes))) => AcpAgentMessage::decode(&bytes[..]).expect("decode"),
+            other => panic!("expected an InitializeResponse frame, got {other:?}"),
+        };
+        assert_eq!(init.id, 1, "InitializeResponse must echo the request id");
+        assert!(
+            matches!(init.msg, Some(acp_agent_message::Msg::Initialize(_))),
+            "first reply must be InitializeResponse, got {:?}",
+            init.msg
+        );
+
+        // When — a live agent output is broadcast to the connected view
+        event_tx
+            .send(PresenterEvent::AgentOutput("hello from the agent".into()))
+            .expect("broadcast agent output");
+
+        // Then (b) — it arrives as an ACP AgentMessageChunk carrying the text
+        let mut got_text = None;
+        for _ in 0..20 {
+            let m = match tokio::time::timeout(Duration::from_millis(300), output_rx.recv()).await {
+                Ok(Some(Ok(bytes))) => AcpAgentMessage::decode(&bytes[..]).expect("decode"),
+                _ => break,
+            };
+            if let Some(acp_agent_message::Msg::SessionUpdate(notif)) = m.msg {
+                if let Some(session_update::Update::AgentMessageChunk(chunk)) =
+                    notif.update.and_then(|u| u.update)
+                {
+                    if let Some(content_block::Block::Text(t)) = chunk.content.and_then(|c| c.block)
+                    {
+                        got_text = Some(t.text);
+                        break;
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            got_text.as_deref(),
+            Some("hello from the agent"),
+            "live AgentOutput must reach the ACP client as an AgentMessageChunk"
+        );
+    }
+
+    /// A blocked clarification must round-trip over ACP: when the Presenter enters `AppMode::Select`,
+    /// the ACP client receives an agent-initiated `request_permission` carrying one option per choice
+    /// (plus an "Other" affordance when allowed). This pins the outbound half of the permission
+    /// round-trip; the inbound reply→`AnswerSelect` half is unit-tested in `convert_acp`.
+    #[tokio::test]
+    async fn acp_session_maps_a_select_clarification_to_a_request_permission() {
+        use crate::proto::acp::{
+            acp_agent_message, acp_client_message, AcpAgentMessage, AcpClientMessage,
+            InitializeRequest,
+        };
+        use tddy_core::{AppMode, ClarificationQuestion, ModeChangedDetails, QuestionOption};
+
+        // Given — the session surface with a connected ACP client
+        let (event_tx, view_factory, _presenter) = a_running_presenter();
+        let surface = session_view_adapter_surface(vec![], view_factory);
+
+        let (tx, rx) = tokio_mpsc::channel::<RpcMessage>(64);
+        tx.send(RpcMessage {
+            payload: AcpClientMessage {
+                id: 1,
+                msg: Some(acp_client_message::Msg::Initialize(
+                    InitializeRequest::default(),
+                )),
+            }
+            .encode_to_vec(),
+            metadata: RequestMetadata::default(),
+        })
+        .await
+        .unwrap();
+
+        let handle = RpcBridge::new(surface)
+            .start_bidi_stream("tddy.acp.v1.AcpService", "Session", rx)
+            .await
+            .expect("route AcpService/Session");
+        let mut output_rx = match handle.output {
+            ResponseBody::Streaming(rx) => rx,
+            ResponseBody::Complete(_) => panic!("expected streaming"),
+        };
+
+        // Drain the InitializeResponse so the view is subscribed before we broadcast.
+        match tokio::time::timeout(Duration::from_millis(300), output_rx.recv()).await {
+            Ok(Some(Ok(bytes))) => {
+                let m = AcpAgentMessage::decode(&bytes[..]).expect("decode");
+                assert!(matches!(m.msg, Some(acp_agent_message::Msg::Initialize(_))));
+            }
+            other => panic!("expected InitializeResponse, got {other:?}"),
+        }
+
+        // When — the Presenter blocks on a single-select clarification
+        event_tx
+            .send(PresenterEvent::ModeChanged(ModeChangedDetails {
+                mode: AppMode::Select {
+                    question: ClarificationQuestion {
+                        header: "Backend".into(),
+                        question: "Which backend?".into(),
+                        options: vec![
+                            QuestionOption {
+                                label: "Claude".into(),
+                                description: String::new(),
+                            },
+                            QuestionOption {
+                                label: "Cursor".into(),
+                                description: String::new(),
+                            },
+                        ],
+                        multi_select: false,
+                        allow_other: false,
+                    },
+                    question_index: 0,
+                    total_questions: 1,
+                    initial_selected: 0,
+                },
+                plan_refinement_pending: false,
+                skills_project_root: None,
+                awaiting_open_answer: false,
+            }))
+            .expect("broadcast ModeChanged(Select)");
+
+        // Then — a request_permission arrives with one option per choice
+        let mut options = None;
+        for _ in 0..20 {
+            let m = match tokio::time::timeout(Duration::from_millis(300), output_rx.recv()).await {
+                Ok(Some(Ok(bytes))) => AcpAgentMessage::decode(&bytes[..]).expect("decode"),
+                _ => break,
+            };
+            if let Some(acp_agent_message::Msg::RequestPermission(req)) = m.msg {
+                options = Some(req.options);
+                break;
+            }
+        }
+        let options = options.expect("a request_permission must reach the ACP client");
+        let names: Vec<String> = options.into_iter().map(|o| o.name).collect();
+        assert_eq!(names, vec!["Claude".to_string(), "Cursor".to_string()]);
+    }
+
+    /// Free-prompting sessions pause per turn at `WaitingForInput` with no `WorkflowComplete`, so the
+    /// only turn-boundary signal is a `ModeChanged` carrying `awaiting_open_answer = true`. The ACP
+    /// service must translate that into a `PromptResponse(EndTurn)` for the in-flight prompt, so a
+    /// turn-based ACP client can send its next prompt instead of hanging.
+    #[tokio::test]
+    async fn acp_session_emits_end_turn_at_a_free_prompting_turn_boundary() {
+        use crate::proto::acp::{
+            acp_agent_message, acp_client_message, content_block, AcpAgentMessage,
+            AcpClientMessage, ContentBlock, InitializeRequest, PromptRequest, StopReason,
+            TextContent,
+        };
+        use tddy_core::{AppMode, ModeChangedDetails};
+
+        let (event_tx, view_factory, _presenter) = a_running_presenter();
+        let surface = session_view_adapter_surface(vec![], view_factory);
+
+        let rpc = |msg: AcpClientMessage| RpcMessage {
+            payload: msg.encode_to_vec(),
+            metadata: RequestMetadata::default(),
+        };
+
+        let (tx, rx) = tokio_mpsc::channel::<RpcMessage>(64);
+        tx.send(rpc(AcpClientMessage {
+            id: 1,
+            msg: Some(acp_client_message::Msg::Initialize(
+                InitializeRequest::default(),
+            )),
+        }))
+        .await
+        .unwrap();
+        // A prompt sets the in-flight prompt id (5) that the turn boundary must echo back.
+        tx.send(rpc(AcpClientMessage {
+            id: 5,
+            msg: Some(acp_client_message::Msg::Prompt(PromptRequest {
+                session_id: None,
+                prompt: vec![ContentBlock {
+                    block: Some(content_block::Block::Text(TextContent {
+                        text: "do it".into(),
+                    })),
+                }],
+            })),
+        }))
+        .await
+        .unwrap();
+
+        let handle = RpcBridge::new(surface)
+            .start_bidi_stream("tddy.acp.v1.AcpService", "Session", rx)
+            .await
+            .expect("route AcpService/Session");
+        let mut output_rx = match handle.output {
+            ResponseBody::Streaming(rx) => rx,
+            ResponseBody::Complete(_) => panic!("expected streaming"),
+        };
+
+        // Let the inbound task process initialize + prompt (so pending prompt id = 5 is set) before
+        // we broadcast the boundary.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        // A free-prompting turn boundary: mode back to Running with awaiting_open_answer = true.
+        event_tx
+            .send(PresenterEvent::ModeChanged(ModeChangedDetails {
+                mode: AppMode::Running,
+                plan_refinement_pending: false,
+                skills_project_root: None,
+                awaiting_open_answer: true,
+            }))
+            .expect("broadcast turn boundary");
+
+        // Then — a PromptResponse(EndTurn) echoing the in-flight prompt id (5) arrives.
+        let mut got = None;
+        for _ in 0..40 {
+            let m = match tokio::time::timeout(Duration::from_millis(300), output_rx.recv()).await {
+                Ok(Some(Ok(bytes))) => AcpAgentMessage::decode(&bytes[..]).expect("decode"),
+                _ => break,
+            };
+            if let Some(acp_agent_message::Msg::Prompt(resp)) = m.msg {
+                got = Some((m.id, resp.stop_reason));
+                break;
+            }
+        }
+        let (id, stop_reason) = got.expect("a PromptResponse must arrive at the turn boundary");
+        assert_eq!(id, 5, "PromptResponse must echo the in-flight prompt id");
+        assert_eq!(stop_reason, StopReason::EndTurn as i32);
+    }
+
     /// The PR-Stack Chat Screen's whole point is seeing the agent talk. A live
     /// `PresenterEvent::AgentOutput` broadcast after a View connects must be forwarded through the
     /// session surface as an `AgentOutput` `ServerMessage` — the streaming that the retired daemon

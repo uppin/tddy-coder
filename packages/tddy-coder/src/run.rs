@@ -309,9 +309,10 @@ pub fn run_main(mut args: Args) {
     }
 
     let mut log_config = effective_log_config(&args);
-    if args.stdio {
-        // --stdio dedicates fd 1 to RPC framing; a misconfigured `output: stdout` logger would
-        // corrupt it. Must run before init_tddy_logger — log::set_logger only succeeds once.
+    if args.stdio || args.acp {
+        // --stdio and --acp both dedicate fd 1 to RPC framing (line-delimited RPC / ACP JSON-RPC);
+        // a misconfigured `output: stdout` logger would corrupt the stream. Must run before
+        // init_tddy_logger — log::set_logger only succeeds once.
         tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut log_config);
     }
     let has_file_output = tddy_core::config_has_file_output(&log_config);
@@ -430,6 +431,9 @@ pub struct Args {
     /// Per-session unix socket path (set by the daemon) hosting the reverse `HostSessionService`.
     /// When present, `run_daemon` connects to it and binds the `spawn_conversation` relay handler.
     pub host_session_socket: Option<String>,
+    /// When true, expose the workflow engine as a standard ACP agent over stdin/stdout (JSON-RPC
+    /// Agent Client Protocol). No local TUI is rendered — physical fd 1 is the ACP channel.
+    pub acp: bool,
     /// LiveKit server WebSocket URL (e.g. ws://localhost:7880)
     pub livekit_url: Option<String>,
     /// LiveKit access token for room join
@@ -586,6 +590,10 @@ pub struct CoderArgs {
     /// When set, connect to it and relay `spawn_conversation` back to the daemon over it.
     #[arg(long, value_name = "PATH")]
     pub host_session_socket: Option<String>,
+    /// Expose the workflow engine as a standard ACP agent (Agent Client Protocol) over
+    /// stdin/stdout. No local TUI is rendered. Honors --agent, --recipe, --tddy-data-dir.
+    #[arg(long)]
+    pub acp: bool,
 
     /// LiveKit server WebSocket URL (e.g. ws://localhost:7880). Requires --livekit-token, --livekit-room, --livekit-identity.
     #[arg(long)]
@@ -937,6 +945,7 @@ impl From<CoderArgs> for Args {
             daemon: a.daemon,
             stdio: a.stdio,
             host_session_socket: a.host_session_socket,
+            acp: a.acp,
             livekit_url: a.livekit_url,
             livekit_token: a.livekit_token,
             livekit_room: a.livekit_room,
@@ -993,6 +1002,7 @@ impl From<DemoArgs> for Args {
             daemon: a.daemon,
             stdio: a.stdio,
             host_session_socket: a.host_session_socket,
+            acp: false,
             livekit_url: a.livekit_url,
             livekit_token: a.livekit_token,
             livekit_room: a.livekit_room,
@@ -1195,6 +1205,9 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
     }
     if args.daemon {
         return run_daemon(args, shutdown);
+    }
+    if args.acp {
+        return run_acp_agent(args, shutdown);
     }
     if args.goal.is_none() {
         // --stdio dedicates real stdin/stdout to RPC framing — never a TTY in practice, but must
@@ -1441,6 +1454,29 @@ fn resolve_agent_home_dir() -> PathBuf {
 
 /// Run as headless gRPC daemon. Serves GetSession and ListSessions; blocks until shutdown.
 /// When LiveKit args are present, also joins the room as a participant serving RPC over the data channel.
+/// Serve the workflow engine as a standard ACP agent over stdio (`--acp`).
+///
+/// Honors `--agent` (coding backend), `--recipe` (workflow), and `--tddy-data-dir` (session root).
+/// No TUI is rendered: physical fd 1 is the JSON-RPC channel.
+fn run_acp_agent(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
+    let agent_str = args.agent.as_deref().unwrap_or("claude").to_string();
+    let backend = create_backend(
+        &agent_str,
+        args.cursor_agent_path.as_deref(),
+        args.codex_cli_path.as_deref(),
+        args.codex_acp_cli_path.as_deref(),
+        None,
+        None,
+        args.fastcontext_url.as_deref(),
+        args.fastcontext_max_turns,
+        args.fastcontext_model.as_deref(),
+        &resolve_specialized_agent_defs(args),
+    );
+    let recipe = recipe_arc_for_args(args)?;
+    let data_dir = resolve_tddy_data_dir(args);
+    crate::acp_agent::run_acp(backend, recipe, data_dir, shutdown)
+}
+
 fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     // Logger is already initialized in `run_main` with `effective_log_config(args)`.
     // Do not call `init_tddy_logger` again: `log::set_logger` only succeeds once; a second
@@ -1875,7 +1911,11 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     crate::session_participant::terminal_manager::TerminalManager::new(),
                 ),
             };
-            let mut livekit_entries = vec![
+            // Transport-specific base services; the Presenter view-adapters (`TddyRemote` **and** the
+            // ACP mirror `AcpService`) + reflection are mounted by `session_view_adapter_surface` so
+            // this LiveKit surface can never diverge from the other transports on which services the
+            // PR-Stack Chat Screen can reach (the exact bug that left `AcpService` unregistered here).
+            let livekit_base = vec![
                 tddy_rpc::ServiceEntry {
                     name: "terminal.TerminalService",
                     service: std::sync::Arc::new(tddy_service::TerminalServiceServer::new(
@@ -1890,27 +1930,16 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                         tddy_service::LoopbackTunnelServiceImpl,
                     )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
                 },
-                // The PR-Stack Chat Screen reaches the session's workflow through this entry — the
-                // Presenter (single source of truth) exposed via its `connect_view` view-factory,
-                // identical to the interactive TUI's LiveKit surface. Without it, TddyRemote.Stream
-                // requests over the LiveKit data channel have no handler and vanish silently.
-                tddy_rpc::ServiceEntry {
-                    name: tddy_service::TddyRemoteServer::<tddy_service::TddyRemoteService>::NAME,
-                    service: std::sync::Arc::new(tddy_service::TddyRemoteServer::new(
-                        tddy_service::TddyRemoteService::with_view_factory(
-                            view_factory
-                                .clone()
-                                .expect("view_factory present when livekit_enabled"),
-                        ),
-                    )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
-                },
                 crate::session_participant::session_connection_service_entry(
                     session_connection_svc,
                 ),
             ];
-            let livekit_names: Vec<&str> = livekit_entries.iter().map(|e| e.name).collect();
-            livekit_entries.push(tddy_service::reflection_entry_from(&livekit_names));
-            let livekit_multi = tddy_rpc::MultiRpcService::new(livekit_entries);
+            let livekit_multi = tddy_service::session_view_adapter_surface(
+                livekit_base,
+                view_factory
+                    .clone()
+                    .expect("view_factory present when livekit_enabled"),
+            );
             if has_key_secret {
                 let token_generator = tddy_livekit::TokenGenerator::new(
                     args.livekit_api_key.as_ref().unwrap().clone(),
@@ -3794,6 +3823,7 @@ mod resume_session_config_tests {
             daemon: false,
             stdio: false,
             host_session_socket: None,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3866,6 +3896,7 @@ mod resume_session_identity_tests {
             daemon: false,
             stdio: false,
             host_session_socket: None,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -3939,6 +3970,7 @@ mod session_dir_sync_tests {
             daemon: false,
             stdio: false,
             host_session_socket: None,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -4028,6 +4060,7 @@ mod changeset_agent_resume_tests {
             daemon: false,
             stdio: false,
             host_session_socket: None,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,
@@ -4134,6 +4167,7 @@ mod post_tui_workflow_exit_tests {
             daemon: false,
             stdio: false,
             host_session_socket: None,
+            acp: false,
             livekit_url: None,
             livekit_token: None,
             livekit_room: None,

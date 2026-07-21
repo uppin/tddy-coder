@@ -4,6 +4,12 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-21 — Reusable Agent Chat, ACP transport, transcript export
+
+- The PR-Stack chat is extracted into a recipe-agnostic `AgentChat` / `useAgentChat` (with `agent-chat-*` test ids and an `AgentChat.stories.tsx` covering empty / streaming / select / multiSelect / error / connecting); any recipe can mount it. See [session-drawer.md § Agent Chat](session-drawer.md#agent-chat).
+- `AgentChat` gains an `acp` prop selecting the ACP protobuf mirror (`useAcpSession` over `AcpService.Session`) instead of the default `TddyRemote.Stream`, over the same LiveKit room; both hooks return the identical result and render through a shared `AgentChatView`. **The pr-stack chat now uses ACP**, at full behavior parity (goal/activity bubbles, single/multi-select clarifications, "other" free-text, streaming, error banners) via documented tddy conventions on ACP fields.
+- New "Export" button downloads a plain-text transcript with ISO timestamps, merging chat messages and clarification (elicitation) points into one chronological timeline — so the operator can see what the agent did and when, including where it paused for input. Works on both transports.
+
 ## 2026-07-16 — Session terminal tabs
 
 - The session detail pane now has a terminal tab bar: an **Agent** tab (the coding agent, not closable) plus one closable tab per interactive **bash** terminal, with a `+` to open more; switching tabs keeps every terminal of the session mounted and streaming in the background.

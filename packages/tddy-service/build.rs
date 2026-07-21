@@ -50,6 +50,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .compile_protos(&["proto/tddy/v1/remote.proto"], &["proto"])?;
 
+    // AcpService: protobuf mirror of ACP (async trait + RpcService server for stdio and
+    // LiveKit/tddy-rpc). Self-contained proto — no extern_path needed. Output file name derives
+    // from the proto package (`tddy.acp.v1` -> `tddy.acp.v1.rs`), distinct from the tonic pass's
+    // `tddy.v1.rs`, so no OUT_DIR collision.
+    prost_build::Config::new()
+        .out_dir(std::env::var("OUT_DIR")?)
+        .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
+            generate_rpc_server: true,
+            generate_tonic_adapter: false,
+            rpc_crate_path: "tddy_rpc".to_string(),
+        }))
+        .compile_protos(&["proto/tddy/acp/v1/acp.proto"], &["proto"])?;
+
     // Echo service (async trait + RpcService server for LiveKit/tddy-rpc)
     prost_build::Config::new()
         .out_dir(std::env::var("OUT_DIR")?)
