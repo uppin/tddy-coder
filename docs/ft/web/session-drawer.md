@@ -571,9 +571,13 @@ the identical `UseAgentChatResult` — `messages`, `elicitations`, `sendPrompt`,
 
 ## Session Traffic Strip
 
-A thin `flex-shrink-0` strip rendered at the top of `SessionMainPane` whenever a session
-is in `connected-livekit` state. It provides live visibility into RPC throughput and
-connection health for the selected session.
+> **Relocated: 2026-07-21** — The traffic readout has moved into the screen-level bottom
+> **Host Stats Footer** (see [host-stats-footer.md](./host-stats-footer.md)), alongside new
+> host-level disk and CPU indicators. It is no longer rendered in the top header row. The
+> readout's fields and metering behavior below are unchanged; only its placement moved.
+
+A thin `flex-shrink-0` strip showing live RPC throughput and connection health for the
+selected session.
 
 ### Display
 

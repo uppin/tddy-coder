@@ -27,7 +27,7 @@ export function SessionTrafficStrip({
   return (
     <div
       data-testid="session-traffic-strip"
-      className="flex items-center gap-3 px-2 py-1 border-b border-border flex-shrink-0 text-xs text-muted-foreground"
+      className="flex items-center gap-3 px-2 py-1 flex-shrink-0 text-xs text-muted-foreground"
     >
       <span>
         <span data-testid="session-traffic-rate-out">{formatRate(outRate)}</span>

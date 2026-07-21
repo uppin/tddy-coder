@@ -194,6 +194,13 @@ export const TEST_IDS = {
   shortcutDrawer: "shortcut-drawer",
   shortcutDragHandle: "shortcut-drag-handle",
 
+  // Host stats footer (screen-level bottom strip: relocated traffic + disk + per-core CPU)
+  hostStatsFooter: "host-stats-footer",
+  /** Free-space readout for the daemon's default project directory filesystem. */
+  diskSpaceAvailable: "disk-space-available",
+  /** Container holding one mini bar per logical core. */
+  cpuCores: "cpu-cores",
+
   // Session traffic strip
   sessionTrafficStrip: "session-traffic-strip",
   sessionTrafficBytesIn: "session-traffic-bytes-in",
@@ -646,3 +653,10 @@ export const projectHostBaseLocation = (daemonInstanceId: string) =>
 
 /** `[data-testid="daemon-selector-option-<instanceId>"]` — one option in the daemon selector */
 export const daemonSelectorOption = (instanceId: string) => `daemon-selector-option-${instanceId}`;
+
+// ---------------------------------------------------------------------------
+// Host stats footer dynamic helpers
+// ---------------------------------------------------------------------------
+
+/** `[data-testid="cpu-core-bar-<index>"]` — the mini bar for logical core `<index>` (0-based). */
+export const cpuCoreBar = (index: number) => `cpu-core-bar-${index}`;
