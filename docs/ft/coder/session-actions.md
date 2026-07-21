@@ -1,5 +1,12 @@
 # Session actions (`tddy-tools`)
 
+> **Updated: 2026-07-21** — [No-bash mode](no-bash-mode.md) adds a second writer and invocation
+> surface: a sandboxed session's **action-author subagent** authors manifests on request
+> (`mcp__tddy-tools__request_action`; validated host-side by
+> `tddy_core::session_actions::validate_authored_manifest`, written to
+> `<session_dir>/actions/`), and the sandboxed agent lists/invokes via
+> `mcp__tddy-tools__list_actions` / `mcp__tddy-tools__invoke_action` (host-relayed).
+>
 > **Updated: 2026-06-29** — Async jobs (`invoke-action --async-start`) register in a per-session
 > `TaskRegistry` via `tddy-actions::ProcessRuntime`. `job_id == task_id`. `wait`/`stop` use task
 > status and cancellation; `stdout.log`/`stderr.log` paths under `session_action_jobs/jobs/<id>/`

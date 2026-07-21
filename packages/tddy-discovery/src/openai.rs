@@ -115,7 +115,9 @@ pub struct ToolFunctionDef {
 
 /// The READ/GLOB/GREP tool schemas sent to the model on every turn — shared by
 /// `FastContextBackend::invoke` (one-shot) and `FastContextSession` (stateful), the two turn
-/// loops that both talk to a FastContext-compatible endpoint.
+/// loops that both talk to a FastContext-compatible endpoint. Deliberately read-only: the
+/// mutation tools live in [`mutation_tool_definitions`] so the always-unfiltered FastContext
+/// loops can never advertise them.
 pub fn discovery_tool_definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
@@ -168,6 +170,67 @@ pub fn discovery_tool_definitions() -> Vec<ToolDefinition> {
                         "path": { "type": "string", "description": "Optional path to search in." }
                     },
                     "required": ["pattern"]
+                }),
+            },
+        },
+    ]
+}
+
+/// The WRITE/STR_REPLACE/DELETE tool schemas a coder-role subagent binds explicitly via its
+/// def's `tools:` list (see `SubagentTool`). Kept out of [`discovery_tool_definitions`] on
+/// purpose: only `SpecializedSubagentSession` — which filters by bound tools — ever sees these,
+/// so the unfiltered FastContext loops stay read-only.
+pub fn mutation_tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition {
+            tool_type: "function".to_string(),
+            function: ToolFunctionDef {
+                name: "WRITE".to_string(),
+                description: "Write the full contents of a file, creating it if missing and \
+                    overwriting it otherwise."
+                    .to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "File path to write." },
+                        "contents": { "type": "string", "description": "Full file contents." }
+                    },
+                    "required": ["path", "contents"]
+                }),
+            },
+        },
+        ToolDefinition {
+            tool_type: "function".to_string(),
+            function: ToolFunctionDef {
+                name: "STR_REPLACE".to_string(),
+                description: "Replace one unique occurrence of a string in a file. Fails when \
+                    the string is missing or matches more than once."
+                    .to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "File path to edit." },
+                        "old_string": {
+                            "type": "string",
+                            "description": "Exact text to replace (must be unique in the file)."
+                        },
+                        "new_string": { "type": "string", "description": "Replacement text." }
+                    },
+                    "required": ["path", "old_string", "new_string"]
+                }),
+            },
+        },
+        ToolDefinition {
+            tool_type: "function".to_string(),
+            function: ToolFunctionDef {
+                name: "DELETE".to_string(),
+                description: "Delete a file.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "File path to delete." }
+                    },
+                    "required": ["path"]
                 }),
             },
         },

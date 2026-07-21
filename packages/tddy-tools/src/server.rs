@@ -206,6 +206,12 @@ impl PermissionServer {
         if subagent_enabled() {
             tool_router.merge(subagent_tool_router());
         }
+        // Session-action tools (request_action/list_actions/invoke_action): with a def replacing
+        // `Shell` there is no direct shell, so declarative session actions authored by that def
+        // become the command surface (docs/ft/coder/no-bash-mode.md).
+        if shell_replacing_author(&subagents_from_env()).is_some() {
+            tool_router.merge(crate::action_tools::action_tool_router());
+        }
         Self {
             tool_router,
             socket_path,
@@ -1132,7 +1138,21 @@ fn subagent_enabled() -> bool {
     env_non_empty("TDDY_SUBAGENT").is_some()
 }
 
-fn env_non_empty(key: &str) -> Option<String> {
+/// The subagent that authors session-action manifests for `request_action`: the def (from
+/// `TDDY_SUBAGENTS_JSON`) whose `replaces` covers `Shell`. Replacing `Shell` is what opts a
+/// session into the declarative-actions surface (docs/ft/coder/no-bash-mode.md) — no separate
+/// mode flag exists. `None` when no def replaces `Shell`.
+pub(crate) fn shell_replacing_author(defs: &[SpecializedAgentDef]) -> Option<String> {
+    defs.iter()
+        .find(|def| {
+            tddy_discovery::subagent::normalize_replaced_tools(&def.replaces)
+                .iter()
+                .any(|t| t == "Shell")
+        })
+        .map(|def| def.name.clone())
+}
+
+pub(crate) fn env_non_empty(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.trim().is_empty())
 }
 
@@ -1187,7 +1207,7 @@ fn managed_codebase_access() -> CodebaseAccess {
 /// process. Empty (unset, blank, or unparseable) when the env var is absent — the caller falls
 /// back to the legacy single-fastcontext `SubagentRegistry::new()` path in that case, preserving
 /// today's `TDDY_SUBAGENT=fastcontext` + `TDDY_SUBAGENT_FASTCONTEXT_*` behavior unchanged.
-fn subagents_from_env() -> Vec<SpecializedAgentDef> {
+pub(crate) fn subagents_from_env() -> Vec<SpecializedAgentDef> {
     env_non_empty("TDDY_SUBAGENTS_JSON")
         .and_then(|json| serde_json::from_str::<Vec<SpecializedAgentDef>>(&json).ok())
         .unwrap_or_default()
@@ -1198,7 +1218,7 @@ fn subagents_from_env() -> Vec<SpecializedAgentDef> {
 /// `access` is meaningful when the registry was built via [`subagents_from_env`]'s defs (the def
 /// itself supplies base_url/model/max_turns in that case — see
 /// `SubagentRegistry::create`'s doc comment in `tddy-discovery`).
-fn subagent_config_from_env() -> SubagentConfig {
+pub(crate) fn subagent_config_from_env() -> SubagentConfig {
     SubagentConfig {
         base_url: env_non_empty("TDDY_SUBAGENT_FASTCONTEXT_URL")
             .unwrap_or_else(|| "http://localhost:30000".to_string()),
@@ -1211,7 +1231,7 @@ fn subagent_config_from_env() -> SubagentConfig {
     }
 }
 
-fn subagent_error_json(message: impl std::fmt::Display) -> String {
+pub(crate) fn subagent_error_json(message: impl std::fmt::Display) -> String {
     serde_json::json!({ "error": message.to_string(), "is_error": true }).to_string()
 }
 
@@ -1353,7 +1373,7 @@ async fn subagent_list_tool(_args: serde_json::Value) -> String {
     serde_json::json!({ "conversations": conversation_records(&sessions) }).to_string()
 }
 
-fn schema_object(
+pub(crate) fn schema_object(
     json: serde_json::Value,
 ) -> std::sync::Arc<serde_json::Map<String, serde_json::Value>> {
     std::sync::Arc::new(json.as_object().cloned().unwrap_or_default())
@@ -1361,7 +1381,7 @@ fn schema_object(
 
 /// Wraps a subagent tool handler (`async fn(Value) -> String`) into a `ToolRoute` — the same
 /// success-envelope-with-embedded-error convention `dynamic_tool_router` uses for exec tools.
-fn subagent_route<F>(
+pub(crate) fn subagent_route<F>(
     tool: rmcp::model::Tool,
     handler: F,
 ) -> rmcp::handler::server::router::tool::ToolRoute<PermissionServer>

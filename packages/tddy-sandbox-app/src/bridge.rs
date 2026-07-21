@@ -26,11 +26,55 @@ use tddy_task::TaskRegistry;
 #[cfg(target_os = "macos")]
 use tokio::sync::mpsc;
 
-/// Runs MCP tool calls in the host worktree via [`tool_engine`].
+/// Runs MCP tool calls in the host worktree via [`tool_engine`], plus the session-action
+/// dispatches (`EstablishAction`/`ListActions`/`InvokeAction`) against the host-only session dir
+/// (see `crate::host_actions`).
 #[cfg(target_os = "macos")]
 struct AppToolHandler {
     worktree: PathBuf,
+    session_dir: PathBuf,
     task_registry: TaskRegistry,
+    /// Exec tools the session's subagent defs replace (normalized union — see
+    /// `tddy_discovery::subagent::resolve_replaced_tools_for_defs`).
+    replaced_tools: Vec<String>,
+}
+
+#[cfg(target_os = "macos")]
+impl AppToolHandler {
+    /// Defense in depth for a replaced `Shell`: reject `Shell`/`Await` dispatches at the host
+    /// boundary too (they are already absent from Claude's lists and the MCP catalog, but a
+    /// raw-IPC dispatch from a compromised jail must fail as well). Deliberately limited to the
+    /// shell surface: other replaced tools (`Grep` for fastcontext, `Write`/`StrReplace`/
+    /// `Delete` for a coder) are dispatched *by the replacing subagent itself* through this same
+    /// relay, so they cannot be rejected here — Claude-side disallow + catalog filtering remain
+    /// their enforcement layers. No subagent dispatches `Shell` (command execution runs through
+    /// `InvokeAction` against established manifests), so this rejection breaks nothing.
+    fn policy_rejects(&self, tool_name: &str) -> bool {
+        matches!(tool_name, "Shell" | "Await") && self.replaced_tools.iter().any(|t| t == "Shell")
+    }
+
+    fn error_response(message: String) -> ExecuteToolResponse {
+        ExecuteToolResponse {
+            result_json: String::new(),
+            is_error: true,
+            error_message: message,
+            job_id: String::new(),
+            job_running: false,
+        }
+    }
+
+    fn json_response(result: Result<serde_json::Value, String>) -> ExecuteToolResponse {
+        match result {
+            Ok(value) => ExecuteToolResponse {
+                result_json: value.to_string(),
+                is_error: false,
+                error_message: String::new(),
+                job_id: String::new(),
+                job_running: false,
+            },
+            Err(message) => Self::error_response(message),
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -42,6 +86,36 @@ impl HostToolHandler for AppToolHandler {
         tool_name: &str,
         args_json: &str,
     ) -> ExecuteToolResponse {
+        if self.policy_rejects(tool_name) {
+            return Self::error_response(format!(
+                "tool '{tool_name}' is replaced by a specialized subagent in this session and \
+                 cannot be dispatched directly"
+            ));
+        }
+        // Session-action dispatches target the host-only session dir, not the worktree — they
+        // never reach the generic exec-tool engine.
+        match tool_name {
+            "EstablishAction" | "ListActions" | "InvokeAction" => {
+                let args: serde_json::Value = match serde_json::from_str(args_json) {
+                    Ok(value) => value,
+                    Err(e) => return Self::error_response(format!("{tool_name}: bad args: {e}")),
+                };
+                let session_dir = self.session_dir.clone();
+                let worktree = self.worktree.clone();
+                let tool = tool_name.to_string();
+                // `InvokeAction` blocks on the child process; run all three off the async
+                // executor (establish/list are cheap, but consistency is simpler than a split).
+                let result = tokio::task::spawn_blocking(move || match tool.as_str() {
+                    "EstablishAction" => crate::host_actions::establish_action(&session_dir, &args),
+                    "ListActions" => crate::host_actions::list_actions(&session_dir, &worktree, &args),
+                    _ => crate::host_actions::invoke_action(&session_dir, &worktree, &args),
+                })
+                .await
+                .unwrap_or_else(|e| Err(format!("{tool_name}: task join: {e}")));
+                return Self::json_response(result);
+            }
+            _ => {}
+        }
         let outcome = tool_engine::execute_tool(
             &self.worktree,
             tool_name,
@@ -66,8 +140,10 @@ pub async fn run_terminal_bridge(
     ready_marker: &Path,
     session_id: &str,
     worktree_path: &Path,
+    session_dir: &Path,
     task_registry: TaskRegistry,
     main_process_exited: Arc<AtomicBool>,
+    replaced_tools: Vec<String>,
 ) -> Result<()> {
     eprintln!("connecting SessionChannel on loopback…");
     let client = tddy_sandbox_darwin::connect_sandbox_client(ready_marker)
@@ -89,7 +165,9 @@ pub async fn run_terminal_bridge(
         client,
         AppToolHandler {
             worktree: worktree_path.to_path_buf(),
+            session_dir: session_dir.to_path_buf(),
             task_registry,
+            replaced_tools,
         },
         HostRelayConfig {
             session_id: session_id.to_string(),

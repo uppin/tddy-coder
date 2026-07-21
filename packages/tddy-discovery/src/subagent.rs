@@ -236,6 +236,65 @@ impl CodebaseAccess {
             }
         }
     }
+
+    /// The mutation tools are Managed-only: the host tool engine confines every path to the
+    /// session/repo roots, exactly as it does for the main agent's own writes. `Local` has no
+    /// confinement layer, so a local-mode subagent must not be grantable unrestricted host
+    /// writes by a YAML `tools:` entry alone.
+    fn reject_local_mutation(tool: &str) -> SubagentError {
+        SubagentError(format!(
+            "{tool}: write tools require managed codebase access (local subagents are read-only)"
+        ))
+    }
+
+    /// Write `contents` to `path` (Managed-only; see [`Self::reject_local_mutation`]).
+    pub async fn write(
+        &self,
+        path: &str,
+        contents: &str,
+    ) -> Result<serde_json::Value, SubagentError> {
+        match self {
+            CodebaseAccess::Local => Err(Self::reject_local_mutation("WRITE")),
+            CodebaseAccess::Managed(dispatch) => {
+                let args = serde_json::json!({ "path": path, "contents": contents });
+                let result = dispatch("Write".to_string(), args).await;
+                Self::parse_dispatch_result(&result)
+            }
+        }
+    }
+
+    /// Replace the unique occurrence of `old_string` in `path` with `new_string` (Managed-only).
+    pub async fn str_replace(
+        &self,
+        path: &str,
+        old_string: &str,
+        new_string: &str,
+    ) -> Result<serde_json::Value, SubagentError> {
+        match self {
+            CodebaseAccess::Local => Err(Self::reject_local_mutation("STR_REPLACE")),
+            CodebaseAccess::Managed(dispatch) => {
+                let args = serde_json::json!({
+                    "path": path,
+                    "old_string": old_string,
+                    "new_string": new_string,
+                });
+                let result = dispatch("StrReplace".to_string(), args).await;
+                Self::parse_dispatch_result(&result)
+            }
+        }
+    }
+
+    /// Delete the file at `path` (Managed-only).
+    pub async fn delete(&self, path: &str) -> Result<serde_json::Value, SubagentError> {
+        match self {
+            CodebaseAccess::Local => Err(Self::reject_local_mutation("DELETE")),
+            CodebaseAccess::Managed(dispatch) => {
+                let args = serde_json::json!({ "path": path });
+                let result = dispatch("Delete".to_string(), args).await;
+                Self::parse_dispatch_result(&result)
+            }
+        }
+    }
 }
 
 /// Default number of lines a single un-windowed READ returns before truncating. Bounds how much
@@ -413,6 +472,21 @@ async fn dispatch_tool_call(access: &CodebaseAccess, tool_call: &ToolCall) -> St
             let pattern = args["pattern"].as_str().unwrap_or("");
             let path = args["path"].as_str();
             access.grep(pattern, path).await
+        }
+        "WRITE" => {
+            let path = args["path"].as_str().unwrap_or("");
+            let contents = args["contents"].as_str().unwrap_or("");
+            access.write(path, contents).await
+        }
+        "STR_REPLACE" => {
+            let path = args["path"].as_str().unwrap_or("");
+            let old_string = args["old_string"].as_str().unwrap_or("");
+            let new_string = args["new_string"].as_str().unwrap_or("");
+            access.str_replace(path, old_string, new_string).await
+        }
+        "DELETE" => {
+            let path = args["path"].as_str().unwrap_or("");
+            access.delete(path).await
         }
         unknown => return format!("{{\"error\": \"unknown tool: {unknown}\"}}"),
     };
@@ -657,12 +731,16 @@ impl FastContextSession {
     }
 }
 
-/// Maps a bound-tool kind to the model-facing tool name (`"READ"`/`"GLOB"`/`"GREP"`).
+/// Maps a bound-tool kind to the model-facing tool name (`"READ"`/`"GLOB"`/`"GREP"`/`"WRITE"`/
+/// `"STR_REPLACE"`/`"DELETE"`).
 fn tool_name(tool: crate::agent_def::SubagentTool) -> &'static str {
     match tool {
         crate::agent_def::SubagentTool::Read => "READ",
         crate::agent_def::SubagentTool::Glob => "GLOB",
         crate::agent_def::SubagentTool::Grep => "GREP",
+        crate::agent_def::SubagentTool::Write => "WRITE",
+        crate::agent_def::SubagentTool::StrReplace => "STR_REPLACE",
+        crate::agent_def::SubagentTool::Delete => "DELETE",
     }
 }
 
@@ -706,10 +784,13 @@ impl SpecializedSubagentSession {
         }
     }
 
-    /// Only the def's bound tools are advertised to the model.
+    /// Only the def's bound tools are advertised to the model. The filter base is the read-only
+    /// discovery trio plus the mutation tools — a def that doesn't bind `WRITE`/`STR_REPLACE`/
+    /// `DELETE` never advertises them.
     fn tool_definitions(&self) -> Vec<crate::openai::ToolDefinition> {
         discovery_tool_definitions()
             .into_iter()
+            .chain(crate::openai::mutation_tool_definitions())
             .filter(|d| self.tools.iter().any(|t| tool_name(*t) == d.function.name))
             .collect()
     }

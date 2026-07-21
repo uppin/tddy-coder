@@ -125,6 +125,63 @@ pub fn resolve_session_agents(
     Ok(out)
 }
 
+/// Model-facing subagent tool that must be bound to serve a replaced mutation tool. Read-side
+/// replacements (`Grep`/`Glob`/`SemanticSearch`) are deliberately unmapped: the default
+/// READ/GLOB/GREP loop serves those (fastcontext replaces `SemanticSearch` without a same-named
+/// internal tool today).
+fn required_binding_for(replaced: &str) -> Option<tddy_discovery::agent_def::SubagentTool> {
+    use tddy_discovery::agent_def::SubagentTool;
+    match replaced {
+        "Write" => Some(SubagentTool::Write),
+        "StrReplace" => Some(SubagentTool::StrReplace),
+        "Delete" => Some(SubagentTool::Delete),
+        _ => None,
+    }
+}
+
+/// Validate the session's tool replacements before spawn — every restriction is declared on the
+/// agent defs themselves (`replaces:`), not on mode flags (docs/ft/coder/no-bash-mode.md):
+///
+/// - At most one def may replace `Shell` (that def becomes the session's action author).
+/// - A def replacing a mutation tool (`Write`/`StrReplace`/`Delete`) must bind the matching
+///   internal tool (`WRITE`/`STR_REPLACE`/`DELETE`) — otherwise the session could never perform
+///   that operation at all, which must fail here rather than at the first delegated edit.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn validate_tool_replacements(defs: &[SpecializedAgentDef]) -> Result<()> {
+    let shell_replacers: Vec<&str> = defs
+        .iter()
+        .filter(|def| {
+            tddy_discovery::subagent::normalize_replaced_tools(&def.replaces)
+                .iter()
+                .any(|t| t == "Shell")
+        })
+        .map(|def| def.name.as_str())
+        .collect();
+    if shell_replacers.len() > 1 {
+        anyhow::bail!(
+            "only one subagent may replace Shell (it becomes the session's action author); got: {}",
+            shell_replacers.join(", ")
+        );
+    }
+
+    for def in defs {
+        for replaced in tddy_discovery::subagent::normalize_replaced_tools(&def.replaces) {
+            let Some(required) = required_binding_for(&replaced) else {
+                continue;
+            };
+            if !def.tools.contains(&required) {
+                anyhow::bail!(
+                    "subagent '{}' replaces {replaced} but does not bind the matching internal \
+                     tool — add `tools: [READ, GLOB, GREP, WRITE, STR_REPLACE, DELETE]` (or at \
+                     least {replaced:?}'s counterpart) to its def",
+                    def.name
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,5 +311,99 @@ claude_args:
 
         // Then
         assert!(defs.is_empty());
+    }
+
+    // ─── tool-replacement validation (agent-driven no-bash / no-write) ───────────
+    //
+    // Feature: docs/ft/coder/no-bash-mode.md — every restriction is declared on the defs
+    // themselves via `replaces:`; there are no mode flags.
+
+    fn def_with(name: &str, replaces: &str, tools: Option<&str>) -> SpecializedAgentDef {
+        let tools_line = tools.map(|t| format!("tools: {t}\n")).unwrap_or_default();
+        serde_yaml::from_str(&format!(
+            "name: {name}\nmodel: m\nbase_url: http://localhost:11434\nreplaces: {replaces}\n{tools_line}"
+        ))
+        .expect("def must parse")
+    }
+
+    /// The documented agent-driven config parses: a gemma def replacing Shell is the whole
+    /// no-bash opt-in — no dedicated flag fields exist (unknown keys are rejected).
+    #[test]
+    fn parses_the_shell_replacing_gemma_config() {
+        // Given / When
+        let cfg: SandboxAppConfig = serde_yaml::from_str(
+            "\
+subagents:
+  - name: action-author
+    model: gemma4:e4b-mlx
+    base_url: http://localhost:11434
+    replaces: [Shell]
+",
+        )
+        .expect("config must parse");
+
+        // Then
+        assert_eq!(cfg.subagents[0].model, "gemma4:e4b-mlx");
+        assert_eq!(cfg.subagents[0].replaces, vec!["Shell"]);
+        let flag_style: Result<SandboxAppConfig, _> = serde_yaml::from_str("no_bash: true\n");
+        assert!(
+            flag_style.is_err(),
+            "the retired flag field must be rejected as an unknown key"
+        );
+    }
+
+    /// A single Shell replacer (the action author) validates.
+    #[test]
+    fn a_single_shell_replacer_is_accepted() {
+        let defs = vec![def_with("action-author", "[Shell]", None)];
+        validate_tool_replacements(&defs).expect("one Shell replacer must be accepted");
+    }
+
+    /// Two defs both replacing Shell is ambiguous — which one authors actions? — and rejected
+    /// before spawn with both names in the error.
+    #[test]
+    fn two_shell_replacers_are_rejected() {
+        let defs = vec![
+            def_with("author-a", "[Shell]", None),
+            def_with("author-b", "[Shell]", None),
+        ];
+        let err = validate_tool_replacements(&defs)
+            .expect_err("two Shell replacers must be rejected");
+        assert!(
+            err.to_string().contains("author-a") && err.to_string().contains("author-b"),
+            "the error must name both defs; got: {err}"
+        );
+    }
+
+    /// A def replacing `Write` without binding the internal WRITE tool would leave the session
+    /// unable to edit anything — rejected before spawn, with the fix in the error.
+    #[test]
+    fn a_write_replacer_without_a_write_binding_is_rejected() {
+        let defs = vec![def_with("coder", "[Write, StrReplace, Delete]", None)];
+        let err = validate_tool_replacements(&defs)
+            .expect_err("a write replacer without WRITE must be rejected");
+        assert!(
+            err.to_string().contains("WRITE"),
+            "the error must show the tools to add; got: {err}"
+        );
+    }
+
+    /// A write-capable coder def replacing the mutation tools validates.
+    #[test]
+    fn a_write_capable_coder_replacing_mutation_tools_is_accepted() {
+        let defs = vec![def_with(
+            "coder",
+            "[Write, StrReplace, Delete]",
+            Some("[READ, GLOB, GREP, WRITE, STR_REPLACE, DELETE]"),
+        )];
+        validate_tool_replacements(&defs).expect("a write-capable coder must be accepted");
+    }
+
+    /// Read-side replacements need no matching internal binding — the builtin fastcontext
+    /// (replaces Grep/Glob/SemanticSearch with a READ/GLOB/GREP loop) must keep validating.
+    #[test]
+    fn read_side_replacements_need_no_matching_binding() {
+        let defs = vec![tddy_discovery::agent_def::builtin_fastcontext_def()];
+        validate_tool_replacements(&defs).expect("fastcontext must keep validating");
     }
 }
