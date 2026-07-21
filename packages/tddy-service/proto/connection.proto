@@ -278,6 +278,10 @@ message StartSessionRequest {
   // recipe/config args; a trailing positional prompt lands last). Sent by local clients that carry
   // their own SandboxAppConfig. Empty = none.
   repeated string claude_args = 25;
+  // When true with session_type = "claude-cli", pass `--dangerously-skip-permissions` to the claude
+  // binary, bypassing all permission prompts. Mutually exclusive with permission_mode: when set, the
+  // daemon omits `--permission-mode` (the claude CLI rejects using both together).
+  bool dangerously_skip_permissions = 26;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved

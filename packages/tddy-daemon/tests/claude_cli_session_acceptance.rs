@@ -638,6 +638,7 @@ fn build_claude_argv_includes_positional_prompt_when_present() {
         Some("build a hello world app"),
         None,
         false,
+        false,
     );
 
     assert_eq!(
@@ -679,6 +680,7 @@ fn build_claude_argv_omits_when_empty_or_none() {
             "sid",
             None,
             None,
+            false,
             false
         ),
         expected,
@@ -691,6 +693,7 @@ fn build_claude_argv_omits_when_empty_or_none() {
             "sid",
             Some(""),
             None,
+            false,
             false
         ),
         expected,
@@ -703,6 +706,7 @@ fn build_claude_argv_omits_when_empty_or_none() {
             "sid",
             Some("   "),
             None,
+            false,
             false
         ),
         expected,

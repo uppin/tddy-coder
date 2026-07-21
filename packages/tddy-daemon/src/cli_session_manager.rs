@@ -235,6 +235,7 @@ impl CliSessionManager {
         session_id: &str,
         initial_prompt: Option<&str>,
         permission_mode: Option<&str>,
+        dangerously_skip_permissions: bool,
         resume: bool,
     ) -> Vec<String> {
         let mode = permission_mode
@@ -246,6 +247,7 @@ impl CliSessionManager {
             model,
             session_id,
             mode,
+            dangerously_skip_permissions,
             resume,
         );
         if let Some(p) = initial_prompt {
@@ -345,6 +347,7 @@ impl CliSessionManager {
             initial_prompt,
             permission_mode,
             false,
+            false,
             None,
             Vec::new(),
             None,
@@ -373,6 +376,7 @@ impl CliSessionManager {
         binary_path: &str,
         initial_prompt: Option<&str>,
         permission_mode: Option<&str>,
+        dangerously_skip_permissions: bool,
         resume: bool,
         append_system_prompt_file: Option<&Path>,
         env: Vec<(String, String)>,
@@ -384,6 +388,7 @@ impl CliSessionManager {
             session_id,
             initial_prompt,
             permission_mode,
+            dangerously_skip_permissions,
             resume,
         );
         if let Some(path) = append_system_prompt_file {
@@ -641,6 +646,7 @@ impl CliSessionManager {
             binary_path,
             None,
             None,
+            false,
             true,
             append_system_prompt_file,
             env,
@@ -1138,6 +1144,7 @@ mod tests {
             "019f5514-c0eb-7893-b32f-a02043a6e5cf",
             None,
             None,
+            false,
             resume,
         );
 
@@ -1161,6 +1168,7 @@ mod tests {
             "019f5514-c0eb-7893-b32f-a02043a6e5cf",
             None,
             None,
+            false,
             resume,
         );
 
@@ -1347,6 +1355,7 @@ mod tests {
                 "/bin/sh",
                 None,
                 None,
+                false,
                 false,
                 None,
                 Vec::new(),

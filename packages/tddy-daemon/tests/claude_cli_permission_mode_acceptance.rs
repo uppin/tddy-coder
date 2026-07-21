@@ -168,6 +168,7 @@ fn build_claude_argv_default_permission_mode_is_auto() {
         None,
         None, // permission_mode not specified → must default to "auto"
         false,
+        false,
     );
 
     let pm_idx = argv
@@ -194,6 +195,7 @@ fn build_claude_argv_explicit_bypass_permissions() {
         None,
         Some("bypassPermissions"),
         false,
+        false,
     );
 
     let pm_idx = argv
@@ -218,6 +220,7 @@ fn build_claude_argv_accept_edits_mode() {
         "test-session",
         None,
         Some("acceptEdits"),
+        false,
         false,
     );
 
@@ -245,6 +248,7 @@ fn build_claude_argv_empty_string_defaults_to_auto() {
         None,
         Some(""),
         false,
+        false,
     );
 
     let pm_idx = argv
@@ -270,6 +274,7 @@ fn build_claude_argv_whitespace_defaults_to_auto() {
         "test-session",
         None,
         Some("   "),
+        false,
         false,
     );
 
@@ -297,6 +302,7 @@ fn build_claude_argv_permission_mode_before_positional_prompt() {
         "test-session",
         Some("build a feature"),
         Some("plan"),
+        false,
         false,
     );
 
@@ -328,6 +334,7 @@ fn build_claude_argv_permission_mode_appears_once() {
         "test-session",
         None,
         Some("auto"),
+        false,
         false,
     );
 
@@ -518,6 +525,7 @@ fn build_claude_argv_exact_structure_default_mode_no_prompt() {
         None,
         None,
         false,
+        false,
     );
 
     assert_eq!(
@@ -546,6 +554,7 @@ fn build_claude_argv_exact_structure_bypass_with_prompt() {
         "sess-xyz",
         Some("build the feature"),
         Some("bypassPermissions"),
+        false,
         false,
     );
 
@@ -577,6 +586,7 @@ fn build_claude_argv_exact_structure_no_model() {
         None,
         None,
         false,
+        false,
     );
 
     assert_eq!(
@@ -602,6 +612,7 @@ fn build_claude_argv_plan_mode() {
         "sess-plan",
         None,
         Some("plan"),
+        false,
         false,
     );
 
@@ -629,6 +640,7 @@ fn build_claude_argv_default_mode_string() {
         None,
         Some("default"),
         false,
+        false,
     );
     let argv_none = ClaudeCliSessionManager::build_claude_argv(
         "claude",
@@ -636,6 +648,7 @@ fn build_claude_argv_default_mode_string() {
         "sess-default",
         None,
         None,
+        false,
         false,
     );
 
