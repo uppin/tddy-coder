@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { presenterRoomTargetFor } from "./presenterRoomTarget";
-import type { SessionAttachmentState } from "../useSessionAttachment";
+import type { SessionAttachmentState } from "./useSessionAttachment";
 
 // Tests for the pure `presenterRoomTargetFor` derivation — the PR-Stack Chat Screen's own
 // dedicated LiveKit room connection is derived from the session's `connectSession`/

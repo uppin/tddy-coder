@@ -3,6 +3,7 @@ import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import { PrStackScreen } from "./prstack/PrStackScreen";
+import { WorkflowChatScreen } from "./WorkflowChatScreen";
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
@@ -28,9 +29,14 @@ export interface WorkflowViewContext {
 /**
  * Resolve a custom main-pane view for `session`, keyed by `session.recipe`.
  *
- * Returns `null` when no custom view is registered for the recipe — callers fall back to the
- * existing terminal / placeholder rendering in that case. This registry is intentionally tiny;
- * it is expected to grow one `if` per future per-workflow screen.
+ * Returns `null` when no custom view is registered for the session — callers fall back to the
+ * existing terminal / placeholder rendering in that case.
+ *
+ * `pr-stack` gets its own two-pane screen (planned-PR list + chat). Every other tddy-coder workflow
+ * (`tool`) session gets the single-pane full-screen {@link WorkflowChatScreen}. The gate is
+ * `session_type` ∈ {"", "tool"} plus a non-empty `recipe`: only tddy-coder `tool` sessions run a
+ * Presenter/ACP surface the chat can reach, so `claude-cli` / `cursor-cli` PTY sessions (which have
+ * no Presenter, even when they carry a managed `recipe`) fall through to the terminal.
  */
 export function resolveWorkflowView(
   session: SessionEntry | null,
@@ -46,6 +52,16 @@ export function resolveWorkflowView(
         sessionToken={context.sessionToken}
         attachment={context.attachment}
         onChildSessionStarted={context.onChildSessionStarted}
+      />
+    );
+  }
+  const isToolSession = session.sessionType === "" || session.sessionType === "tool";
+  if (isToolSession && session.recipe !== "") {
+    return (
+      <WorkflowChatScreen
+        key={session.sessionId}
+        session={session}
+        attachment={context.attachment}
       />
     );
   }
