@@ -207,9 +207,7 @@ mod tests {
             "/Users must be readable for traversal: {reads:?}"
         );
         assert!(
-            reads
-                .iter()
-                .any(|r| r.host == Path::new("/Users/alice")),
+            reads.iter().any(|r| r.host == Path::new("/Users/alice")),
             "user home ancestor must be readable: {reads:?}"
         );
     }
