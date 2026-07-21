@@ -9,6 +9,7 @@
     "branch_suggestion": { "type": "string", "minLength": 1 },
     "worktree_suggestion": { "type": "string", "minLength": 1 },
     "name": { "type": "string" },
-    "summary": { "type": "string" }
+    "summary": { "type": "string" },
+    "exploration": { "type": "string" }
   }
 }

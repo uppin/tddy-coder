@@ -56,6 +56,7 @@
       }
     },
     "branch_suggestion": { "type": "string" },
-    "worktree_suggestion": { "type": "string" }
+    "worktree_suggestion": { "type": "string" },
+    "exploration": { "type": "string" }
   }
 }

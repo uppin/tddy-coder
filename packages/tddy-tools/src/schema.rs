@@ -269,3 +269,64 @@ mod tests {
         common_schemas_or_err().expect("all embedded common schemas must parse");
     }
 }
+
+#[cfg(test)]
+mod exploration_artifact_tests {
+    use super::*;
+
+    #[test]
+    fn plan_schema_declares_the_exploration_property() {
+        // When
+        let schema = get_schema("plan").expect("plan schema must exist");
+
+        // Then
+        assert!(
+            schema.contains("\"exploration\""),
+            "plan schema must declare the optional exploration string property"
+        );
+    }
+
+    #[test]
+    fn analyze_schema_declares_the_exploration_property() {
+        // When
+        let schema = get_schema("analyze").expect("analyze schema must exist");
+
+        // Then
+        assert!(
+            schema.contains("\"exploration\""),
+            "analyze schema must declare the optional exploration string property"
+        );
+    }
+
+    #[test]
+    fn plan_submit_with_an_exploration_field_validates() {
+        // Given
+        let json = r##"{"goal":"plan","prd":"# PRD\n## TODO\n- [ ] t","exploration":"# Exploration\n\n- `src/lib.rs:10:1` — entry point"}"##;
+
+        // When
+        let result = validate_output("plan", json);
+
+        // Then
+        assert!(
+            result.is_ok(),
+            "plan submit with an exploration string must validate: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn plan_submit_without_an_exploration_field_validates() {
+        // Given
+        let json = r##"{"goal":"plan","prd":"# PRD\n## TODO\n- [ ] t"}"##;
+
+        // When
+        let result = validate_output("plan", json);
+
+        // Then
+        assert!(
+            result.is_ok(),
+            "exploration must stay optional in the plan schema: {:?}",
+            result.err()
+        );
+    }
+}

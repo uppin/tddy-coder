@@ -2,6 +2,12 @@
 
 Release note history for the Coder product area.
 
+## 2026-07-21 — Exploration artifact (`exploration.md`) shared across workflow steps
+
+- Workflow planning now produces a persisted `session_dir/artifacts/exploration.md` capturing code-discovery knowledge — a Code Map (file:line/col references), mermaid diagrams, documentation pointers, and conventions/gotchas — so every step that runs after the user interview reuses it instead of re-exploring the codebase. See [exploration-artifact.md](exploration-artifact.md).
+- The plan agent stays read-only: it returns the content inline via a new optional `exploration` field on the plan (and bugfix `analyze`) submit schema, and the engine writes the file (blank/absent → no file). grill-me's create-plan writes it directly.
+- `exploration.md` is registered in `known_artifacts()` for tdd, tdd_small, bugfix, and grill-me, so it is advertised (absolute path) in the `<context-reminder>` header — now extended past acceptance-tests/red to green, evaluate, demo, validate, and refactor. The acceptance-tests, red, and green prompts instruct agents to read it before exploring and append new discoveries as a living document.
+
 ## 2026-07-21 — ACP over LiveKit: `AcpService` protobuf mirror + reusable Agent Chat
 
 - The TDD workflow is now addressable as an ACP agent two ways: `tddy-coder --acp` (JSON-RPC over stdio, for external hosts like Zed) and `AcpService` — a 1:1 protobuf mirror of the Agent Client Protocol served over the same `tddy_rpc` LiveKit session connection that carries `TddyRemote`, so the browser drives a session using ACP semantics with no extra process hop. See [acp-agent.md](acp-agent.md), [acp-protobuf-rpc.md](acp-protobuf-rpc.md).

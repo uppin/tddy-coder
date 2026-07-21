@@ -14,6 +14,7 @@ use tddy_core::setup_worktree_for_session_with_optional_chain_base;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::find_git_root;
 use tddy_core::workflow::ids::WorkflowState;
+use tddy_core::workflow::prepend_context_header;
 use tddy_core::workflow::recipe::WorkflowRecipe;
 
 use crate::tdd::green;
@@ -230,6 +231,16 @@ pub(crate) fn before_green(
         Some(a) => green::build_followup_prompt(&progress, a, prd.as_deref(), at.as_deref()),
         None => green::build_prompt(&progress, prd.as_deref(), at.as_deref()),
     };
+    let repo_dir: Option<PathBuf> = context
+        .get_sync("worktree_dir")
+        .or_else(|| context.get_sync("output_dir"));
+    let ctx_artifacts = manifest.context_header_filenames();
+    let prompt = prepend_context_header(
+        prompt,
+        Some(session_dir),
+        repo_dir.as_deref(),
+        &ctx_artifacts,
+    );
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", green::system_prompt(run_optional_step_x));
     context.set_sync("session_dir", session_dir.to_path_buf());

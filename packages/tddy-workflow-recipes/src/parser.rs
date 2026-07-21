@@ -21,6 +21,8 @@ pub struct PlanningOutput {
     pub branch_suggestion: Option<String>,
     /// Daemon mode: suggested worktree directory name (e.g. "feature-auth").
     pub worktree_suggestion: Option<String>,
+    /// Code-discovery knowledge (Code Map, diagrams, docs) to persist as `artifacts/exploration.md`.
+    pub exploration: Option<String>,
 }
 
 /// Demo execution mode: how the running app is presented to the user.
@@ -83,6 +85,7 @@ struct StructuredPlan {
     demo_plan: Option<DemoPlan>,
     branch_suggestion: Option<String>,
     worktree_suggestion: Option<String>,
+    exploration: Option<String>,
 }
 
 /// Parse LLM planning response. JSON must come from tddy-tools submit (no inline parsing).
@@ -143,6 +146,7 @@ fn parse_planning_response_impl(
         demo_plan: parsed.demo_plan,
         branch_suggestion: parsed.branch_suggestion.filter(|s| !s.is_empty()),
         worktree_suggestion: parsed.worktree_suggestion.filter(|s| !s.is_empty()),
+        exploration: parsed.exploration.filter(|s| !s.trim().is_empty()),
     })
 }
 
@@ -288,6 +292,8 @@ pub struct AnalyzeOutput {
     pub worktree_suggestion: String,
     pub name: Option<String>,
     pub summary: Option<String>,
+    /// Code-discovery knowledge to persist as `artifacts/exploration.md` (analyze is bugfix's discovery step).
+    pub exploration: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -297,6 +303,7 @@ struct StructuredAnalyze {
     worktree_suggestion: Option<String>,
     name: Option<String>,
     summary: Option<String>,
+    exploration: Option<String>,
 }
 
 /// Parse LLM analyze response. JSON must come from tddy-tools submit.
@@ -323,6 +330,7 @@ pub fn parse_analyze_response(s: &str) -> Result<AnalyzeOutput, ParseError> {
         worktree_suggestion,
         name: parsed.name.filter(|x| !x.is_empty()),
         summary: parsed.summary.filter(|x| !x.is_empty()),
+        exploration: parsed.exploration.filter(|x| !x.trim().is_empty()),
     })
 }
 
@@ -1621,4 +1629,26 @@ struct StructuredDemo {
     steps_completed: Option<u32>,
     verification: Option<String>,
     share_url: Option<String>,
+}
+
+#[cfg(test)]
+mod exploration_artifact_tests {
+    use super::*;
+
+    #[test]
+    fn plan_response_retains_the_exploration_field_through_parsing() {
+        // Given
+        let json = r##"{"goal":"plan","prd":"# PRD\n## TODO\n- [ ] t","exploration":"# Exploration\n\n## Code Map\n\n- `src/lib.rs:10:1` — entry point"}"##;
+
+        // When
+        let parsed = parse_planning_response(json).expect("plan response should parse");
+
+        // Then — serialize back: the exploration knowledge must survive the round-trip
+        let value = serde_json::to_value(&parsed).expect("serialize planning output");
+        assert_eq!(
+            value.get("exploration").and_then(|v| v.as_str()),
+            Some("# Exploration\n\n## Code Map\n\n- `src/lib.rs:10:1` — entry point"),
+            "PlanningOutput must retain the plan submit exploration field"
+        );
+    }
 }

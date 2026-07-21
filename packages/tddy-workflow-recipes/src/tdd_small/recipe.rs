@@ -207,6 +207,7 @@ impl SessionArtifactManifest for TddSmallRecipe {
     fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
         &[
             ("prd", "PRD.md"),
+            ("exploration", "exploration.md"),
             ("acceptance_tests", "acceptance-tests.md"),
             ("progress", "progress.md"),
             ("red_output", "red-output.md"),
@@ -258,6 +259,27 @@ mod tests {
             ids.contains(&"post-green-review".to_string()),
             "expected post-green-review in goal_ids, got {:?}",
             ids
+        );
+    }
+}
+
+#[cfg(test)]
+mod exploration_artifact_tests {
+    use super::TddSmallRecipe;
+    use crate::SessionArtifactManifest;
+
+    #[test]
+    fn tdd_small_manifest_registers_the_exploration_artifact() {
+        // Given
+        let recipe = TddSmallRecipe;
+
+        // When / Then
+        assert!(
+            recipe
+                .known_artifacts()
+                .contains(&("exploration", "exploration.md")),
+            "TddSmallRecipe known_artifacts must register exploration.md; got {:?}",
+            recipe.known_artifacts()
         );
     }
 }
