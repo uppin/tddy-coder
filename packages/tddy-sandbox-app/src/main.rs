@@ -505,6 +505,12 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
 /// subagents ([`tddy_core::backend::read_claude_subagent_usages`]), and the tddy subagent
 /// conversations the in-jail MCP server wrote to `<session_dir>/egress/accounting.json`.
 /// Best-effort: a missing or unreadable accounting file simply contributes no tddy-subagent rows.
+///
+/// macOS-only: the in-process `run_macos` flow spawns and reaps Claude itself, so it is the only
+/// path that can read the finished transcript. The Linux path delegates the session lifecycle to
+/// the daemon (`run_linux` → `daemon_client::run`) and never reaps Claude here, so it has no
+/// summary to print.
+#[cfg(target_os = "macos")]
 fn print_token_summary(
     session_dir: &std::path::Path,
     session_id: &str,

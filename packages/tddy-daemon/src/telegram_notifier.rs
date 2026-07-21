@@ -420,6 +420,7 @@ impl TelegramSessionWatcher {
     /// Non-alerting statuses (e.g. `Running`, `Started`) are silently ignored.
     pub async fn on_claude_cli_activity_status_changed(
         &mut self,
+        config: &DaemonConfig,
         sender: &(dyn TelegramSender + Send + Sync),
         session_id: &str,
         new_status: &str,
@@ -448,8 +449,13 @@ impl TelegramSessionWatcher {
         self.last_activity_status
             .insert(session_id.to_string(), new_status.to_string());
 
-        // Resolve which chats are tracking this session.
-        let chat_ids = match self.telegram_tracked.lock() {
+        // Resolve recipients. Chats explicitly tracking this session take priority: a session
+        // started or entered from Telegram routes only to that operator (same targeting the
+        // workflow keyboards use). When no chat tracks the session — e.g. a claude-cli session
+        // started from the web UI or `claude` directly — fall back to the daemon's configured
+        // broadcast list (`telegram.chat_ids`), reusing the same recipient set as lifecycle and
+        // `on_metadata_tick` notifications, so activity alerts still reach operators.
+        let tracked_chat_ids = match self.telegram_tracked.lock() {
             Ok(g) => g.chats_tracking_session(session_id),
             Err(e) => {
                 log::error!(
@@ -460,10 +466,22 @@ impl TelegramSessionWatcher {
             }
         };
 
+        let (chat_ids, routing) = if !tracked_chat_ids.is_empty() {
+            (tracked_chat_ids, "tracked")
+        } else {
+            let fallback = config
+                .telegram
+                .as_ref()
+                .filter(|tg| tg.enabled)
+                .map(|tg| tg.chat_ids.clone())
+                .unwrap_or_default();
+            (fallback, "configured_broadcast")
+        };
+
         if chat_ids.is_empty() {
             log::debug!(
                 target: "tddy_daemon::telegram",
-                "on_claude_cli_activity_status_changed: no chats tracking session_id={} — no alert",
+                "on_claude_cli_activity_status_changed: no chats tracking session_id={} and no configured chat_ids — no alert",
                 session_id
             );
             return;
@@ -483,9 +501,10 @@ impl TelegramSessionWatcher {
 
         log::info!(
             target: "tddy_daemon::telegram",
-            "on_claude_cli_activity_status_changed: sending alert session_id={} status={} chats={}",
+            "on_claude_cli_activity_status_changed: sending alert session_id={} status={} routing={} chats={}",
             session_id,
             new_status,
+            routing,
             chat_ids.len()
         );
 
@@ -2014,6 +2033,20 @@ mod acceptance_unit_tests {
     // on_claude_cli_activity_status_changed unit tests
     // ---------------------------------------------------------------------------
 
+    /// Config with Telegram enabled and the given broadcast `chat_ids` (the fallback recipients
+    /// used when no chat is tracking a session). Pass `vec![]` when a test drives the tracked
+    /// path and must not accidentally match the broadcast fallback.
+    fn cfg_broadcast(chat_ids: Vec<i64>) -> DaemonConfig {
+        DaemonConfig {
+            telegram: Some(crate::config::TelegramConfig {
+                enabled: true,
+                bot_token: "x".to_string(),
+                chat_ids,
+            }),
+            ..Default::default()
+        }
+    }
+
     /// Build a `TelegramSessionWatcher` with a shared tracked coordinator.
     fn watcher_with_shared_tracked(
         tracked: SharedTelegramTrackedSessionCoordinator,
@@ -2047,7 +2080,12 @@ mod acceptance_unit_tests {
         let mut watcher = watcher_with_shared_tracked(shared_tracked_with_bound_chat());
 
         watcher
-            .on_claude_cli_activity_status_changed(&*sender, SID, "WaitingForInput")
+            .on_claude_cli_activity_status_changed(
+                &cfg_broadcast(vec![]),
+                &*sender,
+                SID,
+                "WaitingForInput",
+            )
             .await;
 
         let recorded = sender.recorded();
@@ -2075,7 +2113,7 @@ mod acceptance_unit_tests {
         let mut watcher = watcher_with_shared_tracked(shared_tracked_with_bound_chat());
 
         watcher
-            .on_claude_cli_activity_status_changed(&*sender, SID, "Done")
+            .on_claude_cli_activity_status_changed(&cfg_broadcast(vec![]), &*sender, SID, "Done")
             .await;
 
         let recorded = sender.recorded();
@@ -2099,10 +2137,20 @@ mod acceptance_unit_tests {
         let mut watcher = watcher_with_shared_tracked(shared_tracked_with_bound_chat());
 
         watcher
-            .on_claude_cli_activity_status_changed(&*sender, SID, "WaitingForInput")
+            .on_claude_cli_activity_status_changed(
+                &cfg_broadcast(vec![]),
+                &*sender,
+                SID,
+                "WaitingForInput",
+            )
             .await;
         watcher
-            .on_claude_cli_activity_status_changed(&*sender, SID, "WaitingForInput")
+            .on_claude_cli_activity_status_changed(
+                &cfg_broadcast(vec![]),
+                &*sender,
+                SID,
+                "WaitingForInput",
+            )
             .await;
 
         assert_eq!(
@@ -2121,10 +2169,10 @@ mod acceptance_unit_tests {
         let mut watcher = watcher_with_shared_tracked(shared_tracked_with_bound_chat());
 
         watcher
-            .on_claude_cli_activity_status_changed(&*sender, SID, "Running")
+            .on_claude_cli_activity_status_changed(&cfg_broadcast(vec![]), &*sender, SID, "Running")
             .await;
         watcher
-            .on_claude_cli_activity_status_changed(&*sender, SID, "Started")
+            .on_claude_cli_activity_status_changed(&cfg_broadcast(vec![]), &*sender, SID, "Started")
             .await;
 
         assert!(
@@ -2134,10 +2182,11 @@ mod acceptance_unit_tests {
         );
     }
 
-    /// **no_alert_when_session_untracked**: `WaitingForInput` with no chat tracking the session
-    /// must not send any message.
+    /// **untracked_session_falls_back_to_configured_chat_ids**: `WaitingForInput` for a session no
+    /// chat is tracking (e.g. started from the web UI) must fall back to the daemon's configured
+    /// `telegram.chat_ids` broadcast so operators still receive the alert.
     #[tokio::test]
-    async fn no_alert_when_session_untracked() {
+    async fn untracked_session_falls_back_to_configured_chat_ids() {
         let sender = Arc::new(InMemoryTelegramSender::new());
         let tracked = Arc::new(StdMutex::new(
             crate::telegram_tracked_session::TelegramTrackedSessionCoordinator::new(),
@@ -2146,18 +2195,52 @@ mod acceptance_unit_tests {
         let mut watcher = watcher_with_shared_tracked(tracked);
 
         watcher
-            .on_claude_cli_activity_status_changed(&*sender, SID, "WaitingForInput")
+            .on_claude_cli_activity_status_changed(
+                &cfg_broadcast(vec![777, 888]),
+                &*sender,
+                SID,
+                "WaitingForInput",
+            )
+            .await;
+
+        let recorded = sender.recorded();
+        let chats: Vec<i64> = recorded.iter().map(|(cid, _)| *cid).collect();
+        assert_eq!(
+            chats,
+            vec![777, 888],
+            "untracked session must broadcast to every configured chat_id; got {recorded:?}"
+        );
+    }
+
+    /// **untracked_session_with_no_configured_chat_ids_is_silent**: with no tracking chat and no
+    /// configured broadcast recipients, there is nobody to notify — no message is sent.
+    #[tokio::test]
+    async fn untracked_session_with_no_configured_chat_ids_is_silent() {
+        let sender = Arc::new(InMemoryTelegramSender::new());
+        let tracked = Arc::new(StdMutex::new(
+            crate::telegram_tracked_session::TelegramTrackedSessionCoordinator::new(),
+        ));
+        let mut watcher = watcher_with_shared_tracked(tracked);
+
+        watcher
+            .on_claude_cli_activity_status_changed(
+                &cfg_broadcast(vec![]),
+                &*sender,
+                SID,
+                "WaitingForInput",
+            )
             .await;
 
         assert!(
             sender.recorded().is_empty(),
-            "untracked session must not produce any Telegram message; got {:?}",
+            "no tracking chat and no configured chat_ids must send nothing; got {:?}",
             sender.recorded()
         );
     }
 
     /// **alert_routes_only_to_tracking_chat**: chat A tracks session S, chat B tracks session T;
-    /// `WaitingForInput` for S must alert only chat A.
+    /// `WaitingForInput` for S must alert only chat A — even when the configured broadcast list
+    /// names a different chat, the tracked chat takes priority over the fallback.
     #[tokio::test]
     async fn alert_routes_only_to_tracking_chat() {
         let sender = Arc::new(InMemoryTelegramSender::new());
@@ -2177,7 +2260,12 @@ mod acceptance_unit_tests {
         let mut watcher = watcher_with_shared_tracked(Arc::clone(&tracked));
 
         watcher
-            .on_claude_cli_activity_status_changed(&*sender, sid_s, "WaitingForInput")
+            .on_claude_cli_activity_status_changed(
+                &cfg_broadcast(vec![999]),
+                &*sender,
+                sid_s,
+                "WaitingForInput",
+            )
             .await;
 
         let recorded = sender.recorded();
@@ -2188,7 +2276,7 @@ mod acceptance_unit_tests {
         );
         assert_eq!(
             recorded[0].0, chat_a,
-            "message must go to chat_a (tracking S), not chat_b; got chat_id={}",
+            "message must go to chat_a (tracking S), not chat_b or the configured fallback; got chat_id={}",
             recorded[0].0
         );
     }

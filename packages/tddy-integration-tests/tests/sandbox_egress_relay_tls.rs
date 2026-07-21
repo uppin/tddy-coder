@@ -194,6 +194,7 @@ async fn routes_https_egress_from_jail_through_the_host_relay_to_a_tls_server() 
             model: TEST_MODEL.to_string(),
             ready_marker: ready_marker.clone(),
             permission_mode: "auto".to_string(),
+            dangerously_skip_permissions: false,
             resume: false,
             append_system_prompt_file: None,
             grpc_listen_port: None,

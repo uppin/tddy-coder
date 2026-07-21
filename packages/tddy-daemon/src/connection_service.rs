@@ -545,6 +545,7 @@ impl ConnectionServiceImpl {
         selected_branch_to_work_on: &str,
         initial_prompt: &str,
         permission_mode: &str,
+        dangerously_skip_permissions: bool,
         stack_parent: Option<&str>,
         // When `Some`, the session is launched workflow-aware: the recipe's orchestration prompt is
         // injected and its `transition` tool advances a per-session `WorkflowController`.
@@ -598,6 +599,7 @@ impl ConnectionServiceImpl {
             selected_branch_to_work_on,
             initial_prompt,
             permission_mode,
+            dangerously_skip_permissions,
             stack_parent,
             managed_recipe,
             child_spawn_handler,
@@ -731,6 +733,7 @@ async fn spawn_claude_cli_session_inner(
     selected_branch_to_work_on: &str,
     initial_prompt: &str,
     permission_mode: &str,
+    dangerously_skip_permissions: bool,
     stack_parent: Option<&str>,
     managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
     child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
@@ -954,6 +957,7 @@ async fn spawn_claude_cli_session_inner(
             &binary_owned,
             initial_prompt_opt.as_deref(),
             permission_mode_opt.as_deref(),
+            dangerously_skip_permissions,
             false,
             append_system_prompt_file.as_deref(),
             env_extra,
@@ -1205,6 +1209,7 @@ impl ConnectionServiceImpl {
         // Extra args forwarded verbatim to the in-jail `claude` (StartSessionRequest.claude_args).
         claude_args: &[String],
         permission_mode: &str,
+        dangerously_skip_permissions: bool,
         stack_parent: Option<&str>,
         // Specialized subagents (see docs/ft/coder/specialized-subagents.md). This sandboxed path
         // already never mounts the repo (`mounts: vec![]` below, unconditionally) —
@@ -1517,6 +1522,11 @@ impl ConnectionServiceImpl {
             egress_shim_port.to_string(),
             "--stdio".into(),
         ];
+        // The runner reconciles this with --permission-mode (they are mutually exclusive; when set,
+        // the in-jail claude argv drops --permission-mode). See build_claude_base_argv.
+        if dangerously_skip_permissions {
+            runner_argv.push("--dangerously-skip-permissions".into());
+        }
         if let Some(prompt_path) = &append_system_prompt_file {
             runner_argv.push("--append-system-prompt-file".into());
             runner_argv.push(prompt_path.to_string_lossy().to_string());
@@ -2597,6 +2607,7 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             "",
             &initial_prompt,
             "auto",
+            false,
             Some(&self.orchestrator_session_id),
             None,
             None,
@@ -2710,6 +2721,7 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             "",
             prompt,
             "auto",
+            false,
             Some(&self.orchestrator_session_id),
             None,
             None,
@@ -3429,6 +3441,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         req.initial_prompt.trim(),
                         &req.claude_args,
                         req.permission_mode.trim(),
+                        req.dangerously_skip_permissions,
                         stack_parent_for_claude_cli.as_deref(),
                         req.managed_codebase,
                         &req.specialized_agents,
@@ -3449,6 +3462,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     req.selected_branch_to_work_on.trim(),
                     req.initial_prompt.trim(),
                     req.permission_mode.trim(),
+                    req.dangerously_skip_permissions,
                     stack_parent_for_claude_cli.as_deref(),
                     managed_recipe,
                 )
@@ -5103,6 +5117,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         if let Some(ref telegram) = self.telegram {
             let mut w = telegram.watcher.lock().await;
             w.on_claude_cli_activity_status_changed(
+                &telegram.config,
                 &*telegram.sender,
                 &req.session_id,
                 &req.status,

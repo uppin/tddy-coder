@@ -218,6 +218,11 @@ pub struct SandboxRunnerArgs {
     pub ready_marker: PathBuf,
     #[arg(long, default_value = "auto")]
     pub permission_mode: String,
+    /// When set, pass `--dangerously-skip-permissions` to the in-jail `claude`, bypassing all
+    /// permission prompts. Mutually exclusive with `--permission-mode`: when set, the in-jail claude
+    /// argv drops `--permission-mode` (the claude CLI rejects both together). Claude-mode only.
+    #[arg(long)]
+    pub dangerously_skip_permissions: bool,
     /// When set, resume an existing on-disk claude session transcript via `--resume <id>` instead
     /// of assigning the id to a fresh session via `--session-id <id>`. The daemon sets this on the
     /// resume path (the transcript already exists under the persistent sandbox claude HOME, so
@@ -1194,6 +1199,9 @@ struct SpawnClaudePtyParams<'a> {
     claude_binary: &'a str,
     model: &'a str,
     permission_mode: &'a str,
+    /// When true, pass `--dangerously-skip-permissions` to `claude`, bypassing all permission
+    /// prompts. Mutually exclusive with `permission_mode` (dropped when this is set).
+    dangerously_skip_permissions: bool,
     /// When true, resume the existing on-disk transcript via `--resume <id>` instead of assigning
     /// the id to a fresh session via `--session-id <id>` (see `SandboxRunnerArgs::resume`).
     resume: bool,
@@ -1224,6 +1232,7 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
         claude_binary,
         model,
         permission_mode,
+        dangerously_skip_permissions,
         resume,
         append_system_prompt_file,
         session_id,
@@ -1242,6 +1251,7 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
         model,
         session_id,
         permission_mode,
+        dangerously_skip_permissions,
         resume,
     );
     if let Some(path) = append_system_prompt_file {
@@ -1900,6 +1910,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
                 claude_binary: &args.claude_binary,
                 model: &args.model,
                 permission_mode: &args.permission_mode,
+                dangerously_skip_permissions: args.dangerously_skip_permissions,
                 resume: args.resume,
                 append_system_prompt_file: args.append_system_prompt_file.as_deref(),
                 session_id: &args.session_id,

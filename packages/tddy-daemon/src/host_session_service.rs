@@ -75,13 +75,13 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    /// The arguments a single `spawn_conversation` call was made with: `(prompt, branch, base_ref)`.
-    type SpawnConversationArgs = (String, Option<String>, Option<String>);
+    /// The `(prompt, branch, base_ref)` the fake handler last saw, shared with the test body.
+    type SeenSpawnArgs = Arc<Mutex<Option<(String, Option<String>, Option<String>)>>>;
 
     /// Records the arguments it was called with and returns a fixed child session id.
     struct FakeConversationSpawn {
         session_id: String,
-        seen: Arc<Mutex<Option<SpawnConversationArgs>>>,
+        seen: SeenSpawnArgs,
     }
 
     #[async_trait]

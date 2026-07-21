@@ -42,6 +42,7 @@ export type CreateSessionInitialValues = Partial<{
   recipe: string;
   model: string;
   permissionMode: string;
+  dangerouslySkipPermissions: boolean;
   stackParent: string;
   branchIntent: BranchIntent;
   newBranchName: string;
@@ -88,6 +89,9 @@ export function CreateSessionPane({
   const [toolPath, setToolPath] = useState("");
   const [model, setModel] = useState(initialValues?.model ?? "");
   const [permissionMode, setPermissionMode] = useState(initialValues?.permissionMode ?? "auto");
+  const [dangerouslySkipPermissions, setDangerouslySkipPermissions] = useState(
+    initialValues?.dangerouslySkipPermissions ?? false,
+  );
   const [sandbox, setSandbox] = useState(false);
   const [initialPrompt, setInitialPrompt] = useState(initialValues?.initialPrompt ?? "");
   const [branchIntent, setBranchIntent] = useState<BranchIntent>(
@@ -296,6 +300,7 @@ export function CreateSessionPane({
           sessionType: "claude-cli",
           model,
           permissionMode,
+          dangerouslySkipPermissions,
           initialPrompt,
           sandbox,
           managedCodebase,
@@ -595,6 +600,7 @@ export function CreateSessionPane({
               className={inputClass}
               value={permissionMode}
               onChange={(e) => setPermissionMode(e.target.value)}
+              disabled={dangerouslySkipPermissions}
             >
               <option value="auto">auto</option>
               <option value="default">default</option>
@@ -602,6 +608,19 @@ export function CreateSessionPane({
               <option value="plan">plan</option>
               <option value="bypassPermissions">bypassPermissions</option>
             </select>
+          </div>
+
+          <div>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                data-testid="create-session-dangerously-skip-permissions-toggle"
+                type="checkbox"
+                className="h-4 w-4 rounded border-input"
+                checked={dangerouslySkipPermissions}
+                onChange={(e) => setDangerouslySkipPermissions(e.target.checked)}
+              />
+              Dangerously skip permissions
+            </label>
           </div>
 
           <div>

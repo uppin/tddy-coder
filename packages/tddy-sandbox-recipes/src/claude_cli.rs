@@ -275,6 +275,9 @@ pub fn claude_scratch_mcp_dir(fallback: &Path) -> PathBuf {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+    // Only the macOS-gated dyld-root test below consumes these; gate the import to match so it is
+    // not flagged unused on Linux.
+    #[cfg(target_os = "macos")]
     use tddy_sandbox::builder::{ReadKind, ReadReason};
 
     const NATIVE_TOOLS_EXCLUDED: &[&str] = &[

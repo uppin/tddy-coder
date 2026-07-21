@@ -423,6 +423,8 @@ export function SessionsDrawerScreen() {
   const handleSessionCreated = (sessionId: string) => {
     setMode("list");
     setSelectedSessionId(sessionId);
+    // Auto-close the sessions drawer so the new session's terminal is unobstructed.
+    setSessionListOpen(false);
     window.location.hash = sessionsDrawerPathForSession(sessionId);
     if (!client) return;
     connectSession(sessionId, sessionToken, client).catch((err) => {
