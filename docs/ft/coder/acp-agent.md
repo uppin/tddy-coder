@@ -1,7 +1,9 @@
 # tddy-coder as an ACP Agent (`--acp`)
 
-**Status:** WIP · **Area:** coder · **Related:** [codex-acp-backend](codex-acp-backend.md),
-[activity-log-streaming](activity-log-streaming.md), [session-drawer § Agent Chat](../web/session-drawer.md#agent-chat)
+**Status:** shipped (`tddy-coder --acp` agent + reusable `AgentChat`/`useAgentChat`) · **Area:** coder ·
+**Related:** [acp-protobuf-rpc](acp-protobuf-rpc.md) (the ACP protobuf mirror over LiveKit),
+[codex-acp-backend](codex-acp-backend.md), [activity-log-streaming](activity-log-streaming.md),
+[session-drawer § Agent Chat](../web/session-drawer.md#agent-chat)
 
 ## Problem
 

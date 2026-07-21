@@ -1,7 +1,8 @@
 # ACP as a protobuf RPC (`AcpService`)
 
-**Status**: shipped — prompt streaming and the permission round-trip both work over the mounted
-service; a few parity items remain (see changeset `docs/dev/1-WIP/acp-protobuf-rpc.md`)
+**Status**: shipped — the browser drives a session over `AcpService.Session` at full behavior parity
+with the Presenter path (streaming, tool-call lifecycle, synthesized plan, clarification round-trip,
+per-turn `EndTurn`), verified end-to-end over a real LiveKit hop.
 
 ## What
 
@@ -54,10 +55,12 @@ at both `WorkflowComplete` and the free-prompting turn boundary (signalled by
 
 `useAcpSession` (in `packages/tddy-web/src/components/chat/`) is the ACP counterpart of
 `useAgentChat`, returning the identical `UseAgentChatResult`. `AgentChat` selects it via an `acp`
-prop; both render the same UI and ride the same LiveKit room. **The pr-stack chat (`PrStackChat`)
-uses ACP** (`acp`), at full behavior parity with the old `TddyRemote` path — goal/activity/system
-bubbles, single- and multi-select clarifications, "other" free-text answers, streaming, and error
-banners all work, via the tddy conventions below.
+prop; both render the same UI (shared `AgentChatView`) and ride the same LiveKit room. **The
+pr-stack chat (`PrStackChat`) uses ACP** (`acp`), at full behavior parity with the old `TddyRemote`
+path — goal/activity/system bubbles, single- and multi-select clarifications, "other" free-text
+answers, streaming, and error banners all work, via the tddy conventions below. The chat's "Export"
+button (both transports) downloads a timestamped plain-text transcript that merges messages and
+clarification points into one chronological timeline (`chatTranscript.ts`).
 
 ### tddy rendering conventions (over ACP)
 

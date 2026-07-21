@@ -15,9 +15,13 @@
 //! Additive and opt-in. This does not replace the in-process `WorkflowEngine` → Presenter path, and
 //! nothing wires the session host to use the bridge by default.
 //!
-// TODO(acp-host-rewire): flipping the per-session host to drive the workflow "fully via ACP"
-// through this bridge by default needs end-to-end LiveKit validation on a real host and is out of
-// scope here. The bridge stays an opt-in library component until that validation lands.
+// Note: "drive the workflow fully via ACP by default" is now realized by a *different* path —
+// `AcpService` (protobuf mirror) served over the LiveKit session connection, where the browser
+// speaks ACP directly to the session's in-process Presenter view-adapter (`tddy_service::
+// TddyAcpService`), with no stdio subprocess hop. See `docs/ft/coder/acp-protobuf-rpc.md`. This
+// stdio JSON-RPC bridge is therefore *not* the default host path; it remains an opt-in library
+// component for driving an external `tddy-coder --acp` agent and translating it back to presenter
+// events (external-host interop), and is intentionally kept additive.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

@@ -47,7 +47,7 @@ function AcpBackedChat(props: AgentChatProps) {
   return <AgentChatView {...props} chat={chat} />;
 }
 
-function AgentChatView({
+export function AgentChatView({
   placeholder,
   roomStatus = "idle",
   roomError = null,
