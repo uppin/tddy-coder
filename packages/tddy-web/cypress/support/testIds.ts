@@ -153,6 +153,10 @@ export const TEST_IDS = {
   /** Inline error shown when the model probe (ListAgentModels) fails for the selected agent. */
   createSessionModelError: "create-session-model-error",
   createSessionPermissionModeSelect: "create-session-permission-mode-select",
+  /** Checkbox that sets `StartSessionRequest.dangerously_skip_permissions = true` (claude-cli only).
+   * Mutually exclusive with the permission-mode select, which it disables while checked. */
+  createSessionDangerouslySkipPermissionsToggle:
+    "create-session-dangerously-skip-permissions-toggle",
   createSessionSandboxToggle: "create-session-sandbox-toggle",
   /** Collapsible "Managed codebase" section header — claude-cli sessions only. See
    * docs/ft/coder/specialized-subagents.md. */

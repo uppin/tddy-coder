@@ -331,7 +331,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let tools = dir.path().join("tddy-tools");
 
-        let mut argv = vec!["agent".to_string(), "-p".to_string(), "hi".to_string()];
+        let argv = ["agent".to_string(), "-p".to_string(), "hi".to_string()];
         prepare_cursor_mcp_config(dir.path(), &tools, &BTreeMap::new())
             .expect("prepare must succeed");
         assert!(!argv.contains(&"--trust".to_string()));
@@ -506,7 +506,7 @@ mod tests {
             "cursor-agent share root must be readable: {reads:?}"
         );
         assert!(
-            reads.iter().any(|r| r.host == PathBuf::from("/Users")),
+            reads.iter().any(|r| r.host == Path::new("/Users")),
             "path traversal ancestors must include /Users: {reads:?}"
         );
     }
