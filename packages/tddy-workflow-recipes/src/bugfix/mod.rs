@@ -207,7 +207,10 @@ impl WorkflowRecipe for BugfixRecipe {
 
 impl SessionArtifactManifest for BugfixRecipe {
     fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
-        &[("fix_plan", "fix-plan.md")]
+        &[
+            ("fix_plan", "fix-plan.md"),
+            ("exploration", "exploration.md"),
+        ]
     }
 
     fn default_artifacts(&self) -> BTreeMap<String, String> {
@@ -294,6 +297,27 @@ mod tests {
         assert!(
             !r.goal_requires_tddy_tools_submit(&GoalId::new("reproduce")),
             "reproduce goal should not require tddy-tools submit in demo"
+        );
+    }
+}
+
+#[cfg(test)]
+mod exploration_artifact_tests {
+    use super::BugfixRecipe;
+    use crate::SessionArtifactManifest;
+
+    #[test]
+    fn bugfix_manifest_registers_the_exploration_artifact() {
+        // Given
+        let recipe = BugfixRecipe;
+
+        // When / Then
+        assert!(
+            recipe
+                .known_artifacts()
+                .contains(&("exploration", "exploration.md")),
+            "BugfixRecipe known_artifacts must register exploration.md; got {:?}",
+            recipe.known_artifacts()
         );
     }
 }

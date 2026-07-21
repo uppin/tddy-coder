@@ -31,6 +31,8 @@ Run `tddy-tools get-schema green` to see the expected output format. The JSON mu
 
 The summary must describe what was implemented and confirm test results. The tests array lists each test with status "passing" or "failing"; include "reason" for failing tests. The implementations array lists each implemented item (struct, method, etc.).
 
+**Reuse prior exploration**: Before exploring the codebase, read `exploration.md` when it exists (its absolute path is listed in the context-reminder header). Reuse its knowledge — file/line references, diagrams, documentation pointers — instead of re-discovering it. When you learn something new not already captured, append it to `exploration.md` as a living document; do not delete or truncate existing content.
+
 {}"#,
         demo_instruction
     )
@@ -120,6 +122,28 @@ mod tests {
         assert!(
             prompt.contains("tddy-tools submit") && prompt.contains("--goal green"),
             "system prompt must instruct agent to use tddy-tools submit --goal green"
+        );
+    }
+}
+
+#[cfg(test)]
+mod exploration_artifact_tests {
+    use super::*;
+
+    #[test]
+    fn system_prompt_instructs_reusing_and_extending_exploration_md_in_both_demo_modes() {
+        // When
+        let with_demo = system_prompt(true);
+        let without_demo = system_prompt(false);
+
+        // Then
+        assert!(
+            with_demo.contains("exploration.md") && without_demo.contains("exploration.md"),
+            "green system prompt must instruct reading exploration.md before exploring the codebase"
+        );
+        assert!(
+            with_demo.contains("append") && without_demo.contains("append"),
+            "green system prompt must instruct appending new discoveries to exploration.md"
         );
     }
 }

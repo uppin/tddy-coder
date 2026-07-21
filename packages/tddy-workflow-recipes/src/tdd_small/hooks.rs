@@ -118,10 +118,21 @@ fn before_post_green_review(
 fn before_refactor(
     session_dir: &Path,
     context: &Context,
+    manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let refactor_plan = std::fs::read_to_string(session_dir.join("refactoring-plan.md"))
         .map_err(|e| format!("read refactoring-plan.md: {}", e))?;
     let prompt = refactor::build_prompt(&refactor_plan);
+    let repo_dir: Option<PathBuf> = context
+        .get_sync("worktree_dir")
+        .or_else(|| context.get_sync("output_dir"));
+    let ctx_artifacts = manifest.context_header_filenames();
+    let prompt = prepend_context_header(
+        prompt,
+        Some(session_dir),
+        repo_dir.as_deref(),
+        &ctx_artifacts,
+    );
     let session_id = hooks_common::resolve_agent_session_id(session_dir)?;
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", refactor::system_prompt());
@@ -515,7 +526,7 @@ impl RunnerHooks for TddSmallWorkflowHooks {
                     self.recipe.as_ref(),
                     self.manifest.as_ref(),
                 )?,
-                "refactor" => before_refactor(&session_dir, context)?,
+                "refactor" => before_refactor(&session_dir, context, self.manifest.as_ref())?,
                 "update-docs" => before_update_docs(self.manifest.as_ref(), &session_dir, context)?,
                 _ => {}
             }

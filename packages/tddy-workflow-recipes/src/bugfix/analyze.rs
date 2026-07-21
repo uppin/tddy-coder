@@ -93,6 +93,16 @@ pub fn apply_analyze_submit_to_changeset(
         cs.artifacts
             .insert("analyze_summary".to_string(), s.clone());
     }
+    if let Some(exploration) = parsed
+        .exploration
+        .as_deref()
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+    {
+        let artifacts_root = tddy_workflow::session_artifacts_root(session_dir);
+        crate::writer::write_exploration_file(&artifacts_root, exploration)
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
+    }
     update_state(&mut cs, WorkflowState::new("Reproducing"));
     write_changeset(session_dir, &cs)?;
     log::info!(

@@ -349,12 +349,26 @@ fn before_red(
     Ok(())
 }
 
-fn before_demo(session_dir: &Path, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+fn before_demo(
+    session_dir: &Path,
+    context: &Context,
+    manifest: &dyn SessionArtifactManifest,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let demo_plan = std::fs::read_to_string(session_dir.join("demo-plan.md"))
         .map_err(|e| format!("read demo-plan.md: {}", e))?;
     let prompt = format!(
         "Execute the demo described in demo-plan.md:\n\n{}",
         demo_plan
+    );
+    let repo_dir: Option<PathBuf> = context
+        .get_sync("worktree_dir")
+        .or_else(|| context.get_sync("output_dir"));
+    let ctx_artifacts = manifest.context_header_filenames();
+    let prompt = prepend_context_header(
+        prompt,
+        Some(session_dir),
+        repo_dir.as_deref(),
+        &ctx_artifacts,
     );
     let session_id = hooks_common::resolve_agent_session_id(session_dir)?;
     context.set_sync("prompt", prompt);
@@ -378,6 +392,16 @@ fn before_evaluate(
     let prd = hooks_common::read_primary_session_document_optional(session_dir, manifest);
     let changeset_raw = std::fs::read_to_string(session_dir.join("changeset.yaml")).ok();
     let prompt = evaluate::build_prompt(prd.as_deref(), changeset_raw.as_deref());
+    let repo_dir: Option<PathBuf> = context
+        .get_sync("worktree_dir")
+        .or_else(|| context.get_sync("output_dir"));
+    let ctx_artifacts = manifest.context_header_filenames();
+    let prompt = prepend_context_header(
+        prompt,
+        Some(session_dir),
+        repo_dir.as_deref(),
+        &ctx_artifacts,
+    );
     let session_id = hooks_common::resolve_agent_session_id(session_dir)?;
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", evaluate::system_prompt());
@@ -394,10 +418,21 @@ fn before_evaluate(
 fn before_validate(
     session_dir: &Path,
     context: &Context,
+    manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let eval_report = std::fs::read_to_string(session_dir.join("evaluation-report.md"))
         .map_err(|e| format!("read evaluation-report.md: {}", e))?;
     let prompt = validate_subagents::build_prompt(&eval_report);
+    let repo_dir: Option<PathBuf> = context
+        .get_sync("worktree_dir")
+        .or_else(|| context.get_sync("output_dir"));
+    let ctx_artifacts = manifest.context_header_filenames();
+    let prompt = prepend_context_header(
+        prompt,
+        Some(session_dir),
+        repo_dir.as_deref(),
+        &ctx_artifacts,
+    );
     let session_id = hooks_common::resolve_agent_session_id(session_dir)?;
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", validate_subagents::system_prompt());
@@ -414,10 +449,21 @@ fn before_validate(
 fn before_refactor(
     session_dir: &Path,
     context: &Context,
+    manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let refactor_plan = std::fs::read_to_string(session_dir.join("refactoring-plan.md"))
         .map_err(|e| format!("read refactoring-plan.md: {}", e))?;
     let prompt = refactor::build_prompt(&refactor_plan);
+    let repo_dir: Option<PathBuf> = context
+        .get_sync("worktree_dir")
+        .or_else(|| context.get_sync("output_dir"));
+    let ctx_artifacts = manifest.context_header_filenames();
+    let prompt = prepend_context_header(
+        prompt,
+        Some(session_dir),
+        repo_dir.as_deref(),
+        &ctx_artifacts,
+    );
     let session_id = hooks_common::resolve_agent_session_id(session_dir)?;
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", refactor::system_prompt());
@@ -751,15 +797,15 @@ impl RunnerHooks for TddWorkflowHooks {
                     self.manifest.as_ref(),
                     "tddy_workflow_recipes::tdd::hooks",
                 )?,
-                "demo" => before_demo(&session_dir, context)?,
+                "demo" => before_demo(&session_dir, context, self.manifest.as_ref())?,
                 "evaluate" => before_evaluate(
                     &session_dir,
                     context,
                     self.recipe.as_ref(),
                     self.manifest.as_ref(),
                 )?,
-                "validate" => before_validate(&session_dir, context)?,
-                "refactor" => before_refactor(&session_dir, context)?,
+                "validate" => before_validate(&session_dir, context, self.manifest.as_ref())?,
+                "refactor" => before_refactor(&session_dir, context, self.manifest.as_ref())?,
                 "update-docs" => before_update_docs(self.manifest.as_ref(), &session_dir, context)?,
                 _ => {}
             }

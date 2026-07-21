@@ -123,6 +123,37 @@ pub fn write_artifacts(
     let prd_content = inject_cross_references(&planning.prd, &artifacts_root, prd_basename);
     fs::write(&prd_path, prd_content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
+    if let Some(exploration) = planning
+        .exploration
+        .as_deref()
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+    {
+        write_exploration_file(&artifacts_root, exploration)?;
+    }
+
+    Ok(())
+}
+
+/// Basename of the persisted code-discovery artifact under `session_dir/artifacts/`.
+pub const EXPLORATION_BASENAME: &str = "exploration.md";
+
+/// Write `exploration.md` into `artifacts_root`, injecting cross-references like the PRD.
+///
+/// Callers pass the raw exploration markdown body (already confirmed non-blank). Used by the plan
+/// step (`write_artifacts`) and by the bugfix analyze step.
+pub fn write_exploration_file(
+    artifacts_root: &Path,
+    exploration: &str,
+) -> Result<(), WorkflowError> {
+    fs::create_dir_all(artifacts_root).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    let path = artifacts_root.join(EXPLORATION_BASENAME);
+    let content = inject_cross_references(exploration, artifacts_root, EXPLORATION_BASENAME);
+    fs::write(&path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    log::info!(
+        "[tddy-workflow-recipes] write_artifacts exploration at {:?}",
+        path
+    );
     Ok(())
 }
 
@@ -398,5 +429,72 @@ fn extract_markdown_section(content: &str, heading: &str) -> Option<String> {
         None
     } else {
         Some(section)
+    }
+}
+
+#[cfg(test)]
+mod exploration_artifact_tests {
+    use super::*;
+    use crate::parser::parse_planning_response;
+
+    fn temp_output_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "tddy-writer-exploration-{}-{}",
+            label,
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create output dir");
+        dir
+    }
+
+    #[test]
+    fn write_artifacts_writes_exploration_md_under_the_artifacts_root() {
+        // Given
+        let json = r##"{"goal":"plan","prd":"# PRD\n## TODO\n- [ ] t","exploration":"# Exploration\n\n## Code Map\n\n- `src/lib.rs:10:1` — entry point"}"##;
+        let planning = parse_planning_response(json).expect("plan response should parse");
+        let output_dir = temp_output_dir("writes");
+
+        // When
+        write_artifacts(&output_dir, &planning, "PRD.md").expect("write_artifacts");
+
+        // Then
+        let exploration_path = output_dir.join("artifacts").join("exploration.md");
+        assert!(
+            exploration_path.is_file(),
+            "write_artifacts must write exploration.md under artifacts/; expected {}",
+            exploration_path.display()
+        );
+        let content = fs::read_to_string(&exploration_path).expect("read exploration.md");
+        assert!(
+            content.contains("`src/lib.rs:10:1` — entry point"),
+            "exploration.md must contain the submitted code map entry; got:\n{}",
+            content
+        );
+
+        let _ = fs::remove_dir_all(&output_dir);
+    }
+
+    #[test]
+    fn write_artifacts_skips_exploration_md_when_the_field_is_absent() {
+        // Given
+        let json = r##"{"goal":"plan","prd":"# PRD\n## TODO\n- [ ] t"}"##;
+        let planning = parse_planning_response(json).expect("plan response should parse");
+        let output_dir = temp_output_dir("skips");
+
+        // When
+        write_artifacts(&output_dir, &planning, "PRD.md").expect("write_artifacts");
+
+        // Then
+        assert!(
+            output_dir.join("artifacts").join("PRD.md").is_file(),
+            "PRD.md must still be written under artifacts/"
+        );
+        assert!(
+            !output_dir.join("artifacts").join("exploration.md").exists(),
+            "no exploration.md must be written when the plan submit omits the field"
+        );
+
+        let _ = fs::remove_dir_all(&output_dir);
     }
 }

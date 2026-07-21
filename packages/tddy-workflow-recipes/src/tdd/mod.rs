@@ -298,6 +298,7 @@ impl SessionArtifactManifest for TddRecipe {
     fn known_artifacts(&self) -> &[(&'static str, &'static str)] {
         &[
             ("prd", "PRD.md"),
+            ("exploration", "exploration.md"),
             ("acceptance_tests", "acceptance-tests.md"),
             ("progress", "progress.md"),
             ("red_output", "red-output.md"),
@@ -418,5 +419,32 @@ mod planning_intent_tests {
         // When / Then
         assert_eq!(r.plan_refinement_goal(), GoalId::new("plan"));
         assert_ne!(r.plan_refinement_goal(), r.start_goal());
+    }
+}
+
+#[cfg(test)]
+mod exploration_artifact_tests {
+    use super::TddRecipe;
+    use crate::SessionArtifactManifest;
+
+    #[test]
+    fn tdd_manifest_registers_the_exploration_artifact() {
+        // Given
+        let recipe = TddRecipe;
+
+        // When / Then
+        assert!(
+            recipe
+                .known_artifacts()
+                .contains(&("exploration", "exploration.md")),
+            "TddRecipe known_artifacts must register exploration.md; got {:?}",
+            recipe.known_artifacts()
+        );
+        assert!(
+            recipe
+                .context_header_filenames()
+                .contains(&"exploration.md"),
+            "exploration.md must flow into the context header filenames"
+        );
     }
 }
