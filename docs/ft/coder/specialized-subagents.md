@@ -36,20 +36,29 @@ model: qwen2.5-coder:7b
 base_url: http://localhost:11434         # optional, defaults to http://localhost:30000
 system_prompt: |                          # optional; system_prompt_path also supported
   You are a codebase explorer. Answer with <final_answer> citations only.
-tools: [READ, GLOB, GREP]                 # optional, defaults to [READ, GLOB, GREP]
+tools: [READ, GLOB, GREP]                 # optional, defaults to [READ, GLOB, GREP];
+                                          # WRITE/STR_REPLACE/DELETE available for coder-role defs
 max_turns: 10                             # optional, defaults to 10
 replaces: [Grep, Glob]                    # optional, defaults to [] (replaces nothing)
 ```
 
-`replaces` names main-agent exec-catalog tools (e.g. `Grep`, `Glob`, `Read`) this agent takes over —
-not the same universe as `tools` above (this agent's own internal READ/GLOB/GREP loop). See
-[managed-codebase-subagents.md](managed-codebase-subagents.md) § Tool replacement for the full
-enforcement/guidance contract and how multiple agents' `replaces` lists are unioned.
+`replaces` names main-agent exec-catalog tools this agent takes over — **any** exec tool, not the
+same universe as `tools` above (this agent's own internal tool loop). See
+[managed-codebase-subagents.md](managed-codebase-subagents.md) § Tool replacement for the base
+enforcement/guidance contract and how multiple agents' `replaces` lists are unioned. Two
+replacements carry extra semantics ([no-bash-mode.md](no-bash-mode.md)): replacing **`Shell`**
+makes the def the session's *action author* (Shell + the native `Bash` family are hard-disabled;
+commands run only through `request_action`/`invoke_action` session actions; at most one def may
+replace Shell), and replacing **`Write`/`StrReplace`/`Delete`** makes it the session's *coder*
+(native `Edit`/`MultiEdit`/`NotebookEdit` are hard-disabled too; the def must bind the matching
+internal tool or the session is rejected before spawn).
 
 `tools` is an **extensible registry** — `SubagentTool` is a Rust enum with one variant per bound-tool
-kind. v1 ships exactly `READ`/`GLOB`/`GREP` (the existing read-only codebase tools); the def
-schema/dispatch is generic so a future tool kind is one new variant + one new match arm, not a
-schema rework. A def naming an unrecognized tool is rejected at load time (typed error, no silent drop).
+kind: the read-only discovery trio `READ`/`GLOB`/`GREP` (the defaults) plus the opt-in mutation
+tools `WRITE`/`STR_REPLACE`/`DELETE` for coder-role defs. The mutation tools are **Managed-access
+only** — path confinement comes from the host tool engine; a `Local`-access subagent gets a typed
+error, so a YAML `tools:` entry alone can never grant unconfined host writes. A def naming an
+unrecognized tool is rejected at load time (typed error, no silent drop).
 
 Malformed YAML files are skipped with a logged warning at load time — one bad file never prevents the
 rest of `<tddyhome>/agents/` (or the builtin fastcontext def) from loading.
@@ -191,7 +200,9 @@ no fallback to starting the session anyway.
 
 ## Non-goals (out of scope for v1)
 
-- Tool kinds beyond `READ`/`GLOB`/`GREP` (the registry/schema is extensible; only these three ship).
+- ~~Tool kinds beyond `READ`/`GLOB`/`GREP`~~ — shipped 2026-07-21: `WRITE`/`STR_REPLACE`/`DELETE`
+  for coder-role defs (see [no-bash-mode.md](no-bash-mode.md)). Further kinds remain one new
+  variant + match arm each.
 - Streaming partial subagent output mid-turn (inherited from #254).
 - Per-project (repo-local) agent defs; hot-reloading `<tddyhome>/agents` while a daemon is running.
 - A "Managed codebase" picker for non-sandboxed / plain "tool" session types.

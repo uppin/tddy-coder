@@ -151,6 +151,8 @@ spawn_plan}`; the daemon's `build_sandbox_plan` builds it from the Claude recipe
 
 `SandboxContextDir` copies project guidance files (`CLAUDE.md`, `AGENTS.md`, skills) into a read-only tree and appends `SANDBOX_REMOTE_APPENDIX` (same "Managed Codebase" notice as managed-codebase mode). In managed-codebase mode the host worktree is reached only via MCP tools — optionally with one or more [specialized agents](../../../docs/ft/coder/specialized-subagents.md) wired in, if `tddy-sandbox-app --specialized-agent` was given. Alternatively a caller may mount the repo into the jail (`MountSpec`, e.g. `tddy-sandbox-app --repo`, read-write) and set the runner's `--cwd` so `claude` starts in the real project tree.
 
+`sandbox_remote_appendix(replacements)` renders each agent's tool replacements into the appendix: replaced tools get a per-agent delegation clause (`subagent_new_session`/`subagent_prompt`), except a replaced **`Shell`**, which gets its own paragraph describing the session-action surface (`request_action` authored by the replacing agent, `list_actions`, `invoke_action`) — see [no-bash-mode.md](../../../docs/ft/coder/no-bash-mode.md).
+
 ## Unsupported platforms
 
 macOS (Seatbelt) and Linux (rootless cgroups) are supported. On other platforms — and on Linux/macOS
