@@ -25,6 +25,8 @@ uuid = { version = "1", features = ["v7"] }
 tddy-core = { path = "../tddy-core" }
 tddy-daemon = { path = "../tddy-daemon" }
 tddy-discovery = { path = "../tddy-discovery" }
+tddy-lsp = { path = "../tddy-lsp" }
+tddy-lsp-executor = { path = "../tddy-lsp-executor" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }

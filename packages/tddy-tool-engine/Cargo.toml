@@ -15,6 +15,7 @@ glob = "0.3"
 log = "0.4"
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "time", "process"] }
+tddy-core = { path = "../tddy-core" }
 tddy-task = { path = "../tddy-task" }
 
 [dev-dependencies]

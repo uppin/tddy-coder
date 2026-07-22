@@ -86,6 +86,12 @@ export const TEST_IDS = {
   // Session more-actions menu
   sessionMoreActionsShowFiles: "session-more-actions-show-files",
 
+  // Worktree Code pane (docs/ft/web/session-code-pane.md)
+  worktreeCodeToggle: "sessions-code-toggle",
+  worktreeCodePane: "worktree-code-pane",
+  worktreeFileTree: "worktree-file-tree",
+  worktreeFilePreview: "worktree-file-preview",
+
   // Sessions drawer screen
   sessionsDrawerScreen: "sessions-drawer-screen",
   sessionsDrawer: "sessions-drawer",
@@ -489,6 +495,9 @@ export const sessionsInspectorTerminateBtn = (sessionId: string) =>
  *  the others are `display:none` but still mounted). */
 export const sessionsRuntimeTerminal = (sessionId: string) =>
   `sessions-runtime-terminal-${sessionId}`;
+
+/** `[data-testid="worktree-tree-node-<relPath>"]` — a single file/dir node in the worktree tree. */
+export const worktreeTreeNode = (relPath: string) => `worktree-tree-node-${relPath}`;
 
 /** `[data-testid="sessions-terminal-tab-<terminalId>"]` — a single bash terminal tab. */
 export const sessionsTerminalTab = (terminalId: string) =>

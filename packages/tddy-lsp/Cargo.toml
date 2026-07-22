@@ -1,0 +1,29 @@
+[package]
+name = "tddy-lsp"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable language-server (LSP) support — allow-list, JSON-RPC client, long-running server task, per-(workspace,language) registry"
+
+[lib]
+name = "tddy_lsp"
+path = "src/lib.rs"
+
+# Deterministic fake LSP server used only by the integration tests. Declared as a
+# bin so `CARGO_BIN_EXE_fake_lsp` is available to the `tests/` targets.
+[[bin]]
+name = "fake_lsp"
+path = "tests/bin/fake_lsp.rs"
+
+[dependencies]
+tddy-task = { path = "../tddy-task" }
+async-trait = "0.1"
+bytes = "1"
+log = "0.4"
+lsp-types = "0.94"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tokio = { version = "1", features = ["rt", "sync", "time", "process", "io-util", "macros"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "process", "sync", "io-util"] }
