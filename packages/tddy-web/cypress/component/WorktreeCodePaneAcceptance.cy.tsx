@@ -68,19 +68,25 @@ const PR_STACK_SESSION = aSession({
 
 const README_MD = "# Hello Worktree\n\n- alpha\n- beta\n";
 const MAIN_RS = 'fn main() { println!("worktree-code-pane"); }\n';
+const CONFIG_YAML = "name: worktree-code-pane\nenabled: true\n";
+const LICENSE_TEXT = "All rights reserved. worktree-code-pane license text.\n";
 
-// A worktree with one directory (`src/`) and one root file (`README.md`); `src/` holds `main.rs`.
-// The listing is served per directory level (lazy), keyed by the requested `relPath`.
+// A worktree with one directory (`src/`) and root files (`README.md`, `config.yaml`, `LICENSE`);
+// `src/` holds `main.rs`. The listing is served per directory level (lazy), keyed by `relPath`.
 function aWorktreeBackend(sessions: Record<string, unknown>[]) {
   const directories: Record<string, Array<{ name: string; isDir: boolean }>> = {
     "": [
       { name: "src", isDir: true },
       { name: "README.md", isDir: false },
+      { name: "config.yaml", isDir: false },
+      { name: "LICENSE", isDir: false },
     ],
     src: [{ name: "main.rs", isDir: false }],
   };
   const files: Record<string, string> = {
     "README.md": README_MD,
+    "config.yaml": CONFIG_YAML,
+    LICENSE: LICENSE_TEXT,
     "src/main.rs": MAIN_RS,
   };
 
@@ -198,7 +204,7 @@ it("renders a selected Markdown file as sanitized markup in the preview", () => 
   worktreeCodePanePage.preview().find("h1").should("contain.text", "Hello Worktree");
 });
 
-it("renders a selected code file as monospace text in the preview", () => {
+it("highlights a selected Rust code file with syntax tokens", () => {
   // Given
   const backend = aWorktreeBackend([TERMINAL_SESSION]);
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -209,8 +215,41 @@ it("renders a selected code file as monospace text in the preview", () => {
   // When
   worktreeCodePanePage.node("src/main.rs").click();
 
-  // Then
+  // Then — the code is tokenized (colored spans) and its text is preserved verbatim.
+  worktreeCodePanePage.highlight().should("exist");
+  worktreeCodePanePage.highlight().find(".token").should("exist");
   worktreeCodePanePage.preview().should("contain.text", 'println!("worktree-code-pane")');
+});
+
+it("highlights a selected YAML file with syntax tokens", () => {
+  // Given
+  const backend = aWorktreeBackend([TERMINAL_SESSION]);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+  sessionsDrawerPage.drawerItem(TERMINAL_SESSION.sessionId).click();
+  worktreeCodePanePage.toggle().click();
+
+  // When
+  worktreeCodePanePage.node("config.yaml").click();
+
+  // Then
+  worktreeCodePanePage.highlight().should("exist");
+  worktreeCodePanePage.highlight().find(".token").should("exist");
+  worktreeCodePanePage.preview().should("contain.text", "worktree-code-pane");
+});
+
+it("renders a file with no recognized extension as plain monospace without highlighting", () => {
+  // Given
+  const backend = aWorktreeBackend([TERMINAL_SESSION]);
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+  sessionsDrawerPage.drawerItem(TERMINAL_SESSION.sessionId).click();
+  worktreeCodePanePage.toggle().click();
+
+  // When
+  worktreeCodePanePage.node("LICENSE").click();
+
+  // Then — the text shows, but no highlight container is rendered.
+  worktreeCodePanePage.preview().should("contain.text", "All rights reserved.");
+  worktreeCodePanePage.highlight().should("not.exist");
 });
 
 // ---------------------------------------------------------------------------

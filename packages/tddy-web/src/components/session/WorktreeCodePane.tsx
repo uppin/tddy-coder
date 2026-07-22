@@ -6,6 +6,7 @@ import { WorktreeFileTree } from "./WorktreeFileTree";
 import { createWorktreeFilesApi } from "./worktreeFilesApi";
 import { workflowPreviewKind } from "./sessionWorkflowPreview";
 import { renderSimpleMarkdown } from "./renderSimpleMarkdown";
+import { CodeBlock } from "./CodeBlock";
 
 export type WorktreeCodePaneProps = {
   client: Client<typeof ConnectionService>;
@@ -75,7 +76,7 @@ export function WorktreeCodePane({
         ) : previewKind === "markdown" ? (
           renderSimpleMarkdown(selected.content)
         ) : (
-          <pre className="whitespace-pre-wrap font-mono text-sm">{selected.content}</pre>
+          <CodeBlock content={selected.content} relPath={selected.relPath} />
         )}
       </section>
     </div>

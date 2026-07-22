@@ -26,4 +26,8 @@ export const worktreeCodePanePage = {
   /** The read-only file preview region inside the Code pane. */
   preview: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.worktreeFilePreview, { timeout: 5000, ...options }),
+
+  /** The syntax-highlighted code block inside the preview (present only for recognized languages). */
+  highlight: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.worktreeCodeHighlight, { timeout: 5000, ...options }),
 };

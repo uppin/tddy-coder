@@ -4,6 +4,10 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-22 — Code pane syntax highlighting
+
+- The Worktree **Code pane** file preview now syntax-highlights recognized code files (Rust, TS/TSX, Python, JSON, YAML, and more) instead of showing plain monospace text. The language is inferred from the file's extension; files with no recognized extension (e.g. `LICENSE`) stay plain, and Markdown keeps its sanitized-markup rendering. Highlight colors follow the app's light/dark theme. See [session-code-pane.md](session-code-pane.md).
+
 ## 2026-07-22 — Agent Activity pane
 
 - Every session pane gains a top-right **activity icon** (shown only once the session has recorded at least one agent tool call) that opens an overlay listing **one-line records of the agent's own tool calls** — Read, Shell/Bash, Edit, and `tddy-tools` verbs — with `[running]`/`[error]` markers. Records stream in real time; newly-arrived activity carries an **unread badge** until the overlay is opened.
