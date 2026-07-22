@@ -190,6 +190,8 @@ impl CodingBackend for FastContextBackend {
                         sink.emit(&ProgressEvent::ToolUse {
                             name: tc.function.name.clone(),
                             detail: Some(tc.function.arguments.clone()),
+                            input_json: Some(tc.function.arguments.clone()),
+                            call_id: Some(tc.id.clone()),
                         });
                     }
                     let result_str = dispatch_tool(&executor, tc).await;
@@ -396,7 +398,7 @@ mod tests {
             "exactly one ToolUse progress event must be emitted; got {events:?}"
         );
         match tool_use_events[0] {
-            tddy_core::ProgressEvent::ToolUse { name, detail } => {
+            tddy_core::ProgressEvent::ToolUse { name, detail, .. } => {
                 assert_eq!(name, "GLOB", "ToolUse event must name the dispatched tool");
                 assert_eq!(
                     detail.as_deref(),

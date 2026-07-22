@@ -110,6 +110,25 @@ pub struct Presenter {
     critical_state: Arc<std::sync::Mutex<CriticalPresenterState>>,
     /// Tddy data directory root — passed to workflow runner to avoid global state.
     tddy_data_dir: PathBuf,
+    /// Session directory receiving this session's `agent-activity.jsonl`. When set (tool /
+    /// cursor-cli sessions, where the coder — not the daemon — executes tools), the presenter
+    /// persists the agent's own tool calls here and broadcasts them as
+    /// [`PresenterEvent::AgentActivity`].
+    agent_activity_dir: Option<PathBuf>,
+    /// Provenance written on persisted agent-activity rows (`"coder"` | `"cursor-cli"`).
+    agent_activity_source: String,
+    /// Running agent-activity rows awaiting their terminal `ToolResult`, keyed by `call_id`, so the
+    /// terminal row carries the same tool name / input the coalescing read side expects.
+    agent_activity_pending:
+        std::collections::HashMap<String, crate::agent_activity::AgentActivityRecord>,
+}
+
+/// Milliseconds since the Unix epoch, for agent-activity timestamps.
+fn now_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 fn format_session_id_for_log(id: &str) -> String {
@@ -179,7 +198,18 @@ impl Presenter {
             start_slash_structured_run_active: false,
             critical_state: Arc::new(std::sync::Mutex::new(CriticalPresenterState::default())),
             tddy_data_dir,
+            agent_activity_dir: None,
+            agent_activity_source: "coder".to_string(),
+            agent_activity_pending: std::collections::HashMap::new(),
         }
+    }
+
+    /// Set where the agent's own tool calls are persisted (`agent-activity.jsonl` under
+    /// `dir`) and the `source` recorded on each row. Wired by `tddy-coder` for tool / cursor-cli
+    /// sessions, where the coder process — not the daemon — executes the tools.
+    pub fn set_agent_activity_context(&mut self, dir: PathBuf, source: impl Into<String>) {
+        self.agent_activity_dir = Some(dir);
+        self.agent_activity_source = source.into();
     }
 
     /// Enable broadcast of PresenterEvents (for gRPC subscribers).
@@ -223,6 +253,94 @@ impl Presenter {
         if let Some(ref tx) = self.broadcast_tx {
             let _ = tx.send(event);
         }
+    }
+
+    /// Persist and broadcast the agent's own tool call for a `ToolUse` / `ToolResult` progress
+    /// event. No-op unless [`set_agent_activity_context`](Self::set_agent_activity_context) wired a
+    /// session dir (i.e. tool / cursor-cli sessions, where the coder executes tools). Never panics:
+    /// a persistence failure is logged and the live broadcast still fires (TUI-safe — no
+    /// `println!`/`eprintln!`).
+    fn capture_agent_activity(&mut self, pev: &crate::ProgressEvent) {
+        use crate::agent_activity::{
+            append_agent_activity, AgentActivityRecord, STATUS_COMPLETED, STATUS_ERROR,
+            STATUS_RUNNING,
+        };
+        let dir = match self.agent_activity_dir.clone() {
+            Some(d) => d,
+            None => return,
+        };
+        let record = match pev {
+            crate::ProgressEvent::ToolUse {
+                name,
+                input_json,
+                call_id,
+                ..
+            } => {
+                let call_id = call_id
+                    .clone()
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                let rec = AgentActivityRecord {
+                    call_id: call_id.clone(),
+                    tool_name: name.clone(),
+                    input_json: input_json.clone().unwrap_or_default(),
+                    status: STATUS_RUNNING.to_string(),
+                    result_json: String::new(),
+                    error_message: String::new(),
+                    started_unix_ms: now_unix_ms(),
+                    completed_unix_ms: 0,
+                    source: self.agent_activity_source.clone(),
+                };
+                self.agent_activity_pending.insert(call_id, rec.clone());
+                rec
+            }
+            crate::ProgressEvent::ToolResult {
+                call_id,
+                result_json,
+                is_error,
+            } => {
+                // Base the terminal row on the remembered running row so the coalesced record keeps
+                // the tool name / input / start time. Falls back to a minimal row if no running row
+                // was seen (e.g. the presenter attached mid-call).
+                let mut rec = self
+                    .agent_activity_pending
+                    .remove(call_id)
+                    .unwrap_or_else(|| AgentActivityRecord {
+                        call_id: call_id.clone(),
+                        tool_name: String::new(),
+                        input_json: String::new(),
+                        status: String::new(),
+                        result_json: String::new(),
+                        error_message: String::new(),
+                        started_unix_ms: 0,
+                        completed_unix_ms: 0,
+                        source: self.agent_activity_source.clone(),
+                    });
+                rec.status = if *is_error {
+                    STATUS_ERROR
+                } else {
+                    STATUS_COMPLETED
+                }
+                .to_string();
+                rec.result_json = result_json.clone();
+                rec.error_message = if *is_error {
+                    result_json.clone()
+                } else {
+                    String::new()
+                };
+                rec.completed_unix_ms = now_unix_ms();
+                rec
+            }
+            _ => return,
+        };
+        if let Err(e) = append_agent_activity(&dir, &record) {
+            log::warn!(
+                target: "tddy_core::presenter",
+                "agent_activity: failed to persist tool call to {}: {}",
+                dir.display(),
+                e
+            );
+        }
+        self.broadcast(PresenterEvent::AgentActivity(record));
     }
 
     fn broadcast_mode_changed(&mut self) {
@@ -1124,18 +1242,26 @@ impl Presenter {
                         );
                         self.state.workflow_session_id = Some(session_id.clone());
                     }
+                    // Persist + broadcast the agent's own tool call (tool / cursor-cli sessions).
+                    self.capture_agent_activity(&pev);
                     let entry = match &pev {
                         crate::ProgressEvent::ToolUse {
                             name,
                             detail: Some(d),
+                            ..
                         } => ActivityEntry {
                             text: format!("Tool: {} {}", name, d),
                             kind: ActivityKind::ToolUse,
                         },
-                        crate::ProgressEvent::ToolUse { name, detail: None } => ActivityEntry {
+                        crate::ProgressEvent::ToolUse {
+                            name, detail: None, ..
+                        } => ActivityEntry {
                             text: format!("Tool: {}", name),
                             kind: ActivityKind::ToolUse,
                         },
+                        // A tool result is captured as agent activity above; it is not rendered as a
+                        // separate activity-log line, so skip building an entry for it.
+                        crate::ProgressEvent::ToolResult { .. } => continue,
                         crate::ProgressEvent::TaskStarted { description } => ActivityEntry {
                             text: description.clone(),
                             kind: ActivityKind::TaskStarted,
@@ -1636,6 +1762,79 @@ mod tests {
 
         // Then
         assert_eq!(p.state().workflow_session_id.as_deref(), Some(sid));
+    }
+
+    #[tokio::test]
+    async fn tool_use_then_tool_result_persists_and_broadcasts_agent_activity() {
+        use crate::agent_activity::{read_agent_activity, STATUS_COMPLETED, STATUS_RUNNING};
+
+        // Given — a presenter with a broadcast channel and an agent-activity session dir
+        let tmp = tempfile::tempdir().unwrap();
+        let session_dir = tmp.path().join("sessions").join("s1");
+        let (tx, mut rx) = tokio::sync::broadcast::channel(16);
+        let mut p = Presenter::new(
+            "cursor",
+            "model",
+            std::sync::Arc::new(crate::presenter::presenter_test_recipe::EmptyPresenterTestRecipe)
+                as std::sync::Arc<dyn WorkflowRecipe>,
+            tmp.path().to_path_buf(),
+        )
+        .with_broadcast(tx);
+        p.set_agent_activity_context(session_dir.clone(), "coder");
+        inject_workflow_events(
+            &mut p,
+            vec![
+                WorkflowEvent::Progress(crate::ProgressEvent::ToolUse {
+                    name: "Bash".to_string(),
+                    detail: None,
+                    input_json: Some(r#"{"command":"cargo build"}"#.to_string()),
+                    call_id: Some("call-1".to_string()),
+                }),
+                WorkflowEvent::Progress(crate::ProgressEvent::ToolResult {
+                    call_id: "call-1".to_string(),
+                    result_json: r#"{"stdout":"ok"}"#.to_string(),
+                    is_error: false,
+                }),
+            ],
+        );
+
+        // When
+        p.poll_workflow();
+
+        // Then — the running and completed rows coalesce into one completed call on disk
+        let records = read_agent_activity(&session_dir).unwrap();
+        assert_eq!(
+            records.len(),
+            1,
+            "running + completed rows must coalesce into one call"
+        );
+        assert_eq!(records[0].call_id, "call-1");
+        assert_eq!(records[0].tool_name, "Bash");
+        assert_eq!(records[0].input_json, r#"{"command":"cargo build"}"#);
+        assert_eq!(records[0].status, STATUS_COMPLETED);
+        assert_eq!(records[0].result_json, r#"{"stdout":"ok"}"#);
+        assert_eq!(records[0].source, "coder");
+
+        // And — two AgentActivity events were broadcast: the running row then the completed row
+        let mut activity: Vec<crate::agent_activity::AgentActivityRecord> = Vec::new();
+        while activity.len() < 2 {
+            let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                .await
+                .expect("expected two AgentActivity broadcasts")
+                .expect("broadcast channel closed early");
+            if let PresenterEvent::AgentActivity(rec) = ev {
+                activity.push(rec);
+            }
+        }
+        assert_eq!(
+            activity[0].status, STATUS_RUNNING,
+            "first broadcast is running"
+        );
+        assert_eq!(
+            activity[1].status, STATUS_COMPLETED,
+            "second broadcast is completed"
+        );
+        assert_eq!(activity[1].call_id, "call-1");
     }
 
     #[test]

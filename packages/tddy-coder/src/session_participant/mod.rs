@@ -26,12 +26,13 @@ use tokio::sync::watch;
 
 use tddy_rpc::{RpcMessage, RpcResult, RpcService, ServiceEntry, Status};
 use tddy_service::proto::connection::{
-    ClaimTerminalControlRequest, ClaimTerminalControlResponse, ExecuteToolRequest,
-    ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse, ListTerminalSessionsRequest, ListTerminalSessionsResponse,
-    SendTerminalInputResponse, SessionTerminalInput, SessionTerminalOutput,
-    StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
-    StopTerminalSessionResponse, StreamTerminalOutputRequest, TerminalSessionInfo, ToolCallInfo,
+    AgentActivityRecord as ProtoAgentActivityRecord, ClaimTerminalControlRequest,
+    ClaimTerminalControlResponse, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
+    ListExecToolsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
+    ListTerminalSessionsRequest, ListTerminalSessionsResponse, SendTerminalInputResponse,
+    SessionTerminalInput, SessionTerminalOutput, StartTerminalSessionRequest,
+    StartTerminalSessionResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
+    StreamSessionActivityRequest, StreamTerminalOutputRequest, TerminalSessionInfo, ToolCallInfo,
     ToolDef as ProtoToolDef,
 };
 
@@ -40,6 +41,9 @@ use terminal_manager::MAIN_TERMINAL_ID;
 /// Buffer size for the `StreamTerminalOutput` server-stream bridge (replay frame + live output).
 /// Bounds memory if the client reads slower than the shell produces; overflow applies backpressure.
 const TERMINAL_OUTPUT_CHANNEL_CAPACITY: usize = 256;
+
+/// Buffer size for the `StreamSessionActivity` server-stream bridge (snapshot rows + live tail).
+const AGENT_ACTIVITY_CHANNEL_CAPACITY: usize = 256;
 
 /// Options for spawning a session participant. `tools` + `executor` are injected by `run.rs`
 /// (production wires the shared tool engine; tests wire a fake).
@@ -74,6 +78,12 @@ pub async fn spawn_session_participant(
     opts: SessionParticipantOptions,
     metadata_rx: watch::Receiver<String>,
 ) -> anyhow::Result<SessionParticipantHandle> {
+    // The agent-activity log lives alongside `tool-calls.jsonl` in the session directory.
+    let agent_activity_dir = opts
+        .tool_calls_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
     let svc = Arc::new(SessionConnectionService {
         session_id: opts.session_id.clone(),
         session_token: opts.session_token.clone(),
@@ -82,6 +92,10 @@ pub async fn spawn_session_participant(
         executor: opts.executor.clone(),
         worktree: opts.worktree.clone(),
         terminal_manager: Arc::new(terminal_manager::TerminalManager::new()),
+        agent_activity_dir,
+        // This spawn path has no presenter broadcast wired; served as snapshot-only. `run.rs`
+        // (the production coder participant) wires the live presenter channel directly.
+        presenter_events: None,
     });
     let rpc = SessionConnectionServiceRpc { svc };
 
@@ -391,6 +405,57 @@ impl RpcService for SessionConnectionServiceRpc {
 
                 RpcResult::ServerStream(Ok(rx))
             }
+            "StreamSessionActivity" => {
+                if let Err(e) = StreamSessionActivityRequest::decode(&message.payload[..]) {
+                    return RpcResult::ServerStream(Err(Status::invalid_argument(format!(
+                        "decode StreamSessionActivityRequest: {e}"
+                    ))));
+                }
+
+                let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, Status>>(
+                    AGENT_ACTIVITY_CHANNEL_CAPACITY,
+                );
+
+                // Subscribe to the live tail BEFORE snapshotting the durable log so a record
+                // appended between the snapshot read and the first bridge recv() is still delivered
+                // (via the broadcast) rather than dropped in the gap.
+                let live_rx = self.svc.presenter_events.as_ref().map(|tx| tx.subscribe());
+
+                // Snapshot first: replay the coalesced on-disk records.
+                let snapshot =
+                    tddy_core::agent_activity::read_agent_activity(&self.svc.agent_activity_dir)
+                        .unwrap_or_default();
+                for record in snapshot {
+                    let frame = to_proto_agent_activity(record).encode_to_vec();
+                    if tx.try_send(Ok(frame)).is_err() {
+                        // Receiver already gone — return the (now-closed) stream.
+                        return RpcResult::ServerStream(Ok(rx));
+                    }
+                }
+
+                // Live tail: forward every AgentActivity the presenter broadcasts, ending when the
+                // presenter channel closes or the client disconnects.
+                if let Some(mut live_rx) = live_rx {
+                    tokio::spawn(async move {
+                        use tokio::sync::broadcast::error::RecvError;
+                        loop {
+                            match live_rx.recv().await {
+                                Ok(tddy_core::PresenterEvent::AgentActivity(record)) => {
+                                    let frame = to_proto_agent_activity(record).encode_to_vec();
+                                    if tx.send(Ok(frame)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Ok(_) => continue,
+                                Err(RecvError::Closed) => break,
+                                Err(RecvError::Lagged(_)) => continue,
+                            }
+                        }
+                    });
+                }
+
+                RpcResult::ServerStream(Ok(rx))
+            }
             other => RpcResult::Unary(Err(Status::unimplemented(format!(
                 "session participant does not serve ConnectionService/{other}"
             )))),
@@ -405,6 +470,24 @@ fn resolved_terminal_id(terminal_id: &str) -> &str {
         MAIN_TERMINAL_ID
     } else {
         trimmed
+    }
+}
+
+/// Map a durable [`tddy_core::agent_activity::AgentActivityRecord`] onto its wire form for
+/// `StreamSessionActivity` (identical field mapping to the daemon's `to_proto_agent_activity`).
+fn to_proto_agent_activity(
+    record: tddy_core::agent_activity::AgentActivityRecord,
+) -> ProtoAgentActivityRecord {
+    ProtoAgentActivityRecord {
+        call_id: record.call_id,
+        tool_name: record.tool_name,
+        input_json: record.input_json,
+        status: record.status,
+        result_json: record.result_json,
+        error_message: record.error_message,
+        started_unix_ms: record.started_unix_ms,
+        completed_unix_ms: record.completed_unix_ms,
+        source: record.source,
     }
 }
 
@@ -444,4 +527,130 @@ fn read_tool_calls(
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use tokio::sync::broadcast;
+
+    use tddy_core::agent_activity::{
+        append_agent_activity, AgentActivityRecord, STATUS_COMPLETED, STATUS_RUNNING,
+    };
+    use tddy_core::PresenterEvent;
+
+    /// Executor that is never invoked by the `StreamSessionActivity` path.
+    struct UnusedExecutor;
+    #[async_trait]
+    impl ToolExecutor for UnusedExecutor {
+        async fn execute(&self, _tool_name: &str, _args_json: &str) -> ToolOutcome {
+            ToolOutcome::default()
+        }
+    }
+
+    fn a_running_record(call_id: &str) -> AgentActivityRecord {
+        AgentActivityRecord {
+            call_id: call_id.to_string(),
+            tool_name: "Bash".to_string(),
+            input_json: r#"{"command":"cargo build"}"#.to_string(),
+            status: STATUS_RUNNING.to_string(),
+            result_json: String::new(),
+            error_message: String::new(),
+            started_unix_ms: 1_700_000_000_000,
+            completed_unix_ms: 0,
+            source: "coder".to_string(),
+        }
+    }
+
+    fn a_completed_record(call_id: &str) -> AgentActivityRecord {
+        AgentActivityRecord {
+            status: STATUS_COMPLETED.to_string(),
+            result_json: r#"{"stdout":"done"}"#.to_string(),
+            completed_unix_ms: 1_700_000_000_500,
+            ..a_running_record(call_id)
+        }
+    }
+
+    fn stream_request_message(session_id: &str) -> RpcMessage {
+        let req = StreamSessionActivityRequest {
+            session_token: "caller-token".to_string(),
+            session_id: session_id.to_string(),
+            daemon_instance_id: String::new(),
+        };
+        RpcMessage::new(req.encode_to_vec(), Default::default())
+    }
+
+    fn rpc_for(
+        dir: &std::path::Path,
+        events: broadcast::Sender<PresenterEvent>,
+    ) -> SessionConnectionServiceRpc {
+        SessionConnectionServiceRpc {
+            svc: Arc::new(SessionConnectionService {
+                session_id: "sess-1".to_string(),
+                session_token: "session-token".to_string(),
+                tool_calls_path: dir.join("tool-calls.jsonl"),
+                tools: Vec::new(),
+                executor: Arc::new(UnusedExecutor),
+                worktree: dir.to_path_buf(),
+                terminal_manager: Arc::new(terminal_manager::TerminalManager::new()),
+                agent_activity_dir: dir.to_path_buf(),
+                presenter_events: Some(events),
+            }),
+        }
+    }
+
+    async fn recv_record(
+        rx: &mut tokio::sync::mpsc::Receiver<Result<Vec<u8>, Status>>,
+    ) -> ProtoAgentActivityRecord {
+        let frame = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("expected a streamed agent-activity frame")
+            .expect("stream ended unexpectedly")
+            .expect("frame carried an error status");
+        ProtoAgentActivityRecord::decode(&frame[..]).expect("decode AgentActivityRecord")
+    }
+
+    #[tokio::test]
+    async fn stream_session_activity_replays_the_persisted_snapshot_then_the_live_broadcast() {
+        // Given — a session dir with one persisted (coalesced) call, and a presenter broadcast
+        let dir = tempfile::tempdir().unwrap();
+        append_agent_activity(dir.path(), &a_running_record("call-1")).unwrap();
+        append_agent_activity(dir.path(), &a_completed_record("call-1")).unwrap();
+        let (events, _keepalive) = broadcast::channel(16);
+        let rpc = rpc_for(dir.path(), events.clone());
+
+        // When — the StreamSessionActivity arm is dispatched
+        let result = rpc
+            .handle_rpc(
+                "connection.ConnectionService",
+                "StreamSessionActivity",
+                &stream_request_message("sess-1"),
+            )
+            .await;
+        let mut rx = match result {
+            RpcResult::ServerStream(Ok(rx)) => rx,
+            RpcResult::ServerStream(Err(status)) => {
+                panic!("expected a server stream, got error status: {status:?}")
+            }
+            _ => panic!("expected a server stream, got a unary result"),
+        };
+
+        // Then — the snapshot's coalesced completed call arrives first
+        let snapshot = recv_record(&mut rx).await;
+        assert_eq!(snapshot.call_id, "call-1");
+        assert_eq!(snapshot.status, STATUS_COMPLETED);
+        assert_eq!(snapshot.result_json, r#"{"stdout":"done"}"#);
+
+        // And — a subsequently-broadcast AgentActivity is forwarded live
+        events
+            .send(PresenterEvent::AgentActivity(a_running_record("call-2")))
+            .expect("broadcast send");
+        let live = recv_record(&mut rx).await;
+        assert_eq!(live.call_id, "call-2");
+        assert_eq!(live.status, STATUS_RUNNING);
+        assert_eq!(live.tool_name, "Bash");
+    }
 }

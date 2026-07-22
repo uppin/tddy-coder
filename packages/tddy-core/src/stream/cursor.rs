@@ -218,7 +218,19 @@ where
                         }
                     }
                     if let Some((name, detail)) = extract_tool_call_name_and_detail(tool_call) {
-                        on_progress(&ProgressEvent::ToolUse { name, detail });
+                        // Carry the whole tool_call object as the input JSON for agent-activity
+                        // persistence. Cursor's `stream-json` does not expose a stable tool-call id
+                        // here, and this parser only sees `tool_call`/`started` (no matching
+                        // `completed`/result event), so `call_id` is left `None` and no
+                        // `ToolResult` is emitted — a `running` agent-activity row without a
+                        // fabricated terminal row.
+                        let input_json = serde_json::to_string(tool_call).ok();
+                        on_progress(&ProgressEvent::ToolUse {
+                            name,
+                            detail,
+                            input_json,
+                            call_id: None,
+                        });
                     }
                 }
             }

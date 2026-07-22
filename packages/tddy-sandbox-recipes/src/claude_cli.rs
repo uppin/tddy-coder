@@ -642,7 +642,10 @@ mod tests {
                 "a Shell replacement must advertise {tool}: {allowlist:?}"
             );
         }
-        for name in workspace_exec_tool_names().iter().filter(|n| **n != "Shell") {
+        for name in workspace_exec_tool_names()
+            .iter()
+            .filter(|n| **n != "Shell")
+        {
             let prefixed = format!("mcp__tddy-tools__{name}");
             assert!(
                 allowset.contains(&prefixed),
@@ -692,10 +695,7 @@ mod tests {
             "mcp__tddy-tools__Read",
             "mcp__tddy-tools__Grep",
         ] {
-            assert!(
-                allowset.contains(tool),
-                "{tool} must stay: {allowlist:?}"
-            );
+            assert!(allowset.contains(tool), "{tool} must stay: {allowlist:?}");
         }
         for tool in ACTION_TOOLS {
             assert!(
@@ -710,10 +710,9 @@ mod tests {
     /// native built-ins, which the permission server pre-allows on in-repo paths.
     #[test]
     fn replacing_write_hard_disables_the_native_edit_aliases() {
-        let disallowed: HashSet<_> =
-            build_claude_disallowlist(&["Write", "StrReplace", "Delete"])
-                .into_iter()
-                .collect();
+        let disallowed: HashSet<_> = build_claude_disallowlist(&["Write", "StrReplace", "Delete"])
+            .into_iter()
+            .collect();
         for tool in [
             "Write",
             "mcp__tddy-tools__Write",
@@ -734,8 +733,7 @@ mod tests {
     /// into a deduplicated union.
     #[test]
     fn shell_and_write_replacements_compose_without_duplicates() {
-        let disallowed =
-            build_claude_disallowlist(&["Shell", "Write", "StrReplace", "Delete"]);
+        let disallowed = build_claude_disallowlist(&["Shell", "Write", "StrReplace", "Delete"]);
         let disallowset: HashSet<_> = disallowed.iter().cloned().collect();
         assert_eq!(
             disallowed.len(),
@@ -746,8 +744,7 @@ mod tests {
             assert!(disallowset.contains(tool), "missing {tool}: {disallowed:?}");
         }
 
-        let allowlist =
-            build_claude_allowlist(true, &["Shell", "Write", "StrReplace", "Delete"]);
+        let allowlist = build_claude_allowlist(true, &["Shell", "Write", "StrReplace", "Delete"]);
         let allowset: HashSet<_> = allowlist.iter().cloned().collect();
         for tool in ACTION_TOOLS {
             assert!(

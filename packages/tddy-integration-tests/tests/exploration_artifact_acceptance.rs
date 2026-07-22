@@ -83,7 +83,7 @@ async fn plan_submit_with_exploration_writes_exploration_md_under_artifacts() {
     let _ = std::fs::remove_dir_all(&output_dir);
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(&plan_json_with_exploration());
+    backend.push_ok(plan_json_with_exploration());
     let engine = engine_with_backend(backend, "plan-writes");
 
     // When
@@ -125,7 +125,7 @@ async fn plan_submit_without_exploration_writes_no_exploration_md() {
     let _ = std::fs::remove_dir_all(&output_dir);
 
     let backend = Arc::new(MockBackend::new());
-    backend.push_ok(&plan_json_without_exploration());
+    backend.push_ok(plan_json_without_exploration());
     let engine = engine_with_backend(backend, "plan-skips");
 
     // When

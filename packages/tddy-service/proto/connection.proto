@@ -52,6 +52,12 @@ service ConnectionService {
   // Per-worktree hooks (claude-cli sessions only) report granular activity status.
   // Auth: `hook_token` is a per-session random token written to .session.yaml at session start.
   rpc ReportSessionStatus(ReportSessionStatusRequest) returns (ReportSessionStatusResponse);
+  // Agent Activity pane — the agent's own tool calls (see docs/ft/web/agent-activity.md).
+  // StreamSessionActivity replays the persisted agent-activity.jsonl snapshot then streams live
+  // records for the session. ReportAgentActivity is called by per-worktree claude-cli hooks to
+  // report a PreToolUse (running) / PostToolUse (terminal) pair; bearer is the hook_token.
+  rpc StreamSessionActivity(StreamSessionActivityRequest) returns (stream AgentActivityRecord);
+  rpc ReportAgentActivity(ReportAgentActivityRequest) returns (ReportAgentActivityResponse);
   // Demo VM lifecycle — UI-driven QEMU boot/shutdown for the demo goal.
   rpc StartDemoVm(StartDemoVmRequest) returns (StartDemoVmResponse);
   rpc StopDemoVm(StopDemoVmRequest) returns (StopDemoVmResponse);
@@ -622,6 +628,45 @@ message ReportSessionStatusRequest {
 }
 
 message ReportSessionStatusResponse {
+  bool ok = 1;
+}
+
+// --- Agent Activity: the agent's own tool calls, streamed to the web pane ---
+
+// One recorded state of an agent tool call. Mirrors tddy_core::agent_activity::AgentActivityRecord.
+// The same call_id appears on the running row and the terminal row; the read side coalesces them.
+message AgentActivityRecord {
+  string call_id           = 1;
+  string tool_name         = 2;
+  string input_json        = 3;
+  string status            = 4;  // "running" | "completed" | "error"
+  string result_json       = 5;
+  string error_message     = 6;
+  uint64 started_unix_ms   = 7;
+  uint64 completed_unix_ms = 8;
+  string source            = 9;  // "coder" | "cursor-cli" | "claude-cli" | "sandbox"
+}
+
+message StreamSessionActivityRequest {
+  string session_token      = 1;
+  string session_id         = 2;
+  string daemon_instance_id = 3;
+}
+
+/// Sent by `tddy-tools session-hook`; bearer is the per-session hook_token.
+message ReportAgentActivityRequest {
+  string session_id    = 1;
+  string hook_token    = 2;
+  string os_user       = 3;
+  string event         = 4;  // "PreToolUse" | "PostToolUse"
+  string tool_name     = 5;
+  string input_json    = 6;
+  string result_json   = 7;
+  bool   is_error      = 8;
+  string error_message = 9;
+}
+
+message ReportAgentActivityResponse {
   bool ok = 1;
 }
 

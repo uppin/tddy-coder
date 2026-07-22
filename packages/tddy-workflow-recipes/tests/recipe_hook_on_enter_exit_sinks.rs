@@ -100,6 +100,8 @@ fn free_prompting_hooks_on_enter_sets_progress_sink_and_on_exit_clears_it() {
     sink.emit(&ProgressEvent::ToolUse {
         name: "GLOB".to_string(),
         detail: None,
+        input_json: None,
+        call_id: None,
     });
     let ev = rx
         .recv_timeout(Duration::from_secs(2))

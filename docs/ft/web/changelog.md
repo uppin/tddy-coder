@@ -4,6 +4,12 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-22 — Agent Activity pane
+
+- Every session pane gains a top-right **activity icon** (shown only once the session has recorded at least one agent tool call) that opens an overlay listing **one-line records of the agent's own tool calls** — Read, Shell/Bash, Edit, and `tddy-tools` verbs — with `[running]`/`[error]` markers. Records stream in real time; newly-arrived activity carries an **unread badge** until the overlay is opened.
+- Selecting a row opens a scrollable **detail dialog** showing the call's full input and full output (Escape- and backdrop-close). The pane is session-type-agnostic — it renders the same for tool, cursor-cli, claude-cli, and **sandbox** sessions.
+- Backed by a new per-session `agent-activity.jsonl` log + shared `AgentActivityRecord` (in `tddy-core`), and two new `ConnectionService` RPCs — server-streaming `StreamSessionActivity` (snapshot-then-live) and unary `ReportAgentActivity` (claude-cli hook → daemon). See [agent-activity-pane.md](agent-activity-pane.md).
+
 ## 2026-07-22 — Worktree Code pane
 
 - Every session — terminal, workflow chat, and PR-Stack — gains a **Code** toggle that splits the main pane, opening a directory tree of the session's worktree files beside the live view (with a draggable divider). Toggling it never disturbs the running terminal or chat.

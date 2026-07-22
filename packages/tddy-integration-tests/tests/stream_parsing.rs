@@ -156,7 +156,7 @@ fn process_ndjson_emits_progress_events_for_tasks_and_tools() {
     );
     assert!(matches!(
         &events[2],
-        ProgressEvent::ToolUse { name, detail } if name == "Read" && detail.is_none()
+        ProgressEvent::ToolUse { name, detail, .. } if name == "Read" && detail.is_none()
     ));
 }
 
@@ -181,7 +181,7 @@ fn process_ndjson_extracts_glob_pattern_as_detail() {
     );
     assert!(matches!(
         &events[1],
-        ProgressEvent::ToolUse { name, detail: Some(d) } if name == "Glob" && d == "docs/**/*.md"
+        ProgressEvent::ToolUse { name, detail: Some(d), .. } if name == "Glob" && d == "docs/**/*.md"
     ));
 }
 
@@ -206,7 +206,7 @@ fn process_ndjson_extracts_write_file_path_as_detail() {
     );
     assert!(matches!(
         &events[1],
-        ProgressEvent::ToolUse { name, detail: Some(d) } if name == "Write" && d == "PRD.md"
+        ProgressEvent::ToolUse { name, detail: Some(d), .. } if name == "Write" && d == "PRD.md"
     ));
 }
 
@@ -231,7 +231,7 @@ fn process_ndjson_extracts_tool_use_detail_from_input() {
     );
     assert!(matches!(
         &events[1],
-        ProgressEvent::ToolUse { name, detail: Some(d) } if name == "Read" && d == "lib.rs"
+        ProgressEvent::ToolUse { name, detail: Some(d), .. } if name == "Read" && d == "lib.rs"
     ));
 }
 
@@ -380,12 +380,12 @@ fn process_cursor_stream_emits_tool_use_with_detail_for_display() {
         events[0]
     );
     assert!(
-        matches!(&events[1], ProgressEvent::ToolUse { name, detail: Some(d) } if name == "glob" && d == "*.md"),
+        matches!(&events[1], ProgressEvent::ToolUse { name, detail: Some(d), .. } if name == "glob" && d == "*.md"),
         "glob should have detail *.md, got: {:?}",
         events[1]
     );
     assert!(
-        matches!(&events[2], ProgressEvent::ToolUse { name, detail: Some(d) } if name == "read" && d == "README.md"),
+        matches!(&events[2], ProgressEvent::ToolUse { name, detail: Some(d), .. } if name == "read" && d == "README.md"),
         "read should have detail README.md (filename), got: {:?}",
         events[2]
     );

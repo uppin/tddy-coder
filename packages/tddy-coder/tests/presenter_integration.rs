@@ -46,6 +46,7 @@ fn presenter_event_to_test_event(ev: PresenterEvent) -> Option<TestEvent> {
         PresenterEvent::BackendSelected { .. } => None,
         PresenterEvent::ShouldQuit => None,
         PresenterEvent::TokenUsageUpdated(_) => None,
+        PresenterEvent::AgentActivity(_) => None,
     }
 }
 

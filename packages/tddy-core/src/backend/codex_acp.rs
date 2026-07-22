@@ -72,7 +72,33 @@ impl Client for TddyCodexAcpClient {
                         sink.emit(&ProgressEvent::ToolUse {
                             name: tc.title,
                             detail: None,
+                            input_json: tc
+                                .raw_input
+                                .as_ref()
+                                .and_then(|v| serde_json::to_string(v).ok()),
+                            call_id: Some(tc.tool_call_id.0.to_string()),
                         });
+                    }
+                }
+                acp::SessionUpdate::ToolCallUpdate(upd) => {
+                    // ACP surfaces tool results as a status transition to Completed/Failed on the
+                    // same tool_call_id. Emit a ToolResult only on those terminal states.
+                    if let (Some(ref sink), Some(status)) = (&acc.progress_sink, upd.fields.status)
+                    {
+                        let is_error = matches!(status, acp::ToolCallStatus::Failed);
+                        if is_error || matches!(status, acp::ToolCallStatus::Completed) {
+                            let result_json = upd
+                                .fields
+                                .raw_output
+                                .as_ref()
+                                .and_then(|v| serde_json::to_string(v).ok())
+                                .unwrap_or_default();
+                            sink.emit(&ProgressEvent::ToolResult {
+                                call_id: upd.tool_call_id.0.to_string(),
+                                result_json,
+                                is_error,
+                            });
+                        }
                     }
                 }
                 acp::SessionUpdate::Plan(plan) => {

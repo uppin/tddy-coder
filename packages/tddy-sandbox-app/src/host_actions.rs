@@ -72,8 +72,14 @@ pub fn list_actions(session_dir: &Path, worktree: &Path, args: &Value) -> Result
             .get("path_prefix")
             .and_then(|v| v.as_str())
             .map(str::to_owned),
-        query: args.get("query").and_then(|v| v.as_str()).map(str::to_owned),
-        limit: args.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize),
+        query: args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+        limit: args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize),
         offset: args
             .get("offset")
             .and_then(|v| v.as_u64())
@@ -260,12 +266,8 @@ command: [echo]
     fn invoke_reports_an_unknown_action_id() {
         let session = tempfile::tempdir().unwrap();
         let worktree = tempfile::tempdir().unwrap();
-        let err = invoke_action(
-            session.path(),
-            worktree.path(),
-            &json!({"action": "ghost"}),
-        )
-        .expect_err("unknown action must be an error");
+        let err = invoke_action(session.path(), worktree.path(), &json!({"action": "ghost"}))
+            .expect_err("unknown action must be an error");
         assert!(err.contains("ghost"), "got: {err}");
     }
 }

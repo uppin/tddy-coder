@@ -356,7 +356,10 @@ async fn request_action_establishes_an_authored_manifest_via_the_host_relay() {
     let (socket_path, recorded) = start_fake_host_relay(dir.path());
 
     let mut child = spawn_mcp_server(&[
-        ("TDDY_SUBAGENTS_JSON", &author_def_json(&author_server.uri())),
+        (
+            "TDDY_SUBAGENTS_JSON",
+            &author_def_json(&author_server.uri()),
+        ),
         ("TDDY_SANDBOX_TOOL_IPC", socket_path.to_str().unwrap()),
     ]);
     let mut stdin = child.stdin.take().expect("child stdin");
@@ -423,7 +426,10 @@ async fn request_action_retries_after_an_invalid_manifest_and_then_establishes()
     let (socket_path, recorded) = start_fake_host_relay(dir.path());
 
     let mut child = spawn_mcp_server(&[
-        ("TDDY_SUBAGENTS_JSON", &author_def_json(&author_server.uri())),
+        (
+            "TDDY_SUBAGENTS_JSON",
+            &author_def_json(&author_server.uri()),
+        ),
         ("TDDY_SANDBOX_TOOL_IPC", socket_path.to_str().unwrap()),
     ]);
     let mut stdin = child.stdin.take().expect("child stdin");
@@ -503,8 +509,7 @@ async fn request_action_without_a_shell_replacing_def_is_not_available() {
         "request_action must not be advertised without a Shell replacer; got: {names:?}"
     );
     assert!(
-        response.get("error").is_some()
-            || response["result"]["isError"].as_bool() == Some(true),
+        response.get("error").is_some() || response["result"]["isError"].as_bool() == Some(true),
         "calling the unregistered tool must fail; got: {response}"
     );
     assert!(

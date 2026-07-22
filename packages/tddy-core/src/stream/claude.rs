@@ -64,10 +64,31 @@ enum ContentBlock {
     ToolUse {
         name: String,
         #[serde(default)]
+        id: String,
+        #[serde(default)]
         input: serde_json::Value,
+    },
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        #[serde(default, rename = "tool_use_id")]
+        tool_use_id: String,
+        #[serde(default)]
+        content: serde_json::Value,
+        #[serde(default, rename = "is_error")]
+        is_error: bool,
     },
     #[serde(other)]
     Other,
+}
+
+/// Render a `tool_result` block's `content` (either a plain string or a structured array/object)
+/// as a JSON string for the agent-activity log.
+fn tool_result_content_to_json(content: &serde_json::Value) -> String {
+    match content {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => String::new(),
+        other => serde_json::to_string(other).unwrap_or_default(),
+    }
 }
 
 fn truncate_description(s: &str, max_len: usize) -> String {
@@ -205,7 +226,7 @@ where
                                     on_raw_output(&text);
                                 }
                             }
-                            ContentBlock::ToolUse { name, input } => {
+                            ContentBlock::ToolUse { name, id, input } => {
                                 if name == "AskUserQuestion" {
                                     for q in parse_ask_user_question(&input) {
                                         let key = (q.header.clone(), q.question.clone());
@@ -215,10 +236,45 @@ where
                                     }
                                 } else if !is_subagent {
                                     let detail = tool_use_detail(&name, &input);
-                                    on_progress(&ProgressEvent::ToolUse { name, detail });
+                                    let input_json = serde_json::to_string(&input).ok();
+                                    let call_id = (!id.is_empty()).then_some(id);
+                                    on_progress(&ProgressEvent::ToolUse {
+                                        name,
+                                        detail,
+                                        input_json,
+                                        call_id,
+                                    });
                                 }
                             }
                             _ => {}
+                        }
+                    }
+                }
+            }
+            "user" => {
+                // A `user` event carries the tool_result blocks the CLI feeds back to the model.
+                // These are not appended to `result_text` (the assistant text / final result is the
+                // canonical output), but each terminates a prior `tool_use` — emit a `ToolResult`
+                // correlated by the shared `tool_use_id`. Sub-agent tool results are skipped for the
+                // same reason their `tool_use` is (task_progress already covers sub-agent activity).
+                let is_subagent = event.parent_tool_use_id.is_some();
+                if let Some(msg) = event.message {
+                    if !is_subagent {
+                        for block in msg.content {
+                            if let ContentBlock::ToolResult {
+                                tool_use_id,
+                                content,
+                                is_error,
+                            } = block
+                            {
+                                if !tool_use_id.is_empty() {
+                                    on_progress(&ProgressEvent::ToolResult {
+                                        call_id: tool_use_id,
+                                        result_json: tool_result_content_to_json(&content),
+                                        is_error,
+                                    });
+                                }
+                            }
                         }
                     }
                 }
@@ -383,5 +439,74 @@ mod tests {
             result.result_text.contains("New green output"),
             "result_text must contain the assistant text"
         );
+    }
+
+    fn make_assistant_tool_use(id: &str, name: &str, input: serde_json::Value) -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "tool_use", "id": id, "name": name, "input": input}]
+            },
+            "session_id": "sess-1"
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn tool_use_followed_by_its_tool_result_emits_correlated_tool_use_and_tool_result() {
+        // Given — an assistant tool_use (Bash) then the user tool_result that completes it
+        let ndjson = format!(
+            "{}\n{}",
+            make_assistant_tool_use(
+                "toolu_abc",
+                "Bash",
+                serde_json::json!({"command": "cargo test"})
+            ),
+            make_user_tool_result("test result: ok. 3 passed"),
+        );
+        let reader = std::io::BufReader::new(ndjson.as_bytes());
+        let mut events = Vec::new();
+
+        // When
+        process_ndjson_stream(
+            reader,
+            |ev| events.push(ev.clone()),
+            noop_output,
+            None,
+            None,
+            0,
+        )
+        .unwrap();
+
+        // Then — a ToolUse carrying the full input JSON + call_id, then a ToolResult with the same id
+        assert_eq!(events.len(), 2, "expected one ToolUse and one ToolResult");
+        match &events[0] {
+            ProgressEvent::ToolUse {
+                name,
+                input_json: Some(input_json),
+                call_id: Some(call_id),
+                ..
+            } => {
+                assert_eq!(name, "Bash");
+                assert_eq!(call_id, "toolu_abc");
+                assert_eq!(input_json, r#"{"command":"cargo test"}"#);
+            }
+            other => panic!("expected ToolUse with input_json and call_id, got {other:?}"),
+        }
+        match &events[1] {
+            ProgressEvent::ToolResult {
+                call_id,
+                result_json,
+                is_error,
+            } => {
+                assert_eq!(
+                    call_id, "toolu_abc",
+                    "result must correlate to the tool_use id"
+                );
+                assert_eq!(result_json, "test result: ok. 3 passed");
+                assert!(!is_error);
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
     }
 }

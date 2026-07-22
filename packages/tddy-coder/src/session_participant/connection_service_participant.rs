@@ -87,6 +87,13 @@ pub struct SessionConnectionService {
     pub worktree: PathBuf,
     /// Manager for this session's started bash terminals (the terminal "tabs").
     pub terminal_manager: Arc<super::terminal_manager::TerminalManager>,
+    /// Session directory holding `agent-activity.jsonl` — the agent's own tool calls. Read for the
+    /// `StreamSessionActivity` snapshot.
+    pub agent_activity_dir: PathBuf,
+    /// Presenter broadcast the live `StreamSessionActivity` tail subscribes to; each
+    /// [`tddy_core::PresenterEvent::AgentActivity`] for this session is forwarded to the stream.
+    /// `None` disables the live tail (snapshot only).
+    pub presenter_events: Option<tokio::sync::broadcast::Sender<tddy_core::PresenterEvent>>,
 }
 
 impl SessionConnectionService {

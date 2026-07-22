@@ -189,6 +189,11 @@ struct DaemonToolHandler {
     /// per-session `TDDY_SOCKET` (+ `PATH`) so host-side `tddy-tools transition` reaches the
     /// session's `WorkflowController`.
     session_env: Arc<Vec<(String, String)>>,
+    /// Unified session directory holding `agent-activity.jsonl`, so every in-jail tool call is
+    /// recorded as a `running` then terminal row for the web Agent Activity pane.
+    session_dir: PathBuf,
+    /// Live hub the recorded rows are published to for `StreamSessionActivity` subscribers.
+    agent_activity_hub: Arc<crate::connection_service::AgentActivityHub>,
 }
 
 #[async_trait]
@@ -199,6 +204,23 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
         tool_name: &str,
         args_json: &str,
     ) -> ExecuteToolResponse {
+        // A running row before execution, then a terminal row from the outcome. The durable log is
+        // best-effort — a write failure is logged and never blocks the tool call (mirrors
+        // tool_call_log handling in the ExecuteTool path).
+        let call_id = uuid::Uuid::new_v4().to_string();
+        let running = tddy_core::agent_activity::AgentActivityRecord {
+            call_id: call_id.clone(),
+            tool_name: tool_name.to_string(),
+            input_json: args_json.to_string(),
+            status: tddy_core::agent_activity::STATUS_RUNNING.to_string(),
+            result_json: String::new(),
+            error_message: String::new(),
+            started_unix_ms: crate::connection_service::now_unix_ms(),
+            completed_unix_ms: 0,
+            source: "sandbox".to_string(),
+        };
+        self.record_agent_activity(session_id, &running);
+
         let outcome = tool_engine::execute_tool_with_env(
             &self.worktree,
             tool_name,
@@ -208,6 +230,25 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
             &self.session_env,
         )
         .await;
+
+        let status = if outcome.is_error {
+            tddy_core::agent_activity::STATUS_ERROR
+        } else {
+            tddy_core::agent_activity::STATUS_COMPLETED
+        };
+        let terminal = tddy_core::agent_activity::AgentActivityRecord {
+            call_id,
+            tool_name: tool_name.to_string(),
+            input_json: args_json.to_string(),
+            status: status.to_string(),
+            result_json: outcome.result_json.clone(),
+            error_message: outcome.error_message.clone(),
+            started_unix_ms: running.started_unix_ms,
+            completed_unix_ms: crate::connection_service::now_unix_ms(),
+            source: "sandbox".to_string(),
+        };
+        self.record_agent_activity(session_id, &terminal);
+
         ExecuteToolResponse {
             result_json: outcome.result_json,
             is_error: outcome.is_error,
@@ -215,6 +256,27 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
             job_id: outcome.job_id,
             job_running: outcome.job_running,
         }
+    }
+}
+
+impl DaemonToolHandler {
+    /// Append an agent-activity row and publish it live; a persistence failure is non-fatal.
+    fn record_agent_activity(
+        &self,
+        session_id: &str,
+        record: &tddy_core::agent_activity::AgentActivityRecord,
+    ) {
+        if let Err(e) = tddy_core::agent_activity::append_agent_activity(&self.session_dir, record)
+        {
+            log::warn!(
+                target: "tddy_daemon::sandbox_session",
+                "agent_activity: failed to persist {} row for session {}: {}",
+                record.status,
+                session_id,
+                e
+            );
+        }
+        self.agent_activity_hub.publish(session_id, record.clone());
     }
 }
 
@@ -271,6 +333,8 @@ pub async fn dial_and_bridge(
     capture: Arc<StdMutex<Vec<u8>>>,
     stdin_rx: mpsc::UnboundedReceiver<Bytes>,
     session_env: Arc<Vec<(String, String)>>,
+    session_dir: PathBuf,
+    agent_activity_hub: Arc<crate::connection_service::AgentActivityHub>,
 ) -> Result<(), String> {
     log::info!(
         target: "tddy_daemon::sandbox_session",
@@ -296,6 +360,8 @@ pub async fn dial_and_bridge(
         worktree: worktree_path,
         task_registry,
         session_env,
+        session_dir,
+        agent_activity_hub,
     };
     tddy_sandbox_runner::run_host_relay(
         stdio_client,
@@ -797,6 +863,8 @@ mod tests {
                 capture,
                 stdin_rx,
                 Arc::new(Vec::new()),
+                tmp.path().join("session"),
+                Arc::new(crate::connection_service::AgentActivityHub::default()),
             ),
         )
         .await
@@ -816,5 +884,84 @@ mod tests {
 
         handle.child_mut().kill().ok();
         handle.child_mut().wait().ok();
+    }
+
+    fn a_tool_handler(
+        worktree: PathBuf,
+        session_dir: PathBuf,
+        hub: Arc<crate::connection_service::AgentActivityHub>,
+    ) -> DaemonToolHandler {
+        DaemonToolHandler {
+            worktree,
+            task_registry: tddy_task::TaskRegistry::default(),
+            session_env: Arc::new(Vec::new()),
+            session_dir,
+            agent_activity_hub: hub,
+        }
+    }
+
+    /// Running one tool call through `DaemonToolHandler::execute` appends a `running` row before the
+    /// work and a terminal (`completed`) row after it, sharing one call_id (source = "sandbox").
+    #[tokio::test]
+    async fn execute_appends_a_running_then_a_completed_agent_activity_row() {
+        use tddy_sandbox_runner::HostToolHandler;
+
+        // Given a worktree holding a file the Read tool can return.
+        let tmp = tempfile::tempdir().unwrap();
+        let worktree = tmp.path().join("worktree");
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::fs::write(worktree.join("greeting.txt"), "hello sandbox").unwrap();
+        let session_dir = tmp.path().join("session");
+        let hub = Arc::new(crate::connection_service::AgentActivityHub::default());
+        let handler = a_tool_handler(worktree, session_dir.clone(), Arc::clone(&hub));
+
+        // When the agent reads that file through the sandbox tool handler.
+        let outcome = handler
+            .execute("sandbox-activity-1", "Read", r#"{"path":"greeting.txt"}"#)
+            .await;
+        assert!(!outcome.is_error, "Read of an existing file must succeed");
+
+        // Then two rows were appended — a running row then a completed row for the same call.
+        let raw = std::fs::read_to_string(
+            session_dir.join(tddy_core::agent_activity::AGENT_ACTIVITY_FILENAME),
+        )
+        .unwrap();
+        let rows: Vec<tddy_core::agent_activity::AgentActivityRecord> = raw
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(rows.len(), 2, "one running row and one terminal row");
+        assert_eq!(rows[0].status, tddy_core::agent_activity::STATUS_RUNNING);
+        assert_eq!(rows[0].source, "sandbox");
+        assert_eq!(rows[1].status, tddy_core::agent_activity::STATUS_COMPLETED);
+        assert_eq!(
+            rows[0].call_id, rows[1].call_id,
+            "both rows must share one call_id so they coalesce"
+        );
+    }
+
+    /// A failing tool call records a terminal `error` row (not `completed`).
+    #[tokio::test]
+    async fn execute_appends_an_error_row_when_the_tool_fails() {
+        use tddy_sandbox_runner::HostToolHandler;
+
+        // Given a worktree with no such file.
+        let tmp = tempfile::tempdir().unwrap();
+        let worktree = tmp.path().join("worktree");
+        std::fs::create_dir_all(&worktree).unwrap();
+        let session_dir = tmp.path().join("session");
+        let hub = Arc::new(crate::connection_service::AgentActivityHub::default());
+        let handler = a_tool_handler(worktree, session_dir.clone(), hub);
+
+        // When the agent reads a missing file.
+        let outcome = handler
+            .execute("sandbox-activity-err", "Read", r#"{"path":"missing.txt"}"#)
+            .await;
+        assert!(outcome.is_error, "reading a missing file must be an error");
+
+        // Then the coalesced call is in the error state.
+        let records = tddy_core::agent_activity::read_agent_activity(&session_dir).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].status, tddy_core::agent_activity::STATUS_ERROR);
     }
 }

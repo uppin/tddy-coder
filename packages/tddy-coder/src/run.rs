@@ -222,6 +222,16 @@ fn resolve_specialized_agent_defs(
 }
 
 /// CLI `--output-dir` when set, else `"."` (derive repo root from cwd / default sessions base).
+/// Provenance recorded on this session's `agent-activity.jsonl` rows. The coder hosts tool
+/// execution for tool sessions (`"coder"`) and cursor-cli sessions (`"cursor-cli"`).
+fn agent_activity_source_for(agent: &str) -> &'static str {
+    if agent == "cursor" {
+        "cursor-cli"
+    } else {
+        "coder"
+    }
+}
+
 fn cli_output_dir_param(args: &Args) -> PathBuf {
     args.output_dir
         .clone()
@@ -1563,6 +1573,13 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         let _ = std::fs::create_dir_all(&logs);
         tddy_core::toolcall::set_toolcall_log_dir(&logs);
         crate::build_executor::register();
+        // Capture the agent's own tool calls into this session's `agent-activity.jsonl` and
+        // broadcast them (served live by the coder participant's `StreamSessionActivity`). The
+        // coder — not the daemon — executes tools for tool / cursor-cli sessions.
+        presenter.set_agent_activity_context(
+            session_artifact_dir.clone(),
+            agent_activity_source_for(agent_str),
+        );
 
         // When the daemon gave us a `--host-session-socket`, bind the daemon-relay
         // `spawn_conversation` handler so the agent's `spawn_conversation` tool call is forwarded to
@@ -1910,6 +1927,8 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 terminal_manager: std::sync::Arc::new(
                     crate::session_participant::terminal_manager::TerminalManager::new(),
                 ),
+                agent_activity_dir: session_artifact_dir.clone(),
+                presenter_events: usage_event_tx.clone(),
             };
             // Transport-specific base services; the Presenter view-adapters (`TddyRemote` **and** the
             // ACP mirror `AcpService`) + reflection are mounted by `session_view_adapter_surface` so
@@ -2794,7 +2813,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     let socket_path_for_exec = socket_path.clone();
     let (event_tx, _) = tokio::sync::broadcast::channel(256);
     let (intent_tx, intent_rx) = std::sync::mpsc::channel();
-    let presenter = match args.agent.as_deref() {
+    let mut presenter = match args.agent.as_deref() {
         Some(a) => {
             let m = args
                 .model
@@ -2820,6 +2839,12 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     .with_recipe_resolver(Arc::new(|name: &str| {
         crate::resolve_workflow_recipe_from_cli_name(name.trim())
     }));
+    // Persist + broadcast the agent's own tool calls for this session (served live by the coder
+    // participant's `StreamSessionActivity`).
+    if let Some(dir) = args.session_dir.clone() {
+        let source = agent_activity_source_for(args.agent.as_deref().unwrap_or("claude"));
+        presenter.set_agent_activity_context(dir, source);
+    }
     let presenter = Arc::new(Mutex::new(presenter));
 
     if args.agent.is_none() {
@@ -2978,6 +3003,11 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             terminal_manager: std::sync::Arc::new(
                 crate::session_participant::terminal_manager::TerminalManager::new(),
             ),
+            agent_activity_dir: args
+                .session_dir
+                .clone()
+                .unwrap_or_else(|| std::path::PathBuf::from(".")),
+            presenter_events: Some(event_tx.clone()),
         };
         let session_connection_entry =
             crate::session_participant::session_connection_service_entry(session_connection_svc);

@@ -1,5 +1,6 @@
 //! Core library for tddy-coder.
 
+pub mod agent_activity;
 pub mod agent_skills;
 pub mod backend;
 pub mod branch_worktree_intent;

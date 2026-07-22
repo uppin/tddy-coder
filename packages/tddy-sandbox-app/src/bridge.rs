@@ -107,7 +107,9 @@ impl HostToolHandler for AppToolHandler {
                 // executor (establish/list are cheap, but consistency is simpler than a split).
                 let result = tokio::task::spawn_blocking(move || match tool.as_str() {
                     "EstablishAction" => crate::host_actions::establish_action(&session_dir, &args),
-                    "ListActions" => crate::host_actions::list_actions(&session_dir, &worktree, &args),
+                    "ListActions" => {
+                        crate::host_actions::list_actions(&session_dir, &worktree, &args)
+                    }
                     _ => crate::host_actions::invoke_action(&session_dir, &worktree, &args),
                 })
                 .await
