@@ -236,6 +236,10 @@ export const TEST_IDS = {
   /** The "+" button that opens a new bash terminal. */
   sessionsTerminalTabNew: "sessions-terminal-tab-new",
 
+  // Session connection overlay — covers the runtime's panes until LiveKit is connected
+  sessionConnectionOverlay: "session-connection-overlay",
+  sessionConnectionError: "session-connection-error",
+
   // Terminal control mutex — "Claim terminal" CTA
   terminalControlOverlay: "terminal-control-overlay",
   terminalClaimBtn: "terminal-claim-btn",

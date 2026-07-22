@@ -102,6 +102,10 @@ export const sessionsDrawerPage = {
   detailTerminalContainer: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsDetailTerminalContainer, { timeout: 10000, ...options }),
 
+  /** The "Code" header toggle that opens the worktree Code pane for the selected session. */
+  codeToggle: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.worktreeCodeToggle, { timeout: 5000, ...options }),
+
   /** The metadata block rendered when a disconnected session is selected. */
   detailMetadata: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsDetailMetadata, { timeout: 5000, ...options }),
@@ -425,6 +429,12 @@ export const sessionsDrawerPage = {
   /** A per-session terminal container mounted in the runtime registry. */
   runtimeTerminal: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsRuntimeTerminal(sessionId), { timeout: 10000, ...options }),
+
+  /** The focusable input of a session's runtime terminal (the xterm helper textarea) — the element
+   *  that receives DOM focus when the terminal is focused, so a test can assert keyboard readiness
+   *  without a click. */
+  runtimeTerminalInput: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsRuntimeTerminal(sessionId), { timeout: 10000, ...options }).find("textarea"),
 
   /** Cumulative inbound bytes for the focused session (inspector Details tab). */
   inspectorBytesIn: (options?: Parameters<typeof cy.get>[1]) =>

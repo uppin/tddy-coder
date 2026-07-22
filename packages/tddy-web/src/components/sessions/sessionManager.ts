@@ -26,6 +26,13 @@ import { subscribeSessionsRefresh } from "../../lib/sessionsRefreshBridge";
 /** Pulls the selected host's sessions (typically `client.listSessions(...)`). */
 export type SessionFetcher = () => Promise<SessionEntry[]>;
 
+/**
+ * How often the manager re-pulls the selected host's sessions so externally-observed liveness
+ * changes (a session's PID dying, or a session ended from another client) surface without a reload.
+ * Short enough to feel real-time for a status indicator, cheap enough for a background poll.
+ */
+const REFRESH_INTERVAL_MS = 2000;
+
 export class SessionManager {
   private selectedHostSessions: SessionEntry[] = [];
   private optimistic: SessionEntry[] = [];
@@ -36,16 +43,22 @@ export class SessionManager {
   private cachedSessionMetadata: ReadonlyMap<string, SessionMetadata> = new Map();
   private readonly listeners = new Set<() => void>();
   private unsubscribeBridge: (() => void) | null = null;
+  private refreshIntervalId: ReturnType<typeof window.setInterval> | null = null;
 
-  /** Start listening for window-bound refresh requests. Returns a disposer. */
+  /** Start listening for window-bound refresh requests and periodic polling. Returns a disposer. */
   start(): () => void {
     this.unsubscribeBridge ??= subscribeSessionsRefresh(() => this.refresh());
+    this.refreshIntervalId ??= window.setInterval(() => this.refresh(), REFRESH_INTERVAL_MS);
     return () => this.stop();
   }
 
   stop(): void {
     this.unsubscribeBridge?.();
     this.unsubscribeBridge = null;
+    if (this.refreshIntervalId !== null) {
+      window.clearInterval(this.refreshIntervalId);
+      this.refreshIntervalId = null;
+    }
   }
 
   /** Set the selected host's session source; triggers an immediate refresh. */

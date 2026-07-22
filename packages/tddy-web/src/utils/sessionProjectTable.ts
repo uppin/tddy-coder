@@ -43,7 +43,7 @@ export function projectForUnscopedSession(
   session: SessionEntry,
   projects: ProjectEntry[]
 ): ProjectEntry | undefined {
-  if (session.projectId.trim() !== "") {
+  if ((session.projectId ?? "").trim() !== "") {
     return undefined;
   }
   let best: ProjectEntry | undefined;
@@ -66,7 +66,7 @@ export function sessionBelongsToProject(
   project: ProjectEntry,
   projects: ProjectEntry[]
 ): boolean {
-  const pid = session.projectId.trim();
+  const pid = (session.projectId ?? "").trim();
   if (pid !== "") {
     return session.projectId === project.projectId;
   }
@@ -103,7 +103,7 @@ function projectsOnSessionHost(session: SessionEntry, projects: ProjectEntry[]):
 /** True when the session is not listed under any project accordion (id or repo match on its host). */
 export function isSessionOrphan(s: SessionEntry, projects: ProjectEntry[]): boolean {
   const onHost = projectsOnSessionHost(s, projects);
-  if (s.projectId.trim() !== "") {
+  if ((s.projectId ?? "").trim() !== "") {
     return !onHost.some((p) => p.projectId === s.projectId);
   }
   return projectForUnscopedSession(s, onHost) === undefined;
@@ -135,7 +135,7 @@ export function sessionBelongsToProjectHost(
     return false;
   }
 
-  const spid = session.projectId.trim();
+  const spid = (session.projectId ?? "").trim();
   if (spid !== "") {
     return session.projectId === project.projectId;
   }

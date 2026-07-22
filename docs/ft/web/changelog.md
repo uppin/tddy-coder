@@ -4,6 +4,16 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-06 — Per-session model selection
+
+- The **Create session** form now lets the operator pick the backend **model** for **tool** (tddy-coder) sessions, not just claude-cli. The model list is fetched on demand for the selected agent via the new `ListAgentModels` RPC — enumerated straight from the agent command where possible (`cursor --list-models`, ACP `available_models`) and a curated tddy-core list for `claude`/`codex`. Changing the agent repopulates the options and resets to that backend's default; the chosen model is threaded to `tddy-coder --model` for the whole session. See [tool-session-model-selection.md](tool-session-model-selection.md).
+- If a backend's model probe fails (not logged in, binary missing), the form shows an inline error and disables Create for that agent — no silent fallback to a default model. The claude-cli dropdown is now also fed from the daemon; the old hardcoded web list is dropped from this form (retained only for the legacy `ConnectionScreen`).
+
+## 2026-07-19 — Workflows spawn a child conversation as a session tab
+
+- A managed workflow (first: **grill-me** after its Create-plan phase) can hand off to a fresh implementation agent by spawning a new interactive conversation on its own git worktree; the new conversation appears as a **tab inside the parent session**, beside the Agent tab and any bash tabs. See [session-terminal-tabs.md](session-terminal-tabs.md).
+- Child tabs are discovered from the existing session list (no new RPC): any session whose `orchestrator_session_id` points at the open session renders as `sessions-child-tab-<id>`; selecting it attaches and shows that child session's live pane. A session with no children shows only the Agent tab.
+
 ## 2026-07-22 — Code pane syntax highlighting
 
 - The Worktree **Code pane** file preview now syntax-highlights recognized code files (Rust, TS/TSX, Python, JSON, YAML, and more) instead of showing plain monospace text. The language is inferred from the file's extension; files with no recognized extension (e.g. `LICENSE`) stay plain, and Markdown keeps its sanitized-markup rendering. Highlight colors follow the app's light/dark theme. See [session-code-pane.md](session-code-pane.md).

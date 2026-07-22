@@ -34,10 +34,16 @@ const dbg = tddyDebug("tddy:acp:session");
  * `Session` handler → Presenter view), then stream the agent's `session/update`s. A `PromptRequest`
  * maps a chat message onto the running session; `AgentMessageChunk`s render as one merged agent
  * bubble using the same reconciliation as `useAgentChat` / tddy-core's `AgentOutputActivityLogMerge`.
+ *
+ * Resume: when `resumeSessionId` is a non-empty id (e.g. a reloaded view already knows its
+ * `SessionEntry.sessionId`), the stream opens with `session/load` (`LoadSessionRequest`) instead of
+ * `new_session`, so the agent replays the recorded turns (`user_message_chunk` + `agent_message_chunk`)
+ * before continuing. Without it, the default `new_session` path starts a fresh session.
  */
 export function useAcpSession(
   room: Room | null,
   serverIdentity: string,
+  resumeSessionId?: string,
 ): UseAgentChatResult {
   const liveKitFactory = useLiveKitTransportFactory();
   const factoryIsOverridden = useLiveKitTransportFactoryIsOverridden();
@@ -76,6 +82,8 @@ export function useAcpSession(
   const hasSentRef = useRef(false);
   const sentIndexRef = useRef(0);
   const systemKeyRef = useRef(0);
+  // Distinct key space for user turns replayed by the agent on resume (vs. locally-echoed prompts).
+  const replayedUserKeyRef = useRef(0);
 
   // --- Streaming agent-output merge (identical to useAgentChat's appendAgentChunk) ---------------
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -147,8 +155,11 @@ export function useAcpSession(
     hasSentRef.current = false;
     sentIndexRef.current = 0;
     systemKeyRef.current = 0;
+    replayedUserKeyRef.current = 0;
     nextIdRef.current = 3n;
-    sessionIdRef.current = "";
+    // Resuming a known session: stamp outbound prompts with its id up front (before any server
+    // response), so a prompt sent before the load round-trips still targets the right session.
+    sessionIdRef.current = resumeSessionId ?? "";
     messagesRef.current = [];
     agentBufferRef.current = "";
     agentPartialActiveRef.current = false;
@@ -162,10 +173,18 @@ export function useAcpSession(
     queueRef.current = queue;
     let cancelled = false;
 
-    // Open the stream by handshaking: initialize (id 1) then new_session (id 2). The first enqueued
-    // frame makes the LiveKit transport publish the stream-open, running the server's Session handler.
+    // Open the stream by handshaking: initialize (id 1) then either session/load (resume) or
+    // new_session (id 2). The first enqueued frame makes the LiveKit transport publish the
+    // stream-open, running the server's Session handler.
     queue.enqueue(create(AcpClientMessageSchema, { id: 1n, msg: { case: "initialize", value: {} } }));
-    queue.enqueue(create(AcpClientMessageSchema, { id: 2n, msg: { case: "newSession", value: { cwd: "" } } }));
+    queue.enqueue(
+      resumeSessionId
+        ? create(AcpClientMessageSchema, {
+            id: 2n,
+            msg: { case: "loadSession", value: { sessionId: { value: resumeSessionId }, cwd: "" } },
+          })
+        : create(AcpClientMessageSchema, { id: 2n, msg: { case: "newSession", value: { cwd: "" } } }),
+    );
 
     dbg("opening AcpService.Session (server identity=%o)", serverIdentity);
     (async () => {
@@ -206,9 +225,21 @@ export function useAcpSession(
                   at: Date.now(),
                 });
                 setMessages(messagesRef.current.slice());
+              } else if (update?.case === "userMessageChunk") {
+                // A user turn replayed by the agent on resume (locally-sent prompts are echoed by
+                // sendPrompt, so these only arrive when repainting a loaded session's history).
+                const block = update.value.content?.block;
+                if (block?.case === "text") {
+                  messagesRef.current.push({
+                    key: `user-replayed-${replayedUserKeyRef.current++}`,
+                    text: block.value.text,
+                    from: "user",
+                    at: Date.now(),
+                  });
+                  setMessages(messagesRef.current.slice());
+                }
               }
-              // toolCallUpdate / plan / userMessageChunk carry no additional bubble (user prompts are
-              // already echoed locally by sendPrompt); ignored on purpose.
+              // toolCallUpdate / plan carry no additional bubble; ignored on purpose.
               break;
             }
             case "requestPermission": {
@@ -267,7 +298,7 @@ export function useAcpSession(
         queueRef.current = null;
       }
     };
-  }, [client]);
+  }, [client, resumeSessionId]);
 
   const canSend = (): boolean => {
     if (!queueRef.current) {

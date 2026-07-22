@@ -1,7 +1,8 @@
 import React from "react";
 import { type Client, type Transport } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
-import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
+import type { ConnectionService, SessionEntry, ProjectEntry } from "../../gen/connection_pb";
+import { projectForUnscopedSession } from "../../utils/sessionProjectTable";
 import type { TokenService } from "../../gen/token_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
@@ -53,6 +54,9 @@ interface SessionMainPaneProps {
   /** Inspector I/O traffic (req 5 dual source): live runtime counters for active sessions,
    *  daemon-sourced `SessionEntry` fields for inactive / non-LiveKit sessions. */
   traffic?: { bytesIn: number; bytesOut: number; lastDataReceivedAt: number | null } | null;
+  /** Project registry — used to resolve an unscoped session's project (empty `projectId`) from its
+   *  `repoPath` before the worktree Code pane's RPCs, which require a non-empty `project_id`. */
+  projects?: ReadonlyArray<ProjectEntry>;
   /** Attached runtimes — one mounted terminal per entry (focused visible, others hidden). */
   runtimes?: ReadonlyArray<SessionRuntimeState>;
   /** The full drawer session list — passed to each runtime so it can render its spawned child
@@ -95,6 +99,7 @@ export function SessionMainPane({
   mobileShortcuts,
   onChildSessionStarted,
   traffic,
+  projects = [],
   runtimes = [],
   sessions = [],
   focusedRuntimeId = null,
@@ -111,6 +116,15 @@ export function SessionMainPane({
   // base view (terminal / chat / PR-Stack), it opens beside it.
   const [codeOpen, setCodeOpen] = React.useState(false);
   const codePaneEnabled = Boolean(client && selectedSession);
+
+  // The worktree RPCs require a non-empty `project_id`. Scoped sessions carry their own; unscoped
+  // sessions (empty `projectId`) resolve to the registered project whose main repo is the longest
+  // prefix of the session's `repoPath`.
+  const resolvedProjectId = React.useMemo(() => {
+    if (!selectedSession) return "";
+    if ((selectedSession.projectId ?? "").trim() !== "") return selectedSession.projectId;
+    return projectForUnscopedSession(selectedSession, [...projects])?.projectId ?? "";
+  }, [selectedSession, projects]);
 
   const customView = !isCreating
     ? resolveWorkflowView(selectedSession, {
@@ -261,7 +275,7 @@ export function SessionMainPane({
                       <WorktreeCodePane
                         client={client}
                         sessionToken={sessionToken}
-                        projectId={selectedSession.projectId}
+                        projectId={resolvedProjectId}
                         worktreePath={selectedSession.repoPath}
                       />
                     </Panel>

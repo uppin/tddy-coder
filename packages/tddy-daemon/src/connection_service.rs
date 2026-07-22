@@ -3110,17 +3110,17 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         }
 
         let tools_path = self.resolve_tddy_tools_path();
-        let agent_for_probe = agent.clone();
+        // Cursor's model probe must hand tddy-tools the resolved absolute `agent` path (as the PTY
+        // spawn does), so the impersonated child execs a fully-qualified binary instead of doing a
+        // PATH lookup that lacks the install dir. Only forward an absolute path — a bare-name
+        // resolution keeps the existing behavior (no `--cursor-cli-path`).
+        let cursor_cli_path = (agent == "cursor")
+            .then(|| crate::config::resolve_cursor_binary_path(&self.config))
+            .filter(|p| std::path::Path::new(p).is_absolute())
+            .map(std::path::PathBuf::from);
+        let probe_args = list_models_probe_args(&agent, cursor_cli_path.as_deref());
         let probe = tokio::task::spawn_blocking(move || {
-            spawner::run_capture_as_user(
-                &os_user,
-                &tools_path,
-                &[
-                    "list-models".to_string(),
-                    "--agent".to_string(),
-                    agent_for_probe,
-                ],
-            )
+            spawner::run_capture_as_user(&os_user, &tools_path, &probe_args)
         })
         .await
         .map_err(|e| Status::internal(format!("model probe join error: {e}")))?
@@ -6061,6 +6061,24 @@ fn agent_models_cache() -> &'static std::sync::Mutex<
     AGENT_MODELS_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
+/// Build the `tddy-tools list-models` argv for an agent probe. Always `["list-models", "--agent",
+/// <agent>]`; appends `["--cursor-cli-path", <path>]` only when probing `cursor` with a resolved
+/// path, so the impersonated child execs the fully-qualified binary instead of a PATH lookup.
+fn list_models_probe_args(agent: &str, cursor_cli_path: Option<&std::path::Path>) -> Vec<String> {
+    let mut args = vec![
+        "list-models".to_string(),
+        "--agent".to_string(),
+        agent.to_string(),
+    ];
+    if agent == "cursor" {
+        if let Some(path) = cursor_cli_path {
+            args.push("--cursor-cli-path".to_string());
+            args.push(path.to_string_lossy().into_owned());
+        }
+    }
+    args
+}
+
 /// Parse the JSON stdout of `tddy-tools list-models --agent <id>`
 /// (`{"models":[{"id":..,"label":..}],"default_model":".."}`) into a `ListAgentModelsResponse`.
 /// Malformed output is a hard error — a failed probe must not look like an empty catalog.
@@ -7957,6 +7975,54 @@ mod conversation_spawn_wiring_tests {
         assert!(
             !recipe_enables_conversation_spawn("pr-stack"),
             "pr-stack uses spawn-child, not spawn-conversation"
+        );
+    }
+}
+
+#[cfg(test)]
+mod list_agent_models_probe_tests {
+    use super::*;
+    use std::path::Path;
+
+    /// The cursor model probe must hand `tddy-tools` the **resolved absolute** cursor binary via
+    /// `--cursor-cli-path`, exactly as the PTY spawn does. Otherwise `tddy-tools` builds a
+    /// `CursorBackend` with the bare name `agent`, and the impersonated child's PATH lookup fails
+    /// with "binary not found: agent" — the reported `[failed_precondition] model probe failed`.
+    #[test]
+    fn cursor_probe_args_carry_the_resolved_cursor_binary_path() {
+        // Given — the daemon has resolved the real cursor binary to an absolute path
+        let resolved = Path::new("/home/dev/.local/bin/agent");
+
+        // When — building the args for the `tddy-tools list-models` cursor probe
+        let args = list_models_probe_args("cursor", Some(resolved));
+
+        // Then — the resolved absolute path is passed through to tddy-tools
+        assert_eq!(
+            args,
+            vec![
+                "list-models".to_string(),
+                "--agent".to_string(),
+                "cursor".to_string(),
+                "--cursor-cli-path".to_string(),
+                "/home/dev/.local/bin/agent".to_string(),
+            ]
+        );
+    }
+
+    /// A non-cursor agent's probe carries no cursor override — `--cursor-cli-path` is cursor-only.
+    #[test]
+    fn a_non_cursor_probe_omits_the_cursor_cli_path_flag() {
+        // When — probing a claude agent, even if a cursor path happens to be resolvable
+        let args = list_models_probe_args("claude", Some(Path::new("/home/dev/.local/bin/agent")));
+
+        // Then — only the agent is passed; no cursor override leaks in
+        assert_eq!(
+            args,
+            vec![
+                "list-models".to_string(),
+                "--agent".to_string(),
+                "claude".to_string(),
+            ]
         );
     }
 }
