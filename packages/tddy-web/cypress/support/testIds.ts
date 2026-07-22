@@ -91,6 +91,7 @@ export const TEST_IDS = {
   worktreeCodePane: "worktree-code-pane",
   worktreeFileTree: "worktree-file-tree",
   worktreeFilePreview: "worktree-file-preview",
+  worktreeCodeHighlight: "worktree-code-highlight",
 
   // Sessions drawer screen
   sessionsDrawerScreen: "sessions-drawer-screen",
