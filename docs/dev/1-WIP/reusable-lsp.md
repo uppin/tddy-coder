@@ -47,7 +47,7 @@ as a follow-up so the red phase stays bounded.
 - [x] `tddy-tool-engine`: `lib.rs` — intercept the five `Lsp*` names in `execute_tool_with_env` → `lsp_executor()` (single dispatch site serving all three host handlers: daemon HTTP, daemon sandbox IPC, sandbox-app)
 - [x] `tddy-daemon`: register the executor at startup (`main.rs`, sharing the daemon `TaskRegistry`) + idle-reaper loop; `lsp_tools_env(worktree)` sets `TDDY_LSP_TOOLS` at the three sandboxed-session env sites (`connection_service.rs`). Dispatch is via `tddy-tool-engine`, so no `ExecuteTool` match edit was needed.
 - [ ] `tddy-sandbox-app`: register the executor before spawn (`main.rs::run_macos`) + set `TDDY_LSP_TOOLS` in the jail env (`spawn.rs`) when `is_available(&params.repo)` — **in progress**
-- [ ] **Deferred (documented deviation):** `tddy-tool-engine` `tool_read_lints` LSP backing. `ReadLints` is workspace/arg-less while LSP diagnostics are per-file; a faithful backing needs workspace pull-diagnostics not in this slice. The dedicated **`LspDiagnostics`** tool (file-level) supersedes it; `ReadLints` keeps its stub rather than fabricating workspace-wide results.
+- [x] `tddy-tool-engine`: `tool_read_lints` routes to `LspExecutor::workspace_diagnostics` (a `workspace/diagnostic` pull, backed by `LspClient::workspace_diagnostics`) when a server is available for the repo, else the no-linter stub. Added `workspace_diagnostics` to the `LspExecutor` trait + all impls, `LspClient`, and the fake server.
 - [ ] **Deferred:** full daemon e2e (`agent_gets_lsp_tools_and_finds_references_across_two_targets`). The end-to-end path is covered compositionally by the per-crate tests (executor availability, tool-engine dispatch, MCP gate/merge, client round-trips); a live daemon+jail+fake-server e2e is a heavy follow-up.
 - [ ] **Follow-up (robustness):** `LspClient` currently ignores server→client requests (e.g. `client/registerCapability`, `window/workDoneProgress/create`). Real rust-analyzer tolerates the missing replies (logs a timeout) and the core ops work, but responding to them would make advanced features fully robust.
 
@@ -69,10 +69,10 @@ as a follow-up so the red phase stays bounded.
 
 Per-package (scoped, per repo guidance — full-workspace `./test` rebuilds the livekit/webrtc stack and risks disk exhaustion):
 
-- `tddy-lsp`: **19/19 pass** (4 allowlist unit, 6 registry, 7 client, 2 server-body). Server-body cancel tests finish in <1s — the real body shuts the server down gracefully, so the registry's SIGTERM→SIGKILL escalation grace is never hit.
+- `tddy-lsp`: **20/20 pass** (4 allowlist unit, 6 registry, 8 client incl. workspace diagnostics, 2 server-body). Server-body cancel tests finish in <1s — the real body shuts the server down gracefully, so the registry's SIGTERM→SIGKILL escalation grace is never hit.
 - `tddy-lsp-executor`: **2/2 pass** (rust repo available / non-rust repo unavailable).
 - `tddy-core`: `toolcall::lsp` **1/1 pass**; full lib **262/262** (no regression).
-- `tddy-tool-engine`: `Lsp*` dispatch **1/1 pass**; existing suite green (catalog-consistency test unaffected).
+- `tddy-tool-engine`: `Lsp*` dispatch, `ReadLints`→workspace-diagnostics routing, and `ReadLints` stub-fallback all pass; existing suite green (catalog-consistency test unaffected).
 - `tddy-tools`: `lsp_tools` **5/5 pass** (catalog names + gate + live `PermissionServer::new` merge/hide; other 46 lib tests untouched).
 - `tddy-daemon`: `cargo build` + `clippy -D warnings` clean (register + reaper + `TDDY_LSP_TOOLS` at 3 sandboxed-session env sites).
 - `tddy-sandbox-app`: `cargo build` + `clippy -D warnings` clean (register-before-spawn + `TDDY_LSP_TOOLS` in the `BTreeMap` jail env when `is_available`).

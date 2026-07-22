@@ -37,6 +37,9 @@ impl LspExecutor for EchoExecutor {
     fn symbols(&self, _repo: &Path, _query: &LspQuery) -> Result<Value, String> {
         Ok(json!({ "op": "symbols" }))
     }
+    fn workspace_diagnostics(&self, _repo: &Path) -> Result<Value, String> {
+        Ok(json!({ "lints": [{ "uri": "file:///workspace/src/lib.rs", "message": "unused" }] }))
+    }
 }
 
 #[tokio::test]
@@ -71,5 +74,27 @@ async fn dispatches_the_lsp_definition_tool_to_the_registered_executor() {
             "line": 10,
             "character": 4,
         })
+    );
+}
+
+#[tokio::test]
+async fn read_lints_routes_to_the_registered_executors_workspace_diagnostics() {
+    // Given a registered LSP executor available for the repo
+    register_lsp_executor(Arc::new(EchoExecutor));
+    let registry = TaskRegistry::new();
+
+    // When ReadLints is invoked
+    let outcome = execute_tool(Path::new("/tmp"), "ReadLints", "{}", &registry, "session-1").await;
+
+    // Then it returns the executor's workspace diagnostics, not the no-linter stub
+    assert!(
+        !outcome.is_error,
+        "unexpected error: {}",
+        outcome.error_message
+    );
+    let value: Value = serde_json::from_str(&outcome.result_json).unwrap();
+    assert_eq!(
+        value,
+        json!({ "lints": [{ "uri": "file:///workspace/src/lib.rs", "message": "unused" }] })
     );
 }

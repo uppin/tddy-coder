@@ -158,6 +158,26 @@ impl LspClient {
         Ok(parse_diagnostics(result.get("items")))
     }
 
+    /// Pull workspace-wide diagnostics, returning one `(uri, diagnostics)` group per
+    /// reported document.
+    pub async fn workspace_diagnostics(&self) -> Result<Vec<(String, Vec<Diagnostic>)>, LspError> {
+        let result = self
+            .request("workspace/diagnostic", json!({ "previousResultIds": [] }))
+            .await?;
+        let mut groups = Vec::new();
+        if let Some(items) = result.get("items").and_then(Value::as_array) {
+            for item in items {
+                let uri = item
+                    .get("uri")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                groups.push((uri, parse_diagnostics(item.get("items"))));
+            }
+        }
+        Ok(groups)
+    }
+
     /// Go-to-definition at a position.
     pub async fn definition(&self, uri: &str, pos: Position) -> Result<Vec<Location>, LspError> {
         let result = self

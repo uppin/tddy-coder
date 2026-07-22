@@ -46,6 +46,10 @@ pub trait LspExecutor: Send + Sync {
 
     /// Document/workspace symbols for a query.
     fn symbols(&self, repo_dir: &Path, query: &LspQuery) -> Result<serde_json::Value, String>;
+
+    /// Workspace-wide diagnostics (no target/file) — backs the workspace-level `ReadLints`
+    /// tool. Returns `{"lints":[…]}`.
+    fn workspace_diagnostics(&self, repo_dir: &Path) -> Result<serde_json::Value, String>;
 }
 
 static REGISTERED: OnceLock<Arc<dyn LspExecutor>> = OnceLock::new();
@@ -105,6 +109,9 @@ mod tests {
             _repo_dir: &Path,
             _query: &LspQuery,
         ) -> Result<serde_json::Value, String> {
+            self.payload()
+        }
+        fn workspace_diagnostics(&self, _repo_dir: &Path) -> Result<serde_json::Value, String> {
             self.payload()
         }
     }

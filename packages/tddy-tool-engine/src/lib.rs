@@ -220,6 +220,7 @@ pub async fn execute_tool_with_env(
         "LspDiagnostics" | "LspDefinition" | "LspReferences" | "LspHover" | "LspSymbols" => {
             tool_lsp(worktree_root, tool_name, &args).await
         }
+        "ReadLints" => tool_read_lints(worktree_root).await,
         _ => {
             // Sync tool — run inline, then register as a terminal task for observability.
             let mut outcome = match tool_name {
@@ -229,7 +230,6 @@ pub async fn execute_tool_with_env(
                 "Delete" => tool_delete(worktree_root, &args),
                 "Grep" => tool_grep(worktree_root, &args).await,
                 "Glob" => tool_glob(worktree_root, &args),
-                "ReadLints" => tool_read_lints(),
                 "SemanticSearch" => tool_semantic_search(worktree_root, &args).await,
                 other => ToolOutcome::err(format!("unknown tool: {other}")),
             };
@@ -617,7 +617,21 @@ async fn tool_await(args: &serde_json::Value, registry: &TaskRegistry) -> ToolOu
     }
 }
 
-fn tool_read_lints() -> ToolOutcome {
+/// Workspace-level diagnostics. Routes to the registered language-server executor when one
+/// is available for the repo (`{"lints":[…]}`); otherwise returns the no-linter stub.
+async fn tool_read_lints(worktree_root: &Path) -> ToolOutcome {
+    if let Some(executor) = tddy_core::toolcall::lsp::lsp_executor() {
+        if executor.is_available(worktree_root) {
+            let root = worktree_root.to_path_buf();
+            let result =
+                tokio::task::spawn_blocking(move || executor.workspace_diagnostics(&root)).await;
+            return match result {
+                Ok(Ok(value)) => ToolOutcome::ok(value.to_string()),
+                Ok(Err(e)) => ToolOutcome::err(format!("ReadLints: {e}")),
+                Err(e) => ToolOutcome::err(format!("ReadLints: {e}")),
+            };
+        }
+    }
     ToolOutcome::ok(
         serde_json::json!({
             "lints": [],

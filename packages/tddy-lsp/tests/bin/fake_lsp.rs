@@ -60,6 +60,7 @@ fn handle_message(message: &Value, hang: bool) {
         "textDocument/hover" => reply(id, hover_result()),
         "textDocument/documentSymbol" => reply(id, document_symbol_result()),
         "textDocument/diagnostic" => reply(id, pull_diagnostic_result()),
+        "workspace/diagnostic" => reply(id, workspace_diagnostic_result()),
         "shutdown" => {
             if !hang {
                 reply(id, Value::Null);
@@ -146,6 +147,17 @@ fn one_diagnostic() -> Value {
 
 fn pull_diagnostic_result() -> Value {
     json!({ "kind": "full", "items": [one_diagnostic()] })
+}
+
+fn workspace_diagnostic_result() -> Value {
+    json!({
+        "items": [{
+            "kind": "full",
+            "uri": FAKE_LIB_URI,
+            "version": null,
+            "items": [one_diagnostic()],
+        }]
+    })
 }
 
 fn publish_diagnostics_notification(uri: &str) -> Value {

@@ -185,6 +185,34 @@ async fn surfaces_a_published_diagnostic_after_opening_a_document() {
 }
 
 #[tokio::test]
+async fn returns_workspace_diagnostics_grouped_by_document() {
+    // Given a bound Rust workspace
+    let registry = registry();
+    let service = bound_service(&registry).await;
+
+    // When we pull workspace-wide diagnostics
+    let groups = service
+        .client
+        .workspace_diagnostics()
+        .await
+        .expect("workspace diagnostics");
+
+    // Then the server's report is returned, grouped by document uri
+    assert_eq!(
+        groups,
+        vec![(
+            LIB_URI.to_string(),
+            vec![Diagnostic {
+                range: range(5, 4, 5, 9),
+                severity: 1,
+                message: "unused variable: `x`".to_string(),
+                source: Some("rustc".to_string()),
+            }],
+        )]
+    );
+}
+
+#[tokio::test]
 async fn correlates_concurrent_requests_by_id() {
     // Given a bound Rust workspace
     let registry = registry();

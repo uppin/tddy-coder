@@ -62,6 +62,19 @@ impl TddyLspExecutor {
         language_for_target_type(type_name)
     }
 
+    /// The first allowed language found among the repo's build targets, if any. Backs both
+    /// `is_available` and workspace-level diagnostics.
+    fn first_available_language(&self, repo_dir: &Path) -> Option<Language> {
+        let list = build_list_json(repo_dir, &BuildListQuery::default()).ok()?;
+        let targets = list.get("targets")?.as_array()?;
+        targets.iter().find_map(|t| {
+            t.get("type")
+                .and_then(Value::as_str)
+                .and_then(language_for_target_type)
+                .filter(|lang| self.allow.is_allowed(*lang))
+        })
+    }
+
     /// Resolve a target to its language + reuse key, rejecting disallowed languages.
     fn resolve(&self, repo_dir: &Path, target: &str) -> Result<(Language, LspKey), String> {
         let language = self
@@ -109,19 +122,7 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 
 impl LspExecutor for TddyLspExecutor {
     fn is_available(&self, repo_dir: &Path) -> bool {
-        let Ok(list) = build_list_json(repo_dir, &BuildListQuery::default()) else {
-            return false;
-        };
-        let Some(targets) = list.get("targets").and_then(Value::as_array) else {
-            return false;
-        };
-        targets.iter().any(|t| {
-            t.get("type")
-                .and_then(Value::as_str)
-                .and_then(language_for_target_type)
-                .map(|lang| self.allow.is_allowed(lang))
-                .unwrap_or(false)
-        })
+        self.first_available_language(repo_dir).is_some()
     }
 
     fn diagnostics(&self, repo_dir: &Path, query: &LspQuery) -> Result<Value, String> {
@@ -186,6 +187,33 @@ impl LspExecutor for TddyLspExecutor {
             Ok(json!({ "symbols": symbols.iter().map(symbol_json).collect::<Vec<_>>() }))
         })
     }
+
+    fn workspace_diagnostics(&self, repo_dir: &Path) -> Result<Value, String> {
+        let language = self
+            .first_available_language(repo_dir)
+            .ok_or_else(|| "no language server available for this workspace".to_string())?;
+        let key = LspKey {
+            root: workspace_root_for(repo_dir),
+            language,
+        };
+        block_on(async {
+            let service = self
+                .registry
+                .get_or_spawn(key)
+                .await
+                .map_err(|e| e.to_string())?;
+            let groups = service
+                .client
+                .workspace_diagnostics()
+                .await
+                .map_err(|e| e.to_string())?;
+            let lints: Vec<Value> = groups
+                .iter()
+                .flat_map(|(uri, diags)| diags.iter().map(move |d| lint_json(uri, d)))
+                .collect();
+            Ok(json!({ "lints": lints }))
+        })
+    }
 }
 
 fn position(query: &LspQuery) -> Position {
@@ -209,6 +237,17 @@ fn location_json(l: &Location) -> Value {
 
 fn diagnostic_json(d: &Diagnostic) -> Value {
     json!({
+        "range": range_json(&d.range),
+        "severity": d.severity,
+        "message": d.message,
+        "source": d.source,
+    })
+}
+
+/// A diagnostic tagged with its document uri, for the workspace-level `lints` array.
+fn lint_json(uri: &str, d: &Diagnostic) -> Value {
+    json!({
+        "uri": uri,
         "range": range_json(&d.range),
         "severity": d.severity,
         "message": d.message,

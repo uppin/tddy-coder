@@ -142,9 +142,8 @@ locations/diagnostics (fixed fake values), and the exact set of MCP tool names.
       wins.
 - [x] The five `Lsp*` MCP tools are absent without the gate and present with it; names
       are language-agnostic.
-- [ ] `ReadLints` routes to LSP diagnostics when available. *Deferred:* `ReadLints` is
-      workspace/arg-less while LSP diagnostics are per-file — the dedicated file-level
-      `LspDiagnostics` tool supersedes it; a workspace-pull backing is a follow-up.
+- [x] `ReadLints` routes to workspace-level LSP diagnostics (`workspace/diagnostic` pull)
+      when a language server is available, else the existing no-linter stub.
 
 ## Future Considerations (Not In Scope)
 
