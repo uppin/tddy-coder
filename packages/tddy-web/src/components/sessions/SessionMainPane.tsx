@@ -6,6 +6,7 @@ import type { TokenService } from "../../gen/token_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { SessionInspectorDrawer } from "./SessionInspectorDrawer";
+import { AgentActivityOverlay } from "./AgentActivityOverlay";
 import { Button } from "../ui/button";
 import { CreateSessionPane } from "./CreateSessionPane";
 import { SessionRuntime } from "./SessionRuntime";
@@ -138,7 +139,13 @@ export function SessionMainPane({
         <>
           {/* Inspector toggle button — always visible when a session is selected */}
           {selectedSession && (
-            <div className="flex justify-end px-2 py-1 border-b border-border flex-shrink-0">
+            <div className="flex items-center justify-end gap-1 px-2 py-1 border-b border-border flex-shrink-0">
+              <AgentActivityOverlay
+                sessionId={selectedSession.sessionId}
+                sessionToken={sessionToken}
+                sessionType={selectedSession.sessionType}
+                client={buildSessionClient?.() ?? client}
+              />
               <Button
                 data-testid="sessions-inspector-toggle"
                 variant="ghost"

@@ -180,6 +180,9 @@ pub fn event_to_server_message(event: PresenterEvent) -> ServerMessage {
                     .collect(),
             })),
         },
+        // Agent activity is delivered over the dedicated `StreamSessionActivity` stream, not the
+        // workflow-view `ServerMessage` protocol; there is no corresponding `Event`.
+        PresenterEvent::AgentActivity(_) => ServerMessage { event: None },
     }
 }
 

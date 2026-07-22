@@ -312,6 +312,26 @@ export const TEST_IDS = {
   agentChatQuestionOtherSubmit: "agent-chat-question-other-submit",
   agentChatMultiSelectSubmit: "agent-chat-multiselect-submit",
 
+  // Agent Activity pane (per-session, top-bar overlay of the agent's own tool calls)
+  /** Top-bar icon button — rendered only when the session has ≥1 tool-call record. */
+  agentActivityButton: "agent-activity-button",
+  /** Unread-activity badge on the icon — shown while `unreadCount > 0`. */
+  agentActivityUnreadBadge: "agent-activity-unread-badge",
+  /** The in-pane overlay listing one-line records. */
+  agentActivityOverlay: "agent-activity-overlay",
+  /** Close control on the overlay. */
+  agentActivityOverlayClose: "agent-activity-overlay-close",
+  /** The scrollable record list inside the overlay. */
+  agentActivityList: "agent-activity-list",
+  /** Full-input/output detail dialog. */
+  agentActivityDetailDialog: "agent-activity-detail-dialog",
+  /** Full tool input (`input_json`) inside the detail dialog. */
+  agentActivityDetailInput: "agent-activity-detail-input",
+  /** Full tool output (`result_json`) inside the detail dialog. */
+  agentActivityDetailOutput: "agent-activity-detail-output",
+  /** Close control on the detail dialog. */
+  agentActivityDetailClose: "agent-activity-detail-close",
+
   // PR-Stack Chat Screen — manually adding a planned PR (deterministic, non-chat path)
   prStackAddPlannedPrBtn: "pr-stack-add-planned-pr-btn",
   prStackAddPlannedPrForm: "pr-stack-add-planned-pr-form",
@@ -612,6 +632,9 @@ export const agentChatOption = (index: number) => `agent-chat-option-${index}`;
 
 /** `[data-testid="agent-chat-multiselect-option-<index>"]` — a multi-select option checkbox (reusable AgentChat) */
 export const agentChatMultiSelectOption = (index: number) => `agent-chat-multiselect-option-${index}`;
+
+/** `[data-testid="agent-activity-row-<callId>"]` — one one-line record row in the activity overlay */
+export const agentActivityRow = (callId: string) => `agent-activity-row-${callId}`;
 
 /** `[data-testid="pr-stack-add-planned-pr-ancestor-<nodeId>"]` — an ancestor checkbox in the "New planned PR" form */
 export const prStackAddPlannedPrAncestorCheckbox = (nodeId: string) =>

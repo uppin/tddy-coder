@@ -56,11 +56,13 @@ use crate::user_sessions_path::{
 use crate::workspace_session;
 use crate::worktrees::{self, RemoveWorktreeError, WorktreeStatsCache};
 use tddy_service::proto::connection::{
-    DemoVmState, ExecuteToolRequest, ExecuteToolResponse, GetDemoVmStatusRequest,
-    GetDemoVmStatusResponse, GetHostCpuStatsRequest, GetHostCpuStatsResponse,
-    GetHostDiskStatsRequest, GetHostDiskStatsResponse, ListExecToolsRequest, ListExecToolsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse, StartDemoVmRequest,
-    StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, ToolCallInfo as ProtoToolCallInfo,
+    AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState, ExecuteToolRequest,
+    ExecuteToolResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse, GetHostCpuStatsRequest,
+    GetHostCpuStatsResponse, GetHostDiskStatsRequest, GetHostDiskStatsResponse,
+    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
+    ListSessionToolCallsResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
+    StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
+    StreamSessionActivityRequest, ToolCallInfo as ProtoToolCallInfo,
 };
 use tddy_task::TaskRegistry;
 
@@ -276,6 +278,159 @@ async fn relay_control_events(
     }
 }
 
+/// Stream adapter backed by an mpsc channel for [`ProtoAgentActivityRecord`] server-streaming.
+pub struct MpscAgentActivityStream {
+    rx: tokio::sync::mpsc::UnboundedReceiver<ProtoAgentActivityRecord>,
+}
+
+impl Stream for MpscAgentActivityStream {
+    type Item = Result<ProtoAgentActivityRecord, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.rx.poll_recv(cx) {
+            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+impl Unpin for MpscAgentActivityStream {}
+
+/// Milliseconds since the Unix epoch, for agent-activity timestamps.
+pub(crate) fn now_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+/// Map a durable [`tddy_core::agent_activity::AgentActivityRecord`] onto its wire form.
+fn to_proto_agent_activity(
+    record: tddy_core::agent_activity::AgentActivityRecord,
+) -> ProtoAgentActivityRecord {
+    ProtoAgentActivityRecord {
+        call_id: record.call_id,
+        tool_name: record.tool_name,
+        input_json: record.input_json,
+        status: record.status,
+        result_json: record.result_json,
+        error_message: record.error_message,
+        started_unix_ms: record.started_unix_ms,
+        completed_unix_ms: record.completed_unix_ms,
+        source: record.source,
+    }
+}
+
+/// Live pub/sub hub for **agent activity** records, plus the per-session pending-call stack that
+/// pairs a claude-cli `PreToolUse` (running) hook with its matching `PostToolUse` (terminal) hook.
+///
+/// Modeled on the per-session terminal-control broadcast ([`CliSessionManager::subscribe_control`]
+/// / [`relay_control_events`]): [`subscribe`](AgentActivityHub::subscribe) hands out a
+/// `broadcast::Receiver` for a session (creating the sender lazily) and
+/// [`publish`](AgentActivityHub::publish) fans a record out to every current subscriber. The
+/// durable `agent-activity.jsonl` log remains the source of truth — the hub only accelerates live
+/// delivery, so publishing with no subscribers is a no-op.
+#[derive(Default)]
+pub struct AgentActivityHub {
+    /// Per-session live broadcast; the sender is created lazily on first subscribe or publish.
+    senders: StdMutex<
+        std::collections::HashMap<
+            String,
+            tokio::sync::broadcast::Sender<tddy_core::agent_activity::AgentActivityRecord>,
+        >,
+    >,
+    /// Per-session stack of in-flight `call_id`s awaiting their terminal (PostToolUse) row.
+    pending: StdMutex<std::collections::HashMap<String, Vec<String>>>,
+}
+
+impl AgentActivityHub {
+    /// Broadcast capacity per session. Sized so a burst of tool calls between a slow subscriber's
+    /// polls rarely forces a `Lagged`; the relay tolerates `Lagged` regardless.
+    const CHANNEL_CAPACITY: usize = 256;
+
+    /// Subscribe to live records for `session_id`, creating the broadcast channel if absent.
+    pub fn subscribe(
+        &self,
+        session_id: &str,
+    ) -> tokio::sync::broadcast::Receiver<tddy_core::agent_activity::AgentActivityRecord> {
+        let mut senders = self
+            .senders
+            .lock()
+            .expect("agent activity hub mutex poisoned");
+        let sender = senders
+            .entry(session_id.to_string())
+            .or_insert_with(|| tokio::sync::broadcast::channel(Self::CHANNEL_CAPACITY).0);
+        sender.subscribe()
+    }
+
+    /// Publish a record to all live subscribers of `session_id`. A no-op when none are attached.
+    pub fn publish(
+        &self,
+        session_id: &str,
+        record: tddy_core::agent_activity::AgentActivityRecord,
+    ) {
+        let sender = {
+            let senders = self
+                .senders
+                .lock()
+                .expect("agent activity hub mutex poisoned");
+            senders.get(session_id).cloned()
+        };
+        if let Some(sender) = sender {
+            // Err = no live receivers; the durable log still holds the record, so ignore it.
+            let _ = sender.send(record);
+        }
+    }
+
+    /// Push an in-flight `call_id` onto the session's pending stack (a `PreToolUse` started a call).
+    pub fn push_pending(&self, session_id: &str, call_id: &str) {
+        let mut pending = self
+            .pending
+            .lock()
+            .expect("agent activity hub mutex poisoned");
+        pending
+            .entry(session_id.to_string())
+            .or_default()
+            .push(call_id.to_string());
+    }
+
+    /// Pop the most-recent in-flight `call_id` for the session (its `PostToolUse` arrived). Returns
+    /// `None` when no `PreToolUse` is outstanding, so the caller mints a fresh id instead.
+    pub fn pop_pending(&self, session_id: &str) -> Option<String> {
+        let mut pending = self
+            .pending
+            .lock()
+            .expect("agent activity hub mutex poisoned");
+        pending.get_mut(session_id).and_then(|stack| stack.pop())
+    }
+}
+
+/// Relay task for `StreamSessionActivity`: forwards live agent-activity records for one session
+/// (the broadcast is already session-scoped) from the hub into `tx` until the client disconnects.
+async fn relay_agent_activity(
+    mut broadcast_rx: tokio::sync::broadcast::Receiver<
+        tddy_core::agent_activity::AgentActivityRecord,
+    >,
+    tx: tokio::sync::mpsc::UnboundedSender<ProtoAgentActivityRecord>,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+    loop {
+        match broadcast_rx.recv().await {
+            Ok(record) => {
+                if tx.send(to_proto_agent_activity(record)).is_err() {
+                    break;
+                }
+            }
+            Err(RecvError::Lagged(_)) => {}
+            Err(RecvError::Closed) => break,
+        }
+    }
+}
+
 /// Per-session QEMU demo VM lifecycle state.
 enum DemoVmHandle {
     /// Boot has been requested; waiting for SSH port to become reachable.
@@ -319,6 +474,10 @@ pub struct ConnectionServiceImpl {
     /// session_id. Hosts [`crate::host_session_service::HostSessionService`] so the coder can relay
     /// `spawn_conversation` back to the daemon over the pipe. Kept alive for the session's lifetime.
     session_stdio: Arc<tokio::sync::Mutex<std::collections::HashMap<String, SessionStdioEndpoint>>>,
+    /// Live pub/sub hub for agent-activity records (StreamSessionActivity) plus the PreToolUse /
+    /// PostToolUse pending-call pairing state. Shared with the sandbox tool handler so both the
+    /// hook path and the in-jail tool path publish through the same channel.
+    agent_activity_hub: Arc<AgentActivityHub>,
 }
 
 /// A live reverse stdio endpoint to one spawned tddy-coder session. Holding it keeps the pipe's
@@ -387,7 +546,14 @@ impl ConnectionServiceImpl {
             host_stats,
             demo_vm_state,
             session_stdio,
+            agent_activity_hub: Arc::new(AgentActivityHub::default()),
         }
+    }
+
+    /// Shared agent-activity hub, so the sandbox tool path can publish through the same channel the
+    /// `StreamSessionActivity` subscribers read.
+    pub fn agent_activity_hub(&self) -> Arc<AgentActivityHub> {
+        Arc::clone(&self.agent_activity_hub)
     }
 
     /// Return the shared `TaskRegistry` so `main.rs` can pass it to other services.
@@ -1597,6 +1763,8 @@ impl ConnectionServiceImpl {
             Arc::clone(&capture),
             stdin_rx,
             Arc::new(session_env),
+            session_dir.clone(),
+            self.agent_activity_hub(),
         )
         .await
         .map_err(Status::internal)?;
@@ -1969,6 +2137,8 @@ impl ConnectionServiceImpl {
             Arc::clone(&capture),
             stdin_rx,
             Arc::new(session_env),
+            session_dir.clone(),
+            self.agent_activity_hub(),
         )
         .await
         .map_err(Status::internal)?;
@@ -2421,6 +2591,8 @@ impl ConnectionServiceImpl {
             Arc::clone(&capture),
             stdin_rx,
             Arc::new(session_env),
+            session_dir.to_path_buf(),
+            self.agent_activity_hub(),
         )
         .await
         .map_err(|e| {
@@ -5128,6 +5300,99 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(ReportSessionStatusResponse { ok: true }))
     }
 
+    async fn report_agent_activity(
+        &self,
+        request: Request<ReportAgentActivityRequest>,
+    ) -> Result<Response<ReportAgentActivityResponse>, Status> {
+        let req = request.into_inner();
+
+        // Validate session_id segment to prevent path traversal.
+        tddy_core::validate_session_id_segment(&req.session_id)
+            .map_err(|_| Status::invalid_argument("invalid session_id"))?;
+
+        // Resolve sessions_base from os_user (no web session token available for hooks).
+        let sessions_base = crate::user_sessions_path::sessions_base_for_user(
+            &req.os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::not_found("unknown os_user or sessions_base not found"))?;
+
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+
+        // Read session metadata — not found if the directory/yaml doesn't exist.
+        let meta = tddy_core::read_session_metadata(&session_dir)
+            .map_err(|_| Status::not_found("session not found"))?;
+
+        // Validate hook_token (local-process comparison; the token is a per-session secret).
+        let stored_token = meta.hook_token.as_deref().unwrap_or("");
+        if stored_token != req.hook_token {
+            return Err(Status::permission_denied("invalid hook_token"));
+        }
+
+        let record = match req.event.as_str() {
+            "PreToolUse" => {
+                // A tool call started: mint a call_id, remember it so the paired PostToolUse can
+                // reuse it, and append the `running` row.
+                let call_id = Uuid::new_v4().to_string();
+                self.agent_activity_hub
+                    .push_pending(&req.session_id, &call_id);
+                tddy_core::agent_activity::AgentActivityRecord {
+                    call_id,
+                    tool_name: req.tool_name,
+                    input_json: req.input_json,
+                    status: tddy_core::agent_activity::STATUS_RUNNING.to_string(),
+                    result_json: String::new(),
+                    error_message: String::new(),
+                    started_unix_ms: now_unix_ms(),
+                    completed_unix_ms: 0,
+                    source: "claude-cli".to_string(),
+                }
+            }
+            "PostToolUse" => {
+                // The tool call finished: pair with the most-recent pending call_id (fresh id when
+                // none is outstanding, e.g. a hook restart), and append the terminal row.
+                let call_id = self
+                    .agent_activity_hub
+                    .pop_pending(&req.session_id)
+                    .unwrap_or_else(|| Uuid::new_v4().to_string());
+                let status = if req.is_error {
+                    tddy_core::agent_activity::STATUS_ERROR
+                } else {
+                    tddy_core::agent_activity::STATUS_COMPLETED
+                };
+                tddy_core::agent_activity::AgentActivityRecord {
+                    call_id,
+                    tool_name: req.tool_name,
+                    input_json: req.input_json,
+                    status: status.to_string(),
+                    result_json: req.result_json,
+                    error_message: req.error_message,
+                    started_unix_ms: 0,
+                    completed_unix_ms: now_unix_ms(),
+                    source: "claude-cli".to_string(),
+                }
+            }
+            other => {
+                return Err(Status::invalid_argument(format!(
+                    "unknown event: {other} (expected PreToolUse or PostToolUse)"
+                )));
+            }
+        };
+
+        // The durable log is the source of truth; a write failure must not fail the hook call.
+        if let Err(e) = tddy_core::agent_activity::append_agent_activity(&session_dir, &record) {
+            log::warn!(
+                "agent_activity: failed to persist {} for session {}: {}",
+                req.event,
+                req.session_id,
+                e
+            );
+        }
+        self.agent_activity_hub.publish(&req.session_id, record);
+
+        Ok(Response::new(ReportAgentActivityResponse { ok: true }))
+    }
+
     async fn start_demo_vm(
         &self,
         request: Request<StartDemoVmRequest>,
@@ -5323,6 +5588,87 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             },
         };
         Ok(Response::new(resp))
+    }
+
+    // --- agent activity ---
+
+    type StreamSessionActivityStream = MpscAgentActivityStream;
+
+    /// Stream a session's agent activity: replay the persisted `agent-activity.jsonl` snapshot,
+    /// then relay live records published to the hub for this session.
+    async fn stream_session_activity(
+        &self,
+        request: Request<StreamSessionActivityRequest>,
+    ) -> Result<Response<Self::StreamSessionActivityStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        // Route BEFORE session lookup so a relay can forward. Server-streaming cannot reuse the
+        // unary `forward_to_peer` helper, so a request addressed to a remote daemon is rejected
+        // rather than silently served from the local (wrong) log.
+        // TODO(agent-activity): forward StreamSessionActivity to a peer daemon over LiveKit once a
+        // streaming forward primitive exists (forward_to_peer is unary-only today).
+        let requested_daemon = req.daemon_instance_id.trim();
+        if !requested_daemon.is_empty() {
+            let local_id = local_instance_id_for_config(&self.config);
+            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
+            let eligible_ids: Vec<String> = eligible_rows
+                .iter()
+                .map(|e| e.instance_id.0.clone())
+                .collect();
+            match crate::livekit_peer_discovery::classify_peer_route(
+                &local_id,
+                requested_daemon,
+                &eligible_ids,
+            ) {
+                Err(msg) => {
+                    log::info!("StreamSessionActivity: rejected daemon routing: {}", msg);
+                    return Err(Status::invalid_argument(msg));
+                }
+                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
+                    return Err(Status::unimplemented(format!(
+                        "StreamSessionActivity forwarding to remote daemon_instance_id={peer_instance_id} is not supported yet"
+                    )));
+                }
+                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
+                    // Fall through to local execution below.
+                }
+            }
+        }
+
+        // Authenticate caller (same path as list_session_tool_calls).
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<ProtoAgentActivityRecord>();
+
+        // Snapshot first, then live: replay the coalesced on-disk records, then relay everything
+        // subsequently published to the hub for this session.
+        let snapshot =
+            tddy_core::agent_activity::read_agent_activity(&session_dir).unwrap_or_default();
+        for record in snapshot {
+            if tx.send(to_proto_agent_activity(record)).is_err() {
+                // Receiver already gone — return an empty live stream that terminates immediately.
+                return Ok(Response::new(MpscAgentActivityStream { rx }));
+            }
+        }
+
+        let broadcast_rx = self.agent_activity_hub.subscribe(&req.session_id);
+        tokio::spawn(relay_agent_activity(broadcast_rx, tx));
+
+        Ok(Response::new(MpscAgentActivityStream { rx }))
     }
 
     // --- terminal control mutex ---
@@ -6265,6 +6611,314 @@ mod report_session_status_unit_tests {
         });
         let err = service.report_session_status(request).await.unwrap_err();
         assert_eq!(err.code, tddy_rpc::Code::InvalidArgument);
+    }
+}
+
+#[cfg(test)]
+mod agent_activity_unit_tests {
+    use super::*;
+    use futures_util::StreamExt;
+    use std::time::Duration;
+    use tddy_core::agent_activity::{
+        read_agent_activity, AgentActivityRecord, STATUS_COMPLETED, STATUS_RUNNING,
+    };
+    use tddy_core::session_lifecycle::unified_session_dir_path;
+    use tddy_core::SessionMetadata;
+
+    const TEST_HOOK_TOKEN: &str = "tok-activity-hook-xyz789";
+    const TEST_OS_USER: &str = "u";
+
+    fn make_unit_config() -> crate::config::DaemonConfig {
+        let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        crate::config::DaemonConfig::load(&path).unwrap()
+    }
+
+    fn make_unit_service(sessions_base: std::path::PathBuf) -> ConnectionServiceImpl {
+        let config = make_unit_config();
+        let base = sessions_base.clone();
+        let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
+        let user_resolver: SessionUserResolver =
+            Arc::new(|token| (token == "valid").then(|| "u".to_string()));
+        ConnectionServiceImpl::new(
+            config,
+            sessions_base_resolver,
+            sessions_base,
+            user_resolver,
+            None,
+            None,
+            None,
+            Arc::new(CliSessionManager::new()),
+        )
+    }
+
+    fn write_claude_cli_session(session_dir: &std::path::Path, hook_token: &str) {
+        let session_id = session_dir
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let metadata = SessionMetadata {
+            session_id,
+            project_id: "proj-activity-unit".to_string(),
+            created_at: "2026-06-13T10:00:00Z".to_string(),
+            updated_at: "2026-06-13T10:00:00Z".to_string(),
+            status: "active".to_string(),
+            repo_path: Some("/tmp/worktrees/activity-test".to_string()),
+            pid: None,
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("claude-cli".to_string()),
+            model: Some("claude-sonnet-4-6".to_string()),
+            activity_status: None,
+            hook_token: Some(hook_token.to_string()),
+            sandbox: None,
+            agent: None,
+            recipe: None,
+            specialized_agents: Vec::new(),
+        };
+        tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
+    }
+
+    fn a_pre_tool_use(
+        session_id: &str,
+        tool_name: &str,
+        input_json: &str,
+    ) -> ReportAgentActivityRequest {
+        ReportAgentActivityRequest {
+            session_id: session_id.to_string(),
+            hook_token: TEST_HOOK_TOKEN.to_string(),
+            os_user: TEST_OS_USER.to_string(),
+            event: "PreToolUse".to_string(),
+            tool_name: tool_name.to_string(),
+            input_json: input_json.to_string(),
+            result_json: String::new(),
+            is_error: false,
+            error_message: String::new(),
+        }
+    }
+
+    fn a_post_tool_use(
+        session_id: &str,
+        tool_name: &str,
+        result_json: &str,
+    ) -> ReportAgentActivityRequest {
+        ReportAgentActivityRequest {
+            session_id: session_id.to_string(),
+            hook_token: TEST_HOOK_TOKEN.to_string(),
+            os_user: TEST_OS_USER.to_string(),
+            event: "PostToolUse".to_string(),
+            tool_name: tool_name.to_string(),
+            input_json: String::new(),
+            result_json: result_json.to_string(),
+            is_error: false,
+            error_message: String::new(),
+        }
+    }
+
+    fn a_seeded_record(call_id: &str, tool_name: &str) -> AgentActivityRecord {
+        AgentActivityRecord {
+            call_id: call_id.to_string(),
+            tool_name: tool_name.to_string(),
+            input_json: r#"{"path":"src/main.rs"}"#.to_string(),
+            status: STATUS_COMPLETED.to_string(),
+            result_json: r#"{"content":"fn main() {}"}"#.to_string(),
+            error_message: String::new(),
+            started_unix_ms: 1_700_000_000_000,
+            completed_unix_ms: 1_700_000_000_500,
+            source: "claude-cli".to_string(),
+        }
+    }
+
+    /// A PreToolUse then PostToolUse pair for one call appends a `running` then a terminal row that
+    /// coalesce (by shared call_id) into a single completed record in `agent-activity.jsonl`.
+    #[tokio::test]
+    async fn report_pre_then_post_tool_use_coalesces_into_one_completed_call() {
+        // Given a registered claude-cli session with a valid hook_token.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "activity-pair-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN);
+        let service = make_unit_service(sessions_base);
+
+        // When the hook reports PreToolUse (Bash starts) then PostToolUse (Bash finished).
+        service
+            .report_agent_activity(Request::new(a_pre_tool_use(
+                session_id,
+                "Bash",
+                r#"{"command":"cargo test"}"#,
+            )))
+            .await
+            .unwrap();
+        service
+            .report_agent_activity(Request::new(a_post_tool_use(
+                session_id,
+                "Bash",
+                r#"{"stdout":"ok","exit_code":0}"#,
+            )))
+            .await
+            .unwrap();
+
+        // Then the two rows coalesce into one completed call carrying the terminal state.
+        let records = read_agent_activity(&session_dir).unwrap();
+        assert_eq!(records.len(), 1, "the pair must coalesce into one call");
+        assert_eq!(records[0].tool_name, "Bash");
+        assert_eq!(records[0].status, STATUS_COMPLETED);
+        assert_eq!(records[0].result_json, r#"{"stdout":"ok","exit_code":0}"#);
+        assert_eq!(records[0].source, "claude-cli");
+    }
+
+    /// A PreToolUse alone appends a single `running` row (no terminal row yet).
+    #[tokio::test]
+    async fn report_pre_tool_use_alone_appends_a_running_row() {
+        // Given a registered claude-cli session.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "activity-running-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN);
+        let service = make_unit_service(sessions_base);
+
+        // When only a PreToolUse is reported.
+        service
+            .report_agent_activity(Request::new(a_pre_tool_use(
+                session_id,
+                "Read",
+                r#"{"path":"README.md"}"#,
+            )))
+            .await
+            .unwrap();
+
+        // Then the single recorded call is still running.
+        let records = read_agent_activity(&session_dir).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].tool_name, "Read");
+        assert_eq!(records[0].status, STATUS_RUNNING);
+        assert_eq!(records[0].completed_unix_ms, 0);
+    }
+
+    /// A wrong hook_token is rejected before any activity is written.
+    #[tokio::test]
+    async fn report_agent_activity_rejects_bad_hook_token() {
+        // Given a registered claude-cli session.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "activity-bad-token-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN);
+        let service = make_unit_service(sessions_base);
+
+        // When the hook presents the wrong token.
+        let mut req = a_pre_tool_use(session_id, "Bash", "{}");
+        req.hook_token = "wrong-token".to_string();
+        let err = service
+            .report_agent_activity(Request::new(req))
+            .await
+            .unwrap_err();
+
+        // Then it is denied and nothing is written.
+        assert_eq!(err.code, tddy_rpc::Code::PermissionDenied);
+        assert!(read_agent_activity(&session_dir).unwrap().is_empty());
+    }
+
+    /// StreamSessionActivity replays the persisted snapshot rows, in first-seen order, on subscribe.
+    #[tokio::test]
+    async fn stream_session_activity_replays_the_persisted_snapshot() {
+        // Given a session with two pre-seeded agent-activity rows.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "activity-snapshot-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        tddy_core::agent_activity::append_agent_activity(
+            &session_dir,
+            &a_seeded_record("call-a", "Read"),
+        )
+        .unwrap();
+        tddy_core::agent_activity::append_agent_activity(
+            &session_dir,
+            &a_seeded_record("call-b", "Bash"),
+        )
+        .unwrap();
+        let service = make_unit_service(sessions_base);
+
+        // When a client subscribes to the activity stream.
+        let mut stream = service
+            .stream_session_activity(Request::new(StreamSessionActivityRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Then the two snapshot records arrive in first-seen order.
+        let first = next_record(&mut stream).await;
+        let second = next_record(&mut stream).await;
+        assert_eq!(first.call_id, "call-a");
+        assert_eq!(first.tool_name, "Read");
+        assert_eq!(second.call_id, "call-b");
+        assert_eq!(second.tool_name, "Bash");
+    }
+
+    /// After the snapshot, a record published to the hub for the session is delivered live.
+    #[tokio::test]
+    async fn stream_session_activity_delivers_a_live_record_after_the_snapshot() {
+        // Given a session with one pre-seeded row and a subscribed stream.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "activity-live-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        tddy_core::agent_activity::append_agent_activity(
+            &session_dir,
+            &a_seeded_record("call-snapshot", "Read"),
+        )
+        .unwrap();
+        let service = make_unit_service(sessions_base);
+        let hub = service.agent_activity_hub();
+
+        let mut stream = service
+            .stream_session_activity(Request::new(StreamSessionActivityRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Drain the snapshot record so the next awaited item is the live one.
+        let snapshot = next_record(&mut stream).await;
+        assert_eq!(snapshot.call_id, "call-snapshot");
+
+        // When a fresh record is published live for this session.
+        hub.publish(session_id, a_seeded_record("call-live", "Grep"));
+
+        // Then the subscriber receives it.
+        let live = next_record(&mut stream).await;
+        assert_eq!(live.call_id, "call-live");
+        assert_eq!(live.tool_name, "Grep");
+    }
+
+    /// Await the next stream item with a bounded timeout so a missing record fails loudly instead
+    /// of hanging the test.
+    async fn next_record(stream: &mut super::MpscAgentActivityStream) -> ProtoAgentActivityRecord {
+        tokio::time::timeout(Duration::from_secs(1), stream.next())
+            .await
+            .expect("no agent-activity record arrived within the timeout")
+            .expect("activity stream closed unexpectedly")
+            .expect("activity stream yielded an error")
     }
 }
 

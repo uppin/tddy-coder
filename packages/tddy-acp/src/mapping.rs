@@ -144,6 +144,8 @@ mod tests {
         let event = ProgressEvent::ToolUse {
             name: "Read".into(),
             detail: None,
+            input_json: None,
+            call_id: None,
         };
 
         // When

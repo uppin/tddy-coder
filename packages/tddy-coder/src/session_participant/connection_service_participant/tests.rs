@@ -44,10 +44,12 @@ fn a_service(tool_calls_path: &std::path::Path) -> SessionConnectionService {
             input_schema_json: r#"{"type":"object"}"#.to_string(),
         }],
         executor: std::sync::Arc::new(FakeExecutor),
-        worktree,
+        worktree: worktree.clone(),
         terminal_manager: std::sync::Arc::new(
             crate::session_participant::terminal_manager::TerminalManager::new(),
         ),
+        agent_activity_dir: worktree,
+        presenter_events: None,
     }
 }
 

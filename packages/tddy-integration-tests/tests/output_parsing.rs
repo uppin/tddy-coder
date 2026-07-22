@@ -142,6 +142,7 @@ fn write_artifacts_rejects_empty_prd() {
         demo_plan: None,
         branch_suggestion: None,
         worktree_suggestion: None,
+        exploration: None,
     };
 
     // When / Then
@@ -171,6 +172,7 @@ fn write_artifacts_rejects_whitespace_only_prd() {
         demo_plan: None,
         branch_suggestion: None,
         worktree_suggestion: None,
+        exploration: None,
     };
 
     // When / Then
@@ -200,6 +202,7 @@ fn markdown_cross_references_added() {
         demo_plan: None,
         branch_suggestion: None,
         worktree_suggestion: None,
+        exploration: None,
     };
 
     // When

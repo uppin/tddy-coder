@@ -682,6 +682,8 @@ pub fn apply_event(
         }
         // The TUI does not render live token usage; the snapshot is for remote (Inspector) views.
         PresenterEvent::TokenUsageUpdated(_) => {}
+        // Agent-activity records are served over the web `StreamSessionActivity` stream, not the TUI.
+        PresenterEvent::AgentActivity(_) => {}
     }
 }
 

@@ -52,6 +52,10 @@ pub enum PresenterEvent {
     /// Current cumulative per-conversation token usage snapshot for the running session.
     /// Carries the full snapshot (not a delta) so a newly-connected view sees current totals.
     TokenUsageUpdated(Vec<crate::token_accounting::ConversationRecord>),
+    /// One state of an agent tool call (a `running` row or its terminal row), for the web
+    /// Agent Activity pane's live stream. Persisted to `agent-activity.jsonl` in parallel; this
+    /// event accelerates live delivery to the coder participant's `StreamSessionActivity`.
+    AgentActivity(crate::agent_activity::AgentActivityRecord),
 }
 
 /// Handle passed to gRPC service: broadcast sender for events, mpsc sender for intents.

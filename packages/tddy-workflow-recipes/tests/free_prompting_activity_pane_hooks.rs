@@ -48,6 +48,8 @@ fn free_prompting_hooks_wire_progress_sink_to_workflow_events() {
     sink.emit(&ProgressEvent::ToolUse {
         name: "GLOB".to_string(),
         detail: Some(r#"{"pattern":"src/**/*.rs"}"#.to_string()),
+        input_json: None,
+        call_id: None,
     });
 
     // Then
@@ -55,7 +57,7 @@ fn free_prompting_hooks_wire_progress_sink_to_workflow_events() {
         .recv_timeout(Duration::from_secs(2))
         .expect("sink emit must deliver WorkflowEvent::Progress to the presenter channel");
     match ev {
-        WorkflowEvent::Progress(ProgressEvent::ToolUse { name, detail }) => {
+        WorkflowEvent::Progress(ProgressEvent::ToolUse { name, detail, .. }) => {
             assert_eq!(name, "GLOB", "ToolUse event must name the dispatched tool");
             assert_eq!(
                 detail.as_deref(),

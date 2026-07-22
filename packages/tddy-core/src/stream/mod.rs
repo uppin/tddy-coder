@@ -16,6 +16,18 @@ pub enum ProgressEvent {
     ToolUse {
         name: String,
         detail: Option<String>,
+        /// Full tool input as a JSON string, when the parser has it (`None` otherwise). Carried
+        /// so a host can persist the agent's own tool calls (see `agent_activity`).
+        input_json: Option<String>,
+        /// The stream's tool-call id, when known. A later [`ProgressEvent::ToolResult`] carrying
+        /// the same id is the completion of this call.
+        call_id: Option<String>,
+    },
+    /// Result of a previously-emitted [`ProgressEvent::ToolUse`], correlated by `call_id`.
+    ToolResult {
+        call_id: String,
+        result_json: String,
+        is_error: bool,
     },
     /// Sub-agent task started.
     TaskStarted { description: String },
