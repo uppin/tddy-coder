@@ -5,6 +5,7 @@ import type { TokenService } from "../../gen/token_pb";
 import { GhosttyTerminalLiveKit } from "../GhosttyTerminalLiveKit";
 import { useLiveKitTerminalToken } from "./useLiveKitTerminalToken";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
+import type { LiveKitChromeStatus } from "../../lib/liveKitStatusPresentation";
 
 type TokenClient = Client<typeof TokenService>;
 
@@ -19,6 +20,13 @@ interface SessionLiveKitTerminalProps {
   mobileShortcuts?: ToolShortcutDef[];
   /** Fired once with the session's connected LiveKit `Room` (see `GhosttyTerminalLiveKit.onRoom`). */
   onRoom?: (room: Room) => void;
+  /** Called with a function that returns keyboard focus to this terminal (see
+   *  `GhosttyTerminalLiveKit.onRegisterFocus`). Lets the runtime re-focus the terminal when its
+   *  session is re-selected, without a click. */
+  onRegisterFocus?: (focus: () => void) => void;
+  /** Fired when the underlying LiveKit room's connection status changes (connecting → connected, or
+   *  → error). Lets the runtime cover the panes with a connection overlay until the room connects. */
+  onConnectionStatusChange?: (status: LiveKitChromeStatus) => void;
 }
 
 /**
@@ -36,6 +44,8 @@ export function SessionLiveKitTerminal({
   onDisconnect,
   mobileShortcuts,
   onRoom,
+  onRegisterFocus,
+  onConnectionStatusChange,
 }: SessionLiveKitTerminalProps) {
   const { token, ttlSeconds, getToken } = useLiveKitTerminalToken(tokenClient, livekitRoom, identity);
 
@@ -57,6 +67,8 @@ export function SessionLiveKitTerminal({
       onRemoteSessionEnded={onDisconnect}
       mobileShortcuts={mobileShortcuts}
       onRoom={onRoom}
+      onRegisterFocus={onRegisterFocus}
+      onConnectionStatusChange={onConnectionStatusChange}
     />
   );
 }

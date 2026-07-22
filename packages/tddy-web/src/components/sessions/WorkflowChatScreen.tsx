@@ -39,6 +39,7 @@ export function WorkflowChatScreen({
     >
       <AgentChat
         acp
+        resumeSessionId={session.sessionId}
         room={room}
         livekitServerIdentity={livekitServerIdentity}
         placeholder={`Message ${session.sessionId.slice(0, 8)}…`}
