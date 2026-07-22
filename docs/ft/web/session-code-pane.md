@@ -58,9 +58,13 @@ terminals), the Code pane is available to **all** session types.
 
 - Selecting a file loads its contents (read-only) and renders it in the preview region
   (`data-testid="worktree-file-preview"`).
-- Markdown (`.md`) renders as sanitized structured markup; YAML renders in a highlighted monospace
-  block; every other file renders as plain monospace text. (Reuses the rendering already in
-  `SessionFilesPanel` / `sessionWorkflowPreview.ts`.)
+- Markdown (`.md`) renders as sanitized structured markup (`renderSimpleMarkdown`). Every other file
+  is **syntax-highlighted** when its extension maps to a recognized language, and rendered as plain
+  monospace text otherwise (`data-testid="worktree-code-highlight"` wraps the highlighted block).
+- Highlighting is tokenized client-side with `react-syntax-highlighter` (`PrismLight`, registering
+  only the languages we ship). The language is derived from the file path (`codeLanguageForPath`);
+  an unrecognized or extensionless path falls back to plain monospace with no highlighting. The
+  Prism theme follows the app's light/dark mode.
 - Reads are size-capped; content beyond the cap is truncated (flagged in the response).
 
 ## Backend contract
@@ -94,3 +98,7 @@ outside the worktree root.
    never appear in the tree (enforced server-side).
 6. **Traversal rejected.** `rel_path` containing `..`, absolute paths, or paths resolving outside the
    worktree are rejected; an unlisted `worktree_path` is rejected.
+7. **Syntax highlighting.** Selecting a code file whose extension maps to a recognized language
+   (e.g. `.rs`, `.ts`, `.py`, `.json`, `.yaml`) renders it as tokenized, colored code in
+   `worktree-code-highlight`; a file with no recognized extension (e.g. `LICENSE`) renders as plain
+   monospace text with no highlight container. Highlighting never alters the file's text content.
