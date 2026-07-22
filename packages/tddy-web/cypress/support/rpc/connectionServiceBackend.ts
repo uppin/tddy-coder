@@ -31,8 +31,9 @@ import {
   ToolInfoSchema,
   ClaimTerminalControlResponseSchema,
   ExecuteToolResponseSchema,
-  GetHostCpuStatsResponseSchema,
-  GetHostDiskStatsResponseSchema,
+  HostStatsEventSchema,
+  HostCpuStatsSchema,
+  HostDiskStatsSchema,
   ListExecToolsResponseSchema,
   ListSessionToolCallsResponseSchema,
   ListTerminalSessionsResponseSchema,
@@ -154,10 +155,13 @@ export interface ConnectionServiceScenario {
   terminals?: Array<{ terminalId: string; kind?: string; pid?: number }>;
   /** The `terminal_id` handed out by the Nth (0-based) `StartTerminalSession`. Default `bash-<n+1>`. */
   newTerminalId?: (index: number) => string;
-  /** `GetHostCpuStats` response — per-logical-core utilization percentages (0..100). Default empty. */
+  /** First `StreamHostStats` event — per-logical-core utilization percentages (0..100). Default empty. */
   hostCpuPerCore?: number[];
-  /** `GetHostDiskStats` response — free/total bytes for the daemon's default project directory. */
+  /** Every `StreamHostStats` event — free/total bytes for the daemon's default project directory. */
   hostDisk?: { availableBytes: bigint; totalBytes: bigint; projectDir: string };
+  /** When set, `StreamHostStats` emits a second event carrying these per-core percentages after the
+   *  first — lets a test assert the footer applies fresh readings streamed by the server. */
+  hostCpuPerCoreUpdate?: number[];
 }
 
 export interface ConnectionServiceBackend extends InMemoryRpcBackend {
@@ -182,10 +186,9 @@ export interface ConnectionServiceBackend extends InMemoryRpcBackend {
   readonly sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[];
   /** Every `{ sessionId, terminalId }` an output stream was opened for, in call order. */
   readonly streamedTerminals: { sessionId: string; terminalId: string }[];
-  /** Number of `GetHostCpuStats` calls — lets tests assert the 5 s poll cadence. */
-  readonly hostCpuStatsCallCount: () => number;
-  /** Number of `GetHostDiskStats` calls — lets tests assert the 60 s poll cadence. */
-  readonly hostDiskStatsCallCount: () => number;
+  /** Number of times `StreamHostStats` was subscribed — lets a test assert the footer opens the
+   *  single host-stats stream exactly once. */
+  readonly hostStatsStreamCount: () => number;
 }
 
 // ---------------------------------------------------------------------------
@@ -209,8 +212,7 @@ export function aConnectionServiceBackend(
   const stoppedTerminals: { sessionId: string; terminalId: string }[] = [];
   const sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[] = [];
   const streamedTerminals: { sessionId: string; terminalId: string }[] = [];
-  let hostCpuCalls = 0;
-  let hostDiskCalls = 0;
+  let hostStatsStreamOpens = 0;
 
   // Live bash-terminal list — mutated by Start/Stop so ListTerminalSessions stays consistent.
   const liveTerminals: { terminalId: string; kind: string; pid: number }[] = (
@@ -372,20 +374,28 @@ export function aConnectionServiceBackend(
         });
         return {};
       },
-      // --- Host stats footer ---
-      getHostCpuStats: async () => {
-        hostCpuCalls += 1;
-        return create(GetHostCpuStatsResponseSchema, {
-          perCorePercent: scenario.hostCpuPerCore ?? [],
-        });
-      },
-      getHostDiskStats: async () => {
-        hostDiskCalls += 1;
-        return create(GetHostDiskStatsResponseSchema, {
+      // --- Host stats footer: single server-streaming RPC ---
+      // Emits one event carrying both CPU and disk immediately (the server's on-subscribe snapshot),
+      // optionally a second event with updated CPU, then stays open — a completed stream would look
+      // like the daemon dropping the feed.
+      streamHostStats: async function* () {
+        hostStatsStreamOpens += 1;
+        const disk = create(HostDiskStatsSchema, {
           availableBytes: scenario.hostDisk?.availableBytes ?? 0n,
           totalBytes: scenario.hostDisk?.totalBytes ?? 0n,
           projectDir: scenario.hostDisk?.projectDir ?? "",
         });
+        yield create(HostStatsEventSchema, {
+          cpu: create(HostCpuStatsSchema, { perCorePercent: scenario.hostCpuPerCore ?? [] }),
+          disk,
+        });
+        if (scenario.hostCpuPerCoreUpdate) {
+          yield create(HostStatsEventSchema, {
+            cpu: create(HostCpuStatsSchema, { perCorePercent: scenario.hostCpuPerCoreUpdate }),
+            disk,
+          });
+        }
+        await new Promise<never>(() => undefined);
       },
       // Server-streaming output — record the opened stream, emit one identifying frame, then stay
       // open (a terminal stream that *completes* would signal disconnect and evict the runtime).
@@ -409,8 +419,7 @@ export function aConnectionServiceBackend(
     stoppedTerminals,
     sentTerminalInput,
     streamedTerminals,
-    hostCpuStatsCallCount: () => hostCpuCalls,
-    hostDiskStatsCallCount: () => hostDiskCalls,
+    hostStatsStreamCount: () => hostStatsStreamOpens,
   });
 }
 

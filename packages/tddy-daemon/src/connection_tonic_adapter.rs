@@ -35,15 +35,13 @@ use tddy_service::proto::connection::{
     AgentActivityRecord, ClaimTerminalControlRequest, ClaimTerminalControlResponse,
     ConnectSessionRequest, ConnectSessionResponse, CreateProjectRequest, CreateProjectResponse,
     DeleteSessionRequest, DeleteSessionResponse, ExecuteToolRequest, ExecuteToolResponse,
-    GetDemoVmStatusRequest, GetDemoVmStatusResponse, GetHostCpuStatsRequest,
-    GetHostCpuStatsResponse, GetHostDiskStatsRequest, GetHostDiskStatsResponse,
-    ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse,
-    ListEligibleDaemonsRequest, ListEligibleDaemonsResponse, ListExecToolsRequest,
-    ListExecToolsResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
-    ListProjectsRequest, ListProjectsResponse, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse, ListSessionWorkflowFilesRequest,
-    ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
+    GetDemoVmStatusRequest, GetDemoVmStatusResponse, HostStatsEvent, ListAgentModelsRequest,
+    ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
+    ListEligibleDaemonsResponse, ListExecToolsRequest, ListExecToolsResponse,
+    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
+    ListProjectsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
+    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse,
@@ -55,8 +53,8 @@ use tddy_service::proto::connection::{
     SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse, StartSessionRequest,
     StartSessionResponse, StartTerminalSessionRequest, StartTerminalSessionResponse,
     StopDemoVmRequest, StopDemoVmResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    StreamSessionActivityRequest, StreamTerminalOutputRequest, TerminalControlEvent,
-    WatchTerminalControlRequest,
+    StreamHostStatsRequest, StreamSessionActivityRequest, StreamTerminalOutputRequest,
+    TerminalControlEvent, WatchTerminalControlRequest,
 };
 use tddy_service::tonic_connection::connection_service_server::ConnectionService as TonicConnectionService;
 
@@ -739,29 +737,23 @@ where
         }))
     }
 
-    async fn get_host_cpu_stats(
-        &self,
-        request: tonic::Request<GetHostCpuStatsRequest>,
-    ) -> Result<tonic::Response<GetHostCpuStatsResponse>, tonic::Status> {
-        let resp = RpcConnectionService::get_host_cpu_stats(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
-    }
+    /// Server streaming: host telemetry (immediate emit, then server-owned CPU/disk cadence).
+    type StreamHostStatsStream =
+        Pin<Box<dyn Stream<Item = Result<HostStatsEvent, tonic::Status>> + Send>>;
 
-    async fn get_host_disk_stats(
+    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    #[allow(clippy::result_large_err)]
+    async fn stream_host_stats(
         &self,
-        request: tonic::Request<GetHostDiskStatsRequest>,
-    ) -> Result<tonic::Response<GetHostDiskStatsResponse>, tonic::Status> {
-        let resp = RpcConnectionService::get_host_disk_stats(
+        request: tonic::Request<StreamHostStatsRequest>,
+    ) -> Result<tonic::Response<Self::StreamHostStatsStream>, tonic::Status> {
+        let resp = RpcConnectionService::stream_host_stats(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )
         .await
         .map_err(to_tonic_status)?;
-        Ok(tonic::Response::new(resp.into_inner()))
+        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
+        Ok(tonic::Response::new(Box::pin(outbound)))
     }
 }

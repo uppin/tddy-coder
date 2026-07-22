@@ -4,6 +4,9 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-22 — Streamed host stats
+
+- The Host Stats Footer's CPU and disk readouts are now fed by a **single server-streaming RPC** (`StreamHostStats`) instead of two client-polled unary RPCs. The **daemon owns the cadence**: it emits both readings immediately on subscribe, then refreshes CPU every 5 s and disk every 60 s, pushing an event carrying the latest CPU and disk each tick. The footer opens one subscription per selected daemon (no client-side polling); visible behavior is unchanged. The old `GetHostCpuStats`/`GetHostDiskStats` RPCs are removed. See [host-stats-footer.md](host-stats-footer.md).
 ## 2026-07-06 — Per-session model selection
 
 - The **Create session** form now lets the operator pick the backend **model** for **tool** (tddy-coder) sessions, not just claude-cli. The model list is fetched on demand for the selected agent via the new `ListAgentModels` RPC — enumerated straight from the agent command where possible (`cursor --list-models`, ACP `available_models`) and a curated tddy-core list for `claude`/`codex`. Changing the agent repopulates the options and resets to that backend's default; the chosen model is threaded to `tddy-coder --model` for the whole session. See [tool-session-model-selection.md](tool-session-model-selection.md).
