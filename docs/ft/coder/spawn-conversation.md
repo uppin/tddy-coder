@@ -150,6 +150,47 @@ session's runtime derives its child tabs by filtering the session list on
   parentId` renders as a tab; selecting it attaches the child session; a childless session shows only
   the Agent tab.
 
+## Runtime transport (daemon ↔ coder relay)
+
+The wiring above binds `spawn_conversation` into the daemon's **claude-cli** managed toolcall listener
+(`session_toolcall.rs`). But a grill-me session started from tddy-web actually runs as a **tddy-coder
+tool session** (`agent: cursor`) that serves its **own** toolcall socket (`start_toolcall_listener`,
+owned by the coder pid), so the agent's request finds no daemon-side handler and would return
+*"spawn_conversation is only available in a managed session."* The coder has no in-process channel to
+the daemon. Two execution contexts therefore resolve `spawn_conversation` differently:
+
+- **claude-cli managed sessions** — the daemon owns the toolcall socket, so the bound
+  `GrillMeConversationSpawnHandler` runs **in-process**.
+- **cursor / grill-me tool sessions** — the coder owns the socket and relays the verb to the daemon
+  over a **stdio reverse-RPC channel** (completed in commit `fe8ca30d`, see below).
+
+### stdio reverse-RPC channel (done — `fe8ca30d`)
+
+An auth-free JSON reverse-RPC channel connects the daemon (parent) to each spawned grill-me coder
+(child) over the OS stdio pipe, which is bound 1:1 to the child the daemon spawned — the orchestrator
+context is captured at spawn time, so no token or caller-identity check is needed.
+
+- **`tddy-core`**: `start_toolcall_listener_with_conversation_handler` (the 3-arg form delegates with
+  `None`); shared `HOST_SESSION_SERVICE` / `SPAWN_CONVERSATION_METHOD` consts
+  (`toolcall/{listener,mod.rs}`).
+- **`tddy-daemon`**: `HostSessionService` (`host_session_service.rs`) serves the JSON reverse RPC over
+  `tddy_stdio`, reusing `GrillMeConversationSpawnHandler`; `spawner` pipes child stdio and returns
+  `LocalChildStdio` (gated on `stdio_reverse`); `connection_service` bridges each grill-me child's fds
+  via `StdioEndpoint::from_duplex` into a per-session `session_stdio` registry; a `model_override` lets
+  tool sessions (which persist `model: None`) still inherit a model.
+- **`tddy-coder`**: `run_daemon` under `--stdio` sets up the reverse stdio endpoint and binds a
+  `DaemonRelayConversationSpawnHandler` (awaits the client via a `watch` channel)
+  (`conversation_spawn_relay.rs`, `run.rs`).
+- **`tddy-tools`**: `spawn-conversation` CLI subcommand (kebab) + `spawn-conversation →
+  SpawnConversation` wire mapping; the grill-me prompt uses the kebab CLI name.
+
+### Deferred follow-up (not a blocker)
+
+The daemon→coder presenter-intent path still rides localhost `--grpc`; migrating it onto the stdio
+client (the "full switch") — and wiring the **resume** and **remote/multi-host** spawn paths — is
+tracked in source as `TODO(stdio-relay)`. `--grpc` is retained meanwhile. This is a known limitation,
+not a gap in the shipped grill-me→child flow, which works over the stdio relay above.
+
 ## Related Documentation
 
 - [Session Participant RPC & Metadata](session-participant-rpc.md) — session-scoped RPC + terminals.

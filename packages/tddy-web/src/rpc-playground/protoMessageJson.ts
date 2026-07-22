@@ -56,7 +56,10 @@ export function patchRequestJsonField(
     const msg = fromJson(schema, patched as JsonValue);
     return toJsonString(schema, msg, { prettySpaces: 2 });
   } catch {
-    return JSON.stringify(patched, null, 2);
+    // Not yet schema-valid (e.g. mid-edit): keep the user's partial JSON, but serialize
+    // BigInt (int64/uint64) fields the proto-JSON way — as strings — since JSON.stringify
+    // cannot serialize a BigInt.
+    return JSON.stringify(patched, (_k, v) => (typeof v === "bigint" ? v.toString() : v), 2);
   }
 }
 
