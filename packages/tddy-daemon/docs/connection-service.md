@@ -51,6 +51,16 @@ Session **status** strings in metadata drive workflow display; optional Telegram
 - **Async handler note**: Handlers are **`async`** but perform blocking filesystem work on the runtime thread; volume is expected to stay low (dashboard use). Heavy concurrency may warrant moving work behind **`spawn_blocking`**.
 - **Tests**: Integration coverage in **`session_workflow_files_rpc`**.
 
+## Worktree Code pane file RPCs
+
+Browse a session's **worktree** (the git checkout at `SessionEntry.repo_path`), not the session
+metadata dir — powers the web [Code pane](../../../docs/ft/web/session-code-pane.md).
+
+- **Implementation**: Filesystem/git policy lives in **`worktree_files`**. **`ListWorktreeDirectory`** and **`ReadWorktreeFile`** reuse the **`RemoveWorktree`** preamble (token → GitHub user → mapped OS user → project → **`main_repo_path_for_host`**), then gate on **`worktrees::worktree_path_is_listed`** so the `worktree_path` must appear in the project's `git worktree list`. The git/fs work runs inside **`spawn_blocking`** with `spawn_worker_request_timeout()`.
+- **Listing** (`ListWorktreeDirectory`): one directory level at `rel_path` (empty = root). `.gitignore`-aware and `.git`-excluded via `git ls-files --cached --others --exclude-standard -z`; a linked worktree's private `<gitdir>/info/exclude` is fed in explicitly via `--exclude-from` (git treats `info/` as shared, so `--exclude-standard` alone would miss it). Entries are directories-first then files, each alphabetical.
+- **Reading** (`ReadWorktreeFile`): refuses any path not surfaced by the listing (so `.git` and ignored files, e.g. `.env`, cannot be read), applies traversal rejection (`..`/absolute) plus canonicalize-and-contain under the worktree root, and caps content at **`MAX_WORKTREE_FILE_BYTES`** (1 MiB) with a `truncated` flag and full `byte_size`.
+- **Tests**: unit coverage in **`worktree_files`** (`#[cfg(test)]`); integration coverage in **`worktree_files_rpc`**.
+
 ## DeleteSession behavior
 
 - **Auth**: Same `session_token` → GitHub user → mapped OS user → `sessions_base` as `ListSessions`.

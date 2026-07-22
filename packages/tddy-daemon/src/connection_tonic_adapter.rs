@@ -44,15 +44,17 @@ use tddy_service::proto::connection::{
     ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
     ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
-    ListWorktreesForProjectRequest, ListWorktreesForProjectResponse, MintLocalTokenRequest,
-    MintLocalTokenResponse, ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse,
-    RemoveWorktreeRequest, RemoveWorktreeResponse, ReportSessionStatusRequest,
-    ReportSessionStatusResponse, ResumeSessionRequest, ResumeSessionResponse,
-    SendTerminalInputResponse, SessionTerminalInput, SessionTerminalOutput, SignalSessionRequest,
-    SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse, StartSessionRequest,
-    StartSessionResponse, StartTerminalSessionRequest, StartTerminalSessionResponse,
-    StopDemoVmRequest, StopDemoVmResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    StreamTerminalOutputRequest, TerminalControlEvent, WatchTerminalControlRequest,
+    ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
+    ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse,
+    ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse, ReadWorktreeFileRequest,
+    ReadWorktreeFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
+    ReportSessionStatusRequest, ReportSessionStatusResponse, ResumeSessionRequest,
+    ResumeSessionResponse, SendTerminalInputResponse, SessionTerminalInput, SessionTerminalOutput,
+    SignalSessionRequest, SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse,
+    StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
+    StartTerminalSessionResponse, StopDemoVmRequest, StopDemoVmResponse,
+    StopTerminalSessionRequest, StopTerminalSessionResponse, StreamTerminalOutputRequest,
+    TerminalControlEvent, WatchTerminalControlRequest,
 };
 use tddy_service::tonic_connection::connection_service_server::ConnectionService as TonicConnectionService;
 
@@ -352,6 +354,32 @@ where
         request: tonic::Request<ReadSessionWorkflowFileRequest>,
     ) -> Result<tonic::Response<ReadSessionWorkflowFileResponse>, tonic::Status> {
         let resp = RpcConnectionService::read_session_workflow_file(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn list_worktree_directory(
+        &self,
+        request: tonic::Request<ListWorktreeDirectoryRequest>,
+    ) -> Result<tonic::Response<ListWorktreeDirectoryResponse>, tonic::Status> {
+        let resp = RpcConnectionService::list_worktree_directory(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn read_worktree_file(
+        &self,
+        request: tonic::Request<ReadWorktreeFileRequest>,
+    ) -> Result<tonic::Response<ReadWorktreeFileResponse>, tonic::Status> {
+        let resp = RpcConnectionService::read_worktree_file(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

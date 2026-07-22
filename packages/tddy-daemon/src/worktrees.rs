@@ -414,6 +414,19 @@ fn paths_equal(a: &Path, b: &Path) -> bool {
     lexical_normalize(a) == lexical_normalize(b)
 }
 
+/// True when `worktree_path` matches one of the parsed `git worktree list` rows.
+fn worktree_path_in_rows(rows: &[WorktreeListRow], worktree_path: &Path) -> bool {
+    rows.iter().any(|r| paths_equal(&r.path, worktree_path))
+}
+
+/// True when `worktree_path` appears in `git worktree list` for `repo_root`. Used to gate
+/// filesystem access to a worktree behind git's own membership view.
+pub fn worktree_path_is_listed(repo_root: &Path, worktree_path: &Path) -> bool {
+    let stdout = git_worktree_list_stdout(repo_root);
+    let rows = parse_git_worktree_list(&stdout);
+    worktree_path_in_rows(&rows, worktree_path)
+}
+
 /// Remove a secondary worktree via `git worktree remove` as the project OS user.
 /// The path must appear in `git worktree list` for `repo_root` and must not be the primary
 /// (first-listed) worktree. Worktrees may live outside the main repo directory (sibling paths).
@@ -437,7 +450,7 @@ pub fn remove_worktree_under_repo(
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
     let rows = parse_git_worktree_list(&stdout);
-    let listed = rows.iter().any(|r| paths_equal(&r.path, worktree_path));
+    let listed = worktree_path_in_rows(&rows, worktree_path);
     if !listed {
         warn!(
             "remove_worktree_under_repo: path not in worktree list {:?}",
