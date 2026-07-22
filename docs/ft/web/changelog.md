@@ -4,6 +4,10 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-22 — Streamed host stats
+
+- The Host Stats Footer's CPU and disk readouts are now fed by a **single server-streaming RPC** (`StreamHostStats`) instead of two client-polled unary RPCs. The **daemon owns the cadence**: it emits both readings immediately on subscribe, then refreshes CPU every 5 s and disk every 60 s, pushing an event carrying the latest CPU and disk each tick. The footer opens one subscription per selected daemon (no client-side polling); visible behavior is unchanged. The old `GetHostCpuStats`/`GetHostDiskStats` RPCs are removed. See [host-stats-footer.md](host-stats-footer.md).
+
 ## 2026-07-22 — Code pane syntax highlighting
 
 - The Worktree **Code pane** file preview now syntax-highlights recognized code files (Rust, TS/TSX, Python, JSON, YAML, and more) instead of showing plain monospace text. The language is inferred from the file's extension; files with no recognized extension (e.g. `LICENSE`) stay plain, and Markdown keeps its sanitized-markup rendering. Highlight colors follow the app's light/dark theme. See [session-code-pane.md](session-code-pane.md).

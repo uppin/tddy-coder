@@ -59,12 +59,12 @@ use crate::workspace_session;
 use crate::worktrees::{self, RemoveWorktreeError, WorktreeStatsCache};
 use tddy_service::proto::connection::{
     AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState, ExecuteToolRequest,
-    ExecuteToolResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse, GetHostCpuStatsRequest,
-    GetHostCpuStatsResponse, GetHostDiskStatsRequest, GetHostDiskStatsResponse,
-    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
-    StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
-    StreamSessionActivityRequest, ToolCallInfo as ProtoToolCallInfo,
+    ExecuteToolResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse, HostCpuStats,
+    HostDiskStats, HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ReportAgentActivityRequest,
+    ReportAgentActivityResponse, StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest,
+    StopDemoVmResponse, StreamHostStatsRequest, StreamSessionActivityRequest,
+    ToolCallInfo as ProtoToolCallInfo,
 };
 use tddy_task::TaskRegistry;
 
@@ -302,6 +302,34 @@ impl Stream for MpscAgentActivityStream {
 
 impl Unpin for MpscAgentActivityStream {}
 
+/// Default cadence for refreshing per-core CPU utilization on the host-stats sampling loop.
+const HOST_CPU_INTERVAL: Duration = Duration::from_secs(5);
+/// Default cadence for refreshing project-dir disk figures on the host-stats sampling loop.
+const HOST_DISK_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Stream adapter backed by an mpsc channel for [`HostStatsEvent`] server-streaming.
+#[derive(Debug)]
+pub struct MpscHostStatsStream {
+    rx: tokio::sync::mpsc::UnboundedReceiver<HostStatsEvent>,
+}
+
+impl Stream for MpscHostStatsStream {
+    type Item = Result<HostStatsEvent, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.rx.poll_recv(cx) {
+            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+impl Unpin for MpscHostStatsStream {}
+
 /// Milliseconds since the Unix epoch, for agent-activity timestamps.
 pub(crate) fn now_unix_ms() -> u64 {
     std::time::SystemTime::now()
@@ -470,6 +498,10 @@ pub struct ConnectionServiceImpl {
     idle_tracker: Option<Arc<crate::relay_idle::IdleTimeoutTracker>>,
     /// Host machine stats provider (per-core CPU + project-dir disk) for the Host Stats Footer.
     host_stats: Arc<dyn HostStats>,
+    /// Cadence for refreshing CPU on the `StreamHostStats` sampling loop (overridable for tests).
+    host_cpu_interval: Duration,
+    /// Cadence for refreshing disk on the `StreamHostStats` sampling loop (overridable for tests).
+    host_disk_interval: Duration,
     /// Per-session demo VM state — keyed by session_id.
     demo_vm_state: Arc<tokio::sync::Mutex<std::collections::HashMap<String, DemoVmHandle>>>,
     /// Per-session reverse stdio RPC endpoint to a spawned tddy-coder child (grill-me), keyed by
@@ -546,6 +578,8 @@ impl ConnectionServiceImpl {
             task_registry,
             idle_tracker: None,
             host_stats,
+            host_cpu_interval: HOST_CPU_INTERVAL,
+            host_disk_interval: HOST_DISK_INTERVAL,
             demo_vm_state,
             session_stdio,
             agent_activity_hub: Arc::new(AgentActivityHub::default()),
@@ -579,6 +613,14 @@ impl ConnectionServiceImpl {
     /// deterministic fake in place of the live `sysinfo`-backed provider.
     pub fn with_host_stats(mut self, host_stats: Arc<dyn HostStats>) -> Self {
         self.host_stats = host_stats;
+        self
+    }
+
+    /// Override the `StreamHostStats` sampling cadence (builder pattern) — lets tests inject tiny
+    /// intervals so cadence-driven refresh can be asserted deterministically without real-time waits.
+    pub fn with_host_stats_intervals(mut self, cpu: Duration, disk: Duration) -> Self {
+        self.host_cpu_interval = cpu;
+        self.host_disk_interval = disk;
         self
     }
 
@@ -4376,10 +4418,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             Ok(Ok(Ok(entries))) => entries,
             Ok(Ok(Err(status))) => return Err(status),
             Ok(Err(join_err)) => return Err(Status::internal(join_err.to_string())),
-            Err(_elapsed) => return Err(Status::deadline_exceeded(format!(
+            Err(_elapsed) => {
+                return Err(Status::deadline_exceeded(format!(
                 "ListWorktreeDirectory: timed out after {}s (spawn_worker_request_timeout_secs)",
                 timeout.as_secs()
-            ))),
+            )))
+            }
         };
 
         let entries = entries
@@ -5967,32 +6011,80 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         ))
     }
 
-    async fn get_host_cpu_stats(
-        &self,
-        request: Request<GetHostCpuStatsRequest>,
-    ) -> Result<Response<GetHostCpuStatsResponse>, Status> {
-        self.record_rpc_activity();
-        let req = request.into_inner();
-        let _github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let per_core_percent = self.host_stats.cpu_per_core_percent();
-        Ok(Response::new(GetHostCpuStatsResponse { per_core_percent }))
-    }
+    type StreamHostStatsStream = MpscHostStatsStream;
 
-    async fn get_host_disk_stats(
+    /// Stream host telemetry for the selected daemon. Authenticates `session_token`, then spawns a
+    /// sampling task that emits one `HostStatsEvent` immediately (both CPU and disk), then refreshes
+    /// CPU and disk on two independent cadences, pushing an event carrying the latest CPU and disk
+    /// snapshot on each tick. The task ends when the receiver is dropped (client unsubscribe).
+    async fn stream_host_stats(
         &self,
-        request: Request<GetHostDiskStatsRequest>,
-    ) -> Result<Response<GetHostDiskStatsResponse>, Status> {
+        request: Request<StreamHostStatsRequest>,
+    ) -> Result<Response<Self::StreamHostStatsStream>, Status> {
         self.record_rpc_activity();
         let req = request.into_inner();
         let _github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let usage = self.host_stats.disk_for_project_dir();
-        Ok(Response::new(GetHostDiskStatsResponse {
-            available_bytes: usage.available_bytes,
-            total_bytes: usage.total_bytes,
-            project_dir: usage.project_dir,
-        }))
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HostStatsEvent>();
+        let host_stats = Arc::clone(&self.host_stats);
+        let cpu_interval = self.host_cpu_interval;
+        let disk_interval = self.host_disk_interval;
+
+        tokio::spawn(async move {
+            let read_cpu = |hs: &Arc<dyn HostStats>| HostCpuStats {
+                per_core_percent: hs.cpu_per_core_percent(),
+            };
+            let read_disk = |hs: &Arc<dyn HostStats>| {
+                let usage = hs.disk_for_project_dir();
+                HostDiskStats {
+                    available_bytes: usage.available_bytes,
+                    total_bytes: usage.total_bytes,
+                    project_dir: usage.project_dir,
+                }
+            };
+
+            // Immediate emit: read both snapshots once so the footer populates on connect.
+            let mut cpu = read_cpu(&host_stats);
+            let mut disk = read_disk(&host_stats);
+            if tx
+                .send(HostStatsEvent {
+                    cpu: Some(cpu.clone()),
+                    disk: Some(disk.clone()),
+                })
+                .is_err()
+            {
+                return;
+            }
+
+            // Two independent timers: the first tick of each fires after one full period (not
+            // immediately), so a tick provably reflects a fresh read of only that metric.
+            let now = tokio::time::Instant::now();
+            let mut cpu_tick = tokio::time::interval_at(now + cpu_interval, cpu_interval);
+            let mut disk_tick = tokio::time::interval_at(now + disk_interval, disk_interval);
+
+            loop {
+                tokio::select! {
+                    _ = cpu_tick.tick() => {
+                        cpu = read_cpu(&host_stats);
+                    }
+                    _ = disk_tick.tick() => {
+                        disk = read_disk(&host_stats);
+                    }
+                }
+                if tx
+                    .send(HostStatsEvent {
+                        cpu: Some(cpu.clone()),
+                        disk: Some(disk.clone()),
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
+        Ok(Response::new(MpscHostStatsStream { rx }))
     }
 }
 
@@ -6224,6 +6316,8 @@ mod signal_session_unit_tests {
 mod host_stats_handler_unit_tests {
     use super::*;
     use crate::host_stats::{DiskUsage, HostStats};
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use tddy_service::proto::connection::{HostStatsEvent, StreamHostStatsRequest};
 
     /// Deterministic host-stats double returning fixed per-core CPU and disk figures.
     struct FakeHostStats {
@@ -6277,96 +6371,158 @@ mod host_stats_handler_unit_tests {
         )
     }
 
-    #[tokio::test]
-    async fn get_host_cpu_stats_rejects_an_invalid_token() {
-        // Given a service whose host stats would report four busy cores
-        let service = make_unit_service().with_host_stats(Arc::new(FakeHostStats {
-            per_core_percent: vec![10.0, 55.0, 90.0, 30.0],
-            available_bytes: 0,
-            total_bytes: 0,
-            project_dir: String::new(),
-        }));
+    // --- StreamHostStats: single server-streaming host-info feed ---
 
-        // When an unauthenticated caller asks for CPU stats
-        let result = service
-            .get_host_cpu_stats(Request::new(GetHostCpuStatsRequest {
-                session_token: "bad-token".to_string(),
-            }))
-            .await;
-
-        // Then the request is rejected as unauthenticated
-        assert_eq!(result.unwrap_err().code, tddy_rpc::Code::Unauthenticated);
+    /// A host-stats double whose readings advance on every call, so a later stream event can be
+    /// proven to reflect a *fresh* provider read (rather than a repeat of the first snapshot). The
+    /// Nth CPU read returns `[N.0]`; the Nth disk read reports `available_bytes = N`.
+    struct SequencedHostStats {
+        cpu_reads: AtomicU32,
+        disk_reads: AtomicU32,
     }
 
-    #[tokio::test]
-    async fn get_host_cpu_stats_returns_per_core_percentages_for_a_valid_token() {
-        // Given a service reporting four cores at 10 / 55 / 90 / 30 %
-        let service = make_unit_service().with_host_stats(Arc::new(FakeHostStats {
-            per_core_percent: vec![10.0, 55.0, 90.0, 30.0],
-            available_bytes: 0,
-            total_bytes: 0,
-            project_dir: String::new(),
-        }));
+    impl SequencedHostStats {
+        fn new() -> Self {
+            Self {
+                cpu_reads: AtomicU32::new(0),
+                disk_reads: AtomicU32::new(0),
+            }
+        }
+    }
 
-        // When an authenticated caller asks for CPU stats
-        let response = service
-            .get_host_cpu_stats(Request::new(GetHostCpuStatsRequest {
-                session_token: "valid".to_string(),
-            }))
+    impl HostStats for SequencedHostStats {
+        fn cpu_per_core_percent(&self) -> Vec<f32> {
+            let nth = self.cpu_reads.fetch_add(1, Ordering::SeqCst) + 1;
+            vec![nth as f32]
+        }
+        fn disk_for_project_dir(&self) -> DiskUsage {
+            let nth = self.disk_reads.fetch_add(1, Ordering::SeqCst) + 1;
+            DiskUsage {
+                available_bytes: nth as u64,
+                total_bytes: 100,
+                project_dir: "/home/dev/repos".to_string(),
+            }
+        }
+    }
+
+    /// Await the next stream event with a bounded timeout so a missing event fails loudly instead
+    /// of hanging the test.
+    async fn next_event(
+        stream: &mut (impl Stream<Item = Result<HostStatsEvent, Status>> + Unpin),
+    ) -> HostStatsEvent {
+        tokio::time::timeout(Duration::from_secs(1), stream.next())
             .await
-            .unwrap();
-
-        // Then the provider's per-core percentages are returned in core order
-        assert_eq!(
-            response.into_inner().per_core_percent,
-            vec![10.0, 55.0, 90.0, 30.0]
-        );
+            .expect("no host-stats event arrived within the timeout")
+            .expect("host-stats stream closed unexpectedly")
+            .expect("host-stats stream yielded an error")
     }
 
     #[tokio::test]
-    async fn get_host_disk_stats_rejects_an_invalid_token() {
-        // Given a service whose host stats would report free/total disk space
+    async fn stream_host_stats_rejects_an_invalid_token() {
+        // Given a service that would stream host telemetry
         let service = make_unit_service().with_host_stats(Arc::new(FakeHostStats {
-            per_core_percent: Vec::new(),
+            per_core_percent: vec![10.0, 55.0, 90.0, 30.0],
             available_bytes: 42_100_000_000,
             total_bytes: 100_000_000_000,
             project_dir: "/home/dev/repos".to_string(),
         }));
 
-        // When an unauthenticated caller asks for disk stats
+        // When an unauthenticated caller subscribes to the host-stats stream
         let result = service
-            .get_host_disk_stats(Request::new(GetHostDiskStatsRequest {
+            .stream_host_stats(Request::new(StreamHostStatsRequest {
                 session_token: "bad-token".to_string(),
             }))
             .await;
 
-        // Then the request is rejected as unauthenticated
+        // Then the subscription is rejected as unauthenticated
         assert_eq!(result.unwrap_err().code, tddy_rpc::Code::Unauthenticated);
     }
 
     #[tokio::test]
-    async fn get_host_disk_stats_returns_project_dir_capacity_for_a_valid_token() {
-        // Given a service reporting 42.1 GB free of a 100 GB filesystem at /home/dev/repos
+    async fn stream_host_stats_emits_cpu_and_disk_immediately_on_subscribe() {
+        // Given a service reporting four cores at 10 / 55 / 90 / 30 % and 42.1 GB free of 100 GB
         let service = make_unit_service().with_host_stats(Arc::new(FakeHostStats {
-            per_core_percent: Vec::new(),
+            per_core_percent: vec![10.0, 55.0, 90.0, 30.0],
             available_bytes: 42_100_000_000,
             total_bytes: 100_000_000_000,
             project_dir: "/home/dev/repos".to_string(),
         }));
 
-        // When an authenticated caller asks for disk stats
-        let response = service
-            .get_host_disk_stats(Request::new(GetHostDiskStatsRequest {
+        // When an authenticated caller subscribes
+        let mut stream = service
+            .stream_host_stats(Request::new(StreamHostStatsRequest {
                 session_token: "valid".to_string(),
             }))
             .await
             .unwrap()
             .into_inner();
 
-        // Then the provider's free/total bytes and project directory are returned
-        assert_eq!(response.available_bytes, 42_100_000_000);
-        assert_eq!(response.total_bytes, 100_000_000_000);
-        assert_eq!(response.project_dir, "/home/dev/repos");
+        // Then the very first event carries both the current CPU and the current disk snapshot
+        let event = next_event(&mut stream).await;
+        let cpu = event.cpu.expect("first event must carry a CPU snapshot");
+        let disk = event.disk.expect("first event must carry a disk snapshot");
+        assert_eq!(cpu.per_core_percent, vec![10.0, 55.0, 90.0, 30.0]);
+        assert_eq!(disk.available_bytes, 42_100_000_000);
+        assert_eq!(disk.total_bytes, 100_000_000_000);
+        assert_eq!(disk.project_dir, "/home/dev/repos");
+    }
+
+    #[tokio::test]
+    async fn stream_host_stats_refreshes_cpu_on_the_fast_cadence() {
+        // Given a service whose provider advances on each read, a fast CPU cadence, and a disk
+        // cadence too slow to fire within the test window
+        let service = make_unit_service()
+            .with_host_stats(Arc::new(SequencedHostStats::new()))
+            .with_host_stats_intervals(Duration::from_millis(20), Duration::from_secs(30));
+
+        // When a caller subscribes and reads two successive events
+        let mut stream = service
+            .stream_host_stats(Request::new(StreamHostStatsRequest {
+                session_token: "valid".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let first = next_event(&mut stream).await;
+        let second = next_event(&mut stream).await;
+
+        // Then each event's CPU reflects a fresh provider read (1st then 2nd), while the disk block
+        // is unchanged because the slow cadence has not fired
+        assert_eq!(first.cpu.expect("cpu").per_core_percent, vec![1.0]);
+        assert_eq!(second.cpu.expect("cpu").per_core_percent, vec![2.0]);
+        assert_eq!(
+            second.disk.expect("disk").available_bytes,
+            first.disk.expect("disk").available_bytes
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_host_stats_refreshes_disk_on_the_slow_cadence() {
+        // Given a service whose provider advances on each read, a fast disk cadence, and a CPU
+        // cadence too slow to fire within the test window
+        let service = make_unit_service()
+            .with_host_stats(Arc::new(SequencedHostStats::new()))
+            .with_host_stats_intervals(Duration::from_secs(30), Duration::from_millis(20));
+
+        // When a caller subscribes and reads two successive events
+        let mut stream = service
+            .stream_host_stats(Request::new(StreamHostStatsRequest {
+                session_token: "valid".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let first = next_event(&mut stream).await;
+        let second = next_event(&mut stream).await;
+
+        // Then each event's disk reflects a fresh provider read (1st then 2nd), while the CPU block
+        // is unchanged because the slow cadence has not fired
+        assert_eq!(first.disk.expect("disk").available_bytes, 1);
+        assert_eq!(second.disk.expect("disk").available_bytes, 2);
+        assert_eq!(
+            second.cpu.expect("cpu").per_core_percent,
+            first.cpu.expect("cpu").per_core_percent
+        );
     }
 }
 

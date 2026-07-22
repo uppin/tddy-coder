@@ -12,7 +12,7 @@ import type { SessionAttachmentState } from "./useSessionAttachment";
 import { StatusBar } from "./StatusBar";
 import { DiskSpaceIndicator } from "./DiskSpaceIndicator";
 import { CpuCoresIndicator } from "./CpuCoresIndicator";
-import { useHostCpuStats, useHostDiskStats } from "../../rpc/useHostStats";
+import { useHostStats } from "../../rpc/useHostStats";
 
 export interface HostStatsFooterProps {
   /** The current session attachment — drives the relocated traffic readout (`StatusBar`). */
@@ -20,8 +20,7 @@ export interface HostStatsFooterProps {
 }
 
 export function HostStatsFooter({ attachment }: HostStatsFooterProps) {
-  const perCorePercent = useHostCpuStats();
-  const disk = useHostDiskStats();
+  const { perCorePercent, disk } = useHostStats();
 
   return (
     <div
