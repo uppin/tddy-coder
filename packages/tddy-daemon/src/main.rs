@@ -415,6 +415,11 @@ fn main() -> anyhow::Result<()> {
             // Get the shared TaskRegistry before handing the impl to the servers.
             let task_registry = connection_arc.task_registry();
 
+            // Register the build-catalog provider so a populated session catalog includes the
+            // repository's `BUILD.yaml` targets (discovery lives in `tddy-coder` on top of
+            // `tddy-build`; `tddy-core` owns only the port).
+            tddy_coder::catalog_provider::register();
+
             // Reusable-LSP executor: a Rust-only executor sharing this daemon's task registry,
             // so `Lsp*` tool calls (relayed through tddy-tool-engine) resolve to a real, reused
             // language server; a background loop reaps servers left idle.
