@@ -1,0 +1,21 @@
+[package]
+name = "tddy-lsp-executor"
+version = "0.1.0"
+edition = "2021"
+description = "Concrete LspExecutor — binds tddy-build target discovery to the tddy-lsp registry; registered by the daemon and sandbox-app."
+
+[lib]
+name = "tddy_lsp_executor"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-core = { path = "../tddy-core" }
+tddy-lsp = { path = "../tddy-lsp" }
+tddy-build = { path = "../tddy-build" }
+tddy-task = { path = "../tddy-task" }
+log = "0.4"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }

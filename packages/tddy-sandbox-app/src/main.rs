@@ -255,7 +255,8 @@ async fn run_linux(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
              resolves specialized agents from its own <tddyhome>/agents. Use `--specialized-agent \
              <name>` / config `specialized_agents:` with agents the daemon already knows."
         );
-    }    let mut specialized_agents = args.specialized_agent;
+    }
+    let mut specialized_agents = args.specialized_agent;
     specialized_agents.extend(cfg.specialized_agents);
 
     // Config `claude_args` first, then CLI `-- <args>` — a trailing positional prompt lands last.
@@ -421,6 +422,25 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     let model_for_summary = model.clone();
     let claude_home_for_summary = claude_home_dir.clone();
     let is_claude_agent = agent_kind == AgentKind::Claude;
+
+    // Register the reusable-LSP executor before spawning the jail, so the spawn-time
+    // availability check can gate the in-jail `Lsp*` tools, and relayed `Lsp*` tool calls
+    // resolve to a real, reused language server. Uses its own task registry.
+    {
+        let lsp_registry = tddy_lsp_executor::register(
+            TaskRegistry::new(),
+            tddy_lsp::LspAllowList::rust_only(),
+            std::time::Duration::from_secs(300),
+        );
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+            ticker.tick().await; // consume the immediate first tick
+            loop {
+                ticker.tick().await;
+                lsp_registry.reap_idle().await;
+            }
+        });
+    }
 
     let spawned = tokio::select! {
         res = spawn_claude_sandbox(SpawnParams {

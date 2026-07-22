@@ -415,6 +415,25 @@ fn main() -> anyhow::Result<()> {
             // Get the shared TaskRegistry before handing the impl to the servers.
             let task_registry = connection_arc.task_registry();
 
+            // Reusable-LSP executor: a Rust-only executor sharing this daemon's task registry,
+            // so `Lsp*` tool calls (relayed through tddy-tool-engine) resolve to a real, reused
+            // language server; a background loop reaps servers left idle.
+            {
+                let lsp_registry = tddy_lsp_executor::register(
+                    task_registry.clone(),
+                    tddy_lsp::LspAllowList::rust_only(),
+                    std::time::Duration::from_secs(300),
+                );
+                tokio::spawn(async move {
+                    let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+                    ticker.tick().await; // consume the immediate first tick
+                    loop {
+                        ticker.tick().await;
+                        lsp_registry.reap_idle().await;
+                    }
+                });
+            }
+
             // Local Unix-domain socket transport (SO_PEERCRED peer-trust + MintLocalToken). Spawned
             // as an independent task; it must not disturb the HTTP server below.
             {
