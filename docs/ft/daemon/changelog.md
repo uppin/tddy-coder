@@ -2,6 +2,16 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-06 — `ListAgentModels` RPC + tool-session `--model`
+
+- New `ConnectionService.ListAgentModels(agent, daemon_instance_id)` RPC enumerates a backend's models on demand, shelling out to `tddy-tools list-models --agent <agent>` and returning `{models, default_model}`. Results are cached per (agent, daemon, OS user) with a short TTL — keyed by OS user because cursor/ACP catalogs are account-specific — and the probe runs as the user with its `current_dir` set to that user's home (the daemon cwd may be unreadable after setuid). A failed probe surfaces as an RPC error, never an empty catalog. See [tool-session-model-selection.md](../web/tool-session-model-selection.md).
+- `StartSession` now threads `model` into the spawned **tool** (tddy-coder) session as `--model <m>` (previously claude-cli only), so a session runs with the operator-selected model.
+
+## 2026-07-11 — Unprivileged daemon: Linux cgroups sandbox under `User=tddy`
+
+- `./install --systemd` now generates the unit to run the daemon as the unprivileged **`tddy`** user by default, with **`Delegate=yes`** (a writable cgroup v2 subtree for per-session sandbox scopes) and **`AppArmorProfile=tddy-daemon`** (unprivileged user namespaces on hosts like Ubuntu 24.04 where they are AppArmor-restricted). The install creates the service user/group, chowns the log + auth-storage dirs, and ships + auto-loads (`apparmor_parser -r`) the AppArmor profile before starting the service. Overriding requires `INSTALL_OVERWRITE_SYSTEMD_UNIT=1` on an existing install; `INSTALL_DAEMON_USER=root` restores the previous multi-user setuid mode. See [systemd-install.md § Unprivileged service](systemd-install.md#unprivileged-service-linux-cgroups-sandbox).
+- The Linux cgroups sandbox no longer requires root or a hardcoded `/sys/fs/cgroup`: it derives its delegated cgroup base from `/proc/self/cgroup` at runtime, optionally overridden by a new commented **`sandbox_cgroup:`** block in `daemon.yaml.production`. The userns precondition is now a functional probe (real `unshare` + uid/gid mapping), so a per-binary AppArmor grant is actually detected. It still fails fast (`FAILED_PRECONDITION`) rather than degrading to an unconfined process.
+
 ## 2026-07-16 — Shared PTY crate; Bash tool login shell
 
 - The daemon's PTY runtime and registry moved into a shared `tddy-pty` crate (reused by tddy-coder for its bash terminal tabs); OS-user impersonation stays in the daemon over a thin adapter. See [terminal-sessions.md](terminal-sessions.md).
