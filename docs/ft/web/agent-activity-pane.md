@@ -1,8 +1,8 @@
 # Agent Activity Pane — Real-time view of the agent's tool calls
 
 **Component:** `AgentActivityOverlay` (new) in `packages/tddy-web/src/components/sessions/`, mounted in the `SessionMainPane` top bar
-**Updated:** 2026-07-21
-**Status:** Planned
+**Updated:** 2026-07-22
+**Status:** Implemented (single-host; cross-host stream peer-forward is a tracked follow-up — see below)
 
 ## Overview
 
@@ -85,6 +85,10 @@ snapshot-then-live `WatchTerminalControl` / `StreamTerminalOutput` pattern and t
 - tool / cursor-cli: served by the **coder participant** over LiveKit while live; daemon over `/rpc`
   serves the file snapshot as fallback.
 - claude-cli, sandbox: served by the **daemon** over `/rpc`.
+
+**Shipped limitation:** `StreamSessionActivity` serves **Local** routes and rejects `PeerRoute::Forward`
+with `unimplemented` (rather than serving wrong-host data) — `forward_to_peer` is unary-only, so a
+streaming peer-forward primitive is a follow-up. Single-host, the common case, works fully.
 
 ## Frontend
 

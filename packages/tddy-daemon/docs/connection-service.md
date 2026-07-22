@@ -23,6 +23,8 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 | `ExecuteTool` | Runs one exec-tool (Read, Write, StrReplace, Delete, Grep, Glob, Shell, Await, ReadLints, SemanticSearch) against the session's worktree. After execution, appends a `ToolCallRecord` to the durable JSONL log `~/.tddy/sessions/{session_id}/tool-calls.jsonl` (non-fatal: a write failure is logged as a warning and never blocks the response). Authenticates via `session_token` → OS user, validates `session_id`; optional `daemon_instance_id` for peer routing. |
 | `ListExecTools` | Returns the exec-tool catalog (`ToolDef` per tool: `name`, `description`, `input_schema_json`). Auth same as `ExecuteTool`. |
 | `ListSessionToolCalls` | Returns the durable tool-call log for a session (up to 500 most-recent entries from `tool-calls.jsonl`; ordered chronologically). Each `ToolCallInfo` carries `task_id`, `tool_name`, `args_json`, `result_json`, `is_error`, `error_message`, `job_running`, `created_unix_ms`. Authenticates via `session_token`, validates `session_id` (path-segment guard), optionally routes to owning daemon via `daemon_instance_id`. |
+| `StreamSessionActivity` | Server-streaming feed of the **agent's own** tool calls (distinct from the human-triggered `ExecuteTool` log). On connect it replays the coalesced snapshot from `agent-activity.jsonl`, then tails live `AgentActivityRecord`s from the in-process per-session `AgentActivityHub`. Auth/validation like `ListSessionToolCalls`. **Local** routes only — `PeerRoute::Forward` returns `unimplemented` (streaming peer-forward is a follow-up; `forward_to_peer` is unary-only) rather than serving wrong-host data. See [Agent-activity log & stream](#agent-activity-log--stream). |
+| `ReportAgentActivity` | Unary; the `tddy-tools session-hook` POSTs one record per Claude Code `PreToolUse`/`PostToolUse` (no shared id across hook processes, so the daemon pairs Pre→Post per session). Appends to `agent-activity.jsonl` and publishes to the hub. Auth like `report_session_status`; bad tokens rejected. |
 | `DeleteSession` | Removes **`{sessions_base}/sessions/{session_id}/`**. If **`.session.yaml`** records a live PID, the daemon sends **SIGTERM**, waits, then **SIGKILL** as needed (Linux zombie sessions are treated as stopped), then removes the directory. Directories without readable metadata are still removed when the path resolves safely. Rejects unknown ids and path-unsafe ids (implementation in **`session_deletion`**) |
 | `SignalSession` | Send Unix signal to recorded PID for an active session; `session_id` validated before path resolution |
 | `AddPlannedPr` | Manually appends one planned PR to a **`"pr-stack"`** orchestrator session's **`Changeset.stack`**, with caller-chosen ancestors (**`StackNode.parents`**). Rejects (`FAILED_PRECONDITION`, via **`require_pr_stack_orchestrator`**) when **`session_id`**'s changeset `recipe` doesn't resolve to `"pr-stack"` (legacy aliases included); rejects a blank `title` or a dangling parent ref (`INVALID_ARGUMENT`). Delegates the actual DAG mutation to **`tddy_workflow_recipes::pr_stack::add_planned_pr_node`** (server-assigns `node_id`, cycle-checks, atomic append via `update_stack_atomic`). Response's `stack_plan_json` reuses the same serializer as `ListSessions` enrichment (`stack_plan_json_for_changeset`). See [pr-stacking.md § Manually adding a planned PR](../../../docs/ft/coder/pr-stacking.md#manually-adding-a-planned-pr). |
@@ -307,6 +309,30 @@ Every `ExecuteTool` invocation appends a JSON line to **`~/.tddy/sessions/{sessi
 - **Background Shell** — jobs with `job_running: true` store `task_id`; live stdout/stderr is available via `TaskService.WatchTask` while the task is in the registry. Durable stdio for detached jobs is not captured in the log.
 
 `ListSessionToolCalls` reads this file and returns up to 500 `ToolCallInfo` records in chronological order (UI reverses to newest-first).
+
+## Agent-activity log & stream
+
+A **separate** per-session log — **`~/.tddy/sessions/{session_id}/agent-activity.jsonl`** — records the
+**agent's own** tool loop (Read, Shell/Bash, Edit, `tddy-tools` verbs), as opposed to the
+human-triggered `ExecuteTool` invocations captured in `tool-calls.jsonl`. The record shape
+(`AgentActivityRecord`) and the append/coalesce/500-cap read logic live in **`tddy-core::agent_activity`**
+so every host writes the same format; see [tddy-core architecture § Agent activity](../../tddy-core/docs/architecture.md#agent-activity-agent_activity).
+
+- **Capture (one seam per session type):**
+  - **sandbox** — the host-side executor `DaemonToolHandler::execute` appends a `running` row then a
+    terminal `completed`/`error` row around `tool_engine::execute_tool_with_env`, publishing each to the hub.
+  - **claude-cli** — the `PreToolUse`/`PostToolUse` hooks (`tddy-tools session-hook`) POST `ReportAgentActivity`;
+    the daemon pairs Pre→Post per session.
+  - **tool / cursor-cli** — served by the **coder participant** over LiveKit while the session is live
+    (its presenter appends rows and broadcasts `PresenterEvent::AgentActivity`); the daemon serves the file
+    snapshot over `/rpc` as fallback.
+- **`AgentActivityHub`** — `Mutex<HashMap<sessionId, broadcast::Sender<AgentActivityRecord>>>`, one broadcast
+  channel per session. `StreamSessionActivity` mirrors the snapshot-then-live `StreamTerminalOutput` /
+  `WatchTerminalControl` pattern (snapshot via `read_agent_activity`, then relay hub events with `Lagged`
+  handling); `ReportAgentActivity` and the sandbox executor are the publishers.
+- **Cross-host limitation:** `StreamSessionActivity` serves Local routes only and rejects `PeerRoute::Forward`
+  with `unimplemented` — a streaming peer-forward primitive is a tracked follow-up (`forward_to_peer` is
+  unary-only). Single-host (the common case) works fully. Feature: [agent-activity-pane.md](../../../docs/ft/web/agent-activity-pane.md).
 
 ## See also
 

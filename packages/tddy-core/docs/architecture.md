@@ -76,8 +76,13 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **stream/claude.rs**: `process_ndjson_stream` — Claude Code CLI NDJSON parser (assistant, user, result, tool_use, task_started, task_progress). Tool_result content from user events is collected separately and merged into result_text only as a fallback when primary sources (assistant text, result event) lack a structured-response block.
 - **stream/cursor.rs**: `process_cursor_stream` — Cursor agent NDJSON parser (assistant, tool_call, result; askUserQuestionToolCall/askQuestionToolCall).
 - **StreamResult**: result_text, session_id, questions, raw_lines.
-- **ProgressEvent**: ToolUse, TaskStarted, TaskProgress for real-time display.
+- **ProgressEvent**: ToolUse (carries `input_json` + `call_id`), ToolResult (`call_id`, `result_json`, `is_error`), TaskStarted, TaskProgress for real-time display. A `tool_use` followed by its `tool_result` emits a correlated `ToolUse` + `ToolResult` pair (shared `call_id`).
 - **parse_clarification_questions_from_text**: Fallback when agent outputs `<clarification-questions>` block instead of AskUserQuestion tool.
+
+### Agent activity (`agent_activity`)
+
+- **AgentActivityRecord**: the shared, single cross-crate shape for one agent tool call — `call_id` (correlates the `running` and terminal rows), `tool_name`, `input_json`, `status` (`running`/`completed`/`error`), `result_json`, `error_message`, `started_unix_ms`, `completed_unix_ms`, `source` (`coder`/`cursor-cli`/`claude-cli`/`sandbox`). Modeled on `tddy-daemon/src/tool_call_log.rs` but placed in `tddy-core` so every host writes the same record.
+- **append_agent_activity / read_agent_activity**: append-only JSONL writer + reader for the per-session `agent-activity.jsonl` log (sibling of `tool-calls.jsonl`). The read side **coalesces by `call_id`** (later row supersedes, first-seen order preserved) then applies a 500-record tail cap; malformed lines are skipped. This is the agent's own tool loop, distinct from the human-triggered `ExecuteTool` web-invoke log.
 
 ### Permission (`permission.rs`)
 

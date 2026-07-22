@@ -4,6 +4,8 @@ Wrapped changeset history for tddy-tools.
 
 **Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
 
+- **2026-07-22** [Feature] **`session-hook` reports agent activity** — for Claude Code `PreToolUse`/`PostToolUse`, `session_hook.rs` POSTs `ReportAgentActivity` with the tool payload (parsed via a private `HookToolPayload`, leaving `HookEvent`'s `Eq` intact), swallowing errors and exiting 0 (fail-quiet hook contract preserved). Feature [agent-activity-pane.md](../../../docs/ft/web/agent-activity-pane.md). Cross-package [docs/dev/changesets.md](../../../docs/dev/changesets.md). (tddy-tools)
+
 - **2026-07-22** [Feature] reusable-lsp: `lsp_tools.rs` — language-agnostic `lsp_tool_catalog()` + `lsp_tools_enabled()` (`TDDY_LSP_TOOLS` gate); merged into `PermissionServer::new` via `dynamic_tool_router` behind the gate. Cross-package [changeset](../../../docs/dev/changesets.md). PR [#310](https://github.com/uppin/tddy-coder/pull/310).
 
 - **2026-07-21** [Feature] **Session-action MCP tools for a replaced Shell** — new `action_tools.rs`: `request_action` runs the Shell-replacing author subagent (`shell_replacing_author` from `TDDY_SUBAGENTS_JSON`) in a bounded 3-attempt correction loop (64 KiB cap, in-jail pre-validation) and dispatches `EstablishAction` to the host; `list_actions`/`invoke_action` are host round-trips. The exec catalog filters replaced tools as before; the action router merges only when a def replaces `Shell`. Feature [no-bash-mode.md](../../../docs/ft/coder/no-bash-mode.md). Cross-package: [docs/dev/changesets.md](../../../docs/dev/changesets.md). PR [#308](https://github.com/uppin/tddy-coder/pull/308). (tddy-tools)
