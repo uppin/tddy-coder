@@ -176,8 +176,8 @@ async fn invoke_action_tool(args: serde_json::Value) -> String {
 /// Build the `ToolRouter` for the three session-action tools. Merged into
 /// `PermissionServer::new()`'s router only when a configured def replaces `Shell`
 /// (`shell_replacing_author`).
-pub(crate) fn action_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<PermissionServer>
-{
+pub(crate) fn action_tool_router(
+) -> rmcp::handler::server::router::tool::ToolRouter<PermissionServer> {
     use rmcp::handler::server::router::tool::ToolRouter;
 
     let mut router = ToolRouter::new();

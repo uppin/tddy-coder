@@ -65,8 +65,8 @@ tools: [READ, GLOB, GREP, WRITE, STR_REPLACE, DELETE]
 #[test]
 fn a_def_without_a_tools_list_stays_read_only() {
     // Given / When
-    let def: SpecializedAgentDef = serde_yaml::from_str("name: reader\nmodel: m\n")
-        .expect("a minimal def must parse");
+    let def: SpecializedAgentDef =
+        serde_yaml::from_str("name: reader\nmodel: m\n").expect("a minimal def must parse");
 
     // Then
     assert!(
@@ -300,7 +300,10 @@ async fn a_read_only_session_neither_advertises_nor_executes_write() {
         .expect("the reader def must resolve");
 
     // When
-    session.prompt("look around").await.expect("prompt must succeed");
+    session
+        .prompt("look around")
+        .await
+        .expect("prompt must succeed");
 
     // Then — no dispatch reached the codebase
     assert!(

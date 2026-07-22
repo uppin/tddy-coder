@@ -367,8 +367,8 @@ subagents:
             def_with("author-a", "[Shell]", None),
             def_with("author-b", "[Shell]", None),
         ];
-        let err = validate_tool_replacements(&defs)
-            .expect_err("two Shell replacers must be rejected");
+        let err =
+            validate_tool_replacements(&defs).expect_err("two Shell replacers must be rejected");
         assert!(
             err.to_string().contains("author-a") && err.to_string().contains("author-b"),
             "the error must name both defs; got: {err}"
