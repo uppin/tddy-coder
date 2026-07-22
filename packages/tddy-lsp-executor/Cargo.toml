@@ -8,6 +8,13 @@ description = "Concrete LspExecutor — binds tddy-build target discovery to the
 name = "tddy_lsp_executor"
 path = "src/lib.rs"
 
+# Reuse tddy-lsp's deterministic fake server so the end-to-end test has a real binary to
+# launch (exposes CARGO_BIN_EXE_fake_lsp to this crate's tests). It compiles against
+# `tddy_lsp::protocol`, which is a dependency here.
+[[bin]]
+name = "fake_lsp"
+path = "../tddy-lsp/tests/bin/fake_lsp.rs"
+
 [dependencies]
 tddy-core = { path = "../tddy-core" }
 tddy-lsp = { path = "../tddy-lsp" }

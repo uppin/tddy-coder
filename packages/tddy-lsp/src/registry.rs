@@ -8,9 +8,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use tddy_task::{ChannelKind, TaskChannel, TaskId, TaskRegistry};
+use tddy_task::{ChannelKind, IdleTimeoutTracker, TaskChannel, TaskId, TaskRegistry};
 use tokio::sync::{oneshot, Mutex};
 
 use crate::allowlist::{Language, LspAllowList};
@@ -21,8 +21,8 @@ use crate::server_body::LspServerBody;
 /// How long to wait for a freshly-spawned server to complete its handshake.
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// A live service together with the instant it was last used (its idle-timer anchor).
-type ServiceEntry = (Arc<LspService>, Instant);
+/// A live service together with its idle-timer (reset on each reuse).
+type ServiceEntry = (Arc<LspService>, IdleTimeoutTracker);
 
 /// The stable reuse key: one server per workspace root + language.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -50,7 +50,7 @@ pub struct DocumentSource {
 pub struct LspRegistry {
     allow: LspAllowList,
     task_registry: TaskRegistry,
-    /// Live services keyed by workspace+language, each with its last-activity instant.
+    /// Live services keyed by workspace+language, each with its idle-timer.
     services: Arc<Mutex<HashMap<LspKey, ServiceEntry>>>,
     idle_timeout: Duration,
 }
@@ -84,7 +84,9 @@ impl LspRegistry {
                 };
                 if alive {
                     // Reuse: refresh the idle timer and hand back the same server.
-                    services.insert(key.clone(), (Arc::clone(&existing), Instant::now()));
+                    if let Some((_, tracker)) = services.get(&key) {
+                        tracker.record_activity();
+                    }
                     return Ok(existing);
                 }
                 // The task died — drop the stale entry and spawn a fresh server.
@@ -131,10 +133,13 @@ impl LspRegistry {
             task_id: handle.id.clone(),
             client,
         });
-        self.services
-            .lock()
-            .await
-            .insert(key, (Arc::clone(&service), Instant::now()));
+        self.services.lock().await.insert(
+            key,
+            (
+                Arc::clone(&service),
+                IdleTimeoutTracker::new(self.idle_timeout),
+            ),
+        );
         Ok(service)
     }
 
@@ -157,11 +162,10 @@ impl LspRegistry {
     /// Cancel and drop every server idle for at least the idle timeout; returns the
     /// keys that were reaped.
     pub async fn reap_idle(&self) -> Vec<LspKey> {
-        let now = Instant::now();
         let mut services = self.services.lock().await;
         let expired: Vec<LspKey> = services
             .iter()
-            .filter(|(_, (_, last))| now.duration_since(*last) >= self.idle_timeout)
+            .filter(|(_, (_, tracker))| tracker.should_shutdown())
             .map(|(key, _)| key.clone())
             .collect();
 

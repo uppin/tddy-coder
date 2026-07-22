@@ -107,6 +107,7 @@ impl LspClient {
             stdout,
             Arc::clone(&pending),
             Arc::clone(&diagnostics),
+            stdin.clone(),
         ));
 
         let client = Self {
@@ -329,6 +330,7 @@ async fn read_loop(
     mut stdout: broadcast::Receiver<Bytes>,
     pending: Pending,
     diagnostics: DiagnosticsCache,
+    stdin: mpsc::UnboundedSender<Bytes>,
 ) {
     let mut frames = FrameReader::new();
     loop {
@@ -336,7 +338,7 @@ async fn read_loop(
             Ok(bytes) => {
                 frames.push(&bytes);
                 while let Some(message) = frames.next_message() {
-                    dispatch(&message, &pending, &diagnostics);
+                    dispatch(&message, &pending, &diagnostics, &stdin);
                 }
             }
             Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -345,8 +347,14 @@ async fn read_loop(
     }
 }
 
-/// Route one incoming message to a pending request or the diagnostics cache.
-fn dispatch(message: &Value, pending: &Pending, diagnostics: &DiagnosticsCache) {
+/// Route one incoming message to a pending request, the diagnostics cache, or (for a
+/// server→client request) an acknowledgement reply.
+fn dispatch(
+    message: &Value,
+    pending: &Pending,
+    diagnostics: &DiagnosticsCache,
+    stdin: &mpsc::UnboundedSender<Bytes>,
+) {
     // Notifications and server-to-client requests carry a `method`.
     if let Some(method) = message.get("method").and_then(Value::as_str) {
         if method == "textDocument/publishDiagnostics" {
@@ -361,6 +369,15 @@ fn dispatch(message: &Value, pending: &Pending, diagnostics: &DiagnosticsCache) 
                     .unwrap()
                     .insert(uri, parse_diagnostics(params.get("diagnostics")));
             }
+            return;
+        }
+        // A `method` with an `id` is a server→client request (e.g. rust-analyzer's
+        // `client/registerCapability`, `window/workDoneProgress/create`,
+        // `workspace/configuration`). It expects a response — acknowledge it minimally so
+        // the server does not stall waiting on us.
+        if let Some(id) = message.get("id").cloned() {
+            let reply = server_request_reply(method, message.get("params"), id);
+            let _ = stdin.send(Bytes::from(encode_message(&reply)));
         }
         return;
     }
@@ -372,6 +389,24 @@ fn dispatch(message: &Value, pending: &Pending, diagnostics: &DiagnosticsCache) 
             let _ = tx.send(result);
         }
     }
+}
+
+/// Build the response to a server→client request. `workspace/configuration` expects an
+/// array with one entry per requested item; every other request is acknowledged with a
+/// `null` result (sufficient for `registerCapability` / `workDoneProgress/create`).
+fn server_request_reply(method: &str, params: Option<&Value>, id: Value) -> Value {
+    let result = match method {
+        "workspace/configuration" => {
+            let count = params
+                .and_then(|p| p.get("items"))
+                .and_then(Value::as_array)
+                .map(|items| items.len())
+                .unwrap_or(0);
+            Value::Array(vec![Value::Null; count])
+        }
+        _ => Value::Null,
+    };
+    json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
 
 /// Standard `{ textDocument, position }` request params.
@@ -438,4 +473,36 @@ fn parse_diagnostics(value: Option<&Value>) -> Vec<Diagnostic> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn acknowledges_register_capability_with_a_null_result() {
+        // Given a server->client `client/registerCapability` request
+        let id = json!(7);
+
+        // When we build the reply
+        let reply = server_request_reply("client/registerCapability", None, id);
+
+        // Then it is a well-formed response with a null result
+        assert_eq!(reply, json!({ "jsonrpc": "2.0", "id": 7, "result": null }));
+    }
+
+    #[test]
+    fn answers_workspace_configuration_with_one_null_per_requested_item() {
+        // Given a `workspace/configuration` request for three items
+        let params = json!({ "items": [{}, {}, {}] });
+
+        // When we build the reply
+        let reply = server_request_reply("workspace/configuration", Some(&params), json!(3));
+
+        // Then the result is an array with one null per item
+        assert_eq!(
+            reply,
+            json!({ "jsonrpc": "2.0", "id": 3, "result": [null, null, null] })
+        );
+    }
 }
