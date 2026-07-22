@@ -10,6 +10,8 @@ import { Button } from "../ui/button";
 import { CreateSessionPane } from "./CreateSessionPane";
 import { SessionRuntime } from "./SessionRuntime";
 import { resolveWorkflowView } from "./workflowViews";
+import { WorktreeCodePane } from "../session/WorktreeCodePane";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import type { SessionRuntimeState } from "./sessionRuntimeRegistry";
 
@@ -104,6 +106,11 @@ export function SessionMainPane({
   const isConnected =
     attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
 
+  // The worktree Code pane is a split view available for every session type: it never replaces the
+  // base view (terminal / chat / PR-Stack), it opens beside it.
+  const [codeOpen, setCodeOpen] = React.useState(false);
+  const codePaneEnabled = Boolean(client && selectedSession);
+
   const customView = !isCreating
     ? resolveWorkflowView(selectedSession, {
         client,
@@ -119,6 +126,55 @@ export function SessionMainPane({
   // `SessionRuntime`), so the focused one carries the `sessions-detail-terminal-container` marker
   // (existing acceptance contract) and the terminal-control mutex overlay.
   const hasRuntimes = runtimes.length > 0;
+
+  // The base view (custom workflow view / mounted terminals / placeholder). Rendered on its own
+  // when the Code pane is closed, or as the left panel of the split when it is open — never
+  // unmounted between the two so terminals stay attached.
+  const baseView = customView ? (
+    // Custom per-workflow view — renders in place of the terminal regardless of attachment
+    // status; the workflow owns its own chrome.
+    customView
+  ) : hasRuntimes ? (
+    // One mounted terminal per attached session (focused visible, others hidden). Each runtime
+    // owns its terminal-control lease — see `SessionRuntime`.
+    <div
+      data-testid="sessions-runtime-layer"
+      className="flex-1 min-h-0 relative overflow-hidden"
+    >
+      {runtimes.map((r) => (
+        <SessionRuntime
+          key={r.sessionId}
+          runtime={r}
+          focused={r.sessionId === focusedRuntimeId}
+          sessionToken={sessionToken}
+          client={client}
+          tokenClient={tokenClient}
+          mobileShortcuts={mobileShortcuts}
+          onSessionRoom={onSessionRoom}
+          onSessionDisconnect={onSessionDisconnect}
+          liveKitFactory={liveKitFactory}
+          liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
+          commonRoom={room}
+          sessions={sessions}
+        />
+      ))}
+    </div>
+  ) : isConnected ? (
+    // Connected but the runtime hasn't been registered yet (brief window before the attach
+    // effect runs) — keep the terminal container marker so existing acceptance contracts hold
+    // during the transition.
+    <div
+      data-testid="sessions-detail-terminal-container"
+      className="flex-1 min-h-0 flex flex-col relative overflow-hidden"
+    />
+  ) : (
+    // Disconnected / idle — simple placeholder
+    <div className="flex-1 min-h-0 relative overflow-hidden">
+      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+        Select Resume to reconnect
+      </div>
+    </div>
+  );
 
   return (
     <div
@@ -136,9 +192,19 @@ export function SessionMainPane({
 
       {!isCreating && (
         <>
-          {/* Inspector toggle button — always visible when a session is selected */}
+          {/* Header toggles — always visible when a session is selected */}
           {selectedSession && (
-            <div className="flex justify-end px-2 py-1 border-b border-border flex-shrink-0">
+            <div className="flex justify-end gap-1 px-2 py-1 border-b border-border flex-shrink-0">
+              <Button
+                data-testid="sessions-code-toggle"
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={() => setCodeOpen((open) => !open)}
+                title="Toggle worktree code pane"
+              >
+                Code
+              </Button>
               <Button
                 data-testid="sessions-inspector-toggle"
                 variant="ghost"
@@ -162,51 +228,39 @@ export function SessionMainPane({
             // it — a custom per-workflow view (e.g. PR-Stack Chat Screen) only replaces the
             // terminal, it does not replace the Inspector.
             <div className="flex-1 min-h-0 flex flex-col relative overflow-hidden">
-              {customView ? (
-                // Custom per-workflow view — renders in place of the terminal regardless of
-                // attachment status; the workflow owns its own chrome.
-                customView
-              ) : hasRuntimes ? (
-                // One mounted terminal per attached session (focused visible, others hidden). Each
-                // runtime owns its terminal-control lease — see `SessionRuntime`.
-                <div
-                  data-testid="sessions-runtime-layer"
-                  className="flex-1 min-h-0 relative overflow-hidden"
+              {/* The base view always lives in the same `Panel` (stable id/order), whether or not
+                  the Code pane is open, so toggling never re-mounts it — a live terminal keeps its
+                  attachment and a chat keeps its LiveKit room. Opening the pane only adds the second
+                  panel + resize handle. */}
+              <PanelGroup direction="horizontal" className="flex-1 min-h-0">
+                <Panel
+                  id="session-base-view"
+                  order={1}
+                  minSize={25}
+                  className="flex min-h-0 flex-col overflow-hidden"
                 >
-                  {runtimes.map((r) => (
-                    <SessionRuntime
-                      key={r.sessionId}
-                      runtime={r}
-                      focused={r.sessionId === focusedRuntimeId}
-                      sessionToken={sessionToken}
-                      client={client}
-                      tokenClient={tokenClient}
-                      mobileShortcuts={mobileShortcuts}
-                      onSessionRoom={onSessionRoom}
-                      onSessionDisconnect={onSessionDisconnect}
-                      liveKitFactory={liveKitFactory}
-                      liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
-                      commonRoom={room}
-                      sessions={sessions}
-                    />
-                  ))}
-                </div>
-              ) : isConnected ? (
-                // Connected but the runtime hasn't been registered yet (brief window before the
-                // attach effect runs) — keep the terminal container marker so existing acceptance
-                // contracts hold during the transition.
-                <div
-                  data-testid="sessions-detail-terminal-container"
-                  className="flex-1 min-h-0 flex flex-col relative overflow-hidden"
-                />
-              ) : (
-                // Disconnected / idle — simple placeholder
-                <div className="flex-1 min-h-0 relative overflow-hidden">
-                  <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                    Select Resume to reconnect
-                  </div>
-                </div>
-              )}
+                  {baseView}
+                </Panel>
+                {codeOpen && codePaneEnabled && client && (
+                  <>
+                    <PanelResizeHandle className="w-1 bg-border transition-colors hover:bg-primary/40" />
+                    <Panel
+                      id="worktree-code-pane"
+                      order={2}
+                      defaultSize={40}
+                      minSize={20}
+                      className="flex min-h-0 flex-col overflow-hidden"
+                    >
+                      <WorktreeCodePane
+                        client={client}
+                        sessionToken={sessionToken}
+                        projectId={selectedSession.projectId}
+                        worktreePath={selectedSession.repoPath}
+                      />
+                    </Panel>
+                  </>
+                )}
+              </PanelGroup>
               {/* Inspector overlay — available for every base view above. Key is suffixed
                   (not just sessionId) because the customView branch above (e.g. PrStackScreen)
                   is keyed on sessionId too, and both are siblings here — an identical key would

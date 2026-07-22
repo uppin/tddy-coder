@@ -31,6 +31,9 @@ service ConnectionService {
   rpc ReadSessionWorkflowFile(ReadSessionWorkflowFileRequest) returns (ReadSessionWorkflowFileResponse);
   rpc ListWorktreesForProject(ListWorktreesForProjectRequest) returns (ListWorktreesForProjectResponse);
   rpc RemoveWorktree(RemoveWorktreeRequest) returns (RemoveWorktreeResponse);
+  // Code pane: browse a session's worktree files (docs/ft/web/session-code-pane.md).
+  rpc ListWorktreeDirectory(ListWorktreeDirectoryRequest) returns (ListWorktreeDirectoryResponse);
+  rpc ReadWorktreeFile(ReadWorktreeFileRequest) returns (ReadWorktreeFileResponse);
   rpc StreamSessionTerminalIO(stream SessionTerminalInput) returns (stream SessionTerminalOutput);
   // Browser-compatible alternative: server-streaming output + separate unary input.
   // (connect-web fetch transport cannot send streaming request bodies required for bidi streaming.)
@@ -423,6 +426,45 @@ message RemoveWorktreeRequest {
 message RemoveWorktreeResponse {
   bool ok = 1;
   string message = 2;
+}
+
+// --- Worktree Code pane (docs/ft/web/session-code-pane.md) ---
+
+// One entry in a single directory level of a session's worktree.
+message WorktreeDirEntry {
+  // Path segment (basename) of the entry, relative to its parent directory.
+  string name = 1;
+  bool is_dir = 2;
+}
+
+message ListWorktreeDirectoryRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // The session's worktree (SessionEntry.repo_path); must appear in the project's git worktree list.
+  string worktree_path = 3;
+  // Directory to list, relative to the worktree root (empty = root). No traversal / absolute paths.
+  string rel_path = 4;
+}
+
+message ListWorktreeDirectoryResponse {
+  // Directories first, then files; each group alphabetical. Excludes .git and .gitignore'd paths.
+  repeated WorktreeDirEntry entries = 1;
+}
+
+message ReadWorktreeFileRequest {
+  string session_token = 1;
+  string project_id = 2;
+  string worktree_path = 3;
+  // File to read, relative to the worktree root. No traversal / absolute paths.
+  string rel_path = 4;
+}
+
+message ReadWorktreeFileResponse {
+  string content_utf8 = 1;
+  // True when the file exceeded the server read cap and content_utf8 was truncated.
+  bool truncated = 2;
+  // Full size of the file on disk in bytes (before any truncation).
+  uint64 byte_size = 3;
 }
 
 // --- Project branch listing (for claude-cli branch selection dropdown) ---

@@ -48,6 +48,7 @@ pub mod tool_call_log;
 pub mod tool_catalog_sync;
 pub mod user_sessions_path;
 pub mod workspace_session;
+pub mod worktree_files;
 pub mod worktrees;
 
 // Re-export the shared tool engine so legacy `crate::tool_engine::...` references inside the
