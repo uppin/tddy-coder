@@ -4,6 +4,17 @@
 > and **listing** described there move from per-call YAML globbing to a per-session SQLite catalog.
 > Authoring, invocation, async jobs, and the CLI/MCP surfaces are unchanged.
 
+## Status (2026-07-22)
+
+**Producer landed; reads pending.** The catalog store, the `BUILD.yaml` provider, and the
+worktree-open populate task are implemented: the coder writes `<session_dir>/catalog.db` on session
+open (both coder run paths). **Reads are not yet served from the catalog** — `list-actions` still
+uses the per-call YAML glob (`list_action_summaries`). The remaining work — cutting the read path
+over to the catalog (a cross-process concern; see below) and triggering populate from the
+daemon-managed flow — is tracked under *Future Enhancements* in `docs/dev/TODO.md` and lands in a
+later change. The "block until first populate" / cross-process marker behaviour below describes the
+target design that the read cutover will complete.
+
 ## Purpose
 
 The **session catalog** is a per-session SQLite database that is the **single source of truth** for

@@ -1487,6 +1487,63 @@ fn run_acp_agent(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     crate::acp_agent::run_acp(backend, recipe, data_dir, shutdown)
 }
 
+/// Populate the per-session catalog (`<session_dir>/catalog.db`) with the repo's action manifests
+/// and auto-discovered `BUILD.yaml` build targets, on a detached background thread with its own
+/// runtime. Fire-and-forget: failures are logged, not propagated.
+///
+/// Deliberately runs the [`tddy_core::session_catalog::PopulateCatalogTask`] on a local registry
+/// **without** registering the catalog in the process-global map — this coder flow only *writes*
+/// the catalog for later reads; it does not serve `list-actions` from it yet, so it leaves no
+/// live pool behind once the scan commits.
+fn spawn_session_catalog_populate(
+    session_dir: std::path::PathBuf,
+    repo_root: Option<std::path::PathBuf>,
+    tddy_data_dir: std::path::PathBuf,
+    session_id: String,
+) {
+    std::thread::spawn(move || {
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                log::warn!(target: "tddy_coder::run", "session catalog populate: runtime build failed: {e}");
+                return;
+            }
+        };
+        rt.block_on(async move {
+            let db_path = tddy_core::session_catalog::read::catalog_db_path(&session_dir);
+            let pool = match tddy_core::session_catalog::store::open_pool(&db_path).await {
+                Ok(pool) => pool,
+                Err(e) => {
+                    log::warn!(target: "tddy_coder::run", "session catalog populate: open failed: {e}");
+                    return;
+                }
+            };
+            let task = tddy_core::session_catalog::PopulateCatalogTask {
+                pool,
+                session_dir,
+                repo_root,
+                tddy_data_dir,
+                build_provider: tddy_core::session_catalog::build_catalog_provider(),
+            };
+            let registry = tddy_task::TaskRegistry::new();
+            let handle = registry
+                .spawn(
+                    task,
+                    tddy_core::session_catalog::populate::POPULATE_TASK_KIND,
+                    session_id,
+                    vec![],
+                )
+                .await;
+            // Keep this thread's runtime alive until the scan commits `catalog.db`.
+            let mut status = handle.status_watch();
+            let _ = status.wait_for(tddy_task::TaskStatus::is_terminal).await;
+        });
+    });
+}
+
 fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     // Logger is already initialized in `run_main` with `effective_log_config(args)`.
     // Do not call `init_tddy_logger` again: `log::set_logger` only succeeds once; a second
@@ -1573,6 +1630,14 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         let _ = std::fs::create_dir_all(&logs);
         tddy_core::toolcall::set_toolcall_log_dir(&logs);
         crate::build_executor::register();
+        crate::catalog_provider::register();
+        // Populate `<session_dir>/catalog.db` in the background (written for later reads).
+        spawn_session_catalog_populate(
+            session_artifact_dir.clone(),
+            std::env::current_dir().ok(),
+            resolve_tddy_data_dir(args),
+            args.session_id.clone().unwrap_or_default(),
+        );
         // Capture the agent's own tool calls into this session's `agent-activity.jsonl` and
         // broadcast them (served live by the coder participant's `StreamSessionActivity`). The
         // coder — not the daemon — executes tools for tool / cursor-cli sessions.
@@ -2800,6 +2865,16 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     }
 
     crate::build_executor::register();
+    crate::catalog_provider::register();
+    // Populate `<session_dir>/catalog.db` in the background (written for later reads).
+    if let Some(catalog_session_dir) = args.session_dir.clone() {
+        spawn_session_catalog_populate(
+            catalog_session_dir,
+            std::env::current_dir().ok(),
+            resolve_tddy_data_dir(args),
+            args.session_id.clone().unwrap_or_default(),
+        );
+    }
     let (socket_path, tool_call_rx) = match tddy_core::toolcall::start_toolcall_listener(
         args.session_dir.clone(),
         std::env::current_dir().ok(),
