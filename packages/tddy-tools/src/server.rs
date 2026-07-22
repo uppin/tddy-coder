@@ -212,6 +212,12 @@ impl PermissionServer {
         if shell_replacing_author(&subagents_from_env()).is_some() {
             tool_router.merge(crate::action_tools::action_tool_router());
         }
+        // LSP tools: the single language-agnostic `Lsp*` set is exposed only when the owner
+        // signalled (via `TDDY_LSP_TOOLS`) that a language server is available for the repo.
+        // They forward over the same session-tool transport as the exec tools.
+        if crate::lsp_tools::lsp_tools_enabled() {
+            tool_router.merge(dynamic_tool_router(&crate::lsp_tools::lsp_tool_catalog()));
+        }
         Self {
             tool_router,
             socket_path,

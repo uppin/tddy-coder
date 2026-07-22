@@ -4734,6 +4734,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
+name = "lsp-types"
+version = "0.94.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c66bfd44a06ae10647fe3f8214762e9369fd4248df1350924b4ef9e770a85ea1"
+dependencies = [
+ "bitflags 1.3.2",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "url",
+]
+
+[[package]]
 name = "mac_address"
 version = "1.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8769,6 +8782,8 @@ dependencies = [
  "tddy-github",
  "tddy-livekit",
  "tddy-livekit-testkit",
+ "tddy-lsp",
+ "tddy-lsp-executor",
  "tddy-pty",
  "tddy-rpc",
  "tddy-sandbox",
@@ -9026,6 +9041,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-lsp"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "log",
+ "lsp-types",
+ "serde",
+ "serde_json",
+ "tddy-task",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "tddy-lsp-executor"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "serde_json",
+ "tddy-build",
+ "tddy-core",
+ "tddy-lsp",
+ "tddy-task",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-pty"
 version = "0.1.0"
 dependencies = [
@@ -9108,6 +9151,8 @@ dependencies = [
  "tddy-core",
  "tddy-daemon",
  "tddy-discovery",
+ "tddy-lsp",
+ "tddy-lsp-executor",
  "tddy-sandbox",
  "tddy-sandbox-darwin",
  "tddy-sandbox-recipes",
@@ -9332,6 +9377,7 @@ dependencies = [
  "log",
  "pretty_assertions",
  "serde_json",
+ "tddy-core",
  "tddy-task",
  "tempfile",
  "tokio",

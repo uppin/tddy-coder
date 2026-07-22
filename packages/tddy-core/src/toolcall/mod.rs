@@ -8,6 +8,7 @@
 
 pub mod build;
 mod listener;
+pub mod lsp;
 pub mod transition;
 
 pub use build::{
@@ -18,6 +19,7 @@ pub use listener::{
     start_toolcall_listener_with_conversation_handler, ChildSpawnHandler, ConversationSpawnHandler,
     ToolcallRpcService,
 };
+pub use lsp::{lsp_executor, register_lsp_executor, LspExecutor, LspQuery};
 pub use transition::{
     clear_transition_handler, register_transition_handler, transition_handler, TransitionHandler,
     TransitionRelayOutcome,

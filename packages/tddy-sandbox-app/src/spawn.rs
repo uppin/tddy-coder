@@ -572,6 +572,15 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
     );
     env.extend(subagent_env_overlay(&specialized_defs));
 
+    // Expose the language-agnostic `Lsp*` MCP tools in the jail only when a language server is
+    // available for this repo on the host.
+    if tddy_core::toolcall::lsp::lsp_executor()
+        .map(|ex| ex.is_available(&params.repo))
+        .unwrap_or(false)
+    {
+        env.insert("TDDY_LSP_TOOLS".to_string(), "rust".to_string());
+    }
+
     spawn_trace(
         &session_dir,
         "spawning sandbox-exec → tddy-sandbox-runner …",

@@ -1247,6 +1247,19 @@ impl ConnectionServiceImpl {
         ])
     }
 
+    /// The `TDDY_LSP_TOOLS` jail env pair — set when a language server is available for the
+    /// session's worktree, so the in-jail `tddy-tools --mcp` exposes the `Lsp*` tools.
+    fn lsp_tools_env(&self, worktree_root: &std::path::Path) -> Vec<(String, String)> {
+        let available = tddy_core::toolcall::lsp::lsp_executor()
+            .map(|ex| ex.is_available(worktree_root))
+            .unwrap_or(false);
+        if available {
+            vec![("TDDY_LSP_TOOLS".to_string(), "rust".to_string())]
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Handle `StartSession` for sandboxed `claude-cli` sessions (darwin Seatbelt, local gRPC).
     #[allow(clippy::too_many_arguments)]
     async fn start_sandboxed_claude_cli_session(
@@ -1610,6 +1623,7 @@ impl ConnectionServiceImpl {
         if !specialized_defs.is_empty() {
             env.extend(self.specialized_subagent_env(&specialized_defs)?);
         }
+        env.extend(self.lsp_tools_env(&worktree_path));
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
@@ -1985,6 +1999,7 @@ impl ConnectionServiceImpl {
         if !specialized_defs.is_empty() {
             env.extend(self.specialized_subagent_env(&specialized_defs)?);
         }
+        env.extend(self.lsp_tools_env(&worktree_path));
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
@@ -2431,6 +2446,7 @@ impl ConnectionServiceImpl {
         if !specialized_defs.is_empty() {
             env.extend(self.specialized_subagent_env(&specialized_defs)?);
         }
+        env.extend(self.lsp_tools_env(worktree_path));
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
