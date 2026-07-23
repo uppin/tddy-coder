@@ -170,6 +170,9 @@ export const TEST_IDS = {
   createSessionManagedCodebaseToggle: "create-session-managed-codebase-toggle",
   /** Expanded "Managed codebase" section content (specialized-subagent multi-select). */
   createSessionManagedCodebaseSection: "create-session-managed-codebase-section",
+  /** "Semantic index" checkbox inside the Managed codebase section — when on, the daemon indexes the
+   * worktree before launch and exposes the SemanticSearch tool. See docs/ft/coder/semantic-index.md. */
+  createSessionSemanticIndexToggle: "create-session-semantic-index-toggle",
   createSessionInitialPromptInput: "create-session-initial-prompt-input",
   createSessionBranchIntentSelect: "create-session-branch-intent-select",
   createSessionNewBranchNameInput: "create-session-new-branch-name-input",

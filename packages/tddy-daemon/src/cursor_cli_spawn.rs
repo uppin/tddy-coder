@@ -75,6 +75,10 @@ pub async fn spawn_cursor_cli_session_inner(
     managed_codebase: bool,
     specialized_agents: &[String],
     managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
+    // When true, index the worktree before launch (blocking; aborts on failure) and point the
+    // `SemanticSearch` tool at the per-session index via `TDDY_SEMANTIC_INDEX_DB`.
+    semantic_index: bool,
+    task_registry: &tddy_task::TaskRegistry,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
         return Err(Status::invalid_argument(
@@ -199,6 +203,28 @@ pub async fn spawn_cursor_cli_session_inner(
     }
     let _ = (managed_codebase, specialized_agents);
 
+    // Semantic index: index the worktree into the session dir before launch (blocking; a missing
+    // embedder or a failed index aborts the start — no unindexed fallback), and point the
+    // `SemanticSearch` tool at the per-session index DB via the process env.
+    let mut session_env: Vec<(String, String)> = Vec::new();
+    if semantic_index {
+        let embedder = tddy_semantic_index::production_embedder(tddy_data_dir).map_err(|e| {
+            Status::failed_precondition(format!(
+                "semantic index requested but no embedder is available: {e}"
+            ))
+        })?;
+        crate::semantic_index::run_semantic_index_blocking(
+            &worktree_path,
+            &session_dir,
+            embedder,
+            task_registry,
+            session_id,
+        )
+        .await
+        .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
+        session_env.push(crate::semantic_index::semantic_index_env(&session_dir));
+    }
+
     let handle = cli_manager
         .start_cursor(
             session_id,
@@ -206,6 +232,7 @@ pub async fn spawn_cursor_cli_session_inner(
             model,
             &binary_path,
             initial_prompt_opt.as_deref(),
+            session_env,
         )
         .await
         .map_err(|e| Status::internal(format!("failed to spawn cursor-cli: {}", e)))?;

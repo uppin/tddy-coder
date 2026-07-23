@@ -290,6 +290,8 @@ impl CliSessionManager {
         model: &str,
         binary_path: &str,
         initial_prompt: Option<&str>,
+        // Extra per-session env pairs applied to the cursor process (e.g. `TDDY_SEMANTIC_INDEX_DB`).
+        env: Vec<(String, String)>,
     ) -> anyhow::Result<Arc<PtyHandle>> {
         let argv = Self::build_cursor_argv(binary_path, model, initial_prompt);
         self.spawn_tool(
@@ -299,7 +301,7 @@ impl CliSessionManager {
             worktree_path,
             model,
             argv,
-            Vec::new(),
+            env,
             None,
         )
         .await
@@ -313,8 +315,15 @@ impl CliSessionManager {
         model: &str,
         binary_path: &str,
     ) -> anyhow::Result<Arc<PtyHandle>> {
-        self.start_cursor(session_id, worktree_path, model, binary_path, None)
-            .await
+        self.start_cursor(
+            session_id,
+            worktree_path,
+            model,
+            binary_path,
+            None,
+            Vec::new(),
+        )
+        .await
     }
 
     /// Spawn a new claude CLI process for `session_id` in `worktree_path`.

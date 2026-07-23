@@ -8,6 +8,12 @@ description = "Multi-user daemon for tddy-* tools — GitHub auth, user mapping,
 name = "tddy_daemon"
 path = "src/lib.rs"
 
+[features]
+# Off by default so ordinary dev builds/tests stay candle-free. With it, `production_embedder`
+# yields the local bundled model and a `semantic_index = true` request can actually index; without
+# it, such a request aborts the start with a clear error (the intended honest behavior).
+local-model = ["tddy-semantic-index/local-model"]
+
 [[bin]]
 name = "tddy-daemon"
 path = "src/main.rs"
@@ -51,6 +57,7 @@ tddy-actions = { path = "../tddy-actions" }
 tddy-task = { path = "../tddy-task" }
 tddy-pty = { path = "../tddy-pty" }
 tddy-tool-engine = { path = "../tddy-tool-engine" }
+tddy-semantic-index = { path = "../tddy-semantic-index" }
 tokio-stream = "0.1"
 tokio-util = "0.7"
 tddy-vm = { path = "../tddy-vm" }
