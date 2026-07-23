@@ -2923,6 +2923,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 &model,
                 &binary_path,
                 initial_prompt.as_deref(),
+                Vec::new(),
             )
             .await
             .map_err(|e| anyhow::anyhow!("failed to spawn cursor-cli: {e}"))?;

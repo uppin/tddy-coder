@@ -297,6 +297,10 @@ message StartSessionRequest {
   // binary, bypassing all permission prompts. Mutually exclusive with permission_mode: when set, the
   // daemon omits `--permission-mode` (the claude CLI rejects using both together).
   bool dangerously_skip_permissions = 26;
+  // Managed-codebase sessions with this set index the worktree before launch and expose the
+  // SemanticSearch tool. Only meaningful when managed_codebase = true. See
+  // docs/ft/coder/semantic-index.md.
+  bool semantic_index = 27;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved

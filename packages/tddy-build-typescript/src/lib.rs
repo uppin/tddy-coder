@@ -4,6 +4,7 @@
 
 use serde::Deserialize;
 
+use tddy_build::capabilities::BuildMode;
 use tddy_build::plugin::{BuildPlugin, LowerContext};
 use tddy_build::proto::{ActionType, BuildAction, OutputDecl, OutputKind};
 use tddy_build::BuildError;
@@ -16,6 +17,8 @@ pub struct TypeScriptPlugin;
 struct TypeScript {
     package_dir: String,
     build_script: String,
+    test_script: String,
+    run_script: String,
     srcs: Vec<String>,
     output_dirs: Vec<String>,
 }
@@ -52,6 +55,46 @@ impl BuildPlugin for TypeScriptPlugin {
             working_dir: ts.package_dir,
             ..Default::default()
         }])
+    }
+
+    fn lower_mode(
+        &self,
+        ctx: &LowerContext,
+        mode: BuildMode,
+    ) -> Result<Vec<BuildAction>, BuildError> {
+        if mode == BuildMode::Compile {
+            return self.lower(ctx);
+        }
+        let ts: TypeScript = serde_yaml::from_value(ctx.config.clone())
+            .map_err(|e| BuildError::Manifest(format!("invalid typescript config: {e}")))?;
+        let (id, script) = match mode {
+            BuildMode::Test => (
+                "typescript-test",
+                non_empty(&ts.test_script, "test").to_string(),
+            ),
+            BuildMode::Run => (
+                "typescript-run",
+                non_empty(&ts.run_script, "start").to_string(),
+            ),
+            BuildMode::Compile => unreachable!("compile handled above"),
+        };
+        Ok(vec![BuildAction {
+            id: id.to_string(),
+            description: format!("bun run {script}"),
+            r#type: ActionType::Command as i32,
+            command: vec!["bun".to_string(), "run".to_string(), script],
+            inputs: tddy_build::srcs_to_inputs(&ts.srcs, &ts.package_dir),
+            working_dir: ts.package_dir,
+            ..Default::default()
+        }])
+    }
+}
+
+fn non_empty<'a>(value: &'a str, default: &'a str) -> &'a str {
+    if value.is_empty() {
+        default
+    } else {
+        value
     }
 }
 

@@ -1,0 +1,45 @@
+[package]
+name = "tddy-semantic-index"
+version = "0.1.0"
+edition = "2021"
+description = "Per-session code embedding index (sqlite-vec) + semantic search for managed-codebase sessions"
+
+[lib]
+name = "tddy_semantic_index"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+tddy-task = { path = "../tddy-task" }
+# Vector store: raw SQLite handle (bundled) + the sqlite-vec extension for KNN.
+rusqlite = { version = "0.32", features = ["bundled", "blob"] }
+sqlite-vec = "0.1"
+# Worktree walk in chunk.rs.
+walkdir = "2"
+
+# Production local embedding model (candle BERT + tokenizers), pulled only with `local-model`.
+candle-core = { version = "0.8", optional = true }
+candle-nn = { version = "0.8", optional = true }
+candle-transformers = { version = "0.8", optional = true }
+tokenizers = { version = "0.20", default-features = false, features = ["onig"], optional = true }
+hf-hub = { version = "0.3", optional = true }
+serde_json = { version = "1", optional = true }
+tokio = { version = "1", features = ["rt"], optional = true }
+
+# The production local embedding model (candle BERT + tokenizers) lives behind this
+# non-default feature so ordinary `cargo test` / `./test` never pull heavy ML deps.
+[features]
+local-model = [
+    "dep:candle-core",
+    "dep:candle-nn",
+    "dep:candle-transformers",
+    "dep:tokenizers",
+    "dep:hf-hub",
+    "dep:serde_json",
+    "dep:tokio",
+]
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync"] }

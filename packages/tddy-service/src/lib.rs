@@ -29,6 +29,7 @@ pub use presenter_intent_service::PresenterIntentService;
 pub use proto::acp::{AcpService, AcpServiceServer};
 pub use proto::actions::ActionServiceServer;
 pub use proto::auth::AuthServiceServer;
+pub use proto::bsp::BspServiceServer;
 pub use proto::connection::ConnectionServiceServer;
 pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
 pub use proto::reflection::ServerReflectionServer;
@@ -70,6 +71,10 @@ pub mod proto {
     #[allow(unused_imports, unused_variables)]
     pub mod connection {
         include!(concat!(env!("OUT_DIR"), "/connection.rs"));
+    }
+    #[allow(unused_imports, unused_variables)]
+    pub mod bsp {
+        include!(concat!(env!("OUT_DIR"), "/bsp.rs"));
     }
     pub mod loopback_tunnel {
         include!(concat!(env!("OUT_DIR"), "/loopback_tunnel.rs"));

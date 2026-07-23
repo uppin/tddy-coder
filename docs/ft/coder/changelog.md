@@ -2,6 +2,18 @@
 
 Release note history for the Coder product area.
 
+## 2026-07-23 — Semantic index for managed-codebase sessions
+
+- Managed-codebase sessions (Claude/Cursor CLI) gain an optional **Semantic index** toggle: when on, the daemon indexes the worktree into a per-session `sqlite-vec` DB at `<session_dir>/semantic-index.db` before the agent starts, blocking launch and aborting the start if indexing fails (no fallback) ([semantic-index.md](semantic-index.md)).
+- Indexing embeds file chunks with a local candle model (`all-MiniLM-L6-v2`, behind the non-default `local-model` build feature; weights fetched & cached under the tddy data dir); the embedder is injected behind an `Embedder` trait so the pipeline is deterministic and offline under test.
+- `SemanticSearch` is available only when a session is indexed: for sandboxed Claude it is dropped from the allow-list and hard-disabled otherwise; Cursor and non-sandboxed Claude have no allow-list surface, so it instead errors at call time when no index exists. Its former ripgrep fallback is removed.
+- New crate `tddy-semantic-index` (chunker, `sqlite-vec` store, blocking index task, search engine, embedder). Web adds the toggle + `semantic_index` on `StartSessionRequest`.
+## 2026-07-23 — BSP-shaped build server: enumerate + compile/test/run build targets over RPC
+
+- A session now exposes its `BUILD.yaml` build targets over a BSP (Build Server Protocol)–shaped RPC service (`bsp.BspService`): enumerate workspace targets with their capabilities/tags/languages, list a target's sources and output paths, reload after a `BUILD.yaml` change, and compile/test/run a target ([bsp-build-server.md](bsp-build-server.md)).
+- `BUILD.yaml` targets can now declare `capabilities` (compile/test/run/debug), `tags`, and `languages` — derived from the target type when omitted — and compile/test/run are gated by the resolved capabilities.
+- Served per-session on the coder participant, and session-addressed on the daemon (resolving each request's session to its worktree and catalog), over the same protobuf/Connect + LiveKit transports the web UI already uses.
+- Not a literal JSON-RPC 2.0 BSP transport — external BSP-client (Metals/IntelliJ) compatibility is an explicit non-goal.
 ## 2026-07-19 — Workflows spawn a child conversation via `spawn_conversation`
 
 - A managed workflow agent can call the new `spawn_conversation` MCP tool to start a fresh interactive claude-cli conversation on a newly created git worktree, tagged as a child of the calling (orchestrator) session — reusing the same spawn path as the PR-stack `spawn-child`, which is left untouched. See [spawn-conversation.md](spawn-conversation.md).

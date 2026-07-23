@@ -48,6 +48,7 @@ async fn buildroot_defconfig_action_creates_config_file() {
         &graph,
         "my-os:rootfs",
         &ExecuteOptions::default(),
+        tddy_build::BuildMode::Compile,
         &registry(),
     )
     .await
@@ -77,6 +78,7 @@ async fn buildroot_build_action_creates_rootfs_image() {
         &graph,
         "my-os:rootfs",
         &ExecuteOptions::default(),
+        tddy_build::BuildMode::Compile,
         &registry(),
     )
     .await
@@ -101,14 +103,28 @@ async fn buildroot_cache_hits_on_rerun() {
     let opts = ExecuteOptions::default();
     let reg = registry();
     let graph = load_graph("build/br-out");
-    execute_target(dir.path(), &graph, "my-os:rootfs", &opts, &reg)
-        .await
-        .expect("first run");
+    execute_target(
+        dir.path(),
+        &graph,
+        "my-os:rootfs",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("first run");
 
     // When
-    let second = execute_target(dir.path(), &graph, "my-os:rootfs", &opts, &reg)
-        .await
-        .expect("second run");
+    let second = execute_target(
+        dir.path(),
+        &graph,
+        "my-os:rootfs",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("second run");
 
     // Then
     assert!(second.actions[1].cached, "rerun must be a cache hit");
@@ -124,18 +140,32 @@ async fn buildroot_cache_miss_after_makefile_edit() {
     let yaml = "schema_version: 1\ntargets:\n  - id: \"my-os:rootfs\"\n    config:\n      type: buildroot_image\n      defconfig: qemu_x86_64_defconfig\n      buildroot_dir: external/buildroot\n      output_dir: build/br-out\n      srcs: [\"external/buildroot/Makefile\"]\n";
     let manifest = tddy_build::load_build_manifest(yaml).expect("parse");
     let graph = BuildGraph::from_manifests(vec![manifest]).expect("graph");
-    execute_target(dir.path(), &graph, "my-os:rootfs", &opts, &reg)
-        .await
-        .expect("first run");
+    execute_target(
+        dir.path(),
+        &graph,
+        "my-os:rootfs",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("first run");
 
     // When
     // Touch the tracked Makefile to change its mtime
     let makefile = dir.path().join("external/buildroot/Makefile");
     let contents = std::fs::read(&makefile).expect("read");
     std::fs::write(&makefile, contents).expect("rewrite");
-    let third = execute_target(dir.path(), &graph, "my-os:rootfs", &opts, &reg)
-        .await
-        .expect("third run");
+    let third = execute_target(
+        dir.path(),
+        &graph,
+        "my-os:rootfs",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("third run");
 
     // Then
     assert!(

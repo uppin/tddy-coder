@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use tddy_task::TaskRegistry;
-use tddy_tool_engine::{execute_tool, tool_catalog};
+use tddy_tool_engine::{execute_tool, execute_tool_with_env, tool_catalog};
 
 fn registry() -> TaskRegistry {
     TaskRegistry::new()
@@ -99,6 +99,40 @@ async fn execute_tool_returns_an_error_for_an_unknown_tool() {
         outcome.error_message.contains("unknown tool"),
         "error should mention unknown tool; got: {}",
         outcome.error_message
+    );
+}
+
+/// SemanticSearch is only meaningful when the session has a semantic index. When it is invoked with
+/// no available index (the DB env points at a path that does not exist), it must error rather than
+/// silently degrading to a lexical/ripgrep search. See docs/ft/coder/semantic-index.md (criterion 15).
+#[tokio::test]
+async fn semantic_search_errors_when_no_index_is_available() {
+    // Given — a worktree with searchable text but no populated semantic index
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().to_path_buf();
+    std::fs::write(root.join("code.rs"), "fn find_me() {}").expect("write file");
+    let missing_db = tmp.path().join("semantic-index.db");
+    let registry = registry();
+
+    // When — SemanticSearch runs with the index DB env pointing at a non-existent index
+    let outcome = execute_tool_with_env(
+        &root,
+        "SemanticSearch",
+        r#"{"query":"find_me"}"#,
+        &registry,
+        "test-session",
+        &[(
+            "TDDY_SEMANTIC_INDEX_DB".to_string(),
+            missing_db.to_string_lossy().into_owned(),
+        )],
+    )
+    .await;
+
+    // Then — it errors instead of falling back to a lexical search
+    assert!(
+        outcome.is_error,
+        "SemanticSearch must error without an index (no ripgrep fallback); got: {}",
+        outcome.result_json
     );
 }
 

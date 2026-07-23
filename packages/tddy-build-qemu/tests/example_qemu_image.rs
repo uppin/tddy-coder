@@ -37,6 +37,7 @@ async fn qemu_disk_image_converts_raw_to_qcow2() {
         &load_graph(),
         "my-os:qcow2",
         &ExecuteOptions::default(),
+        tddy_build::BuildMode::Compile,
         &registry(),
     )
     .await
@@ -66,14 +67,28 @@ async fn qemu_disk_image_cache_hits_on_rerun() {
     let opts = ExecuteOptions::default();
     let reg = registry();
     let graph = load_graph();
-    execute_target(dir.path(), &graph, "my-os:qcow2", &opts, &reg)
-        .await
-        .expect("first run");
+    execute_target(
+        dir.path(),
+        &graph,
+        "my-os:qcow2",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("first run");
 
     // When
-    let second = execute_target(dir.path(), &graph, "my-os:qcow2", &opts, &reg)
-        .await
-        .expect("second run");
+    let second = execute_target(
+        dir.path(),
+        &graph,
+        "my-os:qcow2",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("second run");
 
     // Then
     assert!(second.actions[0].cached, "rerun must be a cache hit");
@@ -86,17 +101,31 @@ async fn qemu_disk_image_cache_miss_after_input_change() {
     let opts = ExecuteOptions::default();
     let reg = registry();
     let graph = load_graph();
-    execute_target(dir.path(), &graph, "my-os:qcow2", &opts, &reg)
-        .await
-        .expect("first run");
+    execute_target(
+        dir.path(),
+        &graph,
+        "my-os:qcow2",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("first run");
 
     // When
     // Overwrite the raw image with different content to change its fingerprint
     let raw_path = dir.path().join("build/br-out/images/rootfs.ext4");
     std::fs::write(&raw_path, vec![1u8; 1024 * 1024]).expect("modify raw image");
-    let third = execute_target(dir.path(), &graph, "my-os:qcow2", &opts, &reg)
-        .await
-        .expect("third run");
+    let third = execute_target(
+        dir.path(),
+        &graph,
+        "my-os:qcow2",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("third run");
 
     // Then
     assert!(

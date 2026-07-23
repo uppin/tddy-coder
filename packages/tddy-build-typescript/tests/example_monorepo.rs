@@ -108,6 +108,7 @@ async fn ts_monorepo_builds_with_real_bun() {
         &graph,
         "web:build",
         &ExecuteOptions::default(),
+        tddy_build::BuildMode::Compile,
         &registry(),
     )
     .await
@@ -136,17 +137,31 @@ async fn ts_cache_hits_then_misses_after_source_edit() {
     let graph = load(dir.path());
 
     // When
-    let first = execute_target(dir.path(), &graph, "shared:build", &opts, &reg)
-        .await
-        .expect("first");
+    let first = execute_target(
+        dir.path(),
+        &graph,
+        "shared:build",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("first");
 
     // Then
     assert!(!first.actions[0].cached);
 
     // When (rerun without changes)
-    let second = execute_target(dir.path(), &graph, "shared:build", &opts, &reg)
-        .await
-        .expect("second");
+    let second = execute_target(
+        dir.path(),
+        &graph,
+        "shared:build",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("second");
 
     // Then
     assert!(second.actions[0].cached, "rerun is a cache hit");
@@ -157,9 +172,16 @@ async fn ts_cache_hits_then_misses_after_source_edit() {
         "export const greeting = \"hello again\";\n",
     )
     .expect("edit source");
-    let third = execute_target(dir.path(), &graph, "shared:build", &opts, &reg)
-        .await
-        .expect("third");
+    let third = execute_target(
+        dir.path(),
+        &graph,
+        "shared:build",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("third");
 
     // Then
     assert!(

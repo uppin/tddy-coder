@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use crate::builtin::{self, GROUP};
+use crate::capabilities::BuildMode;
 use crate::error::BuildError;
 use crate::lower::lower_target;
 use crate::manifest::{BuildManifest, BuildTarget};
@@ -52,17 +53,27 @@ impl BuildGraph {
         self.targets.get(id)
     }
 
-    /// All lowered actions for `target_id`, in declaration order.
+    /// All lowered compile actions for `target_id`, in declaration order.
     pub fn actions_for(
         &self,
         target_id: &str,
+        registry: &PluginRegistry,
+    ) -> Result<Vec<BuildAction>, BuildError> {
+        self.actions_for_mode(target_id, BuildMode::Compile, registry)
+    }
+
+    /// All lowered actions for `target_id` in the requested [`BuildMode`], in declaration order.
+    pub fn actions_for_mode(
+        &self,
+        target_id: &str,
+        mode: BuildMode,
         registry: &PluginRegistry,
     ) -> Result<Vec<BuildAction>, BuildError> {
         let target = self
             .targets
             .get(target_id)
             .ok_or_else(|| BuildError::UnknownTarget(target_id.to_string()))?;
-        lower_target(target, registry)
+        lower_target(target, mode, registry)
     }
 
     /// Targets to build for `target_id`, dependencies (and group members) first,

@@ -230,7 +230,7 @@ pub async fn execute_tool_with_env(
                 "Delete" => tool_delete(worktree_root, &args),
                 "Grep" => tool_grep(worktree_root, &args).await,
                 "Glob" => tool_glob(worktree_root, &args),
-                "SemanticSearch" => tool_semantic_search(worktree_root, &args).await,
+                "SemanticSearch" => tool_semantic_search(worktree_root, &args, extra_env).await,
                 other => ToolOutcome::err(format!("unknown tool: {other}")),
             };
             let task_id = register_sync_task(registry, session_id, &kind, &outcome).await;
@@ -641,40 +641,43 @@ async fn tool_read_lints(worktree_root: &Path) -> ToolOutcome {
     )
 }
 
-async fn tool_semantic_search(root: &Path, args: &serde_json::Value) -> ToolOutcome {
-    let query = match args.get("query").and_then(|v| v.as_str()) {
-        Some(q) => q,
-        None => return ToolOutcome::err("SemanticSearch: missing 'query' argument"),
-    };
-
-    let output = tokio::process::Command::new("rg")
-        .args(["--json", "-e", query, "."])
-        .current_dir(root)
-        .output()
-        .await;
-
-    match output {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            let mut results: Vec<serde_json::Value> = vec![];
-            for line in stdout.lines() {
-                if results.len() >= 10 {
-                    break;
-                }
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                    if v.get("type").and_then(|t| t.as_str()) == Some("match") {
-                        results.push(v);
-                    }
-                }
-            }
-            ToolOutcome::ok(
-                serde_json::json!({
-                    "results": results,
-                    "note": "SemanticSearch: ripgrep-backed fallback"
-                })
-                .to_string(),
-            )
-        }
-        Err(e) => ToolOutcome::err(format!("SemanticSearch: rg execution failed: {e}")),
+/// Semantic (embedding-backed) search over the session's index. There is deliberately no lexical
+/// fallback: SemanticSearch is only meaningful with a populated semantic index, and silently
+/// degrading to ripgrep would return lexically-similar-but-semantically-wrong results the caller
+/// cannot distinguish from real hits. The index location is passed via `TDDY_SEMANTIC_INDEX_DB`
+/// (see docs/ft/coder/semantic-index.md); its absence — or a path that does not exist — is an
+/// error, not a cue to search some other way.
+async fn tool_semantic_search(
+    _root: &Path,
+    args: &serde_json::Value,
+    extra_env: &[(String, String)],
+) -> ToolOutcome {
+    if args.get("query").and_then(|v| v.as_str()).is_none() {
+        return ToolOutcome::err("SemanticSearch: missing 'query' argument");
     }
+
+    let db_path = extra_env
+        .iter()
+        .find(|(k, _)| k == "TDDY_SEMANTIC_INDEX_DB")
+        .map(|(_, v)| v.as_str())
+        .filter(|v| !v.trim().is_empty());
+
+    let db_path =
+        match db_path {
+            Some(path) => path,
+            None => return ToolOutcome::err(
+                "SemanticSearch: no semantic index for this session (TDDY_SEMANTIC_INDEX_DB unset)",
+            ),
+        };
+
+    if !Path::new(db_path).exists() {
+        return ToolOutcome::err(format!(
+            "SemanticSearch: no semantic index for this session (index DB not found at {db_path})"
+        ));
+    }
+
+    // TODO: query the populated index via the production embedder. The embedder that turns the
+    // query into a vector for nearest-neighbour lookup is not wired into the engine yet; until it
+    // is, an existing index cannot be queried. See docs/ft/coder/semantic-index.md.
+    ToolOutcome::err("SemanticSearch: index query not yet wired")
 }
