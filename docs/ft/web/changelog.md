@@ -4,6 +4,11 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-23 — Set a project's default branch from the Projects screen
+
+- Each project card gains a **default branch** dropdown listing the project's remote branches (sourced from `ListProjectBranches`); choosing one sets the project's `main_branch_ref` via the new `SetProjectDefaultBranch` RPC and applies it across the project's hosts ([projects-screen-multi-host.md](projects-screen-multi-host.md#default-branch)).
+- A project with no stored default pre-selects `origin/master` when present, otherwise `origin/main` — matching the live default-resolution order — so a sensible default is always shown without implying one has been persisted. Any remote branch (including slash-containing names) is selectable.
+
 ## 2026-07-23 — Inspector docks as the main pane for disconnected sessions
 
 - The Session Inspector now **docks as the full main pane** for a `disconnected` session instead of a ~360px right-edge overlay drawer; `connected` / `needs-input` sessions keep the drawer. Driven by a `data-docked` attribute (from the pure `isInspectorDocked(session)` helper); all header controls remain in both layouts. See [session-drawer.md](session-drawer.md#docked-vs-drawer).
