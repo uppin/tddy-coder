@@ -13,6 +13,15 @@ use std::sync::Arc;
 use tddy_build::plugin::PluginRegistry;
 use tddy_build::service::{build_json, build_list_json, BuildListQuery};
 
+/// Resolve `--repo-dir` to an absolute path. Action specs require absolute input
+/// `host_path`s (they become jail mounts), so the repo root must be absolute before
+/// it is joined with `srcs` patterns during lowering.
+fn resolve_repo_dir(repo_dir: &Path) -> Result<PathBuf> {
+    repo_dir
+        .canonicalize()
+        .with_context(|| format!("repo-dir not found: {}", repo_dir.display()))
+}
+
 /// Assemble the build-plugin registry from the recipe crates. This is the wiring
 /// point: `tddy-build` knows no target types; the binary chooses the plugin set.
 fn plugin_registry() -> PluginRegistry {
@@ -68,27 +77,28 @@ pub struct BuildArgs {
 }
 
 pub async fn run_build_list(args: BuildListArgs) -> Result<()> {
+    let repo_dir = resolve_repo_dir(&args.repo_dir)?;
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
-        return relay_build_list(Path::new(&socket_path), &args).await;
+        return relay_build_list(Path::new(&socket_path), &args, &repo_dir).await;
     }
     let query = BuildListQuery {
         query: args.query.clone(),
         limit: args.limit,
         offset: args.offset,
     };
-    let value =
-        build_list_json(&args.repo_dir, &query).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    let value = build_list_json(&repo_dir, &query).map_err(|e| anyhow::anyhow!(e.to_string()))?;
     println!("{}", serde_json::to_string(&value)?);
     Ok(())
 }
 
 pub async fn run_build(args: BuildArgs) -> Result<()> {
+    let repo_dir = resolve_repo_dir(&args.repo_dir)?;
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
-        return relay_build(Path::new(&socket_path), &args).await;
+        return relay_build(Path::new(&socket_path), &args, &repo_dir).await;
     }
     let registry = plugin_registry();
     let value = build_json(
-        &args.repo_dir,
+        &repo_dir,
         &args.target,
         args.no_cache,
         args.dry_run,
@@ -133,10 +143,10 @@ struct BuildRelayResponse {
 }
 
 #[cfg(unix)]
-async fn relay_build_list(socket_path: &Path, args: &BuildListArgs) -> Result<()> {
+async fn relay_build_list(socket_path: &Path, args: &BuildListArgs, repo_dir: &Path) -> Result<()> {
     let request = BuildListRelayRequest {
         r#type: "build-list",
-        repo_dir: args.repo_dir.to_string_lossy().into_owned(),
+        repo_dir: repo_dir.to_string_lossy().into_owned(),
         query: &args.query,
         limit: args.limit,
         offset: args.offset,
@@ -145,10 +155,10 @@ async fn relay_build_list(socket_path: &Path, args: &BuildListArgs) -> Result<()
 }
 
 #[cfg(unix)]
-async fn relay_build(socket_path: &Path, args: &BuildArgs) -> Result<()> {
+async fn relay_build(socket_path: &Path, args: &BuildArgs, repo_dir: &Path) -> Result<()> {
     let request = BuildRelayRequest {
         r#type: "build",
-        repo_dir: args.repo_dir.to_string_lossy().into_owned(),
+        repo_dir: repo_dir.to_string_lossy().into_owned(),
         target: args.target.clone(),
         no_cache: args.no_cache,
         dry_run: args.dry_run,
@@ -194,11 +204,15 @@ async fn relay<T: Serialize>(socket_path: &Path, request: &T) -> Result<()> {
 }
 
 #[cfg(not(unix))]
-async fn relay_build_list(_socket_path: &Path, _args: &BuildListArgs) -> Result<()> {
+async fn relay_build_list(
+    _socket_path: &Path,
+    _args: &BuildListArgs,
+    _repo_dir: &Path,
+) -> Result<()> {
     anyhow::bail!("TDDY_SOCKET relay is not supported on this platform")
 }
 
 #[cfg(not(unix))]
-async fn relay_build(_socket_path: &Path, _args: &BuildArgs) -> Result<()> {
+async fn relay_build(_socket_path: &Path, _args: &BuildArgs, _repo_dir: &Path) -> Result<()> {
     anyhow::bail!("TDDY_SOCKET relay is not supported on this platform")
 }
