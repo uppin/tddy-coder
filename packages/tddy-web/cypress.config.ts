@@ -726,6 +726,11 @@ export default defineConfig({
             `  web_port: ${webPort}`,
             `  web_host: 127.0.0.1`,
             `web_bundle_path: ${webBundlePath}`,
+            // Session-token signing reads `livekit.api_secret`; without it the stub OAuth
+            // ExchangeCode fails with "session token signing is not configured".
+            `livekit:`,
+            `  api_key: ${DEV_API_KEY}`,
+            `  api_secret: ${DEV_API_SECRET}`,
             `github:`,
             `  stub: true`,
             `  stub_codes: "test-code:testuser"`,

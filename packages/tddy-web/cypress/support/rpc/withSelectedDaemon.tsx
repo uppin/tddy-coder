@@ -15,7 +15,7 @@
  */
 
 import React from "react";
-import { Room } from "livekit-client";
+import { ConnectionState, Room } from "livekit-client";
 import type { DaemonHost } from "../../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../../src/hooks/authProvider";
@@ -36,6 +36,7 @@ export function aFakeCommonRoom(participantIdentities: string[]): Room {
   return {
     localParticipant: undefined,
     remoteParticipants,
+    state: ConnectionState.Connected,
     on: () => {},
     off: () => {},
   } as unknown as Room;
@@ -55,6 +56,7 @@ export function aFakeCommonRoomWithMetadata(
   return {
     localParticipant: undefined,
     remoteParticipants,
+    state: ConnectionState.Connected,
     on: () => {},
     off: () => {},
   } as unknown as Room;

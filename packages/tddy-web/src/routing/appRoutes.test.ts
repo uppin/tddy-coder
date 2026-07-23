@@ -2,14 +2,13 @@ import { describe, expect, it } from "bun:test";
 import {
   TERMINAL_SESSION_ROUTE_PREFIX,
   isAuthCallbackPath,
-  isSessionListPath,
   parseTerminalSessionIdFromPathname,
-  terminalDeepLinkSessionPath,
-  terminalPathForSessionId,
   RPC_PLAYGROUND_ROUTE,
   isRpcPlaygroundPath,
   VMS_ROUTE,
   isVmsPath,
+  LIVEKIT_ROUTE,
+  isLiveKitPath,
   SESSIONS_DRAWER_ROUTE,
   isSessionsDrawerPath,
   sessionsDrawerPathForSession,
@@ -17,13 +16,8 @@ import {
 } from "./appRoutes";
 
 describe("appRoutes helpers (canonical path rules)", () => {
-  it("builds a /terminal/:id path from a session id", () => {
-    // When
-    const result = terminalPathForSessionId("sess-a");
-    // Then
-    expect(result).toBe(`${TERMINAL_SESSION_ROUTE_PREFIX}/sess-a`);
-  });
-
+  // The standalone-mode hash-strip effect still parses legacy /terminal/:id links, so this
+  // helper is retained even though the dedicated terminal route is removed.
   it("extracts the session id from a /terminal/:sessionId pathname", () => {
     // When
     const result = parseTerminalSessionIdFromPathname(`${TERMINAL_SESSION_ROUTE_PREFIX}/abc-123`);
@@ -31,26 +25,11 @@ describe("appRoutes helpers (canonical path rules)", () => {
     expect(result).toBe("abc-123");
   });
 
-  it("recognises the home path as the session list", () => {
-    // When
-    const result = isSessionListPath("/");
-    // Then
-    expect(result).toBe(true);
-  });
-
   it("recognises /auth/callback as the OAuth callback path", () => {
     // When
     const result = isAuthCallbackPath("/auth/callback");
     // Then
     expect(result).toBe(true);
-  });
-
-  it("deep-link session path stays aligned with terminalPathForSessionId for encoded ids", () => {
-    // Given
-    const id = "sess/with space";
-
-    // When + Then
-    expect(terminalDeepLinkSessionPath(id)).toBe(terminalPathForSessionId(id));
   });
 });
 
@@ -120,6 +99,28 @@ describe("appRoutes — VMs route helpers", () => {
 
   it("does not match sub-paths under /vms", () => {
     expect(isVmsPath("/vms/extra")).toBe(false);
+  });
+});
+
+describe("appRoutes — LiveKit route helpers", () => {
+  it("LIVEKIT_ROUTE is /livekit", () => {
+    expect(LIVEKIT_ROUTE).toBe("/livekit");
+  });
+
+  it("recognises /livekit as the LiveKit path", () => {
+    expect(isLiveKitPath("/livekit")).toBe(true);
+  });
+
+  it("does not match root as a LiveKit path", () => {
+    expect(isLiveKitPath("/")).toBe(false);
+  });
+
+  it("does not match /sessions as a LiveKit path", () => {
+    expect(isLiveKitPath("/sessions")).toBe(false);
+  });
+
+  it("does not match sub-paths under /livekit", () => {
+    expect(isLiveKitPath("/livekit/extra")).toBe(false);
   });
 });
 

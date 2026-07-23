@@ -9,6 +9,12 @@ Release note history for the Web product area.
 - The agent-activity pane can subscribe **live-only** — skipping the full-history replay — via `useSessionActivity`'s `mode` (`StreamMode.LIVE_ONLY`); the overlay keeps the snapshot-then-live default so history still populates on open ([agent-activity-pane.md](agent-activity-pane.md#streaming-design--streamsessionactivity)).
 - Tool **input/output** are now structured `google.protobuf.Value` end-to-end (not opaque JSON strings), so the detail dialog renders a real object/array/string/scalar — a bare-string tool result shows verbatim ([agent-activity-pane.md](agent-activity-pane.md#data-model--a-new-per-session-agent-activity-log)).
 
+## 2026-07-23 — Unified app shell layout
+
+- All daemon-mode screens now render inside a single **`AppShell`** that owns the top chrome (top-left hamburger `DaemonNavMenu` + title + daemon selector + user avatar) with `scroll` and `fullbleed` variants. Screens no longer hand-roll their own header, so none can ship without the navigation menu — the sessions drawer screen previously did. See [app-shell.md](app-shell.md).
+- The **sessions drawer** (`#/sessions`) is now the **default** route: `#/` resolves to it and the legacy `ConnectionScreen` (plus its `#/terminal/:id` route) is removed. A `#/sessions/<unknown-id>` deep link shows a "session not found" state with a Home link; bulk select + delete of sessions is available in the drawer.
+- The LiveKit "Connected participants" table moves out of the old connection screen into its own **LiveKit** screen (`#/livekit`, new hamburger item), reusing the shared common-room participant hooks.
+- The standalone auth/connection forms use shared shadcn theme tokens instead of inline hardcoded hex, so every screen shares one theme.
 ## 2026-07-23 — Set a project's default branch from the Projects screen
 
 - Each project card gains a **default branch** dropdown listing the project's remote branches (sourced from `ListProjectBranches`); choosing one sets the project's `main_branch_ref` via the new `SetProjectDefaultBranch` RPC and applies it across the project's hosts ([projects-screen-multi-host.md](projects-screen-multi-host.md#default-branch)).

@@ -7,9 +7,7 @@ import {
   ServerReflectionRequestSchema,
 } from "../gen/grpc/reflection/v1/reflection_pb";
 import { GitHubLoginButton } from "../components/GitHubLoginButton";
-import { UserAvatar } from "../components/UserAvatar";
-import { DaemonNavMenu } from "../components/shell/DaemonNavMenu";
-import { DaemonSelectorConnected } from "../components/shell/DaemonSelector";
+import { AppShell } from "../components/shell/AppShell";
 import { useAuthContext } from "../hooks/authProvider";
 import { useRoomParticipants } from "../hooks/useRoomParticipants";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
@@ -21,9 +19,6 @@ import {
   type ServiceInfo,
   type ServiceMethodKind,
 } from "./RpcPlaygroundScreen";
-
-const screenShellClassName =
-  "min-h-svh w-full min-w-0 box-border px-4 py-6 sm:px-6 font-sans text-foreground";
 
 async function* once<T>(value: T): AsyncIterable<T> {
   yield value;
@@ -75,7 +70,7 @@ export function RpcPlaygroundAppPage({
 }: {
   onNavigate: (path: string) => void;
 }) {
-  const { user, isAuthenticated, login, logout, sessionToken } = useAuthContext();
+  const { user, isAuthenticated, login, sessionToken } = useAuthContext();
   const identity = useMemo(
     () => (user ? presenceIdentityForUser(user.login) : undefined),
     [user],
@@ -204,32 +199,19 @@ export function RpcPlaygroundAppPage({
 
   if (!isAuthenticated) {
     return (
-      <div className={screenShellClassName}>
-        <h1 className="text-2xl font-semibold">tddy-web</h1>
+      <AppShell title="RPC Playground" onNavigate={onNavigate} variant="scroll">
         <p className="mb-4 text-sm text-muted-foreground">
           Sign in with GitHub to access the RPC Playground.
         </p>
         <GitHubLoginButton onClick={login} />
-      </div>
+      </AppShell>
     );
   }
 
   return (
-    <div>
-      <div className="flex flex-wrap items-center justify-between gap-4 px-4 pt-6 sm:px-6">
-        <div className="flex min-w-0 flex-wrap items-center gap-3">
-          <DaemonNavMenu onNavigate={onNavigate} />
-        </div>
-        <div className="flex items-center gap-3">
-          <DaemonSelectorConnected />
-          {user ? <UserAvatar user={user} onLogout={logout} /> : null}
-        </div>
-      </div>
+    <AppShell title="RPC Playground" onNavigate={onNavigate} variant="scroll">
       {error ? (
-        <p
-          className="px-4 text-sm text-destructive sm:px-6"
-          data-testid="rpc-playground-error"
-        >
+        <p className="text-sm text-destructive" data-testid="rpc-playground-error">
           {error}
         </p>
       ) : null}
@@ -241,7 +223,7 @@ export function RpcPlaygroundAppPage({
         onInvoke={handleInvoke}
         onNavigate={onNavigate}
       />
-    </div>
+    </AppShell>
   );
 }
 

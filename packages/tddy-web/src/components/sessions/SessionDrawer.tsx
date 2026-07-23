@@ -42,6 +42,10 @@ interface SessionDrawerProps {
   hostLabelForInstance?: (instanceId: string) => string;
   /** Parsed `session` participant-metadata, keyed by session id (req 4). Defaults to empty. */
   sessionMetadataBySessionId?: ReadonlyMap<string, SessionMetadata>;
+  /** Session ids ticked for bulk delete. When provided, each row renders a selection checkbox. */
+  selectedForDelete?: ReadonlySet<string>;
+  /** Toggle a row's bulk-delete selection. Required for the row checkboxes to render. */
+  onToggleSelect?: (sessionId: string) => void;
 }
 
 interface StackGroup {
@@ -62,12 +66,16 @@ function SessionStackGroup({
   onSelectSession,
   owningHost,
   sessionMetadataBySessionId,
+  selectedForDelete,
+  onToggleSelect,
 }: {
   group: StackGroup;
   selectedSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   owningHost: OwningHostInfo;
   sessionMetadataBySessionId: ReadonlyMap<string, SessionMetadata>;
+  selectedForDelete?: ReadonlySet<string>;
+  onToggleSelect?: (sessionId: string) => void;
 }) {
   const [isOpen, setIsOpen] = useState(true);
 
@@ -79,6 +87,8 @@ function SessionStackGroup({
         onClick={onSelectSession}
         hostLabel={badgeHostLabel(group.parent, owningHost)}
         sessionMetadata={sessionMetadataBySessionId.get(group.parent.sessionId)}
+        selected={selectedForDelete?.has(group.parent.sessionId)}
+        onToggleSelect={onToggleSelect}
       />
       {/* <details> provides the <summary> toggle target; children visibility is controlled explicitly via React state */}
       <details>
@@ -100,6 +110,8 @@ function SessionStackGroup({
             depth={1}
             hostLabel={badgeHostLabel(child, owningHost)}
             sessionMetadata={sessionMetadataBySessionId.get(child.sessionId)}
+            selected={selectedForDelete?.has(child.sessionId)}
+            onToggleSelect={onToggleSelect}
           />
         ))}
       </div>
@@ -119,6 +131,8 @@ export function SessionDrawer({
   selectedInstanceId = "",
   hostLabelForInstance = (instanceId) => instanceId,
   sessionMetadataBySessionId = new Map(),
+  selectedForDelete,
+  onToggleSelect,
 }: SessionDrawerProps) {
   const owningHost: OwningHostInfo = {
     selectedInstanceId,
@@ -231,6 +245,8 @@ export function SessionDrawer({
               onSelectSession={onSelectSession}
               owningHost={owningHost}
               sessionMetadataBySessionId={sessionMetadataBySessionId}
+              selectedForDelete={selectedForDelete}
+              onToggleSelect={onToggleSelect}
             />
           ))}
           {flat.map((session) => (
@@ -241,6 +257,8 @@ export function SessionDrawer({
               onClick={onSelectSession}
               hostLabel={badgeHostLabel(session, owningHost)}
               sessionMetadata={sessionMetadataBySessionId.get(session.sessionId)}
+              selected={selectedForDelete?.has(session.sessionId)}
+              onToggleSelect={onToggleSelect}
             />
           ))}
           {sessions.length === 0 && (
