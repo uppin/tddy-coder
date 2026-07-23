@@ -51,6 +51,15 @@ OVERWRITE_SYSTEMD_UNIT="${INSTALL_OVERWRITE_SYSTEMD_UNIT:-0}"
 DAEMON_USER="${INSTALL_DAEMON_USER:-tddy}"
 DAEMON_GROUP="${INSTALL_DAEMON_GROUP:-$DAEMON_USER}"
 
+# Group that gates access to the local Unix socket (docker-model). systemd creates the socket
+# as root via tddy-daemon.socket and chowns it to ${DAEMON_USER}:${SOCKET_GROUP} mode 0660, so
+# same-host clients (tddy-sandbox-app, and humans added to this group) can connect without root.
+SOCKET_GROUP="${INSTALL_SOCKET_GROUP:-tddy-clients}"
+UNIT_SOCKET_PATH="${SYSTEMD_DIR}/tddy-daemon.socket"
+# Where systemd creates the local socket. Must match daemon.yaml local.socket_path (the daemon's
+# fallback when unset is /run/tddy-daemon.sock, which matches this default).
+SOCKET_LISTEN_PATH="${INSTALL_SOCKET_PATH:-/run/tddy-daemon.sock}"
+
 # AppArmor profile granting the unprivileged user namespaces the Linux cgroups sandbox needs.
 APPARMOR_DIR="${INSTALL_APPARMOR_DIR:-/etc/apparmor.d}"
 APPARMOR_PROFILE_SRC="${ROOT_DIR}/packages/tddy-daemon/apparmor/tddy-daemon"
@@ -189,6 +198,10 @@ if [[ "$NO_SYSTEMCTL" != "1" ]]; then
         --shell /usr/sbin/nologin "$DAEMON_USER"
     fi
   fi
+  echo "install: ensuring socket-access group ${SOCKET_GROUP} (add same-host client users with: usermod -aG ${SOCKET_GROUP} <user>)"
+  if ! getent group "$SOCKET_GROUP" >/dev/null; then
+    groupadd --system "$SOCKET_GROUP"
+  fi
   echo "install: ensuring system dirs for daemon log + auth: ${DAEMON_LOG_DIR}, ${AUTH_STORAGE_DIR}"
   mkdir -p "$DAEMON_LOG_DIR" "$AUTH_STORAGE_DIR"
   echo "install: chowning ${DAEMON_LOG_DIR} and ${AUTH_STORAGE_DIR} to ${DAEMON_USER}:${DAEMON_GROUP}"
@@ -230,6 +243,11 @@ else
 [Unit]
 Description=tddy-daemon multi-user daemon
 After=network.target
+# The socket unit creates the local Unix socket (as root, group ${SOCKET_GROUP}) and passes the
+# listening fd to this service via socket activation, so the unprivileged daemon never has to bind
+# in /run itself. Requires= keeps them lifecycled together.
+Requires=tddy-daemon.socket
+After=tddy-daemon.socket
 
 [Service]
 Type=simple
@@ -254,6 +272,31 @@ UNIT
   echo "install:   ExecStart=${BIN_DIR}/tddy-daemon -c ${CONFIG_FILE}"
 fi
 
+if [[ -f "$UNIT_SOCKET_PATH" ]] && [[ "$OVERWRITE_SYSTEMD_UNIT" != "1" ]]; then
+  echo "install: keeping existing systemd socket unit (not overwriting): ${UNIT_SOCKET_PATH}"
+  echo "install:   set INSTALL_OVERWRITE_SYSTEMD_UNIT=1 to replace with this script's template (SocketGroup, ListenStream, etc.)"
+else
+  echo "install: writing systemd socket unit ${UNIT_SOCKET_PATH} (ListenStream=${SOCKET_LISTEN_PATH}, group ${SOCKET_GROUP})"
+  cat >"$UNIT_SOCKET_PATH" <<SOCKET
+[Unit]
+Description=tddy-daemon local ConnectionService socket
+
+[Socket]
+# systemd creates this socket as root, then chowns it to ${DAEMON_USER}:${SOCKET_GROUP} at mode 0660
+# (the docker.sock model). Same-host clients in ${SOCKET_GROUP} can connect; the daemon adopts the
+# passed fd via LISTEN_FDS. Must match daemon.yaml local.socket_path (unset -> ${SOCKET_LISTEN_PATH}).
+ListenStream=${SOCKET_LISTEN_PATH}
+SocketUser=${DAEMON_USER}
+SocketGroup=${SOCKET_GROUP}
+SocketMode=0660
+
+[Install]
+WantedBy=sockets.target
+SOCKET
+  chmod 0644 "$UNIT_SOCKET_PATH"
+  echo "install:   ListenStream=${SOCKET_LISTEN_PATH} SocketUser=${DAEMON_USER} SocketGroup=${SOCKET_GROUP} SocketMode=0660"
+fi
+
 # AppArmor profile granting the daemon binary unprivileged user namespaces. Loaded before the service
 # starts because the unit's AppArmorProfile= transition fails if the profile is not present.
 if [[ "$NO_SYSTEMCTL" != "1" ]]; then
@@ -274,11 +317,15 @@ if [[ "$NO_SYSTEMCTL" != "1" ]]; then
 fi
 
 if [[ "$NO_SYSTEMCTL" != "1" ]]; then
-  echo "install: systemctl daemon-reload; enable + start tddy-daemon"
+  echo "install: systemctl daemon-reload; enable + start tddy-daemon.socket and tddy-daemon"
   systemctl daemon-reload
+  # Start the socket first so the listening fd exists before the service is (re)started and adopts it.
+  systemctl enable tddy-daemon.socket
+  systemctl restart tddy-daemon.socket
   systemctl enable tddy-daemon
-  systemctl start tddy-daemon
-  echo "install: done (service started). journal: journalctl -u tddy-daemon -f"
+  systemctl restart tddy-daemon
+  echo "install: done (socket + service started). journal: journalctl -u tddy-daemon -f"
+  echo "install: verify socket: ls -l ${SOCKET_LISTEN_PATH}  (expect srw-rw---- ${DAEMON_USER}:${SOCKET_GROUP})"
 else
   echo "install: done (INSTALL_NO_SYSTEMCTL=1: skipped systemctl; skipped mkdir ${DAEMON_LOG_DIR} and ${AUTH_STORAGE_DIR}; skipped enable/start)"
 fi
