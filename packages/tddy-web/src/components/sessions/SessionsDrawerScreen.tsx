@@ -2,7 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExtern
 import { create } from "@bufbuild/protobuf";
 import { createClient, type Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
-import { ConnectionService, SessionEntrySchema, type SessionEntry } from "../../gen/connection_pb";
+import {
+  ConnectionService,
+  SessionEntrySchema,
+  type SessionEntry,
+  type ProjectEntry,
+} from "../../gen/connection_pb";
 import { TokenService } from "../../gen/token_pb";
 import {
   useHttpClient,
@@ -75,6 +80,22 @@ export function SessionsDrawerScreen() {
   // Track whether the URL-seeded selectedSessionId has been activated after the session list loads
   const deepLinkActivatedRef = useRef(false);
   const [mode, setMode] = useState<"list" | "creating">("list");
+
+  // The project registry (daemon-level RPC over the selected-daemon common-room connection). Used
+  // to resolve an unscoped session's project from its `repoPath` before the worktree RPCs — those
+  // require a non-empty `project_id`. Falls back to an empty list when no daemon is selected yet or
+  // the call fails, so the drawer still renders.
+  const [projects, setProjects] = useState<ProjectEntry[]>([]);
+  useEffect(() => {
+    if (!client) {
+      setProjects([]);
+      return;
+    }
+    client
+      .listProjects({ sessionToken })
+      .then((res) => setProjects(res.projects))
+      .catch(() => setProjects([]));
+  }, [client, sessionToken]);
 
   // Default closed on mobile (the open 280px panel would cover the main pane);
   // open on desktop.
@@ -495,6 +516,7 @@ export function SessionsDrawerScreen() {
             mobileShortcuts={mobileShortcuts}
             onChildSessionStarted={handleChildSessionStarted}
             traffic={selectedTraffic}
+            projects={projects}
             runtimes={runtimes}
             sessions={sortedSessions}
             focusedRuntimeId={runtimeRegistry.focusedSessionId}

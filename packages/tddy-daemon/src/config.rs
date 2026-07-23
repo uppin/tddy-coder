@@ -474,21 +474,84 @@ pub struct CursorCliConfig {
     pub cursor_home_dir: Option<PathBuf>,
 }
 
-/// Resolve the Cursor Agent CLI binary path from config and env.
-///
-/// Resolution: `cursor_cli.binary_path` → `TDDY_CURSOR_AGENT` env → `"agent"`.
-pub fn resolve_cursor_binary_path(config: &DaemonConfig) -> String {
-    if let Ok(env) = std::env::var("TDDY_CURSOR_AGENT") {
-        if !env.trim().is_empty() {
-            return env;
+/// Environment variable that overrides the resolved cursor `agent` binary path (highest priority).
+pub const CURSOR_BINARY_ENV: &str = "TDDY_CURSOR_AGENT";
+
+/// Locate the real cursor `agent` binary as an absolute path, mirroring [`find_real_claude_on_host`]
+/// but injectable: prefer `<home>/.local/bin/agent`, then scan `path_dirs` skipping wrapper-shim
+/// dirs. `None` if none is found. The home and search dirs are parameters (not read from env) so the
+/// resolution logic is unit-testable.
+fn find_real_agent_in(home: Option<&Path>, path_dirs: &[PathBuf]) -> Option<PathBuf> {
+    if let Some(home) = home {
+        let candidate = home.join(".local/bin/agent");
+        if is_executable_file(&candidate) {
+            return Some(candidate);
         }
     }
-    config
+    path_dirs
+        .iter()
+        .filter(|d| !d.as_os_str().is_empty() && !is_wrapper_shim_dir(d))
+        .map(|d| d.join("agent"))
+        .find(|c| is_executable_file(c))
+}
+
+/// Locate the real host cursor `agent` as an absolute path: prefer `~/.local/bin/agent`, then scan
+/// `$PATH` skipping wrapper-shim dirs. `None` if none is found. Env-reading wrapper around
+/// [`find_real_agent_in`], mirroring [`find_real_claude_on_host`].
+fn find_real_agent_on_host() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    find_real_agent_in(home.as_deref(), &path_dirs)
+}
+
+/// Whether the cursor `agent` binary is taken from an explicit override or must be auto-resolved.
+/// Mirrors [`ClaudeBinaryChoice`].
+enum CursorBinaryChoice {
+    /// Use this value as-is (an env override or an explicit config path).
+    Explicit(String),
+    /// No explicit path given — resolve the real `agent` from the host.
+    Auto,
+}
+
+/// Decide from the env override and configured value alone (no filesystem access, so it is
+/// unit-testable): a non-empty env override wins; otherwise a configured value naming a path
+/// (contains `/`) is explicit; a bare name means "auto-resolve". Mirrors [`choose_claude_binary`].
+fn choose_cursor_binary(env_override: Option<&str>, configured: &str) -> CursorBinaryChoice {
+    if let Some(env) = env_override.map(str::trim).filter(|s| !s.is_empty()) {
+        return CursorBinaryChoice::Explicit(env.to_string());
+    }
+    if configured.contains('/') {
+        return CursorBinaryChoice::Explicit(configured.to_string());
+    }
+    CursorBinaryChoice::Auto
+}
+
+/// Resolve the Cursor Agent CLI binary the runner / model probe will exec, as an absolute path when
+/// possible. Mirrors [`resolve_claude_binary_path`] so the impersonated child never needs a PATH
+/// lookup (which would fail "binary not found: agent" once the install dir is off the child's PATH).
+///
+/// Resolution order (first match wins):
+/// 1. `TDDY_CURSOR_AGENT` env var, when set and non-empty ([`CURSOR_BINARY_ENV`]).
+/// 2. `cursor_cli.binary_path` in the daemon config, when it names a path (contains `/`).
+/// 3. Auto-resolution of the real host `agent`: `~/.local/bin/agent`, then `$PATH` (skipping
+///    wrapper-shim dirs).
+/// 4. Fallback: the configured value as-is (bare name, default `"agent"`).
+pub fn resolve_cursor_binary_path(config: &DaemonConfig) -> String {
+    let configured = config
         .cursor_cli
         .as_ref()
         .map(|c| c.binary_path.as_str())
-        .unwrap_or("agent")
-        .to_string()
+        .unwrap_or("agent");
+    let env_override = std::env::var(CURSOR_BINARY_ENV).ok();
+    match choose_cursor_binary(env_override.as_deref(), configured) {
+        CursorBinaryChoice::Explicit(p) => canonicalize_if_path(&p),
+        CursorBinaryChoice::Auto => match find_real_agent_on_host() {
+            Some(real) => canonicalize_if_path(&real.to_string_lossy()),
+            None => configured.to_string(),
+        },
+    }
 }
 
 /// Resolve tddy-tools path for cursor-cli hooks (cursor config → claude config → default).
@@ -1308,6 +1371,88 @@ claude_cli:
         assert!(!is_wrapper_shim_dir(Path::new("/usr/bin")));
         // Only the `bin` leaf under a `.superset*` component counts.
         assert!(!is_wrapper_shim_dir(Path::new("/Users/x/.superset/lib")));
+    }
+}
+
+#[cfg(test)]
+mod cursor_cli_config_tests {
+    use super::*;
+
+    /// The cursor `agent` binary must get the same host auto-resolution as `claude`: a bare name
+    /// (the default `"agent"`) means "auto-resolve to the real binary", while a value naming a path
+    /// is used verbatim. Without this, the bare `"agent"` reaches the model probe / PTY spawn and
+    /// fails "binary not found: agent" once the child does a PATH lookup that lacks the install dir.
+    #[test]
+    fn cursor_bare_name_auto_resolves_but_a_configured_path_is_explicit() {
+        assert!(matches!(
+            choose_cursor_binary(None, "agent"),
+            CursorBinaryChoice::Auto
+        ));
+        assert!(matches!(
+            choose_cursor_binary(None, "/opt/cursor/agent"),
+            CursorBinaryChoice::Explicit(p) if p == "/opt/cursor/agent"
+        ));
+    }
+
+    /// A non-empty env override wins over the configured value (same precedence as claude); a blank
+    /// override is ignored and falls through to auto-resolution.
+    #[test]
+    fn cursor_env_override_wins_and_blank_is_ignored() {
+        assert!(matches!(
+            choose_cursor_binary(Some("/opt/agent"), "agent"),
+            CursorBinaryChoice::Explicit(p) if p == "/opt/agent"
+        ));
+        assert!(matches!(
+            choose_cursor_binary(Some("   "), "agent"),
+            CursorBinaryChoice::Auto
+        ));
+    }
+
+    /// Host auto-resolution finds `agent` under the target user's `~/.local/bin` and returns it as
+    /// an **absolute** path (mirroring `find_real_claude_on_host`), so the impersonated child execs
+    /// a fully-qualified path and never needs a PATH lookup. Hermetic: a tempdir stands in for the
+    /// user's home — no real OS user or install path is hardcoded.
+    #[test]
+    fn find_real_agent_prefers_local_bin_and_returns_an_absolute_path() {
+        // Given — a home directory whose ~/.local/bin holds an executable `agent`
+        let home = tempfile::tempdir().unwrap();
+        let bin_dir = home.path().join(".local/bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let agent = bin_dir.join("agent");
+        std::fs::write(&agent, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        // When — resolving the real host agent for that home, with no extra PATH dirs
+        let resolved = find_real_agent_in(Some(home.path()), &[]);
+
+        // Then — it is located there, as the absolute path under ~/.local/bin
+        assert_eq!(resolved.as_deref(), Some(agent.as_path()));
+    }
+
+    /// When `~/.local/bin/agent` is absent, resolution scans the supplied PATH dirs (skipping
+    /// wrapper-shim dirs) and still returns an absolute path — never a bare name.
+    #[test]
+    fn find_real_agent_falls_back_to_path_dirs_as_an_absolute_path() {
+        // Given — no ~/.local/bin/agent, but an `agent` on a PATH dir
+        let home = tempfile::tempdir().unwrap();
+        let path_dir = tempfile::tempdir().unwrap();
+        let agent = path_dir.path().join("agent");
+        std::fs::write(&agent, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        // When — resolving with that dir on the search path
+        let resolved = find_real_agent_in(Some(home.path()), &[path_dir.path().to_path_buf()]);
+
+        // Then — the PATH-dir binary is returned as an absolute path
+        assert_eq!(resolved.as_deref(), Some(agent.as_path()));
     }
 }
 

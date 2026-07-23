@@ -46,6 +46,16 @@ function generateRequestId(): number {
 }
 
 /**
+ * `JSON.stringify` that survives `bigint` values. Decoded protobuf messages carry `uint64`/`int64`
+ * fields as JS `BigInt` (e.g. `GetHostDiskStatsResponse.available_bytes`, `SessionEntry.bytes_in`),
+ * which the built-in serializer throws on. Debug logging must never reject an otherwise-successful
+ * RPC, so we stringify bigints as their decimal string form.
+ */
+function safeStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, v) => (typeof v === "bigint" ? v.toString() : v));
+}
+
+/**
  * Shared per-room RPC state: one `DataReceived` listener, one request-id counter (scoped to this
  * connection, starting at 1), and the pending-call maps every transport vended for the room uses.
  * A browser holds one common-room connection but talks to several daemons; routing all of them
@@ -360,7 +370,7 @@ export class LiveKitTransport implements Transport {
       const outputMessage = fromBinary(method.output as any, response.responseMessage);
 
       if (this.debug) {
-        transportLog(`unary response request_id=${requestId} message=${JSON.stringify((outputMessage as any)?.message ?? outputMessage)}`);
+        transportLog(`unary response request_id=${requestId} message=${safeStringify((outputMessage as any)?.message ?? outputMessage)}`);
       }
 
       return {

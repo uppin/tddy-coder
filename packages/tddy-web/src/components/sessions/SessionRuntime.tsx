@@ -10,9 +10,11 @@ import { AGENT_TERMINAL_ID, useSessionTerminals } from "./useSessionTerminals";
 import { useChildSessions } from "./useChildSessions";
 import { useSessionAttachment } from "./useSessionAttachment";
 import { TerminalControlOverlay } from "./TerminalControlOverlay";
+import { SessionConnectionOverlay } from "./SessionConnectionOverlay";
 import { useTerminalControl, type Session } from "./useTerminalControl";
 import type { SessionRuntimeState } from "./sessionRuntimeRegistry";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
+import type { LiveKitChromeStatus } from "../../lib/liveKitStatusPresentation";
 import { cn } from "../../lib/utils";
 
 type ConnectionClient = Client<typeof ConnectionService>;
@@ -85,6 +87,13 @@ export function SessionRuntime({
   // below rebuilds once the room connects).
   const roomRef = useRef<Room | null>(null);
   const [sessionRoom, setSessionRoom] = useState<Room | null>(null);
+
+  // The LiveKit room's connection status, reported by the Agent pane's `SessionLiveKitTerminal`.
+  // Drives the connection overlay that covers the panes until the room connects. Starts "connecting"
+  // (the room's handshake — token request + join — hasn't reported yet). Only meaningful for
+  // `connected-livekit` runtimes; the `connected-grpc` path has no such handshake, so it never shows
+  // the overlay.
+  const [liveKitStatus, setLiveKitStatus] = useState<LiveKitChromeStatus>("connecting");
 
   // Lazy session-scoped ConnectionService client (targets the coder participant
   // `daemon-{instanceId}-{sessionId}` = `runtime.livekitServerIdentity`). Used by the explicit
@@ -173,6 +182,51 @@ export function SessionRuntime({
     [onSessionRoom, runtime.sessionId],
   );
 
+  // Imperative focus handle for the Agent pane's terminal. Each terminal self-focuses once at
+  // mount, so first-selection works on its own; re-selecting an already-mounted runtime only flips
+  // CSS visibility, so we replay focus here when this runtime comes to the foreground.
+  const focusAgentTerminalRef = useRef<(() => void) | null>(null);
+  const registerAgentFocus = useCallback((focus: () => void) => {
+    focusAgentTerminalRef.current = focus;
+  }, []);
+  // The runtime's outer container — used by the focus guard to tell "focus landed inside me" from
+  // "a sibling session's terminal stole focus".
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // When this runtime becomes focused with the Agent pane active, return keyboard focus to its
+  // terminal — so selection alone makes the session ready to type, no click required. Never steals
+  // focus for a backgrounded runtime, and stays out of the way when a bash tab or child pane is up.
+  // TODO: gRPC sessions (`connected-grpc`, GrpcSessionTerminal/GhosttyTerminalGrpc) don't yet plumb
+  // a focus handle, so focus-on-select is LiveKit-only for now.
+  const agentPaneActive = activeChildSessionId === null && activeTerminalId === AGENT_TERMINAL_ID;
+  useEffect(() => {
+    if (focused && agentPaneActive) {
+      focusAgentTerminalRef.current?.();
+    }
+  }, [focused, agentPaneActive]);
+
+  // Focus guard: a backgrounded session keeps its terminal mounted, and a terminal that opens (or
+  // is re-selected) while still transiently visible auto-focuses itself — ghostty-web focuses on
+  // open and re-asserts it on a deferred timer. That lets a background session's terminal steal
+  // keyboard focus from the foreground one a beat after selection. While this runtime is the
+  // foreground one with its Agent pane active, reclaim focus whenever it lands in a *different*
+  // session's terminal (never for focus that legitimately moves to the drawer, inspector, etc.).
+  useEffect(() => {
+    if (!focused || !agentPaneActive) return;
+    const self = containerRef.current;
+    if (!self) return;
+    const onFocusIn = (e: FocusEvent) => {
+      const target = e.target as Node | null;
+      if (!target || self.contains(target)) return;
+      const stealer = (target as HTMLElement).closest?.(
+        "[data-testid^='sessions-runtime-terminal-']",
+      );
+      if (stealer) focusAgentTerminalRef.current?.();
+    };
+    document.addEventListener("focusin", onFocusIn, true);
+    return () => document.removeEventListener("focusin", onFocusIn, true);
+  }, [focused, agentPaneActive]);
+
   // A terminal pane (Agent/bash) is visible only when its tab is active AND no child conversation
   // is selected — a selected child's pane overlays the terminal stack.
   const paneClass = (terminalId: string) =>
@@ -183,6 +237,7 @@ export function SessionRuntime({
 
   return (
     <div
+      ref={containerRef}
       data-testid={`sessions-runtime-terminal-${runtime.sessionId}`}
       className={cn("absolute inset-0 flex h-full w-full flex-col", focused ? "" : "hidden")}
       aria-hidden={!focused}
@@ -212,6 +267,8 @@ export function SessionRuntime({
               onDisconnect={() => onSessionDisconnect?.(runtime.sessionId)}
               mobileShortcuts={focused && activeTerminalId === AGENT_TERMINAL_ID ? mobileShortcuts : undefined}
               onRoom={handleRoom}
+              onRegisterFocus={registerAgentFocus}
+              onConnectionStatusChange={setLiveKitStatus}
             />
           )}
           {runtime.status === "connected-livekit" && !tokenClient && (
@@ -296,6 +353,13 @@ export function SessionRuntime({
               />
             )}
           </div>
+        )}
+
+        {/* Connection overlay — covers the panes while the session's LiveKit room is still
+            handshaking, and surfaces a failure if it errors. Renders nothing once connected, so the
+            panes become interactive. LiveKit-only: the `connected-grpc` path has no such handshake. */}
+        {runtime.status === "connected-livekit" && (
+          <SessionConnectionOverlay status={liveKitStatus} />
         )}
       </div>
     </div>

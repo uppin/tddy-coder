@@ -82,8 +82,9 @@ The production daemon runs as an **unprivileged systemd service** (`User=tddy`) 
   `unshare` + uid/gid mapping and reports success — rather than a sysctl read, which cannot see a
   per-binary grant. (Running as root also works and short-circuits both requirements.)
 
-*(Follow-up: `pivot_root` read-only-root filesystem write-confinement; the network-namespace egress
-guarantee and cgroup limits are in place.)*
+*(Follow-ups: per-session teardown (`rmdir`) of the empty `tddy-<name>-<seq>.scope` dir on session
+end; `pivot_root` read-only-root filesystem write-confinement. The network-namespace egress guarantee
+and cgroup limits are in place.)*
 
 ### Standalone `tddy-sandbox-app` on Linux (daemon-assisted)
 
