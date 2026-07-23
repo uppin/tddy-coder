@@ -718,6 +718,8 @@ impl ConnectionServiceImpl {
         // When `Some`, the session is launched workflow-aware: the recipe's orchestration prompt is
         // injected and its `transition` tool advances a per-session `WorkflowController`.
         managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
+        // When true, index the worktree before launch and expose the `SemanticSearch` tool.
+        semantic_index: bool,
     ) -> Result<Response<StartSessionResponse>, Status> {
         // A pr-stack orchestrator gets a child-spawn handler bound to its toolcall listener so the
         // agent's `pr_spawn_child` relay can materialize planned nodes into child sessions.
@@ -772,6 +774,8 @@ impl ConnectionServiceImpl {
             managed_recipe,
             child_spawn_handler,
             conversation_spawn_handler,
+            semantic_index,
+            &self.task_registry,
         )
         .await
     }
@@ -906,6 +910,10 @@ async fn spawn_claude_cli_session_inner(
     managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
     child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
     conversation_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
+    // When true, index the worktree into the session dir before launch (blocking; aborts the start
+    // on failure) and point the `SemanticSearch` tool at that per-session index DB.
+    semantic_index: bool,
+    task_registry: &TaskRegistry,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
         return Err(Status::invalid_argument(
@@ -1115,6 +1123,28 @@ async fn spawn_claude_cli_session_inner(
         append_system_prompt_file = Some(launch.prompt_file);
         env_extra = launch.env;
         managed = Some(launch.workflow);
+    }
+
+    // Semantic index: build the per-session vector index over the worktree before launching the
+    // agent (blocking until terminal). A missing embedder or a failed index aborts the start — no
+    // unindexed fallback. On success, point the `SemanticSearch` tool at the session's index DB.
+    if semantic_index {
+        let embedder = tddy_semantic_index::production_embedder(tddy_data_dir).map_err(|e| {
+            Status::failed_precondition(format!(
+                "semantic index requested but no embedder is available: {e}"
+            ))
+        })?;
+        crate::semantic_index::run_semantic_index_blocking(
+            &worktree_path,
+            &session_dir,
+            embedder,
+            task_registry,
+            session_id,
+        )
+        .await
+        .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
+        let (key, value) = crate::semantic_index::semantic_index_env(&session_dir);
+        env_extra.push((key, value));
     }
 
     let handle = manager
@@ -1462,6 +1492,9 @@ impl ConnectionServiceImpl {
         // When `Some`, launch workflow-aware: inject the recipe's orchestration prompt and route the
         // agent's host-side `tddy-tools transition` to a per-session `WorkflowController`.
         managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
+        // When true, index the worktree before launch (blocking; aborts on failure) and expose the
+        // in-jail `SemanticSearch` tool backed by that per-session index.
+        semantic_index: bool,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -1779,6 +1812,31 @@ impl ConnectionServiceImpl {
             runner_argv.push(token);
         }
 
+        // Semantic index: index the worktree into the session dir before spawning the jail
+        // (blocking; a missing embedder or a failed index aborts the start — no unindexed
+        // fallback), and inject `TDDY_SEMANTIC_INDEX_DB` into the jail env. Its presence both points
+        // the in-jail `SemanticSearch` tool at the per-session index and signals the runner to keep
+        // `SemanticSearch` in the tool set (it is otherwise folded into the replaced set).
+        let mut semantic_index_env_pair: Option<(String, String)> = None;
+        if semantic_index {
+            let embedder =
+                tddy_semantic_index::production_embedder(&self.tddy_data_dir).map_err(|e| {
+                    Status::failed_precondition(format!(
+                        "semantic index requested but no embedder is available: {e}"
+                    ))
+                })?;
+            crate::semantic_index::run_semantic_index_blocking(
+                &worktree_path,
+                &session_dir,
+                embedder,
+                &self.task_registry,
+                session_id,
+            )
+            .await
+            .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
+            semantic_index_env_pair = Some(crate::semantic_index::semantic_index_env(&session_dir));
+        }
+
         let mut env = crate::sandbox_session::build_sandbox_runner_env(
             &scratch_home,
             &scratch_tmp,
@@ -1790,6 +1848,7 @@ impl ConnectionServiceImpl {
             env.extend(self.specialized_subagent_env(&specialized_defs)?);
         }
         env.extend(self.lsp_tools_env(&worktree_path));
+        env.extend(semantic_index_env_pair);
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
@@ -1917,6 +1976,9 @@ impl ConnectionServiceImpl {
         _managed_codebase: bool,
         specialized_agents: &[String],
         managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
+        // When true, index the worktree before launch (blocking; aborts on failure) and point the
+        // in-jail `SemanticSearch` tool at the per-session index.
+        semantic_index: bool,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -2157,6 +2219,30 @@ impl ConnectionServiceImpl {
             runner_argv.push(prompt.to_string());
         }
 
+        // Semantic index: index the worktree into the session dir before spawning the jail
+        // (blocking; a missing embedder or a failed index aborts the start — no unindexed
+        // fallback), and inject `TDDY_SEMANTIC_INDEX_DB` into the jail env so the in-jail
+        // `SemanticSearch` tool resolves against the per-session index.
+        let mut semantic_index_env_pair: Option<(String, String)> = None;
+        if semantic_index {
+            let embedder =
+                tddy_semantic_index::production_embedder(&self.tddy_data_dir).map_err(|e| {
+                    Status::failed_precondition(format!(
+                        "semantic index requested but no embedder is available: {e}"
+                    ))
+                })?;
+            crate::semantic_index::run_semantic_index_blocking(
+                &worktree_path,
+                &session_dir,
+                embedder,
+                &self.task_registry,
+                session_id,
+            )
+            .await
+            .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
+            semantic_index_env_pair = Some(crate::semantic_index::semantic_index_env(&session_dir));
+        }
+
         let mut env = crate::sandbox_session::build_sandbox_runner_env(
             &scratch_home,
             &scratch_tmp,
@@ -2168,6 +2254,7 @@ impl ConnectionServiceImpl {
             env.extend(self.specialized_subagent_env(&specialized_defs)?);
         }
         env.extend(self.lsp_tools_env(&worktree_path));
+        env.extend(semantic_index_env_pair);
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
@@ -2861,6 +2948,9 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             None,
             None,
             None,
+            // A spawned child session never runs its own semantic index.
+            false,
+            &self.claude_cli_manager.task_registry(),
         )
         .await
         .map_err(|status| status.message().to_string())?;
@@ -2975,6 +3065,9 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             None,
             None,
             None,
+            // A spawned child conversation never runs its own semantic index.
+            false,
+            &self.claude_cli_manager.task_registry(),
         )
         .await
         .map_err(|status| status.message().to_string())?;
@@ -3695,6 +3788,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         req.managed_codebase,
                         &req.specialized_agents,
                         managed_recipe,
+                        req.semantic_index,
                     )
                     .await;
             }
@@ -3714,6 +3808,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     req.dangerously_skip_permissions,
                     stack_parent_for_claude_cli.as_deref(),
                     managed_recipe,
+                    req.semantic_index,
                 )
                 .await;
         }
@@ -3753,6 +3848,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         req.managed_codebase,
                         &req.specialized_agents,
                         managed_recipe,
+                        req.semantic_index,
                     )
                     .await;
             }
@@ -3773,6 +3869,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 req.managed_codebase,
                 &req.specialized_agents,
                 managed_recipe,
+                req.semantic_index,
+                &self.task_registry,
             )
             .await;
         }
@@ -4376,10 +4474,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             Ok(Ok(Ok(entries))) => entries,
             Ok(Ok(Err(status))) => return Err(status),
             Ok(Err(join_err)) => return Err(Status::internal(join_err.to_string())),
-            Err(_elapsed) => return Err(Status::deadline_exceeded(format!(
+            Err(_elapsed) => {
+                return Err(Status::deadline_exceeded(format!(
                 "ListWorktreeDirectory: timed out after {}s (spawn_worker_request_timeout_secs)",
                 timeout.as_secs()
-            ))),
+            )))
+            }
         };
 
         let entries = entries

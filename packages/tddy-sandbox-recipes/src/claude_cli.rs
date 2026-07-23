@@ -197,6 +197,26 @@ pub fn shell_is_replaced(replaced: &[&str]) -> bool {
     replaced.contains(&"Shell")
 }
 
+/// The semantic-index tool this crate folds into the replaced set when indexing is off.
+const SEMANTIC_SEARCH_TOOL: &str = "SemanticSearch";
+
+/// Fold the semantic-index decision into the session's replaced-tool set. When `semantic_index_enabled`
+/// is `false`, `SemanticSearch` is unavailable, so it joins the subagent-declared replacements —
+/// the existing [`build_claude_allowlist`] / [`build_claude_disallowlist`] machinery then drops and
+/// hard-disables it. When indexing is enabled, `SemanticSearch` stays available and the subagent
+/// replacements pass through unchanged. `SemanticSearch` is never added twice, even if a caller
+/// already listed it.
+pub fn effective_replaced_tools<'a>(
+    subagent_replaced: &'a [&'a str],
+    semantic_index_enabled: bool,
+) -> Vec<&'a str> {
+    let mut replaced = subagent_replaced.to_vec();
+    if !semantic_index_enabled && !replaced.contains(&SEMANTIC_SEARCH_TOOL) {
+        replaced.push(SEMANTIC_SEARCH_TOOL);
+    }
+    replaced
+}
+
 /// `--allowedTools` entries for sandbox claude: `mcp__tddy-tools__*` exec tools (minus any tool
 /// named in `replaced` — a subagent that declares it replaces that tool means a direct call must
 /// be impossible, not merely discouraged) + `AskUserQuestion`, plus the subagent tools when
@@ -789,6 +809,82 @@ mod tests {
         assert!(
             disallowed_tools_in(&argv).is_empty(),
             "nothing must be disallowed when nothing is replaced: {argv:?}"
+        );
+    }
+
+    // ─── Semantic-index tool gating ─────────────────────────────────────────────
+    //
+    // Feature: docs/ft/coder/semantic-index.md (criteria 9-10)
+    // Changeset: docs/dev/1-WIP/2026-07-22-semantic-index.md
+    //
+    // `effective_replaced_tools` folds the semantic-index decision into the existing "replaced" set:
+    // when indexing is enabled, SemanticSearch stays available; when disabled, it joins the replaced
+    // set so the existing allowlist/disallowlist machinery removes it from the session's tools.
+
+    /// With indexing enabled, `SemanticSearch` remains in the session's advertised tool set.
+    #[test]
+    fn exposes_semantic_search_to_the_session_when_indexing_is_enabled() {
+        // Given
+        let replaced = effective_replaced_tools(&[], true);
+
+        // When
+        let allowset: HashSet<_> = build_claude_allowlist(false, &replaced)
+            .into_iter()
+            .collect();
+
+        // Then
+        assert!(
+            allowset.contains("mcp__tddy-tools__SemanticSearch"),
+            "indexed session must expose SemanticSearch; allowlist: {allowset:?}"
+        );
+    }
+
+    /// With indexing disabled, `SemanticSearch` is dropped from the allowlist and hard-disabled in
+    /// both its native and `mcp__tddy-tools__` forms — the agent cannot call it.
+    #[test]
+    fn removes_semantic_search_from_the_session_when_indexing_is_disabled() {
+        // Given
+        let replaced = effective_replaced_tools(&[], false);
+
+        // When
+        let allowset: HashSet<_> = build_claude_allowlist(false, &replaced)
+            .into_iter()
+            .collect();
+        let disallowset: HashSet<_> = build_claude_disallowlist(&replaced).into_iter().collect();
+
+        // Then
+        assert!(
+            !allowset.contains("mcp__tddy-tools__SemanticSearch"),
+            "un-indexed session must not advertise SemanticSearch; allowlist: {allowset:?}"
+        );
+        assert!(
+            disallowset.contains("SemanticSearch"),
+            "native SemanticSearch must be hard-disabled; disallowed: {disallowset:?}"
+        );
+        assert!(
+            disallowset.contains("mcp__tddy-tools__SemanticSearch"),
+            "MCP form of SemanticSearch must be hard-disabled; disallowed: {disallowset:?}"
+        );
+    }
+
+    /// Subagent-declared replacements are preserved when indexing is enabled — the semantic-index
+    /// decision only ever adds `SemanticSearch`, never drops another tool's replacement.
+    #[test]
+    fn keeps_subagent_declared_replacements_when_indexing_is_enabled() {
+        // Given
+        let replaced = effective_replaced_tools(&["Grep"], true);
+
+        // When
+        let disallowset: HashSet<_> = build_claude_disallowlist(&replaced).into_iter().collect();
+
+        // Then
+        assert!(
+            disallowset.contains("Grep"),
+            "a subagent replacing Grep must still hard-disable it; disallowed: {disallowset:?}"
+        );
+        assert!(
+            !disallowset.contains("SemanticSearch"),
+            "indexing enabled must not replace SemanticSearch; disallowed: {disallowset:?}"
         );
     }
 }

@@ -1280,7 +1280,18 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
         .map(|v| !v.trim().is_empty())
         .unwrap_or(false);
     let replaced_tools = subagent_replaced_tools_from_env();
-    let replaced_refs: Vec<&str> = replaced_tools.iter().map(String::as_str).collect();
+    let subagent_replaced_refs: Vec<&str> = replaced_tools.iter().map(String::as_str).collect();
+    // `SemanticSearch` is available only when the session was started with a semantic index —
+    // signalled by the daemon injecting `TDDY_SEMANTIC_INDEX_DB` (the per-session index DB the tool
+    // reads). Without it, fold `SemanticSearch` into the replaced set so `append_claude_mcp_args`
+    // drops it from `--allowedTools` and hard-disables it via `--disallowedTools`.
+    let semantic_index_enabled = std::env::var("TDDY_SEMANTIC_INDEX_DB")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
+    let replaced_refs = tddy_sandbox_recipes::effective_replaced_tools(
+        &subagent_replaced_refs,
+        semantic_index_enabled,
+    );
 
     // Persist the in-jail MCP server's logs (incl. specialized-subagent HTTP activity) to the
     // session egress dir, and set its RUST_LOG — so failures like a subagent's model-server error

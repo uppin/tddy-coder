@@ -113,6 +113,7 @@ export function CreateSessionPane({
   const [subagents, setSubagents] = useState<SubagentInfo[]>([]);
   const [selectedSubagents, setSelectedSubagents] = useState<string[]>([]);
   const [managedCodebase, setManagedCodebase] = useState(false);
+  const [semanticIndex, setSemanticIndex] = useState(false);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -289,6 +290,7 @@ export function CreateSessionPane({
           sandbox,
           managedCodebase,
           specializedAgents: managedCodebase ? selectedSubagents : [],
+          semanticIndex: managedCodebase ? semanticIndex : false,
         });
       } else {
         res = await client.startSession({
@@ -307,6 +309,7 @@ export function CreateSessionPane({
           // Only send subagents when managed codebase is enabled — the picker is hidden otherwise,
           // so a selection made before unchecking the toggle must not leak into the request.
           specializedAgents: managedCodebase ? selectedSubagents : [],
+          semanticIndex: managedCodebase ? semanticIndex : false,
         });
       }
       onCreated(res.sessionId);
@@ -529,7 +532,10 @@ export function CreateSessionPane({
                 type="checkbox"
                 className="h-4 w-4 rounded border-input"
                 checked={managedCodebase}
-                onChange={(e) => setManagedCodebase(e.target.checked)}
+                onChange={(e) => {
+                  setManagedCodebase(e.target.checked);
+                  if (!e.target.checked) setSemanticIndex(false);
+                }}
               />
               Managed codebase
             </label>
@@ -578,6 +584,18 @@ export function CreateSessionPane({
                       </label>
                     ))
                   )}
+                </div>
+                <div>
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <input
+                      data-testid="create-session-semantic-index-toggle"
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-input"
+                      checked={semanticIndex}
+                      onChange={(e) => setSemanticIndex(e.target.checked)}
+                    />
+                    Semantic index
+                  </label>
                 </div>
               </div>
             )}
@@ -661,7 +679,10 @@ export function CreateSessionPane({
                 type="checkbox"
                 className="h-4 w-4 rounded border-input"
                 checked={managedCodebase}
-                onChange={(e) => setManagedCodebase(e.target.checked)}
+                onChange={(e) => {
+                  setManagedCodebase(e.target.checked);
+                  if (!e.target.checked) setSemanticIndex(false);
+                }}
               />
               Managed codebase
             </label>
@@ -710,6 +731,18 @@ export function CreateSessionPane({
                       </label>
                     ))
                   )}
+                </div>
+                <div>
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <input
+                      data-testid="create-session-semantic-index-toggle"
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-input"
+                      checked={semanticIndex}
+                      onChange={(e) => setSemanticIndex(e.target.checked)}
+                    />
+                    Semantic index
+                  </label>
                 </div>
               </div>
             )}

@@ -25,6 +25,7 @@ pub mod project_storage;
 pub mod pty_registry;
 pub mod pty_runtime;
 pub mod relay_idle;
+pub mod semantic_index;
 pub mod server;
 pub mod session_deletion;
 pub mod session_list_enrichment;

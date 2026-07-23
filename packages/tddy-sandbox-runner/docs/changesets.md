@@ -4,6 +4,8 @@ Wrapped changeset history for tddy-sandbox-runner.
 
 **Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
 
+- **2026-07-23** [Feature] semantic-index: `spawn_claude_pty` computes `effective_replaced_tools(replaced, semantic_index_enabled)` — where `semantic_index_enabled` is the presence of the daemon-injected `TDDY_SEMANTIC_INDEX_DB` — before building the claude allow/disallow lists, so `SemanticSearch` is hard-disabled for un-indexed sandboxed sessions. Feature [semantic-index.md](../../../docs/ft/coder/semantic-index.md). Cross-package [docs/dev/changesets.md](../../../docs/dev/changesets.md). (tddy-sandbox-runner)
+
 - **2026-07-11** [Refactor] **`connect_uds_channel`** — extracted/exported the AF_UNIX tonic `Channel` connector from `connect_sandbox_client_uds` so the daemon `ConnectionService` client reuses one UDS connector. Cross-package [docs/dev/changesets.md](../../../docs/dev/changesets.md). PR [#291](https://github.com/uppin/tddy-coder/pull/291) (draft). (tddy-sandbox-runner, tddy-sandbox-app)
 
 - **2026-07-11** [Feature] **Wire `TDDY_TOOLS_ACCOUNTING_FILE`** — both the claude and cursor `tddy-tools --mcp` spawn sites set `TDDY_TOOLS_ACCOUNTING_FILE = <egress-dir>/accounting.json` (mirrors `TDDY_TOOLS_LOG_FILE`), so the host-visible session egress dir carries the subagent token accounting for `tddy-sandbox-app` to read. Feature [session-token-accounting.md](../../../docs/ft/coder/session-token-accounting.md). Cross-package: [docs/dev/changesets.md](../../../docs/dev/changesets.md). PR [#289](https://github.com/uppin/tddy-coder/pull/289). (tddy-sandbox-runner)
