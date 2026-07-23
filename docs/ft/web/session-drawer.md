@@ -6,9 +6,9 @@
 ## Overview
 
 A focused session management screen with a left-side drawer listing all sessions and a
-main content area on the right. A Session Inspector can be opened on the right edge to
-show session details and controls; it is hidden by default for connected sessions and
-open by default for disconnected sessions.
+main content area on the right. A Session Inspector shows session details and controls;
+for connected sessions it is a right-edge overlay drawer (hidden by default), and for
+disconnected sessions it **docks as the main pane** (open by default).
 
 The screen is a parallel view to the existing `ConnectionScreen` (`#/`). Both routes remain
 available; no existing behaviour is changed.
@@ -191,15 +191,31 @@ The inspector renders the live runtime values when a runtime exists, else the da
 
 ## Session Inspector Drawer
 
-The Session Inspector is an overlay panel anchored to the right edge of `SessionMainPane`.
-It shows session metadata and action controls. Its visibility is controlled by a
-`data-state` attribute with three values.
+The Session Inspector shows session metadata and action controls in `SessionMainPane`. Its
+visibility is controlled by a `data-state` attribute with three values, and its **layout** by a
+`data-docked` attribute.
+
+### Docked vs Drawer
+
+`data-docked` is derived from the selected session's connection status via the pure
+`isInspectorDocked(session)` helper (`inspectorState.ts`): docked iff
+`connectionStatusForSession(session) === "disconnected"`.
+
+- `data-docked="true"` (disconnected session) — the inspector **is the main pane**: when not
+  `closed`, it uses the full-pane footprint (`left-0 right-0 w-full`), layered opaque over the
+  still-mounted runtime layer behind it. `connected` and `needs-input` sessions are never docked.
+- `data-docked="false"` (connected / needs-input) — the inspector is a right-edge overlay drawer
+  (the historical behaviour).
+
+All header controls (expand / restore / close) and the header "Inspector" toggle are present in
+both layouts.
 
 ### Open/Expand State
 
 - `data-state="closed"` — hidden (default for connected sessions)
-- `data-state="open"` — overlay panel ~360px wide, floats over the terminal with a slight
-  scrim; does NOT resize/push the terminal
+- `data-state="open"` — as a drawer (`data-docked="false"`), an overlay panel ~360px wide floating
+  over the terminal without resizing it; as the main pane (`data-docked="true"`), the full-pane
+  footprint
 - `data-state="expanded"` — fills the full content area to the right of the session list;
   the session list stays visible so the user can switch sessions
 
@@ -676,6 +692,12 @@ names the holding screen and provides a button to steal control.
   - A primary `<Button>` labelled **"Claim terminal"** (`data-testid="terminal-claim-btn"`).
 - Clicking the button calls `onClaim()` → `ClaimTerminalControl({steal: true})`.
 - When this screen holds control (`isController === true`), no overlay is rendered.
+- **Disconnected sessions never show it.** The overlay is hosted by the *focused* `SessionRuntime`,
+  and `SessionMainPane` suppresses the focused runtime while the inspector is docked
+  (`focused={!docked && …}`). So a session shown as `disconnected` renders no
+  `sessions-detail-terminal-container` and no control overlay, even if its runtime is still in the
+  registry — the runtime layer stays mounted behind the docked inspector (background sessions keep
+  streaming).
 
 ### Data flow
 

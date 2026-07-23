@@ -7,6 +7,7 @@ import type { TokenService } from "../../gen/token_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { SessionInspectorDrawer } from "./SessionInspectorDrawer";
+import { isInspectorDocked } from "./inspectorState";
 import { AgentActivityOverlay } from "./AgentActivityOverlay";
 import { Button } from "../ui/button";
 import { CreateSessionPane } from "./CreateSessionPane";
@@ -112,6 +113,11 @@ export function SessionMainPane({
   const isConnected =
     attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
 
+  // When docked (disconnected session) the inspector becomes the full main pane; the focused
+  // runtime's terminal is suppressed so no claim-terminal overlay renders over it, while the
+  // runtime layer stays mounted behind the inspector (background streaming preserved).
+  const docked = isInspectorDocked(selectedSession);
+
   // The worktree Code pane is a split view available for every session type: it never replaces the
   // base view (terminal / chat / PR-Stack), it opens beside it.
   const [codeOpen, setCodeOpen] = React.useState(false);
@@ -160,7 +166,7 @@ export function SessionMainPane({
         <SessionRuntime
           key={r.sessionId}
           runtime={r}
-          focused={r.sessionId === focusedRuntimeId}
+          focused={!docked && r.sessionId === focusedRuntimeId}
           sessionToken={sessionToken}
           client={client}
           tokenClient={tokenClient}
@@ -290,6 +296,7 @@ export function SessionMainPane({
                 key={`inspector-${selectedSession.sessionId}`}
                 state={inspectorState}
                 session={selectedSession}
+                docked={docked}
                 onClose={onInspectorClose}
                 onExpand={onInspectorExpand}
                 onRestore={onInspectorRestore}

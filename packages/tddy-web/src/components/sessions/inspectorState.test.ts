@@ -1,5 +1,9 @@
 import { describe, it, expect } from "bun:test";
-import { defaultInspectorOpen, nextInspectorState } from "./inspectorState";
+import { defaultInspectorOpen, isInspectorDocked, nextInspectorState } from "./inspectorState";
+import type { SessionEntry } from "../../gen/connection_pb";
+
+const aSession = (fields: Partial<SessionEntry>): SessionEntry =>
+  ({ isActive: false, pendingElicitation: false, ...fields }) as SessionEntry;
 
 describe("defaultInspectorOpen", () => {
   it("returns false for an active session (connected — inspector is hidden by default)", () => {
@@ -8,6 +12,28 @@ describe("defaultInspectorOpen", () => {
 
   it("returns true for an inactive session (disconnected — inspector is open by default)", () => {
     expect(defaultInspectorOpen(false)).toBe(true);
+  });
+});
+
+describe("isInspectorDocked", () => {
+  it("docks a disconnected session (inactive, no pending elicitation)", () => {
+    expect(isInspectorDocked(aSession({ isActive: false, pendingElicitation: false }))).toBe(true);
+  });
+
+  it("does not dock a connected session (active)", () => {
+    expect(isInspectorDocked(aSession({ isActive: true, pendingElicitation: false }))).toBe(false);
+  });
+
+  it("does not dock a needs-input session (pending elicitation is treated as active)", () => {
+    expect(isInspectorDocked(aSession({ isActive: false, pendingElicitation: true }))).toBe(false);
+  });
+
+  it("does not dock a needs-input session even when it is also active", () => {
+    expect(isInspectorDocked(aSession({ isActive: true, pendingElicitation: true }))).toBe(false);
+  });
+
+  it("does not dock when there is no session", () => {
+    expect(isInspectorDocked(null)).toBe(false);
   });
 });
 
