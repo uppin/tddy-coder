@@ -9,16 +9,46 @@
 //! This module splits an encoded envelope into ordered wire frames that each fit within the
 //! per-packet budget, and reassembles the received frames back into the original bytes. Frames of
 //! concurrent logical messages (distinct `message_id`s) are grouped independently.
+//!
+//! # Wire format and back-compat
+//!
+//! A payload that already fits in one packet is sent **raw** — byte-for-byte the encoded envelope,
+//! exactly as before chunking existed — so a peer that predates this codec still decodes small
+//! messages unchanged. Only an oversized payload is split, and each of its frames begins with a
+//! one-byte [`CHUNK_FRAME_MAGIC`] followed by the header:
+//! `[magic: u8 = 0x00][message_id: u32 LE][total_chunks: u32 LE][index: u32 LE][data...]`.
+//!
+//! The receiver tells the two apart with [`is_chunk_frame`]: a valid `prost`-encoded
+//! `RpcRequest`/`RpcResponse` can never begin with `0x00` (protobuf field number 0 is illegal, and
+//! the envelopes' lowest fields are `request_id`/`response_message` at field numbers 1 and 2), so a
+//! leading `0x00` unambiguously marks a chunk frame.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Safe upper bound for a single LiveKit data-channel message. Stays under the ~64 KB SCTP
 /// negotiated maximum with headroom for the frame header.
 pub const MAX_CHUNK_FRAME_BYTES: usize = 60_000;
 
+/// Monotonic source of outbound message ids for this process. A `message_id` only needs to be
+/// unique among one sender's concurrently in-flight messages (the receiver keeps a separate
+/// reassembler per sender), and every send from this process shares one local participant identity,
+/// so a single process-wide counter suffices. Wrap-around at `u32::MAX` is harmless — a collision
+/// would require ~4 billion messages in flight at once.
+static NEXT_MESSAGE_ID: AtomicU32 = AtomicU32::new(0);
+
+/// Allocate the next process-unique `message_id` for an outbound message.
+pub fn next_message_id() -> u32 {
+    NEXT_MESSAGE_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Leading byte marking a frame as a chunk frame rather than a raw envelope. `0x00` is safe because
+/// a valid protobuf envelope never starts with it (see the module docs).
+pub const CHUNK_FRAME_MAGIC: u8 = 0x00;
+
 /// Encoded length of the chunk header prepended to every frame:
-/// `[message_id: u32 LE][total_chunks: u32 LE][index: u32 LE]`.
-const HEADER_LEN: usize = 12;
+/// `[magic: u8][message_id: u32 LE][total_chunks: u32 LE][index: u32 LE]`.
+const HEADER_LEN: usize = 13;
 
 /// Number of payload bytes that fit in one frame of `max_frame_bytes` (the budget minus the frame
 /// header). Callers split their payload into runs of at most this many bytes.
@@ -26,10 +56,29 @@ pub fn max_data_bytes_per_frame(max_frame_bytes: usize) -> usize {
     max_frame_bytes.saturating_sub(HEADER_LEN)
 }
 
-/// Split `payload` into ordered wire frames tagged with `message_id`. Each returned frame's encoded
-/// length is at most `max_frame_bytes`; a payload that already fits yields a single frame. Every
-/// frame — including the sole frame of a small payload — carries the chunk header so the receiver
-/// reassembles uniformly.
+/// Prepare `payload` for the transport under the standard [`MAX_CHUNK_FRAME_BYTES`] budget: a
+/// payload that fits in a single packet is returned **raw** (one frame, no header) for wire
+/// compatibility with pre-chunking peers; a larger one is split into ordered chunk frames.
+///
+/// A short payload that happens to begin with [`CHUNK_FRAME_MAGIC`] is forced through the framed
+/// path anyway, so the receiver never mistakes it for a chunk frame — callers may pass arbitrary
+/// bytes, though in practice `payload` is always an encoded envelope (which never leads with the
+/// magic).
+pub fn frame_for_transport(message_id: u32, payload: &[u8]) -> Vec<Vec<u8>> {
+    let fits_raw =
+        payload.len() <= MAX_CHUNK_FRAME_BYTES && payload.first() != Some(&CHUNK_FRAME_MAGIC);
+    if fits_raw {
+        vec![payload.to_vec()]
+    } else {
+        split_into_frames(message_id, payload, MAX_CHUNK_FRAME_BYTES)
+    }
+}
+
+/// Split `payload` into ordered chunk frames tagged with `message_id`. Each returned frame's encoded
+/// length is at most `max_frame_bytes`; a payload that already fits in one frame's data budget
+/// yields a single frame. Every frame carries the magic-prefixed chunk header so the receiver
+/// reassembles uniformly — prefer [`frame_for_transport`] on the send path, which sends small
+/// payloads raw for back-compat.
 pub fn split_into_frames(message_id: u32, payload: &[u8], max_frame_bytes: usize) -> Vec<Vec<u8>> {
     let data_budget = max_data_bytes_per_frame(max_frame_bytes).max(1);
 
@@ -46,6 +95,7 @@ pub fn split_into_frames(message_id: u32, payload: &[u8], max_frame_bytes: usize
         .enumerate()
         .map(|(index, data)| {
             let mut frame = Vec::with_capacity(HEADER_LEN + data.len());
+            frame.push(CHUNK_FRAME_MAGIC);
             frame.extend_from_slice(&message_id.to_le_bytes());
             frame.extend_from_slice(&(total_chunks as u32).to_le_bytes());
             frame.extend_from_slice(&(index as u32).to_le_bytes());
@@ -55,12 +105,29 @@ pub fn split_into_frames(message_id: u32, payload: &[u8], max_frame_bytes: usize
         .collect()
 }
 
+/// Whether `bytes` is a chunk frame (to be reassembled) rather than a raw envelope (to be decoded
+/// directly). See the module docs for why a leading [`CHUNK_FRAME_MAGIC`] is unambiguous.
+pub fn is_chunk_frame(bytes: &[u8]) -> bool {
+    bytes.first() == Some(&CHUNK_FRAME_MAGIC)
+}
+
 /// Error decoding or reassembling a chunk frame.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ChunkError {
-    /// The frame bytes could not be parsed as a chunk frame (too short, or inconsistent header).
+    /// The frame bytes could not be parsed as a chunk frame (too short, wrong magic, or an
+    /// inconsistent header).
     Malformed(String),
 }
+
+impl std::fmt::Display for ChunkError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ChunkError::Malformed(msg) => write!(f, "malformed chunk frame: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for ChunkError {}
 
 /// Chunks buffered for one in-flight message, indexed by their `index` in the original payload.
 struct PendingMessage {
@@ -68,16 +135,17 @@ struct PendingMessage {
     chunks: HashMap<u32, Vec<u8>>,
 }
 
-/// Stateful reassembler. Feed each received wire frame via [`ChunkReassembler::accept`]; it returns
-/// `Some(payload)` once the final frame of a message arrives, `None` while chunks are still
-/// outstanding. Concurrent messages (distinct `message_id`s) reassemble independently.
+/// Stateful reassembler. Feed each received chunk frame (those for which [`is_chunk_frame`] is true)
+/// via [`ChunkReassembler::accept`]; it returns `Some(payload)` once the final frame of a message
+/// arrives, `None` while chunks are still outstanding. Concurrent messages (distinct `message_id`s)
+/// reassemble independently.
 #[derive(Default)]
 pub struct ChunkReassembler {
     pending: HashMap<u32, PendingMessage>,
 }
 
 impl ChunkReassembler {
-    /// Accept one received wire frame. Returns the completed payload when the final outstanding
+    /// Accept one received chunk frame. Returns the completed payload when the final outstanding
     /// chunk of its message arrives, otherwise `None`.
     pub fn accept(&mut self, frame: &[u8]) -> Result<Option<Vec<u8>>, ChunkError> {
         if frame.len() < HEADER_LEN {
@@ -86,10 +154,16 @@ impl ChunkReassembler {
                 frame.len()
             )));
         }
+        if frame[0] != CHUNK_FRAME_MAGIC {
+            return Err(ChunkError::Malformed(format!(
+                "frame does not begin with the chunk magic (0x{:02x} != 0x{CHUNK_FRAME_MAGIC:02x})",
+                frame[0]
+            )));
+        }
 
-        let message_id = u32::from_le_bytes(frame[0..4].try_into().expect("4 bytes"));
-        let total_chunks = u32::from_le_bytes(frame[4..8].try_into().expect("4 bytes")) as usize;
-        let index = u32::from_le_bytes(frame[8..12].try_into().expect("4 bytes"));
+        let message_id = u32::from_le_bytes(frame[1..5].try_into().expect("4 bytes"));
+        let total_chunks = u32::from_le_bytes(frame[5..9].try_into().expect("4 bytes")) as usize;
+        let index = u32::from_le_bytes(frame[9..13].try_into().expect("4 bytes"));
         let data = frame[HEADER_LEN..].to_vec();
 
         let pending = self
@@ -125,9 +199,16 @@ mod tests {
     /// A deterministic payload of `len` bytes whose value varies per position (period 251, a prime
     /// that won't align with chunk boundaries), so any dropped, duplicated, or reordered chunk
     /// changes the reassembled bytes. Models an oversized RPC envelope — the ~370 KB
-    /// `StreamSessionActivity` snapshot that wedged the transport.
+    /// `StreamSessionActivity` snapshot that wedged the transport. Starts at 1 (never the chunk
+    /// magic), matching a real encoded envelope's leading protobuf tag.
     fn a_payload_of(len: usize) -> Vec<u8> {
-        (0..len).map(|i| (i % 251) as u8).collect()
+        (0..len).map(|i| (i % 251 + 1) as u8).collect()
+    }
+
+    /// A stand-in for a raw encoded `RpcResponse`: begins with `0x08`, the protobuf tag for the
+    /// `request_id` field (field 1, varint) that `prost` emits first.
+    fn an_encoded_envelope() -> Vec<u8> {
+        vec![0x08, 0x2a, 0x12, 0x03, b'h', b'i', b'!']
     }
 
     fn assert_frames_fit(frames: &[Vec<u8>], budget: usize) {
@@ -262,12 +343,98 @@ mod tests {
     #[test]
     fn rejects_a_frame_too_short_to_contain_a_header() {
         // Given a frame with fewer bytes than the chunk header requires
-        let truncated = vec![0u8; 1];
+        let truncated = vec![CHUNK_FRAME_MAGIC; 1];
 
         // When it is fed to the reassembler
         let result = ChunkReassembler::default().accept(&truncated);
 
         // Then it is rejected as malformed
         assert!(matches!(result, Err(ChunkError::Malformed(_))));
+    }
+
+    #[test]
+    fn rejects_a_frame_that_lacks_the_chunk_magic() {
+        // Given a full-length frame whose leading byte is not the chunk magic
+        let mut not_a_chunk = split_into_frames(1, &a_payload_of(2_000), 1_000)[0].clone();
+        not_a_chunk[0] = 0x08;
+
+        // When it is fed to the reassembler
+        let result = ChunkReassembler::default().accept(&not_a_chunk);
+
+        // Then it is rejected as malformed
+        assert!(matches!(result, Err(ChunkError::Malformed(_))));
+    }
+
+    #[test]
+    fn detects_split_frames_as_chunk_frames() {
+        // Given the frames of an oversized payload
+        let frames = split_into_frames(3, &a_payload_of(200_000), 60_000);
+
+        // Then every frame is recognised as a chunk frame
+        assert!(frames.iter().all(|f| is_chunk_frame(f)));
+    }
+
+    #[test]
+    fn does_not_detect_a_raw_envelope_as_a_chunk_frame() {
+        // Given the bytes of a raw encoded envelope
+        let envelope = an_encoded_envelope();
+
+        // Then it is not mistaken for a chunk frame
+        assert!(!is_chunk_frame(&envelope));
+    }
+
+    #[test]
+    fn sends_a_payload_that_fits_as_a_single_raw_frame() {
+        // Given an encoded envelope that fits within one packet
+        let envelope = an_encoded_envelope();
+
+        // When preparing it for the transport
+        let frames = frame_for_transport(1, &envelope);
+
+        // Then it is sent raw — one frame, unchanged bytes, no chunk header
+        assert_eq!(frames, vec![envelope.clone()]);
+        assert!(!is_chunk_frame(&frames[0]));
+    }
+
+    #[test]
+    fn frames_an_oversized_payload_into_detectable_chunks_that_reassemble() {
+        // Given a 370 KB envelope that overflows a single packet
+        let payload = a_payload_of(370_000);
+
+        // When preparing it for the transport
+        let frames = frame_for_transport(9, &payload);
+
+        // Then it is split into fitting chunk frames that reassemble to the original
+        assert!(frames.len() > 1);
+        assert_frames_fit(&frames, MAX_CHUNK_FRAME_BYTES);
+        assert!(frames.iter().all(|f| is_chunk_frame(f)));
+        let completed = feed_all(&mut ChunkReassembler::default(), &frames);
+        assert_eq!(completed, vec![payload]);
+    }
+
+    #[test]
+    fn hands_out_distinct_message_ids() {
+        // When several outbound message ids are allocated
+        let ids = [next_message_id(), next_message_id(), next_message_id()];
+
+        // Then no two collide
+        assert_eq!(
+            ids.iter().collect::<std::collections::HashSet<_>>().len(),
+            3
+        );
+    }
+
+    #[test]
+    fn frames_a_small_payload_that_would_look_like_a_chunk_frame() {
+        // Given a short payload whose first byte collides with the chunk magic
+        let payload = vec![CHUNK_FRAME_MAGIC, 1, 2, 3, 4];
+
+        // When preparing it for the transport
+        let frames = frame_for_transport(2, &payload);
+
+        // Then it is framed (not sent raw) so the receiver won't misread it, and it round-trips
+        assert!(is_chunk_frame(&frames[0]));
+        let completed = feed_all(&mut ChunkReassembler::default(), &frames);
+        assert_eq!(completed, vec![payload]);
     }
 }
