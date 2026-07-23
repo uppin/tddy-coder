@@ -4,6 +4,8 @@ Wrapped changeset history for tddy-service.
 
 **Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
 
+- **2026-07-23** [Feature] session-activity-streaming-mode: `proto/connection.proto` adds `enum StreamMode { SNAPSHOT_THEN_LIVE, LIVE_ONLY }` + `StreamSessionActivityRequest.mode` (field 4), and changes `AgentActivityRecord.input`/`result` (fields 3/5) from `string` to `google.protobuf.Value`. New `lib.rs` helpers `json_to_proto_value` + `agent_activity_to_proto` (record → wire) with 7 converter unit tests. Regenerated Rust + `tddy-web/src/gen/connection_pb.ts`. Feature [agent-activity-pane.md](../../../docs/ft/web/agent-activity-pane.md). Cross-package [docs/dev/changesets.md](../../../docs/dev/changesets.md). (tddy-service)
+
 - **2026-07-23** [Feature] project-default-branch: `proto/connection.proto` adds `ProjectEntry.main_branch_ref` (field 6) and a `SetProjectDefaultBranch(SetProjectDefaultBranchRequest) returns (SetProjectDefaultBranchResponse)` RPC. Regenerated Rust + `tddy-web/src/gen/connection_pb.ts`. Feature [git-integration-base-ref.md](../../../docs/ft/coder/git-integration-base-ref.md). Cross-package [docs/dev/changesets.md](../../../docs/dev/changesets.md). (tddy-service)
 - **2026-07-23** [Feature] semantic-index: `proto/connection.proto` adds `StartSessionRequest.semantic_index` (bool, field 27). Regenerated Rust + `tddy-web/src/gen/connection_pb.ts`. Feature [semantic-index.md](../../../docs/ft/coder/semantic-index.md). Cross-package [docs/dev/changesets.md](../../../docs/dev/changesets.md). (tddy-service)
 

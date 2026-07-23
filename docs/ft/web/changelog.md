@@ -4,6 +4,11 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-23 — Agent activity: subscribe to new records only + structured tool input/output
+
+- The agent-activity pane can subscribe **live-only** — skipping the full-history replay — via `useSessionActivity`'s `mode` (`StreamMode.LIVE_ONLY`); the overlay keeps the snapshot-then-live default so history still populates on open ([agent-activity-pane.md](agent-activity-pane.md#streaming-design--streamsessionactivity)).
+- Tool **input/output** are now structured `google.protobuf.Value` end-to-end (not opaque JSON strings), so the detail dialog renders a real object/array/string/scalar — a bare-string tool result shows verbatim ([agent-activity-pane.md](agent-activity-pane.md#data-model--a-new-per-session-agent-activity-log)).
+
 ## 2026-07-23 — Set a project's default branch from the Projects screen
 
 - Each project card gains a **default branch** dropdown listing the project's remote branches (sourced from `ListProjectBranches`); choosing one sets the project's `main_branch_ref` via the new `SetProjectDefaultBranch` RPC and applies it across the project's hosts ([projects-screen-multi-host.md](projects-screen-multi-host.md#default-branch)).
