@@ -1,5 +1,8 @@
 // Inspector panel state machine for the session inspector drawer.
 
+import { connectionStatusForSession } from "../../utils/connectionStatusForSession";
+import type { SessionEntry } from "../../gen/connection_pb";
+
 export type InspectorState = { open: boolean; expanded: boolean };
 
 export type InspectorAction =
@@ -16,6 +19,12 @@ export type InspectorAction =
  */
 export function defaultInspectorOpen(isActive: boolean): boolean {
   return !isActive;
+}
+
+/** True when the inspector should render as the full main pane (docked) rather than an overlay
+ *  drawer: the selected session is disconnected. */
+export function isInspectorDocked(session: SessionEntry | null): boolean {
+  return session != null && connectionStatusForSession(session) === "disconnected";
 }
 
 /**
