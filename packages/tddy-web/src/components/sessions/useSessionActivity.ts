@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { AgentActivityRecord, ConnectionService } from "../../gen/connection_pb";
+import { StreamMode } from "../../gen/connection_pb";
 
 export interface UseSessionActivityResult {
   /** All known tool-call records, coalesced by `callId`, in first-seen order. */
@@ -25,13 +26,18 @@ export interface UseSessionActivityResult {
  *
  * The streaming-subscription and cancellation shape mirrors `useAgentChat` — a `cancelled` flag
  * plus a cleanup that stops iterating, swallowing the unmount AbortError.
+ *
+ * `mode` selects `SNAPSHOT_THEN_LIVE` (default — replay the coalesced history then tail live, so
+ * the pane is populated on open) or `LIVE_ONLY` (skip the snapshot; a consumer that already holds
+ * the history avoids re-downloading it). The request always carries an explicit mode.
  */
 export function useSessionActivity(args: {
   sessionId: string;
   sessionToken: string;
   client: Client<typeof ConnectionService>;
+  mode?: StreamMode;
 }): UseSessionActivityResult {
-  const { sessionId, sessionToken, client } = args;
+  const { sessionId, sessionToken, client, mode = StreamMode.SNAPSHOT_THEN_LIVE } = args;
 
   const [records, setRecords] = useState<AgentActivityRecord[]>([]);
   const [seenCallIds, setSeenCallIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -56,6 +62,7 @@ export function useSessionActivity(args: {
           sessionToken,
           sessionId,
           daemonInstanceId: "",
+          mode,
         })) {
           if (cancelled) break;
           upsert(record);
@@ -73,7 +80,7 @@ export function useSessionActivity(args: {
     return () => {
       cancelled = true;
     };
-  }, [client, sessionId, sessionToken]);
+  }, [client, sessionId, sessionToken, mode]);
 
   const markSeen = () => {
     setSeenCallIds(new Set(records.map((r) => r.callId)));

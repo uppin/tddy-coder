@@ -208,12 +208,13 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
         // best-effort — a write failure is logged and never blocks the tool call (mirrors
         // tool_call_log handling in the ExecuteTool path).
         let call_id = uuid::Uuid::new_v4().to_string();
+        let input = tddy_core::agent_activity::parse_activity_json(args_json);
         let running = tddy_core::agent_activity::AgentActivityRecord {
             call_id: call_id.clone(),
             tool_name: tool_name.to_string(),
-            input_json: args_json.to_string(),
+            input: input.clone(),
             status: tddy_core::agent_activity::STATUS_RUNNING.to_string(),
-            result_json: String::new(),
+            result: serde_json::Value::Null,
             error_message: String::new(),
             started_unix_ms: crate::connection_service::now_unix_ms(),
             completed_unix_ms: 0,
@@ -239,9 +240,9 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
         let terminal = tddy_core::agent_activity::AgentActivityRecord {
             call_id,
             tool_name: tool_name.to_string(),
-            input_json: args_json.to_string(),
+            input,
             status: status.to_string(),
-            result_json: outcome.result_json.clone(),
+            result: tddy_core::agent_activity::parse_activity_json(&outcome.result_json),
             error_message: outcome.error_message.clone(),
             started_unix_ms: running.started_unix_ms,
             completed_unix_ms: crate::connection_service::now_unix_ms(),

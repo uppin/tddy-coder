@@ -282,9 +282,11 @@ impl Presenter {
                 let rec = AgentActivityRecord {
                     call_id: call_id.clone(),
                     tool_name: name.clone(),
-                    input_json: input_json.clone().unwrap_or_default(),
+                    input: crate::agent_activity::parse_activity_json(
+                        &input_json.clone().unwrap_or_default(),
+                    ),
                     status: STATUS_RUNNING.to_string(),
-                    result_json: String::new(),
+                    result: serde_json::Value::Null,
                     error_message: String::new(),
                     started_unix_ms: now_unix_ms(),
                     completed_unix_ms: 0,
@@ -307,9 +309,9 @@ impl Presenter {
                     .unwrap_or_else(|| AgentActivityRecord {
                         call_id: call_id.clone(),
                         tool_name: String::new(),
-                        input_json: String::new(),
+                        input: serde_json::Value::Null,
                         status: String::new(),
-                        result_json: String::new(),
+                        result: serde_json::Value::Null,
                         error_message: String::new(),
                         started_unix_ms: 0,
                         completed_unix_ms: 0,
@@ -321,7 +323,7 @@ impl Presenter {
                     STATUS_COMPLETED
                 }
                 .to_string();
-                rec.result_json = result_json.clone();
+                rec.result = crate::agent_activity::parse_activity_json(result_json);
                 rec.error_message = if *is_error {
                     result_json.clone()
                 } else {
@@ -1810,9 +1812,12 @@ mod tests {
         );
         assert_eq!(records[0].call_id, "call-1");
         assert_eq!(records[0].tool_name, "Bash");
-        assert_eq!(records[0].input_json, r#"{"command":"cargo build"}"#);
+        assert_eq!(
+            records[0].input,
+            serde_json::json!({ "command": "cargo build" })
+        );
         assert_eq!(records[0].status, STATUS_COMPLETED);
-        assert_eq!(records[0].result_json, r#"{"stdout":"ok"}"#);
+        assert_eq!(records[0].result, serde_json::json!({ "stdout": "ok" }));
         assert_eq!(records[0].source, "coder");
 
         // And — two AgentActivity events were broadcast: the running row then the completed row

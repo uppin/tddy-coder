@@ -12,34 +12,64 @@
  */
 
 import React from "react";
-import { create } from "@bufbuild/protobuf";
+import { create, fromJson } from "@bufbuild/protobuf";
+import { ValueSchema } from "@bufbuild/protobuf/wkt";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ConnectionService, AgentActivityRecordSchema } from "../../src/gen/connection_pb";
+import {
+  ConnectionService,
+  AgentActivityRecordSchema,
+  StreamMode,
+} from "../../src/gen/connection_pb";
 import { AgentActivityOverlay } from "../../src/components/sessions/AgentActivityOverlay";
+import { useSessionActivity } from "../../src/components/sessions/useSessionActivity";
+import { useHttpClient } from "../../src/rpc/transportProvider";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
 
-/** Build one `AgentActivityRecord` for the stream, showing only the fields a test cares about. */
+/**
+ * Build one `AgentActivityRecord` for the stream, showing only the fields a test cares about.
+ * `input`/`result` are plain JS/JSON values carried as structured `google.protobuf.Value` — an
+ * object, a bare string, an array, or a scalar all round-trip. `result` left undefined stays unset
+ * (the "running" row has no output yet).
+ */
 function activityRecord(fields: {
   callId: string;
   toolName: string;
-  inputJson?: string;
+  input?: unknown;
   status?: "running" | "completed" | "error";
-  resultJson?: string;
+  result?: unknown;
   errorMessage?: string;
   source?: string;
 }) {
   return create(AgentActivityRecordSchema, {
     callId: fields.callId,
     toolName: fields.toolName,
-    inputJson: fields.inputJson ?? "{}",
+    input: fromJson(ValueSchema, (fields.input ?? {}) as never),
     status: fields.status ?? "completed",
-    resultJson: fields.resultJson ?? "",
+    result:
+      fields.result === undefined ? undefined : fromJson(ValueSchema, fields.result as never),
     errorMessage: fields.errorMessage ?? "",
     startedUnixMs: 0n,
     completedUnixMs: 0n,
     source: fields.source ?? "coder",
   });
+}
+
+/** A backend whose `StreamSessionActivity` records the request's `mode`, then stays quiet. */
+function backendCapturingMode(capture: (mode: StreamMode) => void) {
+  return anInMemoryRpcBackend().implement(ConnectionService, {
+    // eslint-disable-next-line require-yield
+    async *streamSessionActivity(req) {
+      capture(req.mode);
+    },
+  });
+}
+
+/** Minimal harness: drives `useSessionActivity` with an explicit `mode` and renders nothing. */
+function HookProbe({ mode }: { mode: StreamMode }) {
+  const client = useHttpClient(ConnectionService);
+  useSessionActivity({ sessionId: "s1", sessionToken: "tok", client, mode });
+  return null;
 }
 
 /** A backend whose `StreamSessionActivity` replays exactly `records`, then stays quiet. */
@@ -111,14 +141,14 @@ it("opens the activity overlay listing a one-line row for each tool call", () =>
   agentActivityPage.row("call-2").should("contain.text", "Read");
 });
 
-it("opens a detail dialog with the full input and full output when a record is selected", () => {
-  // Given — a completed tool call with distinctive input and output
+it("renders the structured tool input and output object in the detail dialog", () => {
+  // Given — a completed tool call whose input and output are structured objects
   const backend = backendStreaming(
     activityRecord({
       callId: "call-1",
       toolName: "Bash",
-      inputJson: '{"command":"cargo test --workspace"}',
-      resultJson: '{"stdout":"test result: ok. 412 passed","exit_code":0}',
+      input: { command: "cargo test --workspace" },
+      result: { stdout: "test result: ok. 412 passed", exit_code: 0 },
     }),
   );
 
@@ -127,10 +157,30 @@ it("opens a detail dialog with the full input and full output when a record is s
   agentActivityPage.open();
   agentActivityPage.openDetail("call-1");
 
-  // Then — the dialog shows the full input and full output
+  // Then — the dialog shows the structured input and output (rendered from the Value, not a string)
   agentActivityPage.detailDialog().should("exist");
   agentActivityPage.detailInput().should("contain.text", "cargo test --workspace");
   agentActivityPage.detailOutput().should("contain.text", "test result: ok. 412 passed");
+});
+
+it("renders a bare-string tool result in the detail dialog", () => {
+  // Given — a tool whose output is a plain string (a Value, which an object-only Struct cannot hold)
+  const backend = backendStreaming(
+    activityRecord({
+      callId: "call-1",
+      toolName: "Read",
+      input: { file_path: "src/main.rs" },
+      result: "fn main() { println!(\"hi\"); }",
+    }),
+  );
+
+  // When
+  mountOverlay(backend);
+  agentActivityPage.open();
+  agentActivityPage.openDetail("call-1");
+
+  // Then — the bare-string output renders faithfully
+  agentActivityPage.detailOutput().should("contain.text", "fn main()");
 });
 
 it("closes the detail dialog on Escape", () => {
@@ -210,4 +260,36 @@ it("renders the activity pane for a sandbox session (session-type-agnostic)", ()
   // Then — the icon and record render exactly as for any other session type
   agentActivityPage.button().should("exist");
   agentActivityPage.row("call-1").should("contain.text", "Read");
+});
+
+it("subscribes with snapshot-then-live mode by default", () => {
+  // Given — a backend that records the mode the overlay subscribes with
+  let requestedMode: StreamMode | undefined;
+  const backend = backendCapturingMode((mode) => {
+    requestedMode = mode;
+  });
+
+  // When — the overlay mounts (it subscribes on mount, before any record arrives)
+  mountOverlay(backend);
+
+  // Then — it asks for the full history: snapshot-then-live
+  cy.wrap(null).should(() => {
+    expect(requestedMode).to.equal(StreamMode.SNAPSHOT_THEN_LIVE);
+  });
+});
+
+it("requests live-only mode when the hook is created for new activity only", () => {
+  // Given — a backend that records the subscribed mode
+  let requestedMode: StreamMode | undefined;
+  const backend = backendCapturingMode((mode) => {
+    requestedMode = mode;
+  });
+
+  // When — a consumer drives the hook with LIVE_ONLY
+  mountWithRpc(<HookProbe mode={StreamMode.LIVE_ONLY} />, backend);
+
+  // Then — the request skips the snapshot: live-only
+  cy.wrap(null).should(() => {
+    expect(requestedMode).to.equal(StreamMode.LIVE_ONLY);
+  });
 });

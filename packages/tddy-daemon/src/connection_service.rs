@@ -64,7 +64,7 @@ use tddy_service::proto::connection::{
     HostDiskStats, HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse,
     ListSessionToolCallsRequest, ListSessionToolCallsResponse, ReportAgentActivityRequest,
     ReportAgentActivityResponse, StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest,
-    StopDemoVmResponse, StreamHostStatsRequest, StreamSessionActivityRequest,
+    StopDemoVmResponse, StreamHostStatsRequest, StreamMode, StreamSessionActivityRequest,
     ToolCallInfo as ProtoToolCallInfo,
 };
 use tddy_task::TaskRegistry;
@@ -339,23 +339,6 @@ pub(crate) fn now_unix_ms() -> u64 {
         .as_millis() as u64
 }
 
-/// Map a durable [`tddy_core::agent_activity::AgentActivityRecord`] onto its wire form.
-fn to_proto_agent_activity(
-    record: tddy_core::agent_activity::AgentActivityRecord,
-) -> ProtoAgentActivityRecord {
-    ProtoAgentActivityRecord {
-        call_id: record.call_id,
-        tool_name: record.tool_name,
-        input_json: record.input_json,
-        status: record.status,
-        result_json: record.result_json,
-        error_message: record.error_message,
-        started_unix_ms: record.started_unix_ms,
-        completed_unix_ms: record.completed_unix_ms,
-        source: record.source,
-    }
-}
-
 /// Live pub/sub hub for **agent activity** records, plus the per-session pending-call stack that
 /// pairs a claude-cli `PreToolUse` (running) hook with its matching `PostToolUse` (terminal) hook.
 ///
@@ -452,7 +435,10 @@ async fn relay_agent_activity(
     loop {
         match broadcast_rx.recv().await {
             Ok(record) => {
-                if tx.send(to_proto_agent_activity(record)).is_err() {
+                if tx
+                    .send(tddy_service::agent_activity_to_proto(record))
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -5761,9 +5747,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 tddy_core::agent_activity::AgentActivityRecord {
                     call_id,
                     tool_name: req.tool_name,
-                    input_json: req.input_json,
+                    input: tddy_core::agent_activity::parse_activity_json(&req.input_json),
                     status: tddy_core::agent_activity::STATUS_RUNNING.to_string(),
-                    result_json: String::new(),
+                    result: serde_json::Value::Null,
                     error_message: String::new(),
                     started_unix_ms: now_unix_ms(),
                     completed_unix_ms: 0,
@@ -5785,9 +5771,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 tddy_core::agent_activity::AgentActivityRecord {
                     call_id,
                     tool_name: req.tool_name,
-                    input_json: req.input_json,
+                    input: tddy_core::agent_activity::parse_activity_json(&req.input_json),
                     status: status.to_string(),
-                    result_json: req.result_json,
+                    result: tddy_core::agent_activity::parse_activity_json(&req.result_json),
                     error_message: req.error_message,
                     started_unix_ms: 0,
                     completed_unix_ms: now_unix_ms(),
@@ -6076,14 +6062,22 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<ProtoAgentActivityRecord>();
 
-        // Snapshot first, then live: replay the coalesced on-disk records, then relay everything
-        // subsequently published to the hub for this session.
-        let snapshot =
-            tddy_core::agent_activity::read_agent_activity(&session_dir).unwrap_or_default();
-        for record in snapshot {
-            if tx.send(to_proto_agent_activity(record)).is_err() {
-                // Receiver already gone — return an empty live stream that terminates immediately.
-                return Ok(Response::new(MpscAgentActivityStream { rx }));
+        // Snapshot-then-live (the default and proto3 zero value) replays the coalesced on-disk
+        // records first, then relays everything subsequently published to the hub for this
+        // session. Live-only skips the snapshot entirely and carries only records published after
+        // subscribe.
+        let mode = StreamMode::try_from(req.mode).unwrap_or(StreamMode::SnapshotThenLive);
+        if mode == StreamMode::SnapshotThenLive {
+            let snapshot =
+                tddy_core::agent_activity::read_agent_activity(&session_dir).unwrap_or_default();
+            for record in snapshot {
+                if tx
+                    .send(tddy_service::agent_activity_to_proto(record))
+                    .is_err()
+                {
+                    // Receiver already gone — return an empty live stream that terminates immediately.
+                    return Ok(Response::new(MpscAgentActivityStream { rx }));
+                }
             }
         }
 
@@ -7277,9 +7271,9 @@ mod agent_activity_unit_tests {
         AgentActivityRecord {
             call_id: call_id.to_string(),
             tool_name: tool_name.to_string(),
-            input_json: r#"{"path":"src/main.rs"}"#.to_string(),
+            input: serde_json::json!({ "path": "src/main.rs" }),
             status: STATUS_COMPLETED.to_string(),
-            result_json: r#"{"content":"fn main() {}"}"#.to_string(),
+            result: serde_json::json!({ "content": "fn main() {}" }),
             error_message: String::new(),
             started_unix_ms: 1_700_000_000_000,
             completed_unix_ms: 1_700_000_000_500,
@@ -7323,7 +7317,10 @@ mod agent_activity_unit_tests {
         assert_eq!(records.len(), 1, "the pair must coalesce into one call");
         assert_eq!(records[0].tool_name, "Bash");
         assert_eq!(records[0].status, STATUS_COMPLETED);
-        assert_eq!(records[0].result_json, r#"{"stdout":"ok","exit_code":0}"#);
+        assert_eq!(
+            records[0].result,
+            serde_json::json!({ "stdout": "ok", "exit_code": 0 })
+        );
         assert_eq!(records[0].source, "claude-cli");
     }
 
@@ -7409,6 +7406,7 @@ mod agent_activity_unit_tests {
                 session_token: "valid".to_string(),
                 session_id: session_id.to_string(),
                 daemon_instance_id: String::new(),
+                mode: StreamMode::SnapshotThenLive as i32,
             }))
             .await
             .unwrap()
@@ -7445,6 +7443,7 @@ mod agent_activity_unit_tests {
                 session_token: "valid".to_string(),
                 session_id: session_id.to_string(),
                 daemon_instance_id: String::new(),
+                mode: StreamMode::SnapshotThenLive as i32,
             }))
             .await
             .unwrap()
@@ -7461,6 +7460,110 @@ mod agent_activity_unit_tests {
         let live = next_record(&mut stream).await;
         assert_eq!(live.call_id, "call-live");
         assert_eq!(live.tool_name, "Grep");
+    }
+
+    /// In LIVE_ONLY mode the persisted snapshot is not replayed: the first record delivered is one
+    /// published *after* the subscription, never a pre-seeded snapshot row.
+    #[tokio::test]
+    async fn stream_session_activity_in_live_only_mode_skips_the_snapshot_and_delivers_only_live_records(
+    ) {
+        // Given a session with a pre-seeded snapshot row.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "activity-live-only-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        tddy_core::agent_activity::append_agent_activity(
+            &session_dir,
+            &a_seeded_record("call-snapshot", "Read"),
+        )
+        .unwrap();
+        let service = make_unit_service(sessions_base);
+        let hub = service.agent_activity_hub();
+
+        // When a client subscribes in LIVE_ONLY mode.
+        let mut stream = service
+            .stream_session_activity(Request::new(StreamSessionActivityRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                mode: tddy_service::proto::connection::StreamMode::LiveOnly as i32,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // and a fresh record is published live for the session.
+        hub.publish(session_id, a_seeded_record("call-live", "Grep"));
+
+        // Then the first record delivered is the live one — the snapshot was skipped entirely.
+        let first = next_record(&mut stream).await;
+        assert_eq!(
+            first.call_id, "call-live",
+            "live-only must not replay the persisted snapshot ('call-snapshot')"
+        );
+    }
+
+    /// The hook sends `input_json` as a string; the persisted record carries it as structured JSON.
+    #[tokio::test]
+    async fn report_agent_activity_parses_the_hooks_json_input_into_a_structured_record() {
+        // Given a registered claude-cli session.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "activity-parse-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN);
+        let service = make_unit_service(sessions_base);
+
+        // When the hook reports a PreToolUse whose input is a JSON object string.
+        service
+            .report_agent_activity(Request::new(a_pre_tool_use(
+                session_id,
+                "Bash",
+                r#"{"command":"cargo test"}"#,
+            )))
+            .await
+            .unwrap();
+
+        // Then the persisted record carries the parsed structured input.
+        let records = read_agent_activity(&session_dir).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].input,
+            serde_json::json!({ "command": "cargo test" })
+        );
+    }
+
+    /// A non-JSON input string is preserved as a JSON string scalar (no data loss, no fabrication).
+    #[tokio::test]
+    async fn report_agent_activity_stores_a_non_json_input_string_as_a_string_scalar() {
+        // Given a registered claude-cli session.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "activity-nonjson-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN);
+        let service = make_unit_service(sessions_base);
+
+        // When the hook reports input that is not valid JSON.
+        service
+            .report_agent_activity(Request::new(a_pre_tool_use(
+                session_id,
+                "Bash",
+                "not valid json",
+            )))
+            .await
+            .unwrap();
+
+        // Then it is stored as a JSON string scalar rather than dropped.
+        let records = read_agent_activity(&session_dir).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].input,
+            serde_json::Value::String("not valid json".to_string())
+        );
     }
 
     /// Await the next stream item with a bounded timeout so a missing record fails loudly instead

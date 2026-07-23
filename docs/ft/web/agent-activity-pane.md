@@ -1,7 +1,7 @@
 # Agent Activity Pane — Real-time view of the agent's tool calls
 
 **Component:** `AgentActivityOverlay` (new) in `packages/tddy-web/src/components/sessions/`, mounted in the `SessionMainPane` top bar
-**Updated:** 2026-07-22
+**Updated:** 2026-07-23
 **Status:** Implemented (single-host; cross-host stream peer-forward is a tracked follow-up — see below)
 
 ## Overview
@@ -32,9 +32,9 @@ shape, shared across all hosts (defined once in `tddy-core`):
 AgentActivityRecord {
   call_id           // stable id correlating the "running" and terminal rows
   tool_name
-  input_json        // full tool input
+  input             // full tool input, as structured data (google.protobuf.Value)
   status            // "running" | "completed" | "error"
-  result_json       // full output; empty on the "running" row
+  result            // full tool output, as structured data; unset on the "running" row
   error_message     // non-empty when status == "error"
   started_unix_ms
   completed_unix_ms // 0 until terminal
@@ -46,6 +46,15 @@ A tool call appends a `running` row when it starts and a terminal (`completed`/`
 it finishes (append-only keeps the write atomic). The read side **coalesces by `call_id`** (later
 row supersedes, first-seen order preserved), then applies a 500-record tail cap. A crash mid-call
 leaves a stuck `running` row → the UI shows it as in-progress.
+
+**Structured input/output.** `input` and `result` are carried as **structured**
+`google.protobuf.Value` values — the parsed JSON — both on the wire and in the persisted
+`agent-activity.jsonl` log, not as opaque JSON strings. `google.protobuf.Value` is the full JSON
+superset, so it faithfully carries an object input (`{"command": …}`), a bare-string result (tool
+output is often a plain string), an array, a number, a bool, or null. Consumers render the value
+directly rather than re-parsing a string. The `running` row leaves `result` unset. One wire-format
+caveat: `google.protobuf.Value` numbers are IEEE-754 doubles, so integer tool values beyond 2^53
+are represented approximately (inherent to the wire type).
 
 ## Capture (one seam per session type)
 
@@ -64,23 +73,36 @@ A new **server-streaming** RPC on `ConnectionService`:
 ```protobuf
 message AgentActivityRecord { /* fields above */ }
 
-message StreamSessionActivityRequest {
-  string session_token      = 1;
-  string session_id         = 2;
-  string daemon_instance_id = 3;   // same peer-forward routing as ListSessionToolCalls
+// Whether the stream replays the persisted history before tailing live records.
+enum StreamMode {
+  SNAPSHOT_THEN_LIVE = 0;   // default: replay the coalesced history, then tail live records
+  LIVE_ONLY          = 1;   // skip the snapshot; deliver only records that arrive after subscribe
 }
 
-// server-streaming: replays the coalesced history (snapshot), then live deltas.
+message StreamSessionActivityRequest {
+  string     session_token      = 1;
+  string     session_id         = 2;
+  string     daemon_instance_id = 3;   // same peer-forward routing as ListSessionToolCalls
+  StreamMode mode               = 4;   // snapshot-then-live (default) vs live-only
+}
+
+// server-streaming: replays the coalesced history (snapshot) unless mode == LIVE_ONLY, then live deltas.
 rpc StreamSessionActivity(StreamSessionActivityRequest) returns (stream AgentActivityRecord);
 
 // unary; claude-cli hook → daemon.
 rpc ReportAgentActivity(ReportAgentActivityRequest) returns (ReportAgentActivityResponse);
 ```
 
-On connect the stream **replays the coalesced snapshot** (so the icon/history survive reconnect),
-then tails live records from an in-process per-session broadcast hub. This mirrors the existing
-snapshot-then-live `WatchTerminalControl` / `StreamTerminalOutput` pattern and the dual-host
-`ListSessionToolCalls` (both daemon and coder participant read/write the same session dir).
+On connect the stream, when `mode == SNAPSHOT_THEN_LIVE` (the default, and the value a proto3
+zero-field takes when the client omits it), **replays the coalesced snapshot** (so the
+icon/history survive reconnect), then tails live records from an in-process per-session broadcast
+hub. When `mode == LIVE_ONLY`, the snapshot replay is skipped entirely and the stream carries only
+records that arrive after the subscription is established — a client that already holds the history
+(or does not need it) avoids re-downloading up to 500 full records on every re-subscribe. In both
+modes each streamed message is a single-tool-call delta. This mirrors the existing snapshot-then-live
+`WatchTerminalControl` / `StreamTerminalOutput` pattern and the dual-host `ListSessionToolCalls`
+(both daemon and coder participant read/write the same session dir); **both hosts honour `mode`
+identically.**
 
 - tool / cursor-cli: served by the **coder participant** over LiveKit while live; daemon over `/rpc`
   serves the file snapshot as fallback.
@@ -92,10 +114,12 @@ streaming peer-forward primitive is a follow-up. Single-host, the common case, w
 
 ## Frontend
 
-- `useSessionActivity(sessionId, sessionToken, client)` — opens `StreamSessionActivity`
+- `useSessionActivity(sessionId, sessionToken, client, mode?)` — opens `StreamSessionActivity`
   (mirrors `useAgentChat`'s `for await` consumption), coalesces records by `call_id`, exposes
   `records`, `hasActivity`, `unreadCount`, and `markSeen()`. Opening the overlay marks the current
-  records seen; records that arrive while the overlay is closed increment `unreadCount`.
+  records seen; records that arrive while the overlay is closed increment `unreadCount`. The
+  optional `mode` selects `SNAPSHOT_THEN_LIVE` (default — the overlay keeps this so the list is
+  populated on open) or `LIVE_ONLY`; the request always carries an explicit mode.
 - `AgentActivityOverlay` — self-contained:
   - **icon button** (`agent-activity-button`, lucide, `variant="ghost"`) — rendered only when
     `hasActivity`; shows an **unread badge** (`agent-activity-unread-badge`) when `unreadCount > 0`.
@@ -104,8 +128,8 @@ streaming peer-forward primitive is a follow-up. Single-host, the common case, w
     (`agent-activity-row-<callId>`) showing the tool name plus `[running]`/`[error]` markers.
   - **detail dialog** (`agent-activity-detail-dialog`, mirrors `SessionWorkflowFilesModal`:
     `fixed inset-0 z-50`, `role="dialog"`, Escape- and backdrop-close, scrollable `overflow-auto`
-    body) — full `input_json` (`agent-activity-detail-input`) and `result_json`
-    (`agent-activity-detail-output`).
+    body) — full structured `input` (`agent-activity-detail-input`) and `result`
+    (`agent-activity-detail-output`), rendered from the `Value` (pretty-printed JSON).
 - Wired into the `SessionMainPane` top bar next to the Inspector toggle, using
   `buildSessionClient() ?? client` (the same client selection the Inspector Tools tab uses).
 
@@ -139,7 +163,12 @@ The `•` on the icon is the unread badge. With zero records, no icon renders at
 - **In scope:** the `agent-activity.jsonl` log + shared `AgentActivityRecord` (in `tddy-core`);
   capture seams for all four session types; `StreamSessionActivity` + `ReportAgentActivity` RPCs and
   their daemon + coder-participant hosts; the `AgentActivityOverlay` UI (icon, overlay, detail
-  dialog, unread badge) wired into `SessionMainPane`.
+  dialog, unread badge) wired into `SessionMainPane`. Also: the `StreamMode` request flag
+  (snapshot-then-live vs live-only), honoured by both hosts; structured `google.protobuf.Value`
+  `input`/`result` on the wire, in the persisted log, and in the web detail dialog.
 - **Out of scope:** persisted-log row-size/result truncation cap (tracked in `docs/dev/TODO.md`);
   a plain `ListSessionAgentActivity` unary (add only if the stream proves heavy); filtering/search
-  within the activity list; cross-session activity aggregation.
+  within the activity list; cross-session activity aggregation; splitting/chunking a single
+  oversized record across multiple stream messages; changing the `ReportAgentActivity` write-side
+  request to structured input/output (the hook keeps sending strings; the server parses them into
+  the structured record). No cross-host stream peer-forward (still the tracked follow-up).
