@@ -42,9 +42,21 @@ pub struct CatalogEntry {
     pub source_path: Option<String>,
 }
 
+/// The lifecycle capabilities of a build target (BSP `BuildTargetCapabilities`), as primitive bools
+/// so `tddy-core` needs no `tddy-build` dependency. Intentionally mirrors `tddy_build`'s
+/// `TargetCapabilities` field-for-field; the provider maps across the crate boundary.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogCapabilities {
+    pub compile: bool,
+    pub test: bool,
+    pub run: bool,
+    pub debug: bool,
+}
+
 /// A build target handed across the [`super::provider::BuildCatalogProvider`] port.
 ///
-/// Deliberately free of `tddy-build` types so `tddy-core` keeps no dependency on it.
+/// Deliberately free of `tddy-build` types so `tddy-core` keeps no dependency on it. Carries the rich
+/// projection the BSP layer needs; primitive fields only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildTargetCatalogEntry {
     /// Build target id, e.g. `packages/foo:binary`.
@@ -53,6 +65,22 @@ pub struct BuildTargetCatalogEntry {
     pub name: String,
     /// Projected package (id prefix before `:`).
     pub package: String,
+    /// `config.type` tag, e.g. `rust_library`.
+    pub target_type: Option<String>,
+    /// Directory of the `BUILD.yaml`, relative to the repo root.
+    pub base_dir: Option<String>,
+    /// Resolved tags (declared or derived).
+    pub tags: Vec<String>,
+    /// Resolved language ids (declared or derived).
+    pub languages: Vec<String>,
+    /// The target's declared `deps`.
+    pub deps: Vec<String>,
+    /// Source globs (union of the lowered actions' input globs).
+    pub sources: Vec<String>,
+    /// Declared output paths (union of the lowered actions' outputs).
+    pub outputs: Vec<String>,
+    /// Resolved lifecycle capabilities.
+    pub capabilities: CatalogCapabilities,
     /// Absolute path of the `BUILD.yaml` this target came from.
     pub source_path: String,
 }

@@ -75,6 +75,7 @@ async fn pipeline_builds_successfully_through_a_tool_target() {
         &graph,
         "app:build",
         &ExecuteOptions::default(),
+        tddy_build::BuildMode::Compile,
         &PluginRegistry::new(),
     )
     .await
@@ -99,17 +100,31 @@ async fn cache_hits_on_rerun_and_misses_after_input_edit() {
     let graph = load(dir.path());
 
     // When
-    let first = execute_target(dir.path(), &graph, "codegen:gen", &opts, &registry)
-        .await
-        .expect("first");
+    let first = execute_target(
+        dir.path(),
+        &graph,
+        "codegen:gen",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &registry,
+    )
+    .await
+    .expect("first");
 
     // Then
     assert!(!first.actions[0].cached, "first run executes");
 
     // When
-    let second = execute_target(dir.path(), &graph, "codegen:gen", &opts, &registry)
-        .await
-        .expect("second");
+    let second = execute_target(
+        dir.path(),
+        &graph,
+        "codegen:gen",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &registry,
+    )
+    .await
+    .expect("second");
 
     // Then
     assert!(second.actions[0].cached, "rerun is a cache hit");
@@ -118,9 +133,16 @@ async fn cache_hits_on_rerun_and_misses_after_input_edit() {
     std::fs::write(dir.path().join("codegen/seed.txt"), "seed-changed").expect("edit seed");
 
     // When
-    let third = execute_target(dir.path(), &graph, "codegen:gen", &opts, &registry)
-        .await
-        .expect("third");
+    let third = execute_target(
+        dir.path(),
+        &graph,
+        "codegen:gen",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &registry,
+    )
+    .await
+    .expect("third");
 
     // Then
     assert!(

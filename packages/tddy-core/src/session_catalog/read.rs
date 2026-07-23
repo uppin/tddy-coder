@@ -94,7 +94,7 @@ impl SessionCatalog {
     /// Replace the entire catalog with `entries` (single transaction). Used by the populate task
     /// and by store-level tests.
     pub async fn rebuild(&self, entries: &[CatalogEntry]) -> Result<(), CatalogError> {
-        store::rebuild(&self.pool, entries).await
+        store::rebuild(&self.pool, entries, &[]).await
     }
 
     /// Block until the populate task (if any) reaches a terminal status. Returns immediately
@@ -118,6 +118,25 @@ impl SessionCatalog {
     pub async fn list_for_package(&self, package: &str) -> Result<ActionListResult, CatalogError> {
         self.await_populate().await;
         store::query_for_package(&self.pool, package).await
+    }
+
+    /// List build targets from the dedicated `build_targets` table (the rich BSP projection).
+    /// Blocks until the populate task (if any) is terminal, then reads.
+    pub async fn list_build_targets(
+        &self,
+        query: &DiscoveryQuery,
+    ) -> Result<Vec<store::BuildTargetSummary>, CatalogError> {
+        self.await_populate().await;
+        store::list_build_targets(&self.pool, query).await
+    }
+
+    /// List build targets whose projected `package` equals `package`.
+    pub async fn list_build_targets_for_package(
+        &self,
+        package: &str,
+    ) -> Result<Vec<store::BuildTargetSummary>, CatalogError> {
+        self.await_populate().await;
+        store::list_build_targets_for_package(&self.pool, package).await
     }
 }
 

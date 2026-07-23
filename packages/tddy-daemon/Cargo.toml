@@ -36,6 +36,7 @@ livekit = "0.7"
 prost = "0.13"
 tddy-coder = { path = "../tddy-coder" }
 tddy-core = { path = "../tddy-core" }
+tddy-bsp = { path = "../tddy-bsp" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-demo-runner = { path = "../tddy-demo-runner" }
 tddy-github = { path = "../tddy-github" }

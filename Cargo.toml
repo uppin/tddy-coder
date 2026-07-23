@@ -9,6 +9,7 @@ members = [
     "packages/tddy-build-docker",
     "packages/tddy-build-buildroot",
     "packages/tddy-build-qemu",
+    "packages/tddy-bsp",
     "packages/tddy-demo-runner",
     "packages/tddy-graph",
     "packages/tddy-discovery",

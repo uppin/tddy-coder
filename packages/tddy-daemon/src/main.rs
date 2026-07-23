@@ -395,6 +395,40 @@ fn main() -> anyhow::Result<()> {
                 })
             };
             let ss_user_resolver = user_resolver.clone();
+            // Session-addressed BSP resolver: reproduce the ExecuteTool preamble (token → os_user →
+            // sessions_base → `.session.yaml` repo_path) to yield a session's worktree + catalog dir.
+            // Built here, before the resolvers are moved into ConnectionServiceImpl below.
+            let bsp_session_resolver: tddy_daemon::bsp_service::SessionPathsResolver = {
+                let user_resolver = user_resolver.clone();
+                let config = config.clone();
+                let sessions_base_resolver = sessions_base_resolver.clone();
+                Arc::new(move |token: &str, session_id: &str| {
+                    let github_user = (user_resolver)(token).ok_or_else(|| {
+                        tddy_rpc::Status::unauthenticated("invalid or expired session")
+                    })?;
+                    let os_user = config
+                        .os_user_for_github(&github_user)
+                        .ok_or_else(|| {
+                            tddy_rpc::Status::permission_denied("user not mapped to OS user")
+                        })?
+                        .to_string();
+                    tddy_core::session_lifecycle::validate_session_id_segment(session_id)
+                        .map_err(|e| tddy_rpc::Status::invalid_argument(e.message()))?;
+                    let sessions_base = (sessions_base_resolver)(&os_user).ok_or_else(|| {
+                        tddy_rpc::Status::internal("could not resolve sessions path")
+                    })?;
+                    let repo_root =
+                        tddy_daemon::workspace_session::resolve_worktree_root_for_session(
+                            &sessions_base,
+                            session_id,
+                        )?;
+                    let session_dir = tddy_core::session_lifecycle::unified_session_dir_path(
+                        &sessions_base,
+                        session_id,
+                    );
+                    Ok((session_dir, repo_root))
+                })
+            };
             let mut connection_impl = tddy_daemon::connection_service::ConnectionServiceImpl::new(
                 config.clone(),
                 sessions_base_resolver,
@@ -416,9 +450,9 @@ fn main() -> anyhow::Result<()> {
             let task_registry = connection_arc.task_registry();
 
             // Register the build-catalog provider so a populated session catalog includes the
-            // repository's `BUILD.yaml` targets (discovery lives in `tddy-coder` on top of
+            // repository's `BUILD.yaml` targets (discovery lives in `tddy-bsp` on top of
             // `tddy-build`; `tddy-core` owns only the port).
-            tddy_coder::catalog_provider::register();
+            tddy_bsp::register_catalog_provider();
 
             // Reusable-LSP executor: a Rust-only executor sharing this daemon's task registry,
             // so `Lsp*` tool calls (relayed through tddy-tool-engine) resolve to a real, reused
@@ -517,6 +551,20 @@ fn main() -> anyhow::Result<()> {
             rpc_entries.push(tddy_rpc::ServiceEntry {
                 name: "actions.ActionService",
                 service: Arc::new(action_server) as Arc<dyn tddy_rpc::RpcService>,
+            });
+
+            // BSP build server — session-addressed: each request's token/session_id resolves to that
+            // session's worktree + catalog.db (`bsp_service`), so daemon-managed claude-cli/cursor
+            // sessions expose build targets over the same surface as ConnectionService.
+            let bsp_server = tddy_service::BspServiceServer::new(
+                tddy_daemon::bsp_service::DaemonBspService::new(
+                    bsp_session_resolver,
+                    tddy_data_dir.clone(),
+                ),
+            );
+            rpc_entries.push(tddy_rpc::ServiceEntry {
+                name: "bsp.BspService",
+                service: Arc::new(bsp_server) as Arc<dyn tddy_rpc::RpcService>,
             });
 
             // VM lifecycle service — gated on auth being configured (same as ConnectionService).

@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use sqlx::SqlitePool;
 use tddy_task::{TaskBody, TaskContext, TaskStatus};
 
-use super::entry::{project_package, CatalogEntry, CatalogEntryKind};
+use super::entry::{project_package, BuildTargetCatalogEntry, CatalogEntry, CatalogEntryKind};
 use super::provider::BuildCatalogProvider;
 use super::store;
 use crate::session_actions::{list_action_summaries, DiscoveryQuery};
@@ -35,6 +35,7 @@ impl TaskBody for PopulateCatalogTask {
         }
 
         let mut entries: Vec<CatalogEntry> = Vec::new();
+        let mut build_targets: Vec<BuildTargetCatalogEntry> = Vec::new();
 
         // 1. Action manifests, via the existing glob-based discovery.
         let manifests = list_action_summaries(
@@ -72,16 +73,19 @@ impl TaskBody for PopulateCatalogTask {
             match provider.discover(repo_root) {
                 Ok(targets) => {
                     for t in targets {
+                        // Lightweight row for the shared `catalog` table (unified list/list_for_package).
                         entries.push(CatalogEntry {
                             kind: CatalogEntryKind::BuildTarget,
                             id: t.id.clone(),
-                            package: t.package,
-                            summary: t.name,
-                            path: t.id,
+                            package: t.package.clone(),
+                            summary: t.name.clone(),
+                            path: t.id.clone(),
                             has_input_schema: false,
                             has_output_schema: false,
-                            source_path: Some(t.source_path),
+                            source_path: Some(t.source_path.clone()),
                         });
+                        // Rich row for the dedicated `build_targets` table (the BSP projection).
+                        build_targets.push(t);
                     }
                 }
                 Err(message) => {
@@ -93,7 +97,7 @@ impl TaskBody for PopulateCatalogTask {
         }
 
         // 3. Rebuild the catalog in one transaction.
-        match store::rebuild(&self.pool, &entries).await {
+        match store::rebuild(&self.pool, &entries, &build_targets).await {
             Ok(()) => TaskStatus::Completed { exit_code: Some(0) },
             Err(e) => TaskStatus::Failed {
                 message: format!("catalog rebuild failed: {e}"),

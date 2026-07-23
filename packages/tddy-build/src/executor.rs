@@ -9,6 +9,7 @@ use tddy_task::{TaskHandle, TaskRegistry, TaskStatus};
 use crate::action_convert::build_action_to_spec;
 use crate::builtin::{self, TOOL};
 use crate::cache::{compute_cache_key, lookup_cache, persist_cache, CacheMode};
+use crate::capabilities::BuildMode;
 use crate::error::BuildError;
 use crate::graph::{action_waves, BuildGraph};
 use crate::plugin::PluginRegistry;
@@ -57,11 +58,14 @@ pub struct BuildRecord {
 
 /// Build `target_id` (dependencies and group members first), running each
 /// topological wave in parallel. Honors caching and `dry_run` per `opts`.
+///
+/// `mode` applies to `target_id` itself; its dependencies are always compiled.
 pub async fn execute_target(
     repo_root: &Path,
     graph: &BuildGraph,
     target_id: &str,
     opts: &ExecuteOptions,
+    mode: BuildMode,
     registry: &PluginRegistry,
 ) -> Result<BuildRecord, BuildError> {
     let order = graph.build_order(target_id)?;
@@ -71,7 +75,12 @@ pub async fn execute_target(
     };
 
     for current_target in &order {
-        let actions = graph.actions_for(current_target, registry)?;
+        let current_mode = if current_target == target_id {
+            mode
+        } else {
+            BuildMode::Compile
+        };
+        let actions = graph.actions_for_mode(current_target, current_mode, registry)?;
         if actions.is_empty() {
             continue;
         }
