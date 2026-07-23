@@ -30,6 +30,14 @@ fn a_build_target(id: &str, name: &str, package: &str) -> BuildTargetCatalogEntr
         id: id.into(),
         name: name.into(),
         package: package.into(),
+        target_type: None,
+        base_dir: None,
+        tags: Vec::new(),
+        languages: Vec::new(),
+        deps: Vec::new(),
+        sources: Vec::new(),
+        outputs: Vec::new(),
+        capabilities: Default::default(),
         source_path: "/repo/BUILD.yaml".into(),
     }
 }

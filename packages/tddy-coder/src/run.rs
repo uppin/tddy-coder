@@ -1630,7 +1630,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         let _ = std::fs::create_dir_all(&logs);
         tddy_core::toolcall::set_toolcall_log_dir(&logs);
         crate::build_executor::register();
-        crate::catalog_provider::register();
+        tddy_bsp::register_catalog_provider();
         // Populate `<session_dir>/catalog.db` in the background (written for later reads).
         spawn_session_catalog_populate(
             session_artifact_dir.clone(),
@@ -2017,6 +2017,21 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 crate::session_participant::session_connection_service_entry(
                     session_connection_svc,
                 ),
+                // BSP-shaped build server for this session's worktree. Session-scoped like the
+                // connection service; reads the same `<session_dir>/catalog.db` and repo root the
+                // catalog populate above uses. Reflection over this surface picks it up automatically
+                // (`session_view_adapter_surface` derives names from these entries).
+                tddy_rpc::ServiceEntry {
+                    name: tddy_service::BspServiceServer::<tddy_bsp::BspServiceImpl>::NAME,
+                    service: std::sync::Arc::new(tddy_service::BspServiceServer::new(
+                        tddy_bsp::BspServiceImpl::new(
+                            session_artifact_dir.clone(),
+                            std::env::current_dir()
+                                .unwrap_or_else(|_| std::path::PathBuf::from(".")),
+                            tddy_data_dir.clone(),
+                        ),
+                    )) as std::sync::Arc<dyn tddy_rpc::RpcService>,
+                },
             ];
             let livekit_multi = tddy_service::session_view_adapter_surface(
                 livekit_base,
@@ -2865,7 +2880,7 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     }
 
     crate::build_executor::register();
-    crate::catalog_provider::register();
+    tddy_bsp::register_catalog_provider();
     // Populate `<session_dir>/catalog.db` in the background (written for later reads).
     if let Some(catalog_session_dir) = args.session_dir.clone() {
         spawn_session_catalog_populate(

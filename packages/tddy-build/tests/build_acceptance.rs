@@ -269,6 +269,7 @@ targets:
         &graph,
         "uses:tool",
         &ExecuteOptions::default(),
+        tddy_build::BuildMode::Compile,
         &PluginRegistry::new(),
     )
     .await
@@ -388,17 +389,31 @@ async fn cache_hit_skips_execution() {
     let registry = PluginRegistry::new();
 
     // When
-    let first = execute_target(root, &graph, "cache:demo", &opts, &registry)
-        .await
-        .expect("first run");
+    let first = execute_target(
+        root,
+        &graph,
+        "cache:demo",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &registry,
+    )
+    .await
+    .expect("first run");
 
     // Then
     assert!(!first.actions[0].cached, "first run must execute");
 
     // When
-    let second = execute_target(root, &graph, "cache:demo", &opts, &registry)
-        .await
-        .expect("second run");
+    let second = execute_target(
+        root,
+        &graph,
+        "cache:demo",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &registry,
+    )
+    .await
+    .expect("second run");
 
     // Then
     assert!(second.actions[0].cached, "second run must be a cache hit");
@@ -418,9 +433,16 @@ async fn cache_miss_on_input_mtime_change() {
     let registry = PluginRegistry::new();
 
     // When
-    let first = execute_target(root, &graph, "cache:demo", &opts, &registry)
-        .await
-        .expect("first run");
+    let first = execute_target(
+        root,
+        &graph,
+        "cache:demo",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &registry,
+    )
+    .await
+    .expect("first run");
 
     // Then
     assert!(!first.actions[0].cached);
@@ -429,9 +451,16 @@ async fn cache_miss_on_input_mtime_change() {
     std::fs::write(root.join("input.txt"), "seed-changed-larger").expect("rewrite input");
 
     // When
-    let second = execute_target(root, &graph, "cache:demo", &opts, &registry)
-        .await
-        .expect("second run");
+    let second = execute_target(
+        root,
+        &graph,
+        "cache:demo",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &registry,
+    )
+    .await
+    .expect("second run");
 
     // Then
     assert!(
@@ -468,6 +497,7 @@ targets:
         &graph,
         "hello:script",
         &ExecuteOptions::default(),
+        tddy_build::BuildMode::Compile,
         &PluginRegistry::new(),
     )
     .await

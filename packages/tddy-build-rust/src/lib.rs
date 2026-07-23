@@ -5,6 +5,7 @@
 
 use serde::Deserialize;
 
+use tddy_build::capabilities::BuildMode;
 use tddy_build::plugin::{BuildPlugin, LowerContext};
 use tddy_build::proto::{ActionType, BuildAction};
 use tddy_build::BuildError;
@@ -59,6 +60,114 @@ impl BuildPlugin for RustPlugin {
         };
         Ok(vec![action])
     }
+
+    fn lower_mode(
+        &self,
+        ctx: &LowerContext,
+        mode: BuildMode,
+    ) -> Result<Vec<BuildAction>, BuildError> {
+        let action = match mode {
+            BuildMode::Compile => return self.lower(ctx),
+            BuildMode::Test => rust_test_action(parse_common(ctx)?),
+            BuildMode::Run => rust_run_action(parse_common(ctx)?),
+        }?;
+        Ok(vec![action])
+    }
+}
+
+/// Fields common to both rust target types, plus the binary-only `bin_name`, used for the
+/// test/run lifecycle actions.
+struct RustCommon {
+    package: String,
+    bin_name: String,
+    features: Vec<String>,
+    profile: String,
+    target_triple: String,
+    srcs: Vec<String>,
+    outputs: Vec<tddy_build::OutputSpec>,
+    working_dir: String,
+}
+
+fn parse_common(ctx: &LowerContext) -> Result<RustCommon, BuildError> {
+    match ctx.type_name {
+        "rust_binary" => {
+            let rb: RustBinary = parse(ctx)?;
+            Ok(RustCommon {
+                package: rb.package,
+                bin_name: rb.bin_name,
+                features: rb.features,
+                profile: rb.profile,
+                target_triple: rb.target_triple,
+                srcs: rb.srcs,
+                outputs: rb.outputs,
+                working_dir: rb.working_dir,
+            })
+        }
+        "rust_library" => {
+            let rl: RustLibrary = parse(ctx)?;
+            Ok(RustCommon {
+                package: rl.package,
+                bin_name: String::new(),
+                features: rl.features,
+                profile: rl.profile,
+                target_triple: String::new(),
+                srcs: rl.srcs,
+                outputs: rl.outputs,
+                working_dir: rl.working_dir,
+            })
+        }
+        other => Err(BuildError::Manifest(format!(
+            "tddy-build-rust does not handle target type {other}"
+        ))),
+    }
+}
+
+fn rust_test_action(rc: RustCommon) -> Result<BuildAction, BuildError> {
+    let description = format!("cargo test {}", rc.package);
+    let mut command = vec![
+        "cargo".to_string(),
+        "test".to_string(),
+        "-p".to_string(),
+        rc.package,
+    ];
+    push_features(&mut command, rc.features);
+    push_profile(&mut command, &rc.profile);
+    finish(
+        "rust-test",
+        description,
+        command,
+        rc.srcs,
+        rc.outputs,
+        rc.working_dir,
+    )
+}
+
+fn rust_run_action(rc: RustCommon) -> Result<BuildAction, BuildError> {
+    let description = format!("cargo run {}", rc.package);
+    let mut command = vec![
+        "cargo".to_string(),
+        "run".to_string(),
+        "-p".to_string(),
+        rc.package,
+    ];
+    if !rc.bin_name.is_empty() {
+        command.push("--bin".to_string());
+        command.push(rc.bin_name);
+    }
+    push_features(&mut command, rc.features);
+    push_profile(&mut command, &rc.profile);
+    if !rc.target_triple.is_empty() {
+        command.push("--target".to_string());
+        command.push(rc.target_triple);
+    }
+    finish(
+        "rust-run",
+        description,
+        command,
+        rc.srcs,
+        rc.outputs,
+        rc.working_dir,
+    )
 }
 
 fn parse<T>(ctx: &LowerContext) -> Result<T, BuildError>
@@ -230,6 +339,55 @@ mod tests {
             RustPlugin.lower(&ctx),
             Err(BuildError::Manifest(_))
         ));
+    }
+
+    #[test]
+    fn rust_library_lowers_a_cargo_test_action_in_test_mode() {
+        // Given
+        use tddy_build::capabilities::BuildMode;
+        let config: serde_yaml::Value =
+            serde_yaml::from_str("package: core\nprofile: debug\n").unwrap();
+        let ctx = LowerContext {
+            type_name: "rust_library",
+            target_id: "t",
+            target_name: "",
+            deps: &[],
+            config: &config,
+        };
+
+        // When
+        let actions = RustPlugin
+            .lower_mode(&ctx, BuildMode::Test)
+            .expect("test-mode lowering");
+
+        // Then
+        assert_eq!(actions[0].command, vec!["cargo", "test", "-p", "core"]);
+    }
+
+    #[test]
+    fn rust_binary_lowers_a_cargo_run_action_in_run_mode() {
+        // Given
+        use tddy_build::capabilities::BuildMode;
+        let config: serde_yaml::Value =
+            serde_yaml::from_str("package: app\nbin_name: app\nprofile: debug\n").unwrap();
+        let ctx = LowerContext {
+            type_name: "rust_binary",
+            target_id: "t",
+            target_name: "",
+            deps: &[],
+            config: &config,
+        };
+
+        // When
+        let actions = RustPlugin
+            .lower_mode(&ctx, BuildMode::Run)
+            .expect("run-mode lowering");
+
+        // Then
+        assert_eq!(
+            actions[0].command,
+            vec!["cargo", "run", "-p", "app", "--bin", "app"]
+        );
     }
 
     #[test]

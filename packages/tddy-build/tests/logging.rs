@@ -99,9 +99,16 @@ async fn engine_logs_discovery_lowering_cache_and_cycles() {
     let graph = BuildGraph::from_manifests(manifests).expect("graph");
     let opts = ExecuteOptions::default();
     let registry = PluginRegistry::new();
-    let first = execute_target(root, &graph, "log:demo", &opts, &registry)
-        .await
-        .expect("first run");
+    let first = execute_target(
+        root,
+        &graph,
+        "log:demo",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &registry,
+    )
+    .await
+    .expect("first run");
 
     // Then
     assert!(!first.actions[0].cached);
@@ -110,9 +117,16 @@ async fn engine_logs_discovery_lowering_cache_and_cycles() {
     assert_logged("cache miss");
 
     // When — second run: cache hit
-    let second = execute_target(root, &graph, "log:demo", &opts, &registry)
-        .await
-        .expect("second run");
+    let second = execute_target(
+        root,
+        &graph,
+        "log:demo",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &registry,
+    )
+    .await
+    .expect("second run");
 
     // Then
     assert!(second.actions[0].cached);

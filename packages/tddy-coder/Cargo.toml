@@ -28,6 +28,7 @@ ctrlc = { version = "3", features = ["termination"] }
 crossterm = "0.29"
 tddy-core = { path = "../tddy-core" }
 tddy-acp = { path = "../tddy-acp" }
+tddy-bsp = { path = "../tddy-bsp" }
 tddy-build = { path = "../tddy-build" }
 tddy-build-rust = { path = "../tddy-build-rust" }
 tddy-build-typescript = { path = "../tddy-build-typescript" }

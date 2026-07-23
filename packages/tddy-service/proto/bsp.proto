@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+// BSP-shaped build server service. Mirrors the Build Server Protocol data model
+// (build targets, capabilities, sources, output paths, compile/test/run) but rides
+// the workspace's protobuf/Connect + LiveKit RPC transports rather than JSON-RPC 2.0.
+package bsp;
+
+service BspService {
+  // Enumerate every build target in the workspace with its metadata + capabilities.
+  rpc WorkspaceBuildTargets(WorkspaceBuildTargetsRequest) returns (WorkspaceBuildTargetsResponse);
+  // Re-run the catalog populate task so subsequent reads reflect BUILD.yaml changes.
+  rpc WorkspaceReload(WorkspaceReloadRequest) returns (WorkspaceReloadResponse);
+  // The source globs/roots of the given targets.
+  rpc BuildTargetSources(BuildTargetSourcesRequest) returns (BuildTargetSourcesResponse);
+  // The declared output paths of the given targets.
+  rpc BuildTargetOutputPaths(BuildTargetOutputPathsRequest) returns (BuildTargetOutputPathsResponse);
+  // Build the given targets (compile lifecycle).
+  rpc BuildTargetCompile(BuildTargetActionRequest) returns (BuildTargetActionResponse);
+  // Run the given targets' test lifecycle. Rejected for targets lacking the capability.
+  rpc BuildTargetTest(BuildTargetActionRequest) returns (BuildTargetActionResponse);
+  // Run the given targets' run lifecycle. Rejected for targets lacking the capability.
+  rpc BuildTargetRun(BuildTargetActionRequest) returns (BuildTargetActionResponse);
+}
+
+// A build target's unique id within the workspace (e.g. "packages/foo:binary").
+message BuildTargetIdentifier {
+  string id = 1;
+}
+
+// What lifecycle operations a target supports.
+message BuildTargetCapabilities {
+  bool can_compile = 1;
+  bool can_test = 2;
+  bool can_run = 3;
+  bool can_debug = 4;
+}
+
+// A build target and its BSP metadata.
+message BuildTarget {
+  string id = 1;
+  string display_name = 2;
+  // Directory of the target's BUILD.yaml, relative to the repo root.
+  string base_directory = 3;
+  repeated string tags = 4;
+  repeated string language_ids = 5;
+  repeated BuildTargetIdentifier dependencies = 6;
+  BuildTargetCapabilities capabilities = 7;
+}
+
+// Session addressing. Empty on the coder participant (already single-session); required by the
+// daemon's session-addressed service, which resolves them to the session's worktree + catalog.
+message WorkspaceBuildTargetsRequest {
+  string session_token = 1;
+  string session_id = 2;
+}
+message WorkspaceBuildTargetsResponse {
+  repeated BuildTarget targets = 1;
+}
+
+message WorkspaceReloadRequest {
+  string session_token = 1;
+  string session_id = 2;
+}
+message WorkspaceReloadResponse {}
+
+// A single source glob/path belonging to a target.
+message SourceItem {
+  string uri = 1;
+}
+
+message BuildTargetSourcesRequest {
+  repeated BuildTargetIdentifier targets = 1;
+  string session_token = 2;
+  string session_id = 3;
+}
+message SourcesItem {
+  BuildTargetIdentifier target = 1;
+  repeated SourceItem sources = 2;
+}
+message BuildTargetSourcesResponse {
+  repeated SourcesItem items = 1;
+}
+
+message OutputPathItem {
+  string uri = 1;
+}
+message BuildTargetOutputPathsRequest {
+  repeated BuildTargetIdentifier targets = 1;
+  string session_token = 2;
+  string session_id = 3;
+}
+message OutputPathsItem {
+  BuildTargetIdentifier target = 1;
+  repeated OutputPathItem output_paths = 2;
+}
+message BuildTargetOutputPathsResponse {
+  repeated OutputPathsItem items = 1;
+}
+
+message BuildTargetActionRequest {
+  repeated BuildTargetIdentifier targets = 1;
+  bool no_cache = 2;
+  bool dry_run = 3;
+  string session_token = 4;
+  string session_id = 5;
+}
+// Outcome of one lowered build action.
+message ActionOutcome {
+  string action_id = 1;
+  bool cached = 2;
+  int32 exit_code = 3;
+  repeated string argv = 4;
+  string stdout = 5;
+  string stderr = 6;
+}
+message BuildTargetResult {
+  BuildTargetIdentifier target = 1;
+  // "ok" | "error".
+  string status = 2;
+  repeated ActionOutcome actions = 3;
+  string error_message = 4;
+}
+message BuildTargetActionResponse {
+  repeated BuildTargetResult results = 1;
+}
