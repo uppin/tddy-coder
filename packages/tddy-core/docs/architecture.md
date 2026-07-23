@@ -33,7 +33,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 ### Worktree (`worktree.rs`)
 
-- **DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF**: `origin/master` — effective integration base for legacy project registry rows without `main_branch_ref`.
+- **DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF**: `origin/master` — the documented default ref (used by the `fetch_origin_master` helper). Project registry rows without `main_branch_ref` are resolved **live** by the daemon via `resolve_default_integration_base_ref`, not this constant.
 - **validate_integration_base_ref**: Accepts only `origin/<single-branch-segment>` refs; rejects empty, multi-segment paths, whitespace, and characters that could widen `git` invocation beyond a single branch argument.
 - **validate_chain_pr_integration_base_ref**: Accepts `origin/<path>` where `path` may contain `/` (multi-segment); rejects `..`, `--`, empty segments, whitespace, and shell-oriented metacharacters in the path.
 - **fetch_integration_base**: Runs `git fetch origin <branch>` for a validated integration base ref (single-segment).
@@ -81,8 +81,8 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 ### Agent activity (`agent_activity`)
 
-- **AgentActivityRecord**: the shared, single cross-crate shape for one agent tool call — `call_id` (correlates the `running` and terminal rows), `tool_name`, `input_json`, `status` (`running`/`completed`/`error`), `result_json`, `error_message`, `started_unix_ms`, `completed_unix_ms`, `source` (`coder`/`cursor-cli`/`claude-cli`/`sandbox`). Modeled on `tddy-daemon/src/tool_call_log.rs` but placed in `tddy-core` so every host writes the same record.
-- **append_agent_activity / read_agent_activity**: append-only JSONL writer + reader for the per-session `agent-activity.jsonl` log (sibling of `tool-calls.jsonl`). The read side **coalesces by `call_id`** (later row supersedes, first-seen order preserved) then applies a 500-record tail cap; malformed lines are skipped. This is the agent's own tool loop, distinct from the human-triggered `ExecuteTool` web-invoke log.
+- **AgentActivityRecord**: the shared, single cross-crate shape for one agent tool call — `call_id` (correlates the `running` and terminal rows), `tool_name`, `input` (structured `serde_json::Value`), `status` (`running`/`completed`/`error`), `result` (structured `serde_json::Value`; `Null` until terminal), `error_message`, `started_unix_ms`, `completed_unix_ms`, `source` (`coder`/`cursor-cli`/`claude-cli`/`sandbox`). `input`/`result` cross the wire as `google.protobuf.Value` (via `tddy_service::agent_activity_to_proto`). Modeled on `tddy-daemon/src/tool_call_log.rs` but placed in `tddy-core` so every host writes the same record.
+- **append_agent_activity / read_agent_activity**: append-only JSONL writer + reader for the per-session `agent-activity.jsonl` log (sibling of `tool-calls.jsonl`). The read side **coalesces by `call_id`** (later row supersedes, first-seen order preserved) then applies a 500-record tail cap; malformed lines are skipped. This is the agent's own tool loop, distinct from the human-triggered `ExecuteTool` web-invoke log. **parse_activity_json** turns a hook-supplied JSON string into the structured `Value` field (empty → `Null`, else parse-or-`Value::String`), shared by every capture seam.
 
 ### Permission (`permission.rs`)
 

@@ -2,22 +2,8 @@
  * Canonical URL helpers for tddy-web session routing (terminal deep links, home, OAuth callback).
  */
 
-/** Path prefix for the daemon-managed terminal view (one segment: session id). */
+/** Path prefix for legacy terminal deep links (one segment: session id). */
 export const TERMINAL_SESSION_ROUTE_PREFIX = "/terminal";
-
-export function terminalPathForSessionId(sessionId: string): string {
-  return `${TERMINAL_SESSION_ROUTE_PREFIX}/${encodeURIComponent(sessionId)}`;
-}
-
-/**
- * Canonical path for terminal deep links. Must stay aligned with {@link terminalPathForSessionId}
- * when optional presentation query/hash is added (PRD).
- */
-export function terminalDeepLinkSessionPath(sessionId: string): string {
-  const path = terminalPathForSessionId(sessionId);
-  console.debug("[tddy][appRoutes] terminalDeepLinkSessionPath", { path });
-  return path;
-}
 
 export function parseTerminalSessionIdFromPathname(pathname: string): string | null {
   const prefix = `${TERMINAL_SESSION_ROUTE_PREFIX}/`;
@@ -33,10 +19,6 @@ export function parseTerminalSessionIdFromPathname(pathname: string): string | n
   } catch {
     return null;
   }
-}
-
-export function isSessionListPath(pathname: string): boolean {
-  return pathname === "/";
 }
 
 export function isAuthCallbackPath(pathname: string): boolean {
@@ -62,6 +44,13 @@ export const VMS_ROUTE = "/vms";
 
 export function isVmsPath(pathname: string): boolean {
   return pathname === VMS_ROUTE;
+}
+
+/** Canonical path for the LiveKit presence screen. */
+export const LIVEKIT_ROUTE = "/livekit";
+
+export function isLiveKitPath(pathname: string): boolean {
+  return pathname === LIVEKIT_ROUTE;
 }
 
 /** Canonical path for the dedicated Projects screen. */

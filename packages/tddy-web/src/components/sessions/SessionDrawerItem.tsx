@@ -15,6 +15,10 @@ interface SessionDrawerItemProps {
   hostLabel?: string | null;
   /** Parsed `session` participant-metadata block for this row (presence-driven, req 4). */
   sessionMetadata?: SessionMetadata | null;
+  /** Whether this row is ticked for bulk delete. */
+  selected?: boolean;
+  /** Toggle this row's bulk-delete selection. When provided, a selection checkbox renders. */
+  onToggleSelect?: (sessionId: string) => void;
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -23,26 +27,37 @@ const STATUS_COLOR: Record<string, string> = {
   "needs-input": "bg-yellow-500",
 };
 
-export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLabel, sessionMetadata }: SessionDrawerItemProps) {
+export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLabel, sessionMetadata, selected, onToggleSelect }: SessionDrawerItemProps) {
   const label = sessionDrawerLabel(session);
   const status = connectionStatusForSession(session);
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          data-testid={`sessions-drawer-item-${session.sessionId}`}
-          data-depth={depth !== undefined ? String(depth) : undefined}
-          aria-selected={isSelected ? "true" : undefined}
-          onClick={() => onClick(session.sessionId)}
-          className={cn(
-            "w-full text-left flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
-            isSelected
-              ? "bg-accent text-accent-foreground"
-              : "hover:bg-muted",
-          )}
-        >
+      <div className="flex items-center gap-1">
+        {onToggleSelect && (
+          <input
+            type="checkbox"
+            data-testid={`session-row-select-${session.sessionId}`}
+            aria-label={`Select session ${label}`}
+            checked={selected ?? false}
+            onChange={() => onToggleSelect(session.sessionId)}
+            className="size-4 shrink-0 rounded border border-input accent-primary"
+          />
+        )}
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            data-testid={`sessions-drawer-item-${session.sessionId}`}
+            data-depth={depth !== undefined ? String(depth) : undefined}
+            aria-selected={isSelected ? "true" : undefined}
+            onClick={() => onClick(session.sessionId)}
+            className={cn(
+              "flex-1 min-w-0 text-left flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
+              isSelected
+                ? "bg-accent text-accent-foreground"
+                : "hover:bg-muted",
+            )}
+          >
           {/* Status dot */}
           <span
             data-testid={`sessions-drawer-item-status-${session.sessionId}`}
@@ -65,8 +80,9 @@ export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLab
               {hostLabel}
             </span>
           )}
-        </button>
-      </TooltipTrigger>
+          </button>
+        </TooltipTrigger>
+      </div>
       <TooltipContent
         data-testid={`sessions-drawer-item-tooltip-${session.sessionId}`}
         side="right"

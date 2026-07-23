@@ -2,6 +2,11 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-23 — `SetProjectDefaultBranch` RPC + unified default-branch resolution
+
+- New `ConnectionService.SetProjectDefaultBranch(project_id, main_branch_ref, daemon_instance_id)` RPC stores a project's default branch (`main_branch_ref`) in `projects.yaml`, validating the ref and project up front (`INVALID_ARGUMENT`/`NOT_FOUND`) before any write and peer-forwarding by target host like `AddProjectToHost` so the default is a property of the logical project across hosts. `ProjectEntry` now carries `main_branch_ref` so clients can read it. See [project-concept.md](project-concept.md) and [git-integration-base-ref.md](../coder/git-integration-base-ref.md).
+- `effective_integration_base_ref_for_project` is unified: a stored ref wins outright; a legacy project (no stored ref) resolves its default **live** from the repository (`origin/master` → `origin/main` → `origin/HEAD`) rather than a hardcoded constant. `StartSession` uses the project's stored default when the client sends no override, so the default applies to web sessions, not only Telegram.
+
 ## 2026-07-06 — `ListAgentModels` RPC + tool-session `--model`
 
 - New `ConnectionService.ListAgentModels(agent, daemon_instance_id)` RPC enumerates a backend's models on demand, shelling out to `tddy-tools list-models --agent <agent>` and returning `{models, default_model}`. Results are cached per (agent, daemon, OS user) with a short TTL — keyed by OS user because cursor/ACP catalogs are account-specific — and the probe runs as the user with its `current_dir` set to that user's home (the daemon cwd may be unreadable after setuid). A failed probe surfaces as an RPC error, never an empty catalog. See [tool-session-model-selection.md](../web/tool-session-model-selection.md).

@@ -2,14 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { VmService, type VmInfo, type VmImageInfo } from "../../gen/vm_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
-import { DaemonNavMenu } from "../shell/DaemonNavMenu";
-import { DaemonSelectorConnected } from "../shell/DaemonSelector";
-import { UserAvatar } from "../UserAvatar";
+import { AppShell } from "../shell/AppShell";
 import { VmsScreen, type VmRow } from "./VmsScreen";
 import { DefineVmPanel } from "./DefineVmPanel";
-
-const screenShellClassName =
-  "min-h-svh w-full min-w-0 box-border px-4 py-6 sm:px-6 font-sans text-foreground";
 
 function vmStateLabel(state: number): string {
   switch (state) {
@@ -33,7 +28,7 @@ function rowFromRpc(vm: VmInfo): VmRow {
 }
 
 export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const { user, logout, sessionToken } = useAuthContext();
+  const { sessionToken } = useAuthContext();
   const client = useDaemonClient(VmService);
 
   const [rows, setRows] = useState<VmRow[]>([]);
@@ -164,14 +159,7 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
   );
 
   return (
-    <div className={screenShellClassName}>
-      <div className="flex items-center gap-3 mb-6">
-        <DaemonNavMenu onNavigate={onNavigate} />
-        <h1 className="text-xl font-bold flex-1">VMs</h1>
-        <DaemonSelectorConnected />
-        {user ? <UserAvatar user={user} onLogout={logout} /> : null}
-      </div>
-
+    <AppShell title="VMs" onNavigate={onNavigate} variant="scroll">
       <div className="mb-8">
         <DefineVmPanel
           building={building}
@@ -189,6 +177,6 @@ export function VmsAppPage({ onNavigate }: { onNavigate: (path: string) => void 
         onStop={handleStop}
         onRemove={handleRemove}
       />
-    </div>
+    </AppShell>
   );
 }

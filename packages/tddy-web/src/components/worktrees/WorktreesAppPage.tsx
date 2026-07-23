@@ -6,17 +6,12 @@ import {
   type WorktreeRow,
 } from "../../gen/connection_pb";
 import { GitHubLoginButton } from "../GitHubLoginButton";
-import { UserAvatar } from "../UserAvatar";
-import { DaemonNavMenu } from "../shell/DaemonNavMenu";
-import { DaemonSelectorConnected } from "../shell/DaemonSelector";
+import { AppShell } from "../shell/AppShell";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { WorktreesScreen, type WorktreesScreenMockRow } from "./WorktreesScreen";
 import { formatDiskBytes } from "../sessions/worktreeStatsFormat";
 import { Button } from "@/components/ui/button";
-
-const screenShellClassName =
-  "min-h-svh w-full min-w-0 box-border px-4 py-6 sm:px-6 font-sans text-foreground";
 
 const selectClassName =
   "box-border min-w-[12rem] max-w-[24rem] rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -42,7 +37,7 @@ export function WorktreesAppPage({
 }: {
   onNavigate: (path: string) => void;
 }) {
-  const { user, isAuthenticated, login, logout, sessionToken } = useAuthContext();
+  const { isAuthenticated, login, sessionToken } = useAuthContext();
   const client = useDaemonClient(ConnectionService);
 
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
@@ -145,13 +140,12 @@ export function WorktreesAppPage({
 
   if (!isAuthenticated) {
     return (
-      <div className={screenShellClassName}>
-        <h1 className="text-2xl font-semibold">tddy-web</h1>
+      <AppShell title="Worktrees" onNavigate={onNavigate} variant="scroll">
         <p className="mb-4 text-sm text-muted-foreground">
           Sign in with GitHub to access the app.
         </p>
         <GitHubLoginButton onClick={login} />
-      </div>
+      </AppShell>
     );
   }
 
@@ -162,19 +156,8 @@ export function WorktreesAppPage({
       : null;
 
   return (
-    <div className={screenShellClassName}>
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex min-w-0 flex-wrap items-center gap-3">
-          <DaemonNavMenu onNavigate={onNavigate} />
-          <h1 className="text-2xl font-semibold">Worktrees</h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <DaemonSelectorConnected />
-          {user ? <UserAvatar user={user} onLogout={logout} /> : null}
-        </div>
-      </div>
-
-      <p className="mt-4 max-w-2xl text-sm text-muted-foreground">
+    <AppShell title="Worktrees" onNavigate={onNavigate} variant="scroll">
+      <p className="max-w-2xl text-sm text-muted-foreground">
         Select a project to view git worktrees and cached size/diff stats. Use <strong>Refresh stats</strong> to
         re-run <code className="text-xs">git worktree list</code> and per-worktree diffs (expensive). Delete removes
         a secondary worktree only.
@@ -256,6 +239,6 @@ export function WorktreesAppPage({
           }
         />
       </div>
-    </div>
+    </AppShell>
   );
 }

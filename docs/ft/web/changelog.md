@@ -8,6 +8,21 @@ Release note history for the Web product area.
 
 - The Session Inspector gains a **Worktree** tab scoped to the selected session's own git worktree: on-disk size + changed-file/±line summary, cache-backed and refreshed on a **10-minute** client-side timer (plus a Refresh button), served from the existing `ListWorktreesForProject`. See [session-worktree-inspector.md](session-worktree-inspector.md).
 - Three lifecycle actions reuse the worktree infrastructure: **Clear** (`git clean -fdx` via new `CleanWorktree` RPC — reclaims untracked/ignored disk without removing the worktree), **Delete** (existing `RemoveWorktree`), and **Restore** (recreates a missing worktree from the session's persisted changeset via new `RestoreSessionWorktree`). Clear and Delete are two-step confirm; the primary worktree is refused for both. The daemon invalidates the stats cache after clear/restore.
+## 2026-07-23 — Agent activity: subscribe to new records only + structured tool input/output
+
+- The agent-activity pane can subscribe **live-only** — skipping the full-history replay — via `useSessionActivity`'s `mode` (`StreamMode.LIVE_ONLY`); the overlay keeps the snapshot-then-live default so history still populates on open ([agent-activity-pane.md](agent-activity-pane.md#streaming-design--streamsessionactivity)).
+- Tool **input/output** are now structured `google.protobuf.Value` end-to-end (not opaque JSON strings), so the detail dialog renders a real object/array/string/scalar — a bare-string tool result shows verbatim ([agent-activity-pane.md](agent-activity-pane.md#data-model--a-new-per-session-agent-activity-log)).
+
+## 2026-07-23 — Unified app shell layout
+
+- All daemon-mode screens now render inside a single **`AppShell`** that owns the top chrome (top-left hamburger `DaemonNavMenu` + title + daemon selector + user avatar) with `scroll` and `fullbleed` variants. Screens no longer hand-roll their own header, so none can ship without the navigation menu — the sessions drawer screen previously did. See [app-shell.md](app-shell.md).
+- The **sessions drawer** (`#/sessions`) is now the **default** route: `#/` resolves to it and the legacy `ConnectionScreen` (plus its `#/terminal/:id` route) is removed. A `#/sessions/<unknown-id>` deep link shows a "session not found" state with a Home link; bulk select + delete of sessions is available in the drawer.
+- The LiveKit "Connected participants" table moves out of the old connection screen into its own **LiveKit** screen (`#/livekit`, new hamburger item), reusing the shared common-room participant hooks.
+- The standalone auth/connection forms use shared shadcn theme tokens instead of inline hardcoded hex, so every screen shares one theme.
+## 2026-07-23 — Set a project's default branch from the Projects screen
+
+- Each project card gains a **default branch** dropdown listing the project's remote branches (sourced from `ListProjectBranches`); choosing one sets the project's `main_branch_ref` via the new `SetProjectDefaultBranch` RPC and applies it across the project's hosts ([projects-screen-multi-host.md](projects-screen-multi-host.md#default-branch)).
+- A project with no stored default pre-selects `origin/master` when present, otherwise `origin/main` — matching the live default-resolution order — so a sensible default is always shown without implying one has been persisted. Any remote branch (including slash-containing names) is selectable.
 
 ## 2026-07-23 — Inspector docks as the main pane for disconnected sessions
 

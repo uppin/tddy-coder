@@ -1,6 +1,6 @@
 # Session Drawer Screen
 
-**Route:** `#/sessions`  
+**Route:** `#/sessions` — also the **default** route (`#/` resolves here)
 **Component:** `SessionsDrawerScreen` (`packages/tddy-web/src/components/sessions/`)
 
 ## Overview
@@ -10,8 +10,11 @@ main content area on the right. A Session Inspector shows session details and co
 for connected sessions it is a right-edge overlay drawer (hidden by default), and for
 disconnected sessions it **docks as the main pane** (open by default).
 
-The screen is a parallel view to the existing `ConnectionScreen` (`#/`). Both routes remain
-available; no existing behaviour is changed.
+This is the default daemon-mode screen: `#/` resolves to it, and it renders inside the
+shared [`AppShell`](app-shell.md) (`variant="fullbleed"`), so it carries the unified
+top-left hamburger menu. The legacy `ConnectionScreen` (`#/`) it replaced has been removed.
+A `#/sessions/<unknown-id>` deep link that matches no known session shows a "session not
+found" state with a Home link.
 
 ## Layout
 

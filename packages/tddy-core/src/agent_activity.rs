@@ -53,18 +53,18 @@ pub const STATUS_ERROR: &str = "error";
 ///
 /// The same `call_id` appears on the `running` row and the terminal row; the read side
 /// coalesces them into the call's latest state.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentActivityRecord {
     /// Stable id correlating the `running` and terminal rows of one call.
     pub call_id: String,
     /// Tool name, e.g. `"Read"`, `"Bash"`, `"Edit"`.
     pub tool_name: String,
-    /// Full tool input as a JSON string.
-    pub input_json: String,
+    /// Full tool input as structured JSON (object, array, string, number, bool, or null).
+    pub input: serde_json::Value,
     /// One of [`STATUS_RUNNING`], [`STATUS_COMPLETED`], [`STATUS_ERROR`].
     pub status: String,
-    /// Full tool output as a JSON string; empty on the `running` row.
-    pub result_json: String,
+    /// Full tool output as structured JSON; [`serde_json::Value::Null`] until terminal.
+    pub result: serde_json::Value,
     /// Human-readable error message when `status == "error"`; otherwise empty.
     pub error_message: String,
     /// Unix timestamp (ms since epoch) when the call started.
@@ -94,6 +94,22 @@ pub fn append_agent_activity(session_dir: &Path, record: &AgentActivityRecord) -
         .append(true)
         .open(&path)?;
     file.write_all(line.as_bytes())
+}
+
+/// Parse a raw JSON string (a tool's `input_json` / `result_json`) into the structured
+/// [`serde_json::Value`] stored on an [`AgentActivityRecord`].
+///
+/// The contract is:
+/// - an **empty string** maps to [`serde_json::Value::Null`] — the field is absent (e.g. a
+///   `running` row carries no result, empty input is unset);
+/// - a non-empty string that **parses as JSON** yields that structured value;
+/// - a non-empty string that **fails to parse** is preserved verbatim as a
+///   [`serde_json::Value::String`] scalar, so non-JSON tool text is never lost or fabricated.
+pub fn parse_activity_json(raw: &str) -> serde_json::Value {
+    if raw.is_empty() {
+        return serde_json::Value::Null;
+    }
+    serde_json::from_str(raw).unwrap_or_else(|_| serde_json::Value::String(raw.to_string()))
 }
 
 /// Read the session's agent activity, **coalesced by `call_id`** into one record per call
@@ -158,9 +174,9 @@ mod agent_activity_unit_tests {
         AgentActivityRecord {
             call_id: call_id.to_string(),
             tool_name: tool_name.to_string(),
-            input_json: r#"{"path":"src/main.rs"}"#.to_string(),
+            input: serde_json::json!({ "path": "src/main.rs" }),
             status: STATUS_COMPLETED.to_string(),
-            result_json: r#"{"content":"fn main() {}"}"#.to_string(),
+            result: serde_json::json!({ "content": "fn main() {}" }),
             error_message: String::new(),
             started_unix_ms: 1_700_000_000_000,
             completed_unix_ms: 1_700_000_000_500,
@@ -178,9 +194,9 @@ mod agent_activity_unit_tests {
         let record = AgentActivityRecord {
             call_id: "call-1".to_string(),
             tool_name: "Bash".to_string(),
-            input_json: r#"{"command":"cargo test --workspace"}"#.to_string(),
+            input: serde_json::json!({ "command": "cargo test --workspace" }),
             status: STATUS_COMPLETED.to_string(),
-            result_json: r#"{"stdout":"test result: ok. 412 passed","exit_code":0}"#.to_string(),
+            result: serde_json::json!({ "stdout": "test result: ok. 412 passed", "exit_code": 0 }),
             error_message: String::new(),
             started_unix_ms: 1_700_000_001_000,
             completed_unix_ms: 1_700_000_001_800,
@@ -196,6 +212,72 @@ mod agent_activity_unit_tests {
         assert_eq!(
             records[0], record,
             "round-tripped record must equal the original"
+        );
+    }
+
+    /// A tool call whose input and output are structured JSON objects survives the JSONL round-trip
+    /// as structured `Value`s (stored un-nested, not re-encoded as a JSON-string-of-JSON).
+    #[test]
+    fn append_then_read_round_trips_a_structured_object_input_and_result() {
+        // Given
+        let tmp = tempfile::tempdir().unwrap();
+        let session_dir = tmp.path().join("sessions").join("structured");
+        let record = AgentActivityRecord {
+            call_id: "call-1".to_string(),
+            tool_name: "Bash".to_string(),
+            input: serde_json::json!({ "command": "cargo test --workspace" }),
+            status: STATUS_COMPLETED.to_string(),
+            result: serde_json::json!({ "stdout": "test result: ok. 412 passed", "exit_code": 0 }),
+            error_message: String::new(),
+            started_unix_ms: 1_700_000_001_000,
+            completed_unix_ms: 1_700_000_001_800,
+            source: "sandbox".to_string(),
+        };
+
+        // When
+        append_agent_activity(&session_dir, &record).unwrap();
+        let records = read_agent_activity(&session_dir).unwrap();
+
+        // Then
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].input,
+            serde_json::json!({ "command": "cargo test --workspace" })
+        );
+        assert_eq!(
+            records[0].result,
+            serde_json::json!({ "stdout": "test result: ok. 412 passed", "exit_code": 0 })
+        );
+    }
+
+    /// Tool output is frequently a bare string, not an object; it round-trips as a JSON string
+    /// value — the case an object-only `Struct` could not carry.
+    #[test]
+    fn append_then_read_round_trips_a_bare_string_tool_result() {
+        // Given
+        let tmp = tempfile::tempdir().unwrap();
+        let session_dir = tmp.path().join("sessions").join("bare-string");
+        let record = AgentActivityRecord {
+            call_id: "call-1".to_string(),
+            tool_name: "Read".to_string(),
+            input: serde_json::json!({ "file_path": "src/main.rs" }),
+            status: STATUS_COMPLETED.to_string(),
+            result: serde_json::Value::String("fn main() { println!(\"hi\"); }".to_string()),
+            error_message: String::new(),
+            started_unix_ms: 1_700_000_002_000,
+            completed_unix_ms: 1_700_000_002_500,
+            source: "coder".to_string(),
+        };
+
+        // When
+        append_agent_activity(&session_dir, &record).unwrap();
+        let records = read_agent_activity(&session_dir).unwrap();
+
+        // Then
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].result,
+            serde_json::Value::String("fn main() { println!(\"hi\"); }".to_string())
         );
     }
 
@@ -260,9 +342,9 @@ mod agent_activity_unit_tests {
         let running = AgentActivityRecord {
             call_id: "call-1".to_string(),
             tool_name: "Bash".to_string(),
-            input_json: r#"{"command":"cargo build"}"#.to_string(),
+            input: serde_json::json!({ "command": "cargo build" }),
             status: STATUS_RUNNING.to_string(),
-            result_json: String::new(),
+            result: serde_json::Value::Null,
             error_message: String::new(),
             started_unix_ms: 1_700_000_002_000,
             completed_unix_ms: 0,
@@ -270,7 +352,7 @@ mod agent_activity_unit_tests {
         };
         let completed = AgentActivityRecord {
             status: STATUS_COMPLETED.to_string(),
-            result_json: r#"{"stdout":"Compiling","exit_code":0}"#.to_string(),
+            result: serde_json::json!({ "stdout": "Compiling", "exit_code": 0 }),
             completed_unix_ms: 1_700_000_002_900,
             ..running.clone()
         };
@@ -288,8 +370,8 @@ mod agent_activity_unit_tests {
         );
         assert_eq!(records[0].status, STATUS_COMPLETED);
         assert_eq!(
-            records[0].result_json,
-            r#"{"stdout":"Compiling","exit_code":0}"#
+            records[0].result,
+            serde_json::json!({ "stdout": "Compiling", "exit_code": 0 })
         );
         assert_eq!(records[0].completed_unix_ms, 1_700_000_002_900);
     }

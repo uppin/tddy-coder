@@ -51,8 +51,9 @@ use tddy_service::proto::connection::{
     ReportAgentActivityRequest, ReportAgentActivityResponse, ReportSessionStatusRequest,
     ReportSessionStatusResponse, RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse,
     ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse, SessionTerminalInput,
-    SessionTerminalOutput, SignalSessionRequest, SignalSessionResponse, StartDemoVmRequest,
-    StartDemoVmResponse, StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
+    SessionTerminalOutput, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
+    SignalSessionRequest, SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse,
+    StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
     StartTerminalSessionResponse, StopDemoVmRequest, StopDemoVmResponse,
     StopTerminalSessionRequest, StopTerminalSessionResponse, StreamHostStatsRequest,
     StreamSessionActivityRequest, StreamTerminalOutputRequest, TerminalControlEvent,
@@ -541,6 +542,19 @@ where
         request: tonic::Request<ListProjectBranchesRequest>,
     ) -> Result<tonic::Response<ListProjectBranchesResponse>, tonic::Status> {
         let resp = RpcConnectionService::list_project_branches(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn set_project_default_branch(
+        &self,
+        request: tonic::Request<SetProjectDefaultBranchRequest>,
+    ) -> Result<tonic::Response<SetProjectDefaultBranchResponse>, tonic::Status> {
+        let resp = RpcConnectionService::set_project_default_branch(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

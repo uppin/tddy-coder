@@ -48,7 +48,7 @@ import { GitHubLoginButton } from "./components/GitHubLoginButton";
 import { AuthCallback } from "./components/AuthCallback";
 import { UserAvatar } from "./components/UserAvatar";
 import { Button } from "./components/ui/button";
-import { ConnectionScreen } from "./components/ConnectionScreen";
+import { LiveKitAppPage } from "./components/livekit/LiveKitAppPage";
 import { WorktreesAppPage } from "./components/worktrees/WorktreesAppPage";
 import { VmsAppPage } from "./components/vms/VmsAppPage";
 import { ProjectsAppPage } from "./components/projects/ProjectsAppPage";
@@ -60,6 +60,7 @@ import {
   isTasksPath,
   isVmsPath,
   isProjectsPath,
+  isLiveKitPath,
   isSessionsDrawerPath,
   parseTerminalSessionIdFromPathname,
 } from "./routing/appRoutes";
@@ -105,22 +106,10 @@ function pushParamsToUrl(url: string, identity: string, roomName: string, debugL
   window.history.replaceState(null, "", newUrl);
 }
 
-const formStyle = {
-  padding: 24,
-  fontFamily: "system-ui, sans-serif",
-  maxWidth: 560,
-} as const;
-
-const inputStyle = {
-  display: "block",
-  width: "100%",
-  marginBottom: 12,
-  padding: 8,
-  fontSize: 14,
-  boxSizing: "border-box" as const,
-};
-
-const labelStyle = { display: "block", marginBottom: 4, fontWeight: 500 };
+const formClassName = "p-6 max-w-xl mx-auto font-sans text-foreground";
+const inputClassName =
+  "block w-full mb-3 px-2 py-2 text-sm rounded-md border border-input bg-background text-foreground box-border";
+const labelClassName = "block mb-1 font-medium";
 
 function ConnectedTerminal({
   url,
@@ -172,7 +161,7 @@ function ConnectedTerminal({
 
   if (error) {
     return (
-      <div style={{ padding: 24 }}>
+      <div className="p-6">
         <div data-testid="livekit-error">{error}</div>
       </div>
     );
@@ -268,13 +257,13 @@ function ConnectionForm() {
 
   if (!isAuthenticated) {
     return (
-      <div style={formStyle}>
+      <div className={formClassName}>
         <h1>tddy-web</h1>
-        <p style={{ marginBottom: 16, fontSize: 14, color: "#444" }}>
+        <p className="mb-4 text-sm text-muted-foreground">
           Sign in with GitHub to access the terminal.
         </p>
         {authError ? (
-          <p data-testid="auth-flow-error" style={{ marginBottom: 12, fontSize: 14, color: "#c00" }}>
+          <p data-testid="auth-flow-error" className="mb-3 text-sm text-destructive">
             {authError}
           </p>
         ) : null}
@@ -284,7 +273,7 @@ function ConnectionForm() {
   }
 
   return (
-    <div style={formStyle}>
+    <div className={formClassName}>
       <h1>tddy-web</h1>
       {user && <UserAvatar user={user} onLogout={logout} />}
       <form
@@ -296,7 +285,7 @@ function ConnectionForm() {
           }
         }}
       >
-        <label style={labelStyle} htmlFor="livekit-url">
+        <label className={labelClassName} htmlFor="livekit-url">
           LiveKit URL
         </label>
         <input
@@ -306,9 +295,9 @@ function ConnectionForm() {
           placeholder="ws://192.168.1.10:7880"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          style={inputStyle}
+          className={inputClassName}
         />
-        <label style={labelStyle} htmlFor="livekit-identity">
+        <label className={labelClassName} htmlFor="livekit-identity">
           Identity
         </label>
         <input
@@ -318,9 +307,9 @@ function ConnectionForm() {
           placeholder="client"
           value={identity}
           onChange={(e) => setIdentity(e.target.value)}
-          style={inputStyle}
+          className={inputClassName}
         />
-        <label style={labelStyle} htmlFor="livekit-room">
+        <label className={labelClassName} htmlFor="livekit-room">
           Room name
         </label>
         <input
@@ -330,9 +319,9 @@ function ConnectionForm() {
           placeholder="terminal-e2e"
           value={roomName}
           onChange={(e) => setRoomName(e.target.value)}
-          style={inputStyle}
+          className={inputClassName}
         />
-        <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+        <label className={`${labelClassName} flex items-center gap-2 mt-2`}>
           <input
             type="checkbox"
             checked={debugLogging}
@@ -344,7 +333,7 @@ function ConnectionForm() {
           Connect
         </Button>
       </form>
-      <p style={{ marginTop: 16, fontSize: 13, color: "#666" }}>
+      <p className="mt-4 text-sm text-muted-foreground">
         Token is fetched from the server via Connect-RPC. Ensure tddy-coder is running with
         --livekit-api-key and --livekit-api-secret.
       </p>
@@ -354,13 +343,13 @@ function ConnectionForm() {
 
 function DaemonLoginScreen({ path, login, authError }: { path: string; login: (returnTo?: string) => void; authError: string | null }) {
   return (
-    <div style={{ ...formStyle, display: "flex", flexDirection: "column", gap: 16, paddingTop: 48 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0 }}>Sign in</h1>
-      <p style={{ fontSize: 14, color: "#555", margin: 0 }}>
+    <div className={`${formClassName} flex flex-col gap-4 pt-12`}>
+      <h1 className="text-2xl font-semibold m-0">Sign in</h1>
+      <p className="text-sm text-muted-foreground m-0">
         Sign in with GitHub to continue to tddy-web.
       </p>
       {authError ? (
-        <p data-testid="auth-flow-error" style={{ fontSize: 14, color: "#c00", margin: 0 }}>
+        <p data-testid="auth-flow-error" className="text-sm text-destructive m-0">
           {authError}
         </p>
       ) : null}
@@ -433,7 +422,7 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
       {(typeof window !== "undefined" ? window.location.pathname : "/") === "/auth/callback" ? (
         <AuthCallback />
       ) : daemonMode === null || (daemonMode === true && authLoading) ? (
-        <div style={{ padding: 24 }}>Loading…</div>
+        <div className="p-6">Loading…</div>
       ) : daemonMode === true ? (
         !isAuthenticated ? (
           <DaemonLoginScreen path={path} login={login} authError={authError} />
@@ -448,22 +437,19 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
             {isRpcPlaygroundPath(path) ? (
               <RpcPlaygroundAppPage onNavigate={navigate} />
             ) : isTasksPath(path) ? (
-              <TasksDrawerScreen />
+              <TasksDrawerScreen onNavigate={navigate} />
             ) : isVmsPath(path) ? (
               <VmsAppPage onNavigate={navigate} />
             ) : isProjectsPath(path) ? (
               <ProjectsAppPage onNavigate={navigate} />
+            ) : isLiveKitPath(path) ? (
+              <LiveKitAppPage onNavigate={navigate} />
             ) : path === "/worktrees" ? (
               <WorktreesAppPage onNavigate={navigate} />
             ) : isSessionsDrawerPath(path) ? (
-              <SessionsDrawerScreen />
+              <SessionsDrawerScreen onNavigate={navigate} />
             ) : (
-              <ConnectionScreen
-                livekitUrl={appConfig.livekitUrl}
-                commonRoom={appConfig.commonRoom}
-                allowedAgentsFromConfig={appConfig.allowedAgents}
-                onNavigate={navigate}
-              />
+              <SessionsDrawerScreen onNavigate={navigate} />
             )}
           </SelectedDaemonProvider>
         )

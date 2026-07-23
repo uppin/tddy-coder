@@ -26,14 +26,13 @@ use tokio::sync::watch;
 
 use tddy_rpc::{RpcMessage, RpcResult, RpcService, ServiceEntry, Status};
 use tddy_service::proto::connection::{
-    AgentActivityRecord as ProtoAgentActivityRecord, ClaimTerminalControlRequest,
-    ClaimTerminalControlResponse, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
-    ListExecToolsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
-    ListTerminalSessionsRequest, ListTerminalSessionsResponse, SendTerminalInputResponse,
-    SessionTerminalInput, SessionTerminalOutput, StartTerminalSessionRequest,
-    StartTerminalSessionResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    StreamSessionActivityRequest, StreamTerminalOutputRequest, TerminalSessionInfo, ToolCallInfo,
-    ToolDef as ProtoToolDef,
+    ClaimTerminalControlRequest, ClaimTerminalControlResponse, ExecuteToolRequest,
+    ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
+    ListSessionToolCallsResponse, ListTerminalSessionsRequest, ListTerminalSessionsResponse,
+    SendTerminalInputResponse, SessionTerminalInput, SessionTerminalOutput,
+    StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
+    StopTerminalSessionResponse, StreamMode, StreamSessionActivityRequest,
+    StreamTerminalOutputRequest, TerminalSessionInfo, ToolCallInfo, ToolDef as ProtoToolDef,
 };
 
 use terminal_manager::MAIN_TERMINAL_ID;
@@ -406,11 +405,15 @@ impl RpcService for SessionConnectionServiceRpc {
                 RpcResult::ServerStream(Ok(rx))
             }
             "StreamSessionActivity" => {
-                if let Err(e) = StreamSessionActivityRequest::decode(&message.payload[..]) {
-                    return RpcResult::ServerStream(Err(Status::invalid_argument(format!(
-                        "decode StreamSessionActivityRequest: {e}"
-                    ))));
-                }
+                let req = match StreamSessionActivityRequest::decode(&message.payload[..]) {
+                    Ok(req) => req,
+                    Err(e) => {
+                        return RpcResult::ServerStream(Err(Status::invalid_argument(format!(
+                            "decode StreamSessionActivityRequest: {e}"
+                        ))));
+                    }
+                };
+                let mode = StreamMode::try_from(req.mode).unwrap_or(StreamMode::SnapshotThenLive);
 
                 let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, Status>>(
                     AGENT_ACTIVITY_CHANNEL_CAPACITY,
@@ -421,15 +424,19 @@ impl RpcService for SessionConnectionServiceRpc {
                 // (via the broadcast) rather than dropped in the gap.
                 let live_rx = self.svc.presenter_events.as_ref().map(|tx| tx.subscribe());
 
-                // Snapshot first: replay the coalesced on-disk records.
-                let snapshot =
-                    tddy_core::agent_activity::read_agent_activity(&self.svc.agent_activity_dir)
-                        .unwrap_or_default();
-                for record in snapshot {
-                    let frame = to_proto_agent_activity(record).encode_to_vec();
-                    if tx.try_send(Ok(frame)).is_err() {
-                        // Receiver already gone — return the (now-closed) stream.
-                        return RpcResult::ServerStream(Ok(rx));
+                // Snapshot-then-live (the default) replays the coalesced on-disk records first;
+                // live-only skips the snapshot and carries only records that arrive after subscribe.
+                if mode == StreamMode::SnapshotThenLive {
+                    let snapshot = tddy_core::agent_activity::read_agent_activity(
+                        &self.svc.agent_activity_dir,
+                    )
+                    .unwrap_or_default();
+                    for record in snapshot {
+                        let frame = tddy_service::agent_activity_to_proto(record).encode_to_vec();
+                        if tx.try_send(Ok(frame)).is_err() {
+                            // Receiver already gone — return the (now-closed) stream.
+                            return RpcResult::ServerStream(Ok(rx));
+                        }
                     }
                 }
 
@@ -441,7 +448,8 @@ impl RpcService for SessionConnectionServiceRpc {
                         loop {
                             match live_rx.recv().await {
                                 Ok(tddy_core::PresenterEvent::AgentActivity(record)) => {
-                                    let frame = to_proto_agent_activity(record).encode_to_vec();
+                                    let frame = tddy_service::agent_activity_to_proto(record)
+                                        .encode_to_vec();
                                     if tx.send(Ok(frame)).await.is_err() {
                                         break;
                                     }
@@ -470,24 +478,6 @@ fn resolved_terminal_id(terminal_id: &str) -> &str {
         MAIN_TERMINAL_ID
     } else {
         trimmed
-    }
-}
-
-/// Map a durable [`tddy_core::agent_activity::AgentActivityRecord`] onto its wire form for
-/// `StreamSessionActivity` (identical field mapping to the daemon's `to_proto_agent_activity`).
-fn to_proto_agent_activity(
-    record: tddy_core::agent_activity::AgentActivityRecord,
-) -> ProtoAgentActivityRecord {
-    ProtoAgentActivityRecord {
-        call_id: record.call_id,
-        tool_name: record.tool_name,
-        input_json: record.input_json,
-        status: record.status,
-        result_json: record.result_json,
-        error_message: record.error_message,
-        started_unix_ms: record.started_unix_ms,
-        completed_unix_ms: record.completed_unix_ms,
-        source: record.source,
     }
 }
 
@@ -541,6 +531,7 @@ mod tests {
         append_agent_activity, AgentActivityRecord, STATUS_COMPLETED, STATUS_RUNNING,
     };
     use tddy_core::PresenterEvent;
+    use tddy_service::proto::connection::AgentActivityRecord as ProtoAgentActivityRecord;
 
     /// Executor that is never invoked by the `StreamSessionActivity` path.
     struct UnusedExecutor;
@@ -555,9 +546,9 @@ mod tests {
         AgentActivityRecord {
             call_id: call_id.to_string(),
             tool_name: "Bash".to_string(),
-            input_json: r#"{"command":"cargo build"}"#.to_string(),
+            input: serde_json::json!({ "command": "cargo build" }),
             status: STATUS_RUNNING.to_string(),
-            result_json: String::new(),
+            result: serde_json::Value::Null,
             error_message: String::new(),
             started_unix_ms: 1_700_000_000_000,
             completed_unix_ms: 0,
@@ -568,7 +559,7 @@ mod tests {
     fn a_completed_record(call_id: &str) -> AgentActivityRecord {
         AgentActivityRecord {
             status: STATUS_COMPLETED.to_string(),
-            result_json: r#"{"stdout":"done"}"#.to_string(),
+            result: serde_json::json!({ "stdout": "done" }),
             completed_unix_ms: 1_700_000_000_500,
             ..a_running_record(call_id)
         }
@@ -579,6 +570,7 @@ mod tests {
             session_token: "caller-token".to_string(),
             session_id: session_id.to_string(),
             daemon_instance_id: String::new(),
+            mode: StreamMode::SnapshotThenLive as i32,
         };
         RpcMessage::new(req.encode_to_vec(), Default::default())
     }
@@ -642,7 +634,10 @@ mod tests {
         let snapshot = recv_record(&mut rx).await;
         assert_eq!(snapshot.call_id, "call-1");
         assert_eq!(snapshot.status, STATUS_COMPLETED);
-        assert_eq!(snapshot.result_json, r#"{"stdout":"done"}"#);
+        assert_eq!(
+            snapshot.result,
+            tddy_service::json_to_proto_value(&serde_json::json!({ "stdout": "done" }))
+        );
 
         // And — a subsequently-broadcast AgentActivity is forwarded live
         events
@@ -652,5 +647,52 @@ mod tests {
         assert_eq!(live.call_id, "call-2");
         assert_eq!(live.status, STATUS_RUNNING);
         assert_eq!(live.tool_name, "Bash");
+    }
+
+    fn stream_request_message_live_only(session_id: &str) -> RpcMessage {
+        let req = StreamSessionActivityRequest {
+            session_token: "caller-token".to_string(),
+            session_id: session_id.to_string(),
+            daemon_instance_id: String::new(),
+            mode: tddy_service::proto::connection::StreamMode::LiveOnly as i32,
+        };
+        RpcMessage::new(req.encode_to_vec(), Default::default())
+    }
+
+    #[tokio::test]
+    async fn stream_session_activity_in_live_only_mode_skips_the_persisted_snapshot() {
+        // Given — a session dir with a persisted call, and a presenter broadcast
+        let dir = tempfile::tempdir().unwrap();
+        append_agent_activity(dir.path(), &a_completed_record("call-snapshot")).unwrap();
+        let (events, _keepalive) = broadcast::channel(16);
+        let rpc = rpc_for(dir.path(), events.clone());
+
+        // When — the StreamSessionActivity arm is dispatched in LIVE_ONLY mode
+        let result = rpc
+            .handle_rpc(
+                "connection.ConnectionService",
+                "StreamSessionActivity",
+                &stream_request_message_live_only("sess-1"),
+            )
+            .await;
+        let mut rx = match result {
+            RpcResult::ServerStream(Ok(rx)) => rx,
+            RpcResult::ServerStream(Err(status)) => {
+                panic!("expected a server stream, got error status: {status:?}")
+            }
+            _ => panic!("expected a server stream, got a unary result"),
+        };
+
+        // and — a record is broadcast live after the subscription
+        events
+            .send(PresenterEvent::AgentActivity(a_running_record("call-live")))
+            .expect("broadcast send");
+
+        // Then — the first frame is the live record; the persisted 'call-snapshot' was skipped
+        let first = recv_record(&mut rx).await;
+        assert_eq!(
+            first.call_id, "call-live",
+            "live-only must not replay the persisted snapshot ('call-snapshot')"
+        );
     }
 }
