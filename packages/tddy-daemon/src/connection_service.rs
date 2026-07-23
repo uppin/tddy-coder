@@ -932,6 +932,13 @@ pub fn resolve_start_session_claude_binary(config: &DaemonConfig) -> String {
     crate::config::resolve_claude_binary_path(config)
 }
 
+/// Resolve the `claude` binary for a ResumeSession relaunch through the same host resolver as
+/// StartSession, so an explicitly configured path is honored and a bare name is resolved to a host
+/// path instead of being spawned against the daemon's minimal systemd PATH.
+pub fn resolve_resume_session_claude_binary(config: &DaemonConfig) -> String {
+    crate::config::resolve_claude_binary_path(config)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn spawn_claude_cli_session_inner(
     config: &DaemonConfig,
@@ -2459,16 +2466,9 @@ impl ConnectionServiceImpl {
             .map(PathBuf::from)
             .unwrap_or_else(|| session_dir.clone());
 
-        let binary_path = self
-            .config
-            .claude_cli
-            .as_ref()
-            .map(|c| c.binary_path.as_str())
-            .unwrap_or("claude");
-
         let manager = Arc::clone(&self.claude_cli_manager);
         let session_id_owned = session_id.to_string();
-        let binary_owned = binary_path.to_string();
+        let binary_owned = resolve_resume_session_claude_binary(&self.config);
 
         // Re-wire managed-workflow orchestration when resuming a managed session — metadata records a
         // recipe only for managed sessions. The controller resumes at the goal persisted in
@@ -8113,6 +8113,55 @@ mod start_session_binary_resolution_tests {
 
         // Then both paths agree
         assert_eq!(start_session, sandbox);
+    }
+}
+
+#[cfg(test)]
+mod resume_session_binary_resolution_tests {
+    use super::*;
+
+    fn a_config_with_claude_binary(binary_path: &str) -> crate::config::DaemonConfig {
+        let yaml = format!(
+            "users:\n  - github_user: u\n    os_user: u\nclaude_cli:\n  binary_path: {binary_path}\n"
+        );
+        serde_yaml::from_str(&yaml).expect("daemon config should parse")
+    }
+
+    /// A daemon config that leaves `binary_path` at its default (the bare name `claude`). This is
+    /// the production case that broke ResumeSession: the bare name was spawned against the daemon's
+    /// minimal systemd `PATH` (which omits `~/.local/bin`) instead of being resolved to a host path.
+    fn a_config_with_default_claude_binary() -> crate::config::DaemonConfig {
+        let yaml = "users:\n  - github_user: u\n    os_user: u\nclaude_cli: {}\n";
+        serde_yaml::from_str(yaml).expect("daemon config should parse")
+    }
+
+    /// ResumeSession must resolve `claude` through the same host resolver as StartSession — an
+    /// explicitly configured absolute path is honored verbatim, never spawned by bare name.
+    #[test]
+    fn resume_session_honors_an_explicitly_configured_claude_binary_path() {
+        // Given a daemon config naming an explicit claude binary path
+        let config = a_config_with_claude_binary("/opt/custom/bin/claude");
+
+        // When resolving the binary for a ResumeSession relaunch
+        let resolved = resolve_resume_session_claude_binary(&config);
+
+        // Then the configured absolute path is used verbatim
+        assert_eq!(resolved, "/opt/custom/bin/claude");
+    }
+
+    /// The ResumeSession resolver must be the *same* resolution StartSession uses — resume was the
+    /// odd path out, spawning the bare config name while create resolved it to a host path.
+    #[test]
+    fn resume_session_resolves_the_same_binary_as_start_session() {
+        // Given a daemon config that leaves the claude binary at its bare-name default
+        let config = a_config_with_default_claude_binary();
+
+        // When resolving via the ResumeSession path and the StartSession path
+        let resume = resolve_resume_session_claude_binary(&config);
+        let start_session = resolve_start_session_claude_binary(&config);
+
+        // Then both paths pick the same binary — resume never diverges to the bare name
+        assert_eq!(resume, start_session);
     }
 }
 

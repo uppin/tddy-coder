@@ -480,6 +480,27 @@ async fn rpc_scenarios() -> Result<()> {
             }
         }
 
+        // --- Echo a payload larger than LiveKit's negotiated packet limit (chunked transport) ---
+        {
+            // A ~370 KB message overflows the ~64 KB SCTP max in BOTH directions: the request
+            // (client -> server) and the echoed response (server -> client) each get split into
+            // chunk frames and reassembled. Before the chunking transport this publish wedged with
+            // "data packet size exceeds the negotiated maximum message size" retried forever.
+            log::info!("[rpc_scenarios] scenario: echo oversized (chunked) message");
+            let oversized = "x".repeat(370_000);
+            let request = EchoRequest {
+                message: oversized.clone(),
+            };
+            let response_bytes = harness
+                .rpc_client
+                .call_unary("test.EchoService", "Echo", request.encode_to_vec())
+                .await
+                .map_err(|e| anyhow::anyhow!("echo oversized: {}", e))?;
+            let response = EchoResponse::decode(&response_bytes[..])?;
+            assert_eq!(response.message.len(), oversized.len());
+            assert_eq!(response.message, oversized);
+        }
+
         // --- Unknown service returns an RPC error with appropriate code (NOT_FOUND, not UNKNOWN) ---
         {
             log::debug!("scenario: unknown service");

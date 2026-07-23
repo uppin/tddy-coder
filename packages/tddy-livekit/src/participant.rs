@@ -8,7 +8,7 @@
 
 use livekit::prelude::*;
 use serde_json::Value;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -17,6 +17,7 @@ use tokio::sync::{mpsc, watch, Mutex};
 
 use tddy_rpc::server_engine::ServerEngine;
 
+use crate::chunking;
 use crate::envelope::{decode_request, encode_response};
 use crate::projects_registry;
 use crate::proto::{RpcRequest, RpcResponse};
@@ -199,13 +200,24 @@ fn spawn_response_drain(
             let request_id = response.request_id;
             match encode_response(response) {
                 Ok(encoded) => {
-                    let packet = DataPacket {
-                        payload: encoded,
-                        topic: Some(RPC_TOPIC.to_string()),
-                        reliable: true,
-                        destination_identities: vec![ParticipantIdentity::from(peer)],
-                    };
-                    if let Err(e) = local.publish_data(packet).await {
+                    // Fits-in-one-packet responses go out raw; oversized ones (e.g. a big
+                    // StreamSessionActivity snapshot) are split into per-packet chunk frames.
+                    let message_id = chunking::next_message_id();
+                    let dest = vec![ParticipantIdentity::from(peer)];
+                    let mut publish_error = None;
+                    for frame in chunking::frame_for_transport(message_id, &encoded) {
+                        let packet = DataPacket {
+                            payload: frame,
+                            topic: Some(RPC_TOPIC.to_string()),
+                            reliable: true,
+                            destination_identities: dest.clone(),
+                        };
+                        if let Err(e) = local.publish_data(packet).await {
+                            publish_error = Some(e);
+                            break;
+                        }
+                    }
+                    if let Some(e) = publish_error {
                         log::error!(
                             "[echo_server] RPC request_id={} publish failed: {}",
                             request_id,
@@ -243,8 +255,17 @@ fn spawn_response_drain_reconnectable(
             let request_id = response.request_id;
             match encode_response(response) {
                 Ok(encoded) => {
+                    // See spawn_response_drain: raw when it fits, chunk frames when oversized.
+                    let message_id = chunking::next_message_id();
                     let dest = [ParticipantIdentity::from(peer)];
-                    if let Err(e) = shared_publisher.publish_data(encoded, &dest).await {
+                    let mut publish_error = None;
+                    for frame in chunking::frame_for_transport(message_id, &encoded) {
+                        if let Err(e) = shared_publisher.publish_data(frame, &dest).await {
+                            publish_error = Some(e);
+                            break;
+                        }
+                    }
+                    if let Some(e) = publish_error {
                         log::error!(
                             "[echo_server] RPC request_id={} reconnectable publish failed: {}",
                             request_id,
@@ -543,6 +564,11 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                 }
             });
         }
+        // Per-sender chunk reassembly. Frames arrive in order per sender on the reliable channel; a
+        // raw (non-chunk) payload passes straight through. Keyed by sender identity because message
+        // ids are unique only within one sender and several remotes may share this room.
+        let mut reassemblers: HashMap<Option<ParticipantIdentity>, chunking::ChunkReassembler> =
+            HashMap::new();
         while let Some(event) = self.events.recv().await {
             match event {
                 RoomEvent::ConnectionStateChanged(state) => {
@@ -581,9 +607,14 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                         let remote_identities: Vec<_> =
                             self.room.remote_participants().keys().cloned().collect();
                         for payload in drained {
+                            let sender = Some(identity.clone());
+                            let Some(full) = Self::reassemble(&mut reassemblers, &sender, payload)
+                            else {
+                                continue;
+                            };
                             if let Err(e) = Self::handle_incoming(
-                                &payload,
-                                Some(identity.clone()),
+                                &full,
+                                sender,
                                 &remote_identities,
                                 &self.server,
                                 &self.outgoing_tx,
@@ -651,13 +682,18 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                         payload.len()
                     );
                     let payload = Arc::try_unwrap(payload).unwrap_or_else(|a| (*a).clone());
+                    let Some(full) =
+                        Self::reassemble(&mut reassemblers, &event_participant, payload)
+                    else {
+                        continue;
+                    };
 
                     // Must not `spawn` per packet: `ServerEngine::on_request` may itself spawn
                     // the actual dispatch, but decoding + routing to an existing bidi/multi-message
                     // session must stay in arrival order (concurrent tasks could complete out of
                     // order, reordering keystrokes on `StreamTerminalIO` and any other bidi stream).
                     if let Err(e) = Self::handle_incoming(
-                        &payload,
+                        &full,
                         event_participant,
                         &remote_identities,
                         &self.server,
@@ -734,6 +770,35 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                     "set_metadata failed: {}",
                     e
                 );
+            }
+        }
+    }
+
+    /// Reassemble one received frame from `sender` into a whole RPC payload. A raw (non-chunk)
+    /// payload is returned as-is; a chunk frame is buffered in `sender`'s reassembler until its
+    /// message completes. Returns `None` while chunks are still outstanding, or when a frame is
+    /// malformed (logged and dropped rather than crashing the loop).
+    fn reassemble(
+        reassemblers: &mut HashMap<Option<ParticipantIdentity>, chunking::ChunkReassembler>,
+        sender: &Option<ParticipantIdentity>,
+        payload: Vec<u8>,
+    ) -> Option<Vec<u8>> {
+        if !chunking::is_chunk_frame(&payload) {
+            return Some(payload);
+        }
+        match reassemblers
+            .entry(sender.clone())
+            .or_default()
+            .accept(&payload)
+        {
+            Ok(result) => result,
+            Err(e) => {
+                log::warn!(
+                    "[echo_server] malformed chunk frame from {:?}: {}",
+                    sender,
+                    e
+                );
+                None
             }
         }
     }

@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use tddy_rpc::client_engine::ClientEngine;
 use tddy_rpc::{RpcClientTransport, Status};
 
+use crate::chunking::{self, ChunkReassembler};
 use crate::envelope::{decode_response, encode_request};
 use crate::proto::RpcRequest;
 use crate::rpc_trace;
@@ -64,6 +65,9 @@ impl RpcClient {
 
         tokio::spawn(async move {
             log::debug!("RpcClient: background event loop started");
+            // The loop only accepts frames from `target_for_task`, so one reassembler (one sender)
+            // suffices; ordered reliable delivery keeps a message's chunks contiguous per sender.
+            let mut reassembler = ChunkReassembler::default();
             while let Some(event) = events.recv().await {
                 if let RoomEvent::DataReceived {
                     payload,
@@ -84,6 +88,18 @@ impl RpcClient {
                     }
                     let payload =
                         std::sync::Arc::try_unwrap(payload).unwrap_or_else(|a| (*a).clone());
+                    let payload = if chunking::is_chunk_frame(&payload) {
+                        match reassembler.accept(&payload) {
+                            Ok(Some(full)) => full,
+                            Ok(None) => continue,
+                            Err(e) => {
+                                rpc_trace!("RpcClient: malformed chunk frame: {}", e);
+                                continue;
+                            }
+                        }
+                    } else {
+                        payload
+                    };
                     match decode_response(&payload) {
                         Ok(response) => {
                             rpc_trace!(
@@ -264,17 +280,23 @@ impl RpcClient {
 
     pub(crate) async fn publish_request(&self, request: RpcRequest) -> Result<(), Status> {
         let payload = encode_request(request).map_err(Status::internal)?;
-        let packet = DataPacket {
-            payload,
-            topic: Some(RPC_TOPIC.to_string()),
-            reliable: true,
-            destination_identities: vec![self.target_identity.clone()],
-        };
-        self.room
-            .local_participant()
-            .publish_data(packet)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))
+        // Fits-in-one-packet requests go out raw (unchanged wire bytes); an oversized request is
+        // split into chunk frames that each fit LiveKit's negotiated max message size.
+        let message_id = chunking::next_message_id();
+        for frame in chunking::frame_for_transport(message_id, &payload) {
+            let packet = DataPacket {
+                payload: frame,
+                topic: Some(RPC_TOPIC.to_string()),
+                reliable: true,
+                destination_identities: vec![self.target_identity.clone()],
+            };
+            self.room
+                .local_participant()
+                .publish_data(packet)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
+        }
+        Ok(())
     }
 }
 
