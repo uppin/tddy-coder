@@ -118,3 +118,39 @@ sent before any response is read) surfaced it with a reproducible failure rate. 
 `on_response` backpressure (`.send().await`) instead of dropping — see
 `packages/tddy-rpc/src/client_engine.rs` and its regression test
 `delivers_every_stream_item_even_when_the_consumer_drains_after_a_large_burst`.
+
+### LiveKit oversized-frame chunking
+
+The LiveKit data-channel transport negotiates an SCTP max message size of 64,000 bytes; a
+larger `publish_data` is rejected outright, and `SharedPublisher` retries the same doomed
+publish 30× forever — wedging the transport and starving small RPCs like `ListSessions` (the
+web dashboard then sees `premature EOF` / `cant skip wire type 4` protobuf decode errors).
+This surfaced in production when the daemon published oversized `StreamSessionActivity`
+snapshots (a 369 KB tool-result record, plus 71/117/187 KB others).
+
+The LiveKit transport now chunks oversized envelopes. `chunking::frame_for_transport` splits a
+payload into ≤60,000-byte frames, each carrying a 13-byte little-endian header
+`[magic: 0x00][message_id: u32][total_chunks: u32][index: u32]`, and each receive loop
+reassembles per sender via a `ChunkReassembler` — message ids are unique only within one sender
+(process-wide `next_message_id` counter), and a browser talks to several daemons on one room, so
+mixing two senders' chunks would corrupt reassembly. Reassembly is index-keyed, so frames need
+not arrive in order. This is LiveKit-specific: stdio's length-prefixed frame codec has no such
+size limit.
+
+Back-compat is preserved by the magic byte. A payload that fits one packet is sent **raw**
+(byte-for-byte the encoded envelope), so a pre-chunking peer still decodes small messages; only
+an oversized payload is split. A valid prost `RpcRequest`/`RpcResponse` can never begin with
+`0x00` (protobuf field number 0 is illegal, and the envelopes' lowest field numbers are 1/2), so
+the receiver disambiguates raw vs chunk on the first byte via `is_chunk_frame`. Send paths
+(`client.rs::publish_request`, both `participant.rs` response drains) frame through
+`frame_for_transport`; receive paths (`client.rs`, `client_factory.rs`, `participant.rs`)
+reassemble per sender. The TypeScript client mirrors the codec byte-for-byte in
+`packages/tddy-livekit-web/src/chunking.ts`, wired into `transport.ts`
+(`publishRequest` + per-sender reassembly in `RoomRpcRegistry` and the standalone
+`LiveKitTransport`). Verified by a real-LiveKit `rpc_scenarios` test that round-trips a 370 KB
+oversized echo in both directions.
+
+*Follow-up (deferred, separately tracked):* cap `result_json`/`input_json` at the activity-log
+layer (`tddy-daemon/src/tool_call_log.rs`) so individual records stay small regardless of
+transport; a Cypress e2e crossing the TS↔Rust boundary with an oversized payload is also
+outstanding.
