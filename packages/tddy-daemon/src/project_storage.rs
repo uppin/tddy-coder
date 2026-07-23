@@ -13,7 +13,8 @@ pub struct ProjectData {
     pub git_url: String,
     pub main_repo_path: String,
     /// Remote-tracking ref used as the integration base for worktrees (`origin/main`, etc.).
-    /// Absent entries behave as [`tddy_core::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF`].
+    /// A stored ref is authoritative; absent (legacy) rows resolve their default live from the
+    /// repository — see [`effective_integration_base_ref_for_project`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub main_branch_ref: Option<String>,
     /// Per-host (or per-daemon-instance) checkout paths for the same logical `project_id`.
@@ -63,7 +64,7 @@ pub fn write_projects(projects_dir: &Path, projects: &[ProjectData]) -> anyhow::
 pub fn add_project(projects_dir: &Path, project: ProjectData) -> anyhow::Result<()> {
     log::info!("add_project: project_id={}", project.project_id);
     if let Some(ref r) = project.main_branch_ref {
-        tddy_core::validate_integration_base_ref(r)
+        tddy_core::validate_chain_pr_integration_base_ref(r)
             .map_err(|e| anyhow::anyhow!("invalid main_branch_ref: {}", e))?;
     }
     let mut projects = read_projects(projects_dir)?;
@@ -100,8 +101,10 @@ pub fn find_project(projects_dir: &Path, project_id: &str) -> anyhow::Result<Opt
 
 /// Resolves the git integration base ref for worktree setup for a registered project.
 ///
-/// Legacy rows without [`ProjectData::main_branch_ref`] must resolve to
-/// [`tddy_core::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF`].
+/// A stored [`ProjectData::main_branch_ref`] is authoritative (validated, no probe). Legacy rows
+/// without a stored ref resolve their default **live** from the repository via
+/// [`tddy_core::resolve_default_integration_base_ref`] (`origin/master` → `origin/main` →
+/// `origin/HEAD`); the probe is legacy-only and loses effect once a default is stored.
 pub fn effective_integration_base_ref_for_project(
     projects_dir: &Path,
     project_id: &str,
@@ -114,7 +117,7 @@ pub fn effective_integration_base_ref_for_project(
         .ok_or_else(|| anyhow::anyhow!("unknown project: {}", project_id))?;
     match &project.main_branch_ref {
         Some(r) => {
-            tddy_core::validate_integration_base_ref(r)
+            tddy_core::validate_chain_pr_integration_base_ref(r)
                 .map_err(|e| anyhow::anyhow!("invalid main_branch_ref: {}", e))?;
             log::info!(
                 "effective_integration_base_ref_for_project: project_id={} ref={}",
@@ -125,12 +128,47 @@ pub fn effective_integration_base_ref_for_project(
         }
         None => {
             log::info!(
-                "effective_integration_base_ref_for_project: project_id={} using documented default",
+                "effective_integration_base_ref_for_project: project_id={} resolving live from repository",
                 project_id
             );
-            Ok(tddy_core::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF.to_string())
+            tddy_core::resolve_default_integration_base_ref(std::path::Path::new(
+                &project.main_repo_path,
+            ))
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "resolve default integration base ref for project {}: {}",
+                    project_id,
+                    e
+                )
+            })
         }
     }
+}
+
+/// Sets (or replaces) the stored default integration base ref for `project_id`.
+///
+/// Validates `main_branch_ref` with [`tddy_core::validate_chain_pr_integration_base_ref`] **before**
+/// touching the registry, so a rejected ref never mutates `projects.yaml`. Errors when `project_id`
+/// is unknown.
+pub fn set_project_default_branch(
+    projects_dir: &Path,
+    project_id: &str,
+    main_branch_ref: &str,
+) -> anyhow::Result<()> {
+    log::info!(
+        "set_project_default_branch: project_id={} main_branch_ref={}",
+        project_id,
+        main_branch_ref
+    );
+    tddy_core::validate_chain_pr_integration_base_ref(main_branch_ref)
+        .map_err(|e| anyhow::anyhow!("invalid main_branch_ref: {}", e))?;
+    let mut projects = read_projects(projects_dir)?;
+    let project = projects
+        .iter_mut()
+        .find(|p| p.project_id == project_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown project: {}", project_id))?;
+    project.main_branch_ref = Some(main_branch_ref.to_string());
+    write_projects(projects_dir, &projects)
 }
 
 /// Resolved `main_repo_path` for `project_id` on `host_key` (simulated host or daemon instance id).
@@ -206,22 +244,47 @@ mod project_integration_base_acceptance_tests {
     use std::collections::HashMap;
     use std::fs;
 
-    /// Legacy `projects.yaml` without `main_branch_ref` must resolve to the documented default ref.
+    /// Legacy `projects.yaml` without `main_branch_ref` resolves its default **live** from the
+    /// repository (legacy-only probe), not from a hardcoded constant.
     #[test]
-    fn legacy_project_without_base_ref_uses_documented_default() {
+    fn legacy_project_without_base_ref_resolves_live_from_repository() {
+        fn git(cwd: &Path, args: &[&str]) {
+            let st = std::process::Command::new("git")
+                .current_dir(cwd)
+                .args(args)
+                .status()
+                .unwrap_or_else(|e| panic!("git {args:?} in {cwd:?}: {e}"));
+            assert!(st.success(), "git {args:?} failed in {cwd:?}");
+        }
+
         let temp = tempfile::tempdir().unwrap();
+        // A source repo whose only mainline branch is `main` (no `master`).
+        let source = temp.path().join("src");
+        fs::create_dir_all(&source).unwrap();
+        git(&source, &["init", "-b", "main"]);
+        git(&source, &["config", "user.email", "t@e.st"]);
+        git(&source, &["config", "user.name", "t"]);
+        fs::write(source.join("README.md"), "x\n").unwrap();
+        git(&source, &["add", "README.md"]);
+        git(&source, &["commit", "-m", "init"]);
+        // A clone carrying remote-tracking `origin/*` refs.
+        let clone = temp.path().join("clone");
+        git(
+            temp.path(),
+            &["clone", source.to_str().unwrap(), clone.to_str().unwrap()],
+        );
+
         let projects_dir = temp.path().join("projects");
         fs::create_dir_all(&projects_dir).unwrap();
-        let yaml = r#"projects:
-- project_id: "p-legacy"
-  name: "n"
-  git_url: "https://example.com/r.git"
-  main_repo_path: "/tmp/r"
-"#;
+        let yaml = format!(
+            "projects:\n- project_id: \"p-legacy\"\n  name: \"n\"\n  git_url: \"{}\"\n  main_repo_path: \"{}\"\n",
+            source.to_str().unwrap(),
+            clone.to_str().unwrap()
+        );
         fs::write(projects_file_path(&projects_dir), yaml).unwrap();
 
         let eff = effective_integration_base_ref_for_project(&projects_dir, "p-legacy").unwrap();
-        assert_eq!(eff, tddy_core::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF);
+        assert_eq!(eff, "origin/main");
     }
 
     /// Invalid `main_branch_ref` values must be rejected before YAML mutation.
@@ -247,6 +310,92 @@ mod project_integration_base_acceptance_tests {
         assert!(
             read_projects(&projects_dir).unwrap().is_empty(),
             "projects.yaml must not be written when validation fails"
+        );
+    }
+}
+
+#[cfg(test)]
+mod set_project_default_branch_unit_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn a_projects_dir() -> (tempfile::TempDir, std::path::PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("projects");
+        std::fs::create_dir_all(&dir).unwrap();
+        (temp, dir)
+    }
+
+    fn given_a_project(projects_dir: &Path, project_id: &str, main_branch_ref: Option<&str>) {
+        add_project(
+            projects_dir,
+            ProjectData {
+                project_id: project_id.to_string(),
+                name: "alpha".to_string(),
+                git_url: "https://example.com/a.git".to_string(),
+                main_repo_path: "/tmp/a".to_string(),
+                main_branch_ref: main_branch_ref.map(str::to_string),
+                host_repo_paths: HashMap::new(),
+            },
+        )
+        .expect("seed project");
+    }
+
+    #[test]
+    fn set_updates_the_row_default_branch() {
+        // Given a legacy project with no stored default
+        let (_keep, dir) = a_projects_dir();
+        given_a_project(&dir, "p1", None);
+
+        // When
+        set_project_default_branch(&dir, "p1", "origin/main").expect("set succeeds");
+
+        // Then
+        let stored = find_project(&dir, "p1").unwrap().unwrap();
+        assert_eq!(stored.main_branch_ref.as_deref(), Some("origin/main"));
+    }
+
+    #[test]
+    fn set_accepts_a_multi_segment_remote_branch() {
+        // Given
+        let (_keep, dir) = a_projects_dir();
+        given_a_project(&dir, "p1", None);
+
+        // When
+        set_project_default_branch(&dir, "p1", "origin/release/2025").expect("set succeeds");
+
+        // Then
+        let stored = find_project(&dir, "p1").unwrap().unwrap();
+        assert_eq!(
+            stored.main_branch_ref.as_deref(),
+            Some("origin/release/2025")
+        );
+    }
+
+    #[test]
+    fn set_rejects_an_unsafe_ref_without_mutating_the_row() {
+        // Given a project that already has a default
+        let (_keep, dir) = a_projects_dir();
+        given_a_project(&dir, "p1", Some("origin/main"));
+
+        // When
+        let result = set_project_default_branch(&dir, "p1", "origin/main;rm -rf /");
+
+        // Then — rejected and the previous default is untouched
+        assert!(result.is_err(), "unsafe ref must be rejected");
+        let stored = find_project(&dir, "p1").unwrap().unwrap();
+        assert_eq!(stored.main_branch_ref.as_deref(), Some("origin/main"));
+    }
+
+    #[test]
+    fn set_errors_on_an_unknown_project() {
+        // Given an empty registry
+        let (_keep, dir) = a_projects_dir();
+
+        // When / Then
+        assert!(
+            set_project_default_branch(&dir, "missing", "origin/main").is_err(),
+            "setting a default on an unknown project must be an error"
         );
     }
 }

@@ -690,6 +690,11 @@ export const projectAddToHostUserRelativePath = (projectId: string) =>
 export const projectHostBaseLocation = (daemonInstanceId: string) =>
   `project-host-base-location-${daemonInstanceId}`;
 
+/** `[data-testid="project-default-branch-select-<projectId>"]` — the project's default-branch
+ *  (`main_branch_ref`) dropdown, listing the project's remote branches. */
+export const projectDefaultBranchSelect = (projectId: string) =>
+  `project-default-branch-select-${projectId}`;
+
 // ---------------------------------------------------------------------------
 // Daemon selector dynamic helpers
 // ---------------------------------------------------------------------------

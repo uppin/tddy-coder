@@ -93,6 +93,7 @@ impl EligibleDaemonSource for TestPeerProjectsSource {
                 git_url: "https://example.com/a.git".to_string(),
                 main_repo_path: "/peer/a".to_string(),
                 daemon_instance_id: "workstation-1".to_string(),
+                main_branch_ref: String::new(),
             },
             ProtoProjectEntry {
                 project_id: marker.to_string(),
@@ -100,6 +101,7 @@ impl EligibleDaemonSource for TestPeerProjectsSource {
                 git_url: "https://example.com/b.git".to_string(),
                 main_repo_path: "/peer/b".to_string(),
                 daemon_instance_id: "server-2".to_string(),
+                main_branch_ref: String::new(),
             },
         ]
     }

@@ -33,7 +33,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 
 ### Worktree (`worktree.rs`)
 
-- **DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF**: `origin/master` — effective integration base for legacy project registry rows without `main_branch_ref`.
+- **DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF**: `origin/master` — the documented default ref (used by the `fetch_origin_master` helper). Project registry rows without `main_branch_ref` are resolved **live** by the daemon via `resolve_default_integration_base_ref`, not this constant.
 - **validate_integration_base_ref**: Accepts only `origin/<single-branch-segment>` refs; rejects empty, multi-segment paths, whitespace, and characters that could widen `git` invocation beyond a single branch argument.
 - **validate_chain_pr_integration_base_ref**: Accepts `origin/<path>` where `path` may contain `/` (multi-segment); rejects `..`, `--`, empty segments, whitespace, and shell-oriented metacharacters in the path.
 - **fetch_integration_base**: Runs `git fetch origin <branch>` for a validated integration base ref (single-segment).

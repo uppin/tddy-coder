@@ -30,11 +30,12 @@ use tddy_service::proto::connection::{
     RemoveWorktreeRequest, RemoveWorktreeResponse, ReportSessionStatusRequest,
     ReportSessionStatusResponse, ResumeSessionRequest, ResumeSessionResponse,
     SendTerminalInputResponse, SessionEntry as ProtoSessionEntry, SessionTerminalInput,
-    SessionTerminalOutput, Signal, SignalSessionRequest, SignalSessionResponse,
-    StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
-    StartTerminalSessionResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    StreamTerminalOutputRequest, SubagentInfo, TerminalControlEvent, TerminalSessionInfo, ToolInfo,
-    WatchTerminalControlRequest, WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
+    SessionTerminalOutput, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, Signal,
+    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
+    StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
+    StopTerminalSessionResponse, StreamTerminalOutputRequest, SubagentInfo, TerminalControlEvent,
+    TerminalSessionInfo, ToolInfo, WatchTerminalControlRequest, WorkflowFileEntry,
+    WorktreeDirEntry, WorktreeRow,
 };
 use uuid::Uuid;
 
@@ -1033,14 +1034,21 @@ async fn spawn_claude_cli_session_inner(
         }
     };
 
+    // Resolve the integration base ref: an explicit client override wins; otherwise, for a
+    // new-branch-from-base worktree, use the project's stored default branch when set. A legacy
+    // project (no stored default) leaves this `None` so worktree setup resolves the default live
+    // (`origin/master` → `origin/main` → `origin/HEAD`) — the same order the project resolver uses.
+    let resolved_integration_base_ref = if !selected_integration_base_ref.trim().is_empty() {
+        Some(selected_integration_base_ref.trim().to_string())
+    } else if matches!(intent, BranchWorktreeIntent::NewBranchFromBase) {
+        project.main_branch_ref.clone()
+    } else {
+        None
+    };
     let cs_workflow = ChangesetWorkflow {
         branch_worktree_intent: Some(intent),
         new_branch_name: resolved_new_branch,
-        selected_integration_base_ref: if selected_integration_base_ref.trim().is_empty() {
-            None
-        } else {
-            Some(selected_integration_base_ref.trim().to_string())
-        },
+        selected_integration_base_ref: resolved_integration_base_ref,
         selected_branch_to_work_on: resolved_selected_branch,
         ..ChangesetWorkflow::default()
     };
@@ -1603,15 +1611,35 @@ impl ConnectionServiceImpl {
                 None,
             ),
         };
+        // A client-supplied `repo_path` runs against that checkout directly (no registered
+        // project), so a stored default branch only applies when resolving from `project_id`.
+        let project_default_branch_ref: Option<String> =
+            if repo_path.is_empty() && !project_id.is_empty() {
+                projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+                    .and_then(|dir| {
+                        project_storage::find_project(&dir, project_id)
+                            .ok()
+                            .flatten()
+                    })
+                    .and_then(|p| p.main_branch_ref)
+            } else {
+                None
+            };
 
+        // An explicit client override wins; otherwise a new-branch-from-base worktree uses the
+        // project's stored default branch when set. A legacy project (no stored default) leaves
+        // this `None` so worktree setup resolves the default live.
+        let resolved_integration_base_ref = if !selected_integration_base_ref.trim().is_empty() {
+            Some(selected_integration_base_ref.trim().to_string())
+        } else if matches!(intent, BranchWorktreeIntent::NewBranchFromBase) {
+            project_default_branch_ref.clone()
+        } else {
+            None
+        };
         let cs_workflow = ChangesetWorkflow {
             branch_worktree_intent: Some(intent),
             new_branch_name: resolved_new_branch,
-            selected_integration_base_ref: if selected_integration_base_ref.trim().is_empty() {
-                None
-            } else {
-                Some(selected_integration_base_ref.trim().to_string())
-            },
+            selected_integration_base_ref: resolved_integration_base_ref,
             selected_branch_to_work_on: resolved_selected_branch,
             ..ChangesetWorkflow::default()
         };
@@ -2099,15 +2127,22 @@ impl ConnectionServiceImpl {
                 None,
             ),
         };
+        let project_default_branch_ref = project.main_branch_ref.clone();
 
+        // An explicit client override wins; otherwise a new-branch-from-base worktree uses the
+        // project's stored default branch when set. A legacy project (no stored default) leaves
+        // this `None` so worktree setup resolves the default live.
+        let resolved_integration_base_ref = if !selected_integration_base_ref.trim().is_empty() {
+            Some(selected_integration_base_ref.trim().to_string())
+        } else if matches!(intent, BranchWorktreeIntent::NewBranchFromBase) {
+            project_default_branch_ref.clone()
+        } else {
+            None
+        };
         let cs_workflow = ChangesetWorkflow {
             branch_worktree_intent: Some(intent),
             new_branch_name: resolved_new_branch,
-            selected_integration_base_ref: if selected_integration_base_ref.trim().is_empty() {
-                None
-            } else {
-                Some(selected_integration_base_ref.trim().to_string())
-            },
+            selected_integration_base_ref: resolved_integration_base_ref,
             selected_branch_to_work_on: resolved_selected_branch,
             ..ChangesetWorkflow::default()
         };
@@ -3400,6 +3435,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 git_url: p.git_url,
                 main_repo_path: p.main_repo_path,
                 daemon_instance_id: local_daemon_id.clone(),
+                main_branch_ref: p.main_branch_ref.unwrap_or_default(),
             })
             .collect();
         log::debug!(
@@ -3498,6 +3534,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             git_url: project.git_url.clone(),
             main_repo_path: project.main_repo_path.clone(),
             daemon_instance_id: local_instance_id_for_config(&self.config),
+            main_branch_ref: project.main_branch_ref.clone().unwrap_or_default(),
         };
         project_storage::add_project(&projects_dir, project)
             .map_err(|e| Status::internal(e.to_string()))?;
@@ -3591,6 +3628,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     git_url: existing.git_url,
                     main_repo_path: existing.main_repo_path,
                     daemon_instance_id: local_id,
+                    main_branch_ref: existing.main_branch_ref.unwrap_or_default(),
                 }),
             }));
         }
@@ -3651,6 +3689,104 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 git_url: stored.git_url,
                 main_repo_path: stored.main_repo_path,
                 daemon_instance_id: local_id,
+                main_branch_ref: stored.main_branch_ref.unwrap_or_default(),
+            }),
+        }))
+    }
+
+    async fn set_project_default_branch(
+        &self,
+        request: Request<SetProjectDefaultBranchRequest>,
+    ) -> Result<Response<SetProjectDefaultBranchResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let project_id = req.project_id.trim();
+        if project_id.is_empty() {
+            return Err(Status::invalid_argument("project_id is required"));
+        }
+
+        // Route to the requested host: local (empty / matching id) or forward to a peer daemon.
+        let requested_daemon = req.daemon_instance_id.trim();
+        let local_id = local_instance_id_for_config(&self.config);
+        let eligible_ids: Vec<String> = self
+            .eligible_daemon_source
+            .list_eligible_daemons()
+            .iter()
+            .map(|e| e.instance_id.0.clone())
+            .collect();
+        let route = crate::livekit_peer_discovery::classify_peer_route(
+            &local_id,
+            requested_daemon,
+            &eligible_ids,
+        )
+        .map_err(|msg| {
+            log::info!("SetProjectDefaultBranch: rejected daemon routing: {}", msg);
+            Status::failed_precondition(msg)
+        })?;
+
+        if let crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id } = route {
+            log::info!(
+                "SetProjectDefaultBranch: forwarding RPC to remote daemon_instance_id={}",
+                peer_instance_id
+            );
+            let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
+                Status::failed_precondition(
+                    "cannot forward SetProjectDefaultBranch: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
+                )
+            })?;
+            let inner =
+                crate::livekit_peer_discovery::forward_set_project_default_branch_via_livekit(
+                    slot,
+                    &peer_instance_id,
+                    &req,
+                )
+                .await?;
+            return Ok(Response::new(inner));
+        }
+
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+
+        // Validate the ref shape and project existence up front so the client gets precise codes
+        // (invalid_argument / not_found) before any registry mutation.
+        tddy_core::validate_chain_pr_integration_base_ref(req.main_branch_ref.trim())
+            .map_err(|e| Status::invalid_argument(format!("invalid main_branch_ref: {e}")))?;
+        if project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .is_none()
+        {
+            return Err(Status::not_found("project not found"));
+        }
+
+        project_storage::set_project_default_branch(
+            &projects_dir,
+            project_id,
+            req.main_branch_ref.trim(),
+        )
+        .map_err(|e| Status::internal(e.to_string()))?;
+
+        let stored = project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::internal("project vanished after write"))?;
+        log::info!(
+            "SetProjectDefaultBranch: project_id={} main_branch_ref={}",
+            project_id,
+            stored.main_branch_ref.as_deref().unwrap_or_default()
+        );
+        Ok(Response::new(SetProjectDefaultBranchResponse {
+            project: Some(ProtoProjectEntry {
+                project_id: stored.project_id,
+                name: stored.name,
+                git_url: stored.git_url,
+                main_repo_path: stored.main_repo_path,
+                daemon_instance_id: local_id,
+                main_branch_ref: stored.main_branch_ref.unwrap_or_default(),
             }),
         }))
     }

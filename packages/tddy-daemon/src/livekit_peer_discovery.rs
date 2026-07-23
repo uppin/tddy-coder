@@ -80,7 +80,8 @@ use prost::Message;
 use serde::Deserialize;
 use tddy_service::proto::connection::{
     AddProjectToHostRequest, AddProjectToHostResponse, ListProjectsRequest, ListProjectsResponse,
-    ProjectEntry as ProtoProjectEntry, StartSessionRequest, StartSessionResponse,
+    ProjectEntry as ProtoProjectEntry, SetProjectDefaultBranchRequest,
+    SetProjectDefaultBranchResponse, StartSessionRequest, StartSessionResponse,
 };
 
 use crate::config::DaemonConfig;
@@ -1119,6 +1120,29 @@ pub async fn forward_add_project_to_host_via_livekit(
         .map_err(|e| tddy_rpc::Status::internal(format!("decode AddProjectToHostResponse: {e}")))
 }
 
+/// Forward **SetProjectDefaultBranch** to another daemon in the common room via LiveKit data-channel
+/// RPC.
+///
+/// Thin encode/decode wrapper around [`forward_to_peer`].
+pub async fn forward_set_project_default_branch_via_livekit(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &SetProjectDefaultBranchRequest,
+) -> Result<SetProjectDefaultBranchResponse, tddy_rpc::Status> {
+    let body = request.encode_to_vec();
+    let out = forward_to_peer(
+        room_slot,
+        peer_instance_id,
+        "connection.ConnectionService",
+        "SetProjectDefaultBranch",
+        body,
+    )
+    .await?;
+    SetProjectDefaultBranchResponse::decode(out.as_slice()).map_err(|e| {
+        tddy_rpc::Status::internal(format!("decode SetProjectDefaultBranchResponse: {e}"))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1346,6 +1370,7 @@ mod tests {
             git_url: String::new(),
             main_repo_path: "/repo".to_string(),
             daemon_instance_id: String::new(),
+            main_branch_ref: String::new(),
         }
     }
 

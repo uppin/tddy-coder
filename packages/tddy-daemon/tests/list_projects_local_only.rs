@@ -43,6 +43,7 @@ impl EligibleDaemonSource for PeerProjectsSource {
             git_url: "https://example.com/a.git".to_string(),
             main_repo_path: "/peer/a".to_string(),
             daemon_instance_id: "server-2".to_string(),
+            main_branch_ref: String::new(),
         }]
     }
 }

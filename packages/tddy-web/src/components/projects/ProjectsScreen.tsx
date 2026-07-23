@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ProjectEntry } from "../../gen/connection_pb";
 import type { DaemonHost } from "../../lib/participantRole";
 
@@ -19,12 +19,22 @@ export interface ProjectsScreenProps {
     daemonInstanceId: string;
     userRelativePath: string;
   }) => void;
+  onSetDefaultBranch: (input: {
+    projectId: string;
+    mainBranchRef: string;
+    daemonInstanceId: string;
+  }) => void;
+  loadProjectBranches: (input: {
+    projectId: string;
+    daemonInstanceId: string;
+  }) => Promise<string[]>;
 }
 
 interface ProjectGroup {
   projectId: string;
   name: string;
   gitUrl: string;
+  mainBranchRef: string;
   hosts: { daemonInstanceId: string; mainRepoPath: string }[];
 }
 
@@ -35,7 +45,13 @@ function groupByProject(projects: ProjectEntry[]): ProjectGroup[] {
   for (const p of projects) {
     let group = byId.get(p.projectId);
     if (!group) {
-      group = { projectId: p.projectId, name: p.name, gitUrl: p.gitUrl, hosts: [] };
+      group = {
+        projectId: p.projectId,
+        name: p.name,
+        gitUrl: p.gitUrl,
+        mainBranchRef: p.mainBranchRef,
+        hosts: [],
+      };
       byId.set(p.projectId, group);
       groups.push(group);
     }
@@ -44,11 +60,23 @@ function groupByProject(projects: ProjectEntry[]): ProjectGroup[] {
   return groups;
 }
 
+/**
+ * The branch to show selected when a project has no stored default: mirror the daemon's live
+ * resolution order (`origin/master`, then `origin/main`), else the first branch.
+ */
+function defaultSelectedBranch(branches: string[]): string {
+  if (branches.includes("origin/master")) return "origin/master";
+  if (branches.includes("origin/main")) return "origin/main";
+  return branches[0] ?? "";
+}
+
 export function ProjectsScreen({
   projects,
   daemons,
   onCreateProject,
   onAddProjectToHost,
+  onSetDefaultBranch,
+  loadProjectBranches,
 }: ProjectsScreenProps) {
   const groups = useMemo(() => groupByProject(projects), [projects]);
 
@@ -125,6 +153,8 @@ export function ProjectsScreen({
             group={group}
             daemons={daemons}
             onAddProjectToHost={onAddProjectToHost}
+            onSetDefaultBranch={onSetDefaultBranch}
+            loadProjectBranches={loadProjectBranches}
           />
         ))}
       </div>
@@ -136,15 +166,37 @@ function ProjectCard({
   group,
   daemons,
   onAddProjectToHost,
+  onSetDefaultBranch,
+  loadProjectBranches,
 }: {
   group: ProjectGroup;
   daemons: DaemonHost[];
   onAddProjectToHost: ProjectsScreenProps["onAddProjectToHost"];
+  onSetDefaultBranch: ProjectsScreenProps["onSetDefaultBranch"];
+  loadProjectBranches: ProjectsScreenProps["loadProjectBranches"];
 }) {
   const hostingIds = useMemo(
     () => new Set(group.hosts.map((h) => h.daemonInstanceId)),
     [group.hosts],
   );
+
+  // The default branch is a property of the logical project; load the branch list from — and
+  // address the set-default RPC to — the project's first hosting daemon.
+  const primaryHost = group.hosts[0]?.daemonInstanceId ?? "";
+  const [branches, setBranches] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    loadProjectBranches({ projectId: group.projectId, daemonInstanceId: primaryHost })
+      .then((loaded) => {
+        if (!cancelled) setBranches(loaded);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [loadProjectBranches, group.projectId, primaryHost]);
+
+  const selectedDefaultBranch = group.mainBranchRef || defaultSelectedBranch(branches);
   const targetDaemons = useMemo(
     () => daemons.filter((d) => !hostingIds.has(d.instanceId)),
     [daemons, hostingIds],
@@ -169,6 +221,28 @@ function ProjectCard({
     >
       <div className="mb-2 font-semibold">{group.name}</div>
       <div className="mb-3 text-sm text-muted-foreground">{group.gitUrl}</div>
+
+      <div className="mb-3 flex items-center gap-2 text-sm">
+        <span className="text-muted-foreground">Default branch</span>
+        <select
+          data-testid={`project-default-branch-select-${group.projectId}`}
+          value={selectedDefaultBranch}
+          onChange={(e) =>
+            onSetDefaultBranch({
+              projectId: group.projectId,
+              mainBranchRef: e.target.value,
+              daemonInstanceId: primaryHost,
+            })
+          }
+          className="rounded border border-border px-2 py-1"
+        >
+          {branches.map((branch) => (
+            <option key={branch} value={branch}>
+              {branch}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <div className="flex flex-col gap-1">
         {group.hosts.map((host) => {
