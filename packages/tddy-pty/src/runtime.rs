@@ -102,9 +102,13 @@ impl TaskBody for PtyTaskBody {
         let stdin_rx = self.stdin_rx;
         let ready_tx = self.ready_tx;
         let output_ch_thread = Arc::clone(&output_ch);
+        // Captured from the async context so the blocking writer thread — which has no ambient
+        // runtime of its own — can drive the async stdin receiver and the child-exit signal.
+        let rt_handle = tokio::runtime::Handle::current();
 
         std::thread::spawn(move || {
-            if let Err(e) = open_pty_and_pump(spec, stdin_rx, output_ch_thread, setup_tx) {
+            if let Err(e) = open_pty_and_pump(spec, stdin_rx, output_ch_thread, setup_tx, rt_handle)
+            {
                 log::warn!(
                     target: "tddy_pty::runtime",
                     "PTY setup failed for task {}: {}",
@@ -194,6 +198,7 @@ fn open_pty_and_pump(
     mut stdin_rx: mpsc::UnboundedReceiver<Bytes>,
     output_ch: Arc<TaskChannel>,
     setup_tx: oneshot::Sender<Result<SetupResult, String>>,
+    rt_handle: tokio::runtime::Handle,
 ) -> Result<(), String> {
     if spec.argv.is_empty() {
         let _ = setup_tx.send(Err("empty argv".into()));
@@ -219,6 +224,9 @@ fn open_pty_and_pump(
     let master = Arc::new(Mutex::new(pair.master));
     let current_size = Arc::new(Mutex::new(initial_size));
     let (exit_tx, exit_rx) = oneshot::channel();
+    // Fires when the child exits so the writer thread can stop and release its master fd, rather
+    // than parking on `stdin_rx` forever (the child never reads/writes stdin once it is gone).
+    let (child_exited_tx, child_exited_rx) = oneshot::channel::<()>();
 
     // Reader: start BEFORE child spawn so fast-exiting stubs cannot miss PTY output.
     let master_for_reader = Arc::clone(&master);
@@ -288,7 +296,8 @@ fn open_pty_and_pump(
         exit_rx,
     }));
 
-    // Writer: stdin mpsc → PTY master.
+    // Writer: stdin mpsc → PTY master. Stops on stdin close, a write error, or child exit —
+    // whichever comes first — so the dup'd writer fd and the master Arc are released promptly.
     let master_for_writer = Arc::clone(&master);
     std::thread::spawn(move || {
         let writer = {
@@ -303,25 +312,22 @@ fn open_pty_and_pump(
                 );
             }
             Ok(mut w) => {
-                if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                    tokio::task::block_in_place(|| loop {
-                        let data = handle.block_on(stdin_rx.recv());
-                        match data {
-                            None => break,
-                            Some(bytes) => {
-                                if std::io::Write::write_all(&mut w, &bytes).is_err() {
-                                    break;
+                let mut child_exited_rx = child_exited_rx;
+                rt_handle.block_on(async {
+                    loop {
+                        tokio::select! {
+                            data = stdin_rx.recv() => match data {
+                                None => break,
+                                Some(bytes) => {
+                                    if std::io::Write::write_all(&mut w, &bytes).is_err() {
+                                        break;
+                                    }
                                 }
-                            }
-                        }
-                    });
-                } else {
-                    while let Some(bytes) = stdin_rx.blocking_recv() {
-                        if std::io::Write::write_all(&mut w, &bytes).is_err() {
-                            break;
+                            },
+                            _ = &mut child_exited_rx => break,
                         }
                     }
-                }
+                });
             }
         }
     });
@@ -335,6 +341,8 @@ fn open_pty_and_pump(
                 message: format!("child wait error: {e}"),
             },
         };
+        // Unblock the writer thread first so it drops its master fd, then report terminal status.
+        let _ = child_exited_tx.send(());
         let _ = exit_tx.send(status);
     });
 
@@ -394,5 +402,84 @@ mod tests {
         }
 
         registry.cancel_task(&task.id).await;
+    }
+
+    /// Weak view of a PTY master handle — lets a test observe whether every strong owner
+    /// (reader thread, writer thread, registry, ready signal) has released it.
+    type MasterWeak = std::sync::Weak<Mutex<Box<dyn MasterPty + Send>>>;
+
+    /// A spec that runs `argv` in a scratch tempdir. Meaningful ids so failures name the session.
+    fn a_pty_spec_running(argv: &[&str]) -> PtySpawnSpec {
+        PtySpawnSpec {
+            argv: argv.iter().map(|s| s.to_string()).collect(),
+            worktree_path: std::env::temp_dir(),
+            session_id: "fd-leak-session".to_string(),
+            terminal_id: "fd-leak-term".to_string(),
+            kind: "sh".to_string(),
+            env: Vec::new(),
+        }
+    }
+
+    /// Bounded wait for the task to reach a terminal status. Returns false if it never does.
+    async fn reaches_terminal_within(task: &Arc<TaskHandle>, budget: std::time::Duration) -> bool {
+        let mut status = task.status_watch();
+        tokio::time::timeout(budget, async {
+            while !status.borrow().is_terminal() {
+                if status.changed().await.is_err() {
+                    break;
+                }
+            }
+        })
+        .await
+        .is_ok()
+    }
+
+    /// Bounded wait for every strong owner of the PTY master to drop it. Returns false if some
+    /// owner still pins it when the budget expires.
+    async fn master_released_within(master: &MasterWeak, budget: std::time::Duration) -> bool {
+        tokio::time::timeout(budget, async {
+            while master.upgrade().is_some() {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .is_ok()
+    }
+
+    /// Regression test for the FD leak: when the child exits, the PTY master (and its dup'd
+    /// writer/reader fds) must be released immediately — not pinned until the task registry
+    /// ages the task out via its TTL. The session's stdin channel is deliberately kept open
+    /// (via the retained `task`) to prove the writer thread stops on child exit rather than
+    /// only when the last stdin sender drops.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn releases_the_pty_master_when_the_child_exits_even_while_stdin_stays_open() {
+        // Given — a PTY whose child exits immediately, with the session handle (and thus its
+        // stdin sender) kept alive for the whole test.
+        let registry = TaskRegistry::new();
+        let pty_registry = PtyRegistry::new();
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let task = PtyRuntime::spawn(
+            &registry,
+            &pty_registry,
+            a_pty_spec_running(&["/bin/sh", "-c", "exit 0"]),
+            ready_tx,
+        )
+        .await;
+        let ready = ready_rx.await.expect("ready signal").expect("PTY spawned");
+        let master: MasterWeak = Arc::downgrade(&ready.master);
+        drop(ready); // release the test's own strong ref — only PTY-internal owners remain.
+
+        // When — the child process exits on its own.
+        assert!(
+            reaches_terminal_within(&task, std::time::Duration::from_secs(5)).await,
+            "PTY task never reached terminal status"
+        );
+
+        // Then — the master is released promptly, even though the stdin channel is still open.
+        assert!(
+            master_released_within(&master, std::time::Duration::from_secs(3)).await,
+            "PTY master was not released after the child exited — the writer thread is still \
+             blocked on stdin and pinning the master fd"
+        );
     }
 }
