@@ -10,6 +10,10 @@ Release note history for the Web product area.
 - The **sessions drawer** (`#/sessions`) is now the **default** route: `#/` resolves to it and the legacy `ConnectionScreen` (plus its `#/terminal/:id` route) is removed. A `#/sessions/<unknown-id>` deep link shows a "session not found" state with a Home link; bulk select + delete of sessions is available in the drawer.
 - The LiveKit "Connected participants" table moves out of the old connection screen into its own **LiveKit** screen (`#/livekit`, new hamburger item), reusing the shared common-room participant hooks.
 - The standalone auth/connection forms use shared shadcn theme tokens instead of inline hardcoded hex, so every screen shares one theme.
+## 2026-07-23 — Set a project's default branch from the Projects screen
+
+- Each project card gains a **default branch** dropdown listing the project's remote branches (sourced from `ListProjectBranches`); choosing one sets the project's `main_branch_ref` via the new `SetProjectDefaultBranch` RPC and applies it across the project's hosts ([projects-screen-multi-host.md](projects-screen-multi-host.md#default-branch)).
+- A project with no stored default pre-selects `origin/master` when present, otherwise `origin/main` — matching the live default-resolution order — so a sensible default is always shown without implying one has been persisted. Any remote branch (including slash-containing names) is selectable.
 
 ## 2026-07-23 — Inspector docks as the main pane for disconnected sessions
 

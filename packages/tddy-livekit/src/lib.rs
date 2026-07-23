@@ -4,6 +4,7 @@
 //! Thin transport adapter — delegates to tddy-rpc for generic dispatch.
 
 pub mod bridge;
+pub mod chunking;
 pub mod client;
 pub mod client_factory;
 pub mod envelope;

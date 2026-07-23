@@ -1,6 +1,6 @@
 schema_version: 1
 targets:
-  - id: "my-os:rootfs"
+  - id: "rootfs"
     name: "Buildroot rootfs"
     config:
       type: buildroot_image
@@ -8,3 +8,4 @@ targets:
       buildroot_dir: "external/buildroot"
       output_dir: "build/br-out"
       srcs: ["board/my-os/"]
+

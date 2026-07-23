@@ -20,6 +20,7 @@ use livekit::prelude::*;
 
 use tddy_rpc::client_engine::ClientEngine;
 
+use crate::chunking::{self, ChunkReassembler};
 use crate::client::RpcClient;
 use crate::envelope::decode_response;
 use crate::rpc_trace;
@@ -106,18 +107,36 @@ impl LiveKitRpcClientFactory {
         tokio::spawn(async move {
             let engine_for_task = registry_for_task.engine.clone();
             log::debug!("LiveKitRpcClientFactory: shared response loop started");
+            // This loop reassembles responses from *every* peer in the room (a browser may talk to
+            // several daemons), so chunk frames are grouped per sender — message ids are only
+            // unique within one sender, and mixing two senders' chunks would corrupt reassembly.
+            let mut reassemblers: HashMap<Option<String>, ChunkReassembler> = HashMap::new();
             while let Some(event) = events.recv().await {
                 if let RoomEvent::DataReceived {
                     payload,
                     topic,
                     kind: _,
-                    participant: _,
+                    participant,
                 } = event
                 {
                     if topic.as_deref() != Some(RPC_TOPIC) {
                         continue;
                     }
                     let payload = Arc::try_unwrap(payload).unwrap_or_else(|a| (*a).clone());
+                    let payload = if chunking::is_chunk_frame(&payload) {
+                        let sender = participant.as_ref().map(|p| p.identity().to_string());
+                        let reassembler = reassemblers.entry(sender).or_default();
+                        match reassembler.accept(&payload) {
+                            Ok(Some(full)) => full,
+                            Ok(None) => continue,
+                            Err(e) => {
+                                rpc_trace!("LiveKitRpcClientFactory: malformed chunk frame: {}", e);
+                                continue;
+                            }
+                        }
+                    } else {
+                        payload
+                    };
                     match decode_response(&payload) {
                         Ok(response) => {
                             rpc_trace!(

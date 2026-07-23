@@ -15,7 +15,7 @@ A **Project** is a named configuration linking a **git URL** to a **main reposit
 | `name` | User-chosen name; also used as the directory name under the repos base |
 | `git_url` | Remote URL (e.g. `https://github.com/org/repo.git`) |
 | `main_repo_path` | Absolute path to the cloned repository |
-| `main_branch_ref` | Optional. Remote-tracking ref used as the integration base for worktree fetch and checkout (e.g. `origin/main`, `origin/master`). Omitted rows use **`origin/master`** as the documented default at resolution time. |
+| `main_branch_ref` | Optional. Remote-tracking ref (`origin/<path>`) used as the integration base for worktree fetch and checkout (e.g. `origin/main`, `origin/release/2025`). Set/updated from the Projects UI. Omitted (legacy) rows resolve live at resolution time (`origin/master` → `origin/main` → `origin/HEAD`); see [Git integration base ref](../coder/git-integration-base-ref.md). |
 | `host_repo_paths` | Per-host (or per-daemon-instance) checkout paths keyed by host key; see multi-host daemon docs. |
 
 ## Storage

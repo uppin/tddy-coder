@@ -8,30 +8,62 @@ Workflow sessions that materialize a git worktree select a **remote-tracking int
 
 ## Behavior
 
-### Default resolution (no project override)
+### The default branch is a property of the project
 
-When the workflow calls `setup_worktree_for_session` with only the repository root and session directory, **tddy-core** resolves the base ref after `git fetch origin`:
+The remote-tracking integration base ref is a first-class, user-settable property of the
+**project** (`main_branch_ref`), managed from the Projects screen
+([projects-screen-multi-host.md](../web/projects-screen-multi-host.md#default-branch)). It is the
+single source of truth for the default base ref across every session-start surface (web/gRPC
+`StartSession` and Telegram).
 
-1. `origin/master` when that ref exists on the remote.
-2. Otherwise `origin/main` when that ref exists.
-3. Otherwise the symbolic ref `refs/remotes/origin/HEAD` when it points at a valid `origin/<branch>`.
+### Unified resolution
+
+**`effective_integration_base_ref_for_project`** is the one resolver every default-base path
+consults when the caller supplies no explicit override:
+
+1. **Default branch set** — when the project row has a `main_branch_ref`, that ref is returned
+   verbatim. The probe below **does not run** and has no effect.
+2. **Legacy project (no default branch set)** — the ref is resolved live against the project's
+   repository via **`resolve_default_integration_base_ref`** after `git fetch origin`:
+   1. `origin/master` when that ref exists on the remote.
+   2. Otherwise `origin/main` when that ref exists.
+   3. Otherwise the symbolic ref `refs/remotes/origin/HEAD` when it points at a valid `origin/<branch>`.
+
+Live probing (`origin/master` → `origin/main` → `origin/HEAD`) is therefore **legacy-only**: it
+resolves the default for rows that predate the setting and loses effect the moment a default branch
+is stored. This replaces the previous hardcoded `origin/master` fallback for unset rows.
 
 ### Project registry
 
-Registered projects live in `~/.tddy/projects/projects.yaml`. Each row has optional **`main_branch_ref`**: a single remote-tracking ref of the form `origin/<branch-name>`.
+Registered projects live in `~/.tddy/projects/projects.yaml`. Each row has optional
+**`main_branch_ref`**: a remote-tracking ref of the form `origin/<path>` (one or more segments,
+e.g. `origin/main` or `origin/release/2025`).
 
-- Rows **without** `main_branch_ref` use the documented default **`origin/master`** (same effective behavior as historical hardcoding).
-- **`effective_integration_base_ref_for_project`** returns the stored ref or that default.
-- **`add_project`** rejects invalid `main_branch_ref` values before any YAML write.
+- Rows **without** `main_branch_ref` resolve live (legacy path above).
+- **`effective_integration_base_ref_for_project`** returns the stored ref, or the live-resolved
+  ref for legacy rows.
+- **`set_project_default_branch`** updates a project's stored ref (validated before any YAML write);
+  **`add_project`** rejects invalid `main_branch_ref` values before any YAML write.
 
 ### Validation
 
-Integration base strings must match `origin/<one segment>` with no shell metacharacters or `git` option injection patterns (`validate_integration_base_ref` in **tddy-core**).
+A project default branch must be an `origin/<path>` remote-tracking ref with no shell
+metacharacters, no `..`, no `--`, and no whitespace — the same class of unsafe input rejected
+elsewhere (`validate_chain_pr_integration_base_ref` in **tddy-core**). Any remote branch listed by
+`list_recent_remote_branches` is therefore a valid choice, including slash-containing names.
+(`validate_integration_base_ref` — single-segment only — still governs the per-session
+`selected_integration_base_ref` override.)
 
 ## API and tooling surface
 
 - **tddy-daemon** `ProjectData` includes optional `main_branch_ref` (serde).
-- **CreateProject** paths that build `ProjectData` supply `main_branch_ref` when the connection API exposes it; otherwise the field is absent and the default applies at resolution time.
+- **ConnectionService** `ProjectEntry` carries `main_branch_ref` so clients can read a project's
+  stored default; empty means "not set" (legacy resolution applies).
+- **`SetProjectDefaultBranch`** persists a project's default branch and forwards the change to peer
+  hosts that own the same logical `project_id` (logical-project scope, mirroring `AddProjectToHost`).
+- **`StartSession`** with an empty `selected_integration_base_ref` resolves its default base through
+  `effective_integration_base_ref_for_project`, so the stored default applies to web sessions, not
+  only Telegram.
 
 ## Related
 
