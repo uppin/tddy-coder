@@ -72,7 +72,27 @@ function useProjectsRpc(
     [clientForHost, sessionToken, loadProjects],
   );
 
-  return { projects, createProject, addProjectToHost };
+  const setDefaultBranch = useCallback(
+    (input: { projectId: string; mainBranchRef: string; daemonInstanceId: string }) => {
+      if (!client) return;
+      client
+        .setProjectDefaultBranch({ sessionToken, ...input })
+        .then(() => loadProjects())
+        .catch(() => {});
+    },
+    [client, sessionToken, loadProjects],
+  );
+
+  const loadProjectBranches = useCallback(
+    async (input: { projectId: string; daemonInstanceId: string }): Promise<string[]> => {
+      if (!client) return [];
+      const res = await client.listProjectBranches({ sessionToken, ...input });
+      return res.branches;
+    },
+    [client, sessionToken],
+  );
+
+  return { projects, createProject, addProjectToHost, setDefaultBranch, loadProjectBranches };
 }
 
 /**
@@ -98,11 +118,8 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
         : null,
     [room, liveKitFactory],
   );
-  const { projects, createProject, addProjectToHost } = useProjectsRpc(
-    client,
-    clientForHost,
-    sessionToken ?? "",
-  );
+  const { projects, createProject, addProjectToHost, setDefaultBranch, loadProjectBranches } =
+    useProjectsRpc(client, clientForHost, sessionToken ?? "");
 
   return (
     <div className={screenShellClassName}>
@@ -118,6 +135,8 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
         daemons={daemons}
         onCreateProject={createProject}
         onAddProjectToHost={addProjectToHost}
+        onSetDefaultBranch={setDefaultBranch}
+        loadProjectBranches={loadProjectBranches}
       />
     </div>
   );

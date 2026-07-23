@@ -14,6 +14,7 @@ import {
   projectAddToHostSubmit,
   projectAddToHostUserRelativePath,
   projectHostBaseLocation,
+  projectDefaultBranchSelect,
   TEST_IDS,
 } from "../testIds";
 
@@ -94,6 +95,33 @@ export const projectsScreenPage = {
   /** A host's advertised base clone location (`repos_base_path`) rendered in the Projects screen. */
   hostBaseLocation: (daemonInstanceId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(projectHostBaseLocation(daemonInstanceId), { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
+  // Default branch
+  // ---------------------------------------------------------------------------
+
+  /** The default-branch (`main_branch_ref`) dropdown for a project. */
+  defaultBranchSelect: (projectId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(projectDefaultBranchSelect(projectId), { timeout: 5000, ...options }),
+
+  /** The currently selected default-branch value for a project. */
+  defaultBranchValue: (projectId: string): Cypress.Chainable<string> =>
+    projectsScreenPage
+      .defaultBranchSelect(projectId)
+      .find("option:selected")
+      .then(($opt) => (($opt[0] as HTMLOptionElement)?.value ?? "")),
+
+  /** The remote-branch values offered in the default-branch dropdown, in option order. */
+  defaultBranchOptionValues: (projectId: string): Cypress.Chainable<string[]> =>
+    projectsScreenPage
+      .defaultBranchSelect(projectId)
+      .find("option")
+      .then(($opts) => [...$opts].map((el) => (el as HTMLOptionElement).value)),
+
+  /** Choose a remote branch as the project's default branch (the dropdown submits on change). */
+  setDefaultBranch(projectId: string, mainBranchRef: string) {
+    byTestId(projectDefaultBranchSelect(projectId)).select(mainBranchRef);
+  },
 
   // ---------------------------------------------------------------------------
   // Create project

@@ -35,6 +35,24 @@ The projects table and create-project form are **removed** from `ConnectionScree
 the session-to-project/host association helpers (`sessionProjectTable.ts`) remain,
 as the sessions views still use them.
 
+## Default branch
+
+Each project card exposes a **default branch** selector — the project's integration base ref
+(`main_branch_ref`), the branch new worktrees are cut from. See
+[Git integration base ref](../coder/git-integration-base-ref.md) for the resolution contract.
+
+- The selector is a **dropdown of the project's remote branches**, sourced from
+  **`ListProjectBranches`** (`git branch -r`, most-recent first) for the project's first host row.
+  **Any** remote branch is selectable, including slash-containing names (`origin/release/2025`).
+- The current stored default (`ProjectEntry.main_branch_ref`) is shown **selected**. When a project
+  has **no** stored default (legacy), the dropdown pre-selects **`origin/master`** when present,
+  otherwise **`origin/main`** — matching the live default-resolution order — so a sensible default
+  is always shown without implying one has been persisted.
+- Choosing a branch calls **`SetProjectDefaultBranch`** (project id + chosen ref + the host's
+  `daemon_instance_id`) and refreshes the list. Because the default branch is a **property of the
+  logical project**, the daemon applies it to every host row that owns the same `project_id`
+  (peer-forwarded like **Add to host**), and the selection persists across hosts.
+
 ## Adding a project to a host
 
 **`AddProjectToHost`** makes an existing project available on a target host while

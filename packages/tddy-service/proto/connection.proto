@@ -45,6 +45,9 @@ service ConnectionService {
   rpc StopTerminalSession(StopTerminalSessionRequest) returns (StopTerminalSessionResponse);
   rpc ListTerminalSessions(ListTerminalSessionsRequest) returns (ListTerminalSessionsResponse);
   rpc ListProjectBranches(ListProjectBranchesRequest) returns (ListProjectBranchesResponse);
+  // Set a project's default integration base ref (logical-project scope: forwarded to peer hosts
+  // owning the same project_id). See docs/ft/coder/git-integration-base-ref.md.
+  rpc SetProjectDefaultBranch(SetProjectDefaultBranchRequest) returns (SetProjectDefaultBranchResponse);
   // Remote-codebase mode: execute a tool in a session worktree, or list available tools.
   rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse);
   rpc ListExecTools(ListExecToolsRequest) returns (ListExecToolsResponse);
@@ -196,6 +199,10 @@ message ProjectEntry {
   string main_repo_path = 4;
   // Owning daemon for this registry row (multi-daemon aggregated ListProjects).
   string daemon_instance_id = 5;
+  // Stored default integration base ref (`origin/<branch>`, possibly multi-segment). Empty = unset;
+  // legacy rows resolve their default live from the repository. See
+  // docs/ft/coder/git-integration-base-ref.md.
+  string main_branch_ref = 6;
 }
 
 message ListProjectsRequest {
@@ -485,6 +492,19 @@ message ListProjectBranchesRequest {
 
 message ListProjectBranchesResponse {
   repeated string branches = 1;
+}
+
+// --- Project default branch (integration base ref) ---
+
+message SetProjectDefaultBranchRequest {
+  string session_token = 1;
+  string project_id = 2;
+  string main_branch_ref = 3;
+  string daemon_instance_id = 4;
+}
+
+message SetProjectDefaultBranchResponse {
+  ProjectEntry project = 1;
 }
 
 // --- Claude Code CLI terminal I/O streaming ---

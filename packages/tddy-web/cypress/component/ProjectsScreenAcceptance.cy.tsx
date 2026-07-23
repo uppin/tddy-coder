@@ -43,15 +43,24 @@ function aProject(overrides: Partial<ProjectEntry>): ProjectEntry {
     gitUrl: "https://example.com/alpha.git",
     mainRepoPath: "/home/dev/repos/alpha",
     daemonInstanceId: LOCAL_HOST,
+    mainBranchRef: "",
     ...overrides,
   } as ProjectEntry;
 }
 
-/** In-memory backend pre-seeded with the RPCs `ProjectsAppPage` calls on startup. */
-function aProjectsBackend(projects: ProjectEntry[]): InMemoryRpcBackend {
+/** No-op branch loader for presentational tests that don't exercise the default-branch dropdown. */
+const noBranches = () => Promise.resolve<string[]>([]);
+
+/**
+ * In-memory backend pre-seeded with the RPCs `ProjectsAppPage` calls on startup. `branches` seeds
+ * the default-branch dropdown; `setProjectDefaultBranch` mutates the local project state so a
+ * refreshed list reflects the new default.
+ */
+function aProjectsBackend(projects: ProjectEntry[], branches: string[] = []): InMemoryRpcBackend {
   const state = [...projects];
   return anInMemoryRpcBackend()
     .onUnary(ConnectionService.method.listProjects, () => ({ projects: state }))
+    .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches }))
     .onUnary(ConnectionService.method.createProject, (req) => {
       const project = aProject({
         projectId: "proj-new",
@@ -60,6 +69,13 @@ function aProjectsBackend(projects: ProjectEntry[]): InMemoryRpcBackend {
         daemonInstanceId: LOCAL_HOST,
       });
       state.push(project);
+      return { project };
+    })
+    .onUnary(ConnectionService.method.setProjectDefaultBranch, (req) => {
+      for (const p of state) {
+        if (p.projectId === req.projectId) p.mainBranchRef = req.mainBranchRef;
+      }
+      const project = state.find((p) => p.projectId === req.projectId)!;
       return { project };
     });
 }
@@ -144,6 +160,8 @@ it("adds a project to the selected host reusing the project's existing id", () =
       daemons={DAEMON_HOSTS}
       onCreateProject={cy.stub()}
       onAddProjectToHost={onAddProjectToHost}
+      onSetDefaultBranch={cy.stub()}
+      loadProjectBranches={noBranches}
     />,
   );
 
@@ -166,6 +184,8 @@ it("offers only hosts that do not already host the project as add-to-host target
       daemons={DAEMON_HOSTS}
       onCreateProject={cy.stub()}
       onAddProjectToHost={cy.stub()}
+      onSetDefaultBranch={cy.stub()}
+      loadProjectBranches={noBranches}
     />,
   );
 
@@ -213,6 +233,8 @@ it("adds the project to the chosen host at the entered clone location", () => {
       daemons={DAEMON_HOSTS}
       onCreateProject={cy.stub()}
       onAddProjectToHost={onAddProjectToHost}
+      onSetDefaultBranch={cy.stub()}
+      loadProjectBranches={noBranches}
     />,
   );
 
@@ -240,9 +262,112 @@ it("shows the base clone location advertised by a hosting daemon", () => {
       daemons={daemonsWithBase}
       onCreateProject={cy.stub()}
       onAddProjectToHost={cy.stub()}
+      onSetDefaultBranch={cy.stub()}
+      loadProjectBranches={noBranches}
     />,
   );
 
   // Then — the hosting daemon's base location is surfaced on its host row
   projectsScreenPage.hostBaseLocation(LOCAL_HOST).should("contain.text", "repos");
+});
+
+// ---------------------------------------------------------------------------
+// Default branch (main_branch_ref)
+// ---------------------------------------------------------------------------
+
+it("shows the project's stored default branch as the selected branch", () => {
+  // Given a project whose stored default branch is origin/dev
+  cy.mount(
+    <ProjectsScreen
+      projects={[aProject({ projectId: "proj-alpha", mainBranchRef: "origin/dev" })]}
+      daemons={DAEMON_HOSTS}
+      onCreateProject={cy.stub()}
+      onAddProjectToHost={cy.stub()}
+      onSetDefaultBranch={cy.stub()}
+      loadProjectBranches={() =>
+        Promise.resolve(["origin/master", "origin/main", "origin/dev"])
+      }
+    />,
+  );
+
+  // Then — the dropdown shows the stored default as selected
+  projectsScreenPage.defaultBranchValue("proj-alpha").should("equal", "origin/dev");
+});
+
+it("pre-selects origin/master when a project has no stored default and master exists", () => {
+  // Given a legacy project (no stored default) whose remote has both master and main
+  cy.mount(
+    <ProjectsScreen
+      projects={[aProject({ projectId: "proj-alpha", mainBranchRef: "" })]}
+      daemons={DAEMON_HOSTS}
+      onCreateProject={cy.stub()}
+      onAddProjectToHost={cy.stub()}
+      onSetDefaultBranch={cy.stub()}
+      loadProjectBranches={() =>
+        Promise.resolve(["origin/main", "origin/master", "origin/dev"])
+      }
+    />,
+  );
+
+  // Then — the dropdown pre-selects origin/master (the live-resolution first choice)
+  projectsScreenPage.defaultBranchValue("proj-alpha").should("equal", "origin/master");
+});
+
+it("pre-selects origin/main when a project has no stored default and no master exists", () => {
+  // Given a legacy project whose remote has main but not master
+  cy.mount(
+    <ProjectsScreen
+      projects={[aProject({ projectId: "proj-alpha", mainBranchRef: "" })]}
+      daemons={DAEMON_HOSTS}
+      onCreateProject={cy.stub()}
+      onAddProjectToHost={cy.stub()}
+      onSetDefaultBranch={cy.stub()}
+      loadProjectBranches={() => Promise.resolve(["origin/dev", "origin/main"])}
+    />,
+  );
+
+  // Then — the dropdown pre-selects origin/main
+  projectsScreenPage.defaultBranchValue("proj-alpha").should("equal", "origin/main");
+});
+
+it("offers every remote branch, including slash-containing names, as a selectable default", () => {
+  // Given a project whose remote branches include a slash-containing name
+  cy.mount(
+    <ProjectsScreen
+      projects={[aProject({ projectId: "proj-alpha", mainBranchRef: "origin/main" })]}
+      daemons={DAEMON_HOSTS}
+      onCreateProject={cy.stub()}
+      onAddProjectToHost={cy.stub()}
+      onSetDefaultBranch={cy.stub()}
+      loadProjectBranches={() =>
+        Promise.resolve(["origin/main", "origin/master", "origin/release/2025"])
+      }
+    />,
+  );
+
+  // Then — the slash-containing branch is offered as a choice
+  projectsScreenPage
+    .defaultBranchOptionValues("proj-alpha")
+    .should("deep.equal", ["origin/main", "origin/master", "origin/release/2025"]);
+});
+
+it("sets the project default branch to the chosen remote branch", () => {
+  // Given a legacy project and a set of remote branches to choose from
+  const backend = aProjectsBackend(
+    [aProject({ projectId: "proj-alpha", mainBranchRef: "" })],
+    ["origin/master", "origin/main", "origin/dev"],
+  );
+
+  // When — the operator chooses origin/dev as the default branch
+  mountWithRpc(mountProjectsAppPage(cy.stub()), backend);
+  projectsScreenPage.setDefaultBranch("proj-alpha", "origin/dev");
+
+  // Then — SetProjectDefaultBranch is called with the chosen ref for that project
+  cy.wrap(backend).should((b) => {
+    const calls = b.callsTo(ConnectionService.method.setProjectDefaultBranch);
+    expect(calls).to.have.length(1);
+    expect(calls[0].projectId).to.equal("proj-alpha");
+    expect(calls[0].mainBranchRef).to.equal("origin/dev");
+  });
+  projectsScreenPage.defaultBranchValue("proj-alpha").should("equal", "origin/dev");
 });
