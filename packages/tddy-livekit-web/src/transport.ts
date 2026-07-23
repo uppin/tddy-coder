@@ -31,6 +31,12 @@ import {
   type RpcError,
 } from "./gen/rpc_envelope_pb.js";
 import { AsyncQueue } from "./async-queue.js";
+import {
+  ChunkReassembler,
+  frameForTransport,
+  isChunkFrame,
+  nextMessageId,
+} from "./chunking.js";
 
 const RPC_TOPIC = "tddy-rpc";
 
@@ -71,16 +77,29 @@ export class RoomRpcRegistry {
   readonly pendingStreams = new Map<number, AsyncQueue<Uint8Array>>();
   private nextId = 1;
   private listener:
-    | ((payload: Uint8Array, participant?: unknown, kind?: unknown, topic?: string) => void)
+    | ((
+        payload: Uint8Array,
+        participant?: { identity?: string } | null,
+        kind?: unknown,
+        topic?: string,
+      ) => void)
     | null = null;
+  // Reassemble chunked responses from *every* peer in the room (a browser may talk to several
+  // daemons), so frames are grouped per sender — message ids are only unique within one sender.
+  private readonly reassemblers = new Map<string | undefined, ChunkReassembler>();
 
   constructor(
     private readonly room: Room,
     private readonly debug = false,
   ) {
-    this.listener = (payload: Uint8Array, _participant?: unknown, _kind?: unknown, topic?: string) => {
+    this.listener = (
+      payload: Uint8Array,
+      participant?: { identity?: string } | null,
+      _kind?: unknown,
+      topic?: string,
+    ) => {
       if (topic !== RPC_TOPIC) return;
-      this.route(payload as Uint8Array);
+      this.route(payload as Uint8Array, participant?.identity);
     };
     this.room.on(RoomEvent.DataReceived, this.listener as any);
   }
@@ -89,9 +108,11 @@ export class RoomRpcRegistry {
     return this.nextId++;
   }
 
-  private route(payload: Uint8Array): void {
+  private route(payload: Uint8Array, sender?: string): void {
+    const full = this.reassemble(payload, sender);
+    if (full === null) return;
     try {
-      const response = fromBinary(RpcResponseSchema, payload) as RpcResponse;
+      const response = fromBinary(RpcResponseSchema, full) as RpcResponse;
       const requestId = response.requestId;
       const streamQueue = this.pendingStreams.get(requestId);
       if (streamQueue) {
@@ -121,6 +142,24 @@ export class RoomRpcRegistry {
     }
   }
 
+  /** Reassemble one frame from `sender`: a raw envelope passes through unchanged; a chunk frame is
+   *  buffered in `sender`'s reassembler until its message completes. Returns `null` while chunks are
+   *  outstanding or when a frame is malformed (logged and dropped). */
+  private reassemble(payload: Uint8Array, sender?: string): Uint8Array | null {
+    if (!isChunkFrame(payload)) return payload;
+    let reassembler = this.reassemblers.get(sender);
+    if (!reassembler) {
+      reassembler = new ChunkReassembler();
+      this.reassemblers.set(sender, reassembler);
+    }
+    try {
+      return reassembler.accept(payload);
+    } catch (e) {
+      if (this.debug) registryLog(`malformed chunk frame:`, e);
+      return null;
+    }
+  }
+
   dispose(): void {
     if (this.listener) {
       this.room.off(RoomEvent.DataReceived, this.listener as any);
@@ -128,6 +167,7 @@ export class RoomRpcRegistry {
     }
     this.pendingUnary.clear();
     this.pendingStreams.clear();
+    this.reassemblers.clear();
   }
 }
 
@@ -203,6 +243,9 @@ export class LiveKitTransport implements Transport {
       return;
     }
 
+    // This listener accepts frames only from `targetIdentity` (a single sender), so one reassembler
+    // suffices; ordered reliable delivery keeps a message's chunks contiguous.
+    const inboundReassembler = new ChunkReassembler();
     this.listener = (
       payload: Uint8Array,
       participant?: { identity?: string } | null,
@@ -223,8 +266,22 @@ export class LiveKitTransport implements Transport {
 
       this.meter?.record("in", payload.length);
 
+      let full: Uint8Array;
+      if (isChunkFrame(payload)) {
+        try {
+          const result = inboundReassembler.accept(payload);
+          if (result === null) return;
+          full = result;
+        } catch (e) {
+          if (this.debug) transportLog(`malformed chunk frame:`, e);
+          return;
+        }
+      } else {
+        full = payload;
+      }
+
       try {
-        const response = fromBinary(RpcResponseSchema, payload) as RpcResponse;
+        const response = fromBinary(RpcResponseSchema, full) as RpcResponse;
         const requestId = response.requestId;
 
         if (this.debug) {
@@ -289,11 +346,17 @@ export class LiveKitTransport implements Transport {
         `publish request_id=${request.requestId} bytes=${payload.length} target=${this.targetIdentity}`
       );
     }
-    this.room.localParticipant.publishData(payload, {
-      reliable: true,
-      topic: RPC_TOPIC,
-      destinationIdentities: [this.targetIdentity],
-    });
+    // Fits-in-one-packet requests go out raw (unchanged wire bytes); an oversized request is split
+    // into chunk frames that each fit LiveKit's negotiated max message size. The receiver's
+    // reassembler is index-keyed, so frames need not arrive in order.
+    const messageId = nextMessageId();
+    for (const frame of frameForTransport(messageId, payload)) {
+      this.room.localParticipant.publishData(frame, {
+        reliable: true,
+        topic: RPC_TOPIC,
+        destinationIdentities: [this.targetIdentity],
+      });
+    }
   }
 
   async unary<I extends DescMessage, O extends DescMessage>(
