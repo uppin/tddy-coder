@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::capabilities::BuildMode;
 use crate::error::BuildError;
 use crate::proto::BuildAction;
 
@@ -27,8 +28,26 @@ pub trait BuildPlugin: Send + Sync {
     /// The `config.type` tags this plugin handles, e.g. `["rust_binary", "rust_library"]`.
     fn type_names(&self) -> &'static [&'static str];
 
-    /// Lower the target described by `ctx` into its ordered build actions.
+    /// Lower the target described by `ctx` into its ordered build actions (the compile lifecycle).
     fn lower(&self, ctx: &LowerContext) -> Result<Vec<BuildAction>, BuildError>;
+
+    /// Lower the target for a specific lifecycle `mode`. The default supports only
+    /// [`BuildMode::Compile`] (delegating to [`Self::lower`]); a plugin overrides this to emit
+    /// test/run actions. An unsupported mode is a hard error — never a silent fallback to compile.
+    fn lower_mode(
+        &self,
+        ctx: &LowerContext,
+        mode: BuildMode,
+    ) -> Result<Vec<BuildAction>, BuildError> {
+        match mode {
+            BuildMode::Compile => self.lower(ctx),
+            other => Err(BuildError::Manifest(format!(
+                "target type '{}' does not support {}",
+                ctx.type_name,
+                other.label()
+            ))),
+        }
+    }
 }
 
 /// Maps target `type` tags to the plugins that handle them.

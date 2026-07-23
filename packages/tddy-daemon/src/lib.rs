@@ -4,6 +4,7 @@ pub mod action_service;
 pub mod active_elicitation;
 pub mod agent_list_mapping;
 pub mod auth;
+pub mod bsp_service;
 pub mod claude_cli_session;
 pub mod cli_session_manager;
 mod codex_oauth_participant_metadata;

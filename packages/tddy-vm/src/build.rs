@@ -1265,6 +1265,7 @@ pub async fn build_vm_image(repo_root: &Path, build_target: &str) -> Result<Path
         &graph,
         build_target,
         &ExecuteOptions::default(),
+        tddy_build::BuildMode::Compile,
         &registry,
     )
     .await

@@ -11,6 +11,7 @@
 
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 import { create, toBinary, fromBinary } from "@bufbuild/protobuf";
+import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 import { RoomEvent } from "livekit-client";
 import {
   RpcRequestSchema,
@@ -179,6 +180,59 @@ describe("LiveKitTransport meter option", () => {
         // no meter
       });
     }).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A method whose response message carries a 64-bit integer field.
+//
+// `google.protobuf.Timestamp.seconds` is an int64, which protobuf-es decodes to a JS `BigInt` — the
+// same shape as the daemon's `GetHostDiskStatsResponse.available_bytes` (uint64) and
+// `SessionEntry.bytes_in/out` (uint64). Using it here lets this in-package test exercise a
+// BigInt-bearing response without importing the daemon's protos.
+// ---------------------------------------------------------------------------
+
+const FAKE_METHOD_RETURNING_TIMESTAMP = {
+  kind: "unary",
+  name: "GetTime",
+  parent: { typeName: "test.TestService" },
+  input: RpcRequestSchema,
+  output: TimestampSchema,
+} as any;
+
+/** A valid RpcResponse for `requestId` wrapping a `Timestamp` whose int64 `seconds` = `seconds`. */
+function aTimestampResponse(requestId: number, seconds: bigint): Uint8Array {
+  const message = toBinary(TimestampSchema, create(TimestampSchema, { seconds }));
+  return makeResponsePayload(requestId, message);
+}
+
+describe("LiveKitTransport unary — responses carrying 64-bit integer fields", () => {
+  it("resolves a response whose message has a 64-bit integer field when debug logging is enabled", async () => {
+    // Given — a transport with debug logging enabled (the condition under which the response is
+    // logged), about to receive a message carrying a 64-bit integer field (decodes to a BigInt).
+    let capturedRequestId = 0;
+    const fakeRoom = makeFakeRoom((payload) => {
+      capturedRequestId = fromBinary(RpcRequestSchema, payload).requestId;
+    });
+    const transport = new LiveKitTransport({
+      room: fakeRoom as any,
+      targetIdentity: "server",
+      debug: true,
+    } as any);
+
+    // When — the call is made and the server replies with seconds = 1_700_000_000 (a BigInt)
+    const callPromise = transport.unary(FAKE_METHOD_RETURNING_TIMESTAMP, undefined, undefined, undefined, {});
+    await Promise.resolve();
+    fakeRoom._emit(
+      RoomEvent.DataReceived,
+      aTimestampResponse(capturedRequestId, 1_700_000_000n),
+      { identity: "server" },
+      "tddy-rpc",
+    );
+
+    // Then — the call resolves with the 64-bit value intact (debug logging must not throw on BigInt)
+    const result = await callPromise;
+    expect(result.message.seconds).toBe(1_700_000_000n);
   });
 });
 

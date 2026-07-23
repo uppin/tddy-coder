@@ -20,7 +20,9 @@ import {
 
 // EchoRequestSchema will come from the generated protobuf-es descriptor.
 // Import fails until the reflection plumbing is in place and re-export is set up.
-import { EchoRequestSchema } from "../gen/test/echo_service_pb";
+// EchoResponseSchema carries a `uint64 timestamp` field — a 64-bit scalar that protobuf-es
+// represents as a JS BigInt, used to pin BigInt-safe serialization.
+import { EchoRequestSchema, EchoResponseSchema } from "../gen/test/echo_service_pb";
 
 // ---------------------------------------------------------------------------
 // defaultRequestJson
@@ -87,6 +89,23 @@ describe("patchRequestJsonField", () => {
     // Then
     const parsed = JSON.parse(patched);
     expect(parsed.message).toBe("hello world");
+  });
+
+  it("serializes a uint64 (BigInt) field the protobuf-es way when normalization falls back", () => {
+    // Given — raw JSON that is not yet valid for the schema (a leftover field from mid-edit), so
+    // protobuf-es normalization fails and the fallback serialization path runs.
+    const notYetValidJson = '{"leftoverFromEditing":"wip"}';
+
+    // When — the form builder sets the proto `uint64 timestamp` field, which it holds as a JS BigInt
+    // (beyond Number.MAX_SAFE_INTEGER, so it can only survive as a string).
+    const patch = () =>
+      patchRequestJsonField(EchoResponseSchema, notYetValidJson, "timestamp", 9007199254740993n);
+
+    // Then — it does not crash with "cannot serialize BigInt" ...
+    expect(patch).not.toThrow();
+    // ... and the BigInt is serialized the protobuf-es way, as a proto-JSON string
+    const parsed = JSON.parse(patch());
+    expect(parsed.timestamp).toBe("9007199254740993");
   });
 
   it("overwrites the previous value on a repeat patch", () => {

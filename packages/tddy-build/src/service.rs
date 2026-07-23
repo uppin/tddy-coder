@@ -6,6 +6,7 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
+use crate::capabilities::BuildMode;
 use crate::discovery::discover_build_manifests;
 use crate::error::BuildError;
 use crate::executor::{execute_target, ExecuteOptions};
@@ -59,12 +60,13 @@ pub fn build_list_json(repo_root: &Path, query: &BuildListQuery) -> Result<Value
     }))
 }
 
-/// Build `target` and return the build record as JSON (`status`, `target`, `actions`).
+/// Build `target` in `mode` and return the build record as JSON (`status`, `target`, `actions`).
 pub async fn build_json(
     repo_root: &Path,
     target: &str,
     no_cache: bool,
     dry_run: bool,
+    mode: BuildMode,
     registry: &PluginRegistry,
 ) -> Result<Value, BuildError> {
     let manifests = discover_build_manifests(repo_root)?
@@ -77,7 +79,7 @@ pub async fn build_json(
         dry_run,
         ..ExecuteOptions::default()
     };
-    let record = execute_target(repo_root, &graph, target, &opts, registry).await?;
+    let record = execute_target(repo_root, &graph, target, &opts, mode, registry).await?;
 
     let mut value =
         serde_json::to_value(&record).map_err(|e| BuildError::Manifest(e.to_string()))?;

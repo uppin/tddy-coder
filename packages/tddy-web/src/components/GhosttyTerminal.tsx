@@ -929,7 +929,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       focus() {
         const term = termRef.current;
         if (!term) return;
-        term.textarea?.removeAttribute("readonly");
+        const textarea = term.textarea;
+        if (textarea) {
+          // ghostty-web routes keyboard input through this off-screen textarea — clicking the
+          // terminal focuses it (see the library's canvas mousedown handler), and keydown bubbles
+          // from it to the contenteditable host that owns the key listener. Focusing it directly is
+          // what makes the terminal keyboard-ready. `term.focus()` instead focuses the host wrapper
+          // and re-asserts that focus on a timer, so it can't be used to land focus on the input.
+          textarea.removeAttribute("readonly");
+          textarea.focus();
+          return;
+        }
         term.focus();
       },
       getBufferText() {

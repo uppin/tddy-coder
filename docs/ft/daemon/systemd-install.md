@@ -38,6 +38,9 @@ The generated unit uses **`ExecStart`** pointing at the resolved **`tddy-daemon`
 | `INSTALL_WEB_BUNDLE_DIR` | Web bundle directory (default `$INSTALL_PREFIX/share/tddy/web`). |
 | `INSTALL_NO_SYSTEMCTL=1` | Skip root check and all **`systemctl`** calls (automated tests). |
 | `INSTALL_OVERWRITE_SYSTEMD_UNIT=1` | Replace an existing unit file; default preserves an existing file so local edits (e.g. **User=**) are kept. |
+| `INSTALL_DAEMON_USER` | Service user the generated unit runs as (default **`tddy`**). Set **`INSTALL_DAEMON_USER=root`** to restore the multi-user setuid spawning mode (`Delegate=`/`AppArmorProfile=` become unnecessary). |
+| `INSTALL_DAEMON_GROUP` | Service group (default: same as `INSTALL_DAEMON_USER`). |
+| `INSTALL_APPARMOR_DIR` | Directory the `tddy-daemon` AppArmor profile is written to (default **`/etc/apparmor.d`**). |
 
 ## Behavior notes
 
@@ -45,6 +48,19 @@ The generated unit uses **`ExecStart`** pointing at the resolved **`tddy-daemon`
 - **Config** is skipped if **`daemon.yaml`** already exists.
 - **Unit file** behavior depends on **`INSTALL_OVERWRITE_SYSTEMD_UNIT`** (see above).
 - **`systemctl daemon-reload`**, **enable**, and **start** run after files are installed when **`INSTALL_NO_SYSTEMCTL` is unset.
+
+## Unprivileged service (Linux cgroups sandbox)
+
+By default the generated unit runs the daemon as the unprivileged user **`tddy`** rather than root, and provisions the two grants the [Linux cgroups sandbox](../../../packages/tddy-sandbox/docs/architecture.md#linux-cgroups-jail) needs to work without root:
+
+- **Unit flip** — the template emits **`User=tddy`** / **`Group=tddy`** / **`Delegate=yes`** (a writable cgroup v2 subtree for per-session scopes with memory/cpu/pids limits) / **`AppArmorProfile=tddy-daemon`** (grants the daemon binary unprivileged user namespaces on hosts where `apparmor_restrict_unprivileged_userns=1`, e.g. Ubuntu 24.04).
+- **Service user** — `./install` creates the (configurable) system user/group when missing (`useradd --system`).
+- **Directory ownership** — the daemon log and auth-storage dirs are `chown`ed to the service user/group so the unprivileged process can write them.
+- **AppArmor profile** — the profile is rendered from `packages/tddy-daemon/apparmor/tddy-daemon` (binary path substituted), written to `INSTALL_APPARMOR_DIR`, and loaded with `apparmor_parser -r` **before** the service starts (the `AppArmorProfile=` transition fails the unit if the profile is absent; a missing `apparmor_parser` is a warning, not a hard error).
+- **Runtime cgroup base** — nothing is hardcoded: the daemon derives its delegated cgroup v2 base from `/proc/self/cgroup` at runtime, overridable via the optional commented `sandbox_cgroup:` block in `daemon.yaml.production`.
+- **Restore root mode** — `INSTALL_DAEMON_USER=root` returns to multi-user setuid spawning; `Delegate=`/`AppArmorProfile=` are then unnecessary.
+
+Because the unit is only overwritten when `INSTALL_OVERWRITE_SYSTEMD_UNIT=1`, upgrading an existing root install to the unprivileged default requires that flag (or a manual edit of the installed unit).
 
 ## Verification and tests
 

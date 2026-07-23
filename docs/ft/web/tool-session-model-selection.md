@@ -1,7 +1,7 @@
 # Tool-session model selection — pick the backend model when creating a tddy-coder session
 
 **Product area:** Web
-**Status:** Planned
+**Status:** Implemented
 
 ## Summary
 
@@ -98,7 +98,11 @@ Constructs the backend for `<agent>` (same binary-resolution rules as `tddy-code
 
 - `ListAgentModels` handler shells out to `tddy-tools list-models --agent <agent>` (via the
   configured tool path / spawn worker), parses the JSON, returns `ListAgentModelsResponse`. Result
-  is cached per (agent, daemon) with a short TTL to avoid re-probing on every agent toggle.
+  is cached per (agent, daemon, **OS user**) with a short TTL to avoid re-probing on every agent
+  toggle — the cache is keyed by OS user because cursor/ACP catalogs are account-specific, so a
+  shared (agent, daemon) key would leak one user's catalog to another on a multi-tenant daemon. The
+  probe runs `run_capture_as_user` with `current_dir` set to the user's **home** (the daemon cwd may
+  be unreadable after setuid, and the ACP probe opens a session against the cwd).
 - `StartSession` tool branch threads `req.model` into `SpawnOptions.model`
   (`spawner.rs` + `spawn_worker.rs`); the spawner appends `--model <model>` when non-empty.
 
@@ -108,8 +112,9 @@ Constructs the backend for `<agent>` (same binary-resolution rules as `tddy-code
   `ListAgentModels({ agent })`; render a Model `<select>` from `models`, preselect `default_model`,
   and show a loading state while the probe runs.
 - Send the selected `model` in the tool `startSession` call (currently hardcoded `""`).
-- Remove the hardcoded `CLAUDE_CLI_MODELS` constant; the claude-cli dropdown is fed by
-  `ListAgentModels({ agent: "claude-cli" })`.
+- Remove `CreateSessionPane`'s dependency on the hardcoded `CLAUDE_CLI_MODELS` constant; its
+  claude-cli dropdown is fed by `ListAgentModels({ agent: "claude-cli" })` (see the known limitation
+  below — the constant itself is retained for the out-of-scope legacy `ConnectionScreen`).
 - Reuse the existing `create-session-model-select` test id (one model select visible at a time).
 
 ## Behavior
@@ -155,8 +160,17 @@ must not silently look available.
 - A backend that advertises a single model still renders a one-option select defaulting to it.
 - Model is not independently re-validated by the daemon for tool sessions (free-form `--model`,
   consistent with `tddy-coder`'s existing `--model` contract); the UI only offers listed ids.
-- No web-side static model list remains (`CLAUDE_CLI_MODELS` is removed); all catalogs originate
-  from the daemon/`tddy-core`.
+- No static model list remains in the in-scope session-creation surface (`CreateSessionPane`); its
+  catalogs all originate from the daemon/`tddy-core`.
+
+## Known limitations
+
+- **Retained `CLAUDE_CLI_MODELS` for the legacy `ConnectionScreen`** — `CreateSessionPane` no longer
+  reads the hardcoded `packages/tddy-web/src/constants/claudeCliModels.ts` `CLAUDE_CLI_MODELS`
+  constant, but the constant is **kept** because the out-of-scope legacy `ConnectionScreen` inline
+  form still populates its model dropdown from it. Removing the static list entirely is deferred to
+  whenever `ConnectionScreen` is migrated to `ListAgentModels` (or retired). Its `isClaudeCliSession`
+  / CLI-session helpers are unaffected.
 
 ## Related documentation
 

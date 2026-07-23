@@ -184,6 +184,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .compile_protos(&["proto/actions.proto"], &["proto"])?;
 
+    // BSP build server service (async trait + RpcService server for /rpc + LiveKit)
+    prost_build::Config::new()
+        .out_dir(std::env::var("OUT_DIR")?)
+        .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
+            generate_rpc_server: true,
+            generate_tonic_adapter: false,
+            rpc_crate_path: "tddy_rpc".to_string(),
+        }))
+        .compile_protos(&["proto/bsp.proto"], &["proto"])?;
+
     // VNC control-plane service (VncService)
     prost_build::Config::new()
         .out_dir(std::env::var("OUT_DIR")?)
@@ -321,6 +331,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/vm.proto",
                 "proto/tasks.proto",
                 "proto/actions.proto",
+                "proto/bsp.proto",
                 "proto/vnc.proto",
                 "proto/vnc_input.proto",
                 "proto/screen_sharing.proto",

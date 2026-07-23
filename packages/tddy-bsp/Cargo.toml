@@ -1,0 +1,29 @@
+[package]
+name = "tddy-bsp"
+version = "0.1.0"
+edition = "2021"
+description = "BSP-shaped build server: the bsp.BspService RPC impl + the enriched BUILD.yaml catalog provider + plugin registry. Registered/exposed by tddy-coder and the daemon."
+
+[lib]
+name = "tddy_bsp"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-core = { path = "../tddy-core" }
+tddy-build = { path = "../tddy-build" }
+tddy-build-rust = { path = "../tddy-build-rust" }
+tddy-build-typescript = { path = "../tddy-build-typescript" }
+tddy-build-docker = { path = "../tddy-build-docker" }
+tddy-build-buildroot = { path = "../tddy-build-buildroot" }
+tddy-build-qemu = { path = "../tddy-build-qemu" }
+tddy-service = { path = "../tddy-service" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-task = { path = "../tddy-task" }
+async-trait = "0.1"
+prost = "0.13"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "sync"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }

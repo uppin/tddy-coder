@@ -77,13 +77,11 @@ service ConnectionService {
   // configured user.
   rpc MintLocalToken(MintLocalTokenRequest) returns (MintLocalTokenResponse);
   // Host Stats Footer (see docs/ft/web/host-stats-footer.md) — host-level telemetry for the
-  // selected daemon. Both are addressed to the daemon directly over the common-room LiveKit
-  // connection (no daemon_instance_id payload needed) and validate `session_token`.
-  // Per-logical-core CPU utilization percentages; polled by the web every 5 s.
-  rpc GetHostCpuStats(GetHostCpuStatsRequest) returns (GetHostCpuStatsResponse);
-  // Available/total disk bytes for the filesystem holding the daemon's default project
-  // directory; polled by the web every 60 s.
-  rpc GetHostDiskStats(GetHostDiskStatsRequest) returns (GetHostDiskStatsResponse);
+  // selected daemon. Addressed to the daemon directly over the common-room LiveKit connection (no
+  // daemon_instance_id payload needed) and validates `session_token`. The server owns the cadence:
+  // it emits one HostStatsEvent immediately on subscribe, then refreshes CPU every 5 s and disk
+  // every 60 s, pushing an event carrying the latest CPU and disk snapshot on each tick.
+  rpc StreamHostStats(StreamHostStatsRequest) returns (stream HostStatsEvent);
 }
 
 message ListToolsRequest {}
@@ -786,18 +784,20 @@ message MintLocalTokenResponse {
 
 // --- Host Stats Footer: host-level telemetry for the selected daemon ---
 
-message GetHostCpuStatsRequest {
+message StreamHostStatsRequest {
   string session_token = 1;
 }
-message GetHostCpuStatsResponse {
+// A single host-telemetry sample pushed by the daemon. Both blocks are always populated with the
+// latest snapshot: on a fast CPU tick the (unchanged) disk block is re-sent, and vice versa.
+message HostStatsEvent {
+  HostCpuStats cpu = 1;  // always populated — latest CPU snapshot
+  HostDiskStats disk = 2; // always populated — latest disk snapshot
+}
+message HostCpuStats {
   // Utilization percentage (0..100) of each logical core, core 0 first.
   repeated float per_core_percent = 1;
 }
-
-message GetHostDiskStatsRequest {
-  string session_token = 1;
-}
-message GetHostDiskStatsResponse {
+message HostDiskStats {
   // Free bytes on the filesystem containing the daemon's default project directory.
   uint64 available_bytes = 1;
   // Total bytes of that filesystem.

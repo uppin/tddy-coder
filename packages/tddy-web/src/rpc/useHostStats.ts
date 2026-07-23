@@ -1,25 +1,20 @@
 /**
- * Polling hooks for host-level machine stats surfaced by the Host Stats Footer: per-core CPU
- * utilization (fast poll) and the free/total disk capacity of the selected daemon's default
- * project directory (slow poll).
+ * Streaming hook for host-level machine stats surfaced by the Host Stats Footer: per-core CPU
+ * utilization and the free/total disk capacity of the selected daemon's default project directory.
  *
- * Both target the currently selected daemon's `ConnectionService` over the shared common-room
- * LiveKit connection (`useDaemonClient`), so they follow the daemon selector like every other
- * daemon-level readout.
+ * Both are sourced from a single `ConnectionService.StreamHostStats` server-stream over the shared
+ * common-room LiveKit connection (`useDaemonClient`), so the footer follows the daemon selector like
+ * every other daemon-level readout. The daemon owns the cadence (immediate emit on subscribe, then
+ * CPU every 5 s and disk every 60 s); each event carries the latest CPU and disk snapshot.
  *
- * PRD: `docs/ft/web/host-stats-footer.md`
- * Changeset: `host-stats-footer`
+ * PRD: `docs/ft/web/1-WIP/PRD-2026-07-22-streamed-host-stats.md`
+ * Changeset: `2026-07-22-streamed-host-stats`
  */
 
 import { useEffect, useState } from "react";
 import { ConnectionService } from "../gen/connection_pb";
 import { useDaemonClient } from "./selectedDaemon";
 import { useAuthContext } from "../hooks/authProvider";
-
-/** CPU is polled fast so the footer's mini bars track load in near-real-time. */
-export const CPU_REFRESH_MS = 5000;
-/** Disk capacity changes slowly — a once-a-minute poll is plenty. */
-export const DISK_REFRESH_MS = 60000;
 
 /** Free/total disk capacity for the selected daemon's default project directory. */
 export interface HostDiskStats {
@@ -28,73 +23,56 @@ export interface HostDiskStats {
   projectDir: string;
 }
 
-/**
- * Per-core CPU utilization percentages (core 0 first) for the selected daemon, re-fetched every
- * {@link CPU_REFRESH_MS}. Empty until the first response arrives (or while no daemon is selected).
- */
-export function useHostCpuStats(): number[] {
-  const client = useDaemonClient(ConnectionService);
-  const { sessionToken } = useAuthContext();
-  const [perCorePercent, setPerCorePercent] = useState<number[]>([]);
-
-  useEffect(() => {
-    if (!client) return;
-    let cancelled = false;
-    const fetchOnce = () => {
-      client
-        .getHostCpuStats({ sessionToken: sessionToken ?? "" })
-        .then((resp) => {
-          if (!cancelled) setPerCorePercent(resp.perCorePercent);
-        })
-        .catch((err) => {
-          console.debug("[useHostCpuStats] getHostCpuStats error", err);
-        });
-    };
-    fetchOnce();
-    const interval = setInterval(fetchOnce, CPU_REFRESH_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [client, sessionToken]);
-
-  return perCorePercent;
+export interface UseHostStatsResult {
+  /** Per-core CPU utilization percentages (core 0 first). Empty until the first event arrives. */
+  perCorePercent: number[];
+  /** Latest disk figures, or `null` until the first event arrives (or while no daemon is selected). */
+  disk: HostDiskStats | null;
 }
 
 /**
- * Free/total disk capacity for the selected daemon's default project directory, re-fetched every
- * {@link DISK_REFRESH_MS}. `null` until the first response arrives (or while no daemon is selected).
+ * Subscribe once to `ConnectionService.StreamHostStats` for the selected daemon and expose the
+ * latest CPU and disk snapshots. The subscription/cleanup shape mirrors `useSessionActivity` — a
+ * `cancelled` flag plus a cleanup that stops iterating, swallowing the unmount AbortError.
  */
-export function useHostDiskStats(): HostDiskStats | null {
+export function useHostStats(): UseHostStatsResult {
   const client = useDaemonClient(ConnectionService);
   const { sessionToken } = useAuthContext();
+  const [perCorePercent, setPerCorePercent] = useState<number[]>([]);
   const [disk, setDisk] = useState<HostDiskStats | null>(null);
 
   useEffect(() => {
     if (!client) return;
     let cancelled = false;
-    const fetchOnce = () => {
-      client
-        .getHostDiskStats({ sessionToken: sessionToken ?? "" })
-        .then((resp) => {
-          if (cancelled) return;
-          setDisk({
-            availableBytes: resp.availableBytes,
-            totalBytes: resp.totalBytes,
-            projectDir: resp.projectDir,
-          });
-        })
-        .catch((err) => {
-          console.debug("[useHostDiskStats] getHostDiskStats error", err);
-        });
-    };
-    fetchOnce();
-    const interval = setInterval(fetchOnce, DISK_REFRESH_MS);
+
+    (async () => {
+      try {
+        for await (const event of client.streamHostStats({ sessionToken: sessionToken ?? "" })) {
+          if (cancelled) break;
+          setPerCorePercent(event.cpu?.perCorePercent ?? []);
+          if (event.disk) {
+            setDisk({
+              availableBytes: event.disk.availableBytes,
+              totalBytes: event.disk.totalBytes,
+              projectDir: event.disk.projectDir,
+            });
+          } else {
+            setDisk(null);
+          }
+        }
+      } catch (err) {
+        // A stream aborted on unmount surfaces as an AbortError; ignore it. Any other error while
+        // still mounted leaves the last-known readouts in place (no fallback fabrication).
+        if (!cancelled) {
+          console.debug("[useHostStats] streamHostStats error", err);
+        }
+      }
+    })();
+
     return () => {
       cancelled = true;
-      clearInterval(interval);
     };
   }, [client, sessionToken]);
 
-  return disk;
+  return { perCorePercent, disk };
 }

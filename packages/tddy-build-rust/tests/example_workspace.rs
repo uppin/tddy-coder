@@ -109,6 +109,7 @@ async fn rust_workspace_builds_with_real_cargo() {
         &graph,
         "mathapp:bin",
         &ExecuteOptions::default(),
+        tddy_build::BuildMode::Compile,
         &registry(),
     )
     .await
@@ -140,17 +141,31 @@ async fn rust_cache_hits_then_misses_after_source_edit() {
     let graph = load(dir.path());
 
     // When
-    let first = execute_target(dir.path(), &graph, "mathcore:lib", &opts, &reg)
-        .await
-        .expect("first");
+    let first = execute_target(
+        dir.path(),
+        &graph,
+        "mathcore:lib",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("first");
 
     // Then
     assert!(!first.actions[0].cached);
 
     // When (rerun without changes)
-    let second = execute_target(dir.path(), &graph, "mathcore:lib", &opts, &reg)
-        .await
-        .expect("second");
+    let second = execute_target(
+        dir.path(),
+        &graph,
+        "mathcore:lib",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("second");
 
     // Then
     assert!(second.actions[0].cached, "rerun is a cache hit");
@@ -161,9 +176,16 @@ async fn rust_cache_hits_then_misses_after_source_edit() {
         "pub fn add(a: i64, b: i64) -> i64 { a + b + 0 }\n",
     )
     .expect("edit source");
-    let third = execute_target(dir.path(), &graph, "mathcore:lib", &opts, &reg)
-        .await
-        .expect("third");
+    let third = execute_target(
+        dir.path(),
+        &graph,
+        "mathcore:lib",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("third");
 
     // Then
     assert!(

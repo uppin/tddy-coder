@@ -25,6 +25,10 @@ export interface AgentChatProps {
   /** Drive the session over the ACP protobuf mirror (`AcpService.Session`) instead of the default
    *  `TddyRemote.Stream`. Both ride the same LiveKit session connection and render identically. */
   acp?: boolean;
+  /** Resume an existing session by id instead of starting a new one: the ACP stream opens with
+   *  `session/load` so the agent replays the prior conversation (used after a browser reload).
+   *  Only meaningful with `acp`. */
+  resumeSessionId?: string;
 }
 
 /**
@@ -43,7 +47,7 @@ function RemoteBackedChat(props: AgentChatProps) {
 }
 
 function AcpBackedChat(props: AgentChatProps) {
-  const chat = useAcpSession(props.room, props.livekitServerIdentity || "server");
+  const chat = useAcpSession(props.room, props.livekitServerIdentity || "server", props.resumeSessionId);
   return <AgentChatView {...props} chat={chat} />;
 }
 

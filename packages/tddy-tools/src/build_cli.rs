@@ -92,6 +92,7 @@ pub async fn run_build(args: BuildArgs) -> Result<()> {
         &args.target,
         args.no_cache,
         args.dry_run,
+        tddy_build::BuildMode::Compile,
         &registry,
     )
     .await

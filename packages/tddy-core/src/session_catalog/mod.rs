@@ -18,8 +18,11 @@ pub mod provider;
 pub mod read;
 pub mod store;
 
-pub use entry::{project_package, BuildTargetCatalogEntry, CatalogEntry, CatalogEntryKind};
+pub use entry::{
+    project_package, BuildTargetCatalogEntry, CatalogCapabilities, CatalogEntry, CatalogEntryKind,
+};
 pub use error::CatalogError;
 pub use populate::PopulateCatalogTask;
 pub use provider::{build_catalog_provider, register_build_catalog_provider, BuildCatalogProvider};
 pub use read::{session_catalog, SessionCatalog};
+pub use store::{list_build_targets, list_build_targets_for_package, BuildTargetSummary};

@@ -57,8 +57,8 @@ the newly selected host.
   **default project directory** — the configured repos base (`base_path` override, else
   `$HOME/<repos_base_path>` with the documented default `repos`).
 - Displayed as human-readable free space (decimal SI units, matching the traffic formatter).
-- **Refreshed every 60 seconds.** Disk headroom changes slowly; a one-minute cadence keeps
-  the figure current without needless polling.
+- **Refreshed every 60 seconds**, pushed by the daemon over the host-stats stream. Disk headroom
+  changes slowly; a one-minute cadence keeps the figure current without needless traffic.
 
 ### Per-core CPU usage
 
@@ -67,32 +67,38 @@ the newly selected host.
 - Rendered as a compact row of per-core mini bars — one bar per core, height proportional to
   utilization — so the display scales to machines with many cores. Each bar exposes its core
   index and percentage for hover/inspection.
-- **Refreshed every 5 seconds.** CPU load is volatile; a five-second cadence gives a live feel
-  without saturating the RPC path.
+- **Refreshed every 5 seconds**, pushed by the daemon over the host-stats stream. CPU load is
+  volatile; a five-second cadence gives a live feel without saturating the RPC path.
 
 ## RPC surface
 
-Two new unary methods on `ConnectionService` (daemon-level RPC, addressed to the selected
-daemon over the shared common-room LiveKit connection — no `daemon_instance_id` payload is
-needed because the transport already targets the daemon):
+A single server-streaming method on `ConnectionService` (daemon-level RPC, addressed to the
+selected daemon over the shared common-room LiveKit connection — no `daemon_instance_id` payload
+is needed because the transport already targets the daemon):
 
-- `GetHostCpuStats` → `per_core_percent: repeated float` (0–100, core 0 first).
-- `GetHostDiskStats` → `available_bytes`, `total_bytes`, and the `project_dir` the figures
-  describe (for tooltip/debug).
+- `StreamHostStats(StreamHostStatsRequest) returns (stream HostStatsEvent)` — the **daemon owns the
+  cadence**. On subscribe it emits one event immediately, then refreshes CPU every 5 s and disk
+  every 60 s, pushing a `HostStatsEvent` carrying the latest CPU **and** disk snapshot on each tick.
+- `HostStatsEvent` always carries both `cpu` (`HostCpuStats { per_core_percent: repeated float }`,
+  0–100, core 0 first) and `disk` (`HostDiskStats { available_bytes, total_bytes, project_dir }` —
+  the last for tooltip/debug).
 
-Both take a `session_token` and reject an invalid token with an unauthenticated error, like
-every other `ConnectionService` method.
+`StreamHostStatsRequest` takes a `session_token`; an invalid token is rejected with an
+unauthenticated error, like every other `ConnectionService` method. The web subscribes **once** via
+`useHostStats` and applies each event — there is no client-side polling.
 
 ## Acceptance criteria
 
 1. The byte-traffic readout renders inside the bottom footer of `SessionsDrawerScreen` and is
    **no longer present** in the top header row.
 2. The footer shows the daemon's available disk space as human-readable free space, sourced
-   from `GetHostDiskStats`.
+   from the `StreamHostStats` feed.
 3. The footer shows one CPU mini bar per logical core, each bar's height encoding that core's
-   utilization percentage, sourced from `GetHostCpuStats`.
-4. Disk figures refresh on a 60-second cadence; CPU figures refresh on a 5-second cadence.
+   utilization percentage, sourced from the same `StreamHostStats` feed.
+4. Disk figures refresh on a 60-second cadence and CPU figures on a 5-second cadence, both driven
+   by the daemon (the web opens a single subscription, not two polls).
 5. The disk figure describes the filesystem that contains the daemon's default project
    directory.
-6. Switching the selected daemon re-fetches disk and CPU figures for the newly selected host.
-7. `GetHostCpuStats` / `GetHostDiskStats` reject an invalid session token.
+6. Switching the selected daemon re-subscribes and re-renders disk and CPU figures for the newly
+   selected host.
+7. `StreamHostStats` rejects an invalid session token.

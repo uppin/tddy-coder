@@ -118,9 +118,16 @@ async fn docker_images_build_and_cache_when_daemon_available() {
 
     // When
     // base + api build (deps-first); api is FROM example-base.
-    let record = execute_target(dir.path(), &graph, "api:image", &opts, &reg)
-        .await
-        .expect("docker build");
+    let record = execute_target(
+        dir.path(),
+        &graph,
+        "api:image",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("docker build");
 
     // Then
     assert_eq!(
@@ -134,9 +141,16 @@ async fn docker_images_build_and_cache_when_daemon_available() {
     );
 
     // When (rerun base alone)
-    let second = execute_target(dir.path(), &graph, "base:image", &opts, &reg)
-        .await
-        .expect("second base");
+    let second = execute_target(
+        dir.path(),
+        &graph,
+        "base:image",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("second base");
 
     // Then
     assert!(second.actions[0].cached, "rerun is a cache hit");
@@ -147,9 +161,16 @@ async fn docker_images_build_and_cache_when_daemon_available() {
         "FROM busybox:latest\nRUN echo \"base v2\" > /base.txt\n",
     )
     .expect("edit dockerfile");
-    let third = execute_target(dir.path(), &graph, "base:image", &opts, &reg)
-        .await
-        .expect("third base");
+    let third = execute_target(
+        dir.path(),
+        &graph,
+        "base:image",
+        &opts,
+        tddy_build::BuildMode::Compile,
+        &reg,
+    )
+    .await
+    .expect("third base");
 
     // Then
     assert!(
