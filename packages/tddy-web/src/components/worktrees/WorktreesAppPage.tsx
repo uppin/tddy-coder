@@ -12,6 +12,7 @@ import { DaemonSelectorConnected } from "../shell/DaemonSelector";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { WorktreesScreen, type WorktreesScreenMockRow } from "./WorktreesScreen";
+import { formatDiskBytes } from "../sessions/worktreeStatsFormat";
 import { Button } from "@/components/ui/button";
 
 const screenShellClassName =
@@ -19,20 +20,6 @@ const screenShellClassName =
 
 const selectClassName =
   "box-border min-w-[12rem] max-w-[24rem] rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-
-function formatDiskBytes(n: bigint): string {
-  const v = Number(n);
-  if (!Number.isFinite(v) || v < 0) return "—";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let x = v;
-  let i = 0;
-  while (x >= 1024 && i < units.length - 1) {
-    x /= 1024;
-    i += 1;
-  }
-  const rounded = i === 0 ? Math.round(x) : Math.round(x * 10) / 10;
-  return `${rounded} ${units[i]}`;
-}
 
 function rowFromRpc(w: WorktreeRow): WorktreesScreenMockRow {
   return {

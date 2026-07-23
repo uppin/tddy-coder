@@ -46,6 +46,14 @@ pub enum RemoveWorktreeError {
     Io(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CleanWorktreeError {
+    GitFailed { message: String },
+    NotListed,
+    CannotCleanPrimary,
+    Io(String),
+}
+
 /// Parse `git worktree list` stdout into structured rows (fixtures: see acceptance tests).
 ///
 /// Baseline format matches default `git worktree list` (non-porcelain): path, abbreviated
@@ -481,6 +489,59 @@ pub fn remove_worktree_under_repo(
         return Err(RemoveWorktreeError::GitFailed { message: msg });
     }
     info!("remove_worktree_under_repo: removed {:?}", worktree_path);
+    Ok(())
+}
+
+/// Clear a secondary worktree in place with `git clean -fdx` (drops untracked + ignored files,
+/// e.g. build output, to reclaim disk without removing the worktree). The path must appear in
+/// `git worktree list` for `repo_root` and must not be the primary (first-listed) worktree.
+pub fn clean_worktree_under_repo(
+    repo_root: &Path,
+    worktree_path: &Path,
+) -> Result<(), CleanWorktreeError> {
+    info!(
+        "clean_worktree_under_repo: repo_root={:?} worktree_path={:?}",
+        repo_root, worktree_path
+    );
+    let out = Command::new("git")
+        .current_dir(repo_root)
+        .args(["worktree", "list"])
+        .output()
+        .map_err(|e| CleanWorktreeError::Io(e.to_string()))?;
+    if !out.status.success() {
+        return Err(CleanWorktreeError::GitFailed {
+            message: format!("git worktree list failed: {:?}", out.status),
+        });
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let rows = parse_git_worktree_list(&stdout);
+    let listed = worktree_path_in_rows(&rows, worktree_path);
+    if !listed {
+        warn!(
+            "clean_worktree_under_repo: path not in worktree list {:?}",
+            worktree_path
+        );
+        return Err(CleanWorktreeError::NotListed);
+    }
+    if let Some(first) = rows.first() {
+        if paths_equal(&first.path, worktree_path) {
+            warn!("clean_worktree_under_repo: refusing to clean primary worktree");
+            return Err(CleanWorktreeError::CannotCleanPrimary);
+        }
+    }
+
+    let status = Command::new("git")
+        .current_dir(worktree_path)
+        .args(["clean", "-fdx"])
+        .status()
+        .map_err(|e| CleanWorktreeError::Io(e.to_string()))?;
+
+    if !status.success() {
+        let msg = format!("git clean -fdx failed: {:?}", status);
+        warn!("clean_worktree_under_repo: {}", msg);
+        return Err(CleanWorktreeError::GitFailed { message: msg });
+    }
+    info!("clean_worktree_under_repo: cleaned {:?}", worktree_path);
     Ok(())
 }
 
