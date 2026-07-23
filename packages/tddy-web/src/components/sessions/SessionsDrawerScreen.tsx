@@ -22,7 +22,8 @@ import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
 import { useSessionManager } from "./sessionManager";
 import { SessionRuntimeRegistry, type SessionRuntimeConnection } from "./sessionRuntimeRegistry";
 import { useAuthContext } from "../../hooks/authProvider";
-import { DaemonSelectorConnected } from "../shell/DaemonSelector";
+import { AppShell } from "../shell/AppShell";
+import { Button } from "../ui/button";
 import { TooltipProvider } from "../ui/tooltip";
 import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
@@ -40,7 +41,13 @@ import { PanelLeftOpen } from "lucide-react";
 // Screen
 // ---------------------------------------------------------------------------
 
-export function SessionsDrawerScreen() {
+export function SessionsDrawerScreen({
+  // Optional so isolated component tests can mount the screen without a router; production
+  // (index.tsx) always wires the hash-router navigate.
+  onNavigate = () => {},
+}: {
+  onNavigate?: (path: string) => void;
+}) {
   const { sessionToken: authSessionToken } = useAuthContext();
   const sessionToken = authSessionToken ?? "";
 
@@ -80,6 +87,22 @@ export function SessionsDrawerScreen() {
   // Track whether the URL-seeded selectedSessionId has been activated after the session list loads
   const deepLinkActivatedRef = useRef(false);
   const [mode, setMode] = useState<"list" | "creating">("list");
+  // A deep link (`#/sessions/:id`) that resolves to no known session after the list loads shows a
+  // not-found state instead of silently no-opping. Driven by local state so it dismisses on Home
+  // without depending on a hash change.
+  const [unknownSession, setUnknownSession] = useState(false);
+  // Sessions ticked for bulk delete — a Set preserves insertion (selection) order, which the bulk
+  // delete replays so sessions are removed in the order they were selected.
+  const [selectedForDelete, setSelectedForDelete] = useState<Set<string>>(() => new Set());
+
+  const toggleSelectForDelete = useCallback((sessionId: string) => {
+    setSelectedForDelete((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  }, []);
 
   // The project registry (daemon-level RPC over the selected-daemon common-room connection). Used
   // to resolve an unscoped session's project from its `repoPath` before the worktree RPCs — those
@@ -270,7 +293,12 @@ export function SessionsDrawerScreen() {
     if (deepLinkActivatedRef.current) return;
     if (!selectedSessionId || sortedSessions.length === 0) return;
     const session = sortedSessions.find((s) => s.sessionId === selectedSessionId);
-    if (!session) return;
+    if (!session) {
+      // The deep-linked id is not in the loaded list — surface a not-found state once.
+      deepLinkActivatedRef.current = true;
+      setUnknownSession(true);
+      return;
+    }
     deepLinkActivatedRef.current = true;
     setInspectorState(
       nextInspectorState(
@@ -384,6 +412,34 @@ export function SessionsDrawerScreen() {
     });
   };
 
+  // Delete every selected session in selection (insertion) order, routing each delete to the
+  // session's owning daemon. Sequential so the daemon processes them in the same order the operator
+  // ticked the rows, and so a single failure doesn't abandon the remaining deletes silently.
+  const handleBulkDelete = useCallback(async () => {
+    const ids = [...selectedForDelete];
+    for (const id of ids) {
+      const session = sortedSessions.find((s) => s.sessionId === id);
+      const owner = session
+        ? owningHostForSession(session, selectedInstanceId ?? "")
+        : (selectedInstanceId ?? "");
+      const targetClient = clientForHost(owner) ?? client;
+      if (!targetClient) continue;
+      try {
+        await deleteSession(id, sessionToken, targetClient);
+      } catch (err) {
+        console.debug("[SessionsDrawerScreen] bulk deleteSession error", err);
+      }
+    }
+    setSelectedForDelete(new Set());
+    requestSessionsRefresh();
+  }, [selectedForDelete, sortedSessions, selectedInstanceId, clientForHost, client, deleteSession, sessionToken]);
+
+  const handleUnknownHome = () => {
+    setUnknownSession(false);
+    setSelectedSessionId(null);
+    onNavigate("/sessions");
+  };
+
   // A pr-stack orchestrator's "Start session" CTA spawns a child immediately in the
   // background (no navigation, no auto-connect — the operator stays on the orchestrator's
   // chat screen). Add a minimal optimistic entry so the drawer reflects it right away. Unlike
@@ -456,20 +512,32 @@ export function SessionsDrawerScreen() {
     requestSessionsRefresh();
   };
 
+  const bulkDeleteButton =
+    selectedForDelete.size > 0 ? (
+      <Button
+        type="button"
+        variant="destructive"
+        size="sm"
+        data-testid="sessions-drawer-bulk-delete"
+        onClick={() => {
+          void handleBulkDelete();
+        }}
+      >
+        Delete selected ({selectedForDelete.size})
+      </Button>
+    ) : null;
+
   return (
     <TooltipProvider delayDuration={0}>
-      <div
-        data-testid="sessions-drawer-screen"
-        // 100dvh (not 100vh/h-screen): on mobile 100vh includes the area behind the
-        // browser chrome, which pushes the bottom keyboard bar off the visible screen.
-        className="flex flex-col h-[100dvh] w-full overflow-hidden font-sans text-foreground"
+      {/* 100dvh (via AppShell fullbleed): on mobile 100vh includes the area behind the browser
+          chrome, which would push the bottom keyboard bar off the visible screen. */}
+      <AppShell
+        variant="fullbleed"
+        title="Sessions"
+        onNavigate={onNavigate}
+        dataTestId="sessions-drawer-screen"
+        headerRight={bulkDeleteButton}
       >
-        <div className="flex items-center flex-shrink-0 border-b border-border">
-          <div className="flex-1 min-w-0" />
-          <div className="flex items-center px-2">
-            <DaemonSelectorConnected />
-          </div>
-        </div>
         <div className="flex flex-1 min-h-0 overflow-hidden relative">
           {isMobile && !sessionListOpen && (
             <button
@@ -494,41 +562,66 @@ export function SessionsDrawerScreen() {
             selectedInstanceId={selectedInstanceId ?? ""}
             hostLabelForInstance={hostLabelForInstance}
             sessionMetadataBySessionId={sessionMetadataBySessionId}
+            selectedForDelete={selectedForDelete}
+            onToggleSelect={toggleSelectForDelete}
           />
-          <SessionMainPane
-            selectedSession={selectedSession}
-            attachment={attachment}
-            inspectorState={inspectorState}
-            onToggleInspector={handleInspectorToggle}
-            onInspectorClose={handleInspectorClose}
-            onInspectorExpand={handleInspectorExpand}
-            onInspectorRestore={handleInspectorRestore}
-            onResume={handleResume}
-            onDelete={handleDelete}
-            onTerminate={handleTerminate}
-            isCreating={mode === "creating"}
-            client={mode === "creating" ? (client ?? undefined) : (activeClient ?? client ?? undefined)}
-            tokenClient={tokenClient}
-            sessionToken={sessionToken}
-            onCancelCreate={handleCancelCreate}
-            onSessionCreated={handleSessionCreated}
-            room={room}
-            mobileShortcuts={mobileShortcuts}
-            onChildSessionStarted={handleChildSessionStarted}
-            traffic={selectedTraffic}
-            projects={projects}
-            runtimes={runtimes}
-            sessions={sortedSessions}
-            focusedRuntimeId={runtimeRegistry.focusedSessionId}
-            onSessionRoom={onSessionRoom}
-            onSessionDisconnect={onSessionDisconnect}
-            buildSessionClient={buildSessionClient}
-            liveKitFactory={liveKitFactory}
-            liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
-          />
+          {/* A bad deep link surfaces "not found" in the detail pane only — the session list
+              stays visible so the operator can pick a valid session. */}
+          {unknownSession ? (
+            <div className="flex flex-1 min-h-0 items-center justify-center p-6">
+              <div
+                data-testid="terminal-route-unknown-session"
+                className="rounded-md border border-destructive/40 bg-destructive/5 p-4"
+              >
+                <p className="mb-3 text-sm text-foreground">
+                  Session not found or no longer available.
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  data-testid="terminal-route-unknown-session-home"
+                  onClick={handleUnknownHome}
+                >
+                  Back to sessions
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <SessionMainPane
+              selectedSession={selectedSession}
+              attachment={attachment}
+              inspectorState={inspectorState}
+              onToggleInspector={handleInspectorToggle}
+              onInspectorClose={handleInspectorClose}
+              onInspectorExpand={handleInspectorExpand}
+              onInspectorRestore={handleInspectorRestore}
+              onResume={handleResume}
+              onDelete={handleDelete}
+              onTerminate={handleTerminate}
+              isCreating={mode === "creating"}
+              client={mode === "creating" ? (client ?? undefined) : (activeClient ?? client ?? undefined)}
+              tokenClient={tokenClient}
+              sessionToken={sessionToken}
+              onCancelCreate={handleCancelCreate}
+              onSessionCreated={handleSessionCreated}
+              room={room}
+              mobileShortcuts={mobileShortcuts}
+              onChildSessionStarted={handleChildSessionStarted}
+              traffic={selectedTraffic}
+              projects={projects}
+              runtimes={runtimes}
+              sessions={sortedSessions}
+              focusedRuntimeId={runtimeRegistry.focusedSessionId}
+              onSessionRoom={onSessionRoom}
+              onSessionDisconnect={onSessionDisconnect}
+              buildSessionClient={buildSessionClient}
+              liveKitFactory={liveKitFactory}
+              liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
+            />
+          )}
         </div>
         <HostStatsFooter attachment={attachment} />
-      </div>
+      </AppShell>
     </TooltipProvider>
   );
 }

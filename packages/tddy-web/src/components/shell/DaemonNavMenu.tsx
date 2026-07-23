@@ -3,7 +3,8 @@ import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 /**
- * Hamburger menu for daemon-mode shell: Sessions (/) and Worktrees (/worktrees).
+ * Hamburger menu for the daemon-mode shell: Sessions, Worktrees, Tasks, Projects, VMs, LiveKit,
+ * and the RPC Playground.
  */
 export function DaemonNavMenu({
   onNavigate,
@@ -54,19 +55,9 @@ export function DaemonNavMenu({
             className="h-auto w-full justify-start rounded-sm px-3 py-2 font-normal"
             role="menuitem"
             data-testid="shell-menu-sessions"
-            onClick={() => go("/")}
-          >
-            Sessions
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            className="h-auto w-full justify-start rounded-sm px-3 py-2 font-normal"
-            role="menuitem"
-            data-testid="shell-menu-sessions-drawer"
             onClick={() => go("/sessions")}
           >
-            Sessions (new)
+            Sessions
           </Button>
           <Button
             type="button"
@@ -107,6 +98,16 @@ export function DaemonNavMenu({
             onClick={() => go("/vms")}
           >
             VMs
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-auto w-full justify-start rounded-sm px-3 py-2 font-normal"
+            role="menuitem"
+            data-testid="shell-menu-livekit"
+            onClick={() => go("/livekit")}
+          >
+            LiveKit
           </Button>
           <Button
             type="button"

@@ -133,6 +133,10 @@ export const TEST_IDS = {
   tasksOutputPane: "tasks-output-pane",
   tasksOutputPaneEmpty: "tasks-output-pane-empty",
 
+  // Sessions drawer — bulk select + delete
+  /** Single "delete selected" action button, enabled once ≥1 row checkbox is ticked. */
+  sessionsDrawerBulkDelete: "sessions-drawer-bulk-delete",
+
   // Sessions drawer — open/close toggle
   sessionsDrawerCloseBtn: "sessions-drawer-close-btn",
   sessionsDrawerOpenBtn: "sessions-drawer-open-btn",
@@ -183,6 +187,11 @@ export const TEST_IDS = {
 
   // Shell navigation
   shellMenuButton: "shell-menu-button",
+  shellMenuSessions: "shell-menu-sessions",
+  shellMenuLivekit: "shell-menu-livekit",
+  shellMenuTasks: "shell-menu-tasks",
+  shellMenuProjects: "shell-menu-projects",
+  shellMenuVms: "shell-menu-vms",
   shellMenuRpcPlayground: "shell-menu-rpc-playground",
 
   // RPC Playground

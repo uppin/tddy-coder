@@ -5,13 +5,8 @@ import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useLiveKitTransportFactory } from "../../rpc/transportProvider";
 import { daemonRpcIdentity } from "../../lib/participantRole";
-import { DaemonSelectorConnected } from "../shell/DaemonSelector";
-import { DaemonNavMenu } from "../shell/DaemonNavMenu";
-import { UserAvatar } from "../UserAvatar";
+import { AppShell } from "../shell/AppShell";
 import { ProjectsScreen } from "./ProjectsScreen";
-
-const screenShellClassName =
-  "min-h-svh w-full min-w-0 box-border px-4 py-6 sm:px-6 font-sans text-foreground";
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -83,7 +78,7 @@ function useProjectsRpc(
  * daemons own projects, so coder/browser participants are never offered as hosts.
  */
 export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const { user, logout, sessionToken } = useAuthContext();
+  const { sessionToken } = useAuthContext();
   const client = useDaemonClient(ConnectionService);
   const daemons = useDaemons();
   const { room } = useSelectedDaemon();
@@ -105,20 +100,13 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
   );
 
   return (
-    <div className={screenShellClassName}>
-      <div className="flex items-center gap-3 mb-6">
-        <DaemonNavMenu onNavigate={onNavigate} />
-        <h1 className="text-xl font-bold flex-1">Projects</h1>
-        <DaemonSelectorConnected />
-        {user ? <UserAvatar user={user} onLogout={logout} /> : null}
-      </div>
-
+    <AppShell title="Projects" onNavigate={onNavigate} variant="scroll">
       <ProjectsScreen
         projects={projects}
         daemons={daemons}
         onCreateProject={createProject}
         onAddProjectToHost={addProjectToHost}
       />
-    </div>
+    </AppShell>
   );
 }

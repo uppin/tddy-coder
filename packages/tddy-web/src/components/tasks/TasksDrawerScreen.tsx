@@ -1,10 +1,17 @@
 import React, { useState } from "react";
 import { useAuthContext } from "../../hooks/authProvider";
+import { AppShell } from "../shell/AppShell";
 import { TaskDrawer } from "./TaskDrawer";
 import { TaskOutputPane } from "./TaskOutputPane";
 import { useTaskListStream } from "./useTaskListStream";
 
-export function TasksDrawerScreen() {
+export function TasksDrawerScreen({
+  // Optional so isolated component tests can mount the screen without a router; production
+  // (index.tsx) always wires the hash-router navigate.
+  onNavigate = () => {},
+}: {
+  onNavigate?: (path: string) => void;
+}) {
   const { sessionToken: authSessionToken } = useAuthContext();
   const sessionToken = authSessionToken ?? "";
 
@@ -14,17 +21,21 @@ export function TasksDrawerScreen() {
   const selectedTask = selectedTaskId ? (tasks.get(selectedTaskId) ?? null) : null;
 
   return (
-    <div
-      data-testid="tasks-drawer-screen"
-      className="flex h-screen w-full overflow-hidden font-sans text-foreground"
+    <AppShell
+      variant="fullbleed"
+      title="Tasks"
+      onNavigate={onNavigate}
+      dataTestId="tasks-drawer-screen"
     >
-      <TaskDrawer
-        tasks={[...tasks.values()]}
-        selectedTaskId={selectedTaskId}
-        onSelectTask={setSelectedTaskId}
-        sessionToken={sessionToken}
-      />
-      <TaskOutputPane task={selectedTask} sessionToken={sessionToken} />
-    </div>
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        <TaskDrawer
+          tasks={[...tasks.values()]}
+          selectedTaskId={selectedTaskId}
+          onSelectTask={setSelectedTaskId}
+          sessionToken={sessionToken}
+        />
+        <TaskOutputPane task={selectedTask} sessionToken={sessionToken} />
+      </div>
+    </AppShell>
   );
 }
