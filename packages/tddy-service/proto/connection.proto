@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package connection;
 
+import "google/protobuf/struct.proto";
+
 service ConnectionService {
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
   rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
@@ -658,21 +660,28 @@ message ReportSessionStatusResponse {
 // One recorded state of an agent tool call. Mirrors tddy_core::agent_activity::AgentActivityRecord.
 // The same call_id appears on the running row and the terminal row; the read side coalesces them.
 message AgentActivityRecord {
-  string call_id           = 1;
-  string tool_name         = 2;
-  string input_json        = 3;
-  string status            = 4;  // "running" | "completed" | "error"
-  string result_json       = 5;
-  string error_message     = 6;
-  uint64 started_unix_ms   = 7;
-  uint64 completed_unix_ms = 8;
-  string source            = 9;  // "coder" | "cursor-cli" | "claude-cli" | "sandbox"
+  string call_id                     = 1;
+  string tool_name                   = 2;
+  google.protobuf.Value input        = 3;
+  string status                      = 4;  // "running" | "completed" | "error"
+  google.protobuf.Value result       = 5;
+  string error_message               = 6;
+  uint64 started_unix_ms             = 7;
+  uint64 completed_unix_ms           = 8;
+  string source                      = 9;  // "coder" | "cursor-cli" | "claude-cli" | "sandbox"
+}
+
+// Whether the stream replays the persisted history before tailing live records.
+enum StreamMode {
+  SNAPSHOT_THEN_LIVE = 0;   // default: replay the coalesced history, then tail live records
+  LIVE_ONLY          = 1;   // skip the snapshot; deliver only records that arrive after subscribe
 }
 
 message StreamSessionActivityRequest {
-  string session_token      = 1;
-  string session_id         = 2;
-  string daemon_instance_id = 3;
+  string     session_token      = 1;
+  string     session_id         = 2;
+  string     daemon_instance_id = 3;
+  StreamMode mode               = 4;   // snapshot-then-live (default) vs live-only
 }
 
 /// Sent by `tddy-tools session-hook`; bearer is the per-session hook_token.

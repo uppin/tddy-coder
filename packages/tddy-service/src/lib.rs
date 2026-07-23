@@ -132,6 +132,63 @@ pub mod proto {
     }
 }
 
+/// Convert a [`serde_json::Value`] into the protobuf [`prost_types::Value`] wire form for a
+/// `google.protobuf.Value` field.
+///
+/// [`serde_json::Value::Null`] at the top level maps to `None` — i.e. the proto field is left
+/// unset. This gives the agent-activity "running row leaves `result` unset" / "empty input is
+/// unset" semantics uniformly. Every other JSON shape maps faithfully: object →
+/// `StructValue`, array → `ListValue`, string → `StringValue`, number → `NumberValue`, bool →
+/// `BoolValue`. A `null` nested *inside* an object/array is preserved as a `NullValue` kind.
+pub fn json_to_proto_value(value: &serde_json::Value) -> Option<prost_types::Value> {
+    if value.is_null() {
+        return None;
+    }
+    Some(json_to_prost_value(value))
+}
+
+fn json_to_prost_value(value: &serde_json::Value) -> prost_types::Value {
+    use prost_types::value::Kind;
+    let kind = match value {
+        serde_json::Value::Null => Kind::NullValue(0),
+        serde_json::Value::Bool(b) => Kind::BoolValue(*b),
+        serde_json::Value::Number(n) => Kind::NumberValue(n.as_f64().unwrap_or(0.0)),
+        serde_json::Value::String(s) => Kind::StringValue(s.clone()),
+        serde_json::Value::Array(arr) => Kind::ListValue(prost_types::ListValue {
+            values: arr.iter().map(json_to_prost_value).collect(),
+        }),
+        serde_json::Value::Object(map) => Kind::StructValue(prost_types::Struct {
+            fields: map
+                .iter()
+                .map(|(k, v)| (k.clone(), json_to_prost_value(v)))
+                .collect(),
+        }),
+    };
+    prost_types::Value { kind: Some(kind) }
+}
+
+/// Map a durable [`tddy_core::agent_activity::AgentActivityRecord`] onto its protobuf wire form
+/// [`proto::connection::AgentActivityRecord`].
+///
+/// The structured `input` / `result` JSON values are carried as `google.protobuf.Value` via
+/// [`json_to_proto_value`], so a top-level `Null` leaves the corresponding proto field unset.
+/// All scalar fields are copied through verbatim.
+pub fn agent_activity_to_proto(
+    record: tddy_core::agent_activity::AgentActivityRecord,
+) -> proto::connection::AgentActivityRecord {
+    proto::connection::AgentActivityRecord {
+        call_id: record.call_id,
+        tool_name: record.tool_name,
+        input: json_to_proto_value(&record.input),
+        status: record.status,
+        result: json_to_proto_value(&record.result),
+        error_message: record.error_message,
+        started_unix_ms: record.started_unix_ms,
+        completed_unix_ms: record.completed_unix_ms,
+        source: record.source,
+    }
+}
+
 /// Combined `FileDescriptorSet` (serialized) for all service protos, used by the
 /// gRPC `ServerReflection` service to serve descriptors at runtime.
 pub static SERVICE_DESCRIPTOR_BYTES: &[u8] =
@@ -157,6 +214,142 @@ pub mod tonic_sandbox {
 pub mod tonic_connection {
     #![allow(unused_imports, clippy::all)]
     include!(concat!(env!("OUT_DIR"), "/tonic_connection/connection.rs"));
+}
+
+#[cfg(test)]
+mod json_to_proto_value_tests {
+    use super::json_to_proto_value;
+    use prost_types::value::Kind;
+
+    /// Unwrap the produced `Some(Value)` down to its `Kind`, failing loudly if the field was
+    /// left unset — keeps each test asserting one exact kind.
+    fn kind_of(value: &serde_json::Value) -> Kind {
+        json_to_proto_value(value)
+            .expect("expected the proto field to be set")
+            .kind
+            .expect("proto Value must carry a kind")
+    }
+
+    /// A top-level JSON `null` leaves the `google.protobuf.Value` field unset (`None`), giving
+    /// agent-activity its "running row has no result / empty input is absent" semantics.
+    #[test]
+    fn maps_top_level_null_to_an_unset_field() {
+        // Given
+        let value = serde_json::Value::Null;
+
+        // When
+        let proto = json_to_proto_value(&value);
+
+        // Then
+        assert_eq!(
+            proto, None,
+            "top-level null must leave the proto field unset"
+        );
+    }
+
+    /// A bare JSON string maps to a `StringValue`, so non-object tool text round-trips faithfully.
+    #[test]
+    fn maps_a_bare_string_to_a_string_value() {
+        // Given
+        let value = serde_json::json!("hello");
+
+        // When
+        let kind = kind_of(&value);
+
+        // Then
+        assert_eq!(kind, Kind::StringValue("hello".to_string()));
+    }
+
+    /// A JSON object maps to a `StructValue` whose fields carry the object's entries.
+    #[test]
+    fn maps_an_object_to_a_struct_value() {
+        // Given
+        let value = serde_json::json!({ "command": "x" });
+
+        // When
+        let kind = kind_of(&value);
+
+        // Then
+        let Kind::StructValue(s) = kind else {
+            panic!("expected a StructValue, got {kind:?}");
+        };
+        assert_eq!(s.fields.len(), 1, "struct must carry exactly one field");
+        assert_eq!(
+            s.fields.get("command").and_then(|v| v.kind.clone()),
+            Some(Kind::StringValue("x".to_string())),
+            "the 'command' field must be a StringValue('x')"
+        );
+    }
+
+    /// A JSON array maps to a `ListValue` preserving element order and kinds.
+    #[test]
+    fn maps_an_array_to_a_list_value() {
+        // Given
+        let value = serde_json::json!(["a", "b"]);
+
+        // When
+        let kind = kind_of(&value);
+
+        // Then
+        let Kind::ListValue(list) = kind else {
+            panic!("expected a ListValue, got {kind:?}");
+        };
+        let kinds: Vec<Option<Kind>> = list.values.into_iter().map(|v| v.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                Some(Kind::StringValue("a".to_string())),
+                Some(Kind::StringValue("b".to_string())),
+            ]
+        );
+    }
+
+    /// A JSON boolean maps to a `BoolValue`.
+    #[test]
+    fn maps_a_bool_to_a_bool_value() {
+        // Given
+        let value = serde_json::json!(true);
+
+        // When
+        let kind = kind_of(&value);
+
+        // Then
+        assert_eq!(kind, Kind::BoolValue(true));
+    }
+
+    /// A JSON number maps to a `NumberValue` (IEEE-754 double).
+    #[test]
+    fn maps_a_number_to_a_number_value() {
+        // Given
+        let value = serde_json::json!(42);
+
+        // When
+        let kind = kind_of(&value);
+
+        // Then
+        assert_eq!(kind, Kind::NumberValue(42.0));
+    }
+
+    /// A `null` nested inside an object is preserved as a `NullValue` kind — only a *top-level*
+    /// null unsets the field. This guards the doc-comment claim on [`json_to_proto_value`].
+    #[test]
+    fn preserves_a_null_nested_inside_an_object_as_null_value() {
+        // Given
+        let value = serde_json::json!({ "a": null });
+
+        // When
+        let kind = kind_of(&value);
+
+        // Then
+        let Kind::StructValue(s) = kind else {
+            panic!("expected a StructValue, got {kind:?}");
+        };
+        assert_eq!(
+            s.fields.get("a").and_then(|v| v.kind.clone()),
+            Some(Kind::NullValue(0)),
+            "a nested null must be preserved as a NullValue kind, not dropped"
+        );
+    }
 }
 
 #[cfg(test)]

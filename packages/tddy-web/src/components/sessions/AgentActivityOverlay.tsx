@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
+import { toJson } from "@bufbuild/protobuf";
+import type { Value } from "@bufbuild/protobuf/wkt";
+import { ValueSchema } from "@bufbuild/protobuf/wkt";
 import type { AgentActivityRecord } from "../../gen/connection_pb";
 import { ConnectionService } from "../../gen/connection_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
@@ -166,6 +169,18 @@ export function AgentActivityOverlay({
   );
 }
 
+/**
+ * Render a `google.protobuf.Value` tool input/output as pretty-printed text. An unset value (the
+ * "running" row's output, or an absent input) renders as an empty string. A bare-string value
+ * renders as the string itself; objects/arrays/scalars pretty-print as indented JSON.
+ */
+function formatValue(value: Value | undefined): string {
+  if (value === undefined) return "";
+  const json = toJson(ValueSchema, value);
+  if (typeof json === "string") return json;
+  return JSON.stringify(json, null, 2);
+}
+
 /** Full-input/output detail dialog for one tool call. Escape and backdrop click both dismiss it. */
 function AgentActivityDetailDialog({
   record,
@@ -234,7 +249,7 @@ function AgentActivityDetailDialog({
               data-testid="agent-activity-detail-input"
               className="whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs"
             >
-              {record.inputJson}
+              {formatValue(record.input)}
             </pre>
           </section>
           <section className="space-y-1">
@@ -245,7 +260,7 @@ function AgentActivityDetailDialog({
               data-testid="agent-activity-detail-output"
               className="whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs"
             >
-              {record.resultJson}
+              {formatValue(record.result)}
             </pre>
           </section>
         </div>
