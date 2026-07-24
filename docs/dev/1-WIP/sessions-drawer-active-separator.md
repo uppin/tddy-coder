@@ -111,6 +111,17 @@ clicks the **active** (visible) row, so partitioning is not involved. Confirmed 
 changeset and re-running against the original `SessionDrawer`: it fails identically. Documented in
 the `session-start-resume-daemon-routed-flaky` memory note.
 
+## Validation Results (pr-wrap)
+
+- **validate-changes:** Critical 0 / Warning 0 / Info 1 (cosmetic: separator chevron reflects toggle state, not `forceOpen` visibility during bulk-selection — no fix). Correctness, docs alignment, security all clean.
+- **validate-tests:** Critical 0 / Warning 0. Fluent-compliant (driver + named helpers, Given/When/Then, semantic fixtures, no `cy.intercept`, no branching). Two mixed-fixture specs adapted via `expandRemaining()` with no weakened assertions.
+- **validate-prod-ready:** Blockers 0 / Warnings 0. No TODO/FIXME/console/dead code/fallbacks/mocks in production paths.
+- **analyze-clean-code:** Score **A**. No must-refactor items; extraction of `SessionPartitionBody` reduced duplication.
+- **Lint/typecheck:** web-only change (no Rust → `cargo` N/A). `tsc --noEmit` clean on the three touched source files (only pre-existing repo-wide `bun:test` type noise remains). No eslint config in the package.
+- **Tests:** unit 14/14, acceptance 8/8, seven regression suites green. One pre-existing `DeleteSession`-routing flake (base-branch, unrelated) documented above.
+
+No `refactor` passes were required in any step.
+
 ## Acceptance criteria
 
 - [x] Open drawer with a mix of live and disconnected sessions shows `Active (N)` and `Remaining (M)` collapsible headers with correct counts
