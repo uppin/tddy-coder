@@ -362,7 +362,7 @@ export class LiveKitTransport implements Transport {
   async unary<I extends DescMessage, O extends DescMessage>(
     method: DescMethodUnary<I, O>,
     _signal: AbortSignal | undefined,
-    _timeoutMs: number | undefined,
+    timeoutMs: number | undefined,
     header: HeadersInit | undefined,
     input: MessageInitShape<I>
   ): Promise<UnaryResponse<I, O>> {
@@ -415,10 +415,34 @@ export class LiveKitTransport implements Transport {
     };
     _signal?.addEventListener("abort", onAbort, { once: true });
 
+    // A caller-supplied deadline is the only thing that ever settles a request the peer never
+    // answers. That is a real failure mode, not a theoretical one: a chunk-framed request whose
+    // frames are dropped in transit leaves the peer's reassembler permanently incomplete, so no
+    // response is ever produced and the call would otherwise hang forever with no error at all.
+    // Callers that pass no timeout keep the previous (indefinite) behaviour.
+    const deadlineTimer =
+      timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            const pending = this.pendingUnary.get(requestId);
+            if (!pending) return;
+            this.pendingUnary.delete(requestId);
+            if (this.debug) {
+              transportLog(`error request_id=${requestId} deadline_exceeded after ${timeoutMs}ms`);
+            }
+            pending.reject(
+              new ConnectError(
+                `${service}/${methodName} did not respond within ${timeoutMs}ms`,
+                Code.DeadlineExceeded
+              )
+            );
+          }, timeoutMs);
+
     this.publishRequest(rpcRequest as any);
 
     try {
       const response = await responsePromise;
+      if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
       _signal?.removeEventListener("abort", onAbort);
 
       if (response.error) {
@@ -445,6 +469,7 @@ export class LiveKitTransport implements Transport {
         trailer: metadataToHeaders(response.trailers),
       } as UnaryResponse<I, O>;
     } catch (e) {
+      if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
       _signal?.removeEventListener("abort", onAbort);
       throw e;
     }

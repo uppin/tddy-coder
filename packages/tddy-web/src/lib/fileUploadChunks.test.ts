@@ -8,7 +8,12 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { chunkFile, UPLOAD_CHUNK_SIZE } from "./fileUploadChunks";
+import { MAX_CHUNK_FRAME_BYTES } from "tddy-livekit-web";
+import {
+  chunkFile,
+  UPLOAD_CHUNK_SIZE,
+  UPLOAD_REQUEST_ENVELOPE_HEADROOM,
+} from "./fileUploadChunks";
 
 async function concatText(chunks: Blob[]): Promise<string> {
   const parts = await Promise.all(chunks.map((c) => c.text()));
@@ -16,8 +21,18 @@ async function concatText(chunks: Blob[]): Promise<string> {
 }
 
 describe("UPLOAD_CHUNK_SIZE", () => {
-  it("is 256 KiB", () => {
-    expect(UPLOAD_CHUNK_SIZE).toBe(256 * 1024);
+  it("is 48 KiB", () => {
+    expect(UPLOAD_CHUNK_SIZE).toBe(48 * 1024);
+  });
+
+  it("keeps one chunk's whole upload request inside a single LiveKit data packet", () => {
+    // Given — the LiveKit transport splits any request larger than one data packet into chunk
+    // frames. A dropped frame leaves the peer's reassembler permanently incomplete, so the upload
+    // RPC is never answered; keeping every upload request single-packet keeps it out of that path.
+    // When / Then
+    expect(UPLOAD_CHUNK_SIZE + UPLOAD_REQUEST_ENVELOPE_HEADROOM).toBeLessThanOrEqual(
+      MAX_CHUNK_FRAME_BYTES,
+    );
   });
 });
 

@@ -68,6 +68,9 @@ input**. This works on **both transports** (gRPC `GhosttyTerminalGrpc` and LiveK
 6. **Failures are surfaced, not fatal**: if a file's upload fails mid-stream (network / daemon
    error), that file is **skipped** — its path is **not** inserted — an error is shown in the
    bottom strip (see below), and the remaining files still upload and insert.
+7. **A stalled chunk fails the file** — every chunk RPC carries a deadline
+   (`UPLOAD_CHUNK_TIMEOUT_MS`), so a request the daemon never answers surfaces as a failed file
+   (rule 6) instead of leaving the drop pending forever with no path typed and no error.
 
 **Upload progress (bottom strip):** progress renders in the screen-level **Host Stats Footer**
 (`data-testid="host-stats-footer"`) as a single **aggregate determinate bar**

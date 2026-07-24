@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { create, toBinary, fromBinary } from "@bufbuild/protobuf";
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 import { RoomEvent } from "livekit-client";
@@ -233,6 +234,73 @@ describe("LiveKitTransport unary — responses carrying 64-bit integer fields", 
     // Then — the call resolves with the 64-bit value intact (debug logging must not throw on BigInt)
     const result = await callPromise;
     expect(result.message.seconds).toBe(1_700_000_000n);
+  });
+});
+
+describe("LiveKitTransport unary — call deadlines", () => {
+  it("rejects with DeadlineExceeded when no response arrives within timeoutMs", async () => {
+    // Given — a request that is never answered. This is not hypothetical: a chunk-framed request
+    // whose frames are dropped in transit leaves the peer's reassembler permanently incomplete, so
+    // no response is ever produced (see `chunking.ts`).
+    const fakeRoom = makeFakeRoom();
+    const transport = new LiveKitTransport({ room: fakeRoom as any, targetIdentity: "server" } as any);
+
+    // When — the caller sets a 20 ms deadline
+    const callPromise = transport.unary(FAKE_METHOD, undefined, 20, undefined, {});
+
+    // Then — the call fails instead of hanging forever
+    let error: unknown = null;
+    await callPromise.catch((e) => {
+      error = e;
+    });
+    expect(error).toBeInstanceOf(ConnectError);
+    expect((error as ConnectError).code).toBe(Code.DeadlineExceeded);
+  });
+
+  it("resolves normally when the response arrives before timeoutMs", async () => {
+    // Given
+    let capturedRequestId = 0;
+    const fakeRoom = makeFakeRoom((payload) => {
+      capturedRequestId = fromBinary(RpcRequestSchema, payload).requestId;
+    });
+    const transport = new LiveKitTransport({ room: fakeRoom as any, targetIdentity: "server" } as any);
+
+    // When — a generous deadline and a prompt response
+    const callPromise = transport.unary(FAKE_METHOD, undefined, 60_000, undefined, {});
+    await Promise.resolve();
+    fakeRoom._emit(
+      RoomEvent.DataReceived,
+      makeResponsePayload(capturedRequestId, new Uint8Array(0)),
+      { identity: "server" },
+      "tddy-rpc",
+    );
+
+    // Then
+    const result = await callPromise;
+    expect(result.message).toBeDefined();
+  });
+
+  it("does not time out a call made without a timeoutMs", async () => {
+    // Given — the pre-existing behaviour for callers that pass no deadline
+    let capturedRequestId = 0;
+    const fakeRoom = makeFakeRoom((payload) => {
+      capturedRequestId = fromBinary(RpcRequestSchema, payload).requestId;
+    });
+    const transport = new LiveKitTransport({ room: fakeRoom as any, targetIdentity: "server" } as any);
+
+    // When — the response arrives late (after a timer tick that would have fired a short deadline)
+    const callPromise = transport.unary(FAKE_METHOD, undefined, undefined, undefined, {});
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    fakeRoom._emit(
+      RoomEvent.DataReceived,
+      makeResponsePayload(capturedRequestId, new Uint8Array(0)),
+      { identity: "server" },
+      "tddy-rpc",
+    );
+
+    // Then — it still resolves
+    const result = await callPromise;
+    expect(result.message).toBeDefined();
   });
 });
 
