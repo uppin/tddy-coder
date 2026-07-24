@@ -8,6 +8,10 @@ Release note history for the Web product area.
 
 - Dragging one or more files onto the Ghostty web terminal (either transport) uploads them to the host under `{session_dir}/uploads/<drop-id>/` and **types the uploaded files' shell-escaped absolute host paths into the terminal input** (space-separated, one trailing space, no newline), emulating a native terminal file-drag. See [web-terminal.md § File drop upload](web-terminal.md#file-drop-upload).
 - Upload progress shows as one aggregate bar in the Host Stats Footer and auto-hides on completion; a failed file is skipped (its path is not typed) and surfaced as a transient error. On mobile the gesture is initiated from an **Attach** button in the Keyboard strip. See [host-stats-footer.md § Upload progress](host-stats-footer.md#upload-progress-drag-to-upload).
+## 2026-07-24 — Traffic readout aggregates all attached sessions
+
+- The screen-level byte-traffic readout in the **Host Stats Footer** now sums terminal (data-plane) traffic across **every attached session runtime** — focused and backgrounded — instead of only the focused session's LiveKit room, so the totals and rates reflect total terminal activity across all live sessions. See [host-stats-footer.md](host-stats-footer.md) and [session-drawer.md § Session Traffic Strip](session-drawer.md#session-traffic-strip).
+- A new `useAttachedSessionTraffic(runtimes, runtimeRegistry)` hook sums each runtime's per-session byte-tap counters and derives a live aggregate rate from their advances; it is summed with the existing HTTP `/rpc` (control-plane) meter. Switching focus no longer resets the data-plane total; a disconnected runtime stops contributing.
 
 ## 2026-07-24 — Sessions drawer Active/Remaining separator
 

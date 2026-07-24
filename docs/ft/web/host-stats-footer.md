@@ -36,14 +36,19 @@ The footer shows, left to right:
 
 | Group | Field | Description |
 |-------|-------|-------------|
-| Traffic | ↑ rate / ↓ rate | Live out/in throughput (B/s, kB/s, MB/s) over the last ~2 s |
-| Traffic | ↑ total / ↓ total | Cumulative session bytes sent / received |
-| Traffic | Ping | Round-trip time to the LiveKit gateway in ms, or `—` |
+| Traffic | ↑ rate / ↓ rate | Live out/in throughput (B/s, kB/s, MB/s) over the last ~2 s — HTTP control plane **plus** aggregate session terminal I/O |
+| Traffic | ↑ total / ↓ total | Cumulative bytes sent / received: HTTP RPC **plus** the terminal byte tap summed across **all** attached sessions |
+| Traffic | Ping | Round-trip time to the focused session's LiveKit gateway in ms, or `—` |
 | Disk | Available disk | Free space on the filesystem holding the daemon's default project directory (e.g. `42.1 GB free`) |
 | CPU | Per-core usage | One mini bar per logical core; bar height encodes that core's utilization percentage |
 
-The traffic sub-readout is unchanged in behavior — it is the existing `SessionTrafficStrip`
-relocated into the footer.
+The traffic sub-readout is the relocated `SessionTrafficStrip`. Its **control plane** is the
+app-global HTTP `/rpc` meter; its **data plane** is the per-session terminal byte tap aggregated
+across **every attached runtime** — focused and backgrounded — via
+`useAttachedSessionTraffic(runtimes, runtimeRegistry)`, so the readout reflects total terminal
+traffic across all live sessions rather than only the focused room. See
+[session-drawer.md § Session Traffic Strip](./session-drawer.md#session-traffic-strip) for the
+metering scope.
 
 ## Host stats source
 

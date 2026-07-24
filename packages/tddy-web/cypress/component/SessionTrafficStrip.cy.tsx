@@ -18,6 +18,7 @@ import { byTestId, TEST_IDS } from "../support/testIds";
 
 // This import fails until SessionTrafficStrip.tsx is created.
 import { SessionTrafficStrip } from "../../src/components/sessions/SessionTrafficStrip";
+import { aSessionTrafficBar } from "../support/drivers/sessionTrafficBarDriver";
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -170,5 +171,56 @@ describe("SessionTrafficStrip — component (Cypress)", () => {
     // Check Tailwind class rather than computed styles — avoids requiring global CSS in tests.
     byTestId(TEST_IDS.sessionTrafficStrip).should("have.class", "flex");
     byTestId(TEST_IDS.sessionTrafficStrip).should("not.have.class", "flex-col");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// StatusBar aggregation — the strip's totals sum every mounted runtime's byte tap
+// (data plane), across focused AND backgrounded sessions.
+//
+// Changeset: `statusbar-session-traffic`
+// ---------------------------------------------------------------------------
+
+describe("StatusBar — aggregates session terminal traffic across all attached runtimes", () => {
+  it("shows a single attached session's byte-tap total", () => {
+    // Given — one attached, focused session
+    aSessionTrafficBar()
+      .withAttachedSession("only", { focused: true })
+      .mount()
+      .expectStripVisible()
+      // When — its terminal receives 1500 bytes in / 500 out
+      .receiveBytes("only", { bytesIn: 1_500 })
+      .receiveBytes("only", { bytesOut: 500 })
+      // Then — the strip reflects that session's totals
+      .expectBytesIn("1.5 kB")
+      .expectBytesOut("500 B");
+  });
+
+  it("sums bytes across two attached runtimes", () => {
+    // Given — two attached sessions, both mounted
+    aSessionTrafficBar()
+      .withAttachedSession("a", { focused: true })
+      .withAttachedSession("b")
+      .mount()
+      // When — each receives inbound terminal bytes
+      .receiveBytes("a", { bytesIn: 1_000 })
+      .receiveBytes("b", { bytesIn: 2_000 })
+      // Then — the readout is the aggregate, not just one session's meter
+      .expectBytesIn("3.0 kB");
+  });
+
+  it("stops counting a runtime once it is disconnected", () => {
+    // Given — two attached sessions that have each received traffic
+    aSessionTrafficBar()
+      .withAttachedSession("keep", { focused: true })
+      .withAttachedSession("drop")
+      .mount()
+      .receiveBytes("keep", { bytesIn: 1_000 })
+      .receiveBytes("drop", { bytesIn: 5_000 })
+      .expectBytesIn("6.0 kB")
+      // When — the second session's runtime is evicted
+      .disconnect("drop")
+      // Then — only the surviving runtime's bytes remain in the total
+      .expectBytesIn("1.0 kB");
   });
 });
