@@ -2,10 +2,14 @@ import React, { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { SessionEntry } from "../../gen/connection_pb";
 import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
-import { groupSessionsByStack } from "../../utils/sessionStackGroups";
+import {
+  partitionSessionsByActivity,
+  type SessionStackGroupResult,
+} from "../../utils/sessionStackGroups";
 import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
 import { SessionDrawerItem } from "./SessionDrawerItem";
+import { SessionDrawerSeparator } from "./SessionDrawerSeparator";
 import { sessionDrawerLabel } from "../../utils/sessionDrawerLabel";
 import { connectionStatusForSession } from "../../utils/connectionStatusForSession";
 import { cn } from "../../lib/utils";
@@ -129,6 +133,54 @@ function SessionStackGroup({
   );
 }
 
+/** Renders one partition's stack groups followed by its flat rows. */
+function SessionPartitionBody({
+  partition,
+  selectedSessionId,
+  onSelectSession,
+  owningHost,
+  sessionMetadataBySessionId,
+  selectedForDelete,
+  onToggleSelect,
+}: {
+  partition: SessionStackGroupResult;
+  selectedSessionId: string | null;
+  onSelectSession: (sessionId: string) => void;
+  owningHost: OwningHostInfo;
+  sessionMetadataBySessionId: ReadonlyMap<string, SessionMetadata>;
+  selectedForDelete?: ReadonlySet<string>;
+  onToggleSelect?: (sessionId: string) => void;
+}) {
+  return (
+    <>
+      {partition.groups.map((group) => (
+        <SessionStackGroup
+          key={group.parent.sessionId}
+          group={group}
+          selectedSessionId={selectedSessionId}
+          onSelectSession={onSelectSession}
+          owningHost={owningHost}
+          sessionMetadataBySessionId={sessionMetadataBySessionId}
+          selectedForDelete={selectedForDelete}
+          onToggleSelect={onToggleSelect}
+        />
+      ))}
+      {partition.flat.map((session) => (
+        <SessionDrawerItem
+          key={session.sessionId}
+          session={session}
+          isSelected={session.sessionId === selectedSessionId}
+          onClick={onSelectSession}
+          hostLabel={badgeHostLabel(session, owningHost)}
+          sessionMetadata={sessionMetadataBySessionId.get(session.sessionId)}
+          selected={selectedForDelete?.has(session.sessionId)}
+          onToggleSelect={onToggleSelect}
+        />
+      ))}
+    </>
+  );
+}
+
 export function SessionDrawer({
   sessions,
   selectedSessionId,
@@ -210,7 +262,17 @@ export function SessionDrawer({
     );
   }
 
-  const { groups, flat } = groupSessionsByStack(sessions);
+  const { active, remaining, activeCount, remainingCount } =
+    partitionSessionsByActivity(sessions);
+  const isPartitioned = activeCount > 0 && remainingCount > 0;
+  const partitionBodyProps = {
+    selectedSessionId,
+    onSelectSession,
+    owningHost,
+    sessionMetadataBySessionId,
+    selectedForDelete,
+    onToggleSelect,
+  };
   const selectedCount = selectedForDelete?.size ?? 0;
   const allSelected =
     sessions.length > 0 && sessions.every((s) => selectedForDelete?.has(s.sessionId));
@@ -255,30 +317,33 @@ export function SessionDrawer({
       </div>
       <ScrollArea className="flex-1 min-h-0">
         <div className="py-1 px-2 space-y-0.5">
-          {groups.map((group) => (
-            <SessionStackGroup
-              key={group.parent.sessionId}
-              group={group}
-              selectedSessionId={selectedSessionId}
-              onSelectSession={onSelectSession}
-              owningHost={owningHost}
-              sessionMetadataBySessionId={sessionMetadataBySessionId}
-              selectedForDelete={selectedForDelete}
-              onToggleSelect={onToggleSelect}
+          {isPartitioned ? (
+            <>
+              <SessionDrawerSeparator
+                testId="sessions-drawer-separator-active"
+                label="Active"
+                count={activeCount}
+                defaultOpen
+                forceOpen={selectionMode}
+              >
+                <SessionPartitionBody partition={active} {...partitionBodyProps} />
+              </SessionDrawerSeparator>
+              <SessionDrawerSeparator
+                testId="sessions-drawer-separator-remaining"
+                label="Remaining"
+                count={remainingCount}
+                defaultOpen={false}
+                forceOpen={selectionMode}
+              >
+                <SessionPartitionBody partition={remaining} {...partitionBodyProps} />
+              </SessionDrawerSeparator>
+            </>
+          ) : (
+            <SessionPartitionBody
+              partition={activeCount > 0 ? active : remaining}
+              {...partitionBodyProps}
             />
-          ))}
-          {flat.map((session) => (
-            <SessionDrawerItem
-              key={session.sessionId}
-              session={session}
-              isSelected={session.sessionId === selectedSessionId}
-              onClick={onSelectSession}
-              hostLabel={badgeHostLabel(session, owningHost)}
-              sessionMetadata={sessionMetadataBySessionId.get(session.sessionId)}
-              selected={selectedForDelete?.has(session.sessionId)}
-              onToggleSelect={onToggleSelect}
-            />
-          ))}
+          )}
           {sessions.length === 0 && (
             <div className="px-3 py-4 text-sm text-muted-foreground text-center">
               No sessions

@@ -74,6 +74,18 @@ export const sessionsDrawerPage = {
   drawerItem: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsDrawerItem(sessionId), { timeout: 5000, ...options }),
 
+  /** The "Active (N)" partition header (present only when the list has both active and inactive rows). */
+  separatorActive: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsDrawerSeparatorActive, { timeout: 5000, ...options }),
+
+  /** The "Remaining (M)" partition header (present only when the list has both active and inactive rows). */
+  separatorRemaining: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsDrawerSeparatorRemaining, { timeout: 5000, ...options }),
+
+  /** Expand the (default-collapsed) Remaining partition so its disconnected rows become interactable. */
+  expandRemaining: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsDrawerSeparatorRemaining, { timeout: 5000, ...options }).click(),
+
   /** The derived label text inside a drawer item. */
   drawerItemLabel: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsDrawerItemLabel(sessionId), options),

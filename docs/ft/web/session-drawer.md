@@ -43,8 +43,10 @@ Each `SessionDrawerItem` shows:
   3. `sessionId.slice(0, 8)` — last resort
 - A **tooltip** on focus/hover revealing the full session id
 
-Sessions are ordered newest-first by `createdAt` (`sortSessionsByCreation()`), with no
-active-first grouping (contrast with `sortSessionsForDisplay` used by `ConnectionScreen`).
+Sessions are ordered newest-first by `createdAt` (`sortSessionsByCreation()`). Within that order
+the list is split into an **Active** and a **Remaining** partition (see
+[Active / Remaining Partition Separator](#active--remaining-partition-separator)); there is no
+per-session active-first re-sort (contrast with `sortSessionsForDisplay` used by `ConnectionScreen`).
 
 ## Connection Status Token
 
@@ -52,6 +54,43 @@ active-first grouping (contrast with `sortSessionsForDisplay` used by `Connectio
 - `"connected"` — `isActive: true` and `pendingElicitation: false`
 - `"needs-input"` — `pendingElicitation: true` (takes precedence over `isActive`)
 - `"disconnected"` — `isActive: false` and `pendingElicitation: false`
+
+## Active / Remaining Partition Separator
+
+The open drawer splits its session list into two partitions with a collapsible separator header
+between them, so live sessions stay at the top and finished ones tuck away:
+
+- **Active partition** — sessions whose status dot is **green or yellow**, i.e.
+  `connectionStatusForSession(entry) !== "disconnected"` (equivalently `isActive || pendingElicitation`).
+  A session blocked waiting for human input (`"needs-input"`, yellow) counts as active so it is not
+  hidden. Header label: **`Active (N)`**. Expanded by default.
+- **Remaining partition** — sessions whose dot is **grey** (`"disconnected"`). Header label:
+  **`Remaining (M)`**. Collapsed by default.
+
+`N` and `M` are the number of sessions in each partition (parents + children + flat rows).
+
+**Stack-group nesting is preserved within each partition.** Partitioning happens first, keying on
+each session's *own* status; each partition is then stack-grouped independently by
+`groupSessionsByStack`. A PR-stack whose orchestrator and children share the same activity state
+stays nested inside one partition. A **mixed-activity** stack (e.g. a live child under a finished
+orchestrator) splits: each session lands in the partition matching its own dot, and a child whose
+orchestrator is not present in the same partition renders as a flat row there.
+
+**The separator only appears when both partitions are non-empty.** When every session is active
+(or every session is disconnected) the drawer renders a single plain list with no separator header —
+identical to the pre-partition layout.
+
+**Collapse behaviour** mirrors the PR-stack group: clicking a partition header toggles the
+visibility of that partition's rows. The two partitions collapse independently.
+
+**Bulk delete is unaffected.** Selection mode (the bottom minibar) force-expands both partitions so
+every row's checkbox is reachable; select-all and delete operate across both partitions in the
+existing selection (insertion) order.
+
+Utility: `partitionSessionsByActivity(sessions)` in `utils/sessionStackGroups.ts` returns
+`{ active, remaining, activeCount, remainingCount }` where `active`/`remaining` are each a
+`SessionStackGroupResult` (`groups` + `flat`). Components: `SessionDrawerSeparator`
+(`components/sessions/SessionDrawerSeparator.tsx`) renders one collapsible header + its partition body.
 
 ## Cross-Host Active Sessions
 

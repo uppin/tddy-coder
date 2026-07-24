@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { aSessionEntry } from "../test-utils";
-import { groupSessionsByStack } from "./sessionStackGroups";
+import { groupSessionsByStack, partitionSessionsByActivity } from "./sessionStackGroups";
 
 /**
  * Tests for `groupSessionsByStack` — the util that partitions a session list into orchestrator
@@ -124,5 +124,134 @@ describe("groupSessionsByStack", () => {
     const flatIds = result.flat.map((s) => s.sessionId);
     expect(flatIds).not.toContain("orch-present");
     expect(result.groups).toHaveLength(1);
+  });
+});
+
+/**
+ * Tests for `partitionSessionsByActivity` — splits a session list into an *active* partition
+ * (green/yellow dots: `connectionStatusForSession !== "disconnected"`, i.e. `isActive` or
+ * `pendingElicitation`) and a *remaining* partition (grey/disconnected), each independently
+ * stack-grouped, with per-partition counts.
+ */
+describe("partitionSessionsByActivity", () => {
+  it("returns empty active and remaining partitions for an empty list", () => {
+    const result = partitionSessionsByActivity([]);
+
+    expect(result.activeCount).toBe(0);
+    expect(result.remainingCount).toBe(0);
+    expect(result.active.groups).toEqual([]);
+    expect(result.active.flat).toEqual([]);
+    expect(result.remaining.groups).toEqual([]);
+    expect(result.remaining.flat).toEqual([]);
+  });
+
+  it("routes a connected (green) session to active and a disconnected (grey) session to remaining", () => {
+    // Given — one green session and one grey session
+    const green = aSessionEntry({ sessionId: "green-1", isActive: true, pendingElicitation: false });
+    const grey = aSessionEntry({ sessionId: "grey-1", isActive: false, pendingElicitation: false });
+
+    // When
+    const result = partitionSessionsByActivity([green, grey]);
+
+    // Then
+    expect(result.active.flat.map((s) => s.sessionId)).toEqual(["green-1"]);
+    expect(result.remaining.flat.map((s) => s.sessionId)).toEqual(["grey-1"]);
+    expect(result.activeCount).toBe(1);
+    expect(result.remainingCount).toBe(1);
+  });
+
+  it("routes a needs-input (yellow) session to the active partition", () => {
+    // Given — an inactive session that is nonetheless waiting for human input (yellow dot)
+    const yellow = aSessionEntry({ sessionId: "yellow-1", isActive: false, pendingElicitation: true });
+
+    // When
+    const result = partitionSessionsByActivity([yellow]);
+
+    // Then — the yellow session counts as active, not remaining
+    expect(result.active.flat.map((s) => s.sessionId)).toEqual(["yellow-1"]);
+    expect(result.activeCount).toBe(1);
+    expect(result.remaining.flat).toEqual([]);
+    expect(result.remainingCount).toBe(0);
+  });
+
+  it("counts each partition by the number of sessions it contains", () => {
+    // Given — two green, one yellow, one grey
+    const sessions = [
+      aSessionEntry({ sessionId: "g1", isActive: true }),
+      aSessionEntry({ sessionId: "g2", isActive: true }),
+      aSessionEntry({ sessionId: "y1", isActive: false, pendingElicitation: true }),
+      aSessionEntry({ sessionId: "d1", isActive: false, pendingElicitation: false }),
+    ];
+
+    // When
+    const result = partitionSessionsByActivity(sessions);
+
+    // Then — three active (2 green + 1 yellow), one remaining
+    expect(result.activeCount).toBe(3);
+    expect(result.remainingCount).toBe(1);
+  });
+
+  it("preserves stack-group nesting within the active partition", () => {
+    // Given — an active orchestrator with an active child
+    const orch = aSessionEntry({ sessionId: "orch-a", isActive: true, createdAt: "2026-06-26T08:00:00Z" });
+    const child = aSessionEntry({
+      sessionId: "child-a",
+      isActive: true,
+      orchestratorSessionId: "orch-a",
+      createdAt: "2026-06-26T09:00:00Z",
+    });
+
+    // When
+    const result = partitionSessionsByActivity([orch, child]);
+
+    // Then — the stack stays nested inside the active partition
+    expect(result.active.groups).toHaveLength(1);
+    expect(result.active.groups[0]!.parent.sessionId).toBe("orch-a");
+    expect(result.active.groups[0]!.children.map((c) => c.sessionId)).toEqual(["child-a"]);
+    expect(result.remaining.groups).toHaveLength(0);
+  });
+
+  it("preserves stack-group nesting within the remaining partition", () => {
+    // Given — a disconnected orchestrator with a disconnected child
+    const orch = aSessionEntry({
+      sessionId: "orch-d",
+      isActive: false,
+      createdAt: "2026-06-26T08:00:00Z",
+    });
+    const child = aSessionEntry({
+      sessionId: "child-d",
+      isActive: false,
+      orchestratorSessionId: "orch-d",
+      createdAt: "2026-06-26T09:00:00Z",
+    });
+
+    // When
+    const result = partitionSessionsByActivity([orch, child]);
+
+    // Then — the stack stays nested inside the remaining partition
+    expect(result.remaining.groups).toHaveLength(1);
+    expect(result.remaining.groups[0]!.parent.sessionId).toBe("orch-d");
+    expect(result.remaining.groups[0]!.children.map((c) => c.sessionId)).toEqual(["child-d"]);
+    expect(result.active.groups).toHaveLength(0);
+  });
+
+  it("splits a mixed-activity stack across partitions by each session's own status", () => {
+    // Given — an active orchestrator with a disconnected child
+    const orch = aSessionEntry({ sessionId: "orch-m", isActive: true });
+    const child = aSessionEntry({
+      sessionId: "child-m",
+      isActive: false,
+      orchestratorSessionId: "orch-m",
+    });
+
+    // When
+    const result = partitionSessionsByActivity([orch, child]);
+
+    // Then — the parent is a flat row in active (its only child left the partition);
+    // the child is a flat orphan row in remaining (its parent is absent there).
+    expect(result.active.groups).toHaveLength(0);
+    expect(result.active.flat.map((s) => s.sessionId)).toEqual(["orch-m"]);
+    expect(result.remaining.groups).toHaveLength(0);
+    expect(result.remaining.flat.map((s) => s.sessionId)).toEqual(["child-m"]);
   });
 });
