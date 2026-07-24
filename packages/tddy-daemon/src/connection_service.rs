@@ -3433,6 +3433,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         bytes_in: 0,
                         bytes_out: 0,
                         last_data_received_at: String::new(),
+                        // Populated by `apply_session_list_status_to_proto` below from the recipe
+                        // manifest; left empty here so the enrichment is the single source of truth.
+                        context_docs: Vec::new(),
                     };
                     if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
                         &session_dir,

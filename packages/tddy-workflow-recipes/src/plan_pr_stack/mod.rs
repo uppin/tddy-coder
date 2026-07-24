@@ -27,6 +27,10 @@ use crate::SessionArtifactManifest;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StackPlanOutput {
     pub version: u32,
+    /// Optional code-discovery map (markdown, with `path:line` references) persisted to
+    /// `artifacts/exploration.md`, mirroring the tdd/bugfix planning recipes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exploration: Option<String>,
     pub prs: Vec<PlannedPr>,
 }
 
@@ -303,6 +307,7 @@ mod tests {
     fn parser_happy_path_three_node_dag() {
         let plan = StackPlanOutput {
             version: 1,
+            exploration: None,
             prs: vec![
                 PlannedPr {
                     node_id: "n1".to_string(),
@@ -351,6 +356,7 @@ mod tests {
     fn validate_stack_plan_rejects_duplicate_node_id() {
         let plan = StackPlanOutput {
             version: 1,
+            exploration: None,
             prs: vec![
                 PlannedPr {
                     node_id: "n1".to_string(),
@@ -383,6 +389,7 @@ mod tests {
     fn validate_stack_plan_rejects_dangling_parent_ref() {
         let plan = StackPlanOutput {
             version: 1,
+            exploration: None,
             prs: vec![PlannedPr {
                 node_id: "n2".to_string(),
                 title: "Orphan".to_string(),
@@ -405,6 +412,7 @@ mod tests {
     fn validate_stack_plan_rejects_cycle() {
         let plan = StackPlanOutput {
             version: 1,
+            exploration: None,
             prs: vec![
                 PlannedPr {
                     node_id: "n1".to_string(),
@@ -431,6 +439,42 @@ mod tests {
             msg.contains("cycle"),
             "error should mention cycle, got: {msg}"
         );
+    }
+
+    #[test]
+    fn stack_plan_output_deserializes_an_optional_exploration_field() {
+        // Given — a write-stack-plan submission that carries a code-discovery exploration doc
+        // alongside the PR list, so pr-stack can persist artifacts/exploration.md like the other
+        // planning recipes (tdd/tdd-small/bugfix).
+        let yaml = r##"version: 1
+exploration: "# Exploration\n- src/lib.rs:1 entry point"
+prs:
+  - node_id: n1
+    title: Root PR
+    branch_suggestion: feature/auth/root
+    parents: []
+"##;
+
+        // When
+        let plan: StackPlanOutput = serde_yaml::from_str(yaml).expect("parse stack plan");
+
+        // Then
+        assert_eq!(
+            plan.exploration.as_deref(),
+            Some("# Exploration\n- src/lib.rs:1 entry point")
+        );
+    }
+
+    #[test]
+    fn stack_plan_output_without_exploration_leaves_it_none() {
+        // Given — a submission that omits the exploration field entirely
+        let yaml = "version: 1\nprs: []\n";
+
+        // When
+        let plan: StackPlanOutput = serde_yaml::from_str(yaml).expect("parse stack plan");
+
+        // Then
+        assert_eq!(plan.exploration, None);
     }
 
     #[test]

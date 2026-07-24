@@ -156,6 +156,17 @@ message ListSessionsRequest {
 message ListSessionsResponse {
   repeated SessionEntry sessions = 1;
 }
+// A recipe-manifest–derived planning document surfaced for a session (web Docs tab, child
+// "Start session" prompts). `path` is the absolute artifacts/ location; `exists` reflects whether
+// the file is currently on disk.
+message SessionContextDoc {
+  string key = 1;
+  string basename = 2;
+  string path = 3;
+  string description = 4;
+  bool exists = 5;
+}
+
 message SessionEntry {
   string session_id = 1;
   string created_at = 2;
@@ -206,6 +217,10 @@ message SessionEntry {
   // Epoch-milliseconds of the most recent data received over the session's transport, as a string.
   // Empty when no data has ever been received. Inspector fallback when no live runtime exists.
   string last_data_received_at = 26;
+  // Recipe-manifest–derived planning documents for this session (e.g. exploration notes, the
+  // stack plan) with per-doc existence and human descriptions. Empty for sessions whose recipe
+  // is blank or unknown.
+  repeated SessionContextDoc context_docs = 27;
 }
 
 message ProjectEntry {

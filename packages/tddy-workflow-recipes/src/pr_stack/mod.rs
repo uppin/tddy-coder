@@ -269,6 +269,7 @@ impl SessionArtifactManifest for PrStackRecipe {
             ("stack_plan_md", PR_STACK_PLAN_MD_BASENAME),
             ("stack_status_md", STACK_STATUS_MD_BASENAME),
             ("stack_status_json", STACK_STATUS_JSON_BASENAME),
+            ("exploration", crate::writer::EXPLORATION_BASENAME),
         ]
     }
 
@@ -287,11 +288,37 @@ impl SessionArtifactManifest for PrStackRecipe {
             "stack_status_json".to_string(),
             STACK_STATUS_JSON_BASENAME.to_string(),
         );
+        a.insert(
+            "exploration".to_string(),
+            crate::writer::EXPLORATION_BASENAME.to_string(),
+        );
         a
     }
 
     fn primary_document_basename(&self) -> Option<String> {
         None
+    }
+
+    fn artifact_doc_descriptions(&self) -> BTreeMap<&'static str, &'static str> {
+        let mut d = BTreeMap::new();
+        d.insert(
+            "exploration",
+            "Code-discovery exploration notes gathered before planning.",
+        );
+        d.insert("stack_plan", "The PR stack plan (machine-readable YAML).");
+        d.insert(
+            "stack_plan_md",
+            "Human-readable rendering of the PR stack plan.",
+        );
+        d.insert(
+            "stack_status_md",
+            "Human-readable snapshot of each PR node's live status.",
+        );
+        d.insert(
+            "stack_status_json",
+            "Machine-readable snapshot of each PR node's live status.",
+        );
+        d
     }
 }
 
@@ -480,6 +507,26 @@ mod tests {
 
         // Then
         assert_eq!(goal.as_str(), "write-stack-plan");
+    }
+
+    // -----------------------------------------------------------------------
+    // Artifact manifest (context docs)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn known_artifacts_include_exploration_so_it_is_surfaced_as_context() {
+        // Given — the unified pr-stack recipe's artifact manifest
+        let recipe = PrStackRecipe;
+
+        // When
+        let artifacts = recipe.known_artifacts();
+
+        // Then — exploration.md is a known artifact, so it can be listed as a context doc and
+        // injected into the orchestrate goal's context-reminder header (like tdd/tdd-small/bugfix).
+        assert!(
+            artifacts.contains(&("exploration", "exploration.md")),
+            "known_artifacts must include the exploration doc; got: {artifacts:?}"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -723,6 +770,7 @@ mod tests {
         use crate::plan_pr_stack::PlannedPr;
         StackPlanOutput {
             version: 1,
+            exploration: None,
             prs: vec![
                 PlannedPr {
                     node_id: "n1".to_string(),
@@ -852,6 +900,7 @@ mod tests {
         // When — the agent's refined plan has a cycle (n1 depends on n2, n2 depends on n1)
         let cyclic_plan = StackPlanOutput {
             version: 2,
+            exploration: None,
             prs: vec![
                 PlannedPr {
                     node_id: "n1".to_string(),

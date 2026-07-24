@@ -24,4 +24,9 @@ pub trait SessionArtifactManifest: Send + Sync {
             .map(|(_, name)| *name)
             .collect()
     }
+
+    /// Human, one-line explanation per artifact key (for surfacing docs as context). Empty by default.
+    fn artifact_doc_descriptions(&self) -> BTreeMap<&'static str, &'static str> {
+        BTreeMap::new()
+    }
 }

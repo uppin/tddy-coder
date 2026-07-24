@@ -22,6 +22,7 @@ fn seed_orchestrator_stack_from_plan_populates_changeset_stack() {
     // …and a 2-PR linear plan (n1 → n2)
     let plan = StackPlanOutput {
         version: 1,
+        exploration: None,
         prs: vec![
             PlannedPr {
                 node_id: "n1".into(),
@@ -78,6 +79,7 @@ fn seed_orchestrator_stack_from_plan_is_idempotent_on_empty_plan() {
 
     let plan = StackPlanOutput {
         version: 1,
+        exploration: None,
         prs: vec![],
     };
 
@@ -100,6 +102,7 @@ fn seed_orchestrator_stack_from_plan_rejects_cyclic_plan() {
 
     let plan = StackPlanOutput {
         version: 1,
+        exploration: None,
         prs: vec![
             PlannedPr {
                 node_id: "n1".into(),

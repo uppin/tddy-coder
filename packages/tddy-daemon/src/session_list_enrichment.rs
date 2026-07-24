@@ -275,10 +275,21 @@ pub fn apply_session_list_status_to_proto(
     entry.model = status.model;
     entry.activity_status = status.activity_status;
     entry.orchestrator_session_id = status.orchestrator_session_id;
-    entry.recipe = status.recipe;
     entry.stack_plan_json = status.stack_plan_json;
     entry.pending_elicitation =
         crate::elicitation::pending_elicitation_for_session_dir(session_dir);
+    entry.context_docs =
+        crate::session_context_docs::context_docs_for_session(&status.recipe, session_dir)
+            .into_iter()
+            .map(|doc| tddy_service::proto::connection::SessionContextDoc {
+                key: doc.key,
+                basename: doc.basename,
+                path: doc.path.to_string_lossy().into_owned(),
+                description: doc.description,
+                exists: doc.exists,
+            })
+            .collect();
+    entry.recipe = status.recipe;
     Ok(())
 }
 
@@ -471,6 +482,7 @@ state:
             bytes_in: 0,
             bytes_out: 0,
             last_data_received_at: String::new(),
+            context_docs: Vec::new(),
         };
         apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
         assert_eq!(proto.workflow_goal, "acceptance-tests");
@@ -745,6 +757,7 @@ sessions:
             bytes_in: 0,
             bytes_out: 0,
             last_data_received_at: String::new(),
+            context_docs: Vec::new(),
         };
         apply_session_list_status_to_proto(&session_dir, &mut proto).unwrap();
         assert_eq!(
@@ -1184,6 +1197,84 @@ recipe: plan-pr-stack
         assert_eq!(
             proto.recipe, "plan-pr-stack",
             "recipe from changeset must be copied into proto SessionEntry field 22"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Acceptance tests: context_docs enrichment (Milestone C)
+    // ---------------------------------------------------------------------------
+
+    /// `apply_context_docs_to_proto_lists_the_recipe_manifest_docs` — a pr-stack session whose
+    /// `changeset.yaml` names the recipe and whose `artifacts/` holds `exploration.md` must have
+    /// that doc surfaced on the proto `SessionEntry.context_docs` list (new repeated field), so the
+    /// web Docs tab and child "Start session" prompts can reference it.
+    #[test]
+    fn apply_context_docs_to_proto_lists_the_recipe_manifest_docs() {
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path();
+
+        fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            r"session_id: ctx-docs-sess
+project_id: proj-ctx-docs
+created_at: '2026-07-01T10:00:00Z'
+updated_at: '2026-07-01T10:05:00Z'
+status: active
+repo_path: /tmp/repo
+pid: 88
+",
+        )
+        .unwrap();
+
+        fs::write(
+            session_dir.join("changeset.yaml"),
+            r"version: 1
+models: {}
+sessions: []
+state:
+  current: Init
+  updated_at: '2026-07-01T10:05:00Z'
+  history:
+    - state: Init
+      at: '2026-07-01T10:05:00Z'
+recipe: pr-stack
+",
+        )
+        .unwrap();
+
+        let artifacts = session_dir.join("artifacts");
+        fs::create_dir_all(&artifacts).unwrap();
+        fs::write(
+            artifacts.join("exploration.md"),
+            "# Exploration\n- src/lib.rs:1\n",
+        )
+        .unwrap();
+
+        // When
+        let mut proto = ProtoSessionEntry {
+            session_id: "ctx-docs-sess".to_string(),
+            ..Default::default()
+        };
+        apply_session_list_status_to_proto(session_dir, &mut proto).expect("apply must not error");
+
+        // Then — the exploration context doc is surfaced on the proto row with its basename,
+        // on-disk existence, and a non-empty description
+        let exploration = proto
+            .context_docs
+            .iter()
+            .find(|d| d.key == "exploration")
+            .expect("pr-stack SessionEntry must carry the exploration context doc");
+        assert_eq!(
+            exploration.basename, "exploration.md",
+            "context doc basename must be surfaced"
+        );
+        assert!(
+            exploration.exists,
+            "exploration.md is on disk, so its context doc must report exists=true"
+        );
+        assert!(
+            !exploration.description.trim().is_empty(),
+            "each context doc must carry a human description for the web to render"
         );
     }
 

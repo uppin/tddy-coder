@@ -15,6 +15,7 @@ use tddy_core::presenter::WorkflowEvent;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::ids::WorkflowState;
+use tddy_core::workflow::prepend_context_header;
 use tddy_core::workflow::task::TaskResult;
 use tddy_core::workflow::{clear_sinks, set_sinks};
 
@@ -23,6 +24,7 @@ use crate::plan_pr_stack::{
     analyze_stack_user_prompt, write_stack_plan_user_prompt, StackPlanOutput,
     PR_STACK_PLAN_MD_BASENAME, STACK_PLAN_BASENAME,
 };
+use crate::SessionArtifactManifest;
 
 pub struct PrStackHooks {
     event_tx: Option<mpsc::Sender<WorkflowEvent>>,
@@ -107,6 +109,11 @@ fn write_stack_plan_system_prompt() -> String {
      (e.g. `feature/auth/token-store`, `feature/auth/middleware`)\n\n\
      This may be the first time this plan is written, or a chat-driven refinement of an \
      already-written plan — in both cases, re-emit the full plan.\n\n\
+     You may also include an optional top-level `exploration` field: a short markdown \
+     code-discovery map of the key files you inspected, each with a `path:line` reference \
+     (e.g. `- src/auth/store.rs:42 — token persistence`). When present it is persisted to \
+     `artifacts/exploration.md` and surfaced as context to the orchestrate phase. Omit it if \
+     there is nothing worth recording.\n\n\
      Also submit a human-readable plan summary using key `stack-plan-md`.\n"
         .to_string()
 }
@@ -249,6 +256,24 @@ fn before_write_stack_plan(context: &Context, session_dir: Option<&Path>) {
     }
 }
 
+/// `before_task` for `orchestrate`: prepend a context-reminder header pointing the agent at the
+/// on-disk session artifacts (e.g. `exploration.md`), mirroring the tdd/bugfix recipes. When no
+/// artifacts exist, [`prepend_context_header`] returns the prompt unchanged.
+fn before_orchestrate(context: &Context, session_dir: Option<&Path>) {
+    let Some(dir) = session_dir else {
+        return;
+    };
+    let Some(prompt) = context.get_sync::<String>("prompt") else {
+        return;
+    };
+    let basenames = super::PrStackRecipe.context_header_filenames();
+    let repo_dir: Option<PathBuf> = context
+        .get_sync("worktree_dir")
+        .or_else(|| context.get_sync("output_dir"));
+    let prompt = prepend_context_header(prompt, Some(dir), repo_dir.as_deref(), &basenames);
+    context.set_sync("prompt", prompt);
+}
+
 /// `after_task` for `write-stack-plan`: parse the agent's YAML output, validate (or re-seed on a
 /// refinement turn), persist `stack-plan.yaml` + `pr-stack-plan.md`, and mark `StackPlanned`.
 fn after_write_stack_plan(
@@ -278,6 +303,19 @@ fn after_write_stack_plan(
     std::fs::write(dir.join(PR_STACK_PLAN_MD_BASENAME), &md)
         .map_err(|e| format!("write {PR_STACK_PLAN_MD_BASENAME}: {e}"))?;
 
+    // Persist the optional code-discovery map to artifacts/exploration.md, reusing the same
+    // helper and blank-gating as the tdd/bugfix planning recipes so it is surfaced as context.
+    if let Some(exploration) = plan
+        .exploration
+        .as_deref()
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+    {
+        let artifacts_root = tddy_workflow::session_artifacts_root(dir);
+        crate::writer::write_exploration_file(&artifacts_root, exploration)
+            .map_err(|e| format!("write exploration.md: {e}"))?;
+    }
+
     set_changeset_state(dir, WorkflowState::new("StackPlanned"));
     Ok(())
 }
@@ -305,6 +343,7 @@ impl RunnerHooks for PrStackHooks {
         match task_id {
             "analyze-stack" => before_analyze_stack(context, session_dir.as_deref()),
             "write-stack-plan" => before_write_stack_plan(context, session_dir.as_deref()),
+            "orchestrate" => before_orchestrate(context, session_dir.as_deref()),
             _ => {}
         }
         Ok(())
@@ -343,5 +382,176 @@ impl RunnerHooks for PrStackHooks {
             return;
         };
         set_changeset_state(&dir, WorkflowState::new("Failed"));
+    }
+}
+
+#[cfg(test)]
+mod exploration_and_context_tests {
+    use super::*;
+    use std::fs;
+    use tddy_core::changeset::{write_changeset, Changeset};
+
+    /// A valid `write-stack-plan` submission (single root PR, branch under one namespace) that also
+    /// carries a code-discovery `exploration` doc — the pr-stack analogue of the tdd/bugfix planning
+    /// submissions that persist `artifacts/exploration.md`.
+    fn submit_yaml_with_exploration() -> String {
+        r##"version: 1
+exploration: "# Exploration\n- src/lib.rs:1 entry point"
+prs:
+  - node_id: n1
+    title: Root PR
+    description: root
+    branch_suggestion: feature/auth/root
+    parents: []
+"##
+        .to_string()
+    }
+
+    fn a_planned_session_context(dir: &Path, submit_yaml: String) -> Context {
+        write_changeset(dir, &Changeset::default()).expect("seed changeset");
+        let ctx = Context::new();
+        ctx.set_sync("output", submit_yaml);
+        ctx
+    }
+
+    // ── Milestone A: pr-stack persists exploration.md from the write-stack-plan submit ──
+
+    #[test]
+    fn write_stack_plan_writes_exploration_md_under_artifacts_when_submitted() {
+        // Given — a completed write-stack-plan submission carrying an exploration doc
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let ctx = a_planned_session_context(dir, submit_yaml_with_exploration());
+
+        // When — the after_task hook persists the plan
+        after_write_stack_plan(dir, &ctx).expect("after_write_stack_plan");
+
+        // Then — exploration.md lands under artifacts/ carrying the submitted code map
+        let exploration = dir.join("artifacts").join("exploration.md");
+        assert!(
+            exploration.is_file(),
+            "expected exploration.md at {}",
+            exploration.display()
+        );
+        let content = fs::read_to_string(&exploration).unwrap();
+        assert!(
+            content.contains("src/lib.rs:1 entry point"),
+            "exploration.md must contain the submitted code map; got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn write_stack_plan_writes_no_exploration_md_when_the_field_is_blank() {
+        // Given — a submission whose exploration field is whitespace-only
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let ctx = a_planned_session_context(
+            dir,
+            r#"version: 1
+exploration: "   "
+prs:
+  - node_id: n1
+    title: Root PR
+    branch_suggestion: feature/auth/root
+    parents: []
+"#
+            .to_string(),
+        );
+
+        // When
+        after_write_stack_plan(dir, &ctx).expect("after_write_stack_plan");
+
+        // Then — no exploration.md is written for a blank field
+        assert!(
+            !dir.join("artifacts").join("exploration.md").exists(),
+            "no exploration.md must be written when the exploration field is blank"
+        );
+    }
+
+    #[test]
+    fn write_stack_plan_still_persists_stack_plan_yaml_and_md_alongside_exploration() {
+        // Given
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let ctx = a_planned_session_context(dir, submit_yaml_with_exploration());
+
+        // When
+        after_write_stack_plan(dir, &ctx).expect("after_write_stack_plan");
+
+        // Then — adding exploration.md does not disturb the two pre-existing plan artifacts
+        assert!(
+            dir.join(STACK_PLAN_BASENAME).is_file(),
+            "stack-plan.yaml must still be written to the session root"
+        );
+        assert!(
+            dir.join(PR_STACK_PLAN_MD_BASENAME).is_file(),
+            "pr-stack-plan.md must still be written to the session root"
+        );
+        assert!(
+            dir.join("artifacts").join("exploration.md").is_file(),
+            "exploration.md must be written alongside the plan artifacts"
+        );
+    }
+
+    // ── Milestone B: exploration.md is surfaced to the orchestrate goal as context ──
+
+    #[test]
+    fn orchestrate_prompt_surfaces_the_exploration_doc_path_via_context_reminder() {
+        // Given — a planned session whose exploration.md already exists on disk
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let artifacts = dir.join("artifacts");
+        fs::create_dir_all(&artifacts).unwrap();
+        fs::write(
+            artifacts.join("exploration.md"),
+            "# Exploration\n- src/lib.rs:1 entry point\n",
+        )
+        .unwrap();
+
+        let hooks = PrStackHooks::new(None);
+        let ctx = Context::new();
+        ctx.set_sync("session_dir", dir.to_path_buf());
+        ctx.set_sync("prompt", "resolve the stack".to_string());
+
+        // When — the interactive orchestrate turn is prepared
+        hooks
+            .before_task("orchestrate", &ctx)
+            .expect("before_task orchestrate");
+
+        // Then — the agent is pointed at exploration.md via the context-reminder header
+        let prompt: String = ctx.get_sync("prompt").expect("prompt in context");
+        assert!(
+            prompt.contains("<context-reminder>"),
+            "orchestrate prompt must carry a context-reminder header; got:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("exploration.md"),
+            "orchestrate prompt must reference exploration.md; got:\n{prompt}"
+        );
+    }
+
+    #[test]
+    fn orchestrate_prompt_has_no_context_reminder_when_no_docs_exist() {
+        // Given — a session with an empty artifacts dir (no context docs written yet)
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        fs::create_dir_all(dir.join("artifacts")).unwrap();
+
+        let hooks = PrStackHooks::new(None);
+        let ctx = Context::new();
+        ctx.set_sync("session_dir", dir.to_path_buf());
+        ctx.set_sync("prompt", "resolve the stack".to_string());
+
+        // When
+        hooks
+            .before_task("orchestrate", &ctx)
+            .expect("before_task orchestrate");
+
+        // Then — no header is injected when there is nothing to reference
+        let prompt: String = ctx.get_sync("prompt").expect("prompt in context");
+        assert!(
+            !prompt.contains("<context-reminder>"),
+            "no context-reminder header should be injected when no docs exist; got:\n{prompt}"
+        );
     }
 }

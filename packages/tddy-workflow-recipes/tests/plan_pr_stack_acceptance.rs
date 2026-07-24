@@ -76,6 +76,7 @@ fn validate_stack_plan_rejects_cycle() {
     // Given — cyclic plan (n1 depends on n2, n2 depends on n1)
     let plan = StackPlanOutput {
         version: 1,
+        exploration: None,
         prs: vec![
             tddy_workflow_recipes::plan_pr_stack::PlannedPr {
                 node_id: "n1".into(),
@@ -139,6 +140,7 @@ fn validate_stack_plan_rejects_a_pr_without_a_branch_suggestion() {
     pr.branch_suggestion = None;
     let plan = StackPlanOutput {
         version: 1,
+        exploration: None,
         prs: vec![pr],
     };
 
@@ -165,6 +167,7 @@ fn validate_stack_plan_rejects_a_branch_not_in_feature_stack_node_shape() {
     pr.branch_suggestion = Some("todo-scaffold".into());
     let plan = StackPlanOutput {
         version: 1,
+        exploration: None,
         prs: vec![pr],
     };
 
@@ -189,6 +192,7 @@ fn validate_stack_plan_rejects_branches_split_across_stack_namespaces() {
     core.branch_suggestion = Some("feature/other-thing/core".into());
     let plan = StackPlanOutput {
         version: 1,
+        exploration: None,
         prs: vec![scaffold, core],
     };
 
