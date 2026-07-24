@@ -650,7 +650,11 @@ export function SessionsDrawerScreen({
             />
           )}
         </div>
-        <HostStatsFooter attachment={attachment} />
+        <HostStatsFooter
+          attachment={attachment}
+          runtimes={runtimes}
+          runtimeRegistry={runtimeRegistry}
+        />
       </AppShell>
     </TooltipProvider>
   );

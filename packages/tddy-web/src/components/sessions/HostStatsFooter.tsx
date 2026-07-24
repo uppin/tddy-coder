@@ -13,13 +13,19 @@ import { StatusBar } from "./StatusBar";
 import { DiskSpaceIndicator } from "./DiskSpaceIndicator";
 import { CpuCoresIndicator } from "./CpuCoresIndicator";
 import { useHostStats } from "../../rpc/useHostStats";
+import type { SessionRuntimeRegistry, SessionRuntimeState } from "./sessionRuntimeRegistry";
 
 export interface HostStatsFooterProps {
   /** The current session attachment — drives the relocated traffic readout (`StatusBar`). */
   attachment: SessionAttachmentState;
+  /** All mounted session runtimes (focused + backgrounded) — passed to `StatusBar` so the traffic
+   *  readout aggregates every attached session's terminal (data-plane) bytes. */
+  runtimes?: ReadonlyArray<SessionRuntimeState>;
+  /** The runtime registry backing `runtimes` — passed to `StatusBar` for live aggregate rates. */
+  runtimeRegistry?: SessionRuntimeRegistry | null;
 }
 
-export function HostStatsFooter({ attachment }: HostStatsFooterProps) {
+export function HostStatsFooter({ attachment, runtimes = [], runtimeRegistry = null }: HostStatsFooterProps) {
   const { perCorePercent, disk } = useHostStats();
 
   return (
@@ -27,7 +33,7 @@ export function HostStatsFooter({ attachment }: HostStatsFooterProps) {
       data-testid="host-stats-footer"
       className="flex-shrink-0 flex items-center gap-3 px-2 py-1 border-t border-border"
     >
-      <StatusBar attachment={attachment} />
+      <StatusBar attachment={attachment} runtimes={runtimes} runtimeRegistry={runtimeRegistry} />
       <DiskSpaceIndicator availableBytes={disk ? disk.availableBytes : null} />
       <CpuCoresIndicator perCorePercent={perCorePercent} />
     </div>
