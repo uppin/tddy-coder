@@ -6,6 +6,7 @@ import { GhosttyTerminalLiveKit } from "../GhosttyTerminalLiveKit";
 import { useLiveKitTerminalToken } from "./useLiveKitTerminalToken";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import type { LiveKitChromeStatus } from "../../lib/liveKitStatusPresentation";
+import type { ByteDelta } from "./sessionRuntimeRegistry";
 
 type TokenClient = Client<typeof TokenService>;
 
@@ -27,6 +28,9 @@ interface SessionLiveKitTerminalProps {
   /** Fired when the underlying LiveKit room's connection status changes (connecting → connected, or
    *  → error). Lets the runtime cover the panes with a connection overlay until the room connects. */
   onConnectionStatusChange?: (status: LiveKitChromeStatus) => void;
+  /** Fired per terminal I/O event (see `GhosttyTerminalLiveKit.onBytes`) so the runtime can account
+   *  this session's byte traffic to its inspector counters. */
+  onBytes?: (delta: ByteDelta) => void;
 }
 
 /**
@@ -46,6 +50,7 @@ export function SessionLiveKitTerminal({
   onRoom,
   onRegisterFocus,
   onConnectionStatusChange,
+  onBytes,
 }: SessionLiveKitTerminalProps) {
   const { token, ttlSeconds, getToken } = useLiveKitTerminalToken(tokenClient, livekitRoom, identity);
 
@@ -69,6 +74,7 @@ export function SessionLiveKitTerminal({
       onRoom={onRoom}
       onRegisterFocus={onRegisterFocus}
       onConnectionStatusChange={onConnectionStatusChange}
+      onBytes={onBytes}
     />
   );
 }

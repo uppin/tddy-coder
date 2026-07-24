@@ -12,7 +12,7 @@ import { useSessionAttachment } from "./useSessionAttachment";
 import { TerminalControlOverlay } from "./TerminalControlOverlay";
 import { SessionConnectionOverlay } from "./SessionConnectionOverlay";
 import { useTerminalControl, type Session } from "./useTerminalControl";
-import type { SessionRuntimeState } from "./sessionRuntimeRegistry";
+import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import type { LiveKitChromeStatus } from "../../lib/liveKitStatusPresentation";
 import { cn } from "../../lib/utils";
@@ -38,6 +38,9 @@ export interface SessionRuntimeProps {
   onSessionRoom?: (sessionId: string, room: Room) => void;
   /** Evict this runtime's terminal (e.g. remote session ended). */
   onSessionDisconnect?: (sessionId: string) => void;
+  /** Account this session's terminal I/O bytes (see `GhosttyTerminalLiveKit.onBytes`) so the
+   *  screen can fold them into the session's inspector counters. */
+  onSessionBytes?: (sessionId: string, delta: ByteDelta) => void;
   /** LiveKit transport factory — builds the session-scoped client transport for the explicit
    *  steal-claim (`ClaimTerminalControl`, session-participant routing) and, for `connected-livekit`
    *  sessions, the bash terminals' I/O. */
@@ -77,6 +80,7 @@ export function SessionRuntime({
   mobileShortcuts,
   onSessionRoom,
   onSessionDisconnect,
+  onSessionBytes,
   liveKitFactory,
   liveKitFactoryIsOverridden = false,
   commonRoom = null,
@@ -182,6 +186,15 @@ export function SessionRuntime({
     [onSessionRoom, runtime.sessionId],
   );
 
+  // Account the Agent terminal's byte traffic to this session's own id, so the inspector counters
+  // tick per output chunk / input yield even while this runtime is backgrounded.
+  const handleBytes = useCallback(
+    (delta: ByteDelta) => {
+      onSessionBytes?.(runtime.sessionId, delta);
+    },
+    [onSessionBytes, runtime.sessionId],
+  );
+
   // Imperative focus handle for the Agent pane's terminal. Each terminal self-focuses once at
   // mount, so first-selection works on its own; re-selecting an already-mounted runtime only flips
   // CSS visibility, so we replay focus here when this runtime comes to the foreground.
@@ -269,6 +282,7 @@ export function SessionRuntime({
               onRoom={handleRoom}
               onRegisterFocus={registerAgentFocus}
               onConnectionStatusChange={setLiveKitStatus}
+              onBytes={handleBytes}
             />
           )}
           {runtime.status === "connected-livekit" && !tokenClient && (
@@ -328,6 +342,7 @@ export function SessionRuntime({
               tokenClient={tokenClient}
               mobileShortcuts={mobileShortcuts}
               onSessionRoom={onSessionRoom}
+              onSessionBytes={onSessionBytes}
               onDisconnect={dropChild}
               liveKitFactory={liveKitFactory}
               liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
@@ -376,6 +391,8 @@ interface SessionChildRuntimeProps {
   tokenClient?: TokenClient;
   mobileShortcuts?: ToolShortcutDef[];
   onSessionRoom?: (sessionId: string, room: Room) => void;
+  /** Account this child's terminal I/O bytes to its own session id (see `SessionRuntime.onSessionBytes`). */
+  onSessionBytes?: (sessionId: string, delta: ByteDelta) => void;
   /** Drop this child (its output stream ended) — removes the pane and returns focus to the parent. */
   onDisconnect?: (sessionId: string) => void;
   liveKitFactory?: (room: Room, targetIdentity: string) => Transport;
@@ -398,6 +415,7 @@ function SessionChildRuntime({
   tokenClient,
   mobileShortcuts,
   onSessionRoom,
+  onSessionBytes,
   onDisconnect,
   liveKitFactory,
   liveKitFactoryIsOverridden,
@@ -457,6 +475,7 @@ function SessionChildRuntime({
       tokenClient={tokenClient}
       mobileShortcuts={mobileShortcuts}
       onSessionRoom={onSessionRoom}
+      onSessionBytes={onSessionBytes}
       onSessionDisconnect={onDisconnect}
       liveKitFactory={liveKitFactory}
       liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}

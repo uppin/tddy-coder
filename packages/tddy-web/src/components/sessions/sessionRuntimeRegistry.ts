@@ -62,6 +62,34 @@ export interface ByteSample {
   at: number;
 }
 
+/** A single terminal I/O event, as fired by the terminal's `onBytes` sink. One direction per event:
+ *  an output chunk carries `bytesIn`, a batched input yield carries `bytesOut`. Either field omitted
+ *  ⇒ 0. */
+export interface ByteDelta {
+  bytesIn?: number;
+  bytesOut?: number;
+}
+
+/**
+ * Bind an `onBytes` sink to one session's runtime. Each call folds the delta into the registry's
+ * cumulative counters and stamps `lastDataReceivedAt` from `now()` (default {@link Date.now}). This
+ * is the bridge the terminal fires per output chunk / input yield so a backgrounded session's byte
+ * counters keep ticking in the inspector.
+ */
+export function makeByteTap(
+  registry: SessionRuntimeRegistry,
+  sessionId: string,
+  now: () => number = () => Date.now(),
+): (delta: ByteDelta) => void {
+  return (delta: ByteDelta) => {
+    registry.recordBytes(sessionId, {
+      bytesIn: delta.bytesIn ?? 0,
+      bytesOut: delta.bytesOut ?? 0,
+      at: now(),
+    });
+  };
+}
+
 export class SessionRuntimeRegistry {
   private readonly runtimeBySessionId = new Map<string, SessionRuntimeState>();
   private focusedId: string | null = null;
@@ -141,13 +169,15 @@ export class SessionRuntimeRegistry {
     }
   }
 
-  /** Update a (background or focused) runtime's byte counters + last-received timestamp. */
+  /** Update a (background or focused) runtime's byte counters. `lastDataReceivedAt` tracks inbound
+   *  data only, so it is stamped from `sample.at` solely when the sample carries received bytes. */
   recordBytes(sessionId: string, sample: ByteSample): void {
     const state = this.runtimeBySessionId.get(sessionId);
     if (!state) return;
     state.bytesIn += sample.bytesIn;
     state.bytesOut += sample.bytesOut;
-    state.lastDataReceivedAt = sample.at;
+    // "last data received" tracks inbound only — a pure-outbound event (user input) must not reset it.
+    if (sample.bytesIn > 0) state.lastDataReceivedAt = sample.at;
     this.notify();
   }
 
