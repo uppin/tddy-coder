@@ -120,8 +120,8 @@ singleton for LiveKit-backed sessions. Each `SessionRuntimeState` holds:
 - its own `GhosttyTerminalLiveKit` instance
 - a `ConnectionService` client bound to the session's participant identity
   (`daemon-{instanceId}-{sessionId}`)
-- a per-session traffic meter + byte counters (in/out)
-- `lastDataReceivedAt` (from the LiveKit transport's `DataReceived` events)
+- byte counters (in/out), accumulated from the terminal's own I/O events (see below)
+- `lastDataReceivedAt` (stamped from inbound terminal output chunks only)
 - terminal control state
 
 One `<SessionRuntime>` is mounted per attached session. The focused session's terminal is
@@ -170,19 +170,26 @@ call for that row.
 
 ### Inspector I/O bytes + last-data-received
 
-The inspector **Details** tab shows bytes in, bytes out, and a "last data received: Ns ago"
-relative timestamp that advances while the inspector is open. The source is dual:
+The inspector **Details** tab shows bytes in, bytes out (both via `formatBytes`, e.g. `1.2 kB`),
+and a "last data received: Ns ago" relative timestamp that advances while the inspector is open.
+The source is dual:
 
-- **Attached LiveKit session** — bytes in/out come from the per-session traffic meter and
-  `lastDataReceivedAt` from the LiveKit transport's `DataReceived` events, updating in the
-  background (even while the session is not focused).
+- **Attached LiveKit session** — the session's `GhosttyTerminalLiveKit` fires an `onBytes` event
+  per terminal I/O unit: `bytesIn = output.data.length` per received output chunk, and
+  `bytesOut = data.length` per batched input yield sent to the coder. These thread up through
+  `SessionLiveKitTerminal` → `SessionRuntime` (`onSessionBytes(sessionId, delta)`) → the screen,
+  which folds them into the session's runtime counters via `SessionRuntimeRegistry.recordBytes`
+  (`makeByteTap`). The registry's `notify()` re-renders the screen (`useSyncExternalStore`), so the
+  meter ticks live — even for a backgrounded session. `lastDataReceivedAt` is stamped from inbound
+  chunks only, so sending input (typing/paste) never resets the "Ns ago" clock.
 - **No LiveKit participant** — a stopped tddy-coder session, or claude-cli / cursor-cli /
   workspace sessions that never join a room — falls back to `SessionEntry` fields
   (`bytes_in`, `bytes_out`, `last_data_received_at`) populated by the daemon `ListSessions`
   RPC (see [Terminal Sessions § Inspector data for sessions with no LiveKit participant](../daemon/terminal-sessions.md#inspector-data-for-sessions-with-no-livekit-participant)).
 
 The inspector renders the live runtime values when a runtime exists, else the daemon-sourced
-`SessionEntry` values.
+`SessionEntry` values. (The screen-level footer's [Session Traffic Strip](#session-traffic-strip)
+is a separate, transport-level meter — it counts wire payload bytes, not terminal I/O.)
 
 ### Out of scope
 
