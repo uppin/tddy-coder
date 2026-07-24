@@ -147,7 +147,15 @@ export const TEST_IDS = {
   tasksOutputPane: "tasks-output-pane",
   tasksOutputPaneEmpty: "tasks-output-pane-empty",
 
-  // Sessions drawer — bulk select + delete
+  // Sessions drawer — bulk select + delete (bottom selection minibar)
+  /** The selection minibar pinned to the bottom of the open drawer. */
+  sessionsDrawerSelectBar: "sessions-drawer-select-bar",
+  /** "Select" button that activates selection mode (reveals per-row checkboxes). */
+  sessionsDrawerSelectMode: "sessions-drawer-select-mode",
+  /** "Select all" / "Deselect all" toggle, shown while in selection mode. */
+  sessionsDrawerSelectAll: "sessions-drawer-select-all",
+  /** "Cancel" button that exits selection mode and clears the selection. */
+  sessionsDrawerSelectCancel: "sessions-drawer-select-cancel",
   /** Single "delete selected" action button, enabled once ≥1 row checkbox is ticked. */
   sessionsDrawerBulkDelete: "sessions-drawer-bulk-delete",
 

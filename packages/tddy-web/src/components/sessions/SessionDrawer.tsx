@@ -44,8 +44,18 @@ interface SessionDrawerProps {
   sessionMetadataBySessionId?: ReadonlyMap<string, SessionMetadata>;
   /** Session ids ticked for bulk delete. When provided, each row renders a selection checkbox. */
   selectedForDelete?: ReadonlySet<string>;
-  /** Toggle a row's bulk-delete selection. Required for the row checkboxes to render. */
+  /** Toggle a row's bulk-delete selection. Required (with selection mode on) for row checkboxes. */
   onToggleSelect?: (sessionId: string) => void;
+  /** Whether bulk-selection mode is active — drives the bottom minibar layout. */
+  selectionMode?: boolean;
+  /** Activate selection mode from the bottom minibar (reveals per-row checkboxes). */
+  onEnterSelectionMode?: () => void;
+  /** Exit selection mode and clear the current selection. */
+  onExitSelectionMode?: () => void;
+  /** Toggle select-all / select-none across the visible sessions. */
+  onSelectAll?: () => void;
+  /** Delete the currently selected sessions. */
+  onBulkDelete?: () => void;
 }
 
 interface StackGroup {
@@ -133,6 +143,11 @@ export function SessionDrawer({
   sessionMetadataBySessionId = new Map(),
   selectedForDelete,
   onToggleSelect,
+  selectionMode = false,
+  onEnterSelectionMode,
+  onExitSelectionMode,
+  onSelectAll,
+  onBulkDelete,
 }: SessionDrawerProps) {
   const owningHost: OwningHostInfo = {
     selectedInstanceId,
@@ -196,6 +211,9 @@ export function SessionDrawer({
   }
 
   const { groups, flat } = groupSessionsByStack(sessions);
+  const selectedCount = selectedForDelete?.size ?? 0;
+  const allSelected =
+    sessions.length > 0 && sessions.every((s) => selectedForDelete?.has(s.sessionId));
 
   // On mobile, the open list is a full-width overlay (absolute, out of flow) so it
   // sits on top of the terminal instead of resizing it. On desktop it's an in-flow
@@ -268,6 +286,54 @@ export function SessionDrawer({
           )}
         </div>
       </ScrollArea>
+      {sessions.length > 0 && (
+        <div
+          data-testid="sessions-drawer-select-bar"
+          className="flex items-center gap-1 border-t border-border px-2 py-1.5"
+        >
+          {selectionMode ? (
+            <>
+              <button
+                type="button"
+                data-testid="sessions-drawer-select-all"
+                onClick={onSelectAll}
+                className="rounded px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                {allSelected ? "Deselect all" : "Select all"}
+              </button>
+              <span className="flex-1 text-center text-xs text-muted-foreground">
+                {selectedCount} selected
+              </span>
+              <button
+                type="button"
+                data-testid="sessions-drawer-bulk-delete"
+                onClick={onBulkDelete}
+                disabled={selectedCount === 0}
+                className="rounded px-1.5 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-40"
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                data-testid="sessions-drawer-select-cancel"
+                onClick={onExitSelectionMode}
+                className="rounded px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              data-testid="sessions-drawer-select-mode"
+              onClick={onEnterSelectionMode}
+              className="rounded px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              Select
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

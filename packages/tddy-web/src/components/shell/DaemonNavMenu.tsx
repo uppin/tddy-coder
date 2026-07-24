@@ -35,14 +35,14 @@ export function DaemonNavMenu({
       <Button
         type="button"
         variant="outline"
-        size="icon"
+        size="icon-xs"
         aria-label="Open navigation menu"
         aria-expanded={open}
         aria-haspopup="menu"
         data-testid="shell-menu-button"
         onClick={() => setOpen((o) => !o)}
       >
-        <Menu className="size-5" aria-hidden />
+        <Menu className="size-4" aria-hidden />
       </Button>
       {open ? (
         <div

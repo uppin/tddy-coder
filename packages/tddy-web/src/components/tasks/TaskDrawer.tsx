@@ -1,6 +1,5 @@
 import React from "react";
 import type { TaskInfo } from "../../gen/tasks_pb";
-import { DaemonSelectorConnected } from "../shell/DaemonSelector";
 import { ScrollArea } from "../ui/scroll-area";
 import { TaskDrawerItem } from "./TaskDrawerItem";
 
@@ -20,11 +19,10 @@ export function TaskDrawer({ tasks, selectedTaskId, onSelectTask, sessionToken }
       className="flex flex-col h-full border-r border-border bg-background"
       style={{ width: 280, flexShrink: 0 }}
     >
-      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Tasks
         </span>
-        <DaemonSelectorConnected />
       </div>
       <ScrollArea className="flex-1 min-h-0">
         <div className="py-1 px-2 space-y-0.5">

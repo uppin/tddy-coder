@@ -73,6 +73,19 @@ function aRefreshBackend() {
   });
 }
 
+/**
+ * Backend whose `RefreshSession` always fails with a transient, network-like error (server briefly
+ * unreachable) rather than a definitive auth rejection — models a mobile tab waking on a flaky
+ * connection.
+ */
+function aTransientlyFailingRefreshBackend() {
+  return anInMemoryRpcBackend().implement(AuthService, {
+    refreshSession: async () => {
+      throw new ConnectError("connection refused", Code.Unavailable);
+    },
+  });
+}
+
 function aStore(deps: {
   storage: TokenStorage;
   backend?: ReturnType<typeof aRefreshBackend>;
@@ -161,5 +174,27 @@ describe("createSessionTokenStore", () => {
     expect(storage.getAccess()).toBe(null);
     expect(storage.getRefresh()).toBe(null);
     expect(loggedOut).toBe(1);
+  });
+
+  it("keeps both tokens and does not report logged-out when a refresh fails transiently", async () => {
+    // Given — an expired access token but a still-valid refresh token, and a server that is
+    // momentarily unreachable (a mobile tab that just woke on a flaky connection).
+    const storage = anInMemoryStorage(EXPIRED_ACCESS, VALID_REFRESH);
+    let loggedOut = 0;
+    const { store } = aStore({
+      storage,
+      backend: aTransientlyFailingRefreshBackend(),
+      onLoggedOut: () => (loggedOut += 1),
+    });
+
+    // When — a fresh access token is requested
+    const attempt = store.ensureFreshAccessToken();
+
+    // Then — it rejects, but the still-valid refresh token is preserved and logout is NOT reported:
+    // a transient blip must never discard tokens (that is what forces a spurious re-login).
+    await expect(attempt).rejects.toThrow();
+    expect(storage.getAccess()).toBe(EXPIRED_ACCESS);
+    expect(storage.getRefresh()).toBe(VALID_REFRESH);
+    expect(loggedOut).toBe(0);
   });
 });

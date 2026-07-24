@@ -94,6 +94,9 @@ export function SessionsDrawerScreen({
   // Sessions ticked for bulk delete — a Set preserves insertion (selection) order, which the bulk
   // delete replays so sessions are removed in the order they were selected.
   const [selectedForDelete, setSelectedForDelete] = useState<Set<string>>(() => new Set());
+  // Bulk-selection mode: off by default so the drawer reads as a plain list. The bottom minibar
+  // toggles it on, which is what reveals the per-row checkboxes and the Select-all / Delete actions.
+  const [selectionMode, setSelectionMode] = useState(false);
 
   const toggleSelectForDelete = useCallback((sessionId: string) => {
     setSelectedForDelete((prev) => {
@@ -102,6 +105,15 @@ export function SessionsDrawerScreen({
       else next.add(sessionId);
       return next;
     });
+  }, []);
+
+  const enterSelectionMode = useCallback(() => setSelectionMode(true), []);
+
+  // Leaving selection mode always clears the tick set — a stale selection must not survive into the
+  // next time the operator opens the bar.
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedForDelete(new Set());
   }, []);
 
   // The project registry (daemon-level RPC over the selected-daemon common-room connection). Used
@@ -415,6 +427,16 @@ export function SessionsDrawerScreen({
   // Delete every selected session in selection (insertion) order, routing each delete to the
   // session's owning daemon. Sequential so the daemon processes them in the same order the operator
   // ticked the rows, and so a single failure doesn't abandon the remaining deletes silently.
+  // Select-all toggles against the full visible list: if every session is already ticked, clear;
+  // otherwise tick them all (fresh Set so insertion order matches the current list order).
+  const toggleSelectAll = useCallback(() => {
+    setSelectedForDelete((prev) => {
+      const allIds = sortedSessions.map((s) => s.sessionId);
+      const allSelected = allIds.length > 0 && allIds.every((id) => prev.has(id));
+      return allSelected ? new Set() : new Set(allIds);
+    });
+  }, [sortedSessions]);
+
   const handleBulkDelete = useCallback(async () => {
     const ids = [...selectedForDelete];
     for (const id of ids) {
@@ -431,6 +453,7 @@ export function SessionsDrawerScreen({
       }
     }
     setSelectedForDelete(new Set());
+    setSelectionMode(false);
     requestSessionsRefresh();
   }, [selectedForDelete, sortedSessions, selectedInstanceId, clientForHost, client, deleteSession, sessionToken]);
 
@@ -512,21 +535,6 @@ export function SessionsDrawerScreen({
     requestSessionsRefresh();
   };
 
-  const bulkDeleteButton =
-    selectedForDelete.size > 0 ? (
-      <Button
-        type="button"
-        variant="destructive"
-        size="sm"
-        data-testid="sessions-drawer-bulk-delete"
-        onClick={() => {
-          void handleBulkDelete();
-        }}
-      >
-        Delete selected ({selectedForDelete.size})
-      </Button>
-    ) : null;
-
   return (
     <TooltipProvider delayDuration={0}>
       {/* 100dvh (via AppShell fullbleed): on mobile 100vh includes the area behind the browser
@@ -536,7 +544,6 @@ export function SessionsDrawerScreen({
         title="Sessions"
         onNavigate={onNavigate}
         dataTestId="sessions-drawer-screen"
-        headerRight={bulkDeleteButton}
       >
         <div className="flex flex-1 min-h-0 overflow-hidden relative">
           {isMobile && !sessionListOpen && (
@@ -563,7 +570,14 @@ export function SessionsDrawerScreen({
             hostLabelForInstance={hostLabelForInstance}
             sessionMetadataBySessionId={sessionMetadataBySessionId}
             selectedForDelete={selectedForDelete}
-            onToggleSelect={toggleSelectForDelete}
+            selectionMode={selectionMode}
+            onToggleSelect={selectionMode ? toggleSelectForDelete : undefined}
+            onEnterSelectionMode={enterSelectionMode}
+            onExitSelectionMode={exitSelectionMode}
+            onSelectAll={toggleSelectAll}
+            onBulkDelete={() => {
+              void handleBulkDelete();
+            }}
           />
           {/* A bad deep link surfaces "not found" in the detail pane only — the session list
               stays visible so the operator can pick a valid session. */}

@@ -1,8 +1,13 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { AuthService } from "../gen/auth_pb";
 import type { GitHubUser } from "../gen/auth_pb";
 import { useHttpClient, useAuthTokenGate } from "../rpc/transportProvider";
 import { createSessionTokenStore, type TokenStorage } from "../rpc/sessionTokenStore";
+
+/** Thrown when the server authoritatively reports the stored session is not valid (vs. a transient
+ * network failure). Distinguishing the two is what stops a momentary blip from logging the user out. */
+class SessionInvalidError extends Error {}
 
 /** Short-lived access token used to authenticate RPCs. */
 const ACCESS_TOKEN_KEY = "tddy_session_token";
@@ -109,32 +114,79 @@ export function useAuth() {
           }
         }
       }
-      throw new Error("no valid session");
+      // Reached the server and it did not authenticate us — a definitive invalid session.
+      throw new SessionInvalidError();
     };
 
-    establishSession()
-      .then(({ token, user }) => {
-        if (cancelled) return;
-        setState({
-          user,
-          isAuthenticated: true,
-          isLoading: false,
-          error: null,
-          sessionToken: token,
-          isRefreshing: false,
-        });
-      })
-      .catch(() => {
-        // A rejected refresh already cleared storage via the store; clear defensively for the
-        // "stored access token no longer valid and no refresh token" path too.
-        if (cancelled) return;
-        storage.clear();
-        setState(LOGGED_OUT);
-      });
+    // A definitive auth rejection ends the session; a transient/network failure must not. A
+    // just-woken mobile tab often reloads while its connection is briefly unavailable, so the first
+    // establish attempt can fail purely on connectivity — treating that as "logged out" (and wiping
+    // the valid 7-day refresh token) is the bug that forces a re-login. Only these are terminal:
+    //   • the server said the session is invalid (SessionInvalidError),
+    //   • an RPC was explicitly rejected as Unauthenticated,
+    //   • the store already cleared both tokens (nothing left to recover from).
+    const isTerminal = (err: unknown) =>
+      err instanceof SessionInvalidError ||
+      ConnectError.from(err).code === Code.Unauthenticated ||
+      (!storage.getAccess() && !storage.getRefresh());
+
+    const run = async () => {
+      // Backoff between retries of a transient failure; stays in the "Loading…" state throughout,
+      // so the operator sees a brief spinner rather than a spurious login screen.
+      const backoffsMs = [500, 1000, 2000, 4000];
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const { token, user } = await establishSession();
+          if (cancelled) return;
+          setState({
+            user,
+            isAuthenticated: true,
+            isLoading: false,
+            error: null,
+            sessionToken: token,
+            isRefreshing: false,
+          });
+          return;
+        } catch (err) {
+          if (cancelled) return;
+          if (isTerminal(err) || attempt >= backoffsMs.length) {
+            // Wipe tokens only on a definitive rejection. When transient retries are merely
+            // exhausted, keep the tokens so a later reload/resume can still recover the session.
+            if (isTerminal(err)) storage.clear();
+            setState(LOGGED_OUT);
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, backoffsMs[attempt]));
+        }
+      }
+    };
+    void run();
+
     return () => {
       cancelled = true;
     };
   }, [client, store, storage]);
+
+  // Proactively refresh the access token when the tab returns to the foreground or the network
+  // comes back. Mobile browsers freeze and often discard backgrounded tabs, so the short-lived
+  // access token lapses while hidden with no RPC running to refresh it reactively. Refreshing on
+  // resume keeps the session alive and primes a valid token before the first RPC fires on a
+  // flaky wake-up connection. A no-op when the token is still fresh; failures are swallowed (a
+  // definitive logout is handled by the store's onLoggedOut, a transient one retries later).
+  useEffect(() => {
+    const refreshOnResume = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void store.ensureFreshAccessToken().catch(() => {});
+    };
+    document.addEventListener("visibilitychange", refreshOnResume);
+    window.addEventListener("pageshow", refreshOnResume);
+    window.addEventListener("online", refreshOnResume);
+    return () => {
+      document.removeEventListener("visibilitychange", refreshOnResume);
+      window.removeEventListener("pageshow", refreshOnResume);
+      window.removeEventListener("online", refreshOnResume);
+    };
+  }, [store]);
 
   const login = useCallback(
     async (returnTo?: string) => {
