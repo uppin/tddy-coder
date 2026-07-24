@@ -62,8 +62,9 @@ input**. This works on **both transports** (gRPC `GhosttyTerminalGrpc` and LiveK
    matches how a native terminal (including on-host Ghostty on macOS) inserts a dragged path.
    Insertion reuses the ordinary terminal input path (`sendInput` for gRPC,
    `enqueueTerminalInput` for LiveKit), so no new transport is involved for the "typing".
-4. **Multiple files** in one drop upload concurrently under the same drop id and are inserted
-   as one space-separated run (`'a.pdf' 'b.png' 'c.csv' `).
+4. **Multiple files** in one drop share the drop id, upload **one after another** (each file's
+   chunks are sent in order, one round trip at a time), and are inserted as one space-separated
+   run in **drop order**, regardless of completion order (`'a.pdf' 'b.png' 'c.csv' `).
 5. **No client-side size cap** — files of any size stream in chunks.
 6. **Failures are surfaced, not fatal**: if a file's upload fails mid-stream (network / daemon
    error), that file is **skipped** — its path is **not** inserted — an error is shown in the
@@ -71,6 +72,21 @@ input**. This works on **both transports** (gRPC `GhosttyTerminalGrpc` and LiveK
 7. **A stalled chunk fails the file** — every chunk RPC carries a deadline
    (`UPLOAD_CHUNK_TIMEOUT_MS`), so a request the daemon never answers surfaces as a failed file
    (rule 6) instead of leaving the drop pending forever with no path typed and no error.
+8. **The drop id must not need a secure context.** tddy-web is normally reached over plain
+   `http://` on a LAN address, where `crypto.randomUUID` does not exist; the drop id comes from
+   `lib/randomId.ts`'s `randomUuid()` so the gesture works on any origin. See
+   [insecure-origin-constraints.md](../../../packages/tddy-web/docs/insecure-origin-constraints.md).
+
+**Chunk size, delivery, and how long a drop takes.** Each chunk's whole RPC is sized to fit **one**
+LiveKit data packet (48 KiB of file bytes; see
+[terminal-file-upload.md](../../../packages/tddy-web/docs/terminal-file-upload.md)), because a
+request large enough to be split into chunk frames is lost outright if any one frame is dropped.
+Chunks are strictly serial, so a drop is round-trip bound, not bandwidth bound: a measured 2 MB drop
+over the LiveKit data channel took ~40 s (~47 KB/s). The only feedback during that time is the
+aggregate bar in the Host Stats Footer, which is far from the terminal the user is watching — so a
+large drop can read as "nothing happened" until the path appears. Known limitation; a
+write-at-`offset` upload RPC (allowing several chunks in flight) and progress feedback on the
+terminal itself are the tracked follow-ups.
 
 **Upload progress (bottom strip):** progress renders in the screen-level **Host Stats Footer**
 (`data-testid="host-stats-footer"`) as a single **aggregate determinate bar**

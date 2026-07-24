@@ -154,3 +154,32 @@ oversized echo in both directions.
 layer (`tddy-daemon/src/tool_call_log.rs`) so individual records stay small regardless of
 transport; a Cypress e2e crossing the TS↔Rust boundary with an oversized payload is also
 outstanding.
+
+### A lost chunk frame wedges the call — deadlines are the only escape
+
+Chunk reassembly is best-effort: both `ChunkReassembler`s (Rust `chunking.rs`, TS `chunking.ts`)
+hold a partially arrived message in `pending` with **no timeout and no eviction**. A data channel
+that drops one frame of a multi-frame message therefore leaves that message permanently incomplete —
+it is never delivered, never answered, and never fails. Observed in production on a browser file
+upload: 262 KB requests (5 frames each) stopped arriving mid-file while 2-second `ListSessions` calls
+on the same channel kept flowing, so the channel was healthy and only the big request vanished.
+
+Two consequences, both now reflected in the code:
+
+- **Size requests to one packet where you can.** A payload that fits one packet is sent raw and is
+  as reliable as any other RPC on the channel. `MAX_CHUNK_FRAME_BYTES` is exported from
+  `packages/tddy-livekit-web/src/index.ts` so a caller that generates payloads (chunked uploads,
+  batched snapshots) can size them to stay under it and pin that in a test.
+- **`LiveKitTransport.unary` honours the Connect `timeoutMs` call option.** It previously accepted
+  and ignored it, so no request on the LiveKit path had a deadline and a wedged call hung the caller
+  forever with no error. A deadline timer now drops the pending entry and rejects with
+  `ConnectError(Code.DeadlineExceeded)`; it is cleared on response, error, and abort. Timeouts stay
+  **opt-in per call** — defaulting every unary to a deadline would break legitimately slow RPCs such
+  as `StartSession`, which does remote git work.
+
+*Remaining gap (deliberate, not fixed):* `publishRequest` fires every frame at `publishData`
+**without awaiting** it, so an oversized message still bursts N frames with no SCTP backpressure —
+the exact condition under which those upload frames were lost. Payloads that are still oversized
+(large `StreamSessionActivity` snapshots, ACP replay) pass no `timeoutMs`, so a lost frame there
+still wedges that call silently. Fixing it properly means awaiting `publishData` per frame and/or an
+eviction/nack policy in `ChunkReassembler`; both touch the shared terminal I/O hot path.
