@@ -298,6 +298,28 @@ impl SessionArtifactManifest for PrStackRecipe {
     fn primary_document_basename(&self) -> Option<String> {
         None
     }
+
+    fn artifact_doc_descriptions(&self) -> BTreeMap<&'static str, &'static str> {
+        let mut d = BTreeMap::new();
+        d.insert(
+            "exploration",
+            "Code-discovery exploration notes gathered before planning.",
+        );
+        d.insert("stack_plan", "The PR stack plan (machine-readable YAML).");
+        d.insert(
+            "stack_plan_md",
+            "Human-readable rendering of the PR stack plan.",
+        );
+        d.insert(
+            "stack_status_md",
+            "Human-readable snapshot of each PR node's live status.",
+        );
+        d.insert(
+            "stack_status_json",
+            "Machine-readable snapshot of each PR node's live status.",
+        );
+        d
+    }
 }
 
 /// Re-seed the orchestrator's `Changeset.stack` from a refined [`StackPlanOutput`], but only

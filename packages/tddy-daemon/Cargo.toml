@@ -47,6 +47,7 @@ tddy-discovery = { path = "../tddy-discovery" }
 tddy-demo-runner = { path = "../tddy-demo-runner" }
 tddy-github = { path = "../tddy-github" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
+tddy-workflow = { path = "../tddy-workflow" }
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-lsp = { path = "../tddy-lsp" }
 tddy-lsp-executor = { path = "../tddy-lsp-executor" }
