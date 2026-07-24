@@ -1,4 +1,5 @@
 import type { SessionEntry } from "../gen/connection_pb";
+import { connectionStatusForSession } from "./connectionStatusForSession";
 
 /** One orchestrator session and its stack children, sorted by creation date. */
 export interface SessionStackGroup {
@@ -79,4 +80,47 @@ export function groupSessionsByStack(
   );
 
   return { groups, flat };
+}
+
+/** An active / remaining split of a session list, each side independently stack-grouped. */
+export interface SessionActivityPartitions {
+  /** Active partition (green/yellow dots), stack-grouped. */
+  active: SessionStackGroupResult;
+  /** Remaining partition (grey/disconnected dots), stack-grouped. */
+  remaining: SessionStackGroupResult;
+  /** Raw count of sessions routed to the active partition. */
+  activeCount: number;
+  /** Raw count of sessions routed to the remaining partition. */
+  remainingCount: number;
+}
+
+/**
+ * Splits sessions into an *active* partition (dot is green or yellow, i.e.
+ * {@link connectionStatusForSession} is not `"disconnected"`) and a *remaining* partition
+ * (grey/disconnected), then stack-groups each side independently.
+ *
+ * Because the raw list is filtered *before* grouping, a stack whose sessions differ in activity
+ * is split by each session's own dot: a session lands in the partition its status dictates, and
+ * stack nesting only survives where parent and child share a partition.
+ */
+export function partitionSessionsByActivity(
+  sessions: SessionEntry[],
+): SessionActivityPartitions {
+  const activeSessions: SessionEntry[] = [];
+  const remainingSessions: SessionEntry[] = [];
+
+  for (const s of sessions) {
+    if (connectionStatusForSession(s) !== "disconnected") {
+      activeSessions.push(s);
+    } else {
+      remainingSessions.push(s);
+    }
+  }
+
+  return {
+    active: groupSessionsByStack(activeSessions),
+    remaining: groupSessionsByStack(remainingSessions),
+    activeCount: activeSessions.length,
+    remainingCount: remainingSessions.length,
+  };
 }

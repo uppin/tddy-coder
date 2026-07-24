@@ -159,6 +159,12 @@ export const TEST_IDS = {
   /** Single "delete selected" action button, enabled once ≥1 row checkbox is ticked. */
   sessionsDrawerBulkDelete: "sessions-drawer-bulk-delete",
 
+  // Sessions drawer — active / remaining partition separators (collapsible headers)
+  /** "Active (N)" partition header — expanded by default; toggles the active rows below it. */
+  sessionsDrawerSeparatorActive: "sessions-drawer-separator-active",
+  /** "Remaining (M)" partition header — collapsed by default; toggles the disconnected rows below it. */
+  sessionsDrawerSeparatorRemaining: "sessions-drawer-separator-remaining",
+
   // Sessions drawer — open/close toggle
   sessionsDrawerCloseBtn: "sessions-drawer-close-btn",
   sessionsDrawerOpenBtn: "sessions-drawer-open-btn",

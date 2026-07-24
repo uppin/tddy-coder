@@ -356,7 +356,9 @@ describe("SessionInspectorAcceptance — attachment-driven auto-open/close", () 
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "closed");
 
     // When — simulate session going idle by selecting a disconnected session then reselecting
-    // (The attachment hook resets to idle when the session changes)
+    // (The attachment hook resets to idle when the session changes). The disconnected row lives in
+    // the default-collapsed Remaining partition, so expand it first.
+    sessionsDrawerPage.expandRemaining();
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
 
     // Then — inspector opens for the now-disconnected selection
