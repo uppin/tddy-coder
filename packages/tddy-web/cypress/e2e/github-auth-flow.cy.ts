@@ -47,6 +47,9 @@ describe("GitHub OAuth Flow E2E", () => {
     // Then — authenticated state with user info visible
     appAuthPage.userLogin({ timeout: 15000 }).should("have.text", "testuser");
     byTestId("user-avatar").should("exist");
+    // Sign out now lives in a profile menu revealed by clicking the username.
+    byTestId("logout-button").should("not.exist");
+    byTestId("user-profile-trigger").click();
     byTestId("logout-button").should("exist");
     appAuthPage.livekitUrlInput().should("exist");
   });
@@ -65,7 +68,8 @@ describe("GitHub OAuth Flow E2E", () => {
     appAuthPage.loginButton({ timeout: 10000 }).click();
     appAuthPage.userLogin({ timeout: 15000 }).should("exist");
 
-    // When
+    // When — open the profile menu, then sign out
+    byTestId("user-profile-trigger").click();
     byTestId("logout-button").click();
 
     // Then

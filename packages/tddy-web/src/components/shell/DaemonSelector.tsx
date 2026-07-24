@@ -40,7 +40,10 @@ export function DaemonSelector({
       onValueChange={onSelect}
       disabled={daemons.length === 0}
     >
-      <SelectTrigger data-testid="daemon-selector-trigger">
+      <SelectTrigger
+        data-testid="daemon-selector-trigger"
+        className="h-7 gap-1 px-2 text-xs [&_svg:not([class*='size-'])]:size-3.5"
+      >
         <SelectValue placeholder="Select daemon" />
       </SelectTrigger>
       <SelectContent>

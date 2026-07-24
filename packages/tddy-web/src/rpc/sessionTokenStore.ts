@@ -11,7 +11,7 @@
  * Storage, the auth client, and the clock are injected so the store is unit-testable without a DOM.
  */
 
-import type { Client } from "@connectrpc/connect";
+import { Code, ConnectError, type Client } from "@connectrpc/connect";
 import { AuthService } from "../gen/auth_pb";
 
 /** Persistence seam for the token pair (production backs this with `localStorage`). */
@@ -98,8 +98,15 @@ export function createSessionTokenStore(deps: SessionTokenStoreDeps): SessionTok
       onAccessTokenChange?.(res.sessionToken);
       return res.sessionToken;
     } catch (err) {
-      storage.clear();
-      onLoggedOut?.();
+      // Only a definitive server rejection of the refresh token (Unauthenticated) means the
+      // session is truly over — clear both tokens and report logout. A transient failure (offline,
+      // server briefly unreachable, a mobile tab waking on a flaky connection) must NOT discard the
+      // still-valid 7-day refresh token: rethrow intact so the caller can retry later. Wiping tokens
+      // on a momentary blip is exactly what forces a spurious re-login.
+      if (ConnectError.from(err).code === Code.Unauthenticated) {
+        storage.clear();
+        onLoggedOut?.();
+      }
       throw err;
     } finally {
       onRefreshingChange?.(false);

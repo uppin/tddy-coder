@@ -65,7 +65,10 @@ describe("Sessions drawer — bulk delete", () => {
       backend,
     );
 
-    // When — select A and C, then delete selected
+    // When — activate selection mode (checkboxes are hidden until the bottom minibar turns it on),
+    // select A and C, then delete selected
+    byTestId(sessionRowSelect(SESSION_A.sessionId)).should("not.exist");
+    byTestId(TEST_IDS.sessionsDrawerSelectMode).click();
     byTestId(sessionRowSelect(SESSION_A.sessionId)).check();
     byTestId(sessionRowSelect(SESSION_C.sessionId)).check();
     byTestId(TEST_IDS.sessionsDrawerBulkDelete).click();
@@ -74,6 +77,32 @@ describe("Sessions drawer — bulk delete", () => {
     cy.wrap(null).should(() => {
       expect(backend.deletedSessionIds).to.deep.equal([
         SESSION_A.sessionId,
+        SESSION_C.sessionId,
+      ]);
+    });
+  });
+
+  it("select-all from the minibar ticks every session, then deletes them all", () => {
+    // Given — three sessions in the drawer
+    const backend = aConnectionServiceBackend({ sessions: [SESSION_A, SESSION_B, SESSION_C] });
+    mountWithRecordingLiveKitRpc(
+      withSelectedDaemon(<SessionsDrawerScreen onNavigate={cy.stub()} />),
+      backend,
+    );
+
+    // When — activate selection mode, use "Select all", then delete
+    byTestId(TEST_IDS.sessionsDrawerSelectMode).click();
+    byTestId(TEST_IDS.sessionsDrawerSelectAll).click();
+    byTestId(sessionRowSelect(SESSION_A.sessionId)).should("be.checked");
+    byTestId(sessionRowSelect(SESSION_B.sessionId)).should("be.checked");
+    byTestId(sessionRowSelect(SESSION_C.sessionId)).should("be.checked");
+    byTestId(TEST_IDS.sessionsDrawerBulkDelete).click();
+
+    // Then — all three were deleted (in list order)
+    cy.wrap(null).should(() => {
+      expect(backend.deletedSessionIds).to.deep.equal([
+        SESSION_A.sessionId,
+        SESSION_B.sessionId,
         SESSION_C.sessionId,
       ]);
     });

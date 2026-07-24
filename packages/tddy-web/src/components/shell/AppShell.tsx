@@ -45,7 +45,7 @@ export function AppShell({
         data-testid={dataTestId}
         className="flex flex-col h-[100dvh] w-full overflow-hidden font-sans text-foreground"
       >
-        <div className="flex items-center gap-3 px-2 py-1 border-b border-border flex-shrink-0">
+        <div className="flex items-center gap-2 px-2 py-0.5 border-b border-border flex-shrink-0">
           <DaemonNavMenu onNavigate={onNavigate} />
           <h1 className="text-sm font-semibold truncate">{title}</h1>
           <div className="flex-1" />
@@ -60,9 +60,9 @@ export function AppShell({
 
   return (
     <div data-testid={dataTestId} className={screenShellClassName}>
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-2 mb-4">
         <DaemonNavMenu onNavigate={onNavigate} />
-        <h1 className="text-xl font-bold flex-1">{title}</h1>
+        <h1 className="text-lg font-bold flex-1">{title}</h1>
         {headerRight}
         <DaemonSelectorConnected />
         {user ? <UserAvatar user={user} onLogout={logout} /> : null}
