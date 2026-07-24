@@ -11,6 +11,7 @@
 
 import { useCallback } from "react";
 import { chunkFile } from "../lib/fileUploadChunks";
+import { randomUuid } from "../lib/randomId";
 import { joinQuotedPaths } from "../lib/shellQuote";
 import { useUploadProgressController } from "../rpc/uploadProgress";
 import { useDaemonClient } from "../rpc/selectedDaemon";
@@ -46,7 +47,9 @@ export function useSessionFileUpload({
     async (files: File[]) => {
       if (files.length === 0) return;
 
-      const uploadId = crypto.randomUUID();
+      // Not `crypto.randomUUID()`: that is secure-context only, so it is undefined when tddy-web
+      // is served over plain http on a LAN address.
+      const uploadId = randomUuid();
       const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
       progress.startDrop(files.length, totalBytes);
 
@@ -83,27 +86,42 @@ export function useSessionFileUpload({
 }
 
 /**
+ * Deadline for one chunk's upload RPC. Without a deadline a chunk whose request never reaches the
+ * daemon (or whose response is lost) leaves the whole drop pending forever — no error, no progress,
+ * no typed path. With one, the file is reported as failed and the remaining files still upload.
+ * Generous enough that a slow-but-alive link finishes the chunk.
+ */
+export const UPLOAD_CHUNK_TIMEOUT_MS = 20_000;
+
+/**
  * Builds an {@link UploadChunkFn} bound to the selected daemon's `ConnectionService`, targeting a
  * given session. Throws (rather than silently no-op'ing) if no daemon is connected, so a failed
  * upload surfaces instead of being dropped.
  */
-export function useDaemonUploadChunk(sessionToken: string, sessionId: string): UploadChunkFn {
+export function useDaemonUploadChunk(
+  sessionToken: string,
+  sessionId: string,
+  timeoutMs: number = UPLOAD_CHUNK_TIMEOUT_MS,
+): UploadChunkFn {
   const client = useDaemonClient(ConnectionService);
   return useCallback(
     async ({ uploadId, fileName, data, last }) => {
       if (!client) {
         throw new Error("no daemon connected for file upload");
       }
-      const resp = await client.uploadSessionFileChunk({
-        sessionToken,
-        sessionId,
-        uploadId,
-        fileName,
-        data,
-        last,
-      });
+      const resp = await client.uploadSessionFileChunk(
+        {
+          sessionToken,
+          sessionId,
+          uploadId,
+          fileName,
+          data,
+          last,
+        },
+        { timeoutMs },
+      );
       return resp.hostPath;
     },
-    [client, sessionToken, sessionId],
+    [client, sessionToken, sessionId, timeoutMs],
   );
 }

@@ -2,6 +2,11 @@
 
 Release note history for the Coder product area.
 
+## 2026-07-24 — LiveKit unary RPCs can have a deadline
+
+- `LiveKitTransport.unary` (web) now honours the Connect `timeoutMs` call option instead of ignoring it, rejecting with `DeadlineExceeded`. This is the only escape from a wedged call: a chunk-framed request that loses a frame in transit leaves the peer's reassembler permanently incomplete, so the RPC is never answered and never fails. Timeouts stay opt-in per call so legitimately slow RPCs (`StartSession`) are unaffected. See [rpc-multi-transport.md § A lost chunk frame wedges the call](rpc-multi-transport.md#a-lost-chunk-frame-wedges-the-call--deadlines-are-the-only-escape).
+- `MAX_CHUNK_FRAME_BYTES` is exported from `tddy-livekit-web` so payload producers can size requests to a single data packet — the reliable shape on this transport — and pin that bound in a test.
+
 ## 2026-07-24 — pr-stack: exploration.md + session context docs
 
 - The `pr-stack` recipe now persists `artifacts/exploration.md` (the code-discovery map) from an optional `exploration` field on the `write-stack-plan` submit — matching the tdd/bugfix planning recipes — and advertises it to the `orchestrate` operator loop via the `<context-reminder>` header ([pr-stacking.md](pr-stacking.md), [exploration-artifact.md](exploration-artifact.md)).

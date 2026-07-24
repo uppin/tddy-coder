@@ -4,6 +4,12 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-24 — Terminal file drop actually delivers the path
+
+- Dragging a file onto the web terminal now works on a **plain-http LAN origin**: the per-drop id no longer comes from the secure-context-only `crypto.randomUUID`, which threw before any upload started (so the drop appeared to do nothing, on desktop drop and mobile **Attach** alike). See [web-terminal.md § File drop upload](web-terminal.md#file-drop-upload).
+- Uploads no longer stall mid-file in silence: each chunk request is sized to fit one LiveKit data packet (a larger, frame-split request was lost outright if any frame dropped), and every chunk carries a deadline — a stalled chunk now fails that one file (skipped, error shown, other files continue) instead of leaving the drop pending forever with no path and no error.
+- Known limitation: a drop is round-trip bound (a 2 MB file takes ~40 s) and the only progress feedback is the aggregate bar in the Host Stats Footer, so a large drop can read as a failure until the path appears.
+
 ## 2026-07-24 — Terminal file drop upload
 
 - Dragging one or more files onto the Ghostty web terminal (either transport) uploads them to the host under `{session_dir}/uploads/<drop-id>/` and **types the uploaded files' shell-escaped absolute host paths into the terminal input** (space-separated, one trailing space, no newline), emulating a native terminal file-drag. See [web-terminal.md § File drop upload](web-terminal.md#file-drop-upload).
