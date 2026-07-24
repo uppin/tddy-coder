@@ -11,6 +11,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   SessionRuntimeRegistry,
+  makeByteTap,
   type SessionRuntimeState,
 } from "./sessionRuntimeRegistry";
 
@@ -21,6 +22,17 @@ function aRuntimeState(sessionId: string): SessionRuntimeState {
     bytesIn: 0,
     bytesOut: 0,
     lastDataReceivedAt: null,
+  };
+}
+
+/** A controllable clock injected into the byte tap so `at` timestamps are deterministic. */
+function aClockAt(ms: number) {
+  let value = ms;
+  return {
+    now: () => value,
+    advanceTo(next: number) {
+      value = next;
+    },
   };
 }
 
@@ -81,5 +93,41 @@ describe("SessionRuntimeRegistry", () => {
     expect(registry.get("session-b")?.bytesIn).toBe(128);
     expect(registry.get("session-b")?.bytesOut).toBe(32);
     expect(registry.get("session-b")?.lastDataReceivedAt).toBe(1_700_000_000_000);
+  });
+
+  it("byte tap folds successive inbound chunks into cumulative bytesIn and stamps last-received from the injected clock", () => {
+    // Given — an attached runtime and a byte tap bound to it via a controllable clock. This is the
+    // sink the terminal fires for each output chunk (bytesIn = output.data.length).
+    const registry = new SessionRuntimeRegistry();
+    registry.add("session-a", aRuntimeState("session-a"));
+    const clock = aClockAt(1_700_000_000_000);
+    const tap = makeByteTap(registry, "session-a", clock.now);
+
+    // When — two output chunks arrive, the second a beat later
+    tap({ bytesIn: 60 });
+    clock.advanceTo(1_700_000_005_000);
+    tap({ bytesIn: 40 });
+
+    // Then — bytesIn accumulates and last-received reflects the latest chunk's clock reading
+    expect(registry.get("session-a")?.bytesIn).toBe(100);
+    expect(registry.get("session-a")?.bytesOut).toBe(0);
+    expect(registry.get("session-a")?.lastDataReceivedAt).toBe(1_700_000_005_000);
+  });
+
+  it("byte tap folds outbound input yields into cumulative bytesOut without inflating bytesIn", () => {
+    // Given — an attached runtime and a byte tap. This is the sink the terminal fires for each
+    // batched input yield (bytesOut = data.length).
+    const registry = new SessionRuntimeRegistry();
+    registry.add("session-a", aRuntimeState("session-a"));
+    const tap = makeByteTap(registry, "session-a", aClockAt(1_700_000_000_000).now);
+
+    // When — two batched input yields are sent to the coder
+    tap({ bytesOut: 12 });
+    tap({ bytesOut: 8 });
+
+    // Then — bytesOut accumulates while bytesIn stays zero
+    expect(registry.get("session-a")?.bytesOut).toBe(20);
+    expect(registry.get("session-a")?.bytesIn).toBe(0);
+    expect(registry.get("session-a")?.lastDataReceivedAt).toBe(null);
   });
 });

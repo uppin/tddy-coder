@@ -89,4 +89,22 @@ describe("SessionInspectorByteCountAndLastReceived — inspector shows I/O bytes
         expect(text as string).to.match(/ago/);
       });
   });
+
+  it("renders the inspector I/O byte counters as human-readable formatBytes values (e.g. '0 B'), not raw integers", () => {
+    // Given — a freshly attached session with the inspector Details tab open. Its runtime is
+    // registered with zero cumulative bytes (no chunk has ticked the byte tap yet).
+    const backend = aBackendForSession();
+    mountWithRecordingLiveKitRpc(
+      withSelectedDaemon(<SessionsDrawerScreen />, [{ instanceId: "local", label: "local" }]),
+      backend,
+    );
+    sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
+    sessionsDrawerPage.runtimeTerminal(SESSION.sessionId).should("exist");
+    sessionsDrawerPage.inspectorToggle().click();
+    sessionsDrawerPage.inspectorDetailsTab().should("have.attr", "aria-selected", "true");
+
+    // Then — both counters read the formatBytes rendering of 0 ("0 B"), not the raw String(0) "0".
+    sessionsDrawerPage.inspectorBytesIn().should("have.text", "0 B");
+    sessionsDrawerPage.inspectorBytesOut().should("have.text", "0 B");
+  });
 });

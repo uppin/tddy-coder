@@ -16,7 +16,7 @@ import { resolveWorkflowView } from "./workflowViews";
 import { WorktreeCodePane } from "../session/WorktreeCodePane";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
-import type { SessionRuntimeState } from "./sessionRuntimeRegistry";
+import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
 
 type ConnectionClient = Client<typeof ConnectionService>;
 type TokenClient = Client<typeof TokenService>;
@@ -69,6 +69,8 @@ interface SessionMainPaneProps {
   onSessionRoom?: (sessionId: string, room: Room) => void;
   /** Evict a session's runtime terminal (e.g. remote session ended). */
   onSessionDisconnect?: (sessionId: string) => void;
+  /** Fold a session's terminal I/O bytes into its runtime counters (inspector I/O meter). */
+  onSessionBytes?: (sessionId: string, delta: ByteDelta) => void;
   /** Lazy builder for a session-scoped `ConnectionService` client (session-participant routing) —
    *  used by the inspector's session-scoped RPCs (e.g. ExecuteTool). */
   buildSessionClient?: () => ConnectionClient | null;
@@ -106,6 +108,7 @@ export function SessionMainPane({
   focusedRuntimeId = null,
   onSessionRoom,
   onSessionDisconnect,
+  onSessionBytes,
   buildSessionClient,
   liveKitFactory,
   liveKitFactoryIsOverridden,
@@ -173,6 +176,7 @@ export function SessionMainPane({
           mobileShortcuts={mobileShortcuts}
           onSessionRoom={onSessionRoom}
           onSessionDisconnect={onSessionDisconnect}
+          onSessionBytes={onSessionBytes}
           liveKitFactory={liveKitFactory}
           liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
           commonRoom={room}

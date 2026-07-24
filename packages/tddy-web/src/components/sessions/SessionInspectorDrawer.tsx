@@ -16,6 +16,7 @@ import { SessionVncTab } from "./SessionVncTab";
 import { SessionScreenSharingTab } from "./SessionScreenSharingTab";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { formatLastDataReceived } from "./lastDataReceivedFormat";
+import { formatBytes } from "./formatTraffic";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -231,13 +232,13 @@ export function SessionInspectorDrawer({
                   data-testid="sessions-inspector-bytes-in"
                   className="text-xs"
                 >
-                  {String(traffic?.bytesIn ?? 0)}
+                  {formatBytes(traffic?.bytesIn ?? 0)}
                 </span>
                 <span
                   data-testid="sessions-inspector-bytes-out"
                   className="text-xs"
                 >
-                  {String(traffic?.bytesOut ?? 0)}
+                  {formatBytes(traffic?.bytesOut ?? 0)}
                 </span>
                 <span
                   data-testid="sessions-inspector-last-data-received"

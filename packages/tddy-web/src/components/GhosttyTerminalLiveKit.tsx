@@ -18,6 +18,7 @@ import { TerminalConnectionStatusBar } from "./connection/TerminalConnectionStat
 import { ShortcutDrawer } from "./connection/ShortcutDrawer";
 import { MobileTerminalKeyboard } from "./connection/MobileTerminalKeyboard";
 import type { ToolShortcutDef } from "../lib/toolShortcuts";
+import type { ByteDelta } from "./sessions/sessionRuntimeRegistry";
 
 const dResize = tddyDebug("tddy:term:resize");
 
@@ -131,6 +132,13 @@ export interface GhosttyTerminalLiveKitProps {
    * (the test-double `liveKitFactory` never establishes a real room).
    */
   onRoom?: (room: Room) => void;
+  /**
+   * Fired per terminal I/O event: once per received output chunk (`bytesIn = output.data.length`)
+   * and once per batched input yield sent to the coder (`bytesOut = data.length`). The sessions
+   * drawer folds these into the per-session runtime's cumulative counters so the inspector's I/O
+   * byte meter ticks live, even for a backgrounded session.
+   */
+  onBytes?: (delta: ByteDelta) => void;
 }
 
 export function GhosttyTerminalLiveKit({
@@ -160,6 +168,7 @@ export function GhosttyTerminalLiveKit({
   mobileShortcuts,
   hideStatusStrip = false,
   onRoom,
+  onBytes,
 }: GhosttyTerminalLiveKitProps) {
   const liveKitFactory = useLiveKitTransportFactory();
   const log = debugLogging
@@ -188,12 +197,17 @@ export function GhosttyTerminalLiveKit({
   const coderAvailableRef = useRef(true);
   const onRemoteSessionEndedRef = useRef(onRemoteSessionEnded);
   const onRoomRef = useRef(onRoom);
+  const onBytesRef = useRef(onBytes);
   const remoteSessionEndedEmittedRef = useRef(false);
   const onRoomEmittedRef = useRef(false);
 
   useEffect(() => {
     onRemoteSessionEndedRef.current = onRemoteSessionEnded;
   }, [onRemoteSessionEnded]);
+
+  useEffect(() => {
+    onBytesRef.current = onBytes;
+  }, [onBytes]);
 
   useEffect(() => {
     onRoomRef.current = onRoom;
@@ -369,6 +383,7 @@ export function GhosttyTerminalLiveKit({
               }
               const preview = new TextDecoder().decode(data.slice(0, 40));
               log("dataflow: inputGen yielding", data.length, "bytes (batched from", chunks.length, "items)", JSON.stringify(preview));
+              onBytesRef.current?.({ bytesOut: data.length });
               yield create(TerminalInputSchema, { data });
             } else {
               await new Promise((r) => setTimeout(r, 20));
@@ -386,6 +401,7 @@ export function GhosttyTerminalLiveKit({
             for await (const output of stream) {
               if (output.data.length === 0) continue;
               count++;
+              onBytesRef.current?.({ bytesIn: output.data.length });
               const preview = new TextDecoder().decode(output.data.slice(0, 60));
               if (debugMode) {
                 console.log("[GhosttyTerminalLiveKit] RPC chunk #", count, "bytes:", output.data.length, "sample:", preview);

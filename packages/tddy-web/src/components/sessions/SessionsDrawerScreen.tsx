@@ -20,7 +20,12 @@ import { owningHostForSession } from "../../utils/crossHostSessions";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";
 import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
 import { useSessionManager } from "./sessionManager";
-import { SessionRuntimeRegistry, type SessionRuntimeConnection } from "./sessionRuntimeRegistry";
+import {
+  SessionRuntimeRegistry,
+  makeByteTap,
+  type ByteDelta,
+  type SessionRuntimeConnection,
+} from "./sessionRuntimeRegistry";
 import { useAuthContext } from "../../hooks/authProvider";
 import { AppShell } from "../shell/AppShell";
 import { Button } from "../ui/button";
@@ -198,6 +203,16 @@ export function SessionsDrawerScreen({
       if (sessionId === connectedSessionId) resetAttachment();
     },
     [runtimeRegistry, connectedSessionId, resetAttachment],
+  );
+
+  // Fold a session's terminal I/O bytes into its runtime counters as the terminal fires them (per
+  // output chunk / input yield). The registry's `notify()` re-renders the screen (via
+  // `useSyncExternalStore`), so the inspector's byte meter ticks live — even for a backgrounded session.
+  const onSessionBytes = useCallback(
+    (sessionId: string, delta: ByteDelta) => {
+      makeByteTap(runtimeRegistry, sessionId)(delta);
+    },
+    [runtimeRegistry],
   );
 
   // The merged session list, refresh, and change events all live in one place: `SessionManager`. It
@@ -628,6 +643,7 @@ export function SessionsDrawerScreen({
               focusedRuntimeId={runtimeRegistry.focusedSessionId}
               onSessionRoom={onSessionRoom}
               onSessionDisconnect={onSessionDisconnect}
+              onSessionBytes={onSessionBytes}
               buildSessionClient={buildSessionClient}
               liveKitFactory={liveKitFactory}
               liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
