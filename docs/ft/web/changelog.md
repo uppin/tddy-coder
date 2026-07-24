@@ -4,6 +4,11 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-24 — Sessions drawer Active/Remaining separator
+
+- The open sessions drawer now splits its list into an **Active** partition (sessions whose status dot is green or yellow) and a **Remaining** partition (grey/disconnected), with collapsible `Active (N)` / `Remaining (M)` headers between them — Active expanded, Remaining collapsed by default — so live and attention-needing sessions stay at the top and finished ones tuck away one click below. See [session-drawer.md](session-drawer.md).
+- The separators appear only when the list holds both kinds; an all-active or all-finished list still renders as one flat list. Existing PR-stack group nesting is preserved within each partition, and bulk-select mode temporarily expands both partitions so delete continues to span them.
+
 ## 2026-07-24 — Session activity overlay becomes a read-only ACP transcript
 
 - The Agent Activity overlay's flat tool-call row list is replaced by a **read-only, ACP-style conversation transcript**: the agent's text output interleaved with its tool calls, each tool call enriched inline (`Read main.rs L10-49`) with a running/error status chip, and a DEBUG-style colored **`+Ns`** badge showing wall-clock elapsed since the previous entry. Read-only — no composer. See [agent-activity-pane.md](agent-activity-pane.md).
