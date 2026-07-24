@@ -57,7 +57,8 @@ use tddy_service::proto::connection::{
     StartTerminalSessionResponse, StopDemoVmRequest, StopDemoVmResponse,
     StopTerminalSessionRequest, StopTerminalSessionResponse, StreamAcpReplayRequest,
     StreamHostStatsRequest, StreamSessionActivityRequest, StreamTerminalOutputRequest,
-    TerminalControlEvent, WatchTerminalControlRequest,
+    TerminalControlEvent, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
+    WatchTerminalControlRequest,
 };
 use tddy_service::tonic_connection::connection_service_server::ConnectionService as TonicConnectionService;
 
@@ -818,5 +819,18 @@ where
         .map_err(to_tonic_status)?;
         let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
         Ok(tonic::Response::new(Box::pin(outbound)))
+    }
+
+    async fn upload_session_file_chunk(
+        &self,
+        request: tonic::Request<UploadSessionFileChunkRequest>,
+    ) -> Result<tonic::Response<UploadSessionFileChunkResponse>, tonic::Status> {
+        let resp = RpcConnectionService::upload_session_file_chunk(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
     }
 }

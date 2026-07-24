@@ -35,6 +35,64 @@ When the terminal connects and renders, it supports:
 - **Font zoom (pitch)**: The terminal supports **pitch-in** (larger glyphs), **pitch-out** (smaller glyphs), and **reset** to the session baseline. There are **no on-screen +/−/0 buttons**; zoom is via **keyboard** (**Ctrl** or **⌘** with **+**/**=**, **-**, or **0** when focus is inside **`[data-testid='ghostty-terminal']`**), **two-finger touch pinch**, **trackpad pinch** (**`wheel`** with **`ctrlKey`**), or programmatic **`CustomEvent`** dispatch. Default font bounds are **8–32** px with step **1**; at the minimum or maximum, further pitch-in or pitch-out is ignored. **`GhosttyTerminal`** exposes the live size on **`data-terminal-font-size`** (integer string). Font changes apply to the running ghostty-web **`Terminal`** (`options.fontSize`), then **`FitAddon.fit()`** recomputes columns and rows; **`onResize`** runs when the grid changes, so the existing resize OSC sequence reaches the TUI backend on the same input path as keyboard data. **`GhosttyTerminalLiveKit`** accepts **`fontSize`** (default **14**) and passes it to **`GhosttyTerminal`** as the reset baseline. Bridge events use **`tddy-terminal-zoom`** and **`tddy-terminal-font-size-sync`**; payloads are validated before handling. Optional trace logging uses **`VITE_TERMINAL_ZOOM_DEBUG=true`** in the Vite build, or **`debugLogging`** on **`GhosttyTerminal`**. Implementation reference: [terminal-zoom.md](../../../packages/tddy-web/docs/terminal-zoom.md).
 - **Touch/mouse mode**: When `--mouse` is set on tddy-coder, the TUI sends EnableMouseCapture. GhosttyTerminal encodes SGR mouse sequences `\x1b[<Pb;Px;PyM/m` (press/release) and forwards them via onData. Click-to-select and scroll work. Touch events (touchstart/touchend) are forwarded for tap-to-click on mobile. The TUI draws Enter and (when wide enough) Stop affordances to the right of the prompt; see [Mouse mode: Enter control](../coder/tui-status-bar.md#mouse-mode-enter-control) and [Mouse mode: Stop control](../coder/tui-status-bar.md#mouse-mode-stop-control).
 
+### File drop upload
+
+Dragging one or more files from the host OS onto the terminal viewport uploads them to the
+session's host machine and then behaves exactly as if the files had been dragged onto the
+on-host terminal — the uploaded files' **absolute host paths are typed into the terminal
+input**. This works on **both transports** (gRPC `GhosttyTerminalGrpc` and LiveKit
+`GhosttyTerminalLiveKit`); the drop surface and the mobile Attach affordance are shared.
+
+**Drop → upload → type-path flow:**
+
+1. **Drag over** the terminal canvas shows a drop overlay
+   (`data-testid="terminal-drop-overlay"`, label "Drop files to upload") over the
+   `[data-testid='ghostty-terminal']` region. The overlay clears on drop or drag-leave.
+2. **On drop**, the web generates one **drop id** (a UUID) for the whole gesture and, for
+   each dropped file, streams the file to the host in ordered chunks over the new
+   `ConnectionService.UploadSessionFileChunk` unary RPC (see
+   [§ Upload RPC](#upload-rpc-drag-to-upload)). Files land at
+   `{session_dir}/uploads/{drop_id}/{filename}` on the host, where `session_dir` is the
+   session's unified session directory (`~/.tddy/sessions/<session-id>/`). A fresh
+   per-drop subfolder preserves original filenames and makes collisions impossible.
+3. **On completion**, the successfully uploaded files' absolute host paths are inserted into
+   the terminal input, **space-separated**, each **shell-escaped** (single-quote wrapped,
+   embedded quotes escaped), followed by a **single trailing space** and **no newline** — the
+   cursor rests after the path(s) so the user can keep typing or press Enter themselves. This
+   matches how a native terminal (including on-host Ghostty on macOS) inserts a dragged path.
+   Insertion reuses the ordinary terminal input path (`sendInput` for gRPC,
+   `enqueueTerminalInput` for LiveKit), so no new transport is involved for the "typing".
+4. **Multiple files** in one drop upload concurrently under the same drop id and are inserted
+   as one space-separated run (`'a.pdf' 'b.png' 'c.csv' `).
+5. **No client-side size cap** — files of any size stream in chunks.
+6. **Failures are surfaced, not fatal**: if a file's upload fails mid-stream (network / daemon
+   error), that file is **skipped** — its path is **not** inserted — an error is shown in the
+   bottom strip (see below), and the remaining files still upload and insert.
+
+**Upload progress (bottom strip):** progress renders in the screen-level **Host Stats Footer**
+(`data-testid="host-stats-footer"`) as a single **aggregate determinate bar**
+(`data-testid="upload-progress-indicator"`) labeled `"{n} files · {pct}%"`, where the percent
+is total bytes uploaded across all files in the drop. The indicator **appears when a drop
+starts** and **auto-hides** shortly after the drop completes; a failed file briefly shows an
+error (`data-testid="upload-progress-error"`, e.g. "⚠ upload of report.iso failed — skipped").
+See [host-stats-footer.md § Upload progress](./host-stats-footer.md#upload-progress-drag-to-upload).
+
+<a id="upload-rpc-drag-to-upload"></a>
+**Upload RPC.** A new unary method on `ConnectionService` (the web drives chunking, so upload
+**progress is known client-side** and the same call works over both grpc-web and the LiveKit
+data-channel — no client-streaming RPC is required):
+
+- `rpc UploadSessionFileChunk(UploadSessionFileChunkRequest) returns (UploadSessionFileChunkResponse)`
+- `UploadSessionFileChunkRequest { string session_token; string session_id; string upload_id; string file_name; bytes data; bool last; }` —
+  `file_name` is a **basename only** (path separators / `.` / `..` / empty are rejected);
+  chunks for a given `(upload_id, file_name)` arrive **in order** and are **appended**.
+- `UploadSessionFileChunkResponse { string host_path; }` — the file's **absolute host path**,
+  populated only on the final chunk (`last = true`); empty on non-final chunks.
+- Like every `ConnectionService` method, an invalid `session_token` is rejected with an
+  **unauthenticated** error. The daemon writes only under
+  `{session_dir}/uploads/{upload_id}/` with a canonicalize-and-contain guard, so a crafted
+  `file_name` can never escape the uploads directory.
+
 ### Connection chrome (LiveKit overlay)
 
 When **`GhosttyTerminalLiveKit`** is mounted with **`connectionOverlay`**, connection controls render in a dedicated top row (**`TerminalConnectionStatusBar`**, `data-testid="terminal-connection-status-bar"`) above the Ghostty terminal area. The row uses **`role="toolbar"`** and **`aria-label="Terminal connection"`**. **`ConnectionTerminalChrome`** supplies the interactive content; supported layouts are **`corner`** (controls over the terminal canvas), **`paneHeader`** (compact dot + menu for floating toolbars), and **`statusBar`** (horizontal toolbar: build id, status dot, fullscreen; no overlay on the grid). **`GhosttyTerminalLiveKit`**, **`ConnectionScreen`**, and the standalone connected view use **`chromeLayout="statusBar"`** inside the status bar wrapper.
@@ -65,6 +123,7 @@ On touch-capable devices or narrow viewports (width &lt; 768px):
 
 - **Keyboard-aware resize**: The terminal container uses the Visual Viewport API. When the virtual keyboard opens, the container shrinks to fit the visible area above the keyboard; when it closes, the terminal fills the screen again.
 - **Manual keyboard button**: A floating "Keyboard" button appears at the bottom center. Tapping it focuses the terminal (opens the virtual keyboard). The button hides while the keyboard is open and reappears when it closes.
+- **File upload from the Keyboard strip**: Mobile has no OS drag-and-drop, so the upload/drop gesture is initiated from the **Keyboard strip** (the bottom bar hosting the Keyboard button). An **Attach** button (`data-testid="terminal-upload-button"`) sits beside the Keyboard button and opens the native multi-file picker (`<input type="file" multiple>`). Picked files run the **identical** upload → type-path flow as a desktop drop (same `UploadSessionFileChunk` streaming, same `{session_dir}/uploads/{drop_id}/` destination, same escaped-path insertion, same bottom-strip progress). The Attach button is present on **both** transports; enabling it on the LiveKit terminal threads the mobile-affordance slot through `SessionLiveKitTerminal` (which previously never set `showMobileKeyboard`).
 - **Focus prevention**: Tapping the terminal does not open the keyboard. The terminal uses `preventFocusOnTap` (event prevention + readonly textarea) so the keyboard opens only when the user taps the Keyboard button.
 - **Touch forwarding**: Tap-to-click works for TUI menus and interactive elements. Capture-phase touch handlers send SGR mouse sequences before focus prevention, so interactive TUIs (vim, htop) receive correct mouse events. A **second finger** on the surface does not emit SGR press/release pairs (avoids confusing the TUI during pinch). **Two-finger pinch** on the terminal adjusts **font size** (same bounds and steps as pitch in/out); disable with **`pinchZoomFont={false}`** on **`GhosttyTerminal`** if needed.
 - **Build ID**: A build timestamp is shown in the top-left when connected for cache verification on mobile.

@@ -50,6 +50,11 @@ export const TEST_IDS = {
   terminalConnectionStatusBar: "terminal-connection-status-bar",
   mobileKeyboardButton: "mobile-keyboard-button",
   ctrlCButton: "ctrl-c-button",
+  // File drop-to-upload (docs/ft/web/web-terminal.md § File drop upload)
+  terminalDropOverlay: "terminal-drop-overlay",
+  terminalUploadButton: "terminal-upload-button",
+  uploadProgressIndicator: "upload-progress-indicator",
+  uploadProgressError: "upload-progress-error",
 
   // ConnectionScreen / session table
   sessionsTableOrphan: "sessions-table-orphan",

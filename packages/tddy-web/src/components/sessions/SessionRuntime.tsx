@@ -277,6 +277,8 @@ export function SessionRuntime({
               livekitServerIdentity={runtime.livekitServerIdentity ?? ""}
               identity={runtime.identity ?? ""}
               tokenClient={tokenClient}
+              sessionToken={sessionToken}
+              sessionId={runtime.sessionId}
               onDisconnect={() => onSessionDisconnect?.(runtime.sessionId)}
               mobileShortcuts={focused && activeTerminalId === AGENT_TERMINAL_ID ? mobileShortcuts : undefined}
               onRoom={handleRoom}
