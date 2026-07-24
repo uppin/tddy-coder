@@ -4,6 +4,11 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-24 — Session activity overlay becomes a read-only ACP transcript
+
+- The Agent Activity overlay's flat tool-call row list is replaced by a **read-only, ACP-style conversation transcript**: the agent's text output interleaved with its tool calls, each tool call enriched inline (`Read main.rs L10-49`) with a running/error status chip, and a DEBUG-style colored **`+Ns`** badge showing wall-clock elapsed since the previous entry. Read-only — no composer. See [agent-activity-pane.md](agent-activity-pane.md).
+- Works for **both live and completed/dormant** sessions: the session persists its own ACP-mapped transcript (`acp-transcript.jsonl`), and a new server-streaming `StreamAcpReplay` RPC replays it (then tails live) over the existing HTTP transport — so history survives even if the coding agent doesn't keep its own transcript. `StreamSessionActivity` is retained (no longer backing this overlay), reserved for future system session messages.
+
 ## 2026-07-23 — Session Inspector Worktree tab
 
 - The Session Inspector gains a **Worktree** tab scoped to the selected session's own git worktree: on-disk size + changed-file/±line summary, cache-backed and refreshed on a **10-minute** client-side timer (plus a Refresh button), served from the existing `ListWorktreesForProject`. See [session-worktree-inspector.md](session-worktree-inspector.md).

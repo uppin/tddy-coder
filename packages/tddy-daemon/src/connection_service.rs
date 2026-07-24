@@ -60,13 +60,13 @@ use crate::user_sessions_path::{
 use crate::workspace_session;
 use crate::worktrees::{self, CleanWorktreeError, RemoveWorktreeError, WorktreeStatsCache};
 use tddy_service::proto::connection::{
-    AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState, ExecuteToolRequest,
-    ExecuteToolResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse, HostCpuStats,
-    HostDiskStats, HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse,
+    AcpReplayFrame, AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState,
+    ExecuteToolRequest, ExecuteToolResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
+    HostCpuStats, HostDiskStats, HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse,
     ListSessionToolCallsRequest, ListSessionToolCallsResponse, ReportAgentActivityRequest,
     ReportAgentActivityResponse, StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest,
-    StopDemoVmResponse, StreamHostStatsRequest, StreamMode, StreamSessionActivityRequest,
-    ToolCallInfo as ProtoToolCallInfo,
+    StopDemoVmResponse, StreamAcpReplayRequest, StreamHostStatsRequest, StreamMode,
+    StreamSessionActivityRequest, ToolCallInfo as ProtoToolCallInfo,
 };
 use tddy_task::TaskRegistry;
 
@@ -303,6 +303,61 @@ impl Stream for MpscAgentActivityStream {
 }
 
 impl Unpin for MpscAgentActivityStream {}
+
+/// Stream adapter backed by an mpsc channel for [`AcpReplayFrame`] server-streaming.
+pub struct MpscAcpReplayStream {
+    rx: tokio::sync::mpsc::UnboundedReceiver<AcpReplayFrame>,
+}
+
+impl Stream for MpscAcpReplayStream {
+    type Item = Result<AcpReplayFrame, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.rx.poll_recv(cx) {
+            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+impl Unpin for MpscAcpReplayStream {}
+
+/// Wrap one ACP frame in the connection-local [`AcpReplayFrame`] envelope, encoding the inner
+/// `AcpAgentMessage` to its protobuf bytes.
+fn acp_replay_frame(frame: &tddy_service::proto::acp::AcpAgentMessage) -> AcpReplayFrame {
+    AcpReplayFrame {
+        acp_agent_message: frame.encode_to_vec(),
+    }
+}
+
+/// Relay task for `StreamAcpReplay`: forwards live agent-activity records for one session (the
+/// broadcast is already session-scoped) as enriched ACP `tool_call` replay frames into `tx` until
+/// the client disconnects.
+async fn relay_acp_replay(
+    mut broadcast_rx: tokio::sync::broadcast::Receiver<
+        tddy_core::agent_activity::AgentActivityRecord,
+    >,
+    tx: tokio::sync::mpsc::UnboundedSender<AcpReplayFrame>,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+    loop {
+        match broadcast_rx.recv().await {
+            Ok(record) => {
+                let frame =
+                    acp_replay_frame(&tddy_service::acp_replay::frame_for_agent_activity(&record));
+                if tx.send(frame).is_err() {
+                    break;
+                }
+            }
+            Err(RecvError::Lagged(_)) => {}
+            Err(RecvError::Closed) => break,
+        }
+    }
+}
 
 /// Default cadence for refreshing per-core CPU utilization on the host-stats sampling loop.
 const HOST_CPU_INTERVAL: Duration = Duration::from_secs(5);
@@ -6234,6 +6289,93 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(MpscAgentActivityStream { rx }))
     }
 
+    // --- ACP transcript replay ---
+
+    type StreamAcpReplayStream = MpscAcpReplayStream;
+
+    /// Stream a session's read-only ACP transcript: replay the persisted `acp-transcript.jsonl`
+    /// snapshot, then relay live agent-activity records (mapped to ACP `tool_call` frames) published
+    /// to the hub for this session. Mirrors [`stream_session_activity`] — same routing, auth, and
+    /// [`StreamMode`] semantics.
+    async fn stream_acp_replay(
+        &self,
+        request: Request<StreamAcpReplayRequest>,
+    ) -> Result<Response<Self::StreamAcpReplayStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        // Route BEFORE session lookup so a relay can forward. Server-streaming cannot reuse the
+        // unary `forward_to_peer` helper, so a request addressed to a remote daemon is rejected
+        // rather than silently served from the local (wrong) transcript.
+        // TODO(acp-replay): forward StreamAcpReplay to a peer daemon over LiveKit once a streaming
+        // forward primitive exists (forward_to_peer is unary-only today).
+        let requested_daemon = req.daemon_instance_id.trim();
+        if !requested_daemon.is_empty() {
+            let local_id = local_instance_id_for_config(&self.config);
+            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
+            let eligible_ids: Vec<String> = eligible_rows
+                .iter()
+                .map(|e| e.instance_id.0.clone())
+                .collect();
+            match crate::livekit_peer_discovery::classify_peer_route(
+                &local_id,
+                requested_daemon,
+                &eligible_ids,
+            ) {
+                Err(msg) => {
+                    log::info!("StreamAcpReplay: rejected daemon routing: {}", msg);
+                    return Err(Status::invalid_argument(msg));
+                }
+                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
+                    return Err(Status::unimplemented(format!(
+                        "StreamAcpReplay forwarding to remote daemon_instance_id={peer_instance_id} is not supported yet"
+                    )));
+                }
+                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
+                    // Fall through to local execution below.
+                }
+            }
+        }
+
+        // Authenticate caller (same path as stream_session_activity).
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<AcpReplayFrame>();
+
+        // Snapshot-then-live (the default and proto3 zero value) replays the persisted transcript
+        // first, then relays everything subsequently published to the hub for this session.
+        // Live-only skips the snapshot entirely and carries only frames produced after subscribe.
+        let mode = StreamMode::try_from(req.mode).unwrap_or(StreamMode::SnapshotThenLive);
+        if mode == StreamMode::SnapshotThenLive {
+            let snapshot =
+                tddy_service::acp_replay::read_acp_transcript(&session_dir).unwrap_or_default();
+            for frame in snapshot {
+                if tx.send(acp_replay_frame(&frame)).is_err() {
+                    // Receiver already gone — return an empty live stream that terminates immediately.
+                    return Ok(Response::new(MpscAcpReplayStream { rx }));
+                }
+            }
+        }
+
+        let broadcast_rx = self.agent_activity_hub.subscribe(&req.session_id);
+        tokio::spawn(relay_acp_replay(broadcast_rx, tx));
+
+        Ok(Response::new(MpscAcpReplayStream { rx }))
+    }
+
     // --- terminal control mutex ---
 
     type WatchTerminalControlStream = MpscControlEventStream;
@@ -7735,6 +7877,134 @@ mod agent_activity_unit_tests {
             .expect("no agent-activity record arrived within the timeout")
             .expect("activity stream closed unexpectedly")
             .expect("activity stream yielded an error")
+    }
+
+    /// Await the next replay frame with a bounded timeout, decoding its inner ACP `AcpAgentMessage`.
+    async fn next_replay_frame(
+        stream: &mut super::MpscAcpReplayStream,
+    ) -> tddy_service::proto::acp::AcpAgentMessage {
+        let envelope = tokio::time::timeout(Duration::from_secs(1), stream.next())
+            .await
+            .expect("no replay frame arrived within the timeout")
+            .expect("replay stream closed unexpectedly")
+            .expect("replay stream yielded an error");
+        prost::Message::decode(&envelope.acp_agent_message[..])
+            .expect("decode inner AcpAgentMessage")
+    }
+
+    /// The text of an `agent_message_chunk` ACP frame (panics on any other shape).
+    fn acp_agent_text(frame: &tddy_service::proto::acp::AcpAgentMessage) -> String {
+        use tddy_service::proto::acp::{acp_agent_message, content_block, session_update};
+        match &frame.msg {
+            Some(acp_agent_message::Msg::SessionUpdate(n)) => {
+                match n.update.as_ref().and_then(|u| u.update.as_ref()) {
+                    Some(session_update::Update::AgentMessageChunk(c)) => {
+                        match c.content.as_ref().and_then(|b| b.block.as_ref()) {
+                            Some(content_block::Block::Text(t)) => t.text.clone(),
+                            other => panic!("expected text content, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected AgentMessageChunk, got {other:?}"),
+                }
+            }
+            other => panic!("expected a SessionUpdate frame, got {other:?}"),
+        }
+    }
+
+    /// The tool_call_id of a `tool_call` ACP frame (panics on any other shape).
+    fn acp_tool_call_id(frame: &tddy_service::proto::acp::AcpAgentMessage) -> String {
+        use tddy_service::proto::acp::{acp_agent_message, session_update};
+        match &frame.msg {
+            Some(acp_agent_message::Msg::SessionUpdate(n)) => {
+                match n.update.as_ref().and_then(|u| u.update.clone()) {
+                    Some(session_update::Update::ToolCall(tc)) => {
+                        tc.tool_call_id.map(|id| id.value).unwrap_or_default()
+                    }
+                    other => panic!("expected ToolCall, got {other:?}"),
+                }
+            }
+            other => panic!("expected a SessionUpdate frame, got {other:?}"),
+        }
+    }
+
+    /// StreamAcpReplay replays the persisted transcript snapshot, in write order, on subscribe.
+    #[tokio::test]
+    async fn stream_acp_replay_replays_the_persisted_snapshot() {
+        // Given a session with a pre-seeded ACP transcript (an agent-text then a tool_call frame).
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-snapshot-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            &session_dir,
+            &tddy_service::acp_replay::agent_text_frame("Analyzing the parser.", 1_000),
+        )
+        .unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            &session_dir,
+            &tddy_service::acp_replay::frame_for_agent_activity(&a_seeded_record("call-a", "Read")),
+        )
+        .unwrap();
+        let service = make_unit_service(sessions_base);
+
+        // When a client subscribes to the ACP replay stream.
+        let mut stream = service
+            .stream_acp_replay(Request::new(StreamAcpReplayRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                mode: StreamMode::SnapshotThenLive as i32,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Then the two snapshot frames arrive in write order.
+        let first = next_replay_frame(&mut stream).await;
+        let second = next_replay_frame(&mut stream).await;
+        assert_eq!(acp_agent_text(&first), "Analyzing the parser.");
+        assert_eq!(acp_tool_call_id(&second), "call-a");
+    }
+
+    /// After the snapshot, a record published to the hub is delivered live as an ACP tool_call frame.
+    #[tokio::test]
+    async fn stream_acp_replay_delivers_a_live_frame_after_the_snapshot() {
+        // Given a session with one pre-seeded transcript frame and a subscribed stream.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-live-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            &session_dir,
+            &tddy_service::acp_replay::agent_text_frame("Starting.", 1_000),
+        )
+        .unwrap();
+        let service = make_unit_service(sessions_base);
+        let hub = service.agent_activity_hub();
+
+        let mut stream = service
+            .stream_acp_replay(Request::new(StreamAcpReplayRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                mode: StreamMode::SnapshotThenLive as i32,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Drain the snapshot frame so the next awaited item is the live one.
+        let snapshot = next_replay_frame(&mut stream).await;
+        assert_eq!(acp_agent_text(&snapshot), "Starting.");
+
+        // When a fresh record is published live for this session.
+        hub.publish(session_id, a_seeded_record("call-live", "Grep"));
+
+        // Then the subscriber receives it as an ACP tool_call frame.
+        let live = next_replay_frame(&mut stream).await;
+        assert_eq!(acp_tool_call_id(&live), "call-live");
     }
 }
 

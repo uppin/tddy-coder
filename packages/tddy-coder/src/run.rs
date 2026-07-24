@@ -1973,6 +1973,13 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     metadata_tx,
                     metadata_seed,
                 );
+                // Persist the coder's presenter events into this session's own ACP transcript
+                // (`acp-transcript.jsonl`), served read-only by `StreamAcpReplay`.
+                let _acp_transcript_handle =
+                    crate::session_participant::spawn_acp_transcript_writer(
+                        event_tx.subscribe(),
+                        session_artifact_dir.clone(),
+                    );
             }
             let session_connection_svc = crate::session_participant::SessionConnectionService {
                 session_id: args.session_id.clone().unwrap_or_default(),
@@ -3069,6 +3076,14 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         // current working directory (the repo under development), mirroring the interactive path's
         // `agent_working_dir`. FIXME: wire the `session` metadata tap into this headless path's own
         // thread/runtime (the interactive path above now spawns `spawn_session_metadata_tap`).
+        // Persist the coder's presenter events into this session's own ACP transcript
+        // (`acp-transcript.jsonl`), served read-only by `StreamAcpReplay`.
+        let _acp_transcript_handle = crate::session_participant::spawn_acp_transcript_writer(
+            event_tx.subscribe(),
+            args.session_dir
+                .clone()
+                .unwrap_or_else(|| std::path::PathBuf::from(".")),
+        );
         let session_connection_svc = crate::session_participant::SessionConnectionService {
             session_id: args.session_id.clone().unwrap_or_default(),
             session_token: args.livekit_token.clone().unwrap_or_default(),

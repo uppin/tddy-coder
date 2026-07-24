@@ -111,11 +111,24 @@ fn file_path_display(obj: &serde_json::Map<String, serde_json::Value>) -> Option
     })
 }
 
+/// Format the inclusive line window `L{offset}-{offset+limit-1}` when both `offset` and `limit`
+/// are present as numbers, e.g. offset 10 + limit 40 → `L10-49`. Returns `None` when either is
+/// absent or non-numeric (whole-file read).
+fn line_range_suffix(obj: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    let offset = obj.get("offset").and_then(|v| v.as_i64())?;
+    let limit = obj.get("limit").and_then(|v| v.as_i64())?;
+    let last = offset + limit - 1;
+    Some(format!("L{offset}-{last}"))
+}
+
 /// Extract a short display detail from tool input (file_path, command, description, etc.).
-fn tool_use_detail(name: &str, input: &serde_json::Value) -> Option<String> {
+pub fn tool_use_detail(name: &str, input: &serde_json::Value) -> Option<String> {
     let obj = input.as_object()?;
     let detail = if name == "Read" || name == "Write" {
-        file_path_display(obj)
+        file_path_display(obj).map(|file| match line_range_suffix(obj) {
+            Some(range) => format!("{file} {range}"),
+            None => file,
+        })
     } else if name == "Bash" {
         obj.get("description")
             .and_then(|v| v.as_str())
@@ -364,6 +377,42 @@ mod tests {
             "session_id": "sess-1"
         })
         .to_string()
+    }
+
+    #[test]
+    fn read_detail_includes_the_file_and_line_range() {
+        // Given — a Read reading 40 lines starting at line 10
+        let input = serde_json::json!({ "file_path": "src/main.rs", "offset": 10, "limit": 40 });
+
+        // When
+        let detail = tool_use_detail("Read", &input);
+
+        // Then — the detail names the file and the inclusive line window, not just the basename
+        assert_eq!(detail, Some("main.rs L10-49".to_string()));
+    }
+
+    #[test]
+    fn write_detail_includes_the_file_and_line_range() {
+        // Given — a Write of a 20-line window starting at line 1
+        let input = serde_json::json!({ "file_path": "src/lib.rs", "offset": 1, "limit": 20 });
+
+        // When
+        let detail = tool_use_detail("Write", &input);
+
+        // Then
+        assert_eq!(detail, Some("lib.rs L1-20".to_string()));
+    }
+
+    #[test]
+    fn read_detail_without_a_range_is_just_the_file() {
+        // Given — a Read with no offset/limit (whole file)
+        let input = serde_json::json!({ "file_path": "src/main.rs" });
+
+        // When
+        let detail = tool_use_detail("Read", &input);
+
+        // Then — no range to show, so the basename stands alone
+        assert_eq!(detail, Some("main.rs".to_string()));
     }
 
     #[test]

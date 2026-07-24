@@ -230,6 +230,10 @@ message ContentChunk {
 message SessionNotification {
   SessionId session_id = 1;
   SessionUpdate update = 2;
+  // tddy extension (not part of upstream ACP): wall-clock time of the underlying event, used by the
+  // read-only transcript's DEBUG-style "+Ns" elapsed badge. 0 when unknown. Leaves the SessionUpdate
+  // oneof untouched, so external ACP clients ignore it.
+  int64 timestamp_unix_ms = 3;
 }
 
 message SessionUpdate {

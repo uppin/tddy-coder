@@ -11,6 +11,8 @@ import {
   agentChatMessage,
   agentChatOption,
   agentChatMultiSelectOption,
+  agentChatElapsed,
+  agentChatToolStatus,
   TEST_IDS,
 } from "../testIds";
 
@@ -27,9 +29,17 @@ export const agentChatPage = {
   chatMessage: (index: number, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(agentChatMessage(index), { timeout: 5000, ...options }),
 
-  /** The bubble kind ("user" | "agent" | "goal" | "activity") of a chat bubble, in arrival order. */
+  /** The bubble kind ("user" | "agent" | "goal" | "activity" | "tool") of a chat bubble, in arrival order. */
   chatMessageKind: (index: number, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(agentChatMessage(index), { timeout: 5000, ...options }).invoke("attr", "data-message-kind"),
+
+  /** The DEBUG-style "+Ns" elapsed badge on a read-only transcript entry, in arrival order. */
+  chatElapsed: (index: number, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(agentChatElapsed(index), { timeout: 5000, ...options }),
+
+  /** The status marker (running/error) on a read-only transcript tool-call entry, in arrival order. */
+  chatToolStatus: (index: number, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(agentChatToolStatus(index), { timeout: 5000, ...options }),
 
   /** The chat text input. */
   chatInput: (options?: Parameters<typeof cy.get>[1]) =>

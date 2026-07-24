@@ -19,7 +19,7 @@ use tokio::time::timeout;
 #[tokio::test]
 async fn populating_with_the_real_build_provider_unifies_manifests_and_build_yaml_targets() {
     // Given — the real provider registered, a repo with a BUILD.yaml, and a session-overlay manifest.
-    tddy_coder::catalog_provider::register();
+    tddy_bsp::register_catalog_provider();
 
     let base = tempfile::tempdir().expect("tempdir");
     let session_dir = base.path().join("session");

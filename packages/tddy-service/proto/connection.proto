@@ -69,6 +69,14 @@ service ConnectionService {
   // report a PreToolUse (running) / PostToolUse (terminal) pair; bearer is the hook_token.
   rpc StreamSessionActivity(StreamSessionActivityRequest) returns (stream AgentActivityRecord);
   rpc ReportAgentActivity(ReportAgentActivityRequest) returns (ReportAgentActivityResponse);
+  // Read-only ACP transcript for the activity pane (see docs/ft/web/agent-activity-pane.md
+  // § Read-only ACP transcript). Replays the session's persisted acp-transcript.jsonl as ACP
+  // session/update frames, then (SNAPSHOT_THEN_LIVE) tails the live presenter. Each AcpReplayFrame
+  // wraps one AcpAgentMessage (only its session_update / error variants). Served over HTTP for any
+  // session (live or dormant) — unlike the bidi, LiveKit-only AcpService.Session. The frame is
+  // wrapped in a connection-local message so the cross-package reference is a field (prost
+  // extern_path) rather than a service return type.
+  rpc StreamAcpReplay(StreamAcpReplayRequest) returns (stream AcpReplayFrame);
   // Demo VM lifecycle — UI-driven QEMU boot/shutdown for the demo goal.
   rpc StartDemoVm(StartDemoVmRequest) returns (StartDemoVmResponse);
   rpc StopDemoVm(StopDemoVmRequest) returns (StopDemoVmResponse);
@@ -717,6 +725,24 @@ message StreamSessionActivityRequest {
   string     session_id         = 2;
   string     daemon_instance_id = 3;
   StreamMode mode               = 4;   // snapshot-then-live (default) vs live-only
+}
+
+// Request for the read-only ACP transcript replay. Mirrors StreamSessionActivityRequest — same
+// peer-forward routing and StreamMode semantics.
+message StreamAcpReplayRequest {
+  string     session_token      = 1;
+  string     session_id         = 2;
+  string     daemon_instance_id = 3;
+  StreamMode mode               = 4;   // snapshot-then-live (default) vs live-only
+}
+
+// One replay frame: a connection-local wrapper carrying an ACP `tddy.acp.v1.AcpAgentMessage`
+// (session_update / error variant) as its protobuf-encoded bytes. Bytes (rather than a direct
+// cross-package field) keep connection.proto self-contained — no import, no cross-package codegen —
+// while preserving the exact ACP data model: the web decodes the bytes with the AcpAgentMessage
+// schema and reuses the same session/update switch as the live ACP stream.
+message AcpReplayFrame {
+  bytes acp_agent_message = 1;
 }
 
 /// Sent by `tddy-tools session-hook`; bearer is the per-session hook_token.
