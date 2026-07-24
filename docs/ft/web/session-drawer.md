@@ -661,8 +661,11 @@ the identical `UseAgentChatResult` — `messages`, `elicitations`, `sendPrompt`,
 
 > **Relocated: 2026-07-21** — The traffic readout has moved into the screen-level bottom
 > **Host Stats Footer** (see [host-stats-footer.md](./host-stats-footer.md)), alongside new
-> host-level disk and CPU indicators. It is no longer rendered in the top header row. The
-> readout's fields and metering behavior below are unchanged; only its placement moved.
+> host-level disk and CPU indicators. It is no longer rendered in the top header row.
+>
+> **Data-plane rescoped: 2026-07-24** — The data-plane half of the readout now aggregates the
+> per-session terminal byte tap across **every attached runtime** (focused + backgrounded), not
+> just the focused session's LiveKit room. See § Metering scope below.
 
 A thin `flex-shrink-0` strip showing live RPC throughput and connection health for the
 selected session.
@@ -681,16 +684,22 @@ The strip shows five values:
 
 ### Metering scope
 
-Two transport layers are metered independently and summed for display:
+Two planes are metered independently and summed for display:
 
-- **LiveKit data-channel** — per-session; counts exact wire payload bytes at the point
-  they are serialised/deserialised (outbound `publishRequest` payload, inbound
-  `DataReceived` payload).
-- **HTTP `/rpc`** — app-global; counts the binary-serialised protobuf message body of
-  each unary request and response via a Connect `Interceptor`.
+- **Data plane (session terminal I/O)** — the per-session byte tap (see
+  [§ Inspector I/O bytes](#inspector-io-bytes--last-data-received)) **aggregated across every
+  attached runtime**, focused and backgrounded. `useAttachedSessionTraffic(runtimes,
+  runtimeRegistry)` sums each mounted runtime's cumulative `bytesIn`/`bytesOut` for the totals and
+  folds their advances into one shared `TrafficMeter` for the aggregate rate. Because backgrounded
+  runtimes keep streaming, a session left in the background still contributes; the total is **not**
+  reset when focus moves between sessions.
+- **HTTP `/rpc`** (control plane) — app-global; counts the binary-serialised protobuf message body
+  of each unary request and response via a Connect `Interceptor`, read from the shared
+  `TrafficMeterRegistry` under the `"http"` scope.
 
-Both meters share a `TrafficMeterRegistry` (React context) keyed by scope:
-`"http"` for the HTTP transport and the LiveKit room name for the data-channel transport.
+(Before 2026-07-24 the data plane was the focused session's LiveKit-room transport meter — a single
+room-scoped `TrafficMeterRegistry` entry — which excluded backgrounded sessions and reset on every
+focus switch.)
 
 ### Ping measurement
 
@@ -720,7 +729,9 @@ meter's room subscription.
 4. Live rates reset toward 0 when no RPC traffic occurs for ≥ 2 s.
 5. Ping shows a numeric ms value when the WebRTC candidate-pair RTT is available.
 6. Ping shows `—` when RTT is null (Room not connected, stats unavailable).
-7. Switching sessions resets the session-scoped (LiveKit) meter to 0; the HTTP meter persists.
+7. The data-plane total is the sum of every attached runtime's terminal byte tap (focused +
+   backgrounded) and is **not** reset by switching focus; the HTTP meter persists app-wide.
+   A disconnected runtime stops contributing.
 
 ## Terminal Control — "Claim terminal" CTA
 

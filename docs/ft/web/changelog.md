@@ -4,6 +4,11 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-24 — Traffic readout aggregates all attached sessions
+
+- The screen-level byte-traffic readout in the **Host Stats Footer** now sums terminal (data-plane) traffic across **every attached session runtime** — focused and backgrounded — instead of only the focused session's LiveKit room, so the totals and rates reflect total terminal activity across all live sessions. See [host-stats-footer.md](host-stats-footer.md) and [session-drawer.md § Session Traffic Strip](session-drawer.md#session-traffic-strip).
+- A new `useAttachedSessionTraffic(runtimes, runtimeRegistry)` hook sums each runtime's per-session byte-tap counters and derives a live aggregate rate from their advances; it is summed with the existing HTTP `/rpc` (control-plane) meter. Switching focus no longer resets the data-plane total; a disconnected runtime stops contributing.
+
 ## 2026-07-24 — Sessions drawer Active/Remaining separator
 
 - The open sessions drawer now splits its list into an **Active** partition (sessions whose status dot is green or yellow) and a **Remaining** partition (grey/disconnected), with collapsible `Active (N)` / `Remaining (M)` headers between them — Active expanded, Remaining collapsed by default — so live and attention-needing sessions stay at the top and finished ones tuck away one click below. See [session-drawer.md](session-drawer.md).
