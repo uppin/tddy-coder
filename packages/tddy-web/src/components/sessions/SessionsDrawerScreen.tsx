@@ -15,6 +15,7 @@ import {
   useLiveKitTransportFactoryIsOverridden,
 } from "../../rpc/transportProvider";
 import { useDaemonClient, useDaemonClientFor, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
+import { UploadProgressProvider } from "../../rpc/uploadProgress";
 import { daemonRpcIdentity } from "../../lib/participantRole";
 import { owningHostForSession } from "../../utils/crossHostSessions";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";
@@ -551,6 +552,7 @@ export function SessionsDrawerScreen({
   };
 
   return (
+    <UploadProgressProvider>
     <TooltipProvider delayDuration={0}>
       {/* 100dvh (via AppShell fullbleed): on mobile 100vh includes the area behind the browser
           chrome, which would push the bottom keyboard bar off the visible screen. */}
@@ -653,5 +655,6 @@ export function SessionsDrawerScreen({
         <HostStatsFooter attachment={attachment} />
       </AppShell>
     </TooltipProvider>
+    </UploadProgressProvider>
   );
 }

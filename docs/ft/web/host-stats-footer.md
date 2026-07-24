@@ -87,6 +87,27 @@ is needed because the transport already targets the daemon):
 unauthenticated error, like every other `ConnectionService` method. The web subscribes **once** via
 `useHostStats` and applies each event — there is no client-side polling.
 
+<a id="upload-progress-drag-to-upload"></a>
+## Upload progress (drag-to-upload)
+
+The footer is also the home for **file-upload progress** from the terminal's drag-to-upload
+feature (see [web-terminal.md § File drop upload](./web-terminal.md#file-drop-upload)). When the
+user drops files on the terminal (or picks them via the mobile Keyboard-strip Attach button), a
+single **aggregate determinate bar** (`data-testid="upload-progress-indicator"`) appears inside
+the footer showing `"{n} files · {pct}%"`, where the percent is total bytes uploaded across all
+files in that drop. The indicator:
+
+- **Appears** when a drop starts and **auto-hides** shortly after the drop completes.
+- Exposes `data-upload-percent` (0–100) and `data-upload-file-count` for assertions.
+- Surfaces a per-file failure as a transient error (`data-testid="upload-progress-error"`, e.g.
+  "⚠ upload of report.iso failed — skipped"); the failed file's path is not typed into the
+  terminal, and the remaining files continue.
+
+Progress is published from the terminal's upload orchestration into a screen-level
+`UploadProgressProvider`, so the drop handler (deep in the terminal subtree) and this footer (a
+sibling subtree of `SessionsDrawerScreen`) share one progress snapshot — mirroring how the
+traffic readout subscribes to its meter.
+
 ## Acceptance criteria
 
 1. The byte-traffic readout renders inside the bottom footer of `SessionsDrawerScreen` and is

@@ -17,6 +17,8 @@ import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome"
 import { TerminalConnectionStatusBar } from "./connection/TerminalConnectionStatusBar";
 import { ShortcutDrawer } from "./connection/ShortcutDrawer";
 import { MobileTerminalKeyboard } from "./connection/MobileTerminalKeyboard";
+import { TerminalFileDropZone } from "./connection/TerminalFileDropZone";
+import { TerminalUploadButton } from "./connection/TerminalUploadButton";
 import type { ToolShortcutDef } from "../lib/toolShortcuts";
 import type { ByteDelta } from "./sessions/sessionRuntimeRegistry";
 
@@ -139,6 +141,13 @@ export interface GhosttyTerminalLiveKitProps {
    * byte meter ticks live, even for a backgrounded session.
    */
   onBytes?: (delta: ByteDelta) => void;
+  /**
+   * Daemon session token + id for the terminal file drop upload feature. When both are set, files
+   * dropped on the terminal (or picked via the mobile Attach button) upload to the session dir and
+   * their host paths are typed into the terminal. See docs/ft/web/web-terminal.md § File drop upload.
+   */
+  sessionToken?: string;
+  sessionId?: string;
 }
 
 export function GhosttyTerminalLiveKit({
@@ -169,6 +178,8 @@ export function GhosttyTerminalLiveKit({
   hideStatusStrip = false,
   onRoom,
   onBytes,
+  sessionToken,
+  sessionId,
 }: GhosttyTerminalLiveKitProps) {
   const liveKitFactory = useLiveKitTransportFactory();
   const log = debugLogging
@@ -510,8 +521,21 @@ export function GhosttyTerminalLiveKit({
 
   const statusBarCompact = connectionChromePlacement === "none";
 
+  // When both are present the terminal can upload; narrowing here removes the need for non-null
+  // assertions at every use site (the props are optional for LiveKit's non-session reuse).
+  const uploadTarget = sessionToken && sessionId ? { sessionToken, sessionId } : null;
+
   const mobileKeyboardAffordance = showMobileKeyboard ? (
-    <MobileTerminalKeyboard onSend={pushInput} />
+    <span className="inline-flex items-center gap-2">
+      <MobileTerminalKeyboard onSend={pushInput} />
+      {uploadTarget && (
+        <TerminalUploadButton
+          sessionToken={uploadTarget.sessionToken}
+          sessionId={uploadTarget.sessionId}
+          insertInput={pushInput}
+        />
+      )}
+    </span>
   ) : null;
 
   tddyDevDebug("[GhosttyTerminalLiveKit] render chrome", {
@@ -520,6 +544,49 @@ export function GhosttyTerminalLiveKit({
     showMobileKeyboard,
     status,
   });
+
+  const terminalElement = (
+    <GhosttyTerminal
+      ref={termRef}
+      fontSize={fontSize}
+      minFontSize={minFontSize}
+      maxFontSize={maxFontSize}
+      containerMinHeightPx={terminalContainerMinHeightPx}
+      fixedViewportGrid={fixedViewportGrid}
+      sessionActive={coderSessionActive}
+      debugLogging={debugLogging}
+      preventFocusOnTap={preventFocusOnTap}
+      onReady={() => {
+        termReadyRef.current = true;
+        const buf = outputBufferRef.current;
+        outputBufferRef.current = [];
+        const term = termRef.current;
+        log("lifecycle: onReady, flushing buffer", buf.length, "chunks");
+        if (term) {
+          for (const chunk of buf) {
+            log("dataflow: onReady flush write", chunk.length, "bytes");
+            term.write(chunk);
+          }
+          if (autoFocus !== false) {
+            term.focus();
+          }
+        }
+      }}
+      onResize={(size) => {
+        dResize(
+          "LiveKit OSC resize send cols=%d rows=%d fixedGrid=%o",
+          size.cols,
+          size.rows,
+          fixedViewportGrid ?? null,
+        );
+        const seq = `\x1b]resize;${size.cols};${size.rows}\x07`;
+        enqueueTerminalInput(new TextEncoder().encode(seq));
+      }}
+      onData={(data) => {
+        enqueueTerminalInput(new TextEncoder().encode(data));
+      }}
+    />
+  );
 
   return (
     <div
@@ -613,47 +680,16 @@ export function GhosttyTerminalLiveKit({
               {rpcReceivedSample || "(waiting…)"}
             </div>
           </div>
+        ) : uploadTarget ? (
+          <TerminalFileDropZone
+            sessionToken={uploadTarget.sessionToken}
+            sessionId={uploadTarget.sessionId}
+            insertInput={pushInput}
+          >
+            {terminalElement}
+          </TerminalFileDropZone>
         ) : (
-          <GhosttyTerminal
-            ref={termRef}
-            fontSize={fontSize}
-            minFontSize={minFontSize}
-            maxFontSize={maxFontSize}
-            containerMinHeightPx={terminalContainerMinHeightPx}
-            fixedViewportGrid={fixedViewportGrid}
-            sessionActive={coderSessionActive}
-            debugLogging={debugLogging}
-            preventFocusOnTap={preventFocusOnTap}
-            onReady={() => {
-              termReadyRef.current = true;
-              const buf = outputBufferRef.current;
-              outputBufferRef.current = [];
-              const term = termRef.current;
-              log("lifecycle: onReady, flushing buffer", buf.length, "chunks");
-              if (term) {
-                for (const chunk of buf) {
-                  log("dataflow: onReady flush write", chunk.length, "bytes");
-                  term.write(chunk);
-                }
-                if (autoFocus !== false) {
-                  term.focus();
-                }
-              }
-            }}
-            onResize={(size) => {
-              dResize(
-                "LiveKit OSC resize send cols=%d rows=%d fixedGrid=%o",
-                size.cols,
-                size.rows,
-                fixedViewportGrid ?? null,
-              );
-              const seq = `\x1b]resize;${size.cols};${size.rows}\x07`;
-              enqueueTerminalInput(new TextEncoder().encode(seq));
-            }}
-            onData={(data) => {
-              enqueueTerminalInput(new TextEncoder().encode(data));
-            }}
-          />
+          terminalElement
         )}
         {mobileShortcuts && mobileShortcuts.length > 0 && (
           <ShortcutDrawer shortcuts={mobileShortcuts} onSend={pushInput} />

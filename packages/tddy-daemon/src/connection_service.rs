@@ -36,7 +36,8 @@ use tddy_service::proto::connection::{
     SignalSessionResponse, StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
     StartTerminalSessionResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
     StreamTerminalOutputRequest, SubagentInfo, TerminalControlEvent, TerminalSessionInfo, ToolInfo,
-    WatchTerminalControlRequest, WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
+    UploadSessionFileChunkRequest, UploadSessionFileChunkResponse, WatchTerminalControlRequest,
+    WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
 };
 use uuid::Uuid;
 
@@ -6605,6 +6606,43 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         });
 
         Ok(Response::new(MpscHostStatsStream { rx }))
+    }
+
+    async fn upload_session_file_chunk(
+        &self,
+        request: Request<UploadSessionFileChunkRequest>,
+    ) -> Result<Response<UploadSessionFileChunkResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        // Reject an invalid session token before any filesystem access (parity with the other
+        // session-dir methods).
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+
+        let host_path = crate::session_file_upload::write_upload_chunk(
+            &sessions_base,
+            &req.session_id,
+            &req.upload_id,
+            &req.file_name,
+            &req.data,
+            req.last,
+        )?;
+
+        Ok(Response::new(UploadSessionFileChunkResponse {
+            host_path: host_path
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        }))
     }
 }
 

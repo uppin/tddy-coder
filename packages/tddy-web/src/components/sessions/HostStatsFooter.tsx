@@ -12,6 +12,7 @@ import type { SessionAttachmentState } from "./useSessionAttachment";
 import { StatusBar } from "./StatusBar";
 import { DiskSpaceIndicator } from "./DiskSpaceIndicator";
 import { CpuCoresIndicator } from "./CpuCoresIndicator";
+import { UploadProgressIndicator } from "./UploadProgressIndicator";
 import { useHostStats } from "../../rpc/useHostStats";
 
 export interface HostStatsFooterProps {
@@ -30,6 +31,7 @@ export function HostStatsFooter({ attachment }: HostStatsFooterProps) {
       <StatusBar attachment={attachment} />
       <DiskSpaceIndicator availableBytes={disk ? disk.availableBytes : null} />
       <CpuCoresIndicator perCorePercent={perCorePercent} />
+      <UploadProgressIndicator />
     </div>
   );
 }

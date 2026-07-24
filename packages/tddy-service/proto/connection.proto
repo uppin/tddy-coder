@@ -101,6 +101,11 @@ service ConnectionService {
   // it emits one HostStatsEvent immediately on subscribe, then refreshes CPU every 5 s and disk
   // every 60 s, pushing an event carrying the latest CPU and disk snapshot on each tick.
   rpc StreamHostStats(StreamHostStatsRequest) returns (stream HostStatsEvent);
+  // Terminal file drop upload (see docs/ft/web/web-terminal.md § File drop upload). Files dropped
+  // on the web terminal are chunked client-side and uploaded to
+  // {session_dir}/uploads/{upload_id}/{file_name}; the response carries each file's absolute host
+  // path on its final chunk so the web can type that path into the terminal.
+  rpc UploadSessionFileChunk(UploadSessionFileChunkRequest) returns (UploadSessionFileChunkResponse);
 }
 
 message ListToolsRequest {}
@@ -909,4 +914,24 @@ message HostDiskStats {
   uint64 total_bytes = 2;
   // Absolute path whose filesystem these figures describe (for tooltip/debug).
   string project_dir = 3;
+}
+
+// --- Terminal file drop upload ---
+
+message UploadSessionFileChunkRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // Per-drop UUID grouping all files of one drag gesture into uploads/<upload_id>/.
+  string upload_id = 3;
+  // Basename only — path separators, "." / ".." and empty are rejected by the daemon.
+  string file_name = 4;
+  // Next chunk of this file's bytes; chunks for a given (upload_id, file_name) arrive in order.
+  bytes data = 5;
+  // True on the final chunk of this file — response then carries the absolute host_path.
+  bool last = 6;
+}
+
+message UploadSessionFileChunkResponse {
+  // Absolute host path of the written file; populated only when the request's `last` was true.
+  string host_path = 1;
 }
