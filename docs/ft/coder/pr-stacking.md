@@ -205,6 +205,13 @@ A recovery guard at the top of every `assess` entry (`recover_in_flight_stack_op
 
 `Changeset.orchestrator_session_id` (a child-session back-reference to the orchestrating session) is surfaced to the web via `SessionEntry` proto field 21 (`orchestrator_session_id: string`). It is populated during enrichment by `session_list_enrichment.rs` reading the child's `changeset.yaml` (alongside `changeset.state.current`). Empty string for non-child sessions.
 
+### Context docs in proto
+
+The session's **context documents** — the recipe manifest's planning artifacts (`exploration.md`, `stack-plan.yaml`, `pr-stack-plan.md`, the two `stack-status.*` files) — are surfaced to the web via `SessionEntry` proto field 27, `repeated SessionContextDoc context_docs`, where `SessionContextDoc { key, basename, path, description, exists }`. The list is derived from the recipe manifest and populated during enrichment (`session_list_enrichment.rs`, alongside `orchestrator_session_id`):
+
+- `session_context_docs::context_docs_for_session(recipe_name, session_dir)` joins the manifest's `known_artifacts()` with a per-key human `description` (a new defaulted `SessionArtifactManifest::artifact_doc_descriptions()`; `PrStackRecipe` provides a one-liner per artifact) and an on-disk existence flag, resolving each `path` under `session_artifacts_root` (`session_dir/artifacts/`). A blank or unknown recipe yields an empty list.
+- `session_context_docs::read_session_context_doc_utf8(recipe_name, session_dir, basename)` reads a doc's contents, allowlisted to the manifest's basenames with a canonicalize-and-contain guard rooted at the artifacts dir (a non-manifest basename or a traversal segment → `PermissionDenied`). It mirrors the guard shape in `session_workflow_files.rs`. The wire RPC that exposes this reader is added by the web-facing follow-up that consumes it (the **Docs** tab and child "Start session" prompt references).
+
 ### New-session screen: recipe dropdown and parent picker
 
 `CreateSessionPane` (`packages/tddy-web/src/components/sessions/`) gains two changes for tool sessions:

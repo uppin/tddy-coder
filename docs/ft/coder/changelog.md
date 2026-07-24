@@ -2,6 +2,11 @@
 
 Release note history for the Coder product area.
 
+## 2026-07-24 — pr-stack: exploration.md + session context docs
+
+- The `pr-stack` recipe now persists `artifacts/exploration.md` (the code-discovery map) from an optional `exploration` field on the `write-stack-plan` submit — matching the tdd/bugfix planning recipes — and advertises it to the `orchestrate` operator loop via the `<context-reminder>` header ([pr-stacking.md](pr-stacking.md), [exploration-artifact.md](exploration-artifact.md)).
+- A session's planning documents (`exploration.md`, the stack plan, the status files) are now a first-class list on `SessionEntry.context_docs` — each with a human description and an on-disk existence flag — derived from the recipe manifest during `ListSessions` enrichment, so the web can render and reference them. An allowlisted, traversal-guarded reader serves their contents; the wire RPC and web Docs tab are a stacked follow-up.
+
 ## 2026-07-23 — Default branch is a property of the project (unified integration-base resolution)
 
 - The remote-tracking integration base ref (`origin/master` vs `origin/main`) is now a settable property of the **project** (`main_branch_ref`), the single source of truth for the default base ref across every session-start surface (web/gRPC and Telegram) ([git-integration-base-ref.md](git-integration-base-ref.md)).
