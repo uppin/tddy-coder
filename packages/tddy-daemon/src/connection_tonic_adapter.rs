@@ -33,29 +33,31 @@ use tddy_service::proto::connection::ConnectionService as RpcConnectionService;
 use tddy_service::proto::connection::{
     AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest, AddProjectToHostResponse,
     AgentActivityRecord, ClaimTerminalControlRequest, ClaimTerminalControlResponse,
-    ConnectSessionRequest, ConnectSessionResponse, CreateProjectRequest, CreateProjectResponse,
-    DeleteSessionRequest, DeleteSessionResponse, ExecuteToolRequest, ExecuteToolResponse,
-    GetDemoVmStatusRequest, GetDemoVmStatusResponse, HostStatsEvent, ListAgentModelsRequest,
-    ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
-    ListEligibleDaemonsResponse, ListExecToolsRequest, ListExecToolsResponse,
-    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
-    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
-    ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
+    CleanWorktreeRequest, CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
+    CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse,
+    ExecuteToolRequest, ExecuteToolResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
+    HostStatsEvent, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
+    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
+    ListExecToolsRequest, ListExecToolsResponse, ListProjectBranchesRequest,
+    ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ListSessionWorkflowFilesRequest,
+    ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse,
+    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse,
     ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse, ReadWorktreeFileRequest,
     ReadWorktreeFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
     ReportAgentActivityRequest, ReportAgentActivityResponse, ReportSessionStatusRequest,
-    ReportSessionStatusResponse, ResumeSessionRequest, ResumeSessionResponse,
-    SendTerminalInputResponse, SessionTerminalInput, SessionTerminalOutput,
-    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, SignalSessionRequest,
-    SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse, StartSessionRequest,
-    StartSessionResponse, StartTerminalSessionRequest, StartTerminalSessionResponse,
-    StopDemoVmRequest, StopDemoVmResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    StreamHostStatsRequest, StreamSessionActivityRequest, StreamTerminalOutputRequest,
-    TerminalControlEvent, WatchTerminalControlRequest,
+    ReportSessionStatusResponse, RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse,
+    ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse, SessionTerminalInput,
+    SessionTerminalOutput, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
+    SignalSessionRequest, SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse,
+    StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
+    StartTerminalSessionResponse, StopDemoVmRequest, StopDemoVmResponse,
+    StopTerminalSessionRequest, StopTerminalSessionResponse, StreamHostStatsRequest,
+    StreamSessionActivityRequest, StreamTerminalOutputRequest, TerminalControlEvent,
+    WatchTerminalControlRequest,
 };
 use tddy_service::tonic_connection::connection_service_server::ConnectionService as TonicConnectionService;
 
@@ -408,6 +410,32 @@ where
         request: tonic::Request<RemoveWorktreeRequest>,
     ) -> Result<tonic::Response<RemoveWorktreeResponse>, tonic::Status> {
         let resp = RpcConnectionService::remove_worktree(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn clean_worktree(
+        &self,
+        request: tonic::Request<CleanWorktreeRequest>,
+    ) -> Result<tonic::Response<CleanWorktreeResponse>, tonic::Status> {
+        let resp = RpcConnectionService::clean_worktree(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn restore_session_worktree(
+        &self,
+        request: tonic::Request<RestoreSessionWorktreeRequest>,
+    ) -> Result<tonic::Response<RestoreSessionWorktreeResponse>, tonic::Status> {
+        let resp = RpcConnectionService::restore_session_worktree(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

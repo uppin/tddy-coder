@@ -42,6 +42,11 @@ import {
   StopTerminalSessionResponseSchema,
   TerminalSessionInfoSchema,
   ToolDefSchema,
+  WorktreeRowSchema,
+  ListWorktreesForProjectResponseSchema,
+  RemoveWorktreeResponseSchema,
+  CleanWorktreeResponseSchema,
+  RestoreSessionWorktreeResponseSchema,
   type AgentInfo,
   type ConnectSessionResponse,
   type EligibleDaemonEntry,
@@ -162,6 +167,17 @@ export interface ConnectionServiceScenario {
   /** When set, `StreamHostStats` emits a second event carrying these per-core percentages after the
    *  first — lets a test assert the footer applies fresh readings streamed by the server. */
   hostCpuPerCoreUpdate?: number[];
+  /** Rows returned by `ListWorktreesForProject` (Session Worktree tab). Default: none. */
+  worktrees?: Array<{
+    path: string;
+    branchLabel?: string;
+    diskBytes?: bigint;
+    changedFiles?: number;
+    linesAdded?: bigint;
+    linesRemoved?: bigint;
+    updatedAtUnixMs?: bigint;
+    stale?: boolean;
+  }>;
 }
 
 export interface ConnectionServiceBackend extends InMemoryRpcBackend {
@@ -189,6 +205,14 @@ export interface ConnectionServiceBackend extends InMemoryRpcBackend {
   /** Number of times `StreamHostStats` was subscribed — lets a test assert the footer opens the
    *  single host-stats stream exactly once. */
   readonly hostStatsStreamCount: () => number;
+  /** Number of `ListWorktreesForProject` calls with `refresh: true` — asserts the 10-min cadence. */
+  readonly listWorktreesRefreshCount: () => number;
+  /** Every `worktree_path` passed to `CleanWorktree`, in call order. */
+  readonly cleanedWorktreePaths: string[];
+  /** Every `worktree_path` passed to `RemoveWorktree`, in call order. */
+  readonly removedWorktreePaths: string[];
+  /** Every `session_id` passed to `RestoreSessionWorktree`, in call order. */
+  readonly restoredSessionIds: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +237,10 @@ export function aConnectionServiceBackend(
   const sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[] = [];
   const streamedTerminals: { sessionId: string; terminalId: string }[] = [];
   let hostStatsStreamOpens = 0;
+  let listWorktreesRefreshCalls = 0;
+  const cleanedWorktreePaths: string[] = [];
+  const removedWorktreePaths: string[] = [];
+  const restoredSessionIds: string[] = [];
 
   // Live bash-terminal list — mutated by Start/Stop so ListTerminalSessions stays consistent.
   const liveTerminals: { terminalId: string; kind: string; pid: number }[] = (
@@ -374,6 +402,29 @@ export function aConnectionServiceBackend(
         });
         return {};
       },
+      // --- Session Worktree tab: cache-backed list + clear/delete/restore ---
+      listWorktreesForProject: async (req) => {
+        if (req.refresh) listWorktreesRefreshCalls += 1;
+        return create(ListWorktreesForProjectResponseSchema, {
+          worktrees: (scenario.worktrees ?? []).map((w) => create(WorktreeRowSchema, w)),
+        });
+      },
+      removeWorktree: async (req) => {
+        removedWorktreePaths.push(req.worktreePath);
+        return create(RemoveWorktreeResponseSchema, { ok: true, message: "" });
+      },
+      cleanWorktree: async (req) => {
+        cleanedWorktreePaths.push(req.worktreePath);
+        return create(CleanWorktreeResponseSchema, { ok: true, message: "" });
+      },
+      restoreSessionWorktree: async (req) => {
+        restoredSessionIds.push(req.sessionId);
+        return create(RestoreSessionWorktreeResponseSchema, {
+          ok: true,
+          message: "",
+          worktreePath: `/restored/${req.sessionId}`,
+        });
+      },
       // --- Host stats footer: single server-streaming RPC ---
       // Emits one event carrying both CPU and disk immediately (the server's on-subscribe snapshot),
       // optionally a second event with updated CPU, then stays open — a completed stream would look
@@ -420,6 +471,10 @@ export function aConnectionServiceBackend(
     sentTerminalInput,
     streamedTerminals,
     hostStatsStreamCount: () => hostStatsStreamOpens,
+    listWorktreesRefreshCount: () => listWorktreesRefreshCalls,
+    cleanedWorktreePaths,
+    removedWorktreePaths,
+    restoredSessionIds,
   });
 }
 

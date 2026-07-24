@@ -69,6 +69,20 @@ export const TEST_IDS = {
   worktreeDeleteConfirm: "worktrees-delete-confirm",
   worktreeDeletedPath: "worktrees-deleted-path",
 
+  // Session Inspector → Worktree tab (docs/ft/web/session-worktree-inspector.md)
+  sessionInspectorTabWorktree: "sessions-inspector-tab-worktree",
+  sessionWorktreeTab: "session-worktree-tab",
+  sessionWorktreeSize: "session-worktree-size",
+  sessionWorktreeBranch: "session-worktree-branch",
+  sessionWorktreeChanged: "session-worktree-changed",
+  sessionWorktreeRefresh: "session-worktree-refresh",
+  sessionWorktreeClear: "session-worktree-clear",
+  sessionWorktreeClearConfirm: "session-worktree-clear-confirm",
+  sessionWorktreeDelete: "session-worktree-delete",
+  sessionWorktreeDeleteConfirm: "session-worktree-delete-confirm",
+  sessionWorktreeMissing: "session-worktree-missing",
+  sessionWorktreeRestore: "session-worktree-restore",
+
   // CodexOAuth dialog
   codexOauthDialog: "codex-oauth-dialog",
   codexOauthDismiss: "codex-oauth-dismiss",

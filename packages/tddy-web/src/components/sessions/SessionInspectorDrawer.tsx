@@ -10,6 +10,7 @@ import { cn } from "../../lib/utils";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
 import { SessionToolsTab } from "./SessionToolsTab";
 import { SessionUsageTab } from "./SessionUsageTab";
+import { SessionWorktreeTab } from "./SessionWorktreeTab";
 // (usage stream is owned by SessionUsageTab so it opens only while that tab is mounted)
 import { SessionVncTab } from "./SessionVncTab";
 import { SessionScreenSharingTab } from "./SessionScreenSharingTab";
@@ -340,6 +341,16 @@ export function SessionInspectorDrawer({
         ) : tab === "usage" ? (
           <ScrollArea className="flex-1 min-h-0">
             <SessionUsageTab room={room} serverIdentity={serverIdentity} />
+          </ScrollArea>
+        ) : tab === "worktree" ? (
+          <ScrollArea className="flex-1 min-h-0">
+            <SessionWorktreeTab
+              client={client ?? null}
+              sessionToken={sessionToken ?? ""}
+              projectId={session.projectId}
+              sessionId={session.sessionId}
+              repoPath={session.repoPath}
+            />
           </ScrollArea>
         ) : tab === "vnc" ? (
           <ScrollArea className="flex-1 min-h-0">

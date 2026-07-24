@@ -14,28 +14,29 @@ use tddy_core::{BranchWorktreeIntent, Changeset, ChangesetWorkflow};
 use tddy_rpc::{Request, Response, Status, Streaming};
 use tddy_service::proto::connection::{
     AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest, AddProjectToHostResponse,
-    AgentInfo, ClaimTerminalControlRequest, ClaimTerminalControlResponse, ConnectSessionRequest,
-    ConnectSessionResponse, ConnectionService as ConnectionServiceTrait, CreateProjectRequest,
-    CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse, EligibleDaemonEntry,
-    ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse,
-    ListEligibleDaemonsRequest, ListEligibleDaemonsResponse, ListProjectBranchesRequest,
-    ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
-    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
-    ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
+    AgentInfo, ClaimTerminalControlRequest, ClaimTerminalControlResponse, CleanWorktreeRequest,
+    CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
+    ConnectionService as ConnectionServiceTrait, CreateProjectRequest, CreateProjectResponse,
+    DeleteSessionRequest, DeleteSessionResponse, EligibleDaemonEntry, ListAgentModelsRequest,
+    ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
+    ListEligibleDaemonsResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
+    ListProjectsRequest, ListProjectsResponse, ListSessionWorkflowFilesRequest,
+    ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse,
+    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse, ModelInfo,
     ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
     ReadSessionWorkflowFileResponse, ReadWorktreeFileRequest, ReadWorktreeFileResponse,
     RemoveWorktreeRequest, RemoveWorktreeResponse, ReportSessionStatusRequest,
-    ReportSessionStatusResponse, ResumeSessionRequest, ResumeSessionResponse,
-    SendTerminalInputResponse, SessionEntry as ProtoSessionEntry, SessionTerminalInput,
-    SessionTerminalOutput, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, Signal,
-    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
-    StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
-    StopTerminalSessionResponse, StreamTerminalOutputRequest, SubagentInfo, TerminalControlEvent,
-    TerminalSessionInfo, ToolInfo, WatchTerminalControlRequest, WorkflowFileEntry,
-    WorktreeDirEntry, WorktreeRow,
+    ReportSessionStatusResponse, RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse,
+    ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse,
+    SessionEntry as ProtoSessionEntry, SessionTerminalInput, SessionTerminalOutput,
+    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, Signal, SignalSessionRequest,
+    SignalSessionResponse, StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
+    StartTerminalSessionResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
+    StreamTerminalOutputRequest, SubagentInfo, TerminalControlEvent, TerminalSessionInfo, ToolInfo,
+    WatchTerminalControlRequest, WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
 };
 use uuid::Uuid;
 
@@ -57,7 +58,7 @@ use crate::user_sessions_path::{
     project_path_under_home_from_user_relative, projects_path_for_user, repos_base_for_user,
 };
 use crate::workspace_session;
-use crate::worktrees::{self, RemoveWorktreeError, WorktreeStatsCache};
+use crate::worktrees::{self, CleanWorktreeError, RemoveWorktreeError, WorktreeStatsCache};
 use tddy_service::proto::connection::{
     AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState, ExecuteToolRequest,
     ExecuteToolResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse, HostCpuStats,
@@ -5285,6 +5286,152 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         }
     }
 
+    async fn clean_worktree(
+        &self,
+        request: Request<CleanWorktreeRequest>,
+    ) -> Result<Response<CleanWorktreeResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let project_id = req.project_id.trim();
+        if project_id.is_empty() {
+            return Err(Status::invalid_argument("project_id is required"));
+        }
+        let worktree_path_raw = req.worktree_path.trim();
+        if worktree_path_raw.is_empty() {
+            return Err(Status::invalid_argument("worktree_path is required"));
+        }
+
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+
+        let local_id = local_instance_id_for_config(&self.config);
+        let main_repo_str =
+            project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
+                .map_err(|e| Status::internal(e.to_string()))?
+                .ok_or_else(|| Status::not_found("project not found"))?;
+
+        let main_repo = PathBuf::from(&main_repo_str);
+        if !main_repo.exists() {
+            return Err(Status::invalid_argument(
+                "project main repo path does not exist",
+            ));
+        }
+
+        let worktree_path = PathBuf::from(worktree_path_raw);
+
+        let repo_blocking = main_repo.clone();
+        let wt_blocking = worktree_path.clone();
+        let timeout = self.config.spawn_worker_request_timeout();
+        let join = tokio::task::spawn_blocking(move || {
+            worktrees::clean_worktree_under_repo(&repo_blocking, &wt_blocking)
+        });
+
+        match tokio::time::timeout(timeout, join).await {
+            Ok(Ok(Ok(()))) => {
+                self.worktree_stats_cache.invalidate_project(project_id);
+                Ok(Response::new(CleanWorktreeResponse {
+                    ok: true,
+                    message: String::new(),
+                }))
+            }
+            Ok(Ok(Err(e))) => Err(map_clean_worktree_error(e)),
+            Ok(Err(join_err)) => Err(Status::internal(join_err.to_string())),
+            Err(_elapsed) => Err(Status::deadline_exceeded(format!(
+                "CleanWorktree: timed out after {}s (spawn_worker_request_timeout_secs)",
+                timeout.as_secs()
+            ))),
+        }
+    }
+
+    async fn restore_session_worktree(
+        &self,
+        request: Request<RestoreSessionWorktreeRequest>,
+    ) -> Result<Response<RestoreSessionWorktreeResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let project_id = req.project_id.trim();
+        if project_id.is_empty() {
+            return Err(Status::invalid_argument("project_id is required"));
+        }
+        let session_id = req.session_id.trim();
+        if session_id.is_empty() {
+            return Err(Status::invalid_argument("session_id is required"));
+        }
+        validate_session_id_segment(session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+
+        let local_id = local_instance_id_for_config(&self.config);
+        let main_repo_str =
+            project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
+                .map_err(|e| Status::internal(e.to_string()))?
+                .ok_or_else(|| Status::not_found("project not found"))?;
+
+        let main_repo = PathBuf::from(&main_repo_str);
+        if !main_repo.exists() {
+            return Err(Status::invalid_argument(
+                "project main repo path does not exist",
+            ));
+        }
+
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions base"))?;
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+
+        let repo_blocking = main_repo.clone();
+        let session_dir_blocking = session_dir.clone();
+        let timeout = self.config.spawn_worker_request_timeout();
+        let join = tokio::task::spawn_blocking(move || {
+            let base_ref = tddy_core::resolve_persisted_worktree_integration_base_for_session(
+                &session_dir_blocking,
+                &repo_blocking,
+            )?;
+            tddy_core::setup_worktree_for_session_with_integration_base(
+                &repo_blocking,
+                &session_dir_blocking,
+                &base_ref,
+            )
+        });
+
+        match tokio::time::timeout(timeout, join).await {
+            Ok(Ok(Ok(path))) => {
+                self.worktree_stats_cache.invalidate_project(project_id);
+                Ok(Response::new(RestoreSessionWorktreeResponse {
+                    ok: true,
+                    message: String::new(),
+                    worktree_path: path.to_string_lossy().into_owned(),
+                }))
+            }
+            Ok(Ok(Err(e))) => Err(Status::internal(e)),
+            Ok(Err(join_err)) => Err(Status::internal(join_err.to_string())),
+            Err(_elapsed) => Err(Status::deadline_exceeded(format!(
+                "RestoreSessionWorktree: timed out after {}s (spawn_worker_request_timeout_secs)",
+                timeout.as_secs()
+            ))),
+        }
+    }
+
     async fn list_project_branches(
         &self,
         request: Request<ListProjectBranchesRequest>,
@@ -6359,6 +6506,20 @@ fn map_remove_worktree_error(e: RemoveWorktreeError) -> Status {
             Status::failed_precondition("cannot remove primary worktree")
         }
         RemoveWorktreeError::GitFailed { message } | RemoveWorktreeError::Io(message) => {
+            Status::internal(message)
+        }
+    }
+}
+
+fn map_clean_worktree_error(e: CleanWorktreeError) -> Status {
+    match e {
+        CleanWorktreeError::NotListed => {
+            Status::not_found("worktree path is not in git worktree list")
+        }
+        CleanWorktreeError::CannotCleanPrimary => {
+            Status::failed_precondition("cannot clean primary worktree")
+        }
+        CleanWorktreeError::GitFailed { message } | CleanWorktreeError::Io(message) => {
             Status::internal(message)
         }
     }

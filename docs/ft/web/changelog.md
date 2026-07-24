@@ -4,6 +4,10 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-23 — Session Inspector Worktree tab
+
+- The Session Inspector gains a **Worktree** tab scoped to the selected session's own git worktree: on-disk size + changed-file/±line summary, cache-backed and refreshed on a **10-minute** client-side timer (plus a Refresh button), served from the existing `ListWorktreesForProject`. See [session-worktree-inspector.md](session-worktree-inspector.md).
+- Three lifecycle actions reuse the worktree infrastructure: **Clear** (`git clean -fdx` via new `CleanWorktree` RPC — reclaims untracked/ignored disk without removing the worktree), **Delete** (existing `RemoveWorktree`), and **Restore** (recreates a missing worktree from the session's persisted changeset via new `RestoreSessionWorktree`). Clear and Delete are two-step confirm; the primary worktree is refused for both. The daemon invalidates the stats cache after clear/restore.
 ## 2026-07-23 — Agent activity: subscribe to new records only + structured tool input/output
 
 - The agent-activity pane can subscribe **live-only** — skipping the full-history replay — via `useSessionActivity`'s `mode` (`StreamMode.LIVE_ONLY`); the overlay keeps the snapshot-then-live default so history still populates on open ([agent-activity-pane.md](agent-activity-pane.md#streaming-design--streamsessionactivity)).

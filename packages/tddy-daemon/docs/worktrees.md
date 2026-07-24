@@ -17,6 +17,8 @@ Library helpers for the Worktrees manager feature: parse **`git worktree list`**
 | **`WorktreeStatsCache`** | **`new`**, **`refresh_stats_for_project`**, **`list_cached_stats`**, **`invalidate_project`**. Test-only atomic **`test_git_diff_invocations`** counts refresh-side diff/stat work; list path does not re-run diff. |
 | **`RemoveWorktreeError`** | **`GitFailed`**, **`NotListed`**, **`CannotRemovePrimary`**, **`Io`**. |
 | **`remove_worktree_under_repo`** | Validates membership via **`git worktree list`**, blocks primary row, runs **`git worktree remove`**. |
+| **`CleanWorktreeError`** | **`GitFailed`**, **`NotListed`**, **`CannotCleanPrimary`**, **`Io`**. |
+| **`clean_worktree_under_repo`** | Validates membership via **`git worktree list`**, blocks primary row, runs **`git clean -fdx`** in the worktree (reclaims disk without removing it). Mirrors **`remove_worktree_under_repo`**. |
 
 ## Persistence layout
 

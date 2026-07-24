@@ -33,6 +33,12 @@ service ConnectionService {
   rpc ReadSessionWorkflowFile(ReadSessionWorkflowFileRequest) returns (ReadSessionWorkflowFileResponse);
   rpc ListWorktreesForProject(ListWorktreesForProjectRequest) returns (ListWorktreesForProjectResponse);
   rpc RemoveWorktree(RemoveWorktreeRequest) returns (RemoveWorktreeResponse);
+  // Session Worktree inspector tab (docs/ft/web/session-worktree-inspector.md).
+  // CleanWorktree runs `git clean -fdx` in a secondary session worktree (membership-gated, primary
+  // refused). RestoreSessionWorktree recreates a missing session worktree from its persisted
+  // changeset (reusing tddy-core session-worktree setup).
+  rpc CleanWorktree(CleanWorktreeRequest) returns (CleanWorktreeResponse);
+  rpc RestoreSessionWorktree(RestoreSessionWorktreeRequest) returns (RestoreSessionWorktreeResponse);
   // Code pane: browse a session's worktree files (docs/ft/web/session-code-pane.md).
   rpc ListWorktreeDirectory(ListWorktreeDirectoryRequest) returns (ListWorktreeDirectoryResponse);
   rpc ReadWorktreeFile(ReadWorktreeFileRequest) returns (ReadWorktreeFileResponse);
@@ -443,6 +449,35 @@ message RemoveWorktreeRequest {
 message RemoveWorktreeResponse {
   bool ok = 1;
   string message = 2;
+}
+
+// --- Session Worktree inspector tab (docs/ft/web/session-worktree-inspector.md) ---
+
+message CleanWorktreeRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // Absolute or repo-relative path; must appear in git worktree list. The primary (first-listed)
+  // worktree is refused — only secondary session worktrees are clearable.
+  string worktree_path = 3;
+}
+
+message CleanWorktreeResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+message RestoreSessionWorktreeRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // Session whose persisted changeset (branch + integration base) drives the recreation.
+  string session_id = 3;
+}
+
+message RestoreSessionWorktreeResponse {
+  bool ok = 1;
+  string message = 2;
+  // Absolute path of the recreated worktree.
+  string worktree_path = 3;
 }
 
 // --- Worktree Code pane (docs/ft/web/session-code-pane.md) ---
