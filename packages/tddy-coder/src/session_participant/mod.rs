@@ -6,10 +6,12 @@
 //! daemon participant (`daemon-{instanceId}`), which owns process teardown and must be reachable
 //! even when the coder participant is stuck (changeset `2026-07-12-fast-session-change`).
 
+pub mod acp_transcript;
 pub mod connection_service_participant;
 pub mod metadata_publisher;
 pub mod terminal_manager;
 
+pub use acp_transcript::{append_frames_for_event, frame_for_event, spawn_acp_transcript_writer};
 pub use connection_service_participant::{
     coder_session_tool_catalog, coder_session_tool_catalog_full, CoderSessionToolExecutor,
     SessionConnectionService, ToolDef, ToolExecutor, ToolOutcome,
@@ -26,12 +28,12 @@ use tokio::sync::watch;
 
 use tddy_rpc::{RpcMessage, RpcResult, RpcService, ServiceEntry, Status};
 use tddy_service::proto::connection::{
-    ClaimTerminalControlRequest, ClaimTerminalControlResponse, ExecuteToolRequest,
+    AcpReplayFrame, ClaimTerminalControlRequest, ClaimTerminalControlResponse, ExecuteToolRequest,
     ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
     ListSessionToolCallsResponse, ListTerminalSessionsRequest, ListTerminalSessionsResponse,
     SendTerminalInputResponse, SessionTerminalInput, SessionTerminalOutput,
     StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
-    StopTerminalSessionResponse, StreamMode, StreamSessionActivityRequest,
+    StopTerminalSessionResponse, StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
     StreamTerminalOutputRequest, TerminalSessionInfo, ToolCallInfo, ToolDef as ProtoToolDef,
 };
 
@@ -464,6 +466,79 @@ impl RpcService for SessionConnectionServiceRpc {
 
                 RpcResult::ServerStream(Ok(rx))
             }
+            "StreamAcpReplay" => {
+                let req = match StreamAcpReplayRequest::decode(&message.payload[..]) {
+                    Ok(req) => req,
+                    Err(e) => {
+                        return RpcResult::ServerStream(Err(Status::invalid_argument(format!(
+                            "decode StreamAcpReplayRequest: {e}"
+                        ))));
+                    }
+                };
+                let mode = StreamMode::try_from(req.mode).unwrap_or(StreamMode::SnapshotThenLive);
+
+                let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, Status>>(
+                    AGENT_ACTIVITY_CHANNEL_CAPACITY,
+                );
+
+                // Wrap one ACP frame in the connection-local `AcpReplayFrame` envelope and encode it
+                // to the transport bytes the client decodes back into an `AcpReplayFrame`.
+                fn replay_frame_bytes(
+                    frame: &tddy_service::proto::acp::AcpAgentMessage,
+                ) -> Vec<u8> {
+                    AcpReplayFrame {
+                        acp_agent_message: frame.encode_to_vec(),
+                    }
+                    .encode_to_vec()
+                }
+
+                // Subscribe to the live tail BEFORE snapshotting so an event produced between the
+                // snapshot read and the first bridge recv() is still delivered (via the broadcast)
+                // rather than dropped in the gap.
+                let live_rx = self.svc.presenter_events.as_ref().map(|tx| tx.subscribe());
+
+                // Snapshot-then-live (the default) replays the persisted ACP transcript first;
+                // live-only skips it and carries only frames produced after subscribe.
+                if mode == StreamMode::SnapshotThenLive {
+                    let snapshot =
+                        tddy_service::acp_replay::read_acp_transcript(&self.svc.agent_activity_dir)
+                            .unwrap_or_default();
+                    for frame in snapshot {
+                        if tx.try_send(Ok(replay_frame_bytes(&frame))).is_err() {
+                            // Receiver already gone — return the (now-closed) stream.
+                            return RpcResult::ServerStream(Ok(rx));
+                        }
+                    }
+                }
+
+                // Live tail: map every renderable presenter event to its ACP frame (via the same
+                // mapper the on-disk writer uses) and forward it, ending when the presenter channel
+                // closes or the client disconnects.
+                if let Some(mut live_rx) = live_rx {
+                    tokio::spawn(async move {
+                        use tokio::sync::broadcast::error::RecvError;
+                        loop {
+                            match live_rx.recv().await {
+                                Ok(event) => {
+                                    let Some(frame) = acp_transcript::frame_for_event(
+                                        &event,
+                                        acp_transcript::now_unix_ms(),
+                                    ) else {
+                                        continue;
+                                    };
+                                    if tx.send(Ok(replay_frame_bytes(&frame))).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(RecvError::Closed) => break,
+                                Err(RecvError::Lagged(_)) => continue,
+                            }
+                        }
+                    });
+                }
+
+                RpcResult::ServerStream(Ok(rx))
+            }
             other => RpcResult::Unary(Err(Status::unimplemented(format!(
                 "session participant does not serve ConnectionService/{other}"
             )))),
@@ -694,5 +769,104 @@ mod tests {
             first.call_id, "call-live",
             "live-only must not replay the persisted snapshot ('call-snapshot')"
         );
+    }
+
+    fn acp_replay_request_message(session_id: &str) -> RpcMessage {
+        let req = StreamAcpReplayRequest {
+            session_token: "caller-token".to_string(),
+            session_id: session_id.to_string(),
+            daemon_instance_id: String::new(),
+            mode: StreamMode::SnapshotThenLive as i32,
+        };
+        RpcMessage::new(req.encode_to_vec(), Default::default())
+    }
+
+    /// Receive one streamed replay byte-frame and decode its inner ACP `AcpAgentMessage`.
+    async fn recv_acp_frame(
+        rx: &mut tokio::sync::mpsc::Receiver<Result<Vec<u8>, Status>>,
+    ) -> tddy_service::proto::acp::AcpAgentMessage {
+        let bytes = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("expected a streamed replay frame")
+            .expect("stream ended unexpectedly")
+            .expect("frame carried an error status");
+        let envelope = AcpReplayFrame::decode(&bytes[..]).expect("decode AcpReplayFrame");
+        tddy_service::proto::acp::AcpAgentMessage::decode(&envelope.acp_agent_message[..])
+            .expect("decode inner AcpAgentMessage")
+    }
+
+    /// The text of an `agent_message_chunk` ACP frame (panics on any other shape).
+    fn acp_agent_text(frame: &tddy_service::proto::acp::AcpAgentMessage) -> String {
+        use tddy_service::proto::acp::{acp_agent_message, content_block, session_update};
+        match &frame.msg {
+            Some(acp_agent_message::Msg::SessionUpdate(n)) => {
+                match n.update.as_ref().and_then(|u| u.update.as_ref()) {
+                    Some(session_update::Update::AgentMessageChunk(c)) => {
+                        match c.content.as_ref().and_then(|b| b.block.as_ref()) {
+                            Some(content_block::Block::Text(t)) => t.text.clone(),
+                            other => panic!("expected text content, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected AgentMessageChunk, got {other:?}"),
+                }
+            }
+            other => panic!("expected a SessionUpdate frame, got {other:?}"),
+        }
+    }
+
+    /// The tool_call_id of a `tool_call` ACP frame (panics on any other shape).
+    fn acp_tool_call_id(frame: &tddy_service::proto::acp::AcpAgentMessage) -> String {
+        use tddy_service::proto::acp::{acp_agent_message, session_update};
+        match &frame.msg {
+            Some(acp_agent_message::Msg::SessionUpdate(n)) => {
+                match n.update.as_ref().and_then(|u| u.update.clone()) {
+                    Some(session_update::Update::ToolCall(tc)) => {
+                        tc.tool_call_id.map(|id| id.value).unwrap_or_default()
+                    }
+                    other => panic!("expected ToolCall, got {other:?}"),
+                }
+            }
+            other => panic!("expected a SessionUpdate frame, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn stream_acp_replay_replays_the_persisted_transcript_then_the_live_broadcast() {
+        // Given — a session dir with one persisted ACP transcript frame, and a presenter broadcast
+        let dir = tempfile::tempdir().unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            dir.path(),
+            &tddy_service::acp_replay::agent_text_frame("Analyzing the parser.", 1_000),
+        )
+        .unwrap();
+        let (events, _keepalive) = broadcast::channel(16);
+        let rpc = rpc_for(dir.path(), events.clone());
+
+        // When — the StreamAcpReplay arm is dispatched
+        let result = rpc
+            .handle_rpc(
+                "connection.ConnectionService",
+                "StreamAcpReplay",
+                &acp_replay_request_message("sess-1"),
+            )
+            .await;
+        let mut rx = match result {
+            RpcResult::ServerStream(Ok(rx)) => rx,
+            RpcResult::ServerStream(Err(status)) => {
+                panic!("expected a server stream, got error status: {status:?}")
+            }
+            _ => panic!("expected a server stream, got a unary result"),
+        };
+
+        // Then — the persisted agent-text frame arrives first
+        let snapshot = recv_acp_frame(&mut rx).await;
+        assert_eq!(acp_agent_text(&snapshot), "Analyzing the parser.");
+
+        // And — a subsequently-broadcast AgentActivity is mapped to a live tool_call frame
+        events
+            .send(PresenterEvent::AgentActivity(a_running_record("call-2")))
+            .expect("broadcast send");
+        let live = recv_acp_frame(&mut rx).await;
+        assert_eq!(acp_tool_call_id(&live), "call-2");
     }
 }

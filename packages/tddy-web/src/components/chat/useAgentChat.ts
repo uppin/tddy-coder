@@ -26,7 +26,10 @@ type AppModeCase = AppModeProto["variant"]["case"];
 export interface ChatMessage {
   key: string;
   text: string;
-  from: "user" | "agent" | "goal" | "activity";
+  from: "user" | "agent" | "goal" | "activity" | "tool";
+  /** Coarse status of a `from: "tool"` entry, rendered as a marker on the read-only transcript.
+   *  Unset for non-tool bubbles. */
+  toolStatus?: "running" | "completed" | "error";
   /** Epoch ms when this message was first shown — used for the exported transcript timeline. */
   at: number;
 }

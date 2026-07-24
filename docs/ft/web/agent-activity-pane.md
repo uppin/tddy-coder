@@ -1,8 +1,8 @@
 # Agent Activity Pane — Real-time view of the agent's tool calls
 
 **Component:** `AgentActivityOverlay` (new) in `packages/tddy-web/src/components/sessions/`, mounted in the `SessionMainPane` top bar
-**Updated:** 2026-07-23
-**Status:** Implemented (single-host; cross-host stream peer-forward is a tracked follow-up — see below)
+**Updated:** 2026-07-24
+**Status:** Implemented (single-host; cross-host stream peer-forward is a tracked follow-up — see below). **Evolving** — the overlay body is being replaced by a read-only ACP transcript (see [§ Read-only ACP transcript](#read-only-acp-transcript-evolution)).
 
 ## Overview
 
@@ -158,6 +158,103 @@ streaming peer-forward primitive is a follow-up. Single-host, the common case, w
 
 The `•` on the icon is the unread badge. With zero records, no icon renders at all.
 
+## Read-only ACP transcript (evolution)
+
+The overlay's flat one-line-per-tool-call list is being replaced by a **read-only, ACP-style
+conversation transcript** that interleaves the agent's text output with its tool calls, so an
+operator sees *what the agent said and did*, in order — for a **live** session and, equally, a
+**completed/dormant** one.
+
+### What changes for the operator
+
+- **Agent text is shown.** The transcript renders the agent's message output (from the persisted
+  conversation transcript), not just tool calls. The old list showed tool calls only.
+- **Tool calls carry inline detail.** Each tool call reads `Read main.rs L10-49`, `Bash cargo test`,
+  `Glob **/*.rs` — the tool name **plus a short, per-tool detail** derived from its input — instead of
+  a bare `Read`. A status marker (`running`/`error`) still applies.
+- **DEBUG-style elapsed badge.** Each entry shows a colored `+Ns` / `+Nms` chip on its right edge —
+  the wall-clock time elapsed since the previous entry — so slow steps stand out. This is computed
+  from **real event timestamps** carried on the wire, so it is meaningful for replayed history too.
+- **Read-only.** No message input, Send, or clarification controls — this is an inspection view.
+
+### Why a new stream (`StreamAcpReplay`) rather than the existing RPCs
+
+- The **literal ACP RPC** (`AcpService.Session`) is a *bidirectional* stream reachable in the
+  browser only over **LiveKit**, which requires a live, attached session process. It has **no
+  surface at all for a dormant session**, and even for a live one it forwards only events from
+  connect-time (no history replay). It therefore cannot back an inspect-any-session view.
+- **`StreamSessionActivity`** carries only tool calls (`agent-activity.jsonl`) — **no agent text** —
+  so it cannot show the conversation. It is **kept as-is**, reserved for future *system* session
+  messages, and no longer backs this overlay.
+
+So a new **server-streaming** RPC emits **ACP-format frames** (reusing the `SessionUpdate` /
+`ToolCall` / `AgentMessageChunk` data model), served over the same **HTTP** transport the overlay
+already uses (no LiveKit, no Room), for **any** session:
+
+```protobuf
+// server-streaming: replay the session's persisted transcript as ACP session/update frames, then
+// (SNAPSHOT_THEN_LIVE) tail the live presenter. Reuses the existing StreamMode enum.
+rpc StreamAcpReplay(StreamAcpReplayRequest) returns (stream AcpReplayFrame);
+
+message StreamAcpReplayRequest {
+  string     session_token      = 1;
+  string     session_id         = 2;
+  string     daemon_instance_id = 3;   // same peer-forward routing as StreamSessionActivity
+  StreamMode mode               = 4;   // snapshot-then-live (default) vs live-only
+}
+
+// The ACP `AcpAgentMessage` (session_update / error) as its protobuf bytes. Bytes keep
+// connection.proto self-contained (no cross-package import / codegen); the web decodes them with the
+// AcpAgentMessage schema and reuses the live ACP stream's session/update switch.
+message AcpReplayFrame { bytes acp_agent_message = 1; }
+```
+
+Frames carry a timestamp on the ACP `SessionNotification` wrapper (`timestamp_unix_ms`), leaving the
+ACP `SessionUpdate` oneof itself unchanged.
+
+### Persisted ACP transcript — self-contained source of truth (Updated: 2026-07-24)
+
+**The session persists its own ACP-mapped transcript** so the replay is self-contained and does
+**not** depend on the coding agent keeping `conversation.jsonl` (that file is written by the agent
+CLI and is not a contract we control). A new append-only per-session log, **`acp-transcript.jsonl`**
+(sibling of `agent-activity.jsonl` in the session dir), holds one JSON `AcpAgentMessage`
+(`session_update` frame) per line, **written at event time** by the same seam that captures
+agent activity:
+
+- The presenter maps each `PresenterEvent` through **`tddy-service::convert_acp`** + a persistent
+  `OutboundState` (the *same* mapping the live ACP stream uses) and appends the resulting frame,
+  **stamped with the real wall-clock `timestamp_unix_ms`**. Because history and live are produced by
+  one mapper, a replayed transcript is byte-for-byte what a live viewer would have seen.
+- Enriched tool detail (req #1) and the timestamp (req #2) are therefore computed **once, at write
+  time** — `raw_input`/`kind`/`title` (tool detail via `tddy-core::stream::claude`) and the event
+  timestamp are baked into the persisted frame. Replay does **no** re-derivation and **no** join.
+
+Coverage matches the existing activity-capture seams: **tool / cursor-cli** sessions write the full
+transcript (agent text + tool calls) from the coder presenter; **claude-cli / sandbox** write the
+tool-call frames the daemon already captures (persisting agent *text* for those hook-driven types is
+a follow-up — see Scope).
+
+### Server-side replay (persisted transcript → ACP) (Updated: 2026-07-24)
+
+The replay simply **reads `acp-transcript.jsonl` and re-emits its frames** (snapshot), then tails
+live. It no longer parses `conversation.jsonl` or joins `agent-activity.jsonl` for the transcript —
+those keep their existing roles. Hosting mirrors `StreamSessionActivity` end-to-end: the **coder
+participant** replays the persisted snapshot then tails `presenter_events` (mapped + appended by the
+same writer) for a live session; the **daemon** serves snapshot-only from the file for a dormant one
+(the `presenter_events: None` path).
+
+### Frontend
+
+- `useAcpReplay({ sessionId, sessionToken, client })` — opens `StreamAcpReplay` over the HTTP client
+  (mirrors `useSessionActivity`'s consumption), decodes `session_update` frames with the same switch
+  as `useAcpSession`, and produces a richer read-only view model (`from: "user"|"agent"|"goal"|"tool"`,
+  optional `tool: { name, detail, status, kind }`, and a real `at` timestamp).
+- `AgentChatView` gains a `readOnly` prop: hides the input/Send/clarification UI, renders `tool`
+  entries as an enriched card (`«name» «detail»` + status chip), and shows the right-edge `+Ns`
+  elapsed badge per entry.
+- `AgentActivityOverlay` swaps its data source to `useAcpReplay` and renders `<AgentChatView readOnly>`
+  as the panel body (keeping the top-bar icon, unread badge, and open/close behavior).
+
 ## Scope
 
 - **In scope:** the `agent-activity.jsonl` log + shared `AgentActivityRecord` (in `tddy-core`);
@@ -166,6 +263,14 @@ The `•` on the icon is the unread badge. With zero records, no icon renders at
   dialog, unread badge) wired into `SessionMainPane`. Also: the `StreamMode` request flag
   (snapshot-then-live vs live-only), honoured by both hosts; structured `google.protobuf.Value`
   `input`/`result` on the wire, in the persisted log, and in the web detail dialog.
+- **In scope (Added: 2026-07-24):** the persisted **`acp-transcript.jsonl`** log (append-only,
+  event-time ACP frames with real timestamps) as the self-contained source of truth for the
+  transcript; the write-time ACP mapping at the coder presenter seam (tool / cursor-cli); the
+  `StreamAcpReplay` RPC reading it (daemon snapshot-only + coder live-tail).
+- **Out of scope (Added: 2026-07-24):** persisting agent **text** frames for the hook-driven
+  **claude-cli / sandbox** session types (they persist tool-call frames only; agent-text capture for
+  those is a follow-up); a retention/size cap on `acp-transcript.jsonl` (tracked with the
+  `agent-activity.jsonl` cap in `docs/dev/TODO.md`).
 - **Out of scope:** persisted-log row-size/result truncation cap (tracked in `docs/dev/TODO.md`);
   a plain `ListSessionAgentActivity` unary (add only if the stream proves heavy); filtering/search
   within the activity list; cross-session activity aggregation; splitting/chunking a single

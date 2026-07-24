@@ -4,6 +4,7 @@
 //! clients send UserIntent, receive PresenterView events.
 //! Also provides EchoServiceImpl and TerminalServiceVirtualTui for LiveKit/gRPC terminal streaming.
 
+pub mod acp_replay;
 pub mod codex_oauth_scan;
 pub mod codex_oauth_validate;
 pub mod convert;

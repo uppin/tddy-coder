@@ -31,18 +31,18 @@ use tonic::transport::server::UdsConnectInfo;
 use crate::config::DaemonConfig;
 use tddy_service::proto::connection::ConnectionService as RpcConnectionService;
 use tddy_service::proto::connection::{
-    AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest, AddProjectToHostResponse,
-    AgentActivityRecord, ClaimTerminalControlRequest, ClaimTerminalControlResponse,
-    CleanWorktreeRequest, CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
-    CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse,
-    ExecuteToolRequest, ExecuteToolResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
-    HostStatsEvent, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
-    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
-    ListExecToolsRequest, ListExecToolsResponse, ListProjectBranchesRequest,
-    ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ListSessionWorkflowFilesRequest,
-    ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
+    AcpReplayFrame, AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest,
+    AddProjectToHostResponse, AgentActivityRecord, ClaimTerminalControlRequest,
+    ClaimTerminalControlResponse, CleanWorktreeRequest, CleanWorktreeResponse,
+    ConnectSessionRequest, ConnectSessionResponse, CreateProjectRequest, CreateProjectResponse,
+    DeleteSessionRequest, DeleteSessionResponse, ExecuteToolRequest, ExecuteToolResponse,
+    GetDemoVmStatusRequest, GetDemoVmStatusResponse, HostStatsEvent, ListAgentModelsRequest,
+    ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
+    ListEligibleDaemonsResponse, ListExecToolsRequest, ListExecToolsResponse,
+    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
+    ListProjectsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
+    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse,
@@ -55,9 +55,9 @@ use tddy_service::proto::connection::{
     SignalSessionRequest, SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse,
     StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
     StartTerminalSessionResponse, StopDemoVmRequest, StopDemoVmResponse,
-    StopTerminalSessionRequest, StopTerminalSessionResponse, StreamHostStatsRequest,
-    StreamSessionActivityRequest, StreamTerminalOutputRequest, TerminalControlEvent,
-    WatchTerminalControlRequest,
+    StopTerminalSessionRequest, StopTerminalSessionResponse, StreamAcpReplayRequest,
+    StreamHostStatsRequest, StreamSessionActivityRequest, StreamTerminalOutputRequest,
+    TerminalControlEvent, WatchTerminalControlRequest,
 };
 use tddy_service::tonic_connection::connection_service_server::ConnectionService as TonicConnectionService;
 
@@ -157,6 +157,7 @@ where
     T::StreamTerminalOutputStream: 'static,
     T::WatchTerminalControlStream: 'static,
     T::StreamSessionActivityStream: 'static,
+    T::StreamAcpReplayStream: 'static,
 {
     async fn list_tools(
         &self,
@@ -639,6 +640,26 @@ where
         request: tonic::Request<StreamSessionActivityRequest>,
     ) -> Result<tonic::Response<Self::StreamSessionActivityStream>, tonic::Status> {
         let resp = RpcConnectionService::stream_session_activity(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
+        Ok(tonic::Response::new(Box::pin(outbound)))
+    }
+
+    /// Server streaming: read-only ACP transcript replay (snapshot + live).
+    type StreamAcpReplayStream =
+        Pin<Box<dyn Stream<Item = Result<AcpReplayFrame, tonic::Status>> + Send>>;
+
+    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    #[allow(clippy::result_large_err)]
+    async fn stream_acp_replay(
+        &self,
+        request: tonic::Request<StreamAcpReplayRequest>,
+    ) -> Result<tonic::Response<Self::StreamAcpReplayStream>, tonic::Status> {
+        let resp = RpcConnectionService::stream_acp_replay(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

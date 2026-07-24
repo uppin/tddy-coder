@@ -366,16 +366,6 @@ export const TEST_IDS = {
   agentActivityOverlay: "agent-activity-overlay",
   /** Close control on the overlay. */
   agentActivityOverlayClose: "agent-activity-overlay-close",
-  /** The scrollable record list inside the overlay. */
-  agentActivityList: "agent-activity-list",
-  /** Full-input/output detail dialog. */
-  agentActivityDetailDialog: "agent-activity-detail-dialog",
-  /** Full tool input (`input_json`) inside the detail dialog. */
-  agentActivityDetailInput: "agent-activity-detail-input",
-  /** Full tool output (`result_json`) inside the detail dialog. */
-  agentActivityDetailOutput: "agent-activity-detail-output",
-  /** Close control on the detail dialog. */
-  agentActivityDetailClose: "agent-activity-detail-close",
 
   // PR-Stack Chat Screen — manually adding a planned PR (deterministic, non-chat path)
   prStackAddPlannedPrBtn: "pr-stack-add-planned-pr-btn",
@@ -680,6 +670,14 @@ export const agentChatOption = (index: number) => `agent-chat-option-${index}`;
 
 /** `[data-testid="agent-chat-multiselect-option-<index>"]` — a multi-select option checkbox (reusable AgentChat) */
 export const agentChatMultiSelectOption = (index: number) => `agent-chat-multiselect-option-${index}`;
+
+/** `[data-testid="agent-chat-elapsed-<index>"]` — the DEBUG-style "+Ns" elapsed badge on a
+ *  read-only transcript entry (wall-clock since the previous entry). */
+export const agentChatElapsed = (index: number) => `agent-chat-elapsed-${index}`;
+
+/** `[data-testid="agent-chat-tool-status-<index>"]` — the status marker (running/error) on a
+ *  read-only transcript tool-call entry. */
+export const agentChatToolStatus = (index: number) => `agent-chat-tool-status-${index}`;
 
 /** `[data-testid="agent-activity-row-<callId>"]` — one one-line record row in the activity overlay */
 export const agentActivityRow = (callId: string) => `agent-activity-row-${callId}`;

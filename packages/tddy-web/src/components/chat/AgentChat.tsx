@@ -2,9 +2,41 @@ import React, { useEffect, useState } from "react";
 import type { Room } from "livekit-client";
 import type { CommonRoomStatus } from "../../hooks/useCommonRoom";
 import { Button } from "../ui/button";
-import { useAgentChat, type UseAgentChatResult } from "./useAgentChat";
+import { useAgentChat, type ChatMessage, type UseAgentChatResult } from "./useAgentChat";
 import { useAcpSession } from "./useAcpSession";
 import { buildChatTranscript, downloadTextFile } from "./chatTranscript";
+
+/** Tailwind classes for a chat bubble by role. Shared by the live and read-only renders so their
+ *  common roles look identical. */
+function bubbleClass(from: ChatMessage["from"]): string {
+  switch (from) {
+    case "user":
+      return "self-end rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm";
+    case "agent":
+      return "self-start rounded-md bg-muted px-3 py-2 text-sm";
+    case "goal":
+      return "self-center text-xs text-muted-foreground italic font-medium";
+    case "tool":
+      return "self-start rounded-md border border-border bg-muted/50 px-3 py-2 font-mono text-xs";
+    default:
+      return "self-center text-xs text-muted-foreground italic";
+  }
+}
+
+/** Classes for the tool-call status marker on a read-only transcript entry. */
+function toolStatusClass(status: NonNullable<ChatMessage["toolStatus"]>): string {
+  const base = "rounded px-1.5 py-0.5 text-[10px] font-medium leading-none";
+  if (status === "error") return `${base} text-destructive`;
+  if (status === "completed") return `${base} text-muted-foreground`;
+  return `${base} text-primary`; // running
+}
+
+/** DEBUG-style "+Ns" (or "+Nms" under a second) elapsed badge: the gap from the previous entry.
+ *  The first entry has no predecessor, so it reads "+0ms". */
+function elapsedBadge(messages: ChatMessage[], index: number): string {
+  const ms = index === 0 ? 0 : messages[index].at - messages[index - 1].at;
+  return ms >= 1000 ? `+${Math.round(ms / 1000)}s` : `+${ms}ms`;
+}
 
 const STATUS_LABEL: Record<CommonRoomStatus, string> = {
   idle: "Not connected",
@@ -29,6 +61,10 @@ export interface AgentChatProps {
    *  `session/load` so the agent replays the prior conversation (used after a browser reload).
    *  Only meaningful with `acp`. */
   resumeSessionId?: string;
+  /** Render as a read-only transcript: no message input, Send button, or clarification composer,
+   *  and each entry gains a right-aligned "+Ns" elapsed badge (plus a status marker on tool calls).
+   *  Used by the Agent Activity overlay to replay a session's ACP conversation. */
+  readOnly?: boolean;
 }
 
 /**
@@ -55,6 +91,7 @@ export function AgentChatView({
   placeholder,
   roomStatus = "idle",
   roomError = null,
+  readOnly = false,
   chat,
 }: AgentChatProps & { chat: UseAgentChatResult }) {
   const {
@@ -120,22 +157,24 @@ export function AgentChatView({
 
   return (
     <div data-testid="agent-chat" className="relative flex-1 min-h-0 flex flex-col overflow-hidden">
-      <div className="flex-shrink-0 flex items-center justify-between px-3 pt-2">
-        <span data-testid="agent-chat-status" className="text-xs text-muted-foreground">
-          {STATUS_LABEL[roomStatus]}
-        </span>
-        <Button
-          data-testid="agent-chat-export-btn"
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-xs"
-          onClick={handleExport}
-          disabled={messages.length === 0 && elicitations.length === 0}
-          title="Export the chat transcript (with timestamps and clarification points) as a .txt file"
-        >
-          Export
-        </Button>
-      </div>
+      {!readOnly && (
+        <div className="flex-shrink-0 flex items-center justify-between px-3 pt-2">
+          <span data-testid="agent-chat-status" className="text-xs text-muted-foreground">
+            {STATUS_LABEL[roomStatus]}
+          </span>
+          <Button
+            data-testid="agent-chat-export-btn"
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs"
+            onClick={handleExport}
+            disabled={messages.length === 0 && elicitations.length === 0}
+            title="Export the chat transcript (with timestamps and clarification points) as a .txt file"
+          >
+            Export
+          </Button>
+        </div>
+      )}
       {isConnecting && (
         <div
           data-testid="agent-chat-connecting"
@@ -153,26 +192,46 @@ export function AgentChatView({
         data-testid="agent-chat-messages"
         className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 p-3"
       >
-        {messages.map((m, i) => (
-          <div
-            key={m.key}
-            data-testid={`agent-chat-message-${i}`}
-            data-message-kind={m.from}
-            className={
-              m.from === "user"
-                ? "self-end rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm"
-                : m.from === "agent"
-                  ? "self-start rounded-md bg-muted px-3 py-2 text-sm"
-                  : m.from === "goal"
-                    ? "self-center text-xs text-muted-foreground italic font-medium"
-                    : "self-center text-xs text-muted-foreground italic"
-            }
-          >
-            {m.from === "goal" ? `Goal: ${m.text}` : m.text}
-          </div>
-        ))}
+        {messages.map((m, i) =>
+          readOnly ? (
+            <div key={m.key} className="flex items-start justify-between gap-2">
+              <div
+                data-testid={`agent-chat-message-${i}`}
+                data-message-kind={m.from}
+                className={bubbleClass(m.from)}
+              >
+                {m.from === "goal" ? `Goal: ${m.text}` : m.text}
+              </div>
+              <div className="flex flex-shrink-0 items-center gap-1.5 pt-1">
+                {m.from === "tool" && m.toolStatus && (
+                  <span
+                    data-testid={`agent-chat-tool-status-${i}`}
+                    className={toolStatusClass(m.toolStatus)}
+                  >
+                    {m.toolStatus}
+                  </span>
+                )}
+                <span
+                  data-testid={`agent-chat-elapsed-${i}`}
+                  className="font-mono text-[10px] leading-none text-muted-foreground"
+                >
+                  {elapsedBadge(messages, i)}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div
+              key={m.key}
+              data-testid={`agent-chat-message-${i}`}
+              data-message-kind={m.from}
+              className={bubbleClass(m.from)}
+            >
+              {m.from === "goal" ? `Goal: ${m.text}` : m.text}
+            </div>
+          ),
+        )}
       </div>
-      {pendingQuestion ? (
+      {readOnly ? null : pendingQuestion ? (
         <div
           data-testid="agent-chat-question"
           className="flex-shrink-0 flex flex-col gap-2 border-t border-border p-3"

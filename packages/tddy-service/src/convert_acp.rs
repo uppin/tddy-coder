@@ -181,6 +181,8 @@ pub fn session_update_message(session_id: &str, update: SessionUpdate) -> AcpAge
                 value: session_id.to_string(),
             }),
             update: Some(update),
+            // Live stream leaves this unset; the persisted replay stamps the real event time.
+            timestamp_unix_ms: 0,
         })),
     }
 }
