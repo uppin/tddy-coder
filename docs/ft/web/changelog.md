@@ -4,6 +4,11 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-24 — Terminal file drop upload
+
+- Dragging one or more files onto the Ghostty web terminal (either transport) uploads them to the host under `{session_dir}/uploads/<drop-id>/` and **types the uploaded files' shell-escaped absolute host paths into the terminal input** (space-separated, one trailing space, no newline), emulating a native terminal file-drag. See [web-terminal.md § File drop upload](web-terminal.md#file-drop-upload).
+- Upload progress shows as one aggregate bar in the Host Stats Footer and auto-hides on completion; a failed file is skipped (its path is not typed) and surfaced as a transient error. On mobile the gesture is initiated from an **Attach** button in the Keyboard strip. See [host-stats-footer.md § Upload progress](host-stats-footer.md#upload-progress-drag-to-upload).
+
 ## 2026-07-24 — Sessions drawer Active/Remaining separator
 
 - The open sessions drawer now splits its list into an **Active** partition (sessions whose status dot is green or yellow) and a **Remaining** partition (grey/disconnected), with collapsible `Active (N)` / `Remaining (M)` headers between them — Active expanded, Remaining collapsed by default — so live and attention-needing sessions stay at the top and finished ones tuck away one click below. See [session-drawer.md](session-drawer.md).
