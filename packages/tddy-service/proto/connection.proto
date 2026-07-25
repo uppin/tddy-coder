@@ -83,6 +83,13 @@ service ConnectionService {
   // wrapped in a connection-local message so the cross-package reference is a field (prost
   // extern_path) rather than a service return type.
   rpc StreamAcpReplay(StreamAcpReplayRequest) returns (stream AcpReplayFrame);
+  // On-demand tool-call body lookup for the Agent Activity detail dialog. StreamAcpReplay's
+  // SNAPSHOT_THEN_LIVE / LIVE_ONLY frames carry a tool call's metadata only (title/status/kind/id) —
+  // its raw_input/raw_output are stripped so the stream's size tracks the number of tool calls, not
+  // the volume of their I/O. This unary returns one call's full raw_input/raw_output, resolved from
+  // the same coalesced transcript the stream replays (acp-transcript.jsonl + agent-activity.jsonl
+  // fallback). See docs/ft/coder/acp-replay-lazy-tool-bodies.md.
+  rpc GetAcpToolCallDetail(GetAcpToolCallDetailRequest) returns (GetAcpToolCallDetailResponse);
   // Demo VM lifecycle — UI-driven QEMU boot/shutdown for the demo goal.
   rpc StartDemoVm(StartDemoVmRequest) returns (StartDemoVmResponse);
   rpc StopDemoVm(StopDemoVmRequest) returns (StopDemoVmResponse);
@@ -854,6 +861,23 @@ message AcpReplayFrame {
   // Set only in COUNT_THEN_LIVE frames (the current number of persisted transcript frames); the
   // SNAPSHOT_THEN_LIVE / LIVE_ONLY modes leave this 0 and carry acp_agent_message instead.
   uint64 activity_count = 2;
+}
+
+// Request for one tool call's full body. Mirrors StreamAcpReplayRequest's routing (same
+// peer-forward semantics on daemon_instance_id) plus the tool_call_id to look up.
+message GetAcpToolCallDetailRequest {
+  string session_token      = 1;
+  string session_id         = 2;
+  string daemon_instance_id = 3;   // same peer-forward routing as StreamAcpReplay
+  string tool_call_id       = 4;   // the ToolCall.tool_call_id from a streamed frame
+}
+
+// One tool call's stripped-out bodies: the exact JSON strings the stream used to inline. Either may
+// be absent (e.g. a still-running call has raw_input but no raw_output yet). A tool_call_id absent
+// from the transcript is a NOT_FOUND error, not an empty success.
+message GetAcpToolCallDetailResponse {
+  optional string raw_input  = 1;
+  optional string raw_output = 2;
 }
 
 /// Sent by `tddy-tools session-hook`; bearer is the per-session hook_token.
