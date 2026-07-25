@@ -17,7 +17,7 @@ use prost::Message as _;
 use tddy_livekit::{LiveKitParticipant, RpcResult, RpcService, TokenGenerator};
 use tddy_rpc::{BidiStreamOutput, ResponseBody, RpcMessage};
 use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
-use tddy_task::{TaskHandle, TaskId, TaskRegistry};
+use tddy_task::{TaskHandle, TaskId, TaskRegistry, TerminalCapture};
 use tokio::sync::{broadcast, mpsc, oneshot, watch, RwLock};
 
 use crate::pty_registry::PtyRegistry;
@@ -47,8 +47,9 @@ pub struct PtyHandle {
     pub stdin_tx: mpsc::UnboundedSender<Bytes>,
     /// Subscribe to bytes from the child process via PTY master (stdout+stderr combined).
     pub stdout_tx: broadcast::Sender<Bytes>,
-    /// Rolling capture of all PTY output since session start, for replay to late subscribers.
-    pub capture: Arc<std::sync::Mutex<Vec<u8>>>,
+    /// Rolling capture of recent PTY output plus the terminal modes still in effect, for replay
+    /// to late subscribers.
+    pub capture: Arc<std::sync::Mutex<TerminalCapture>>,
     /// PID of the spawned process.
     pub pid: u32,
     /// PTY master — kept alive for the session's lifetime to avoid SIGHUP; also allows resize.
@@ -1020,10 +1021,13 @@ impl RpcService for PtyLiveKitService {
 
         let (out_tx, out_rx) = mpsc::channel::<Result<Vec<u8>, tddy_rpc::Status>>(256);
 
-        // Replay capture buffer so the client sees all output since session start.
+        // Replay the mouse-tracking prologue plus all output since session start, so the client's
+        // own VT ends up in the same modes the application enabled — even when the bytes that
+        // enabled them have long been evicted from the capture ring.
         if let Ok(cap) = self.handle.capture.lock() {
-            if !cap.is_empty() {
-                let frame = TerminalOutput { data: cap.clone() }.encode_to_vec();
+            let replay = cap.replay();
+            if !replay.is_empty() {
+                let frame = TerminalOutput { data: replay }.encode_to_vec();
                 let _ = out_tx.try_send(Ok(frame));
             }
         }

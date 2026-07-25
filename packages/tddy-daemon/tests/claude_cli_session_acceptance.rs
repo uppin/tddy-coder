@@ -156,7 +156,7 @@ async fn wait_for_capture_contains(handle: &Arc<PtyHandle>, needle: &str, timeou
     loop {
         {
             let cap = handle.capture.lock().unwrap();
-            if String::from_utf8_lossy(&cap).contains(needle) {
+            if String::from_utf8_lossy(cap.buffered_bytes()).contains(needle) {
                 return true;
             }
         }
@@ -746,7 +746,7 @@ async fn claude_cli_session_passes_initial_prompt_as_positional_arg() {
     );
 
     let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(&cap);
+    let output = String::from_utf8_lossy(cap.buffered_bytes());
     assert!(
         output.contains("build a hello world app"),
         "initial_prompt must appear in ARGV output; got: {:?}",
@@ -791,7 +791,7 @@ async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
     );
 
     let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(&cap);
+    let output = String::from_utf8_lossy(cap.buffered_bytes());
     let argv_line = output
         .lines()
         .find(|l| l.trim_start().starts_with("ARGV:"))
@@ -880,7 +880,7 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
     );
 
     let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(&cap);
+    let output = String::from_utf8_lossy(cap.buffered_bytes());
     assert!(
         output.contains("hello from rpc"),
         "initial_prompt from StartSession RPC must appear in ARGV output; got: {:?}",
@@ -929,7 +929,7 @@ async fn resume_does_not_replay_initial_prompt() {
     assert!(found, "stub script must write ARGV: within 2s on resume");
 
     let cap = handle2.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(&cap);
+    let output = String::from_utf8_lossy(cap.buffered_bytes());
     let argv_line = output
         .lines()
         .find(|l| l.trim_start().starts_with("ARGV:"))

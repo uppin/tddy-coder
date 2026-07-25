@@ -116,7 +116,7 @@ async fn wait_for_capture_contains(handle: &Arc<PtyHandle>, needle: &str, timeou
     loop {
         {
             let cap = handle.capture.lock().unwrap();
-            if String::from_utf8_lossy(&cap).contains(needle) {
+            if String::from_utf8_lossy(cap.buffered_bytes()).contains(needle) {
                 return true;
             }
         }
@@ -618,7 +618,7 @@ async fn send_terminal_input_targets_identified_terminal() {
         .expect("main terminal must exist");
     let main_cap = main_handle.capture.lock().unwrap();
     assert!(
-        !String::from_utf8_lossy(&main_cap).contains(marker),
+        !String::from_utf8_lossy(main_cap.buffered_bytes()).contains(marker),
         "input addressed to a terminal must not leak to the main terminal"
     );
 }

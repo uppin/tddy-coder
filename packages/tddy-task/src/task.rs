@@ -8,6 +8,8 @@ use bytes::Bytes;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
+use crate::terminal_capture::TerminalCapture;
+
 /// Unique identifier for a task, formatted as a UUIDv7 string.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TaskId(pub String);
@@ -68,8 +70,6 @@ pub enum ChannelKind {
 
 /// Bounded broadcast capacity for task channel output.
 const CHANNEL_BROADCAST_CAPACITY: usize = 256;
-/// Maximum bytes retained in the replay ring buffer per channel.
-const CHANNEL_CAPTURE_LIMIT_BYTES: usize = 64 * 1024;
 
 /// A single named I/O channel on a task.
 ///
@@ -84,7 +84,7 @@ pub struct TaskChannel {
     /// Whether this channel carries stdout, stderr, or combined output.
     pub kind: ChannelKind,
     output_tx: broadcast::Sender<Bytes>,
-    capture: Arc<Mutex<Vec<u8>>>,
+    capture: Arc<Mutex<TerminalCapture>>,
     stdin_tx: Option<mpsc::UnboundedSender<Bytes>>,
 }
 
@@ -102,7 +102,7 @@ impl TaskChannel {
             name: name.into(),
             kind,
             output_tx,
-            capture: Arc::new(Mutex::new(Vec::new())),
+            capture: Arc::new(Mutex::new(TerminalCapture::new())),
             stdin_tx: Some(stdin_tx),
         });
         (channel, Some(stdin_rx))
@@ -120,7 +120,7 @@ impl TaskChannel {
             name: name.into(),
             kind,
             output_tx,
-            capture: Arc::new(Mutex::new(Vec::new())),
+            capture: Arc::new(Mutex::new(TerminalCapture::new())),
             stdin_tx: None,
         })
     }
@@ -144,22 +144,19 @@ impl TaskChannel {
         self.output_tx.subscribe()
     }
 
-    /// A snapshot of all bytes emitted so far (bounded to `CHANNEL_CAPTURE_LIMIT_BYTES`).
+    /// The output the process produced, as it produced it (bounded to
+    /// [`TerminalCapture::CAPTURE_LIMIT_BYTES`]).
+    ///
+    /// Callers rendering this into a terminal want [`TerminalCapture::replay`] via
+    /// [`Self::capture_arc`] instead: it prefixes the terminal modes still in effect, which a
+    /// late subscriber's own VT would otherwise never learn about.
     pub fn replay_capture(&self) -> Vec<u8> {
-        self.capture.lock().unwrap().clone()
+        self.capture.lock().unwrap().buffered_bytes().to_vec()
     }
 
     /// Write bytes to the channel, appending to the replay buffer and broadcasting to subscribers.
     pub fn write(&self, data: Bytes) {
-        // Append to replay ring buffer (trim when over limit).
-        {
-            let mut buf = self.capture.lock().unwrap();
-            buf.extend_from_slice(&data);
-            if buf.len() > CHANNEL_CAPTURE_LIMIT_BYTES {
-                let excess = buf.len() - CHANNEL_CAPTURE_LIMIT_BYTES;
-                buf.drain(..excess);
-            }
-        }
+        self.capture.lock().unwrap().append(&data);
         // Broadcast to subscribers — ignore "no receivers" errors (common for fast tasks).
         let _ = self.output_tx.send(data);
     }
@@ -184,7 +181,7 @@ impl TaskChannel {
     }
 
     /// Shared capture buffer (for replay to late subscribers).
-    pub fn capture_arc(&self) -> Arc<Mutex<Vec<u8>>> {
+    pub fn capture_arc(&self) -> Arc<Mutex<TerminalCapture>> {
         Arc::clone(&self.capture)
     }
 }

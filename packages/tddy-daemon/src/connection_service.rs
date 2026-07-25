@@ -5071,6 +5071,25 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let (mpsc_tx, mpsc_rx) = tokio::sync::mpsc::unbounded_channel::<bytes::Bytes>();
         let mut broadcast_rx = handle.stdout_tx.subscribe();
 
+        // Re-issue the mouse-tracking modes the application has enabled as the very first frame,
+        // independent of the capture replay below. A client's VT only reports clicks, drags and
+        // scrolls once it has seen the DECSET itself, and neither the SIGWINCH redraw nor a capture
+        // ring that has trimmed past the startup bytes carries them.
+        let prologue = handle
+            .capture
+            .lock()
+            .map(|cap| cap.mode_prologue())
+            .unwrap_or_default();
+        if !prologue.is_empty() {
+            log::debug!(
+                target: "tddy_daemon::connection_service",
+                "stream_terminal_output: re-issuing {} byte(s) of terminal mode prologue for session {}",
+                prologue.len(),
+                session_id
+            );
+            let _ = mpsc_tx.send(bytes::Bytes::from(prologue));
+        }
+
         // Replay capture buffer only when the client did NOT supply terminal dimensions.
         //
         // When dimensions are provided we already sent SIGWINCH (above), which will make the
@@ -5086,7 +5105,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             let frames = handle
                 .capture
                 .lock()
-                .map(|cap| chunk_terminal_output(&cap, TERMINAL_OUTPUT_FRAME_MAX_BYTES))
+                .map(|cap| {
+                    chunk_terminal_output(cap.buffered_bytes(), TERMINAL_OUTPUT_FRAME_MAX_BYTES)
+                })
                 .unwrap_or_default();
             if !frames.is_empty() {
                 let total_bytes: usize = frames.iter().map(|f| f.len()).sum();
