@@ -9,10 +9,45 @@ pub struct PrRef {
     pub url: String,
 }
 
+/// Live GitHub state of a PR, surfaced on the PR-Stack Chat Screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrState {
+    Open,
+    Merged,
+    Closed,
+    Draft,
+}
+
+/// A PR (open, merged, or closed) resolved by head branch, with its derived state.
+#[derive(Debug, Clone)]
+pub struct PrView {
+    pub number: u64,
+    pub url: String,
+    pub state: PrState,
+}
+
+/// Derive the displayed `PrState` from GitHub's PR fields.
+///
+/// A closed PR with a `merged_at` timestamp is merged; a closed PR without one was closed
+/// unmerged. An open PR marked `draft` is a draft; otherwise it is open.
+pub fn pr_state_from_github(state: &str, merged_at: Option<&str>, draft: bool) -> PrState {
+    match state {
+        "closed" if merged_at.is_some() => PrState::Merged,
+        "closed" => PrState::Closed,
+        _ if draft => PrState::Draft,
+        _ => PrState::Open,
+    }
+}
+
 /// Abstraction over GitHub REST PR operations. Allows stubbing in tests.
 pub trait GithubPrApi: Send + Sync {
     /// Find open PR whose head matches `head_branch` (format: `owner:branch`).
     fn get_open_pr(&self, head_branch: &str) -> Result<Option<PrRef>, tddy_core::WorkflowError>;
+
+    /// Find the PR (open, merged, or closed) whose head matches `head_branch`, with its derived
+    /// state. Returns `Ok(None)` when no PR exists (or no GitHub token is configured).
+    fn get_pr_by_head(&self, head_branch: &str)
+        -> Result<Option<PrView>, tddy_core::WorkflowError>;
 
     /// Merge PR by number; returns the merge commit SHA.
     fn merge_pr(&self, number: u64) -> Result<String, tddy_core::WorkflowError>;
@@ -81,6 +116,16 @@ mod tests {
                 head_sha: "abc123".to_string(),
                 base_branch: "master".to_string(),
                 url: "https://github.com/example/repo/pull/42".to_string(),
+            }))
+        }
+        fn get_pr_by_head(
+            &self,
+            _head_branch: &str,
+        ) -> Result<Option<PrView>, tddy_core::WorkflowError> {
+            Ok(Some(PrView {
+                number: 42,
+                url: "https://github.com/example/repo/pull/42".to_string(),
+                state: PrState::Open,
             }))
         }
         fn merge_pr(&self, _number: u64) -> Result<String, tddy_core::WorkflowError> {
@@ -288,6 +333,47 @@ impl GithubPrApi for RealGithubPrApi {
             head_sha,
             base_branch,
             url,
+        }))
+    }
+
+    fn get_pr_by_head(
+        &self,
+        head_branch: &str,
+    ) -> Result<Option<PrView>, tddy_core::WorkflowError> {
+        if crate::github_rest_common::github_token_from_env().is_none() {
+            return Ok(None);
+        }
+        let body = crate::github_rest_common::curl_github_get_json(
+            &self.repo,
+            "pulls",
+            &[("state", "all"), ("head", head_branch)],
+        )?;
+        let items: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
+            tddy_core::WorkflowError::WriteFailed(format!("get_pr_by_head: JSON parse error: {e}"))
+        })?;
+        let arr = items.as_array().ok_or_else(|| {
+            tddy_core::WorkflowError::WriteFailed(format!(
+                "get_pr_by_head: expected array, got: {body}"
+            ))
+        })?;
+        let Some(pr) = arr.first() else {
+            return Ok(None);
+        };
+        let number = pr.get("number").and_then(|n| n.as_u64()).ok_or_else(|| {
+            tddy_core::WorkflowError::WriteFailed(format!("get_pr_by_head: missing number in {pr}"))
+        })?;
+        let url = pr
+            .get("html_url")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string();
+        let state = pr.get("state").and_then(|s| s.as_str()).unwrap_or("open");
+        let merged_at = pr.get("merged_at").and_then(|s| s.as_str());
+        let draft = pr.get("draft").and_then(|d| d.as_bool()).unwrap_or(false);
+        Ok(Some(PrView {
+            number,
+            url,
+            state: pr_state_from_github(state, merged_at, draft),
         }))
     }
 

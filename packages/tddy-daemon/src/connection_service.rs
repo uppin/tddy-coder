@@ -62,11 +62,13 @@ use crate::worktrees::{self, CleanWorktreeError, RemoveWorktreeError, WorktreeSt
 use tddy_service::proto::connection::{
     AcpReplayFrame, AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState,
     ExecuteToolRequest, ExecuteToolResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
-    HostCpuStats, HostDiskStats, HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ReportAgentActivityRequest,
-    ReportAgentActivityResponse, StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest,
-    StopDemoVmResponse, StreamAcpReplayRequest, StreamHostStatsRequest, StreamMode,
-    StreamSessionActivityRequest, ToolCallInfo as ProtoToolCallInfo,
+    GetPrStatusRequest, GetPrStatusResponse, HostCpuStats, HostDiskStats, HostStatsEvent,
+    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
+    ListSessionToolCallsResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
+    ReportAgentActivityRequest, ReportAgentActivityResponse, StartDemoVmRequest,
+    StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, StreamAcpReplayRequest,
+    StreamHostStatsRequest, StreamMode, StreamSessionActivityRequest,
+    ToolCallInfo as ProtoToolCallInfo,
 };
 use tddy_task::TaskRegistry;
 
@@ -684,15 +686,45 @@ impl ConnectionServiceImpl {
         sessions_base: &std::path::Path,
         stack_parent: Option<&str>,
         repo_root: &std::path::Path,
+        new_branch_name: &str,
     ) -> Result<Option<String>, Status> {
         let Some(sp) = stack_parent else {
             return Ok(None);
         };
-        // A pr-stack orchestrator is a planning session with no branch of its own — chaining a
-        // child onto it means "base off the stack/default branch", not chaining onto a (nonexistent)
-        // orchestrator branch. Treat it as no chain base rather than a failed_precondition. A
+        // A pr-stack orchestrator is a planning session with no branch of its own. The child being
+        // spawned owns a planned node, identified by the branch it is about to create: base it off
+        // that node's effective base (its nearest non-merged ancestor branch, skipping merged
+        // ones), enforcing bottom-up ordering. When the branch matches no node — or the parent
+        // carries no stack — fall back to the stack/default branch (`Ok(None)`), not an error. A
         // branchless *code* session still errors below, per the session-chaining PRD.
         if Self::parent_is_pr_stack_orchestrator(sessions_base, sp) {
+            let parent_dir = unified_session_dir_path(sessions_base, sp);
+            let stack = tddy_core::read_changeset(&parent_dir)
+                .ok()
+                .and_then(|cs| cs.stack);
+            let branch = new_branch_name.trim();
+            if !branch.is_empty() {
+                if let Some(stack) = stack {
+                    if let Some(node) = stack
+                        .nodes
+                        .iter()
+                        .find(|n| n.branch.as_deref() == Some(branch))
+                    {
+                        let default_base = tddy_core::resolve_default_integration_base_ref(
+                            repo_root,
+                        )
+                        .map_err(|e| {
+                            Status::failed_precondition(format!(
+                                "could not resolve default branch for pr-stack node: {e}"
+                            ))
+                        })?;
+                        let base = stack
+                            .base_ref_for_spawn(&node.node_id, &default_base)
+                            .map_err(|e| Status::failed_precondition(e.to_string()))?;
+                        return Ok(Some(base));
+                    }
+                }
+            }
             return Ok(None);
         }
         tddy_core::resolve_chain_integration_base_ref_from_parent_session(
@@ -1111,8 +1143,12 @@ async fn spawn_claude_cli_session_inner(
     tddy_core::write_changeset(&session_dir, &cs)
         .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
-    let chain_base_ref =
-        ConnectionServiceImpl::resolve_chain_base_ref(&sessions_base, stack_parent, &repo_root)?;
+    let chain_base_ref = ConnectionServiceImpl::resolve_chain_base_ref(
+        &sessions_base,
+        stack_parent,
+        &repo_root,
+        new_branch_name,
+    )?;
 
     // Create the real git worktree (blocking: involves git fetch + git worktree add).
     let repo_root_clone = repo_root.clone();
@@ -1722,8 +1758,12 @@ impl ConnectionServiceImpl {
                         "project main repo path does not exist",
                     ));
                 }
-                let chain_base_ref =
-                    Self::resolve_chain_base_ref(&sessions_base, stack_parent, &repo_root)?;
+                let chain_base_ref = Self::resolve_chain_base_ref(
+                    &sessions_base,
+                    stack_parent,
+                    &repo_root,
+                    new_branch_name,
+                )?;
                 let repo_root_clone = repo_root.clone();
                 let session_dir_clone = session_dir.clone();
                 let timeout = self.config.spawn_worker_request_timeout();
@@ -3436,6 +3476,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         // Populated by `apply_session_list_status_to_proto` below from the recipe
                         // manifest; left empty here so the enrichment is the single source of truth.
                         context_docs: Vec::new(),
+                        // Populated by `apply_session_list_status_to_proto` below from
+                        // Changeset.branch; left empty here so the enrichment is the single source
+                        // of truth.
+                        branch: String::new(),
                     };
                     if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
                         &session_dir,
@@ -6518,6 +6562,134 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(AddPlannedPrResponse { stack_plan_json }))
     }
 
+    async fn get_pr_status(
+        &self,
+        request: Request<GetPrStatusRequest>,
+    ) -> Result<Response<GetPrStatusResponse>, Status> {
+        use tddy_service::proto::connection::PrStatusView;
+
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        if req.branch.trim().is_empty() {
+            return Err(Status::invalid_argument("branch is required"));
+        }
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+        require_pr_stack_orchestrator(&session_dir)?;
+
+        // Resolve `owner/repo` from the orchestrator session's repo remote (its `repo_path` is a
+        // filesystem path, not the GitHub namespace). When it can't be resolved, there is no PR to
+        // report — treat it the same as a token-less query: `exists = false`, not an error.
+        let changeset =
+            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
+        let repo_root = changeset
+            .repo_path
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| session_dir.clone());
+        let Some(owner_repo) = owner_repo_from_repo_root(&repo_root) else {
+            return Ok(Response::new(GetPrStatusResponse {
+                status: Some(PrStatusView::default()),
+            }));
+        };
+
+        let branch = req.branch.trim().to_string();
+        let view = tokio::task::spawn_blocking(move || {
+            use tddy_workflow_recipes::orchestrate_pr_stack::github::GithubPrApi;
+            let gh = tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::new(
+                owner_repo,
+            );
+            gh.get_pr_by_head(&branch)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("get_pr_status join error: {e}")))?
+        .map_err(|e| Status::internal(e.to_string()))?;
+
+        let status = match view {
+            Some(pr) => PrStatusView {
+                exists: true,
+                number: pr.number,
+                url: pr.url,
+                state: pr_state_label(pr.state).to_string(),
+            },
+            None => PrStatusView::default(),
+        };
+        Ok(Response::new(GetPrStatusResponse {
+            status: Some(status),
+        }))
+    }
+
+    async fn repoint_planned_pr(
+        &self,
+        request: Request<RepointPlannedPrRequest>,
+    ) -> Result<Response<RepointPlannedPrResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        if req.node_id.trim().is_empty() {
+            return Err(Status::invalid_argument("node_id is required"));
+        }
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+        require_pr_stack_orchestrator(&session_dir)?;
+
+        let changeset =
+            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
+        let repo_root = changeset
+            .repo_path
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| session_dir.clone());
+        let owner_repo = owner_repo_from_repo_root(&repo_root).unwrap_or_default();
+        let default_branch =
+            tddy_core::resolve_default_integration_base_ref(&repo_root).map_err(|e| {
+                Status::failed_precondition(format!("could not resolve default branch: {e}"))
+            })?;
+
+        let node_id = req.node_id.trim().to_string();
+        let session_dir_for_op = session_dir.clone();
+        tokio::task::spawn_blocking(move || {
+            let gh = tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::new(
+                owner_repo,
+            );
+            tddy_workflow_recipes::pr_stack::repoint_planned_pr_node(
+                &session_dir_for_op,
+                &repo_root,
+                &node_id,
+                &default_branch,
+                &gh,
+            )
+        })
+        .await
+        .map_err(|e| Status::internal(format!("repoint_planned_pr join error: {e}")))?
+        .map_err(Status::failed_precondition)?;
+
+        // Re-read the just-updated changeset and reuse the same serializer as `ListSessions`
+        // enrichment so the response's `stack_plan_json` is the exact wire shape `PrStackScreen`
+        // already knows how to parse.
+        let updated =
+            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
+        let stack_plan_json = session_list_enrichment::stack_plan_json_for_changeset(&updated);
+        Ok(Response::new(RepointPlannedPrResponse { stack_plan_json }))
+    }
+
     /// Local peer-trust minting is not available on this transport. Peer credentials
     /// (SO_PEERCRED) exist only on the daemon's local Unix-domain socket; over ConnectRPC-HTTP or
     /// LiveKit there is no peer uid to trust, so those transports reach this tddy-rpc handler and
@@ -6640,6 +6812,34 @@ fn require_pr_stack_orchestrator(session_dir: &std::path::Path) -> Result<(), St
         ));
     }
     Ok(())
+}
+
+/// Derive `owner/repo` from a repo's `origin` remote URL, for GitHub API namespacing.
+/// Returns `None` when the remote can't be read or isn't a recognizable GitHub URL.
+fn owner_repo_from_repo_root(repo_root: &std::path::Path) -> Option<String> {
+    let out = std::process::Command::new("git")
+        .current_dir(repo_root)
+        .args(["remote", "get-url", "origin"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let remote_url = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    tddy_workflow_recipes::orchestrate_pr_stack::github::owner_repo_from_remote_url(&remote_url)
+}
+
+/// GitHub PR state → the lowercase label carried on the `PrStatusView.state` wire field.
+fn pr_state_label(
+    state: tddy_workflow_recipes::orchestrate_pr_stack::github::PrState,
+) -> &'static str {
+    use tddy_workflow_recipes::orchestrate_pr_stack::github::PrState;
+    match state {
+        PrState::Open => "open",
+        PrState::Merged => "merged",
+        PrState::Closed => "closed",
+        PrState::Draft => "draft",
+    }
 }
 
 fn map_remove_worktree_error(e: RemoveWorktreeError) -> Status {
@@ -8441,18 +8641,19 @@ mod chain_base_resolution_tests {
             },
         );
 
-        // When — a child chains onto that orchestrator
+        // When — a child chains onto that orchestrator with a branch that matches no planned node
         let result = ConnectionServiceImpl::resolve_chain_base_ref(
             sessions_base,
             Some("orchestrator-1"),
             tmp.path(),
+            "feature/x/unmatched",
         );
 
         // Then — no chaining; the child bases off the stack/default branch (Ok(None)), not an error
         assert_eq!(
             result.expect("branchless orchestrator parent must resolve, not error"),
             None,
-            "a pr-stack orchestrator parent must yield no chain base (default branch), not failed_precondition"
+            "a pr-stack orchestrator parent with no matching node must yield no chain base (default branch), not failed_precondition"
         );
     }
 
@@ -8477,6 +8678,7 @@ mod chain_base_resolution_tests {
             sessions_base,
             Some("code-session-1"),
             tmp.path(),
+            "feature/some-branch",
         );
 
         // Then — the session-chaining PRD still applies: a branchless code parent cannot be chained

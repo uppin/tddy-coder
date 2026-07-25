@@ -40,6 +40,10 @@ pub struct SessionListStatusDisplay {
     /// JSON-serialized `Changeset.stack` (the PR DAG), present only on orchestrator sessions.
     /// Empty string when `Changeset.stack` is `None`.
     pub stack_plan_json: String,
+    /// The session's git branch (from `Changeset.branch`). Empty when the session has no branch
+    /// yet. Lets the PR-Stack view resolve the in-progress child session for a planned node by
+    /// branch.
+    pub branch: String,
 }
 
 impl SessionListStatusDisplay {
@@ -55,6 +59,7 @@ impl SessionListStatusDisplay {
             orchestrator_session_id: String::new(),
             recipe: String::new(),
             stack_plan_json: String::new(),
+            branch: String::new(),
         }
     }
 }
@@ -161,6 +166,7 @@ pub fn session_list_status_from_session_dir(
             orchestrator_session_id: String::new(),
             recipe: String::new(),
             stack_plan_json: String::new(),
+            branch: String::new(),
         });
     }
 
@@ -175,6 +181,7 @@ pub fn session_list_status_from_session_dir(
             orchestrator_session_id: String::new(),
             recipe: String::new(),
             stack_plan_json: String::new(),
+            branch: String::new(),
         });
     }
 
@@ -212,6 +219,7 @@ pub fn session_list_status_from_session_dir(
                 .unwrap_or_default(),
             recipe: changeset.recipe.clone().unwrap_or_default(),
             stack_plan_json: stack_plan_json_for_changeset(&changeset),
+            branch: changeset.branch.clone().unwrap_or_default(),
         });
     };
 
@@ -244,6 +252,7 @@ pub fn session_list_status_from_session_dir(
             .unwrap_or_default(),
         recipe: changeset.recipe.clone().unwrap_or_default(),
         stack_plan_json: stack_plan_json_for_changeset(&changeset),
+        branch: changeset.branch.clone().unwrap_or_default(),
     })
 }
 
@@ -276,6 +285,7 @@ pub fn apply_session_list_status_to_proto(
     entry.activity_status = status.activity_status;
     entry.orchestrator_session_id = status.orchestrator_session_id;
     entry.stack_plan_json = status.stack_plan_json;
+    entry.branch = status.branch;
     entry.pending_elicitation =
         crate::elicitation::pending_elicitation_for_session_dir(session_dir);
     entry.context_docs =
@@ -483,6 +493,7 @@ state:
             bytes_out: 0,
             last_data_received_at: String::new(),
             context_docs: Vec::new(),
+            branch: String::new(),
         };
         apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
         assert_eq!(proto.workflow_goal, "acceptance-tests");
@@ -490,6 +501,56 @@ state:
         assert_eq!(proto.agent, "claude");
         assert_eq!(proto.model, "sonnet-4");
         assert_ne!(proto.elapsed_display, "—");
+    }
+
+    #[test]
+    fn apply_session_list_status_populates_branch_from_the_changeset() {
+        // Given — a session whose changeset records the git branch it works on. The PR-Stack view
+        // resolves the in-progress child session for a planned node by matching this against the
+        // node's branch, so enrichment must surface it onto the proto entry.
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path();
+        fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            r"session_id: branch-enrich-1
+project_id: proj-1
+created_at: '2026-07-01T10:00:00Z'
+updated_at: '2026-07-01T12:00:00Z'
+status: active
+repo_path: /tmp/repo
+pid: 0
+",
+        )
+        .unwrap();
+        fs::write(
+            session_dir.join("changeset.yaml"),
+            r"version: 1
+branch: feature/auth/token-store
+models: {}
+sessions:
+  - id: branch-enrich-1
+    agent: claude
+    tag: acceptance-tests
+    created_at: '2026-07-01T10:00:00Z'
+state:
+  current: Red
+  session_id: branch-enrich-1
+  updated_at: '2026-07-01T12:00:00Z'
+  history: []
+",
+        )
+        .unwrap();
+
+        let mut proto = ProtoSessionEntry {
+            session_id: "branch-enrich-1".to_string(),
+            ..Default::default()
+        };
+
+        // When
+        apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
+
+        // Then
+        assert_eq!(proto.branch, "feature/auth/token-store");
     }
 
     /// **claude_cli_session_enrichment_uses_metadata_not_changeset**: when `.session.yaml` has
@@ -758,6 +819,7 @@ sessions:
             bytes_out: 0,
             last_data_received_at: String::new(),
             context_docs: Vec::new(),
+            branch: String::new(),
         };
         apply_session_list_status_to_proto(&session_dir, &mut proto).unwrap();
         assert_eq!(

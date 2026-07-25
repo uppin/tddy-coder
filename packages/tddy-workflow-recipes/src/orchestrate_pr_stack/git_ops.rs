@@ -17,6 +17,22 @@ fn run_git(
         })
 }
 
+/// Whether `branch` exists as a local ref in `repo`. Returns `false` when `repo` isn't a git
+/// repository, so remote-only branches (and non-repo scratch dirs) short-circuit git ops cleanly.
+pub fn local_branch_exists(repo: &std::path::Path, branch: &str) -> bool {
+    run_git(
+        repo,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ],
+    )
+    .map(|out| out.status.success())
+    .unwrap_or(false)
+}
+
 /// Rebase `branch` onto `new_base`, replacing `old_base` as the fork point.
 /// Aborts the rebase on conflict and returns `Err`.
 #[allow(dead_code)]

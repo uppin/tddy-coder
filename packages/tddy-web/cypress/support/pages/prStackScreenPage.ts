@@ -15,6 +15,10 @@ import {
   agentChatOption,
   agentChatMultiSelectOption,
   prStackAddPlannedPrAncestorCheckbox,
+  prStackInProgressBadge,
+  prStackPrLink,
+  prStackPrState,
+  prStackRepointBtn,
   TEST_IDS,
 } from "../testIds";
 
@@ -59,6 +63,27 @@ export const prStackScreenPage = {
   /** The action-needed internal-status badge on a planned-PR row (e.g. "needs-repoint"). */
   internalStatusBadge: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(prStackInternalStatusBadge(nodeId), { timeout: 5000, ...options }),
+
+  /** The in-progress indicator on a row whose branch is owned by a live session. */
+  inProgressBadge: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackInProgressBadge(nodeId), { timeout: 5000, ...options }),
+
+  /** The GitHub PR number rendered as a link to the PR for a row. */
+  prLink: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackPrLink(nodeId), { timeout: 5000, ...options }),
+
+  /** The GitHub PR state label (open/merged/closed/draft) for a row. */
+  prState: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackPrState(nodeId), { timeout: 5000, ...options }),
+
+  /** The Repoint control on a row whose predecessor has merged. */
+  repointBtn: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackRepointBtn(nodeId), { timeout: 5000, ...options }),
+
+  /** Click the Repoint control for a row. */
+  clickRepoint(nodeId: string) {
+    byTestId(prStackRepointBtn(nodeId)).click();
+  },
 
   // ---------------------------------------------------------------------------
   // Manually adding a planned PR (deterministic, non-chat path)

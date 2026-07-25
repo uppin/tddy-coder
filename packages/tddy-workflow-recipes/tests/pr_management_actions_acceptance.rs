@@ -14,7 +14,7 @@ use std::sync::Mutex;
 use tddy_core::changeset::{
     read_changeset, write_changeset, Changeset, GithubPrStatus, Stack, StackNode,
 };
-use tddy_workflow_recipes::orchestrate_pr_stack::github::{GithubPrApi, PrRef};
+use tddy_workflow_recipes::orchestrate_pr_stack::github::{GithubPrApi, PrRef, PrState, PrView};
 use tddy_workflow_recipes::orchestrate_pr_stack::{
     pr_close_action, pr_merge_action, pr_resolve_conflicts_action,
 };
@@ -32,6 +32,16 @@ struct RecordingGithub {
 impl GithubPrApi for RecordingGithub {
     fn get_open_pr(&self, _head_branch: &str) -> Result<Option<PrRef>, tddy_core::WorkflowError> {
         Ok(None)
+    }
+    fn get_pr_by_head(
+        &self,
+        _head_branch: &str,
+    ) -> Result<Option<PrView>, tddy_core::WorkflowError> {
+        Ok(Some(PrView {
+            number: 1,
+            url: "https://github.com/acme/repo/pull/1".to_string(),
+            state: PrState::Open,
+        }))
     }
     fn merge_pr(&self, number: u64) -> Result<String, tddy_core::WorkflowError> {
         self.merged.lock().unwrap().push(number);

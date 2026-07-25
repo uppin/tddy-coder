@@ -232,6 +232,23 @@ export function SessionsDrawerScreen({
     [sortedSessions, selectedSessionId],
   );
 
+  // A pr-stack orchestrator is itself idle while its children do the work; when a child is live,
+  // the orchestrator must stay reachable in the drawer (grouped with its children) rather than
+  // collapsing into the disconnected "Remaining" partition mid-flight. Reflect that by treating an
+  // orchestrator as active whenever a session it owns is active. This only affects drawer grouping;
+  // the main pane keeps the raw list so branch→session resolution reads each child's true activity.
+  const drawerSessions = useMemo(() => {
+    const activeOrchestratorIds = new Set(
+      sortedSessions
+        .filter((s) => s.isActive && s.orchestratorSessionId.length > 0)
+        .map((s) => s.orchestratorSessionId),
+    );
+    if (activeOrchestratorIds.size === 0) return sortedSessions;
+    return sortedSessions.map((s) =>
+      !s.isActive && activeOrchestratorIds.has(s.sessionId) ? { ...s, isActive: true } : s,
+    );
+  }, [sortedSessions]);
+
   // Register a session in the runtime registry on successful attach, storing the connection
   // params so the runtime layer can render its terminal independently of the focused attachment.
   // `lastDataReceivedAt` starts at the attach moment so the inspector reads "0s ago" before the
@@ -573,7 +590,7 @@ export function SessionsDrawerScreen({
             </button>
           )}
           <SessionDrawer
-            sessions={sortedSessions}
+            sessions={drawerSessions}
             selectedSessionId={selectedSessionId}
             onSelectSession={handleSelectSession}
             onCreateSession={handleCreateSession}

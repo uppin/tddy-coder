@@ -3,7 +3,7 @@
 mod actions;
 mod assess;
 pub mod bridge;
-mod git_ops;
+pub(crate) mod git_ops;
 pub mod github;
 mod hooks;
 mod internal_status;

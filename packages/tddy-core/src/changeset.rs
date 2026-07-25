@@ -174,6 +174,39 @@ impl Stack {
             refs
         }
     }
+
+    /// Resolve the base ref a child worktree for `node_id` must branch off.
+    ///
+    /// Enforces bottom-up ordering first: if any non-merged parent has not been started yet
+    /// (no `session_id`), spawning is refused with a `ChangesetInvalid` error naming that parent,
+    /// because its branch does not exist to base onto. Merged parents are skipped, not required.
+    ///
+    /// Otherwise returns the nearest non-merged ancestor's `origin/<branch>` (the first
+    /// `effective_base_refs` entry), or `stack_bottom_base` for a root node or a node whose
+    /// parents are all merged.
+    pub fn base_ref_for_spawn(
+        &self,
+        node_id: &str,
+        stack_bottom_base: &str,
+    ) -> Result<String, WorkflowError> {
+        if let Some(node) = self.node(node_id) {
+            for parent_id in &node.parents {
+                if let Some(parent) = self.node(parent_id) {
+                    if !parent.is_skipped() && parent.session_id.is_none() {
+                        return Err(WorkflowError::ChangesetInvalid(format!(
+                            "cannot spawn node '{node_id}': non-merged parent '{parent_id}' has not been started yet"
+                        )));
+                    }
+                }
+            }
+        }
+
+        let refs = self.effective_base_refs(node_id, stack_bottom_base);
+        Ok(refs
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| stack_bottom_base.to_string()))
+    }
 }
 
 /// Changeset manifest stored in plan directory.

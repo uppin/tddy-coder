@@ -603,6 +603,17 @@ mod tests {
                 url: "https://github.com/o/r/pull/1".into(),
             }))
         }
+        fn get_pr_by_head(
+            &self,
+            _head: &str,
+        ) -> Result<Option<crate::orchestrate_pr_stack::github::PrView>, tddy_core::WorkflowError>
+        {
+            Ok(Some(crate::orchestrate_pr_stack::github::PrView {
+                number: self.pr_number,
+                url: "https://github.com/o/r/pull/1".into(),
+                state: crate::orchestrate_pr_stack::github::PrState::Open,
+            }))
+        }
         fn merge_pr(&self, _number: u64) -> Result<String, tddy_core::WorkflowError> {
             Ok("sha".into())
         }
@@ -636,6 +647,13 @@ mod tests {
             &self,
             _head: &str,
         ) -> Result<Option<crate::orchestrate_pr_stack::github::PrRef>, tddy_core::WorkflowError>
+        {
+            Ok(None)
+        }
+        fn get_pr_by_head(
+            &self,
+            _head: &str,
+        ) -> Result<Option<crate::orchestrate_pr_stack::github::PrView>, tddy_core::WorkflowError>
         {
             Ok(None)
         }

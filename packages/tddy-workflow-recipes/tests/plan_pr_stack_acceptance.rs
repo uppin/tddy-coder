@@ -68,7 +68,10 @@ prs:
         n1.session_id.is_none(),
         "no session_id before materialization"
     );
-    assert!(n1.branch.is_none(), "no branch before materialization");
+    assert_eq!(
+        n1.branch, n1.branch_suggestion,
+        "branch is the definitive link key, assigned from the suggestion at creation"
+    );
 }
 
 #[test]
