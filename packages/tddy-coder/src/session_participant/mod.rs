@@ -555,9 +555,10 @@ impl RpcService for SessionConnectionServiceRpc {
                 // frame now with the current count, then a fresh count for each subsequent renderable
                 // presenter event — with no transcript payload. It never replays the snapshot itself.
                 if mode == StreamMode::CountThenLive {
-                    let snapshot =
-                        tddy_service::acp_replay::read_acp_transcript(&self.svc.agent_activity_dir)
-                            .unwrap_or_default();
+                    let snapshot = tddy_service::acp_replay::read_session_transcript(
+                        &self.svc.agent_activity_dir,
+                    )
+                    .unwrap_or_default();
                     let mut count = tddy_service::acp_replay::count_activity_entries(&snapshot);
                     let mut seen_ids = tddy_service::acp_replay::tool_call_ids(&snapshot);
                     if tx.try_send(Ok(count_frame_bytes(count))).is_err() {
@@ -598,12 +599,14 @@ impl RpcService for SessionConnectionServiceRpc {
                     return RpcResult::ServerStream(Ok(rx));
                 }
 
-                // Snapshot-then-live (the default) replays the persisted ACP transcript first;
+                // Snapshot-then-live (the default) replays the session's resolved transcript first
+                // (the persisted ACP frames merged with the durable agent-activity rows);
                 // live-only skips it and carries only frames produced after subscribe.
                 if mode == StreamMode::SnapshotThenLive {
-                    let snapshot =
-                        tddy_service::acp_replay::read_acp_transcript(&self.svc.agent_activity_dir)
-                            .unwrap_or_default();
+                    let snapshot = tddy_service::acp_replay::read_session_transcript(
+                        &self.svc.agent_activity_dir,
+                    )
+                    .unwrap_or_default();
                     for frame in snapshot {
                         if tx.try_send(Ok(replay_frame_bytes(&frame))).is_err() {
                             // Receiver already gone — return the (now-closed) stream.
@@ -1082,5 +1085,83 @@ mod tests {
             .send(PresenterEvent::AgentActivity(a_running_record("call-y")))
             .expect("broadcast send");
         assert_eq!(recv_acp_envelope(&mut rx).await.activity_count, 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // Persisted-activity replay (bug fc990524: badge counts, pane opens empty)
+    //
+    // `acp-transcript.jsonl` only exists for sessions that ran the presenter seam that writes it; a
+    // session started before it (or one whose tool calls were recorded by another host) has only the
+    // durable `agent-activity.jsonl`. Replaying the transcript file alone serves an empty snapshot
+    // while the count feed keeps counting live records — badge, but nothing to see.
+    // -----------------------------------------------------------------------
+
+    /// The snapshot must project the session's durable `agent-activity.jsonl` rows, coalesced by
+    /// call_id, when no ACP transcript was written.
+    #[tokio::test]
+    async fn stream_acp_replay_replays_persisted_agent_activity_when_no_acp_transcript_exists() {
+        // Given — a session dir whose activity log holds one coalesced call and one still-running
+        // call, and no `acp-transcript.jsonl`
+        let dir = tempfile::tempdir().unwrap();
+        append_agent_activity(dir.path(), &a_running_record("call-1")).unwrap();
+        append_agent_activity(dir.path(), &a_completed_record("call-1")).unwrap();
+        append_agent_activity(dir.path(), &a_running_record("call-2")).unwrap();
+        let (events, _keepalive) = broadcast::channel(16);
+        let rpc = rpc_for(dir.path(), events);
+
+        // When — the StreamAcpReplay arm is dispatched in snapshot mode
+        let result = rpc
+            .handle_rpc(
+                "connection.ConnectionService",
+                "StreamAcpReplay",
+                &acp_replay_request_message("sess-1"),
+            )
+            .await;
+        let mut rx = match result {
+            RpcResult::ServerStream(Ok(rx)) => rx,
+            RpcResult::ServerStream(Err(status)) => {
+                panic!("expected a server stream, got error status: {status:?}")
+            }
+            _ => panic!("expected a server stream, got a unary result"),
+        };
+
+        // Then — both persisted calls are replayed as tool_call frames, each once, in recorded order
+        assert_eq!(acp_tool_call_id(&recv_acp_frame(&mut rx).await), "call-1");
+        assert_eq!(acp_tool_call_id(&recv_acp_frame(&mut rx).await), "call-2");
+    }
+
+    /// The count baseline comes from the same resolved transcript the snapshot replays, so a badge
+    /// never promises entries the pane cannot deliver.
+    #[tokio::test]
+    async fn stream_acp_replay_count_then_live_counts_persisted_agent_activity_rows() {
+        // Given — the same dir: two distinct calls persisted in the activity log alone
+        let dir = tempfile::tempdir().unwrap();
+        append_agent_activity(dir.path(), &a_running_record("call-1")).unwrap();
+        append_agent_activity(dir.path(), &a_completed_record("call-1")).unwrap();
+        append_agent_activity(dir.path(), &a_running_record("call-2")).unwrap();
+        let (events, _keepalive) = broadcast::channel(16);
+        let rpc = rpc_for(dir.path(), events);
+
+        // When — the StreamAcpReplay arm is dispatched in count-first mode
+        let req = StreamAcpReplayRequest {
+            session_token: "caller-token".to_string(),
+            session_id: "sess-1".to_string(),
+            daemon_instance_id: String::new(),
+            mode: StreamMode::CountThenLive as i32,
+        };
+        let message = RpcMessage::new(req.encode_to_vec(), Default::default());
+        let mut rx = match rpc
+            .handle_rpc("connection.ConnectionService", "StreamAcpReplay", &message)
+            .await
+        {
+            RpcResult::ServerStream(Ok(rx)) => rx,
+            RpcResult::ServerStream(Err(status)) => {
+                panic!("expected a server stream, got error status: {status:?}")
+            }
+            _ => panic!("expected a server stream, got a unary result"),
+        };
+
+        // Then — the first count frame reports the two persisted calls
+        assert_eq!(recv_acp_envelope(&mut rx).await.activity_count, 2);
     }
 }

@@ -6566,10 +6566,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
     type StreamAcpReplayStream = MpscAcpReplayStream;
 
-    /// Stream a session's read-only ACP transcript: replay the persisted `acp-transcript.jsonl`
-    /// snapshot, then relay live agent-activity records (mapped to ACP `tool_call` frames) published
-    /// to the hub for this session. Mirrors [`stream_session_activity`] — same routing, auth, and
-    /// [`StreamMode`] semantics.
+    /// Stream a session's read-only ACP transcript: replay the session's resolved transcript
+    /// snapshot (`acp-transcript.jsonl` merged with the durable `agent-activity.jsonl` — see
+    /// [`tddy_service::acp_replay::read_session_transcript`]), then relay live agent-activity records
+    /// (mapped to ACP `tool_call` frames) published to the hub for this session. Mirrors
+    /// [`stream_session_activity`] — same routing, auth, and [`StreamMode`] semantics.
     async fn stream_acp_replay(
         &self,
         request: Request<StreamAcpReplayRequest>,
@@ -6638,7 +6639,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // transcript payload. It never replays the snapshot itself.
         if mode == StreamMode::CountThenLive {
             let snapshot =
-                tddy_service::acp_replay::read_acp_transcript(&session_dir).unwrap_or_default();
+                tddy_service::acp_replay::read_session_transcript(&session_dir).unwrap_or_default();
             let count = tddy_service::acp_replay::count_activity_entries(&snapshot);
             let seen_ids = tddy_service::acp_replay::tool_call_ids(&snapshot);
             if tx
@@ -6658,7 +6659,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         if mode == StreamMode::SnapshotThenLive {
             let snapshot =
-                tddy_service::acp_replay::read_acp_transcript(&session_dir).unwrap_or_default();
+                tddy_service::acp_replay::read_session_transcript(&session_dir).unwrap_or_default();
             for frame in snapshot {
                 if tx.send(acp_replay_frame(&frame)).is_err() {
                     // Receiver already gone — return an empty live stream that terminates immediately.
@@ -8212,7 +8213,8 @@ mod agent_activity_unit_tests {
     use futures_util::StreamExt;
     use std::time::Duration;
     use tddy_core::agent_activity::{
-        read_agent_activity, AgentActivityRecord, STATUS_COMPLETED, STATUS_RUNNING,
+        append_agent_activity, read_agent_activity, AgentActivityRecord, STATUS_COMPLETED,
+        STATUS_RUNNING,
     };
     use tddy_core::session_lifecycle::unified_session_dir_path;
     use tddy_core::SessionMetadata;
@@ -8856,6 +8858,85 @@ mod agent_activity_unit_tests {
         hub.publish(session_id, a_seeded_record("call-x", "Bash"));
         hub.publish(session_id, a_seeded_record("call-y", "Read"));
         assert_eq!(next_replay_envelope(&mut stream).await.activity_count, 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // Persisted-activity replay (bug fc990524: badge counts, pane opens empty)
+    //
+    // `acp-transcript.jsonl` is written by the tddy-coder presenter seam only. Every daemon-hosted
+    // (claude-cli / sandbox) session on disk therefore has a large `agent-activity.jsonl` and NO
+    // `acp-transcript.jsonl` — so an ACP replay that reads the transcript file alone serves an empty
+    // snapshot while its count feed keeps counting live records: the operator sees a badge, opens
+    // the pane, and finds nothing (and nothing at all after a page reload).
+    // -----------------------------------------------------------------------
+
+    /// The snapshot must project the session's durable `agent-activity.jsonl` rows, which are the
+    /// only persisted record of a daemon-hosted session's tool calls.
+    #[tokio::test]
+    async fn stream_acp_replay_replays_persisted_agent_activity_when_no_acp_transcript_exists() {
+        // Given a session whose durable activity log holds two completed calls and which has no
+        // `acp-transcript.jsonl` at all (the on-disk shape of every claude-cli session).
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-legacy-activity-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        append_agent_activity(&session_dir, &a_seeded_record("call-a", "Read")).unwrap();
+        append_agent_activity(&session_dir, &a_seeded_record("call-b", "Grep")).unwrap();
+        let service = make_unit_service(sessions_base);
+
+        // When a client subscribes to the ACP replay snapshot.
+        let mut stream = service
+            .stream_acp_replay(Request::new(StreamAcpReplayRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                mode: StreamMode::SnapshotThenLive as i32,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Then both persisted calls are replayed as tool_call frames, in recorded order.
+        assert_eq!(
+            acp_tool_call_id(&next_replay_frame(&mut stream).await),
+            "call-a"
+        );
+        assert_eq!(
+            acp_tool_call_id(&next_replay_frame(&mut stream).await),
+            "call-b"
+        );
+    }
+
+    /// The badge must never promise entries the pane cannot deliver: the count baseline is taken from
+    /// the same resolved transcript the snapshot replays, so persisted activity counts even when no
+    /// `acp-transcript.jsonl` was ever written.
+    #[tokio::test]
+    async fn stream_acp_replay_count_then_live_counts_persisted_agent_activity_rows() {
+        // Given a session whose durable activity log holds two completed calls and no ACP transcript.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-legacy-count-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        append_agent_activity(&session_dir, &a_seeded_record("call-a", "Read")).unwrap();
+        append_agent_activity(&session_dir, &a_seeded_record("call-b", "Grep")).unwrap();
+        let service = make_unit_service(sessions_base);
+
+        // When a client subscribes in count-first mode.
+        let mut stream = service
+            .stream_acp_replay(Request::new(StreamAcpReplayRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                mode: StreamMode::CountThenLive as i32,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Then the first count frame reports the two persisted calls.
+        assert_eq!(next_replay_envelope(&mut stream).await.activity_count, 2);
     }
 }
 

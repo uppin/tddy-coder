@@ -10605,6 +10605,7 @@ dependencies = [
  "tddy-tui",
  "tddy-workflow",
  "tddy-workflow-recipes",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tonic 0.12.3",

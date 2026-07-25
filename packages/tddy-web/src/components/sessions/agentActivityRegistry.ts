@@ -1,8 +1,8 @@
 /**
  * `AgentActivityRegistry` — the per-session, module-level store that backs the Agent Activity
  * overlay. It holds the streamed activity `count`, the lazily-pulled transcript `messages`, the
- * `seenCount` baseline (for the unread badge), and whether the heavy snapshot has already been
- * `snapshotOpened`, keyed by `sessionId`.
+ * `seenCount` baseline (for the unread badge), and whether the heavy snapshot has already
+ * `snapshotLoaded`, keyed by `sessionId`.
  *
  * It mirrors {@link SessionRuntimeRegistry}: an observable store (subscribe/notify with an
  * immutably-replaced per-session snapshot) consumed via `useSyncExternalStore`. Because a session's
@@ -27,14 +27,16 @@ export interface AgentActivityState {
   readonly messages: ChatMessage[];
   /** The `count` value at the last overlay open — entries beyond it are unread. */
   readonly seenCount: number;
-  /** True once the `SNAPSHOT_THEN_LIVE` transcript pull has been started for this session. */
-  readonly snapshotOpened: boolean;
+  /** True once the `SNAPSHOT_THEN_LIVE` transcript pull has **delivered** for this session. A pull
+   *  that started but was cancelled before its first frame landed leaves this false, so it is
+   *  retried on the next open rather than caching an empty transcript forever. */
+  readonly snapshotLoaded: boolean;
 }
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
 function freshState(sessionId: string): AgentActivityState {
-  return { sessionId, count: 0, messages: EMPTY_MESSAGES, seenCount: 0, snapshotOpened: false };
+  return { sessionId, count: 0, messages: EMPTY_MESSAGES, seenCount: 0, snapshotLoaded: false };
 }
 
 /** Cap on retained per-session state. A long-lived dashboard can visit many sessions; beyond this
@@ -65,12 +67,12 @@ export class AgentActivityRegistry {
     this.write(sessionId, { ...prev, messages });
   }
 
-  /** Mark that the snapshot pull has been started, so a later switch-back reuses the cache instead
-   *  of re-opening the stream. No-op (no notify) when already opened. */
-  markSnapshotOpened(sessionId: string): void {
+  /** Mark that the snapshot pull has delivered (its first frame landed), so a later switch-back
+   *  reuses the cache instead of re-opening the stream. No-op (no notify) when already loaded. */
+  markSnapshotLoaded(sessionId: string): void {
     const prev = this.bySessionId.get(sessionId) ?? freshState(sessionId);
-    if (prev.snapshotOpened) return;
-    this.write(sessionId, { ...prev, snapshotOpened: true });
+    if (prev.snapshotLoaded) return;
+    this.write(sessionId, { ...prev, snapshotLoaded: true });
   }
 
   /** Set the unread baseline to the current count (called on overlay open). No-op when unchanged. */

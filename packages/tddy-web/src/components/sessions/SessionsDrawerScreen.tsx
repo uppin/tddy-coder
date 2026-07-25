@@ -27,6 +27,7 @@ import {
   type ByteDelta,
   type SessionRuntimeConnection,
 } from "./sessionRuntimeRegistry";
+import { useSessionClientCache } from "./sessionClientCache";
 import { useAuthContext } from "../../hooks/authProvider";
 import { AppShell } from "../shell/AppShell";
 import { Button } from "../ui/button";
@@ -176,7 +177,10 @@ export function SessionsDrawerScreen({
   // do not record the session-participant identity. In production the session's own LiveKit `Room`
   // (captured via the terminal's `onRoom`) is the transport room; in tests the test-double
   // `liveKitFactory` ignores its `room` argument, so the common room is an acceptable stand-in.
+  // Resolved through `sessionClientCache` so an unchanged route yields one stable client identity:
+  // this callback is invoked inline while rendering, and consumers key stream effects on the client.
   const liveKitFactoryIsOverridden = useLiveKitTransportFactoryIsOverridden();
+  const sessionClientCache = useSessionClientCache();
   const buildSessionClient = useCallback((): Client<typeof ConnectionService> | null => {
     if (!connectedSessionId) return null;
     if (attachment.status !== "connected-livekit") return null;
@@ -185,8 +189,18 @@ export function SessionsDrawerScreen({
     const sessionRoom =
       runtimeRegistry.get(connectedSessionId)?.room ?? (liveKitFactoryIsOverridden ? room : null);
     if (!sessionRoom) return null;
-    return createClient(ConnectionService, liveKitFactory(sessionRoom, targetIdentity));
-  }, [connectedSessionId, attachment, room, liveKitFactory, liveKitFactoryIsOverridden, runtimeRegistry]);
+    return sessionClientCache.clientFor(targetIdentity, sessionRoom, () =>
+      createClient(ConnectionService, liveKitFactory(sessionRoom, targetIdentity)),
+    );
+  }, [
+    connectedSessionId,
+    attachment,
+    room,
+    liveKitFactory,
+    liveKitFactoryIsOverridden,
+    runtimeRegistry,
+    sessionClientCache,
+  ]);
 
   // Capture a session's connected LiveKit `Room` (fired by the terminal after `room.connect`) so
   // `buildSessionClient` can route session-scoped RPCs over the session's own room in production.

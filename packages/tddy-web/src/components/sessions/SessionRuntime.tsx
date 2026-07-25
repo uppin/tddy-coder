@@ -13,6 +13,7 @@ import { TerminalControlOverlay } from "./TerminalControlOverlay";
 import { SessionConnectionOverlay } from "./SessionConnectionOverlay";
 import { useTerminalControl, type Session } from "./useTerminalControl";
 import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
+import { useSessionClientCache } from "./sessionClientCache";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import type { LiveKitChromeStatus } from "../../lib/liveKitStatusPresentation";
 import { cn } from "../../lib/utils";
@@ -107,19 +108,25 @@ export function SessionRuntime({
   // `daemon-{instanceId}-{sessionId}` = `runtime.livekitServerIdentity`). Used by the explicit
   // steal-claim so "Claim terminal" routes through the session participant. Built only for
   // `connected-livekit` runtimes; `null` otherwise (the daemon client is the fallback).
+  // Resolved through `sessionClientCache` so an unchanged route yields one stable client identity:
+  // this callback is invoked inline while rendering, and consumers key stream effects on the client.
+  const sessionClientCache = useSessionClientCache();
   const buildSessionClient = useCallback((): ConnectionClient | null => {
     if (runtime.status !== "connected-livekit") return null;
     const targetIdentity = runtime.livekitServerIdentity;
     if (!targetIdentity || !liveKitFactory) return null;
     const room = roomRef.current ?? (liveKitFactoryIsOverridden ? commonRoom : null);
     if (!room) return null;
-    return createClient(ConnectionService, liveKitFactory(room, targetIdentity));
+    return sessionClientCache.clientFor(targetIdentity, room, () =>
+      createClient(ConnectionService, liveKitFactory(room, targetIdentity)),
+    );
   }, [
     runtime.status,
     runtime.livekitServerIdentity,
     liveKitFactory,
     liveKitFactoryIsOverridden,
     commonRoom,
+    sessionClientCache,
   ]);
 
   // The runtime owns its own control lease. The `Session` reference (sessionId + owning daemon
