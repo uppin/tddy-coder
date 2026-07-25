@@ -13,9 +13,13 @@ export const sessionWorktreeTabPage = {
   tab: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionWorktreeTab, { timeout: 5000, ...options }),
 
-  /** The disk-size readout. */
+  /** The disk-size readout — shows "Calculating…" until the size streams in, then the byte label. */
   size: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionWorktreeSize, { timeout: 5000, ...options }),
+
+  /** The relative "last calculated" readout (present only once the size is cached). */
+  lastCalculated: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionWorktreeLastCalculated, { timeout: 5000, ...options }),
 
   /** The branch label. */
   branch: (options?: Parameters<typeof cy.get>[1]) =>

@@ -90,6 +90,7 @@ export const TEST_IDS = {
   sessionInspectorTabWorktree: "sessions-inspector-tab-worktree",
   sessionWorktreeTab: "session-worktree-tab",
   sessionWorktreeSize: "session-worktree-size",
+  sessionWorktreeLastCalculated: "session-worktree-last-calculated",
   sessionWorktreeBranch: "session-worktree-branch",
   sessionWorktreeChanged: "session-worktree-changed",
   sessionWorktreeRefresh: "session-worktree-refresh",
