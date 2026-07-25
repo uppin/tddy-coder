@@ -4,6 +4,11 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-25 — Agent Activity: persistent, lazy-loading overlay + JSON detail
+
+- The Agent Activity overlay now **persists per session** — switching to another session and back keeps its transcript and unread badge instead of resetting and re-downloading. See [agent-activity-pane.md § Persisted, lazily-counted activity](agent-activity-pane.md#persisted-lazily-counted-activity-added-2026-07-25).
+- It also **loads lazily**: a cheap count-first stream drives the icon and unread badge (counting the entries you actually see — agent text plus one per tool call), and the full transcript is fetched only the first time you open the pane.
+- **Clicking a tool call** opens a detail dialog showing its input and output as prettified, color-highlighted JSON.
 ## 2026-07-25 — Mouse works in every terminal session
 
 - Fixed: only the **newest** session responded to the mouse — older sessions dropped every click, drag and scroll while keyboard input kept working. A terminal reports mouse events only after it has seen the TUI's mouse-tracking DECSET, which is emitted once at startup and eventually trimmed out of the server's 64 KiB replay buffer.

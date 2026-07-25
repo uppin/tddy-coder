@@ -34,4 +34,34 @@ export const agentActivityPage = {
   close() {
     byTestId(TEST_IDS.agentActivityOverlayClose).click();
   },
+
+  // ---------------------------------------------------------------------------
+  // Tool-call detail dialog (prettified, color-highlighted JSON)
+  // ---------------------------------------------------------------------------
+
+  /** The tool-call detail dialog. */
+  detailDialog: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.agentActivityDetailDialog, { timeout: 5000, ...options }),
+
+  /** The dialog's raw_input JSON block. */
+  detailInput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.agentActivityDetailInput, { timeout: 5000, ...options }),
+
+  /** The dialog's raw_output JSON block. */
+  detailOutput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.agentActivityDetailOutput, { timeout: 5000, ...options }),
+
+  /** Any color-highlighted JSON block (Prism output) inside the dialog. */
+  jsonHighlight: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.agentActivityJsonHighlight, { timeout: 5000, ...options }),
+
+  /** Open the detail dialog by clicking the transcript entry at `index` (arrival order). */
+  openDetail(index: number) {
+    byTestId(`agent-chat-message-${index}`).click();
+  },
+
+  /** Close the detail dialog via its close control. */
+  closeDetail() {
+    byTestId(TEST_IDS.agentActivityDetailClose).click();
+  },
 };

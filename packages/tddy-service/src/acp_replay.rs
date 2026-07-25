@@ -79,6 +79,67 @@ pub fn read_acp_transcript(session_dir: &Path) -> io::Result<Vec<AcpAgentMessage
     Ok(deserialize_frames(&contents))
 }
 
+/// The `tool_call_id` of a `tool_call` frame, or `None` for any other frame shape.
+fn tool_call_id_of(frame: &AcpAgentMessage) -> Option<&str> {
+    match &frame.msg {
+        Some(acp_agent_message::Msg::SessionUpdate(n)) => {
+            match n.update.as_ref().and_then(|u| u.update.as_ref()) {
+                Some(session_update::Update::ToolCall(tc)) => {
+                    tc.tool_call_id.as_ref().map(|id| id.value.as_str())
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// True for an `agent_message_chunk` (agent-text) frame.
+fn is_agent_text(frame: &AcpAgentMessage) -> bool {
+    matches!(
+        &frame.msg,
+        Some(acp_agent_message::Msg::SessionUpdate(n))
+            if matches!(
+                n.update.as_ref().and_then(|u| u.update.as_ref()),
+                Some(session_update::Update::AgentMessageChunk(_))
+            )
+    )
+}
+
+/// The distinct tool-call ids present in a transcript, in no particular order.
+///
+/// Used to seed a live count relay's "already counted" set so a tool call whose `running` frame is
+/// in the snapshot is not counted a second time when its terminal record arrives live.
+pub fn tool_call_ids(frames: &[AcpAgentMessage]) -> std::collections::HashSet<String> {
+    frames
+        .iter()
+        .filter_map(|f| tool_call_id_of(f).map(str::to_string))
+        .collect()
+}
+
+/// Count the **coalesced** activity entries in a transcript: one per agent-text frame plus one per
+/// distinct tool-call id.
+///
+/// A tool call persists a `running` then a terminal frame under the *same* `tool_call_id`, which the
+/// reader (and the web pane) coalesce into a single row. This counts what the pane renders — the
+/// number the Agent Activity badge reflects — not the raw frame count.
+pub fn count_activity_entries(frames: &[AcpAgentMessage]) -> u64 {
+    let mut seen_tool_ids = std::collections::HashSet::new();
+    let mut count: u64 = 0;
+    for frame in frames {
+        match tool_call_id_of(frame) {
+            Some(id) => {
+                if seen_tool_ids.insert(id) {
+                    count += 1;
+                }
+            }
+            None if is_agent_text(frame) => count += 1,
+            None => {}
+        }
+    }
+    count
+}
+
 /// Wrap a `SessionUpdate` in a `SessionNotification` frame stamped at `at_unix_ms`.
 fn session_update_frame(update: SessionUpdate, at_unix_ms: i64) -> AcpAgentMessage {
     AcpAgentMessage {
@@ -164,6 +225,13 @@ pub fn frame_for_agent_activity(
     } else {
         record.started_unix_ms
     } as i64;
+    // A completed call carries its result as `raw_output`; a still-running row has a JSON `null`
+    // result and no output yet, so it stays `None`.
+    let raw_output = if record.result.is_null() {
+        None
+    } else {
+        serde_json::to_string(&record.result).ok()
+    };
     let update = SessionUpdate {
         update: Some(session_update::Update::ToolCall(ToolCall {
             tool_call_id: Some(ToolCallId {
@@ -173,6 +241,7 @@ pub fn frame_for_agent_activity(
             kind: tool_kind_for(&record.tool_name) as i32,
             status: status as i32,
             raw_input: serde_json::to_string(&record.input).ok(),
+            raw_output,
             ..Default::default()
         })),
     };
@@ -292,6 +361,49 @@ mod tests {
             .expect("raw_input should carry the full tool input");
         let parsed: serde_json::Value = serde_json::from_str(&raw).expect("raw_input is JSON");
         assert_eq!(parsed, a_read_input());
+    }
+
+    #[test]
+    fn a_completed_tool_frame_carries_the_full_result_as_raw_output_json() {
+        // When — a completed tool call (with a result) is mapped for the persisted transcript
+        let frame = frame_for_agent_activity(&a_completed_read_record());
+
+        // Then — the whole result round-trips through raw_output, so the web detail dialog can render
+        // the tool's output as prettified JSON alongside its input.
+        let (tc, _) = tool_call(&frame);
+        let raw = tc
+            .raw_output
+            .expect("raw_output should carry the full tool result");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("raw_output is JSON");
+        assert_eq!(parsed, serde_json::json!({ "content": "fn main() {}" }));
+    }
+
+    #[test]
+    fn count_activity_entries_coalesces_a_tool_calls_running_and_terminal_frames() {
+        // Given — a transcript: one agent-text frame, the SAME tool call persisted as running then
+        // completed (two frames, one id), then a second distinct tool call.
+        fn record(call_id: &str, status: &str) -> AgentActivityRecord {
+            AgentActivityRecord {
+                call_id: call_id.to_string(),
+                tool_name: "Read".to_string(),
+                input: a_read_input(),
+                status: status.to_string(),
+                result: serde_json::Value::Null,
+                error_message: String::new(),
+                started_unix_ms: 1_000,
+                completed_unix_ms: 0,
+                source: "coder".to_string(),
+            }
+        }
+        let frames = vec![
+            agent_text_frame("Analyzing.", 1_000),
+            frame_for_agent_activity(&record("call-a", "running")),
+            frame_for_agent_activity(&record("call-a", STATUS_COMPLETED)),
+            frame_for_agent_activity(&record("call-b", STATUS_COMPLETED)),
+        ];
+
+        // Then — the running+terminal pair for call-a coalesces: 1 text + 2 distinct calls = 3
+        assert_eq!(count_activity_entries(&frames), 3);
     }
 
     #[test]

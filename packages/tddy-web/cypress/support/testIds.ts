@@ -387,6 +387,16 @@ export const TEST_IDS = {
   agentActivityOverlay: "agent-activity-overlay",
   /** Close control on the overlay. */
   agentActivityOverlayClose: "agent-activity-overlay-close",
+  /** Tool-call detail dialog opened by clicking a tool entry in the transcript. */
+  agentActivityDetailDialog: "agent-activity-detail-dialog",
+  /** Close control on the detail dialog. */
+  agentActivityDetailClose: "agent-activity-detail-close",
+  /** The tool call's raw_input, prettified + color-highlighted JSON. */
+  agentActivityDetailInput: "agent-activity-detail-input",
+  /** The tool call's raw_output, prettified + color-highlighted JSON. */
+  agentActivityDetailOutput: "agent-activity-detail-output",
+  /** A color-highlighted JSON block (Prism output) inside the detail dialog. */
+  agentActivityJsonHighlight: "agent-activity-json-highlight",
 
   // PR-Stack Chat Screen — manually adding a planned PR (deterministic, non-chat path)
   prStackAddPlannedPrBtn: "pr-stack-add-planned-pr-btn",
