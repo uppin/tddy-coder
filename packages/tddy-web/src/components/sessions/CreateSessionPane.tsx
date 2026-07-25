@@ -46,6 +46,10 @@ export type CreateSessionInitialValues = Partial<{
   stackParent: string;
   branchIntent: BranchIntent;
   newBranchName: string;
+  /** Pre-check state for the "Create Remote Branch" toggle (new-branch mode). Defaults to checked. */
+  createRemoteBranch: boolean;
+  /** Concrete base branch shown in the new-branch option: "New branch from base: <baseBranchLabel>". */
+  baseBranchLabel: string;
   initialPrompt: string;
   daemonInstanceId: string;
 }>;
@@ -98,6 +102,9 @@ export function CreateSessionPane({
     initialValues?.branchIntent ?? "new_branch_from_base",
   );
   const [newBranchName, setNewBranchName] = useState(initialValues?.newBranchName ?? "");
+  const [createRemoteBranch, setCreateRemoteBranch] = useState(
+    initialValues?.createRemoteBranch ?? true,
+  );
   const [selectedBranchToWorkOn, setSelectedBranchToWorkOn] = useState("");
   // Which daemon/host runs the session. Defaults to the pre-filled host, else the selected daemon,
   // else empty (which the daemon treats as "run locally on the connected daemon"). An empty
@@ -258,6 +265,7 @@ export function CreateSessionPane({
         projectId,
         branchWorktreeIntent: branchIntent,
         newBranchName,
+        createRemoteBranch,
         selectedIntegrationBaseRef: "",
         selectedBranchToWorkOn,
         daemonInstanceId,
@@ -785,7 +793,11 @@ export function CreateSessionPane({
           value={branchIntent}
           onChange={(e) => setBranchIntent(e.target.value as BranchIntent)}
         >
-          <option value="new_branch_from_base">New branch from base</option>
+          <option value="new_branch_from_base">
+            {`New branch from base${
+              initialValues?.baseBranchLabel ? `: ${initialValues.baseBranchLabel}` : ""
+            }`}
+          </option>
           <option value="work_on_selected_branch">Work on existing branch</option>
         </select>
       </div>
@@ -804,6 +816,21 @@ export function CreateSessionPane({
             onChange={(e) => setNewBranchName(e.target.value)}
             placeholder="e.g. feature/my-work"
           />
+          {/* Only the claude-cli / cursor-cli spawn paths create the worktree in-daemon and can push
+              it; a "tool" session spawns tddy-coder, which owns its own worktree — so we don't offer
+              the toggle there rather than show a checked box that silently does nothing. */}
+          {(sessionType === "claude-cli" || sessionType === "cursor-cli") && (
+            <label className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                data-testid="create-session-create-remote-branch-toggle"
+                type="checkbox"
+                className="h-4 w-4"
+                checked={createRemoteBranch}
+                onChange={(e) => setCreateRemoteBranch(e.target.checked)}
+              />
+              Create Remote Branch
+            </label>
+          )}
         </div>
       )}
 

@@ -481,6 +481,43 @@ pub fn find_existing_worktree_for_branch_ref(
     Ok(None)
 }
 
+/// Pushes a local branch to `origin` and sets it as the upstream (`git push -u origin <branch>`),
+/// run inside `worktree_dir`. Uses [`git_remote_command`] so any configured `GIT_SSH_COMMAND`
+/// applies and interactive prompts fail fast. Returns a descriptive `Err` on a non-zero exit — no
+/// silent success, no fallback.
+pub fn push_new_branch_to_origin(worktree_dir: &Path, branch: &str) -> Result<(), String> {
+    log::info!(
+        "push_new_branch_to_origin: worktree={} branch={}",
+        worktree_dir.display(),
+        branch
+    );
+    let output = git_remote_command(worktree_dir)
+        .args(["push", "-u", "origin", branch])
+        .output()
+        .map_err(|e| format!("git push -u origin {}: {}", branch, e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "git push -u origin {} failed: {}",
+            branch,
+            stderr.trim()
+        ));
+    }
+    Ok(())
+}
+
+/// Public, non-erroring wrapper over [`try_find_existing_worktree_for_branch_ref`]: returns the
+/// on-disk worktree path checked out for `branch` in `repo_root`, or `None` when the branch does not
+/// resolve or has no worktree. Errors (I/O, worktree enumeration) collapse to `None` — callers that
+/// only want to display a worktree indicator do not need to distinguish "no worktree" from a
+/// transient git error.
+pub fn worktree_path_for_branch(repo_root: &Path, branch: &str) -> Option<PathBuf> {
+    try_find_existing_worktree_for_branch_ref(repo_root, branch)
+        .ok()
+        .flatten()
+}
+
 /// Like [`find_existing_worktree_for_branch_ref`], but returns `Ok(None)` when `branch_ref` does not
 /// resolve in `repo_root` (e.g. suggested branch not created yet). Propagates I/O and worktree
 /// enumeration errors.
@@ -1613,6 +1650,107 @@ mod list_recent_remote_branches_tests {
         assert_ne!(
             first[0], second[0],
             "skip(0,1) and skip(1,1) must differ when multiple remotes exist; first={first:?} second={second:?}"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn push_new_branch_to_origin_creates_the_branch_on_the_remote() {
+        // Given — a working repo whose `origin` is a real bare remote, with a new local branch that
+        // does not yet exist on the remote.
+        let base = std::env::temp_dir().join("tddy-core-push-new-branch-to-origin");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+
+        let origin = base.join("origin.git");
+        Command::new("git")
+            .args(["init", "--bare"])
+            .arg(&origin)
+            .output()
+            .unwrap();
+
+        let repo = base.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "t@t.com"],
+            vec!["config", "user.name", "T"],
+        ] {
+            Command::new("git")
+                .args(&args)
+                .current_dir(&repo)
+                .output()
+                .unwrap();
+        }
+        fs::write(repo.join("f"), "x").unwrap();
+        Command::new("git")
+            .args(["add", "f"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "c"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["remote", "add", "origin", origin.to_str().unwrap()])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["push", "-u", "origin", "main"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+
+        Command::new("git")
+            .args(["checkout", "-b", "feature/x"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        fs::write(repo.join("g"), "y").unwrap();
+        Command::new("git")
+            .args(["add", "g"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "c2"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+
+        // When
+        push_new_branch_to_origin(&repo, "feature/x").expect("push should succeed");
+
+        // Then — the branch now exists on the remote, and the local branch tracks origin/feature/x.
+        let ls = Command::new("git")
+            .args(["ls-remote", "origin", "refs/heads/feature/x"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        let ls_out = String::from_utf8_lossy(&ls.stdout);
+        assert!(
+            ls_out.contains("refs/heads/feature/x"),
+            "expected feature/x on the remote, ls-remote was: {ls_out:?}"
+        );
+
+        let upstream = Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "feature/x@{upstream}"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&upstream.stdout).trim(),
+            "origin/feature/x",
+            "expected feature/x to track origin/feature/x"
         );
 
         let _ = fs::remove_dir_all(&base);

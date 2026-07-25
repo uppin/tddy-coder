@@ -103,6 +103,10 @@ service ConnectionService {
   // PR-Stack Chat Screen: repoint a planned node after a predecessor merged — drop merged parents,
   // rebase the local branch onto the effective base, and re-target the open PR's base branch.
   rpc RepointPlannedPr(RepointPlannedPrRequest) returns (RepointPlannedPrResponse);
+  // PR-Stack Chat Screen: resolve one head branch to its in-progress child session, on-disk
+  // worktree, and live GitHub PR status in a single call. Polled by the web per rendered branch.
+  // See docs/ft/coder/pr-stack-live-status.md.
+  rpc QueryBranch(QueryBranchRequest) returns (QueryBranchResponse);
   // Local peer-trust: mint a session token for the caller identified by its SO_PEERCRED peer uid
   // over the daemon's Unix-domain socket. Available only on the local UDS transport (the peer
   // credential is not present on ConnectRPC-HTTP or LiveKit), and only for a peer uid mapped to a
@@ -366,6 +370,11 @@ message StartSessionRequest {
   // SemanticSearch tool. Only meaningful when managed_codebase = true. See
   // docs/ft/coder/semantic-index.md.
   bool semantic_index = 27;
+  // When true in "new_branch_from_base" mode, push the freshly created branch to origin
+  // (`git push -u origin <branch>`) at session start and record Changeset.remote_pushed = true.
+  // A push failure fails the session start (no silent fallback). See
+  // docs/ft/coder/1-WIP/PRD-2026-07-25-branch-query-and-remote-branch.md.
+  bool create_remote_branch = 28;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved
@@ -988,6 +997,46 @@ message GetPrStatusRequest {
 }
 message GetPrStatusResponse {
   PrStatusView status = 1;
+}
+
+// --- PR-Stack Chat Screen: one-call branch resolution (session + worktree + PR) ---
+
+message QueryBranchRequest {
+  string session_token = 1;
+  // The "pr-stack" orchestrator session — resolves the repo (owner/repo + repo_path) and the
+  // sessions root to scan.
+  string session_id = 2;
+  // Head branch to resolve.
+  string branch = 3;
+}
+message QueryBranchResponse {
+  BranchResolution resolution = 1;
+}
+
+// Everything the PR-Stack view needs about one branch, resolved server-side by branch name.
+message BranchResolution {
+  // Echoes the request; lets a response self-identify.
+  string branch = 1;
+  // The in-progress child session working the branch.
+  BranchSession session = 2;
+  // The worktree checked out for the branch on disk.
+  BranchWorktree worktree = 3;
+  // Live GitHub PR status (reuses the existing PrStatusView).
+  PrStatusView pr = 4;
+}
+message BranchSession {
+  // False when no session owns the branch.
+  bool exists = 1;
+  string session_id = 2;
+  bool is_active = 3;
+  // e.g. "active" | "idle".
+  string status = 4;
+}
+message BranchWorktree {
+  // False when no worktree is checked out for the branch.
+  bool exists = 1;
+  // Absolute worktree path when exists = true.
+  string path = 2;
 }
 
 message RepointPlannedPrRequest {

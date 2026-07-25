@@ -1,5 +1,5 @@
 import React from "react";
-import type { PrStatusView, SessionEntry } from "../../../gen/connection_pb";
+import type { BranchResolution, PrStatusView, SessionEntry } from "../../../gen/connection_pb";
 import { resolveNodeSession } from "../../../utils/resolveNodeSession";
 import { PlannedPrRow } from "./PlannedPrRow";
 import { topoSortStackNodes, type StackNode } from "./stackPlan";
@@ -12,6 +12,8 @@ export interface PlannedPrListProps {
   sessions?: SessionEntry[];
   /** Live GitHub PR status keyed by branch (from `usePrStatus`). */
   prStatusByBranch?: Record<string, PrStatusView>;
+  /** One-call branch resolution (worktree + session + PR) keyed by branch (from `useQueryBranch`). */
+  branchResolutionByBranch?: Record<string, BranchResolution>;
   /** Repoint a node whose predecessor merged (drops the merged parent, rebases, re-targets the PR). */
   onRepoint?: (nodeId: string) => void;
 }
@@ -23,6 +25,7 @@ export function PlannedPrList({
   startingNodeId,
   sessions = [],
   prStatusByBranch = {},
+  branchResolutionByBranch = {},
   onRepoint,
 }: PlannedPrListProps) {
   const ordered = topoSortStackNodes(nodes);
@@ -38,6 +41,7 @@ export function PlannedPrList({
           const owner = resolveNodeSession(node, sessions);
           const inProgress = Boolean(owner?.isActive);
           const prStatus = node.branch ? prStatusByBranch[node.branch] : undefined;
+          const resolution = node.branch ? branchResolutionByBranch[node.branch] : undefined;
           // Repoint is offered once at least one parent PR has merged (the node needs re-basing
           // onto the new effective base).
           const canRepoint = node.parents.some(
@@ -52,6 +56,7 @@ export function PlannedPrList({
               starting={startingNodeId === node.nodeId}
               inProgress={inProgress}
               prStatus={prStatus}
+              resolution={resolution}
               canRepoint={canRepoint}
               onRepoint={onRepoint}
             />
