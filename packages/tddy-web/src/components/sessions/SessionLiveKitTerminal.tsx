@@ -4,6 +4,7 @@ import type { Room } from "livekit-client";
 import type { TokenService } from "../../gen/token_pb";
 import { GhosttyTerminalLiveKit } from "../GhosttyTerminalLiveKit";
 import { useLiveKitTerminalToken } from "./useLiveKitTerminalToken";
+import { useIsMobile } from "../../hooks/useIsMobile";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import type { LiveKitChromeStatus } from "../../lib/liveKitStatusPresentation";
 import type { ByteDelta } from "./sessionRuntimeRegistry";
@@ -17,6 +18,9 @@ interface SessionLiveKitTerminalProps {
   /** This browser tab's own LiveKit identity, from `SessionAttachmentState`'s `connected-livekit` variant. */
   identity: string;
   tokenClient: TokenClient;
+  /** Daemon session token + id, threaded to the terminal for the file drop upload feature. */
+  sessionToken: string;
+  sessionId: string;
   onDisconnect?: () => void;
   mobileShortcuts?: ToolShortcutDef[];
   /** Fired once with the session's connected LiveKit `Room` (see `GhosttyTerminalLiveKit.onRoom`). */
@@ -45,6 +49,8 @@ export function SessionLiveKitTerminal({
   livekitServerIdentity,
   identity,
   tokenClient,
+  sessionToken,
+  sessionId,
   onDisconnect,
   mobileShortcuts,
   onRoom,
@@ -53,6 +59,7 @@ export function SessionLiveKitTerminal({
   onBytes,
 }: SessionLiveKitTerminalProps) {
   const { token, ttlSeconds, getToken } = useLiveKitTerminalToken(tokenClient, livekitRoom, identity);
+  const isMobile = useIsMobile();
 
   if (token === null || ttlSeconds === null) {
     // Initial token fetch in flight (or failed) — GhosttyTerminalLiveKit requires a token up front.
@@ -69,6 +76,9 @@ export function SessionLiveKitTerminal({
       serverIdentity={livekitServerIdentity}
       connectionChromePlacement="none"
       hideStatusStrip
+      sessionToken={sessionToken}
+      sessionId={sessionId}
+      showMobileKeyboard={isMobile}
       onRemoteSessionEnded={onDisconnect}
       mobileShortcuts={mobileShortcuts}
       onRoom={onRoom}

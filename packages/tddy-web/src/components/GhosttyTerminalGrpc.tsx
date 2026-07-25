@@ -5,6 +5,8 @@ import { GhosttyTerminal, type GhosttyTerminalHandle } from "./GhosttyTerminal";
 import { ConnectionTerminalChrome } from "./connection/ConnectionTerminalChrome";
 import { TerminalConnectionStatusBar } from "./connection/TerminalConnectionStatusBar";
 import { MobileTerminalKeyboard } from "./connection/MobileTerminalKeyboard";
+import { TerminalFileDropZone } from "./connection/TerminalFileDropZone";
+import { TerminalUploadButton } from "./connection/TerminalUploadButton";
 import { ShortcutDrawer } from "./connection/ShortcutDrawer";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useVisualViewport } from "../hooks/useVisualViewport";
@@ -40,6 +42,8 @@ export interface GhosttyTerminalGrpcProps {
 }
 
 export function GhosttyTerminalGrpc({
+  sessionToken,
+  sessionId,
   stream,
   connectionOverlay,
   onDisconnect,
@@ -140,14 +144,25 @@ export function GhosttyTerminalGrpc({
         </TerminalConnectionStatusBar>
       ) : null}
       <div style={{ flex: 1, minHeight: 0, minWidth: 0, width: "100%", position: "relative" }}>
-        {terminal}
+        <TerminalFileDropZone
+          sessionToken={sessionToken}
+          sessionId={sessionId}
+          insertInput={sendInput}
+        >
+          {terminal}
+        </TerminalFileDropZone>
         {isMobile && mobileShortcuts && mobileShortcuts.length > 0 && (
           <ShortcutDrawer shortcuts={mobileShortcuts} onSend={sendInput} />
         )}
       </div>
       {isMobile && (
-        <div className="flex-shrink-0 flex items-center justify-center border-t border-border bg-muted p-1">
+        <div className="flex-shrink-0 flex items-center justify-center gap-2 border-t border-border bg-muted p-1">
           <MobileTerminalKeyboard onSend={sendInput} />
+          <TerminalUploadButton
+            sessionToken={sessionToken}
+            sessionId={sessionId}
+            insertInput={sendInput}
+          />
         </div>
       )}
       <div data-testid="terminal-buffer-text" style={{ display: "none" }} aria-hidden>

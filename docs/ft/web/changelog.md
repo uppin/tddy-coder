@@ -4,6 +4,16 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-24 — Terminal file drop actually delivers the path
+
+- Dragging a file onto the web terminal now works on a **plain-http LAN origin**: the per-drop id no longer comes from the secure-context-only `crypto.randomUUID`, which threw before any upload started (so the drop appeared to do nothing, on desktop drop and mobile **Attach** alike). See [web-terminal.md § File drop upload](web-terminal.md#file-drop-upload).
+- Uploads no longer stall mid-file in silence: each chunk request is sized to fit one LiveKit data packet (a larger, frame-split request was lost outright if any frame dropped), and every chunk carries a deadline — a stalled chunk now fails that one file (skipped, error shown, other files continue) instead of leaving the drop pending forever with no path and no error.
+- Known limitation: a drop is round-trip bound (a 2 MB file takes ~40 s) and the only progress feedback is the aggregate bar in the Host Stats Footer, so a large drop can read as a failure until the path appears.
+
+## 2026-07-24 — Terminal file drop upload
+
+- Dragging one or more files onto the Ghostty web terminal (either transport) uploads them to the host under `{session_dir}/uploads/<drop-id>/` and **types the uploaded files' shell-escaped absolute host paths into the terminal input** (space-separated, one trailing space, no newline), emulating a native terminal file-drag. See [web-terminal.md § File drop upload](web-terminal.md#file-drop-upload).
+- Upload progress shows as one aggregate bar in the Host Stats Footer and auto-hides on completion; a failed file is skipped (its path is not typed) and surfaced as a transient error. On mobile the gesture is initiated from an **Attach** button in the Keyboard strip. See [host-stats-footer.md § Upload progress](host-stats-footer.md#upload-progress-drag-to-upload).
 ## 2026-07-24 — Traffic readout aggregates all attached sessions
 
 - The screen-level byte-traffic readout in the **Host Stats Footer** now sums terminal (data-plane) traffic across **every attached session runtime** — focused and backgrounded — instead of only the focused session's LiveKit room, so the totals and rates reflect total terminal activity across all live sessions. See [host-stats-footer.md](host-stats-footer.md) and [session-drawer.md § Session Traffic Strip](session-drawer.md#session-traffic-strip).

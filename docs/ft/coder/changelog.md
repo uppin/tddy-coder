@@ -8,6 +8,10 @@ Release note history for the Coder product area.
 - The PR-Stack view resolves each node's **in-progress session by branch**, and polls GitHub (every 5 s) to show the **PR number as a link plus its state** (open/merged/closed/draft) — live, without the orchestrator agent running.
 - A **Repoint control** re-points a node whose predecessor has merged: it drops the merged parent, rebases the node's local branch onto the new effective base, and re-targets the open PR's base branch.
 - **Bug fix — the stack sequence is now respected on spawn.** Starting a session for a planned node branches off its parent node's effective base (skipping merged ancestors), not the default branch as before; starting a node before its non-merged parent is refused ([pr-stacking.md](pr-stacking.md)).
+## 2026-07-24 — LiveKit unary RPCs can have a deadline
+
+- `LiveKitTransport.unary` (web) now honours the Connect `timeoutMs` call option instead of ignoring it, rejecting with `DeadlineExceeded`. This is the only escape from a wedged call: a chunk-framed request that loses a frame in transit leaves the peer's reassembler permanently incomplete, so the RPC is never answered and never fails. Timeouts stay opt-in per call so legitimately slow RPCs (`StartSession`) are unaffected. See [rpc-multi-transport.md § A lost chunk frame wedges the call](rpc-multi-transport.md#a-lost-chunk-frame-wedges-the-call--deadlines-are-the-only-escape).
+- `MAX_CHUNK_FRAME_BYTES` is exported from `tddy-livekit-web` so payload producers can size requests to a single data packet — the reliable shape on this transport — and pin that bound in a test.
 
 ## 2026-07-24 — pr-stack: exploration.md + session context docs
 
