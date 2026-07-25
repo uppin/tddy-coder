@@ -6,6 +6,8 @@ import type { ConnectedSession } from "./useTerminalControl";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import { tddyDebug } from "../../lib/debugMask";
 import { measureTerminalGridFromRect } from "../../lib/terminalGridMeasure";
+import { useEnqueuedInput } from "./useEnqueuedInput";
+import { EnqueuedInputOverlay } from "../connection/EnqueuedInputOverlay";
 
 const dGrpc = tddyDebug("tddy:term:grpc");
 const dResize = tddyDebug("tddy:term:resize");
@@ -51,6 +53,10 @@ export function GrpcSessionTerminal({
   // structurally, `sendTerminalInput` cannot go out before the lease exists.
   const pendingInputRef = useRef<Uint8Array[]>([]);
 
+  // Enqueued-input accounting: assigns each sent chunk a cumulative byte offset, consumes the
+  // daemon's acked_input_offset, and drives the un-acknowledged-input overlay on slow links.
+  const { enqueue, ack, model: enqueuedModel, visible: enqueuedVisible } = useEnqueuedInput();
+
   // Disconnect fires automatically when the terminal goes away — either the remote
   // stream ends or this component unmounts (e.g. the user switches sessions). Read
   // the latest callback via a ref and guard so it fires at most once.
@@ -72,8 +78,18 @@ export function GrpcSessionTerminal({
         pendingInputRef.current.push(data);
         return;
       }
+      // Assign this chunk its cumulative byte offset (also tracked for the enqueued-input overlay)
+      // and send it so the daemon can ack the applied offset back on the output stream.
+      const inputOffset = enqueue(data);
       client
-        .sendTerminalInput({ sessionToken, sessionId, terminalId, data, controlToken: conn.controlToken })
+        .sendTerminalInput({
+          sessionToken,
+          sessionId,
+          terminalId,
+          data,
+          controlToken: conn.controlToken,
+          inputOffset: BigInt(inputOffset),
+        })
         .catch((err) => {
           dGrpc(
             "sendTerminalInput failed sessionId=%s error=%o",
@@ -82,7 +98,7 @@ export function GrpcSessionTerminal({
           );
         });
     },
-    [client, sessionId, sessionToken, terminalId],
+    [client, sessionId, sessionToken, terminalId, enqueue],
   );
 
   useEffect(() => {
@@ -133,6 +149,10 @@ export function GrpcSessionTerminal({
           initialRows,
         }) as AsyncIterable<SessionTerminalOutput>) {
           if (closed) break;
+          // ACK frames (empty data, non-zero offset) collapse the enqueued-input overlay.
+          if (output.ackedInputOffset > 0n) {
+            ack(Number(output.ackedInputOffset));
+          }
           if (output.data.length > 0) {
             outputListeners.forEach((fn) => fn(output.data));
           }
@@ -146,7 +166,7 @@ export function GrpcSessionTerminal({
     return () => {
       closed = true;
     };
-  }, [client, sessionId, sessionToken, terminalId, sendInputRequest]);
+  }, [client, sessionId, sessionToken, terminalId, sendInputRequest, ack]);
 
   // Release input that was queued while the claim was in flight once `connected` arrives. Keyed on
   // `connected` so it fires exactly when the lease transitions null → ConnectedSession.
@@ -172,7 +192,7 @@ export function GrpcSessionTerminal({
   // Always render the outer div so containerRef.current is available when the
   // effect above runs (before stream is set). Terminal renders once stream is ready.
   return (
-    <div ref={containerRef} style={{ width: "100%", height: "100%" }}>
+    <div ref={containerRef} style={{ width: "100%", height: "100%", position: "relative" }}>
       {stream && (
         <GhosttyTerminalGrpc
           sessionToken={sessionToken}
@@ -181,6 +201,7 @@ export function GrpcSessionTerminal({
           mobileShortcuts={mobileShortcuts}
         />
       )}
+      <EnqueuedInputOverlay model={enqueuedModel} visible={enqueuedVisible} />
     </div>
   );
 }

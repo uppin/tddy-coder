@@ -172,6 +172,7 @@ impl Stream for TerminalOutputStream {
                 Ok(chunk) => {
                     return std::task::Poll::Ready(Some(Ok(SessionTerminalOutput {
                         data: chunk.to_vec(),
+                        acked_input_offset: 0,
                     })));
                 }
                 Err(TryRecvError::Lagged(_)) => {
@@ -207,7 +208,7 @@ impl Unpin for TerminalOutputStream {}
 /// broadcast channel into the mpsc sender so no messages can be lost between `try_recv()` and
 /// waker registration.
 pub struct MpscTerminalOutputStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<bytes::Bytes>,
+    rx: tokio::sync::mpsc::UnboundedReceiver<SessionTerminalOutput>,
 }
 
 impl Stream for MpscTerminalOutputStream {
@@ -218,14 +219,26 @@ impl Stream for MpscTerminalOutputStream {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         match self.rx.poll_recv(cx) {
-            std::task::Poll::Ready(Some(chunk)) => {
-                std::task::Poll::Ready(Some(Ok(SessionTerminalOutput {
-                    data: chunk.to_vec(),
-                })))
-            }
+            std::task::Poll::Ready(Some(msg)) => std::task::Poll::Ready(Some(Ok(msg))),
             std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
             std::task::Poll::Pending => std::task::Poll::Pending,
         }
+    }
+}
+
+/// A terminal output-data frame (no ACK).
+fn terminal_data_frame(data: Vec<u8>) -> SessionTerminalOutput {
+    SessionTerminalOutput {
+        data,
+        acked_input_offset: 0,
+    }
+}
+
+/// An input-offset ACK frame (empty data).
+fn terminal_ack_frame(acked_input_offset: u64) -> SessionTerminalOutput {
+    SessionTerminalOutput {
+        data: Vec::new(),
+        acked_input_offset,
     }
 }
 
@@ -5012,14 +5025,15 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 .map(|cap| chunk_terminal_output(&cap, TERMINAL_OUTPUT_FRAME_MAX_BYTES))
                 .unwrap_or_default();
             for frame in frames {
-                let _ = tx.send(frame);
+                let _ = tx.send(terminal_data_frame(frame.to_vec()));
             }
             let mut stdout_rx = sandbox.stdout_tx.subscribe();
+            // Sandbox sessions have no unary input-offset ACK source; data frames only.
             tokio::spawn(async move {
                 loop {
                     match stdout_rx.recv().await {
                         Ok(chunk) => {
-                            if tx.send(chunk).is_err() {
+                            if tx.send(terminal_data_frame(chunk.to_vec())).is_err() {
                                 break;
                             }
                         }
@@ -5068,7 +5082,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // Subscribe to broadcast BEFORE reading the capture buffer so there is no gap:
         // bytes produced between the capture snapshot and the first bridge recv() are
         // covered by the broadcast subscription.
-        let (mpsc_tx, mpsc_rx) = tokio::sync::mpsc::unbounded_channel::<bytes::Bytes>();
+        let (mpsc_tx, mpsc_rx) = tokio::sync::mpsc::unbounded_channel::<SessionTerminalOutput>();
         let mut broadcast_rx = handle.stdout_tx.subscribe();
 
         // Replay capture buffer only when the client did NOT supply terminal dimensions.
@@ -5098,7 +5112,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     session_id
                 );
                 for frame in frames {
-                    let _ = mpsc_tx.send(frame);
+                    let _ = mpsc_tx.send(terminal_data_frame(frame.to_vec()));
                 }
             }
         } else {
@@ -5139,23 +5153,48 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             }
         }
 
-        // Bridge broadcast → mpsc for all future output.
+        // Input-offset ACKs ride the same output stream (docs/ft/web/enqueued-input-overlay.md):
+        // whenever the applied input offset advances, emit an empty-data frame carrying it. Emit the
+        // current applied offset up front so a stream that opens after some input was already
+        // applied (e.g. a reconnect) learns the acknowledged position immediately.
+        let mut acked_rx = handle.subscribe_acked_offset();
+        let initial_acked = *acked_rx.borrow_and_update();
+        if initial_acked > 0 {
+            let _ = mpsc_tx.send(terminal_ack_frame(initial_acked));
+        }
+
+        // Bridge broadcast → mpsc for all future output, interleaving ACK frames.
         // Also breaks when pty_done fires so the HTTP stream ends when the process exits.
         let mpsc_tx_bridge = mpsc_tx.clone();
         let mut pty_done = handle.pty_done.clone();
         tokio::spawn(async move {
             use tokio::sync::broadcast::error::RecvError;
+            // Disabled once the ACK sender drops, so a closed watch never busy-spins the select.
+            let mut ack_open = true;
             loop {
                 tokio::select! {
                     result = broadcast_rx.recv() => {
                         match result {
                             Ok(chunk) => {
-                                if mpsc_tx_bridge.send(chunk).is_err() {
+                                if mpsc_tx_bridge.send(terminal_data_frame(chunk.to_vec())).is_err() {
                                     break; // receiver dropped (stream closed)
                                 }
                             }
                             Err(RecvError::Closed) => break,
                             Err(RecvError::Lagged(_)) => continue, // skip lagged; resume from latest
+                        }
+                    }
+                    changed = acked_rx.changed(), if ack_open => {
+                        match changed {
+                            Ok(()) => {
+                                let offset = *acked_rx.borrow_and_update();
+                                if mpsc_tx_bridge.send(terminal_ack_frame(offset)).is_err() {
+                                    break; // receiver dropped (stream closed)
+                                }
+                            }
+                            // ACK sender dropped (terminal gone) — stop watching acks; the output
+                            // bridge runs on until pty_done / broadcast close drive the exit.
+                            Err(_) => ack_open = false,
                         }
                     }
                     _ = pty_done.changed() => break,
@@ -5217,7 +5256,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 req.data.len(),
                 String::from_utf8_lossy(&req.data)
             );
-            handle.send_input(bytes::Bytes::from(req.data));
+            let input_offset = req.input_offset;
+            handle.send_input(bytes::Bytes::from(req.data), input_offset);
         }
         Ok(Response::new(SendTerminalInputResponse {}))
     }

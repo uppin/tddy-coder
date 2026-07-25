@@ -55,6 +55,11 @@ export const TEST_IDS = {
   terminalUploadButton: "terminal-upload-button",
   uploadProgressIndicator: "upload-progress-indicator",
   uploadProgressError: "upload-progress-error",
+  // Enqueued input overlay (docs/ft/web/enqueued-input-overlay.md)
+  enqueuedInputOverlay: "enqueued-input-overlay",
+  enqueuedInputText: "enqueued-input-text",
+  enqueuedInputMouse: "enqueued-input-mouse",
+  enqueuedInputOverflow: "enqueued-input-overflow",
 
   // ConnectionScreen / session table
   sessionsTableOrphan: "sessions-table-orphan",
