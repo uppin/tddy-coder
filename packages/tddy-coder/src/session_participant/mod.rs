@@ -29,7 +29,8 @@ use tokio::sync::watch;
 use tddy_rpc::{RpcMessage, RpcResult, RpcService, ServiceEntry, Status};
 use tddy_service::proto::connection::{
     AcpReplayFrame, ClaimTerminalControlRequest, ClaimTerminalControlResponse, ExecuteToolRequest,
-    ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
+    ExecuteToolResponse, GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse,
+    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
     ListSessionToolCallsResponse, ListTerminalSessionsRequest, ListTerminalSessionsResponse,
     SendTerminalInputResponse, SessionTerminalInput, SessionTerminalOutput,
     StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
@@ -529,7 +530,8 @@ impl RpcService for SessionConnectionServiceRpc {
                     frame: &tddy_service::proto::acp::AcpAgentMessage,
                 ) -> Vec<u8> {
                     AcpReplayFrame {
-                        acp_agent_message: frame.encode_to_vec(),
+                        acp_agent_message: tddy_service::acp_replay::strip_tool_body(frame)
+                            .encode_to_vec(),
                         // A transcript frame carries no count; count-first mode sets this instead.
                         activity_count: 0,
                     }
@@ -642,6 +644,33 @@ impl RpcService for SessionConnectionServiceRpc {
                 }
 
                 RpcResult::ServerStream(Ok(rx))
+            }
+            "GetAcpToolCallDetail" => {
+                let req = match GetAcpToolCallDetailRequest::decode(&message.payload[..]) {
+                    Ok(req) => req,
+                    Err(e) => {
+                        return RpcResult::Unary(Err(Status::invalid_argument(format!(
+                            "decode GetAcpToolCallDetailRequest: {e}"
+                        ))));
+                    }
+                };
+                match tddy_service::acp_replay::tool_call_detail(
+                    &self.svc.agent_activity_dir,
+                    &req.tool_call_id,
+                ) {
+                    Err(e) => {
+                        RpcResult::Unary(Err(Status::internal(format!("read transcript: {e}"))))
+                    }
+                    Ok(None) => RpcResult::Unary(Err(Status::not_found(format!(
+                        "no tool call with id {} in this session",
+                        req.tool_call_id
+                    )))),
+                    Ok(Some(d)) => RpcResult::Unary(Ok(GetAcpToolCallDetailResponse {
+                        raw_input: d.raw_input,
+                        raw_output: d.raw_output,
+                    }
+                    .encode_to_vec())),
+                }
             }
             other => RpcResult::Unary(Err(Status::unimplemented(format!(
                 "session participant does not serve ConnectionService/{other}"
@@ -1163,5 +1192,141 @@ mod tests {
 
         // Then — the first count frame reports the two persisted calls
         assert_eq!(recv_acp_envelope(&mut rx).await.activity_count, 2);
+    }
+
+    /// The full `ToolCall` payload of a `tool_call` ACP frame (panics on any other shape).
+    fn acp_tool_call(
+        frame: &tddy_service::proto::acp::AcpAgentMessage,
+    ) -> tddy_service::proto::acp::ToolCall {
+        use tddy_service::proto::acp::{acp_agent_message, session_update};
+        match &frame.msg {
+            Some(acp_agent_message::Msg::SessionUpdate(n)) => {
+                match n.update.as_ref().and_then(|u| u.update.clone()) {
+                    Some(session_update::Update::ToolCall(tc)) => tc,
+                    other => panic!("expected ToolCall, got {other:?}"),
+                }
+            }
+            other => panic!("expected a SessionUpdate frame, got {other:?}"),
+        }
+    }
+
+    fn detail_request_message(session_id: &str, tool_call_id: &str) -> RpcMessage {
+        let req = GetAcpToolCallDetailRequest {
+            session_token: "caller-token".to_string(),
+            session_id: session_id.to_string(),
+            daemon_instance_id: String::new(),
+            tool_call_id: tool_call_id.to_string(),
+        };
+        RpcMessage::new(req.encode_to_vec(), Default::default())
+    }
+
+    /// A `SNAPSHOT_THEN_LIVE` tool-call frame carries the call's id but not its bodies: the heavy
+    /// `raw_input`/`raw_output` are stripped so the stream stays small.
+    #[tokio::test]
+    async fn stream_acp_replay_snapshot_frames_omit_tool_bodies() {
+        // Given — a session dir whose persisted transcript holds a completed call with full bodies
+        let dir = tempfile::tempdir().unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            dir.path(),
+            &tddy_service::acp_replay::frame_for_agent_activity(&a_completed_record("call-1")),
+        )
+        .unwrap();
+        let (events, _keepalive) = broadcast::channel(16);
+        let rpc = rpc_for(dir.path(), events);
+
+        // When — the StreamAcpReplay snapshot arm is dispatched
+        let result = rpc
+            .handle_rpc(
+                "connection.ConnectionService",
+                "StreamAcpReplay",
+                &acp_replay_request_message("sess-1"),
+            )
+            .await;
+        let mut rx = match result {
+            RpcResult::ServerStream(Ok(rx)) => rx,
+            RpcResult::ServerStream(Err(status)) => {
+                panic!("expected a server stream, got error status: {status:?}")
+            }
+            _ => panic!("expected a server stream, got a unary result"),
+        };
+
+        // Then — the tool call arrives with its id intact but neither body
+        let tc = acp_tool_call(&recv_acp_frame(&mut rx).await);
+        assert_eq!(tc.tool_call_id.expect("tool_call_id").value, "call-1");
+        assert_eq!(tc.raw_input, None);
+        assert_eq!(tc.raw_output, None);
+    }
+
+    /// The bodies the stream strips are fetched on demand: GetAcpToolCallDetail returns the exact
+    /// raw_input/raw_output the transcript recorded for one call.
+    #[tokio::test]
+    async fn get_acp_tool_call_detail_returns_the_full_tool_bodies() {
+        // Given — a session dir whose transcript holds a completed Bash call
+        let dir = tempfile::tempdir().unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            dir.path(),
+            &tddy_service::acp_replay::frame_for_agent_activity(&a_completed_record("call-1")),
+        )
+        .unwrap();
+        let (events, _keepalive) = broadcast::channel(16);
+        let rpc = rpc_for(dir.path(), events);
+
+        // When — the detail for that call is requested
+        let result = rpc
+            .handle_rpc(
+                "connection.ConnectionService",
+                "GetAcpToolCallDetail",
+                &detail_request_message("sess-1", "call-1"),
+            )
+            .await;
+        let bytes = match result {
+            RpcResult::Unary(Ok(bytes)) => bytes,
+            RpcResult::Unary(Err(status)) => {
+                panic!("expected a detail response, got error status: {status:?}")
+            }
+            _ => panic!("expected a unary result, got a server stream"),
+        };
+        let resp = GetAcpToolCallDetailResponse::decode(&bytes[..])
+            .expect("decode GetAcpToolCallDetailResponse");
+
+        // Then — it returns the exact bodies the stream used to inline
+        let raw_input: serde_json::Value =
+            serde_json::from_str(&resp.raw_input.expect("raw_input")).expect("raw_input is JSON");
+        let raw_output: serde_json::Value =
+            serde_json::from_str(&resp.raw_output.expect("raw_output"))
+                .expect("raw_output is JSON");
+        assert_eq!(raw_input, serde_json::json!({ "command": "cargo build" }));
+        assert_eq!(raw_output, serde_json::json!({ "stdout": "done" }));
+    }
+
+    /// A tool_call_id absent from the transcript is a NOT_FOUND error, not an empty success.
+    #[tokio::test]
+    async fn get_acp_tool_call_detail_is_not_found_for_an_unknown_tool_call_id() {
+        // Given — a session dir whose transcript holds only call-1
+        let dir = tempfile::tempdir().unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            dir.path(),
+            &tddy_service::acp_replay::frame_for_agent_activity(&a_completed_record("call-1")),
+        )
+        .unwrap();
+        let (events, _keepalive) = broadcast::channel(16);
+        let rpc = rpc_for(dir.path(), events);
+
+        // When — the detail for a non-existent call is requested
+        let result = rpc
+            .handle_rpc(
+                "connection.ConnectionService",
+                "GetAcpToolCallDetail",
+                &detail_request_message("sess-1", "does-not-exist"),
+            )
+            .await;
+        let status = match result {
+            RpcResult::Unary(Err(status)) => status,
+            RpcResult::Unary(Ok(_)) => panic!("expected NOT_FOUND, got a success response"),
+            _ => panic!("expected a unary result, got a server stream"),
+        };
+
+        // Then — the status is NOT_FOUND
+        assert_eq!(status.code(), tddy_rpc::Code::NotFound);
     }
 }

@@ -69,7 +69,8 @@ use crate::worktrees::{
 };
 use tddy_service::proto::connection::{
     AcpReplayFrame, AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState,
-    ExecuteToolRequest, ExecuteToolResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
+    ExecuteToolRequest, ExecuteToolResponse, GetAcpToolCallDetailRequest,
+    GetAcpToolCallDetailResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
     GetPrStatusRequest, GetPrStatusResponse, HostCpuStats, HostDiskStats, HostStatsEvent,
     ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
     ListSessionToolCallsResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
@@ -366,7 +367,7 @@ impl Unpin for MpscAcpReplayStream {}
 /// `AcpAgentMessage` to its protobuf bytes.
 fn acp_replay_frame(frame: &tddy_service::proto::acp::AcpAgentMessage) -> AcpReplayFrame {
     AcpReplayFrame {
-        acp_agent_message: frame.encode_to_vec(),
+        acp_agent_message: tddy_service::acp_replay::strip_tool_body(frame).encode_to_vec(),
         // A transcript frame carries no count; the count-first mode sets this instead.
         activity_count: 0,
     }
@@ -6674,6 +6675,97 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(MpscAcpReplayStream { rx }))
     }
 
+    /// Return one tool call's full `raw_input`/`raw_output` from the session's coalesced transcript
+    /// (the bodies `stream_acp_replay` strips out). Mirrors `stream_acp_replay`'s routing/auth and
+    /// maps an unknown `tool_call_id` to `NOT_FOUND`.
+    async fn get_acp_tool_call_detail(
+        &self,
+        request: Request<GetAcpToolCallDetailRequest>,
+    ) -> Result<Response<GetAcpToolCallDetailResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        // Route BEFORE session lookup so a relay (which has no local sessions) can forward.
+        let requested_daemon = req.daemon_instance_id.trim();
+        if !requested_daemon.is_empty() {
+            let local_id = local_instance_id_for_config(&self.config);
+            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
+            let eligible_ids: Vec<String> = eligible_rows
+                .iter()
+                .map(|e| e.instance_id.0.clone())
+                .collect();
+            match crate::livekit_peer_discovery::classify_peer_route(
+                &local_id,
+                requested_daemon,
+                &eligible_ids,
+            ) {
+                Err(msg) => {
+                    log::info!("GetAcpToolCallDetail: rejected daemon routing: {}", msg);
+                    return Err(Status::invalid_argument(msg));
+                }
+                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
+                    log::info!(
+                        "GetAcpToolCallDetail: forwarding RPC to remote daemon_instance_id={}",
+                        peer_instance_id
+                    );
+                    let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
+                        Status::failed_precondition(
+                            "cannot forward GetAcpToolCallDetail: this process has no LiveKit common-room connection",
+                        )
+                    })?;
+                    let body = req.encode_to_vec();
+                    let out = crate::livekit_peer_discovery::forward_to_peer(
+                        slot,
+                        &peer_instance_id,
+                        "connection.ConnectionService",
+                        "GetAcpToolCallDetail",
+                        body,
+                    )
+                    .await?;
+                    let inner =
+                        GetAcpToolCallDetailResponse::decode(out.as_slice()).map_err(|e| {
+                            Status::internal(format!("decode GetAcpToolCallDetailResponse: {e}"))
+                        })?;
+                    return Ok(Response::new(inner));
+                }
+                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
+                    // Fall through to local execution below.
+                }
+            }
+        }
+
+        // Authenticate caller.
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        // Validate session ID.
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+
+        // Resolve the session dir.
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+
+        let detail = tddy_service::acp_replay::tool_call_detail(&session_dir, &req.tool_call_id)
+            .map_err(|e| Status::internal(format!("read transcript: {e}")))?;
+        match detail {
+            None => Err(Status::not_found(format!(
+                "no tool call with id {} in session {}",
+                req.tool_call_id, req.session_id
+            ))),
+            Some(detail) => Ok(Response::new(GetAcpToolCallDetailResponse {
+                raw_input: detail.raw_input,
+                raw_output: detail.raw_output,
+            })),
+        }
+    }
+
     // --- terminal control mutex ---
 
     type WatchTerminalControlStream = MpscControlEventStream;
@@ -8937,6 +9029,165 @@ mod agent_activity_unit_tests {
 
         // Then the first count frame reports the two persisted calls.
         assert_eq!(next_replay_envelope(&mut stream).await.activity_count, 2);
+    }
+
+    /// The full `ToolCall` payload of a `tool_call` ACP frame (panics on any other shape).
+    fn acp_tool_call(
+        frame: &tddy_service::proto::acp::AcpAgentMessage,
+    ) -> tddy_service::proto::acp::ToolCall {
+        use tddy_service::proto::acp::{acp_agent_message, session_update};
+        match &frame.msg {
+            Some(acp_agent_message::Msg::SessionUpdate(n)) => {
+                match n.update.as_ref().and_then(|u| u.update.clone()) {
+                    Some(session_update::Update::ToolCall(tc)) => tc,
+                    other => panic!("expected ToolCall, got {other:?}"),
+                }
+            }
+            other => panic!("expected a SessionUpdate frame, got {other:?}"),
+        }
+    }
+
+    /// A `SNAPSHOT_THEN_LIVE` tool-call frame carries the call's metadata but not its bodies: the
+    /// heavy `raw_input`/`raw_output` are stripped so the stream's size tracks the number of tool
+    /// calls, not the volume of their I/O.
+    #[tokio::test]
+    async fn stream_acp_replay_snapshot_frames_omit_tool_bodies() {
+        // Given a session whose persisted transcript holds a completed Read call with a full
+        // raw_input and raw_output baked into the frame.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-strip-snapshot-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            &session_dir,
+            &tddy_service::acp_replay::frame_for_agent_activity(&a_seeded_record("call-a", "Read")),
+        )
+        .unwrap();
+        let service = make_unit_service(sessions_base);
+
+        // When a client subscribes to the snapshot replay.
+        let mut stream = service
+            .stream_acp_replay(Request::new(StreamAcpReplayRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                mode: StreamMode::SnapshotThenLive as i32,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Then the tool call arrives with its id and title intact but its bodies stripped.
+        let tc = acp_tool_call(&next_replay_frame(&mut stream).await);
+        assert_eq!(tc.tool_call_id.expect("tool_call_id").value, "call-a");
+        assert_eq!(tc.title, "Read");
+        assert_eq!(tc.raw_input, None);
+        assert_eq!(tc.raw_output, None);
+    }
+
+    /// The live tail is stripped too: a record published after subscribe (LIVE_ONLY) arrives as a
+    /// body-less tool-call frame, same as the snapshot.
+    #[tokio::test]
+    async fn stream_acp_replay_live_frames_omit_tool_bodies() {
+        // Given a live subscription in LIVE_ONLY mode (no snapshot).
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-strip-live-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let service = make_unit_service(sessions_base);
+        let hub = service.agent_activity_hub();
+        let mut stream = service
+            .stream_acp_replay(Request::new(StreamAcpReplayRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                mode: StreamMode::LiveOnly as i32,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // When a completed call is published live for this session.
+        hub.publish(session_id, a_seeded_record("call-live", "Grep"));
+
+        // Then the live tool-call frame carries its id but neither body.
+        let tc = acp_tool_call(&next_replay_frame(&mut stream).await);
+        assert_eq!(tc.tool_call_id.expect("tool_call_id").value, "call-live");
+        assert_eq!(tc.raw_input, None);
+        assert_eq!(tc.raw_output, None);
+    }
+
+    /// The bodies the stream strips are fetched on demand: GetAcpToolCallDetail returns the exact
+    /// raw_input/raw_output the transcript recorded for one call.
+    #[tokio::test]
+    async fn get_acp_tool_call_detail_returns_the_full_tool_bodies() {
+        // Given a session whose transcript holds a completed Read call.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-detail-full-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            &session_dir,
+            &tddy_service::acp_replay::frame_for_agent_activity(&a_seeded_record("call-a", "Read")),
+        )
+        .unwrap();
+        let service = make_unit_service(sessions_base);
+
+        // When the detail for that call is requested.
+        let detail = service
+            .get_acp_tool_call_detail(Request::new(GetAcpToolCallDetailRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                tool_call_id: "call-a".to_string(),
+            }))
+            .await
+            .expect("detail lookup should succeed")
+            .into_inner();
+
+        // Then it returns the exact bodies the stream used to inline.
+        let raw_input: serde_json::Value =
+            serde_json::from_str(&detail.raw_input.expect("raw_input")).expect("raw_input is JSON");
+        let raw_output: serde_json::Value =
+            serde_json::from_str(&detail.raw_output.expect("raw_output"))
+                .expect("raw_output is JSON");
+        assert_eq!(raw_input, serde_json::json!({ "path": "src/main.rs" }));
+        assert_eq!(raw_output, serde_json::json!({ "content": "fn main() {}" }));
+    }
+
+    /// A tool_call_id absent from the transcript is a NOT_FOUND error, not an empty success — so the
+    /// caller can tell "no such call" from "call exists but has no output".
+    #[tokio::test]
+    async fn get_acp_tool_call_detail_is_not_found_for_an_unknown_tool_call_id() {
+        // Given a session whose transcript holds only call-a.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-detail-missing-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            &session_dir,
+            &tddy_service::acp_replay::frame_for_agent_activity(&a_seeded_record("call-a", "Read")),
+        )
+        .unwrap();
+        let service = make_unit_service(sessions_base);
+
+        // When the detail for a non-existent call is requested.
+        let status = service
+            .get_acp_tool_call_detail(Request::new(GetAcpToolCallDetailRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                tool_call_id: "does-not-exist".to_string(),
+            }))
+            .await
+            .expect_err("an unknown tool_call_id should be an error");
+
+        // Then the status is NOT_FOUND.
+        assert_eq!(status.code(), tddy_rpc::Code::NotFound);
     }
 }
 
