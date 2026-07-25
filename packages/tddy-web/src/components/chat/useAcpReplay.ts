@@ -57,9 +57,11 @@ const NOOP_SEND = () => false;
  * Frame projection mirrors the live ACP path: `agent_message_chunk` text merges into agent bubbles
  * (via {@link createAgentChunkMerger}, finalized per recorded chunk so discrete chunks stay separate);
  * `tool_call` becomes a tool entry carrying the server-enriched `title`, a coarse status, and its
- * `raw_input`/`raw_output` (for the detail dialog), coalesced by `tool_call_id`; `user_message_chunk`
- * a user bubble; `agent_thought_chunk` a goal bubble. Each entry's timestamp is the frame's
- * `SessionNotification.timestamp_unix_ms`, so elapsed badges reflect the recorded timeline.
+ * `tool_call_id` (the detail dialog fetches the call's `raw_input`/`raw_output` on demand via
+ * `GetAcpToolCallDetail`, since the stream no longer inlines bodies — PR #345), coalesced by
+ * `tool_call_id`; `user_message_chunk` a user bubble; `agent_thought_chunk` a goal bubble. Each
+ * entry's timestamp is the frame's `SessionNotification.timestamp_unix_ms`, so elapsed badges reflect
+ * the recorded timeline.
  */
 export function useAcpReplay(args: {
   sessionId: string;
@@ -165,16 +167,13 @@ export function useAcpReplay(args: {
             // a missing id always opens a new entry.
             const id = update.value.toolCallId?.value ?? "";
             const existingIndex = id ? toolIndexById.get(id) : undefined;
-            const rawInput = update.value.rawInput ?? "";
-            const rawOutput = update.value.rawOutput ?? "";
             if (existingIndex !== undefined) {
               acc[existingIndex] = {
                 ...acc[existingIndex],
                 text: update.value.title,
                 at,
                 toolStatus: toolStatusOf(update.value.status),
-                rawInput,
-                rawOutput,
+                toolCallId: id,
               };
             } else {
               if (id) toolIndexById.set(id, acc.length);
@@ -184,8 +183,7 @@ export function useAcpReplay(args: {
                 from: "tool",
                 at,
                 toolStatus: toolStatusOf(update.value.status),
-                rawInput,
-                rawOutput,
+                toolCallId: id,
               });
             }
           } else if (update.case === "userMessageChunk") {

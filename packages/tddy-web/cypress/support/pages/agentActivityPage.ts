@@ -55,6 +55,14 @@ export const agentActivityPage = {
   jsonHighlight: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.agentActivityJsonHighlight, { timeout: 5000, ...options }),
 
+  /** The dialog's loading state, shown while the tool body is being fetched on demand. */
+  detailLoading: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.agentActivityDetailLoading, { timeout: 5000, ...options }),
+
+  /** The dialog's error state, shown when the tool body lookup fails. */
+  detailError: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.agentActivityDetailError, { timeout: 5000, ...options }),
+
   /** Open the detail dialog by clicking the transcript entry at `index` (arrival order). */
   openDetail(index: number) {
     byTestId(`agent-chat-message-${index}`).click();
