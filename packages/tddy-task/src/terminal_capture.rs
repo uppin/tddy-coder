@@ -36,6 +36,14 @@ impl TerminalCapture {
     /// Maximum bytes of output retained for replay.
     pub const CAPTURE_LIMIT_BYTES: usize = 64 * 1024;
 
+    /// How far past the limit eviction may chase the end of a cut escape sequence.
+    ///
+    /// A sequence a client can render is at most a few dozen bytes, so this bound is only ever
+    /// reached by a payload the application never terminated (an OSC missing its `ST`, say).
+    /// Without it the chase would run to the end of the buffer and empty the ring, leaving a late
+    /// subscriber a blank screen; giving up leaves a fragment instead, which is the better trade.
+    pub const MAX_SEQUENCE_CHASE_BYTES: usize = 1024;
+
     pub fn new() -> Self {
         Self {
             buffer: Vec::new(),
@@ -74,30 +82,42 @@ impl TerminalCapture {
         &self.buffer
     }
 
-    /// Track the latest DECSET/DECRST for every mouse-tracking mode the application touches.
+    /// Track the latest DECSET/DECRST for every mouse-tracking mode the application touches, and
+    /// forget them all when the application hard-resets the terminal.
     fn sniff_mouse_modes(&mut self, data: &[u8]) {
         for &byte in data {
-            let Some(update) = self.sniffer.feed(byte) else {
+            let Some(event) = self.sniffer.feed(byte) else {
                 continue;
             };
-            apply_mouse_modes(&mut self.enabled_mouse_modes, update);
+            match event {
+                StreamEvent::PrivateMode(update) => {
+                    apply_mouse_modes(&mut self.enabled_mouse_modes, update)
+                }
+                StreamEvent::FullReset => self.enabled_mouse_modes.clear(),
+            }
         }
     }
 
     /// Evict the oldest bytes down to the limit, then keep going to the end of an escape sequence
     /// the eviction cut in half — an orphan fragment would be rendered as text by the client.
+    ///
+    /// The chase stops after [`Self::MAX_SEQUENCE_CHASE_BYTES`] so an unterminated payload cannot
+    /// consume the whole ring.
     fn evict_to_limit(&mut self) {
-        let mut evict = self.buffer.len().saturating_sub(Self::CAPTURE_LIMIT_BYTES);
-        for &byte in &self.buffer[..evict] {
+        let overflow = self.buffer.len().saturating_sub(Self::CAPTURE_LIMIT_BYTES);
+        if overflow == 0 {
+            return;
+        }
+        for &byte in &self.buffer[..overflow] {
             self.evicted.feed(byte);
         }
-        while !self.evicted.at_sequence_boundary() && evict < self.buffer.len() {
+        let chase_limit = (overflow + Self::MAX_SEQUENCE_CHASE_BYTES).min(self.buffer.len());
+        let mut evict = overflow;
+        while !self.evicted.at_sequence_boundary() && evict < chase_limit {
             self.evicted.feed(self.buffer[evict]);
             evict += 1;
         }
-        if evict > 0 {
-            self.buffer.drain(..evict);
-        }
+        self.buffer.drain(..evict);
     }
 }
 
@@ -105,6 +125,14 @@ impl Default for TerminalCapture {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Something the parser saw complete in the stream that changes the terminal's mode state.
+enum StreamEvent<'a> {
+    /// A DECSET (`ESC[?<modes>h`) or DECRST (`ESC[?<modes>l`).
+    PrivateMode(PrivateModeUpdate<'a>),
+    /// RIS (`ESC c`) — a hard terminal reset, which turns every private mode back off.
+    FullReset,
 }
 
 /// A completed DECSET (`ESC[?<modes>h`) or DECRST (`ESC[?<modes>l`).
@@ -178,8 +206,8 @@ impl EscapeParser {
         matches!(self.state, ParserState::Ground)
     }
 
-    /// Consume the next byte, reporting a private-mode change when one completes.
-    fn feed(&mut self, byte: u8) -> Option<PrivateModeUpdate<'_>> {
+    /// Consume the next byte, reporting a mode-changing sequence when one completes.
+    fn feed(&mut self, byte: u8) -> Option<StreamEvent<'_>> {
         match self.state {
             ParserState::Ground => {
                 if byte == ESC {
@@ -188,6 +216,10 @@ impl EscapeParser {
                 None
             }
             ParserState::Escape => {
+                if byte == RIS_FINAL {
+                    self.state = ParserState::Ground;
+                    return Some(StreamEvent::FullReset);
+                }
                 self.state = match byte {
                     b'[' => {
                         self.begin_csi();
@@ -238,7 +270,7 @@ impl EscapeParser {
     }
 
     /// Parameter bytes accumulate until a final byte (`0x40..=0x7e`) closes the sequence.
-    fn feed_csi(&mut self, byte: u8) -> Option<PrivateModeUpdate<'_>> {
+    fn feed_csi(&mut self, byte: u8) -> Option<StreamEvent<'_>> {
         match byte {
             b'0'..=b'9' => {
                 self.current_param = self
@@ -271,10 +303,10 @@ impl EscapeParser {
                     return None;
                 }
                 self.finish_param();
-                Some(PrivateModeUpdate {
+                Some(StreamEvent::PrivateMode(PrivateModeUpdate {
                     modes: &self.params,
                     enabled,
-                })
+                }))
             }
             // Private markers, intermediates and in-sequence control bytes leave the state alone.
             _ => None,
@@ -298,6 +330,8 @@ impl EscapeParser {
 const ESC: u8 = 0x1b;
 /// `BEL` — one of the two accepted terminators of a string payload.
 const BEL: u8 = 0x07;
+/// Final byte of RIS (`ESC c`), the hard terminal reset.
+const RIS_FINAL: u8 = b'c';
 /// Intermediate bytes of an escape sequence, e.g. the `(` of `ESC ( B`.
 const INTERMEDIATE_BYTES: std::ops::RangeInclusive<u8> = 0x20..=0x2f;
 /// Bytes that separate CSI parameters (`;`, and `:` inside sub-parameters).

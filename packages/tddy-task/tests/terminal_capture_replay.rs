@@ -29,6 +29,11 @@ const ALTERNATE_SCREEN: u16 = 1049;
 /// Byte used for bulk output that carries no escape sequences.
 const FILLER_BYTE: u8 = b'A';
 
+/// RIS (`ESC c`) — a full terminal reset, which turns mouse reporting back off.
+const FULL_RESET: &[u8] = b"\x1bc";
+/// The start of an OSC payload (set window title) that the application never terminates.
+const UNTERMINATED_OSC: &[u8] = b"\x1b]0;";
+
 /// The bytes a terminal application writes to turn a private mode on.
 fn mode_on(mode: u16) -> Vec<u8> {
     format!("\x1b[?{mode}h").into_bytes()
@@ -302,6 +307,43 @@ fn drops_the_escape_sequence_that_trimming_cut_in_half() {
     replay
         .assert_is_entirely(FILLER_BYTE)
         .assert_byte_len(TerminalCapture::CAPTURE_LIMIT_BYTES - 2);
+}
+
+#[test]
+fn forgets_the_mouse_modes_after_a_full_terminal_reset() {
+    // Given an application that enabled mouse tracking and then hard-reset the terminal, which
+    // turns mouse reporting off just as surely as a DECRST would
+    let capture = a_terminal_capture()
+        .with_mode_enabled(BUTTON_EVENT_TRACKING)
+        .with_mode_enabled(SGR_MOUSE_ENCODING)
+        .with_raw_output(FULL_RESET)
+        .build();
+
+    // When the prologue is computed
+    let prologue = capture.mode_prologue();
+
+    // Then nothing is re-enabled — replaying stale modes would leave a late subscriber's VT
+    // reporting mouse events the application is no longer reading
+    prologue.assert_is(b"");
+}
+
+#[test]
+fn keeps_serving_output_when_the_trim_point_falls_inside_an_unterminated_sequence() {
+    // Given an application that opened an OSC payload and never terminated it, then wrote far
+    // more than the ring retains: chasing to the end of the cut sequence would otherwise run to
+    // the end of the buffer and leave a late subscriber a blank screen
+    let capture = a_terminal_capture()
+        .with_raw_output(UNTERMINATED_OSC)
+        .with_output_far_exceeding_the_capture_limit()
+        .build();
+
+    // When a late subscriber takes the buffered output
+    let buffered = capture.buffered_bytes().to_vec();
+
+    // Then the chase gave up at its bound and the ring still holds a screenful of real output
+    buffered.assert_is_entirely(FILLER_BYTE).assert_byte_len(
+        TerminalCapture::CAPTURE_LIMIT_BYTES - TerminalCapture::MAX_SEQUENCE_CHASE_BYTES,
+    );
 }
 
 // ---------------------------------------------------------------------------

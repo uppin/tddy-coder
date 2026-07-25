@@ -290,6 +290,13 @@ The LiveKit bidi `PtyLiveKitService` and the tddy-coder session participant send
 of escape-boundary trimming live in
 [tddy-task terminal-capture.md](../../tddy-task/docs/terminal-capture.md).
 
+Sandbox sessions take a separate branch: their PTY output arrives over the stdio bridge in
+`sandbox_session.rs` and is captured in `SandboxSessionState.capture`, a `TerminalCapture` of its
+own (it predates `TaskChannel` on this path). Attach replays through `sandbox_replay_frames`, which
+is `chunk_terminal_output(&capture.replay(), …)` — prologue first, same contract, and a named seam so
+the behaviour is unit-testable without spawning a real sandbox. Sandbox streams carry no unary
+input-offset ACK source, so they emit data frames only.
+
 ### Input-offset acknowledgement
 
 `SendTerminalInput` carries a cumulative byte `input_offset` (0 = unset). After the bytes reach the

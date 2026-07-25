@@ -25,6 +25,7 @@ currently in effect. That state costs no ring space, so it survives eviction ind
 | Member | Meaning |
 |---|---|
 | `CAPTURE_LIMIT_BYTES` | 64 KiB — the retained-output bound. |
+| `MAX_SEQUENCE_CHASE_BYTES` | 1 KiB — how far past the limit eviction may chase the end of a cut sequence. |
 | `append(&[u8])` | Sniff modes, extend the ring, evict down to the limit. |
 | `replay() -> Vec<u8>` | `mode_prologue()` ++ retained output. **What terminal clients want.** |
 | `mode_prologue() -> Vec<u8>` | `ESC[?<mode>h` per enabled mode, ascending — puts a fresh VT back into the modes now in effect. |
@@ -46,9 +47,16 @@ Eviction uses it too: after trimming to the limit, it keeps going to the end of 
 landed inside. Otherwise a cut through `ESC[1m` would leave a bare `1m` at the head of the replay,
 which the client renders as literal text.
 
-One consequence: a cut inside an *unterminated* OSC/DCS payload can transiently empty the ring until
-the terminator arrives. There is also no RIS (`ESC c`) handling — sticky mode state survives a hard
-terminal reset.
+That chase is bounded by `MAX_SEQUENCE_CHASE_BYTES` (1 KiB). A sequence a client can render is at
+most a few dozen bytes, so the bound is only ever reached by a payload the application never
+terminated — an OSC missing its `ST`, say. Unbounded, the chase would run to the end of the buffer
+and empty the ring, leaving a late subscriber a blank screen; giving up leaves a fragment instead,
+which is the better trade. The ring therefore never holds less than
+`CAPTURE_LIMIT_BYTES - MAX_SEQUENCE_CHASE_BYTES`.
+
+The parser also recognises RIS (`ESC c`): a hard terminal reset turns mouse reporting off, so
+`feed` reports `StreamEvent::FullReset` and the sticky mode set is cleared. Replaying modes past a
+reset would leave a late subscriber's VT reporting events the application is no longer reading.
 
 ## `replay_capture()` is not `replay()`
 
@@ -63,10 +71,12 @@ Terminal callers take `capture_arc().lock().replay()` instead. The split is pinn
 
 Every capture write flows through `TaskChannel::write`, so the sniffer cannot be bypassed.
 
-## Known gap
+## Users outside `TaskChannel`
 
-`tddy-daemon`'s `sandbox_session.rs` keeps its own raw, **unbounded** `Arc<Mutex<Vec<u8>>>` capture
-(`extend_from_slice`, no trim) and so gets no prologue. Pre-existing; tracked as a follow-up.
+`tddy-daemon`'s `sandbox_session.rs` holds its own `Arc<Mutex<TerminalCapture>>` (sandbox PTY output
+arrives over a stdio bridge, not through a `TaskChannel`). It calls `append` on every chunk, and the
+sandbox branch of `stream_terminal_output` replays through `sandbox_replay_frames`, so sandbox
+sessions are bounded and get the prologue like every other attach path.
 
 ## See also
 

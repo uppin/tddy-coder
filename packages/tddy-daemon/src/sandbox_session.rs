@@ -13,6 +13,7 @@ use tokio::sync::{broadcast, mpsc, Mutex};
 use tddy_sandbox::{MountSpec, SandboxContextDir, SandboxError, SandboxPlan};
 use tddy_service::proto::connection::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
+use tddy_task::TerminalCapture;
 
 use crate::tool_engine;
 
@@ -22,7 +23,7 @@ pub struct SandboxSessionState {
     pub worktree_path: PathBuf,
     pub stdout_tx: broadcast::Sender<Bytes>,
     /// Rolling PTY output for late `StreamTerminalOutput` subscribers (broadcast drops when idle).
-    pub capture: Arc<StdMutex<Vec<u8>>>,
+    pub capture: Arc<StdMutex<TerminalCapture>>,
     pub stdin_tx: mpsc::UnboundedSender<Bytes>,
     pub ready_marker: PathBuf,
     /// Kept so delete/resume can SIGKILL the sandbox-exec tree reliably.
@@ -37,7 +38,7 @@ pub struct SandboxSessionStateInit {
     pub pid: u32,
     pub worktree_path: PathBuf,
     pub stdout_tx: broadcast::Sender<Bytes>,
-    pub capture: Arc<StdMutex<Vec<u8>>>,
+    pub capture: Arc<StdMutex<TerminalCapture>>,
     pub stdin_tx: mpsc::UnboundedSender<Bytes>,
     pub ready_marker: PathBuf,
     pub handle: tddy_sandbox::SandboxHandle,
@@ -331,7 +332,7 @@ pub async fn dial_and_bridge(
     handle: &mut tddy_sandbox::SandboxHandle,
     task_registry: tddy_task::TaskRegistry,
     stdout_tx: broadcast::Sender<Bytes>,
-    capture: Arc<StdMutex<Vec<u8>>>,
+    capture: Arc<StdMutex<TerminalCapture>>,
     stdin_rx: mpsc::UnboundedReceiver<Bytes>,
     session_env: Arc<Vec<(String, String)>>,
     session_dir: PathBuf,
@@ -351,7 +352,7 @@ pub async fn dial_and_bridge(
     tokio::spawn(async move {
         while let Some(chunk) = term_rx.recv().await {
             if let Ok(mut cap) = capture_out.lock() {
-                cap.extend_from_slice(&chunk);
+                cap.append(&chunk);
             }
             let _ = stdout_out.send(chunk);
         }
@@ -849,7 +850,7 @@ mod tests {
         // output subscription held before the call so we can observe the relay's own PTY-poll
         // loop deliver something
         let (stdout_tx, mut stdout_rx) = broadcast::channel(16);
-        let capture = Arc::new(StdMutex::new(Vec::new()));
+        let capture = Arc::new(StdMutex::new(TerminalCapture::new()));
         let (_stdin_tx, stdin_rx) = mpsc::unbounded_channel();
         let task_registry = tddy_task::TaskRegistry::default();
 
