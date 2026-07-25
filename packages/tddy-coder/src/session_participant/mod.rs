@@ -329,7 +329,8 @@ impl RpcService for SessionConnectionServiceRpc {
                 match self.svc.terminal_manager.get_terminal(terminal_id).await {
                     Some(handle) => {
                         if !req.data.is_empty() {
-                            handle.send_input(tddy_pty::Bytes::from(req.data));
+                            let input_offset = req.input_offset;
+                            handle.send_input(tddy_pty::Bytes::from(req.data), input_offset);
                         }
                         RpcResult::Unary(Ok(SendTerminalInputResponse {}.encode_to_vec()))
                     }
@@ -378,26 +379,67 @@ impl RpcService for SessionConnectionServiceRpc {
                     .map(|cap| cap.replay())
                     .unwrap_or_default();
                 if !replay.is_empty() {
-                    let frame = SessionTerminalOutput { data: replay }.encode_to_vec();
+                    let frame = SessionTerminalOutput {
+                        data: replay,
+                        acked_input_offset: 0,
+                    }
+                    .encode_to_vec();
                     let _ = tx.try_send(Ok(frame));
                 }
 
-                // Bridge live PTY output → the server stream, ending when the shell exits.
+                // Input-offset ACKs ride the same output stream (docs/ft/web/enqueued-input-overlay.md):
+                // when the applied input offset advances, emit an empty-data frame carrying it. Emit
+                // the current offset up front so a stream opened after some input was already applied
+                // learns the acknowledged position immediately.
+                let mut acked_rx = handle.subscribe_acked_offset();
+                let initial_acked = *acked_rx.borrow_and_update();
+                if initial_acked > 0 {
+                    let frame = SessionTerminalOutput {
+                        data: Vec::new(),
+                        acked_input_offset: initial_acked,
+                    }
+                    .encode_to_vec();
+                    let _ = tx.try_send(Ok(frame));
+                }
+
+                // Bridge live PTY output → the server stream, interleaving ACK frames, ending when
+                // the shell exits.
                 let mut pty_done = handle.pty_done.clone();
                 tokio::spawn(async move {
                     use tokio::sync::broadcast::error::RecvError;
+                    // Disabled once the ACK sender drops, so a closed watch never busy-spins.
+                    let mut ack_open = true;
                     loop {
                         tokio::select! {
                             result = stdout_rx.recv() => match result {
                                 Ok(bytes) => {
-                                    let frame = SessionTerminalOutput { data: bytes.to_vec() }
-                                        .encode_to_vec();
+                                    let frame = SessionTerminalOutput {
+                                        data: bytes.to_vec(),
+                                        acked_input_offset: 0,
+                                    }
+                                    .encode_to_vec();
                                     if tx.send(Ok(frame)).await.is_err() {
                                         break;
                                     }
                                 }
                                 Err(RecvError::Closed) => break,
                                 Err(RecvError::Lagged(_)) => continue,
+                            },
+                            changed = acked_rx.changed(), if ack_open => {
+                                match changed {
+                                    Ok(()) => {
+                                        let offset = *acked_rx.borrow_and_update();
+                                        let frame = SessionTerminalOutput {
+                                            data: Vec::new(),
+                                            acked_input_offset: offset,
+                                        }
+                                        .encode_to_vec();
+                                        if tx.send(Ok(frame)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                    Err(_) => ack_open = false,
+                                }
                             },
                             _ = pty_done.changed() => break,
                         }

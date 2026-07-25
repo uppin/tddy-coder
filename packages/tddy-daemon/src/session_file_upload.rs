@@ -20,7 +20,7 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_rpc::Status;
 
 /// Rejection message for an `upload_id` or `file_name` that is not a safe single path segment.
-const UNSAFE_SEGMENT_ERR: &str = "upload_id and file_name must each be a basename";
+pub(crate) const UNSAFE_SEGMENT_ERR: &str = "upload_id and file_name must each be a basename";
 
 /// The directory a drop's files land in: `{session_dir}/uploads/{upload_id}`.
 #[must_use]
@@ -59,26 +59,7 @@ pub fn write_upload_chunk(
     // inside the former — defends against a symlink escape even though the validated segments
     // already cannot traverse. Rooting at `uploads_root` (not `dir`) makes this a real check rather
     // than a tautology.
-    let canonical_root = uploads_root.canonicalize().map_err(|e| {
-        log::error!(
-            "write_upload_chunk: canonicalize {:?} failed: {}",
-            uploads_root,
-            e
-        );
-        Status::internal(format!("failed to resolve uploads dir: {}", e))
-    })?;
-    let canonical_dir = dir.canonicalize().map_err(|e| {
-        log::error!("write_upload_chunk: canonicalize {:?} failed: {}", dir, e);
-        Status::internal(format!("failed to resolve uploads dir: {}", e))
-    })?;
-    if !canonical_dir.starts_with(&canonical_root) {
-        log::warn!(
-            "write_upload_chunk: rejected upload dir escaping uploads root: dir={:?} root={:?}",
-            canonical_dir,
-            canonical_root
-        );
-        return Err(Status::invalid_argument(UNSAFE_SEGMENT_ERR));
-    }
+    let canonical_dir = contained_canonical_dir(&uploads_root, &dir)?;
 
     let target = canonical_dir.join(safe_name);
     let mut file = OpenOptions::new()
@@ -108,22 +89,46 @@ pub fn write_upload_chunk(
 
 /// Validates that `value` is a single safe path segment (a basename) and returns it. Rejects empty,
 /// `.`, `..`, any value containing a path separator, and any value whose [`Path::file_name`]
-/// differs from the input. Applied to both the `upload_id` and the `file_name`.
-fn validate_segment(value: &str) -> Result<&str, Status> {
+/// differs from the input. Applied to both the `upload_id` and the `file_name` by every operation
+/// (upload, list, delete) that turns untrusted client input into an `uploads` path segment.
+pub(crate) fn validate_segment(value: &str) -> Result<&str, Status> {
     if value.is_empty()
         || value == "."
         || value == ".."
         || value.contains('/')
         || value.contains('\\')
     {
-        log::warn!("write_upload_chunk: rejected unsafe path segment: {value:?}");
+        log::warn!("session uploads: rejected unsafe path segment: {value:?}");
         return Err(Status::invalid_argument(UNSAFE_SEGMENT_ERR));
     }
     match Path::new(value).file_name() {
         Some(name) if name == value => Ok(value),
         _ => {
-            log::warn!("write_upload_chunk: rejected non-basename path segment: {value:?}");
+            log::warn!("session uploads: rejected non-basename path segment: {value:?}");
             Err(Status::invalid_argument(UNSAFE_SEGMENT_ERR))
         }
     }
+}
+
+/// Canonicalizes the trusted `uploads_root` and a candidate per-drop `dir` and confirms the latter
+/// resolves inside the former, returning the canonical `dir`. Rooting the containment check at
+/// `uploads_root` (which holds no untrusted component) rather than `dir` makes it a real guard
+/// against a symlink escape, not a tautology. Shared by the upload writer and the delete path so a
+/// delete is never a weaker gate than a write. Both paths must already exist on disk.
+pub(crate) fn contained_canonical_dir(uploads_root: &Path, dir: &Path) -> Result<PathBuf, Status> {
+    let canonical_root = uploads_root.canonicalize().map_err(|e| {
+        log::error!("session uploads: canonicalize {uploads_root:?} failed: {e}");
+        Status::internal(format!("failed to resolve uploads dir: {e}"))
+    })?;
+    let canonical_dir = dir.canonicalize().map_err(|e| {
+        log::error!("session uploads: canonicalize {dir:?} failed: {e}");
+        Status::internal(format!("failed to resolve uploads dir: {e}"))
+    })?;
+    if !canonical_dir.starts_with(&canonical_root) {
+        log::warn!(
+            "session uploads: rejected upload dir escaping uploads root: dir={canonical_dir:?} root={canonical_root:?}"
+        );
+        return Err(Status::invalid_argument(UNSAFE_SEGMENT_ERR));
+    }
+    Ok(canonical_dir)
 }

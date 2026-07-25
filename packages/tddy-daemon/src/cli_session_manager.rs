@@ -17,7 +17,7 @@ use prost::Message as _;
 use tddy_livekit::{LiveKitParticipant, RpcResult, RpcService, TokenGenerator};
 use tddy_rpc::{BidiStreamOutput, ResponseBody, RpcMessage};
 use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
-use tddy_task::{TaskHandle, TaskId, TaskRegistry, TerminalCapture};
+use tddy_task::{TaskChannel, TaskHandle, TaskId, TaskRegistry, TerminalCapture};
 use tokio::sync::{broadcast, mpsc, oneshot, watch, RwLock};
 
 use crate::pty_registry::PtyRegistry;
@@ -60,6 +60,10 @@ pub struct PtyHandle {
     current_size: Arc<std::sync::Mutex<PtySize>>,
     /// Owning task in the shared registry.
     task_id: TaskId,
+    /// Shared per-terminal I/O channel — the source of stdin/stdout/capture and the input-offset
+    /// ACK state. Held here (not just the derived senders) so the ACK state is shared across every
+    /// `PtyHandle` rebuilt for this terminal by `resolve_pty_handle`.
+    channel: Arc<TaskChannel>,
 }
 
 impl PtyHandle {
@@ -95,12 +99,19 @@ impl PtyHandle {
         }
     }
 
-    /// Forward input data to the PTY stdin, stripping any embedded resize escape sequence.
+    /// Forward input data to the PTY stdin, stripping any embedded resize escape sequence, and
+    /// acknowledge the client's cumulative `input_offset`.
     ///
     /// When `\x1b]resize;{cols};{rows}\x07` is found, the PTY is resized (SIGWINCH sent)
     /// and the escape bytes are not forwarded to the subprocess. Used by both the bidi and
     /// unary input paths so resize always works regardless of which transport the client uses.
-    pub fn send_input(&self, data: bytes::Bytes) {
+    ///
+    /// `input_offset` is the running byte total the client reports for this chunk (0 = unset, for
+    /// legacy clients). After the input is handled, the applied offset advances to the maximum of
+    /// its current value and `input_offset`; when it advances, the new value is published to
+    /// `StreamTerminalOutput` subscribers as an ACK. Resize bytes stripped above are still counted
+    /// (the client counted them), so the ACK matches the client's byte accounting exactly.
+    pub fn send_input(&self, data: bytes::Bytes, input_offset: u64) {
         let (resize, remaining) = strip_resize(&data);
         if let Some((cols, rows)) = resize {
             self.resize(rows, cols);
@@ -108,6 +119,15 @@ impl PtyHandle {
         if !remaining.is_empty() {
             let _ = self.stdin_tx.send(remaining);
         }
+        self.channel.acknowledge_input(input_offset);
+    }
+
+    /// Subscribe to applied-input-offset changes — the ACK source for `StreamTerminalOutput`.
+    ///
+    /// The receiver's initial value is the current applied offset; each `changed()` observes a new
+    /// monotonic maximum published by [`send_input`](Self::send_input).
+    pub fn subscribe_acked_offset(&self) -> watch::Receiver<u64> {
+        self.channel.subscribe_acked_offset()
     }
 }
 
@@ -542,6 +562,7 @@ impl CliSessionManager {
             pty_done: pty_done_rx,
             current_size: ready.current_size,
             task_id: task.id.clone(),
+            channel,
         })
     }
 
@@ -1073,7 +1094,8 @@ impl RpcService for PtyLiveKitService {
             while let Some(msg) = input_rx.recv().await {
                 if let Ok(input) = TerminalInput::decode(&msg.payload[..]) {
                     if !input.data.is_empty() {
-                        handle_for_input.send_input(bytes::Bytes::from(input.data));
+                        // VirtualTui `TerminalInput` carries no offset; 0 = unset (no ACK).
+                        handle_for_input.send_input(bytes::Bytes::from(input.data), 0);
                     }
                 }
             }

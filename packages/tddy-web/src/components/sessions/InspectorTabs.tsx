@@ -1,6 +1,13 @@
 import React from "react";
 
-export type InspectorTab = "details" | "tools" | "usage" | "worktree" | "vnc" | "screen-sharing";
+export type InspectorTab =
+  | "details"
+  | "tools"
+  | "usage"
+  | "worktree"
+  | "files"
+  | "vnc"
+  | "screen-sharing";
 
 interface InspectorTabsProps {
   value: InspectorTab;
@@ -57,6 +64,18 @@ export function InspectorTabs({ value, onChange }: InspectorTabsProps) {
         }`}
       >
         Worktree
+      </button>
+      <button
+        data-testid="sessions-inspector-tab-files"
+        aria-selected={value === "files"}
+        onClick={() => onChange("files")}
+        className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+          value === "files"
+            ? "border-foreground text-foreground"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        Files
       </button>
       <button
         data-testid="sessions-inspector-tab-vnc"

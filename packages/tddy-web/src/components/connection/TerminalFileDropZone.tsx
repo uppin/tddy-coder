@@ -9,6 +9,8 @@
 
 import React, { useState } from "react";
 import { useSessionFileUpload, useDaemonUploadChunk } from "../../hooks/useSessionFileUpload";
+import { joinQuotedPaths } from "../../lib/shellQuote";
+import { HOST_PATH_MIME } from "../../lib/hostPathDrag";
 
 export interface TerminalFileDropZoneProps {
   sessionToken: string;
@@ -42,6 +44,13 @@ export function TerminalFileDropZone({
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setDragging(false);
+    // A file dragged out of the Files tab carries its already-uploaded host path — insert the
+    // quoted path without re-uploading (the bytes are already on the host).
+    const hostPath = e.dataTransfer.getData(HOST_PATH_MIME);
+    if (hostPath) {
+      insertInput(joinQuotedPaths([hostPath]));
+      return;
+    }
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) {
       void uploadFiles(files);

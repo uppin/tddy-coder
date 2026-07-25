@@ -312,6 +312,7 @@ async fn send_terminal_input_is_accepted_for_a_started_terminal() {
         data: b"echo hi\n".to_vec(),
         terminal_id: started.terminal_id.clone(),
         control_token: String::new(),
+        input_offset: 0,
     };
     let result = call(&entry, "SendTerminalInput", input.encode_to_vec()).await;
 
@@ -382,6 +383,7 @@ async fn stream_terminal_output_streams_a_started_shell_output() {
         data: b"echo tddy-marker\n".to_vec(),
         terminal_id: started.terminal_id.clone(),
         control_token: String::new(),
+        input_offset: 0,
     };
     unary_ok(call(&entry, "SendTerminalInput", input.encode_to_vec()).await);
 

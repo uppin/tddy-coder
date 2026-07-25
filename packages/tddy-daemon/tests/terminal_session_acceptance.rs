@@ -599,6 +599,7 @@ async fn send_terminal_input_targets_identified_terminal() {
             data: format!("echo {marker}\n").into_bytes(),
             terminal_id: started.clone(),
             control_token: String::new(),
+            input_offset: 0,
         }))
         .await
         .expect("SendTerminalInput must succeed");

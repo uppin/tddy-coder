@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use tddy_pty::Bytes;
-use tddy_task::{TaskId, TaskRegistry, TerminalCapture};
+use tddy_task::{TaskChannel, TaskId, TaskRegistry, TerminalCapture};
 use tokio::sync::{broadcast, mpsc, watch, RwLock};
 
 /// Reserved terminal id for a session's original (agent) terminal. It is not managed here — it is
@@ -33,6 +33,9 @@ pub struct PtyHandle {
     pub pty_done: watch::Receiver<bool>,
     task_id: TaskId,
     pty_registry: tddy_pty::PtyRegistry,
+    /// Shared per-terminal I/O channel — the input-offset ACK state lives here so an ACK published
+    /// by the input path is visible to an already-open `StreamTerminalOutput` bridge.
+    channel: Arc<TaskChannel>,
 }
 
 impl PtyHandle {
@@ -41,12 +44,15 @@ impl PtyHandle {
         self.pty_registry.resize(&self.task_id, rows, cols).await;
     }
 
-    /// Forward input to the PTY stdin, intercepting an embedded OSC resize escape.
+    /// Forward input to the PTY stdin, intercepting an embedded OSC resize escape, and acknowledge
+    /// the client's cumulative `input_offset`.
     ///
     /// When `\x1b]resize;{cols};{rows}\x07` is found, the PTY is resized and the escape bytes are
     /// not forwarded to the shell. Mirrors the daemon's input handling so resize works over the
-    /// unary `SendTerminalInput` transport.
-    pub fn send_input(&self, data: Bytes) {
+    /// unary `SendTerminalInput` transport. `input_offset` (0 = unset) advances the shared applied
+    /// offset; when it advances, the new value is published to `StreamTerminalOutput` subscribers.
+    /// Stripped resize bytes are still counted (the client counted them), matching its accounting.
+    pub fn send_input(&self, data: Bytes, input_offset: u64) {
         let (resize, remaining) = strip_resize(&data);
         if let Some((cols, rows)) = resize {
             let pty_registry = self.pty_registry.clone();
@@ -58,6 +64,12 @@ impl PtyHandle {
         if !remaining.is_empty() {
             let _ = self.stdin_tx.send(remaining);
         }
+        self.channel.acknowledge_input(input_offset);
+    }
+
+    /// Subscribe to applied-input-offset changes — the ACK source for `StreamTerminalOutput`.
+    pub fn subscribe_acked_offset(&self) -> watch::Receiver<u64> {
+        self.channel.subscribe_acked_offset()
     }
 }
 
@@ -142,6 +154,7 @@ impl TerminalManager {
             pty_done: pty_done_rx,
             task_id: task.id.clone(),
             pty_registry: self.pty_registry.clone(),
+            channel,
         });
 
         self.terminals

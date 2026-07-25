@@ -707,6 +707,7 @@ async fn run_grpc_terminal(
                 data: resize,
                 terminal_id: String::new(),
                 control_token: String::new(),
+                input_offset: 0,
             };
             let _ = connectrpc_post(
                 &input_client,
@@ -727,6 +728,7 @@ async fn run_grpc_terminal(
                 data,
                 terminal_id: String::new(),
                 control_token: String::new(),
+                input_offset: 0,
             };
             let _ = connectrpc_post(
                 &input_client,

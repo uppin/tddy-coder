@@ -39,6 +39,9 @@ export interface GhosttyTerminalGrpcProps {
   maxFontSize?: number;
   /** Shortcut presets — on mobile, rendered as the draggable ShortcutDrawer overlay. */
   mobileShortcuts?: ToolShortcutDef[];
+  /** Called with a function that types text into the terminal input (no newline). Lets the session
+   *  runtime expose this terminal's insert to the inspector's Files tab (click/tap route). */
+  onRegisterInsertInput?: (insertInput: (text: string) => void) => void;
 }
 
 export function GhosttyTerminalGrpc({
@@ -51,6 +54,7 @@ export function GhosttyTerminalGrpc({
   minFontSize = DEFAULT_TERMINAL_FONT_MIN,
   maxFontSize = DEFAULT_TERMINAL_FONT_MAX,
   mobileShortcuts,
+  onRegisterInsertInput,
 }: GhosttyTerminalGrpcProps) {
   const termRef = useRef<GhosttyTerminalHandle>(null);
   const termReadyRef = useRef(false);
@@ -61,6 +65,14 @@ export function GhosttyTerminalGrpc({
 
   const sendInput = (data: string | Uint8Array) =>
     stream.send(typeof data === "string" ? new TextEncoder().encode(data) : data);
+
+  // Expose text-insert to the runtime (for the inspector's Files-tab click/tap route). A ref keeps
+  // the registered function current without re-registering every render.
+  const sendInputRef = useRef(sendInput);
+  sendInputRef.current = sendInput;
+  useEffect(() => {
+    onRegisterInsertInput?.((text: string) => sendInputRef.current(text));
+  }, [onRegisterInsertInput]);
 
   useEffect(() => {
     stream.onMessage((data) => {

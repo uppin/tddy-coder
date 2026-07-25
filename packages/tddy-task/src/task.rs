@@ -71,6 +71,48 @@ pub enum ChannelKind {
 /// Bounded broadcast capacity for task channel output.
 const CHANNEL_BROADCAST_CAPACITY: usize = 256;
 
+/// Monotonic accumulator for the highest input byte offset applied to a channel's stdin.
+///
+/// Backs the terminal `SendTerminalInput` → `StreamTerminalOutput` acknowledgement: input carries a
+/// cumulative byte `input_offset`; once applied, that offset is recorded here. [`record`](Self::record)
+/// keeps the running maximum and returns whether the value advanced (so a caller only publishes an
+/// ACK when there is something new to confirm); [`get`](Self::get) reads the current maximum.
+/// Interior mutability (`AtomicU64`) plus the max semantics make it safe to share across the
+/// ephemeral handles rebuilt per RPC call and tolerant of out-of-order input.
+#[derive(Debug, Default)]
+pub struct AppliedOffset {
+    value: std::sync::atomic::AtomicU64,
+}
+
+impl AppliedOffset {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record `offset`, keeping the maximum. Returns `true` iff the stored value increased.
+    pub fn record(&self, offset: u64) -> bool {
+        use std::sync::atomic::Ordering;
+        let mut cur = self.value.load(Ordering::Relaxed);
+        loop {
+            if offset <= cur {
+                return false;
+            }
+            match self
+                .value
+                .compare_exchange_weak(cur, offset, Ordering::AcqRel, Ordering::Relaxed)
+            {
+                Ok(_) => return true,
+                Err(actual) => cur = actual,
+            }
+        }
+    }
+
+    /// The current running maximum (0 before any input is applied).
+    pub fn get(&self) -> u64 {
+        self.value.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 /// A single named I/O channel on a task.
 ///
 /// Writers push bytes into the channel; multiple observers subscribe via `subscribe()`.
@@ -86,6 +128,11 @@ pub struct TaskChannel {
     output_tx: broadcast::Sender<Bytes>,
     capture: Arc<Mutex<TerminalCapture>>,
     stdin_tx: Option<mpsc::UnboundedSender<Bytes>>,
+    /// Highest input offset applied to this channel's stdin (monotonic); the ACK source shared by
+    /// every `PtyHandle` rebuilt for this terminal.
+    applied_offset: Arc<AppliedOffset>,
+    /// Publishes the applied offset to `StreamTerminalOutput` subscribers as it advances.
+    acked_offset_tx: watch::Sender<u64>,
 }
 
 impl TaskChannel {
@@ -104,6 +151,8 @@ impl TaskChannel {
             output_tx,
             capture: Arc::new(Mutex::new(TerminalCapture::new())),
             stdin_tx: Some(stdin_tx),
+            applied_offset: Arc::new(AppliedOffset::new()),
+            acked_offset_tx: watch::channel(0u64).0,
         });
         (channel, Some(stdin_rx))
     }
@@ -122,6 +171,8 @@ impl TaskChannel {
             output_tx,
             capture: Arc::new(Mutex::new(TerminalCapture::new())),
             stdin_tx: None,
+            applied_offset: Arc::new(AppliedOffset::new()),
+            acked_offset_tx: watch::channel(0u64).0,
         })
     }
 
@@ -183,6 +234,27 @@ impl TaskChannel {
     /// Shared capture buffer (for replay to late subscribers).
     pub fn capture_arc(&self) -> Arc<Mutex<TerminalCapture>> {
         Arc::clone(&self.capture)
+    }
+
+    /// Record that input up to cumulative byte `offset` has been applied to stdin, publishing the
+    /// new maximum to `subscribe_acked_offset` observers when it advances. Returns whether it
+    /// advanced. Shared across every `PtyHandle` rebuilt for this terminal, so an ACK published by
+    /// the input path is seen by an already-open output stream.
+    pub fn acknowledge_input(&self, offset: u64) -> bool {
+        if self.applied_offset.record(offset) {
+            // `send_replace` (not `send`) so the latest applied offset is retained even with no
+            // current subscriber — a stream that opens later reads it as its initial watch value.
+            self.acked_offset_tx.send_replace(self.applied_offset.get());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Subscribe to applied-input-offset changes — the ACK source for `StreamTerminalOutput`.
+    /// The receiver's initial value is the current applied offset.
+    pub fn subscribe_acked_offset(&self) -> watch::Receiver<u64> {
+        self.acked_offset_tx.subscribe()
     }
 }
 
@@ -344,4 +416,82 @@ impl TaskContext {
 pub trait TaskBody: Send + 'static {
     /// Execute the task. Must return a terminal `TaskStatus`.
     async fn run(self: Box<Self>, ctx: TaskContext) -> TaskStatus;
+}
+
+#[cfg(test)]
+mod applied_offset_tests {
+    use super::*;
+
+    #[test]
+    fn records_a_higher_offset_and_reports_that_it_advanced() {
+        // Given
+        let applied = AppliedOffset::new();
+
+        // When
+        let advanced = applied.record(42);
+
+        // Then
+        assert!(
+            advanced,
+            "a first, higher offset must report that it advanced"
+        );
+        assert_eq!(applied.get(), 42);
+    }
+
+    #[test]
+    fn keeps_the_maximum_and_reports_no_advance_for_a_lower_offset() {
+        // Given — a higher offset already applied
+        let applied = AppliedOffset::new();
+        applied.record(100);
+
+        // When — a later, smaller offset arrives
+        let advanced = applied.record(50);
+
+        // Then — the applied offset does not regress and no ACK should be published
+        assert!(!advanced, "a lower offset must not report an advance");
+        assert_eq!(
+            applied.get(),
+            100,
+            "applied offset must be the running maximum"
+        );
+    }
+
+    #[test]
+    fn starts_at_zero() {
+        assert_eq!(AppliedOffset::new().get(), 0);
+    }
+}
+
+#[cfg(test)]
+mod channel_ack_tests {
+    use super::*;
+
+    #[test]
+    fn acknowledge_input_publishes_the_applied_offset_to_a_subscriber() {
+        // Given — a PTY channel with an output stream already subscribed to acks
+        let (channel, _stdin_rx) = TaskChannel::pty("0", "pty");
+        let mut acked = channel.subscribe_acked_offset();
+        assert_eq!(*acked.borrow_and_update(), 0);
+
+        // When — input up to offset 42 is applied
+        let advanced = channel.acknowledge_input(42);
+
+        // Then — the subscriber observes the acknowledged offset
+        assert!(advanced);
+        assert_eq!(*acked.borrow(), 42);
+    }
+
+    #[test]
+    fn acknowledge_input_never_lowers_the_published_offset() {
+        // Given
+        let (channel, _stdin_rx) = TaskChannel::pty("0", "pty");
+        channel.acknowledge_input(100);
+
+        // When — a later, smaller offset arrives
+        let advanced = channel.acknowledge_input(50);
+
+        // Then — the published offset stays at the maximum
+        assert!(!advanced);
+        assert_eq!(*channel.subscribe_acked_offset().borrow(), 100);
+    }
 }

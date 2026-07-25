@@ -13,5 +13,7 @@ pub mod terminal_capture;
 
 pub use idle::IdleTimeoutTracker;
 pub use registry::{TaskRegistry, TaskRegistryEvent};
-pub use task::{ChannelKind, TaskBody, TaskChannel, TaskContext, TaskHandle, TaskId, TaskStatus};
+pub use task::{
+    AppliedOffset, ChannelKind, TaskBody, TaskChannel, TaskContext, TaskHandle, TaskId, TaskStatus,
+};
 pub use terminal_capture::TerminalCapture;
