@@ -169,7 +169,7 @@ async fn wait_for_capture_contains(handle: &Arc<PtyHandle>, needle: &str, timeou
     loop {
         {
             let cap = handle.capture.lock().unwrap();
-            if String::from_utf8_lossy(&cap).contains(needle) {
+            if String::from_utf8_lossy(cap.buffered_bytes()).contains(needle) {
                 return true;
             }
         }
@@ -294,7 +294,7 @@ async fn managed_claude_cli_session_launches_claude_with_orchestration_prompt_fi
         "stub claude must echo its ARGV"
     );
     let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(&cap);
+    let output = String::from_utf8_lossy(cap.buffered_bytes());
     assert!(
         output.contains("--append-system-prompt-file"),
         "managed session must launch claude with --append-system-prompt-file; got: {output:?}"
@@ -337,7 +337,7 @@ async fn managed_claude_cli_session_launches_claude_with_tddy_socket_in_env() {
         "stub claude must echo its TDDY_SOCKET env"
     );
     let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(&cap);
+    let output = String::from_utf8_lossy(cap.buffered_bytes());
     assert!(
         !output.contains("ENVDUMP TDDY_SOCKET=[]"),
         "managed session must inject a non-empty per-session TDDY_SOCKET; got: {output:?}"
@@ -407,7 +407,7 @@ async fn resuming_a_managed_claude_cli_session_re_wires_orchestration_and_socket
         "resumed stub claude must echo its argv + env"
     );
     let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(&cap);
+    let output = String::from_utf8_lossy(cap.buffered_bytes());
     assert!(
         output.contains("--append-system-prompt-file"),
         "resumed managed session must re-inject the orchestration prompt; got: {output:?}"

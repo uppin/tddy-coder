@@ -32,6 +32,21 @@ This command analyzes code quality metrics to identify maintainability issues an
 
 ## Metrics to Analyze
 
+### File Length
+| Threshold | Rating |
+|-----------|--------|
+| ≤500 lines | ⭐⭐⭐ Within limit |
+| >500 lines | ⚠️ Mark for review — propose a split |
+
+Measured on the file's **total** length, not the size of the diff in it: a one-line edit to a
+1,200-line module still flags that module. State whether the length is pre-existing or grown by
+this change.
+
+For each flagged file, propose concrete split options — the cohesive groups of code found (by
+responsibility, not line range), the module each would become, and the cost of splitting (shared
+private state that would have to be exported, call sites that would move, tests to repoint). If
+splitting is not worth it, say so and why.
+
 ### Function Length
 | Threshold | Rating |
 |-----------|--------|
@@ -86,6 +101,7 @@ Any literal value that should be a named constant:
 ### Metrics Summary
 | Metric | Score | Issues |
 |--------|-------|--------|
+| File length | X/10 | Y files over 500 lines |
 | Function length | X/10 | Y functions too long |
 | Nesting depth | X/10 | Y deeply nested blocks |
 | Parameter count | X/10 | Y functions with many params |
@@ -108,6 +124,14 @@ Any literal value that should be a named constant:
 #### ℹ️ Minor (Score impact: low)
 1. **[file:line]** Variable `d` could be more descriptive
    - Suggested: `document` or `data`
+
+### Files Over 500 Lines (marked for review)
+
+#### ⚠️ `some_service.rs` — 1,240 lines (pre-existing; +18 in this change)
+- Responsibilities found: session lifecycle RPCs, terminal I/O streaming, host stats
+- Proposed split: `session_rpc.rs` ← lifecycle; `terminal_rpc.rs` ← terminal I/O; keep stats inline
+- Cost: `SomeServiceImpl` fields become `pub(crate)`; 3 test modules repoint
+- Recommendation: split later — out of scope for this change, worth its own PR
 
 ### Refactoring Suggestions
 1. Extract `validateInput()` from `processRequest()`

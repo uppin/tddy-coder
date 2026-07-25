@@ -136,7 +136,7 @@ async fn wait_for_capture_contains(handle: &Arc<PtyHandle>, needle: &str, timeou
     loop {
         {
             let cap = handle.capture.lock().unwrap();
-            if String::from_utf8_lossy(&cap).contains(needle) {
+            if String::from_utf8_lossy(cap.buffered_bytes()).contains(needle) {
                 return true;
             }
         }
@@ -383,7 +383,7 @@ async fn claude_cli_session_pty_argv_includes_default_permission_mode() {
     );
 
     let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(&cap);
+    let output = String::from_utf8_lossy(cap.buffered_bytes());
     assert!(
         output.contains("--permission-mode"),
         "PTY ARGV must include --permission-mode flag; got: {:?}",
@@ -429,7 +429,7 @@ async fn claude_cli_session_pty_argv_includes_explicit_permission_mode() {
     );
 
     let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(&cap);
+    let output = String::from_utf8_lossy(cap.buffered_bytes());
     assert!(
         output.contains("bypassPermissions"),
         "PTY ARGV must include bypassPermissions; got: {:?}",
@@ -722,7 +722,7 @@ async fn resume_pty_argv_uses_default_permission_mode() {
     );
 
     let cap = handle2.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(&cap);
+    let output = String::from_utf8_lossy(cap.buffered_bytes());
     let argv_line = output
         .lines()
         .find(|l| l.trim_start().starts_with("ARGV:"))

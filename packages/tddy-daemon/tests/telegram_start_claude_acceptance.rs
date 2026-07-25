@@ -141,7 +141,7 @@ async fn wait_for_capture_contains(handle: &Arc<PtyHandle>, needle: &str, timeou
     loop {
         {
             let cap = handle.capture.lock().unwrap();
-            if String::from_utf8_lossy(&cap).contains(needle) {
+            if String::from_utf8_lossy(cap.buffered_bytes()).contains(needle) {
                 return true;
             }
         }
@@ -526,7 +526,7 @@ async fn start_claude_uses_shared_manager() {
     );
 
     let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(&cap);
+    let output = String::from_utf8_lossy(cap.buffered_bytes());
     assert!(
         output.contains("build a search feature"),
         "initial_prompt must be passed as positional arg via Telegram flow; got: {:?}",
