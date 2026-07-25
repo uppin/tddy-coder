@@ -1,6 +1,6 @@
 # Lazy tool bodies in the ACP replay (`StreamAcpReplay` + `GetAcpToolCallDetail`)
 
-**Status:** Planned (Rust-only). Strips the heavy `raw_input`/`raw_output` payloads out of the
+**Status:** Implemented (Rust-only). Strips the heavy `raw_input`/`raw_output` payloads out of the
 streamed transcript and moves them behind a unary, on-demand lookup.
 
 ## What
