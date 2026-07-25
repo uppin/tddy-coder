@@ -9,7 +9,10 @@
 //!
 //! This module owns:
 //! - the persisted format (`serialize_frame` / `deserialize_frames`) + file I/O
-//!   (`append_acp_frame` / `read_acp_transcript`), and
+//!   (`append_acp_frame` / `read_acp_transcript`),
+//! - the session's replayable transcript (`read_session_transcript`), which resolves this file
+//!   *together with* the durable `agent-activity.jsonl` — the only store a daemon-hosted
+//!   (claude-cli / sandbox) session writes, and
 //! - the frame builders (`agent_text_frame`, `tool_use_frame`) that stamp the timestamp and, for a
 //!   tool call, the enriched title + `raw_input` + `kind`.
 
@@ -77,6 +80,92 @@ pub fn read_acp_transcript(session_dir: &Path) -> io::Result<Vec<AcpAgentMessage
     }
     let contents = std::fs::read_to_string(&path)?;
     Ok(deserialize_frames(&contents))
+}
+
+/// Read the session's **replayable transcript**, resolved from both persisted stores.
+///
+/// `acp-transcript.jsonl` is written by the coder presenter seam alone, so a session hosted
+/// elsewhere (claude-cli / sandbox: the daemon records its tool calls) has no transcript file at all
+/// — only the durable `agent-activity.jsonl`. Replaying one store leaves the other's history
+/// unreachable, so this merges them:
+/// - the persisted ACP frames ([`read_acp_transcript`]), plus
+/// - the coalesced agent-activity calls ([`tddy_core::agent_activity::read_agent_activity`]) mapped
+///   through [`frame_for_agent_activity`] — the same mapping the live tail uses;
+/// - interleaved by recorded timestamp (each store contributing in its own recorded order), and
+/// - deduped by `tool_call_id`, so a call recorded in both stores is replayed once, in the latest
+///   state either store recorded for it.
+///
+/// A missing file on either side contributes nothing and is not an error.
+pub fn read_session_transcript(session_dir: &Path) -> io::Result<Vec<AcpAgentMessage>> {
+    let persisted_frames = read_acp_transcript(session_dir)?;
+    let activity_frames: Vec<AcpAgentMessage> =
+        tddy_core::agent_activity::read_agent_activity(session_dir)?
+            .iter()
+            .map(frame_for_agent_activity)
+            .collect();
+    Ok(latest_state_per_tool_call(merge_by_timestamp(
+        persisted_frames,
+        activity_frames,
+    )))
+}
+
+/// The wall-clock stamp a frame was recorded at; `0` for a frame shape that carries no timestamp
+/// (only `session_update` frames are ever persisted), which replays it as the oldest.
+fn frame_timestamp(frame: &AcpAgentMessage) -> i64 {
+    match &frame.msg {
+        Some(acp_agent_message::Msg::SessionUpdate(n)) => n.timestamp_unix_ms,
+        _ => 0,
+    }
+}
+
+/// Interleave two already time-ordered frame lists into one, oldest first.
+///
+/// The merge is stable: each list keeps its own recorded order, and a tie resolves in favour of
+/// `persisted` (the store that also carries agent text, so its narrative stays contiguous).
+fn merge_by_timestamp(
+    persisted: Vec<AcpAgentMessage>,
+    activity: Vec<AcpAgentMessage>,
+) -> Vec<AcpAgentMessage> {
+    let mut merged = Vec::with_capacity(persisted.len() + activity.len());
+    let mut persisted = persisted.into_iter().peekable();
+    let mut activity = activity.into_iter().peekable();
+    loop {
+        let take_activity = match (persisted.peek(), activity.peek()) {
+            (Some(p), Some(a)) => frame_timestamp(a) < frame_timestamp(p),
+            (Some(_), None) => false,
+            (None, Some(_)) => true,
+            (None, None) => break,
+        };
+        let next = if take_activity {
+            activity.next()
+        } else {
+            persisted.next()
+        };
+        merged.extend(next);
+    }
+    merged
+}
+
+/// Drop every superseded record of a tool call, keeping each `tool_call_id`'s **last** frame in
+/// replay order — the latest state recorded for that call. Frames without a `tool_call_id` (agent
+/// text) are all kept.
+fn latest_state_per_tool_call(frames: Vec<AcpAgentMessage>) -> Vec<AcpAgentMessage> {
+    let mut latest_index: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for (index, frame) in frames.iter().enumerate() {
+        if let Some(id) = tool_call_id_of(frame) {
+            latest_index.insert(id.to_string(), index);
+        }
+    }
+    frames
+        .into_iter()
+        .enumerate()
+        .filter(|(index, frame)| match tool_call_id_of(frame) {
+            Some(id) => latest_index.get(id) == Some(index),
+            None => true,
+        })
+        .map(|(_, frame)| frame)
+        .collect()
 }
 
 /// The `tool_call_id` of a `tool_call` frame, or `None` for any other frame shape.
@@ -252,7 +341,9 @@ pub fn frame_for_agent_activity(
 mod tests {
     use super::*;
     use crate::proto::acp::{acp_agent_message, content_block, session_update, ToolCall, ToolKind};
-    use tddy_core::agent_activity::{AgentActivityRecord, STATUS_COMPLETED};
+    use tddy_core::agent_activity::{
+        append_agent_activity, AgentActivityRecord, STATUS_COMPLETED, STATUS_RUNNING,
+    };
 
     /// The (text, timestamp) of an `agent_message_chunk` frame (panics on any other shape).
     fn agent_chunk(frame: &AcpAgentMessage) -> (String, i64) {
@@ -404,6 +495,123 @@ mod tests {
 
         // Then — the running+terminal pair for call-a coalesces: 1 text + 2 distinct calls = 3
         assert_eq!(count_activity_entries(&frames), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // read_session_transcript — the session's replayable transcript, resolved from BOTH persisted
+    // stores (`acp-transcript.jsonl` + the durable `agent-activity.jsonl`).
+    //
+    // Bug (fc990524): the replay snapshot reads only `acp-transcript.jsonl`, which is written by the
+    // coder presenter seam alone. Every daemon-hosted (claude-cli / sandbox) session on disk has a
+    // multi-MB `agent-activity.jsonl` and NO `acp-transcript.jsonl`, so the pane opens empty while
+    // its badge counts live activity.
+    // -----------------------------------------------------------------------
+
+    /// The `tool_call_id` of every `tool_call` frame in a replayed transcript, in replay order.
+    fn replayed_tool_call_ids(frames: &[AcpAgentMessage]) -> Vec<String> {
+        frames
+            .iter()
+            .filter_map(|f| tool_call_id_of(f).map(str::to_string))
+            .collect()
+    }
+
+    /// The `timestamp_unix_ms` of every frame in a replayed transcript, in replay order.
+    fn replayed_timestamps(frames: &[AcpAgentMessage]) -> Vec<i64> {
+        frames
+            .iter()
+            .map(|f| match &f.msg {
+                Some(acp_agent_message::Msg::SessionUpdate(n)) => n.timestamp_unix_ms,
+                other => panic!("expected a SessionUpdate frame, got {other:?}"),
+            })
+            .collect()
+    }
+
+    /// A completed Bash record, stamped after [`a_completed_read_record`]'s call.
+    fn a_completed_bash_record() -> AgentActivityRecord {
+        AgentActivityRecord {
+            call_id: "call-bash-2".to_string(),
+            tool_name: "Bash".to_string(),
+            input: serde_json::json!({ "command": "cargo build" }),
+            status: STATUS_COMPLETED.to_string(),
+            result: serde_json::json!({ "stdout": "ok" }),
+            error_message: String::new(),
+            started_unix_ms: 4_000,
+            completed_unix_ms: 5_000,
+            source: "claude-cli".to_string(),
+        }
+    }
+
+    #[test]
+    fn a_session_with_only_agent_activity_rows_replays_each_call_as_a_tool_call_frame() {
+        // Given — a session dir holding ONLY the durable agent-activity log: the shape every
+        // daemon-hosted session on disk has (nothing ever wrote `acp-transcript.jsonl` there)
+        let dir = tempfile::tempdir().unwrap();
+        append_agent_activity(dir.path(), &a_completed_read_record()).unwrap();
+        append_agent_activity(dir.path(), &a_completed_bash_record()).unwrap();
+
+        // When — the session's replayable transcript is resolved
+        let frames = read_session_transcript(dir.path()).expect("read session transcript");
+
+        // Then — both persisted calls are replayable, in recorded order
+        assert_eq!(
+            replayed_tool_call_ids(&frames),
+            ["call-read-1", "call-bash-2"]
+        );
+    }
+
+    #[test]
+    fn a_tool_call_recorded_in_both_stores_is_replayed_once_in_its_latest_state() {
+        // Given — the ACP transcript holds call-read-1 while it was still running, and the
+        // agent-activity log holds the same call's terminal (completed) row
+        let dir = tempfile::tempdir().unwrap();
+        let running = AgentActivityRecord {
+            status: STATUS_RUNNING.to_string(),
+            result: serde_json::Value::Null,
+            completed_unix_ms: 0,
+            ..a_completed_read_record()
+        };
+        append_acp_frame(dir.path(), &frame_for_agent_activity(&running)).unwrap();
+        append_agent_activity(dir.path(), &a_completed_read_record()).unwrap();
+
+        // When — the session's replayable transcript is resolved
+        let frames = read_session_transcript(dir.path()).expect("read session transcript");
+
+        // Then — one entry for the call, carrying its latest (completed) state
+        assert_eq!(replayed_tool_call_ids(&frames), ["call-read-1"]);
+        assert_eq!(
+            tool_call(&frames[0]).0.status,
+            ToolCallStatus::Completed as i32
+        );
+    }
+
+    #[test]
+    fn frames_from_both_stores_are_replayed_in_recorded_time_order() {
+        // Given — an agent-text frame recorded at 6_000 in the ACP transcript, and an older tool
+        // call (terminal at 3_000) in the agent-activity log
+        let dir = tempfile::tempdir().unwrap();
+        append_acp_frame(dir.path(), &agent_text_frame("Done reading.", 6_000)).unwrap();
+        append_agent_activity(dir.path(), &a_completed_read_record()).unwrap();
+
+        // When — the session's replayable transcript is resolved
+        let frames = read_session_transcript(dir.path()).expect("read session transcript");
+
+        // Then — the two stores interleave by recorded wall-clock, oldest first
+        assert_eq!(replayed_timestamps(&frames), [3_000, 6_000]);
+    }
+
+    #[test]
+    fn counting_a_session_with_only_agent_activity_rows_matches_its_replayed_entries() {
+        // Given — two calls persisted in the agent-activity log alone
+        let dir = tempfile::tempdir().unwrap();
+        append_agent_activity(dir.path(), &a_completed_read_record()).unwrap();
+        append_agent_activity(dir.path(), &a_completed_bash_record()).unwrap();
+
+        // When — the badge count is derived from the same resolved transcript the pane replays
+        let frames = read_session_transcript(dir.path()).expect("read session transcript");
+
+        // Then — the count matches what opening the pane will show (2), so a badge never promises
+        // entries the transcript cannot deliver
+        assert_eq!(count_activity_entries(&frames), 2);
     }
 
     #[test]

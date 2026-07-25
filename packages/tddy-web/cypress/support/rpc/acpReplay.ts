@@ -109,25 +109,71 @@ export function aReplayBackend(config: { counts: number[]; snapshot?: AcpAgentMe
     async *streamAcpReplay(req: { mode: StreamMode }) {
       if (req.mode === StreamMode.COUNT_THEN_LIVE) {
         opens.count += 1;
-        for (const c of config.counts) {
-          yield create(AcpReplayFrameSchema, {
-            acpAgentMessage: new Uint8Array(),
-            activityCount: BigInt(c),
-          });
-        }
+        yield* countFrames(config.counts);
       } else {
         opens.snapshot += 1;
-        for (const frame of config.snapshot ?? []) {
-          yield create(AcpReplayFrameSchema, {
-            acpAgentMessage: toBinary(AcpAgentMessageSchema, frame),
-          });
-        }
+        yield* transcriptFrames(config.snapshot ?? []);
       }
       // Keep the stream open so the live-tail consumer stays subscribed.
       await new Promise<void>(() => {});
     },
   });
   return { backend, opens };
+}
+
+/**
+ * A `StreamAcpReplay` backend whose **snapshot** feed is held open — subscribed, but silent — until
+ * the test calls `releaseSnapshot()`. The count feed answers immediately, exactly as in
+ * {@link aReplayBackend}.
+ *
+ * Lets a spec interleave host activity (a re-render, a remount) with an **in-flight** snapshot pull,
+ * which is what production does: the real snapshot crosses a network and the dashboard re-renders
+ * while it is in flight. `opens.snapshot` still tallies subscriptions, so a spec can synchronize on
+ * "the pull has started" before acting.
+ */
+export function aReplayBackendWithHeldSnapshot(config: {
+  counts: number[];
+  snapshot: AcpAgentMessage[];
+}) {
+  const opens: ReplayOpens = { count: 0, snapshot: 0 };
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const backend = anInMemoryRpcBackend().implement(ConnectionService, {
+    async *streamAcpReplay(req: { mode: StreamMode }) {
+      if (req.mode === StreamMode.COUNT_THEN_LIVE) {
+        opens.count += 1;
+        yield* countFrames(config.counts);
+      } else {
+        opens.snapshot += 1;
+        await held;
+        yield* transcriptFrames(config.snapshot);
+      }
+      // Keep the stream open so the live-tail consumer stays subscribed.
+      await new Promise<void>(() => {});
+    },
+  });
+  return { backend, opens, releaseSnapshot: () => release() };
+}
+
+/** Count-only frames (no transcript payload) — the cheap icon/badge feed. */
+function* countFrames(counts: number[]) {
+  for (const count of counts) {
+    yield create(AcpReplayFrameSchema, {
+      acpAgentMessage: new Uint8Array(),
+      activityCount: BigInt(count),
+    });
+  }
+}
+
+/** Transcript frames (no count) — the heavy snapshot feed. */
+function* transcriptFrames(frames: AcpAgentMessage[]) {
+  for (const frame of frames) {
+    yield create(AcpReplayFrameSchema, {
+      acpAgentMessage: toBinary(AcpAgentMessageSchema, frame),
+    });
+  }
 }
 
 export { StreamMode, ToolCallStatus, ToolKind };

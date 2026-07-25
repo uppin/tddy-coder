@@ -35,6 +35,7 @@ tonic-build = "0.12"
 
 [dev-dependencies]
 async-stream = "0.3"
+tempfile = "3"
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tddy-testing-commons = { path = "../tddy-testing-commons" }

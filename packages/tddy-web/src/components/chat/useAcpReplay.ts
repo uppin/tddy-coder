@@ -33,9 +33,9 @@ export interface UseAcpReplayResult extends UseAgentChatResult {
   markSeen: () => void;
   /** Open the heavy transcript snapshot for this session — call on first overlay open. Reuses the
    *  cached transcript on a later open (or a switch-back), so the snapshot stream opens at most once
-   *  per session. */
+   *  per delivered transcript. */
   loadSnapshot: () => void;
-  /** True once the snapshot pull has been started for this session. */
+  /** True once the snapshot pull has delivered this session's transcript. */
   snapshotLoaded: boolean;
 }
 
@@ -51,6 +51,8 @@ const NOOP_SEND = () => false;
  * - a **snapshot** feed (`SNAPSHOT_THEN_LIVE`), opened lazily by {@link UseAcpReplayResult.loadSnapshot}
  *   on the first overlay open. Its ACP `session_update` frames are projected into the read-only chat
  *   transcript and cached in the registry, so a switch away and back reuses it rather than re-pulling.
+ *   A pull only counts as done once its frames actually land, so one that is cancelled mid-flight
+ *   (a remount, a session switch) is retried instead of caching an empty transcript.
  *
  * Frame projection mirrors the live ACP path: `agent_message_chunk` text merges into agent bubbles
  * (via {@link createAgentChunkMerger}, finalized per recorded chunk so discrete chunks stay separate);
@@ -74,7 +76,14 @@ export function useAcpReplay(args: {
   const count = state?.count ?? 0;
   const seenCount = state?.seenCount ?? 0;
   const messages = state?.messages ?? [];
-  const snapshotLoaded = state?.snapshotOpened ?? false;
+  const snapshotLoaded = state?.snapshotLoaded ?? false;
+
+  // Both stream effects key on `client`, so a genuine routing change (daemon-direct → session-scoped
+  // once the session's room connects) re-subscribes over the new transport. That is only safe because
+  // the client's *identity* is stable at the source: hosts build it inline while rendering
+  // (`buildSessionClient?.() ?? client` in `SessionMainPane`) but resolve the build through
+  // `SessionClientCache`, so an unchanged route hands back the same client and a mere re-render
+  // cannot tear a subscription down mid-flight.
 
   // The count feed runs while the session is focused: cheap frames carrying only `activity_count`.
   useEffect(() => {
@@ -106,11 +115,10 @@ export function useAcpReplay(args: {
   const loadSnapshot = useCallback(() => setSnapshotSession(sessionId), [sessionId]);
 
   // The snapshot feed: opened lazily once `loadSnapshot` targets the current session, and only when
-  // the registry has not already pulled it (a switch-back reuses the cached transcript).
+  // the registry has not already loaded it (a switch-back reuses the cached transcript).
   useEffect(() => {
     if (snapshotSession !== sessionId) return;
-    if (agentActivityRegistry.get(sessionId)?.snapshotOpened) return;
-    agentActivityRegistry.markSnapshotOpened(sessionId);
+    if (agentActivityRegistry.get(sessionId)?.snapshotLoaded) return;
 
     let cancelled = false;
     const merger = createAgentChunkMerger();
@@ -131,6 +139,10 @@ export function useAcpReplay(args: {
           mode: StreamMode.SNAPSHOT_THEN_LIVE,
         })) {
           if (cancelled) break;
+          // The pull counts as done from its first delivered frame onwards — marking it earlier (at
+          // subscribe time) would leave a pull cancelled before any frame landed cached as an empty
+          // transcript that no later open would refill.
+          agentActivityRegistry.markSnapshotLoaded(sessionId);
           const msg = fromBinary(AcpAgentMessageSchema, frame.acpAgentMessage);
           if (msg.msg.case !== "sessionUpdate") continue;
           const notification = msg.msg.value;
