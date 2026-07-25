@@ -4,6 +4,11 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-25 — Agent Activity: lazy tool-call bodies (fetch on click)
+
+- Tool-call input/output is **no longer downloaded with the transcript** — the replay stream now carries only each call's name/status, so opening the pane on a busy session is cheap regardless of how much the tools read or printed.
+- **Clicking a tool call fetches just that call's body on demand**, showing a brief loading state and, on failure, an error state; fetched bodies are cached so re-opening the same row is instant. See [agent-activity-pane.md § 4 Lazy tool bodies](agent-activity-pane.md#4-lazy-tool-bodies--fetch-on-click-added-2026-07-25).
+
 ## 2026-07-25 — Worktrees: live disk-usage status
 
 - Each worktree now tracks its on-disk size independently with a **None / Calculating / Cached** status and a "last calculated" time; sizes are computed lazily and centrally rate-limited (at most two walks at once) instead of one eager project-wide sweep. See [worktree-disk-usage-streaming.md](worktree-disk-usage-streaming.md).
