@@ -65,3 +65,16 @@ exclude = [
 rstest = "0.24"
 pretty_assertions = "1"
 sysinfo = "0.33"
+
+# Debug builds keep only line tables, not full variable/type DWARF. Panic backtraces (the custom
+# `std::panic::set_hook`s in tddy-coder/tddy-tui/tddy-sandbox-runner) and anyhow errors still resolve
+# to file:line, but the debug-symbol bulk that dominated `target/` size is dropped. This applies to
+# dependencies too (where most of that bulk lives). For a full-symbol build on demand:
+# `CARGO_PROFILE_DEV_DEBUG=2 cargo build`. Release (`./release`) is unaffected.
+[profile.dev]
+debug = "line-tables-only"
+
+# `test` inherits from `dev`; set explicitly so the per-crate test binaries (the biggest `target/`
+# contributor under `cargo test --workspace`) also carry only line tables.
+[profile.test]
+debug = "line-tables-only"
