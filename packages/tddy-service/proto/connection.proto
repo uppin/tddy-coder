@@ -113,6 +113,11 @@ service ConnectionService {
   // {session_dir}/uploads/{upload_id}/{file_name}; the response carries each file's absolute host
   // path on its final chunk so the web can type that path into the terminal.
   rpc UploadSessionFileChunk(UploadSessionFileChunkRequest) returns (UploadSessionFileChunkResponse);
+  // Session Files inspector tab (see docs/ft/web/session-files-inspector.md). Lists the files
+  // already uploaded to a session under {session_dir}/uploads/{upload_id}/{file_name} as a flat,
+  // newest-first list, and deletes a single uploaded file on demand.
+  rpc ListSessionUploads(ListSessionUploadsRequest) returns (ListSessionUploadsResponse);
+  rpc DeleteSessionUpload(DeleteSessionUploadRequest) returns (DeleteSessionUploadResponse);
 }
 
 message ListToolsRequest {}
@@ -991,3 +996,28 @@ message UploadSessionFileChunkResponse {
   // Absolute host path of the written file; populated only when the request's `last` was true.
   string host_path = 1;
 }
+
+// --- Session Files inspector tab (list / delete uploaded files) ---
+
+message ListSessionUploadsRequest {
+  string session_token = 1;
+  string session_id = 2;
+}
+message ListSessionUploadsResponse {
+  repeated SessionUploadEntry uploads = 1;  // newest first
+}
+message SessionUploadEntry {
+  string upload_id = 1;      // per-drop UUID subfolder
+  string file_name = 2;      // basename
+  string host_path = 3;      // absolute host path
+  uint64 size_bytes = 4;
+  int64 uploaded_at_ms = 5;  // file mtime, unix milliseconds
+}
+
+message DeleteSessionUploadRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string upload_id = 3;  // untrusted — validated as a basename, contained under uploads root
+  string file_name = 4;  // untrusted — validated as a basename
+}
+message DeleteSessionUploadResponse {}

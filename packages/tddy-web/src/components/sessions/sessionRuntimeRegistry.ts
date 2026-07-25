@@ -44,6 +44,11 @@ export interface SessionRuntimeState {
   bytesOut: number;
   /** Epoch-ms of the most recent `DataReceived` event, or `null` when none has arrived yet. */
   lastDataReceivedAt: number | null;
+  /** Types text into this session's Agent terminal (no newline appended). Registered by the
+   *  session's terminal once mounted, so the inspector's Files tab can insert an uploaded file's
+   *  host path into the focused session's terminal via a click/tap. `undefined` until the terminal
+   *  registers it (or for a non-interactive runtime). */
+  insertInput?: (text: string) => void;
 }
 
 /** Connection-only patch applied when an attach response arrives for an existing runtime. */
@@ -127,6 +132,15 @@ export class SessionRuntimeRegistry {
     if (!state) return;
     this.runtimeBySessionId.set(sessionId, { ...state, room });
     // `room` is not part of the `runtimes` snapshot used by the UI; no notify needed.
+  }
+
+  /** Register the session's terminal text-insert function (captured from the mounted terminal), so
+   *  the Files-tab Insert/tap route can reach the focused session's terminal. No-op when the session
+   *  has no runtime. `insertInput` is not part of the `runtimes` snapshot, so no notify is needed. */
+  setInsertInput(sessionId: string, insertInput: (text: string) => void): void {
+    const state = this.runtimeBySessionId.get(sessionId);
+    if (!state) return;
+    state.insertInput = insertInput;
   }
 
   /** Focus a session's runtime. The previously focused runtime stays mounted (backgrounded). */

@@ -61,6 +61,10 @@ use tddy_service::proto::connection::{
     StreamTerminalOutputRequest, TerminalControlEvent, UploadSessionFileChunkRequest,
     UploadSessionFileChunkResponse, WatchTerminalControlRequest,
 };
+use tddy_service::proto::connection::{
+    DeleteSessionUploadRequest, DeleteSessionUploadResponse, ListSessionUploadsRequest,
+    ListSessionUploadsResponse,
+};
 use tddy_service::tonic_connection::connection_service_server::ConnectionService as TonicConnectionService;
 
 /// Maps a peer uid (from SO_PEERCRED) to its OS username. Injected so the local peer-trust path is
@@ -853,6 +857,32 @@ where
         request: tonic::Request<UploadSessionFileChunkRequest>,
     ) -> Result<tonic::Response<UploadSessionFileChunkResponse>, tonic::Status> {
         let resp = RpcConnectionService::upload_session_file_chunk(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn list_session_uploads(
+        &self,
+        request: tonic::Request<ListSessionUploadsRequest>,
+    ) -> Result<tonic::Response<ListSessionUploadsResponse>, tonic::Status> {
+        let resp = RpcConnectionService::list_session_uploads(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn delete_session_upload(
+        &self,
+        request: tonic::Request<DeleteSessionUploadRequest>,
+    ) -> Result<tonic::Response<DeleteSessionUploadResponse>, tonic::Status> {
+        let resp = RpcConnectionService::delete_session_upload(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

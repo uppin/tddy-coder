@@ -11,6 +11,7 @@ import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
 import { SessionToolsTab } from "./SessionToolsTab";
 import { SessionUsageTab } from "./SessionUsageTab";
 import { SessionWorktreeTab } from "./SessionWorktreeTab";
+import { SessionFilesTab } from "./SessionFilesTab";
 // (usage stream is owned by SessionUsageTab so it opens only while that tab is mounted)
 import { SessionVncTab } from "./SessionVncTab";
 import { SessionScreenSharingTab } from "./SessionScreenSharingTab";
@@ -50,6 +51,9 @@ interface SessionInspectorDrawerProps {
    *  / `ExecuteTool` through it when available, falling back to the daemon `client` for inactive /
    *  non-LiveKit sessions. */
   buildSessionClient?: () => Client<typeof ConnectionService> | null;
+  /** Inserts an uploaded file's host path into the focused session's terminal (Files tab → Insert
+   *  / tap). Defaults to a no-op when the host does not route terminal input. */
+  onInsertPathIntoTerminal?: (hostPath: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +90,7 @@ export function SessionInspectorDrawer({
   serverIdentity = "server",
   traffic = null,
   buildSessionClient,
+  onInsertPathIntoTerminal,
 }: SessionInspectorDrawerProps) {
   const [pendingDelete, setPendingDelete] = useState(false);
   const [tab, setTab] = useState<InspectorTab>("details");
@@ -351,6 +356,16 @@ export function SessionInspectorDrawer({
               projectId={session.projectId}
               sessionId={session.sessionId}
               repoPath={session.repoPath}
+            />
+          </ScrollArea>
+        ) : tab === "files" ? (
+          <ScrollArea className="flex-1 min-h-0">
+            <SessionFilesTab
+              client={client ?? null}
+              sessionToken={sessionToken ?? ""}
+              sessionId={session.sessionId}
+              onInsertPath={onInsertPathIntoTerminal ?? (() => undefined)}
+              onCloseInspector={onClose}
             />
           </ScrollArea>
         ) : tab === "vnc" ? (

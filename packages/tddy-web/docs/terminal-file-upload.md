@@ -57,9 +57,21 @@ Two tracked follow-ups, neither implemented: an explicit `offset` on `UploadSess
 turning the transfer bandwidth-bound; and progress feedback belongs on the terminal itself (overlay,
 or a placeholder replaced by the path on completion), not only in the screen footer.
 
+## Re-dropping an already-uploaded file (Files tab → terminal)
+
+An uploaded file stays reusable via the Inspector **Files** tab (see
+[session-files-inspector.md](../../../docs/ft/web/session-files-inspector.md)): dragging a row onto
+the terminal carries the file's already-uploaded **host path** in the drag's `DataTransfer` under the
+private MIME `application/x-tddy-host-path` (the constant in `lib/hostPathDrag.ts`). `handleDrop`
+checks `dataTransfer.getData(HOST_PATH_MIME)` first and, when present, inserts the shell-quoted path
+via `joinQuotedPaths([hostPath])` and **returns without uploading** — the bytes are already on the
+host. An OS file drag (carrying `DataTransfer.files`) is unchanged and still uploads. The click/tap
+route (Files-tab **Insert** button) reaches the focused terminal through the runtime registry's
+`insertInput` hook instead of the drop zone.
+
 ## Tests
 
 Units `randomId.test.ts` (6), `fileUploadChunks.test.ts` (5), `shellQuote`/`uploadProgress`; Cypress
 `TerminalFileDropUpload` (4), `TerminalFileUploadFailure` (2), `MobileTerminalUploadButton` (2),
-`TerminalFileUploadProgressFooter` (2). The transport deadline itself is pinned in
-`packages/tddy-livekit-web/src/transport.test.ts`.
+`TerminalFileUploadProgressFooter` (2), `TerminalDropInsertHostPath` (2, internal host-path drag).
+The transport deadline itself is pinned in `packages/tddy-livekit-web/src/transport.test.ts`.

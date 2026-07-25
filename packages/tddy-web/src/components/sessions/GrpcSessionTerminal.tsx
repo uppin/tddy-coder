@@ -29,6 +29,9 @@ interface GrpcSessionTerminalProps {
   terminalId?: string;
   onDisconnect?: () => void;
   mobileShortcuts?: ToolShortcutDef[];
+  /** Called with this terminal's text-insert function (see `GhosttyTerminalGrpc.onRegisterInsertInput`),
+   *  so the runtime can expose it to the inspector's Files-tab click/tap route. */
+  onRegisterInsertInput?: (insertInput: (text: string) => void) => void;
 }
 
 export function GrpcSessionTerminal({
@@ -39,6 +42,7 @@ export function GrpcSessionTerminal({
   terminalId = "",
   onDisconnect,
   mobileShortcuts,
+  onRegisterInsertInput,
 }: GrpcSessionTerminalProps) {
   const [stream, setStream] = useState<GrpcStream | null>(null);
   // containerRef must be on a div that is ALWAYS rendered (not gated on stream),
@@ -199,6 +203,7 @@ export function GrpcSessionTerminal({
           sessionId={sessionId}
           stream={stream}
           mobileShortcuts={mobileShortcuts}
+          onRegisterInsertInput={onRegisterInsertInput}
         />
       )}
       <EnqueuedInputOverlay model={enqueuedModel} visible={enqueuedVisible} />

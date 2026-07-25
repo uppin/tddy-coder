@@ -71,6 +71,9 @@ export interface GhosttyTerminalLiveKitProps {
   debugLogging?: boolean;
   /** Called with a function to focus the terminal. Used by mobile keyboard button. */
   onRegisterFocus?: (focus: () => void) => void;
+  /** Called with a function that types text into the terminal input (no newline). Lets the session
+   *  runtime expose this terminal's insert to the inspector's Files tab (click/tap route). */
+  onRegisterInsertInput?: (insertInput: (text: string) => void) => void;
   /** When set, show connection chrome (status dot menu). Interrupt is the TUI Stop pane (SGR mouse → 0x03). */
   connectionOverlay?: {
     onDisconnect: () => void;
@@ -160,6 +163,7 @@ export function GhosttyTerminalLiveKit({
   debugMode = false,
   debugLogging = false,
   onRegisterFocus,
+  onRegisterInsertInput,
   autoFocus = true,
   preventFocusOnTap = false,
   showMobileKeyboard = false,
@@ -513,6 +517,14 @@ export function GhosttyTerminalLiveKit({
       typeof data === "string" ? new TextEncoder().encode(data) : data;
     enqueueTerminalInput(encoded);
   };
+
+  // Expose text-insert to the runtime (for the inspector's Files-tab click/tap route). A ref keeps
+  // the registered function current without re-registering every render.
+  const pushInputRef = useRef(pushInput);
+  pushInputRef.current = pushInput;
+  useEffect(() => {
+    onRegisterInsertInput?.((text: string) => pushInputRef.current(text));
+  }, [onRegisterInsertInput]);
 
   const showLiveKitStatusStrip = shouldShowVisibleLiveKitStatusStrip({
     connectionOverlayEnabled: !!connectionOverlay,
