@@ -269,6 +269,34 @@ carry an optional `terminal_id` (empty ⇒ `"main"`) and resolve the target via
 `get_terminal(session_id, terminal_id)`. All four new/extended RPCs authenticate `session_token`
 via the same GitHub → OS user path as the other endpoints.
 
+### Terminal mode replay (mouse tracking)
+
+A client's VT reports mouse events only after it has itself seen a mouse-tracking DECSET. An agent
+TUI emits those bytes once at startup, and the 64 KiB capture ring trims from the front — so after
+enough output they are gone, and `trigger_redraw()` (SIGWINCH) does not re-issue private modes.
+
+`stream_terminal_output` therefore sends `capture.mode_prologue()` — the mouse modes still in effect,
+as `ESC[?<mode>h` — as its **own first frame**, before and independently of the replay branch below.
+That independence matters: the replay is gated on `!has_initial_dims`, and a browser always measures
+its grid before opening the stream, so on the exact path the web terminal uses the capture was never
+sent at all. The prologue is not subject to that gate.
+
+Frame order on attach is **prologue → capture replay (legacy no-dimensions path only) → initial ACK
+→ live bridge**. The legacy replay chunks `capture.buffered_bytes()` (output without the prologue),
+so a client on that path may see the DECSETs twice; DECSET is idempotent.
+
+The LiveKit bidi `PtyLiveKitService` and the tddy-coder session participant send
+`capture.replay()` (prologue ++ retained output) for the same reason. Mechanics of the sniffing and
+of escape-boundary trimming live in
+[tddy-task terminal-capture.md](../../tddy-task/docs/terminal-capture.md).
+
+Sandbox sessions take a separate branch: their PTY output arrives over the stdio bridge in
+`sandbox_session.rs` and is captured in `SandboxSessionState.capture`, a `TerminalCapture` of its
+own (it predates `TaskChannel` on this path). Attach replays through `sandbox_replay_frames`, which
+is `chunk_terminal_output(&capture.replay(), …)` — prologue first, same contract, and a named seam so
+the behaviour is unit-testable without spawning a real sandbox. Sandbox streams carry no unary
+input-offset ACK source, so they emit data frames only.
+
 ### Input-offset acknowledgement
 
 `SendTerminalInput` carries a cumulative byte `input_offset` (0 = unset). After the bytes reach the

@@ -145,7 +145,7 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
     // When driving the production `dial_and_bridge` over the jailed process's piped stdio — the
     // same call `connection_service.rs` makes for a real session, once switched off gRPC
     let (stdout_tx, _stdout_rx) = broadcast::channel(16);
-    let capture = Arc::new(StdMutex::new(Vec::new()));
+    let capture = Arc::new(StdMutex::new(tddy_task::TerminalCapture::new()));
     let (_stdin_tx, stdin_rx) = mpsc::unbounded_channel();
     let task_registry = tddy_task::TaskRegistry::default();
 

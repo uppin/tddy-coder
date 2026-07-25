@@ -376,7 +376,7 @@ impl RpcService for SessionConnectionServiceRpc {
                 let replay = handle
                     .capture
                     .lock()
-                    .map(|cap| cap.clone())
+                    .map(|cap| cap.replay())
                     .unwrap_or_default();
                 if !replay.is_empty() {
                     let frame = SessionTerminalOutput {

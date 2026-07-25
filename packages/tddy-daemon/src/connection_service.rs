@@ -72,7 +72,7 @@ use tddy_service::proto::connection::{
     StreamHostStatsRequest, StreamMode, StreamSessionActivityRequest,
     ToolCallInfo as ProtoToolCallInfo,
 };
-use tddy_task::TaskRegistry;
+use tddy_task::{TaskRegistry, TerminalCapture};
 
 /// Runs blocking clone/spawn work with a wall-clock cap so hung NSS/git/spawn cannot block RPCs forever.
 pub(crate) async fn spawn_blocking_with_timeout<T: Send + 'static>(
@@ -134,6 +134,19 @@ pub(crate) fn chunk_terminal_output(data: &[u8], max_frame_bytes: usize) -> Vec<
     data.chunks(max_frame_bytes)
         .map(bytes::Bytes::copy_from_slice)
         .collect()
+}
+
+/// Frames a newly attached sandbox-session subscriber receives before the live broadcast: the
+/// mouse-tracking modes still in effect, then the retained output.
+///
+/// Without the prologue a browser attaching to a long-running sandbox session never learns the
+/// application enabled mouse reporting, because the DECSET that enabled it was evicted from the
+/// capture ring long ago and nothing re-emits it.
+pub(crate) fn sandbox_replay_frames(
+    capture: &TerminalCapture,
+    max_frame_bytes: usize,
+) -> Vec<bytes::Bytes> {
+    chunk_terminal_output(&capture.replay(), max_frame_bytes)
 }
 
 /// Derives the agent and recipe to relaunch a resumed session with, from its persisted
@@ -2115,7 +2128,7 @@ impl ConnectionServiceImpl {
         .map_err(Status::deadline_exceeded)?;
 
         let (stdout_tx, _) = tokio::sync::broadcast::channel(256);
-        let capture = Arc::new(StdMutex::new(Vec::new()));
+        let capture = Arc::new(StdMutex::new(TerminalCapture::new()));
         let (stdin_tx, stdin_rx) = tokio::sync::mpsc::unbounded_channel();
 
         crate::sandbox_session::dial_and_bridge(
@@ -2525,7 +2538,7 @@ impl ConnectionServiceImpl {
         .map_err(Status::deadline_exceeded)?;
 
         let (stdout_tx, _) = tokio::sync::broadcast::channel(256);
-        let capture = Arc::new(StdMutex::new(Vec::new()));
+        let capture = Arc::new(StdMutex::new(TerminalCapture::new()));
         let (stdin_tx, stdin_rx) = tokio::sync::mpsc::unbounded_channel();
 
         crate::sandbox_session::dial_and_bridge(
@@ -2973,7 +2986,7 @@ impl ConnectionServiceImpl {
         })?;
 
         let (stdout_tx, _) = tokio::sync::broadcast::channel(256);
-        let capture = Arc::new(StdMutex::new(Vec::new()));
+        let capture = Arc::new(StdMutex::new(TerminalCapture::new()));
         let (stdin_tx, stdin_rx) = tokio::sync::mpsc::unbounded_channel();
 
         crate::sandbox_session::dial_and_bridge(
@@ -5079,7 +5092,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             let frames = sandbox
                 .capture
                 .lock()
-                .map(|cap| chunk_terminal_output(&cap, TERMINAL_OUTPUT_FRAME_MAX_BYTES))
+                .map(|cap| sandbox_replay_frames(&cap, TERMINAL_OUTPUT_FRAME_MAX_BYTES))
                 .unwrap_or_default();
             for frame in frames {
                 let _ = tx.send(terminal_data_frame(frame.to_vec()));
@@ -5142,6 +5155,25 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let (mpsc_tx, mpsc_rx) = tokio::sync::mpsc::unbounded_channel::<SessionTerminalOutput>();
         let mut broadcast_rx = handle.stdout_tx.subscribe();
 
+        // Re-issue the mouse-tracking modes the application has enabled as the very first frame,
+        // independent of the capture replay below. A client's VT only reports clicks, drags and
+        // scrolls once it has seen the DECSET itself, and neither the SIGWINCH redraw nor a capture
+        // ring that has trimmed past the startup bytes carries them.
+        let prologue = handle
+            .capture
+            .lock()
+            .map(|cap| cap.mode_prologue())
+            .unwrap_or_default();
+        if !prologue.is_empty() {
+            log::debug!(
+                target: "tddy_daemon::connection_service",
+                "stream_terminal_output: re-issuing {} byte(s) of terminal mode prologue for session {}",
+                prologue.len(),
+                session_id
+            );
+            let _ = mpsc_tx.send(terminal_data_frame(prologue));
+        }
+
         // Replay capture buffer only when the client did NOT supply terminal dimensions.
         //
         // When dimensions are provided we already sent SIGWINCH (above), which will make the
@@ -5157,7 +5189,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             let frames = handle
                 .capture
                 .lock()
-                .map(|cap| chunk_terminal_output(&cap, TERMINAL_OUTPUT_FRAME_MAX_BYTES))
+                .map(|cap| {
+                    chunk_terminal_output(cap.buffered_bytes(), TERMINAL_OUTPUT_FRAME_MAX_BYTES)
+                })
                 .unwrap_or_default();
             if !frames.is_empty() {
                 let total_bytes: usize = frames.iter().map(|f| f.len()).sum();
@@ -9442,6 +9476,44 @@ mod terminal_output_chunking_tests {
             assert!(TERMINAL_OUTPUT_FRAME_MAX_BYTES > 0);
             assert!(TERMINAL_OUTPUT_FRAME_MAX_BYTES < 1024 * 1024);
         };
+    }
+}
+
+#[cfg(test)]
+mod sandbox_replay_tests {
+    use super::{sandbox_replay_frames, TERMINAL_OUTPUT_FRAME_MAX_BYTES};
+    use tddy_task::TerminalCapture;
+
+    /// DECSET 1006 — SGR mouse encoding, the mode `GhosttyTerminal` gates mouse forwarding on.
+    const SGR_MOUSE_ENCODING: &[u8] = b"\x1b[?1006h";
+
+    /// A sandbox session that turned on mouse reporting at startup and has since produced far
+    /// more output than the capture ring retains.
+    fn a_long_running_sandbox_capture() -> TerminalCapture {
+        let mut capture = TerminalCapture::new();
+        capture.append(SGR_MOUSE_ENCODING);
+        capture.append(&vec![b'A'; 3 * TerminalCapture::CAPTURE_LIMIT_BYTES]);
+        capture
+    }
+
+    #[test]
+    fn leads_the_sandbox_replay_with_the_mouse_modes_still_in_effect() {
+        // Given a sandbox session whose ring has long since evicted the enabling DECSET
+        let capture = a_long_running_sandbox_capture();
+
+        // When a browser attaches and takes the replay frames
+        let frames = sandbox_replay_frames(&capture, TERMINAL_OUTPUT_FRAME_MAX_BYTES);
+
+        // Then the first frame re-enables mouse reporting, so the attaching terminal forwards
+        // clicks and scrolls instead of silently dropping them
+        assert_eq!(
+            frames.first().map(|frame| frame
+                .iter()
+                .copied()
+                .take(SGR_MOUSE_ENCODING.len())
+                .collect::<Vec<u8>>()),
+            Some(SGR_MOUSE_ENCODING.to_vec()),
+        );
     }
 }
 
