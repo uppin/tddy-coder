@@ -496,8 +496,27 @@ prs:
         assert_eq!(n.branch_suggestion.as_deref(), Some("feature/my-pr"));
         assert_eq!(n.parents, vec!["n0".to_string()]);
         assert!(n.session_id.is_none());
-        assert_eq!(n.branch, n.branch_suggestion);
         assert!(n.pr_status.is_none());
         assert!(n.child_state.is_none());
+    }
+
+    #[test]
+    fn planned_nodes_own_no_branch_until_a_child_creates_one() {
+        // Given — a plan whose PR names the branch it would like to use
+        let pr = PlannedPr {
+            node_id: "n1".to_string(),
+            title: "My PR".to_string(),
+            description: "Does things".to_string(),
+            branch_suggestion: Some("feature/my-pr".to_string()),
+            parents: vec![],
+            child_recipe: None,
+        };
+
+        // When — the plan is turned into stack nodes
+        let nodes = planned_prs_into_stack_nodes(&[pr]);
+
+        // Then — the suggestion stays a suggestion: `branch` means "a branch that exists", and the
+        // stack's spawn ordering depends on it, so planning must not pre-fill it.
+        assert_eq!(nodes[0].branch, None);
     }
 }

@@ -803,6 +803,49 @@ mod tests {
         );
     }
 
+    /// A node's PR belongs to its **branch**, not to its child session. Once the branch exists the
+    /// PR must be reported whether or not a session is still attached — sessions come and go
+    /// (closed, cleaned, restarted) while the branch and its PR stay.
+    #[test]
+    fn assemble_views_reports_the_pr_of_a_branch_whose_child_session_is_gone() {
+        use tddy_core::changeset::{Stack, StackNode};
+
+        // Given — n1 owns a branch but no session points at it any more
+        let tmp = tempfile::tempdir().unwrap();
+        let stack = Stack {
+            version: 1,
+            nodes: vec![StackNode {
+                node_id: "n1".into(),
+                title: "Root".into(),
+                description: String::new(),
+                branch_suggestion: Some("feature/n1".into()),
+                branch: Some("feature/n1".into()),
+                session_id: None,
+                parents: vec![],
+                pr_status: None,
+                child_state: None,
+                internal_status: None,
+            }],
+        };
+        let gh = AlwaysOpenMockGh {
+            pr_number: 7,
+            base: "master".into(),
+        };
+
+        // When
+        let views = assemble_views(tmp.path(), tmp.path(), &stack, &gh, "master")
+            .expect("assemble_views must not error");
+
+        // Then
+        assert_eq!(
+            views[0].pr,
+            PrLiveStatus::Open {
+                number: 7,
+                base: "master".to_string()
+            }
+        );
+    }
+
     /// `assemble_views_reports_propen_when_mock_returns_open_pr` — when the `GithubPrApi` mock
     /// returns an open PR for a node's branch, `assemble_views` must map it to `PrLiveStatus::Open`.
     #[test]

@@ -987,6 +987,46 @@ mod tests {
     }
 
     #[test]
+    fn reseeding_refuses_to_overwrite_a_stack_once_a_node_owns_a_branch() {
+        // Given — node n1 owns a real branch; no session is attached to it (it was closed)
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let cs = Changeset {
+            stack: Some(Stack {
+                version: 1,
+                nodes: vec![StackNode {
+                    node_id: "n1".to_string(),
+                    title: "Add token store".to_string(),
+                    description: String::new(),
+                    branch_suggestion: Some("feature/token-store".to_string()),
+                    branch: Some("feature/token-store".to_string()),
+                    session_id: None,
+                    parents: vec![],
+                    pr_status: None,
+                    child_state: None,
+                    internal_status: None,
+                }],
+            }),
+            ..Changeset::default()
+        };
+        tddy_core::changeset::write_changeset(dir, &cs).unwrap();
+
+        // When — a chat refinement tries to reshape the plan
+        let result = reseed_stack_from_plan_if_unspawned(dir, &a_two_node_plan());
+
+        // Then — refused: the branch is real work, whether or not a session still points at it
+        assert!(
+            result.is_err(),
+            "expected Err once a node owns a materialized branch"
+        );
+        let loaded = read_changeset(dir).unwrap().stack.unwrap();
+        assert_eq!(
+            loaded.node("n1").unwrap().branch.as_deref(),
+            Some("feature/token-store")
+        );
+    }
+
+    #[test]
     fn reseeding_rejects_a_refinement_that_introduces_a_cycle_and_preserves_the_previous_stack() {
         use crate::plan_pr_stack::PlannedPr;
 
