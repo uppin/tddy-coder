@@ -19,6 +19,8 @@ import {
   prStackPrLink,
   prStackPrState,
   prStackRepointBtn,
+  prStackWorktree,
+  prStackSession,
   TEST_IDS,
 } from "../testIds";
 
@@ -79,6 +81,14 @@ export const prStackScreenPage = {
   /** The Repoint control on a row whose predecessor has merged. */
   repointBtn: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(prStackRepointBtn(nodeId), { timeout: 5000, ...options }),
+
+  /** The on-disk worktree indicator for a row (resolved by branch via QueryBranch). */
+  worktree: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackWorktree(nodeId), { timeout: 5000, ...options }),
+
+  /** The resolved in-progress session reference for a row (resolved by branch via QueryBranch). */
+  sessionRef: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackSession(nodeId), { timeout: 5000, ...options }),
 
   /** Click the Repoint control for a row. */
   clickRepoint(nodeId: string) {
@@ -266,6 +276,14 @@ export const prStackScreenPage = {
   /** The dialog's new-branch-name input (pre-filled from the planned PR's branch). */
   dialogNewBranchNameInput: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionNewBranchNameInput, { timeout: 5000, ...options }),
+
+  /** The dialog's branch-mode select — its "New branch from base: <name>" option carries the base. */
+  dialogBranchIntentSelect: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionBranchIntentSelect, { timeout: 5000, ...options }),
+
+  /** The dialog's pre-checked "Create Remote Branch" toggle. */
+  dialogCreateRemoteBranchToggle: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionCreateRemoteBranchToggle, { timeout: 5000, ...options }),
 
   /** The dialog's initial-prompt textarea (pre-filled from the planned PR's title + description). */
   dialogInitialPromptInput: (options?: Parameters<typeof cy.get>[1]) =>

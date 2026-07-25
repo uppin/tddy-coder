@@ -232,6 +232,8 @@ export const TEST_IDS = {
   createSessionBranchIntentSelect: "create-session-branch-intent-select",
   createSessionNewBranchNameInput: "create-session-new-branch-name-input",
   createSessionBranchToWorkOnSelect: "create-session-branch-to-work-on-select",
+  /** "Create Remote Branch" checkbox — pre-checked; pushes the new branch to origin at session start. */
+  createSessionCreateRemoteBranchToggle: "create-session-create-remote-branch-toggle",
   createSessionCancelBtn: "create-session-cancel-btn",
   createSessionSubmitBtn: "create-session-submit-btn",
   createSessionError: "create-session-error",
@@ -716,6 +718,12 @@ export const prStackPrState = (nodeId: string) => `pr-stack-pr-state-${nodeId}`;
 
 /** `[data-testid="pr-stack-repoint-<nodeId>"]` — the Repoint control shown when a predecessor merged */
 export const prStackRepointBtn = (nodeId: string) => `pr-stack-repoint-${nodeId}`;
+
+/** `[data-testid="pr-stack-worktree-<nodeId>"]` — the on-disk worktree indicator (from QueryBranch) */
+export const prStackWorktree = (nodeId: string) => `pr-stack-worktree-${nodeId}`;
+
+/** `[data-testid="pr-stack-session-<nodeId>"]` — the resolved in-progress session reference (QueryBranch) */
+export const prStackSession = (nodeId: string) => `pr-stack-session-${nodeId}`;
 
 /** `[data-testid="agent-chat-message-<index>"]` — a single rendered chat bubble (reusable AgentChat) */
 export const agentChatMessage = (index: number) => `agent-chat-message-${index}`;
