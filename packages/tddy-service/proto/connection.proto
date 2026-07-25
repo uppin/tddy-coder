@@ -90,6 +90,13 @@ service ConnectionService {
   // choosing its ancestors (parent node ids) from the already-planned nodes. See
   // docs/ft/coder/pr-stacking.md § Manually adding a planned PR.
   rpc AddPlannedPr(AddPlannedPrRequest) returns (AddPlannedPrResponse);
+  // PR-Stack Chat Screen: live GitHub PR status for one planned-PR branch (number, link, state).
+  // Polled by the web so the stack view shows PR status without the orchestrator agent running.
+  // See docs/ft/coder/pr-stack-live-status.md.
+  rpc GetPrStatus(GetPrStatusRequest) returns (GetPrStatusResponse);
+  // PR-Stack Chat Screen: repoint a planned node after a predecessor merged — drop merged parents,
+  // rebase the local branch onto the effective base, and re-target the open PR's base branch.
+  rpc RepointPlannedPr(RepointPlannedPrRequest) returns (RepointPlannedPrResponse);
   // Local peer-trust: mint a session token for the caller identified by its SO_PEERCRED peer uid
   // over the daemon's Unix-domain socket. Available only on the local UDS transport (the peer
   // credential is not present on ConnectRPC-HTTP or LiveKit), and only for a peer uid mapped to a
@@ -226,6 +233,10 @@ message SessionEntry {
   // stack plan) with per-doc existence and human descriptions. Empty for sessions whose recipe
   // is blank or unknown.
   repeated SessionContextDoc context_docs = 27;
+  // The session's git branch (from Changeset.branch). Empty when the session has no branch yet.
+  // Lets the PR-Stack view resolve the in-progress child session for a planned node by branch
+  // (docs/ft/coder/pr-stack-live-status.md).
+  string branch = 28;
 }
 
 message ProjectEntry {
@@ -882,6 +893,41 @@ message AddPlannedPrRequest {
 message AddPlannedPrResponse {
   // Updated JSON-serialized `Stack`, same wire shape as `SessionEntry.stack_plan_json` (field 23)
   // — callers re-use the existing `parseStackPlan` parser rather than a second message schema.
+  string stack_plan_json = 1;
+}
+
+// --- PR-Stack Chat Screen: live PR status & repoint (docs/ft/coder/pr-stack-live-status.md) ---
+
+// Live GitHub PR status for one head branch.
+message PrStatusView {
+  // False when no PR (open, merged, or closed) exists for the queried head branch.
+  bool exists = 1;
+  uint64 number = 2;
+  string url = 3;
+  // "open" | "merged" | "closed" | "draft". Empty when exists = false.
+  string state = 4;
+}
+
+message GetPrStatusRequest {
+  string session_token = 1;
+  // The "pr-stack" orchestrator session — resolves the repo (owner/repo) to query.
+  string session_id = 2;
+  // Head branch to look up (the planned PR's branch).
+  string branch = 3;
+}
+message GetPrStatusResponse {
+  PrStatusView status = 1;
+}
+
+message RepointPlannedPrRequest {
+  string session_token = 1;
+  // The "pr-stack" orchestrator session whose Changeset.stack holds the node.
+  string session_id = 2;
+  // The planned node to repoint (drop merged parents, rebase, re-target PR base).
+  string node_id = 3;
+}
+message RepointPlannedPrResponse {
+  // Updated JSON-serialized `Stack`, same wire shape as `SessionEntry.stack_plan_json` (field 23).
   string stack_plan_json = 1;
 }
 

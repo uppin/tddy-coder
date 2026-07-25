@@ -405,8 +405,8 @@ pub fn add_planned_pr_node(
         node_id,
         title: input.title,
         description: input.description,
+        branch: input.branch_suggestion.clone(),
         branch_suggestion: input.branch_suggestion,
-        branch: None,
         session_id: None,
         parents: input.parents,
         pr_status: None,
@@ -433,6 +433,126 @@ pub fn add_planned_pr_node(
     .map_err(|e| format!("add_planned_pr_node: failed to write stack: {e}"))?;
 
     Ok(new_node)
+}
+
+/// Repoint a single planned node after one or more predecessors have merged.
+///
+/// Drops every merged parent from the node's `parents` (persisted atomically), computes the
+/// effective base branch (the nearest non-merged ancestor's branch, or `default_branch` when the
+/// node's remaining parents are all merged/absent), rebases the node's local branch onto that base
+/// and force-pushes it, then re-targets the open GitHub PR's base to the effective base. Mirrors
+/// `bridge::execute_stack_repoint` applied to one node so the web Repoint control and the agent
+/// repoint converge. When the branch is not local (remote-only), the git rebase is skipped and the
+/// PR base is still re-targeted.
+pub fn repoint_planned_pr_node(
+    session_dir: &Path,
+    repo_root: &Path,
+    node_id: &str,
+    default_branch: &str,
+    gh: &dyn crate::orchestrate_pr_stack::github::GithubPrApi,
+) -> Result<StackNode, String> {
+    use crate::orchestrate_pr_stack::git_ops::{
+        force_push_with_lease, local_branch_exists, merge_base, rebase_onto,
+    };
+    use tddy_core::changeset::{read_changeset, update_stack_atomic, GithubPrStatus};
+
+    let changeset = read_changeset(session_dir)
+        .map_err(|e| format!("repoint_planned_pr_node: failed to read changeset: {e}"))?;
+    let stack = changeset.stack.unwrap_or_default();
+    let node = stack
+        .node(node_id)
+        .ok_or_else(|| format!("repoint_planned_pr_node: node '{node_id}' not found"))?
+        .clone();
+
+    // Identify which of the node's parents have merged — those are dropped.
+    let merged_parents: Vec<String> = node
+        .parents
+        .iter()
+        .filter(|parent_id| stack.node(parent_id).is_some_and(|p| p.is_skipped()))
+        .cloned()
+        .collect();
+
+    update_stack_atomic(session_dir, |stack| {
+        if let Some(node) = stack.nodes.iter_mut().find(|n| n.node_id == node_id) {
+            node.parents.retain(|p| !merged_parents.contains(p));
+        }
+    })
+    .map_err(|e| format!("repoint_planned_pr_node: failed to persist stack: {e}"))?;
+
+    // Effective base after dropping merged parents: strip the `origin/` prefix so it names a
+    // branch usable both as a rebase target and a GitHub PR base.
+    let updated = read_changeset(session_dir)
+        .map_err(|e| format!("repoint_planned_pr_node: failed to re-read changeset: {e}"))?
+        .stack
+        .unwrap_or_default();
+    let base_ref = updated
+        .effective_base_refs(node_id, default_branch)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| default_branch.to_string());
+    let effective_base = base_ref
+        .strip_prefix("origin/")
+        .unwrap_or(&base_ref)
+        .to_string();
+
+    let branch = node.branch.clone().ok_or_else(|| {
+        format!("repoint_planned_pr_node: node '{node_id}' has no branch to repoint")
+    })?;
+
+    // Rebase + force-push only when the branch is local; remote-only branches skip git ops.
+    if local_branch_exists(repo_root, &branch) {
+        let old_base = merge_base(repo_root, &branch, &effective_base)
+            .unwrap_or_else(|_| effective_base.clone());
+        match rebase_onto(repo_root, &effective_base, &old_base, &branch) {
+            Ok(()) => {
+                let expected_sha = std::process::Command::new("git")
+                    .current_dir(repo_root)
+                    .args(["rev-parse", &branch])
+                    .output()
+                    .ok()
+                    .filter(|o| o.status.success())
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    .unwrap_or_default();
+                if let Err(e) = force_push_with_lease(repo_root, &branch, &expected_sha) {
+                    log::warn!("repoint_planned_pr_node: force-push failed for {branch}: {e}");
+                }
+            }
+            Err(e) => {
+                let err_msg = e.to_string();
+                update_stack_atomic(session_dir, |stack| {
+                    if let Some(node) = stack.nodes.iter_mut().find(|n| n.node_id == node_id) {
+                        node.pr_status = Some(GithubPrStatus {
+                            phase: "error".to_string(),
+                            url: None,
+                            error: Some(err_msg.clone()),
+                        });
+                    }
+                })
+                .map_err(|e| format!("repoint_planned_pr_node: failed to record error: {e}"))?;
+                return Err(format!(
+                    "repoint_planned_pr_node: rebase of {branch} onto {effective_base} failed: {err_msg}"
+                ));
+            }
+        }
+    }
+
+    // Re-target the open PR's base to the effective base.
+    if let Some(pr) = gh
+        .get_open_pr(&branch)
+        .map_err(|e| format!("repoint_planned_pr_node: get_open_pr failed: {e}"))?
+    {
+        gh.patch_pr_base(pr.number, &effective_base)
+            .map_err(|e| format!("repoint_planned_pr_node: patch_pr_base failed: {e}"))?;
+    }
+
+    let final_stack = read_changeset(session_dir)
+        .map_err(|e| format!("repoint_planned_pr_node: failed to reload node: {e}"))?
+        .stack
+        .unwrap_or_default();
+    final_stack
+        .node(node_id)
+        .cloned()
+        .ok_or_else(|| format!("repoint_planned_pr_node: node '{node_id}' vanished after repoint"))
 }
 
 /// Next free `"n<N>"` node id for a stack: one past the highest existing numeric suffix among

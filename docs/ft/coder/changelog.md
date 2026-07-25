@@ -2,6 +2,12 @@
 
 Release note history for the Coder product area.
 
+## 2026-07-25 — PR-Stack: branch-keyed live status & repoint
+
+- A Planned PR is assigned a **definitive branch at creation** — the remote branch name is now the durable link between the planned PR, its worktree/session, and its GitHub PR ([pr-stack-live-status.md](pr-stack-live-status.md)).
+- The PR-Stack view resolves each node's **in-progress session by branch**, and polls GitHub (every 5 s) to show the **PR number as a link plus its state** (open/merged/closed/draft) — live, without the orchestrator agent running.
+- A **Repoint control** re-points a node whose predecessor has merged: it drops the merged parent, rebases the node's local branch onto the new effective base, and re-targets the open PR's base branch.
+- **Bug fix — the stack sequence is now respected on spawn.** Starting a session for a planned node branches off its parent node's effective base (skipping merged ancestors), not the default branch as before; starting a node before its non-merged parent is refused ([pr-stacking.md](pr-stacking.md)).
 ## 2026-07-24 — LiveKit unary RPCs can have a deadline
 
 - `LiveKitTransport.unary` (web) now honours the Connect `timeoutMs` call option instead of ignoring it, rejecting with `DeadlineExceeded`. This is the only escape from a wedged call: a chunk-framed request that loses a frame in transit leaves the peer's reassembler permanently incomplete, so the RPC is never answered and never fails. Timeouts stay opt-in per call so legitimately slow RPCs (`StartSession`) are unaffected. See [rpc-multi-transport.md § A lost chunk frame wedges the call](rpc-multi-transport.md#a-lost-chunk-frame-wedges-the-call--deadlines-are-the-only-escape).

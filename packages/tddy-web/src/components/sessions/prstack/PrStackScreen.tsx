@@ -8,6 +8,7 @@ import { PlannedPrList } from "./PlannedPrList";
 import { AddPlannedPrForm, type AddPlannedPrFormSubmission } from "./AddPlannedPrForm";
 import { PrStackChat } from "./PrStackChat";
 import { parseStackPlan, type StackNode } from "./stackPlan";
+import { usePrStatus } from "./usePrStatus";
 import { CreateSessionDialog } from "../CreateSessionDialog";
 import type { CreateSessionInitialValues } from "../CreateSessionPane";
 
@@ -19,6 +20,11 @@ export interface PrStackScreenProps {
   session: SessionEntry;
   client?: ConnectionClient;
   sessionToken?: string;
+  /**
+   * The full session list (all hosts). Used to resolve each planned node's in-progress child
+   * session by branch (`node.branch === session.branch`) — see `resolveNodeSession`.
+   */
+  sessions?: SessionEntry[];
   /**
    * The session's own attach state. The chat panel derives its own independent LiveKit room
    * connection from this (see `usePresenterLiveKitRoom`) rather than being handed a room from
@@ -48,6 +54,7 @@ export function PrStackScreen({
   session,
   client,
   sessionToken = "",
+  sessions = [],
   attachment = IDLE_ATTACHMENT,
   onChildSessionStarted,
 }: PrStackScreenProps) {
@@ -67,6 +74,13 @@ export function PrStackScreen({
   );
   const [startSessionNode, setStartSessionNode] = useState<StackNode | null>(null);
   const [isAddingPlannedPr, setIsAddingPlannedPr] = useState(false);
+
+  // Live GitHub PR status per node branch, polled on an interval (independent of the agent).
+  const branches = useMemo(
+    () => stack.nodes.map((n) => n.branch).filter((b): b is string => Boolean(b)),
+    [stack.nodes],
+  );
+  const prStatusByBranch = usePrStatus(client, sessionToken, session.sessionId, branches);
 
   // Opening "Start session" no longer spawns the child directly — it opens the shared creation
   // form pre-filled from the planned node, so the operator can review/adjust before spawning.
@@ -122,6 +136,19 @@ export function PrStackScreen({
     setIsAddingPlannedPr(false);
   };
 
+  // Repoint drops the node's merged parents, rebases its branch onto the new effective base, and
+  // re-targets the open PR — then re-renders the list from the returned stack (same override
+  // mechanism as `handleAddPlannedPr`, since the `session` prop only refreshes on a later refetch).
+  const handleRepoint = async (nodeId: string) => {
+    if (!client) return;
+    const res = await client.repointPlannedPr({
+      sessionToken,
+      sessionId: session.sessionId,
+      nodeId,
+    });
+    setStackPlanOverride(res.stackPlanJson);
+  };
+
   return (
     <div data-testid="pr-stack-screen" className="flex-1 min-h-0 flex overflow-hidden">
       <div className="w-1/2 min-w-0 border-r border-border flex flex-col overflow-hidden">
@@ -146,6 +173,9 @@ export function PrStackScreen({
           nodes={stack.nodes}
           onStartSession={handleStartSession}
           startingNodeId={startSessionNode?.nodeId ?? null}
+          sessions={sessions}
+          prStatusByBranch={prStatusByBranch}
+          onRepoint={handleRepoint}
         />
       </div>
       <div className="w-1/2 min-w-0 flex flex-col overflow-hidden">

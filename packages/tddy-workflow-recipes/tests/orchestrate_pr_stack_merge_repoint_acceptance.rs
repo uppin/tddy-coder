@@ -8,7 +8,7 @@ use tddy_core::changeset::{
     read_changeset, write_changeset_atomic, Changeset, GithubPrStatus, Stack, StackNode,
 };
 use tddy_core::WorkflowError;
-use tddy_workflow_recipes::orchestrate_pr_stack::github::{GithubPrApi, PrRef};
+use tddy_workflow_recipes::orchestrate_pr_stack::github::{GithubPrApi, PrRef, PrState, PrView};
 use tddy_workflow_recipes::orchestrate_pr_stack::transient::{
     recover_in_flight_stack_op, MergePhase,
 };
@@ -45,6 +45,13 @@ impl MockGithubPrApi {
 impl GithubPrApi for MockGithubPrApi {
     fn get_open_pr(&self, _head: &str) -> Result<Option<PrRef>, WorkflowError> {
         Ok(None)
+    }
+    fn get_pr_by_head(&self, _head: &str) -> Result<Option<PrView>, WorkflowError> {
+        Ok(Some(PrView {
+            number: 42,
+            url: "https://github.com/acme/repo/pull/42".to_string(),
+            state: PrState::Open,
+        }))
     }
     fn merge_pr(&self, number: u64) -> Result<String, WorkflowError> {
         self.merge_calls.lock().unwrap().push(number);

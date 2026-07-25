@@ -17,6 +17,8 @@ export interface WorkflowViewContext {
    * room from above — see `usePresenterLiveKitRoom`.
    */
   attachment?: SessionAttachmentState;
+  /** The full session list — the PR-Stack view resolves each node's in-progress child by branch. */
+  sessions?: SessionEntry[];
   /** Fired after a child session is spawned inside the view — see `PrStackScreenProps.onChildSessionStarted`. */
   onChildSessionStarted?: (entry: {
     sessionId: string;
@@ -50,6 +52,7 @@ export function resolveWorkflowView(
         session={session}
         client={context.client}
         sessionToken={context.sessionToken}
+        sessions={context.sessions}
         attachment={context.attachment}
         onChildSessionStarted={context.onChildSessionStarted}
       />

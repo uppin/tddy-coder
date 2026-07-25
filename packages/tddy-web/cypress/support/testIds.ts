@@ -673,6 +673,18 @@ export const prStackStatusChip = (nodeId: string) => `pr-stack-status-chip-${nod
 export const prStackInternalStatusBadge = (nodeId: string) =>
   `pr-stack-internal-status-badge-${nodeId}`;
 
+/** `[data-testid="pr-stack-in-progress-<nodeId>"]` — in-progress indicator (a live session owns the branch) */
+export const prStackInProgressBadge = (nodeId: string) => `pr-stack-in-progress-${nodeId}`;
+
+/** `[data-testid="pr-stack-pr-link-<nodeId>"]` — the GitHub PR number rendered as a link to the PR */
+export const prStackPrLink = (nodeId: string) => `pr-stack-pr-link-${nodeId}`;
+
+/** `[data-testid="pr-stack-pr-state-<nodeId>"]` — the GitHub PR state (open/merged/closed/draft) */
+export const prStackPrState = (nodeId: string) => `pr-stack-pr-state-${nodeId}`;
+
+/** `[data-testid="pr-stack-repoint-<nodeId>"]` — the Repoint control shown when a predecessor merged */
+export const prStackRepointBtn = (nodeId: string) => `pr-stack-repoint-${nodeId}`;
+
 /** `[data-testid="agent-chat-message-<index>"]` — a single rendered chat bubble (reusable AgentChat) */
 export const agentChatMessage = (index: number) => `agent-chat-message-${index}`;
 

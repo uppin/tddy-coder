@@ -262,6 +262,7 @@ Only one nesting level is rendered for v1; the grouping utility is written to su
 
 ## Related
 
+- [PR-Stack live status & repoint](pr-stack-live-status.md) — the branch as the durable link key; branch→session/PR resolution and live PR status in the web view; the Repoint control; and the sequence-respecting spawn base (`Stack::base_ref_for_spawn`).
 - [Session drawer](../web/session-drawer.md) — session drawer screen layout, create session, recipe field, grouping, and the [Per-Workflow Session Views](../web/session-drawer.md#per-workflow-session-views) / [PR-Stack Chat Screen](../web/session-drawer.md#pr-stack-chat-screen) sections.
 - [Git integration base ref (worktrees)](git-integration-base-ref.md) — session chaining, `spawn_chain_child_worktree`, worktree base-ref validation.
 - [Session layout](session-layout.md) — session directory structure, `changeset.yaml`, artifact paths.

@@ -140,6 +140,7 @@ export function SessionMainPane({
         client,
         sessionToken,
         attachment,
+        sessions: [...sessions],
         onChildSessionStarted,
       })
     : null;

@@ -1,11 +1,20 @@
 import React from "react";
 import { Button } from "../../ui/button";
+import type { PrStatusView } from "../../../gen/connection_pb";
 import type { StackNode } from "./stackPlan";
 
 export interface PlannedPrRowProps {
   node: StackNode;
   onStartSession: (node: StackNode) => void;
   starting: boolean;
+  /** True when a live session owns this node's branch (shows the in-progress indicator). */
+  inProgress?: boolean;
+  /** Live GitHub PR status for this node's branch (number/link/state), when a PR exists. */
+  prStatus?: PrStatusView;
+  /** True when a predecessor has merged and the node can be repointed. */
+  canRepoint?: boolean;
+  /** Repoint this node — drops merged parents, rebases, and re-targets the open PR base. */
+  onRepoint?: (nodeId: string) => void;
 }
 
 /** Tailwind classes for an internal-status badge, keyed by status kind. */
@@ -17,8 +26,17 @@ const INTERNAL_STATUS_BADGE_CLASSES: Record<string, string> = {
 };
 
 /** A single row in the planned-PR list: title/description plus a Start-session CTA or status chip. */
-export function PlannedPrRow({ node, onStartSession, starting }: PlannedPrRowProps) {
+export function PlannedPrRow({
+  node,
+  onStartSession,
+  starting,
+  inProgress = false,
+  prStatus,
+  canRepoint = false,
+  onRepoint,
+}: PlannedPrRowProps) {
   const isSpawned = Boolean(node.sessionId);
+  const hasPr = Boolean(prStatus?.exists);
 
   return (
     <div
@@ -31,6 +49,33 @@ export function PlannedPrRow({ node, onStartSession, starting }: PlannedPrRowPro
           <p className="text-xs text-muted-foreground truncate">{node.description}</p>
         )}
       </div>
+      {inProgress && (
+        <span
+          data-testid={`pr-stack-in-progress-${node.nodeId}`}
+          className="flex-shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800 dark:bg-blue-900 dark:text-blue-100"
+        >
+          in progress
+        </span>
+      )}
+      {hasPr && (
+        <a
+          data-testid={`pr-stack-pr-link-${node.nodeId}`}
+          href={prStatus!.url}
+          target="_blank"
+          rel="noreferrer"
+          className="flex-shrink-0 text-xs text-blue-600 hover:underline dark:text-blue-400"
+        >
+          #{prStatus!.number.toString()}
+        </a>
+      )}
+      {hasPr && (
+        <span
+          data-testid={`pr-stack-pr-state-${node.nodeId}`}
+          className="flex-shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+        >
+          {prStatus!.state}
+        </span>
+      )}
       {node.internalStatus && (
         <span
           data-testid={`pr-stack-internal-status-badge-${node.nodeId}`}
@@ -42,6 +87,16 @@ export function PlannedPrRow({ node, onStartSession, starting }: PlannedPrRowPro
         >
           {node.internalStatus.kind}
         </span>
+      )}
+      {canRepoint && (
+        <Button
+          data-testid={`pr-stack-repoint-${node.nodeId}`}
+          size="sm"
+          variant="outline"
+          onClick={() => onRepoint?.(node.nodeId)}
+        >
+          Repoint
+        </Button>
       )}
       {isSpawned ? (
         <span
