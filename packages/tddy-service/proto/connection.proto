@@ -33,6 +33,12 @@ service ConnectionService {
   rpc ReadSessionWorkflowFile(ReadSessionWorkflowFileRequest) returns (ReadSessionWorkflowFileResponse);
   rpc ListWorktreesForProject(ListWorktreesForProjectRequest) returns (ListWorktreesForProjectResponse);
   rpc RemoveWorktree(RemoveWorktreeRequest) returns (RemoveWorktreeResponse);
+  // Lazy, semaphore-bounded per-worktree disk usage (docs/ft/web/worktree-disk-usage-streaming.md).
+  // StreamWorktreeStats emits a full snapshot frame, then one frame per worktree as its size flips
+  // Calculating -> Cached. CalculateWorktreeSize (re)triggers one worktree; the result surfaces on
+  // any open stream.
+  rpc StreamWorktreeStats(StreamWorktreeStatsRequest) returns (stream WorktreeStatsEvent);
+  rpc CalculateWorktreeSize(CalculateWorktreeSizeRequest) returns (CalculateWorktreeSizeResponse);
   // Session Worktree inspector tab (docs/ft/web/session-worktree-inspector.md).
   // CleanWorktree runs `git clean -fdx` in a secondary session worktree (membership-gated, primary
   // refused). RestoreSessionWorktree recreates a missing session worktree from its persisted
@@ -461,6 +467,17 @@ message ReadSessionWorkflowFileResponse {
 
 // --- Worktrees (local daemon; see docs/ft/web/worktrees.md) ---
 
+// Lifecycle of a worktree's on-disk size calculation (docs/ft/web/worktree-disk-usage-streaming.md).
+enum WorktreeSizeStatus {
+  WORKTREE_SIZE_STATUS_UNSPECIFIED = 0;
+  // Never calculated and no walk in flight.
+  WORKTREE_SIZE_STATUS_NONE = 1;
+  // A size walk is queued or running.
+  WORKTREE_SIZE_STATUS_CALCULATING = 2;
+  // A size has been computed and is available (in memory or persisted).
+  WORKTREE_SIZE_STATUS_CACHED = 3;
+}
+
 message WorktreeRow {
   string path = 1;
   string branch_label = 2;
@@ -470,6 +487,9 @@ message WorktreeRow {
   int64 lines_removed = 6;
   int64 updated_at_unix_ms = 7;
   bool stale = 8;
+  // Disk-size lifecycle for this worktree, and when the size was last calculated (0 when never).
+  WorktreeSizeStatus size_status = 9;
+  int64 size_calculated_at_unix_ms = 10;
 }
 
 message ListWorktreesForProjectRequest {
@@ -491,6 +511,35 @@ message RemoveWorktreeRequest {
 }
 
 message RemoveWorktreeResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+// --- Lazy, streamed worktree disk usage (docs/ft/web/worktree-disk-usage-streaming.md) ---
+
+message StreamWorktreeStatsRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // When true, (re)enqueue a size calculation for every worktree on subscribe. When false, only
+  // worktrees currently NONE are lazily enqueued.
+  bool recalculate_all = 3;
+}
+
+// One event on the StreamWorktreeStats server stream. The first event carries the full snapshot;
+// subsequent events carry a single updated worktree row (its size flipped Calculating -> Cached).
+message WorktreeStatsEvent {
+  repeated WorktreeRow snapshot = 1;
+  WorktreeRow updated = 2;
+}
+
+message CalculateWorktreeSizeRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // Absolute or repo-relative path; must appear in git worktree list (membership-gated).
+  string worktree_path = 3;
+}
+
+message CalculateWorktreeSizeResponse {
   bool ok = 1;
   string message = 2;
 }

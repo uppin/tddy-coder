@@ -43,11 +43,15 @@ import {
   TerminalSessionInfoSchema,
   ToolDefSchema,
   WorktreeRowSchema,
+  WorktreeStatsEventSchema,
+  WorktreeSizeStatus,
+  CalculateWorktreeSizeResponseSchema,
   ListWorktreesForProjectResponseSchema,
   RemoveWorktreeResponseSchema,
   CleanWorktreeResponseSchema,
   RestoreSessionWorktreeResponseSchema,
   type AgentInfo,
+  type WorktreeRow,
   type ConnectSessionResponse,
   type EligibleDaemonEntry,
   type ProjectEntry,
@@ -122,6 +126,36 @@ function anEligibleDaemonEntry(overrides: Partial<EligibleDaemonEntry>): Eligibl
   });
 }
 
+/** One worktree row as fed into a `StreamWorktreeStats` snapshot/update frame. */
+export interface WorktreeStatsRowInput {
+  path: string;
+  branchLabel?: string;
+  /** On-disk size in bytes; meaningful once `sizeStatus` is `CACHED`. */
+  diskBytes?: bigint;
+  /** Lazy size lifecycle state (drives the Worktrees screen's Status cell). */
+  sizeStatus: WorktreeSizeStatus;
+  /** Unix epoch (ms) of the last size calculation; `0n`/omitted means "never". */
+  sizeCalculatedAtUnixMs?: bigint;
+  changedFiles?: number;
+  linesAdded?: bigint;
+  linesRemoved?: bigint;
+  stale?: boolean;
+}
+
+function aWorktreeRow(input: WorktreeStatsRowInput): WorktreeRow {
+  return create(WorktreeRowSchema, {
+    path: input.path,
+    branchLabel: input.branchLabel ?? "",
+    diskBytes: input.diskBytes ?? 0n,
+    changedFiles: input.changedFiles ?? 0,
+    linesAdded: input.linesAdded ?? 0n,
+    linesRemoved: input.linesRemoved ?? 0n,
+    stale: input.stale ?? false,
+    sizeStatus: input.sizeStatus,
+    sizeCalculatedAtUnixMs: input.sizeCalculatedAtUnixMs ?? 0n,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Scenario options
 // ---------------------------------------------------------------------------
@@ -178,6 +212,10 @@ export interface ConnectionServiceScenario {
     updatedAtUnixMs?: bigint;
     stale?: boolean;
   }>;
+  /** First `StreamWorktreeStats` frame — the full snapshot of the project's worktrees. Default: none. */
+  worktreeStatsSnapshot?: WorktreeStatsRowInput[];
+  /** Optional second `StreamWorktreeStats` frame — one worktree whose size finished (Calculating → Cached). */
+  worktreeStatsUpdate?: WorktreeStatsRowInput;
 }
 
 export interface ConnectionServiceBackend extends InMemoryRpcBackend {
@@ -213,6 +251,12 @@ export interface ConnectionServiceBackend extends InMemoryRpcBackend {
   readonly removedWorktreePaths: string[];
   /** Every `session_id` passed to `RestoreSessionWorktree`, in call order. */
   readonly restoredSessionIds: string[];
+  /** Number of times `StreamWorktreeStats` was subscribed (each open re-runs the async generator). */
+  readonly worktreeStatsStreamCount: () => number;
+  /** The `recalculate_all` flag of every `StreamWorktreeStats` subscription, in call order. */
+  readonly worktreeStatsRecalculateAllFlags: boolean[];
+  /** Every `worktree_path` passed to `CalculateWorktreeSize`, in call order. */
+  readonly calculatedWorktreePaths: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +285,9 @@ export function aConnectionServiceBackend(
   const cleanedWorktreePaths: string[] = [];
   const removedWorktreePaths: string[] = [];
   const restoredSessionIds: string[] = [];
+  let worktreeStatsStreamOpens = 0;
+  const worktreeStatsRecalculateAllFlags: boolean[] = [];
+  const calculatedWorktreePaths: string[] = [];
 
   // Live bash-terminal list — mutated by Start/Stop so ListTerminalSessions stays consistent.
   const liveTerminals: { terminalId: string; kind: string; pid: number }[] = (
@@ -425,6 +472,27 @@ export function aConnectionServiceBackend(
           worktreePath: `/restored/${req.sessionId}`,
         });
       },
+      // --- Worktrees screen: lazy, streamed disk usage ---
+      // Emits a first snapshot frame of every worktree, optionally one "updated" frame for a worktree
+      // whose size flipped Calculating → Cached, then stays open (mirrors StreamHostStats — a
+      // completed stream would read like the daemon dropping the feed).
+      streamWorktreeStats: async function* (req) {
+        worktreeStatsStreamOpens += 1;
+        worktreeStatsRecalculateAllFlags.push(req.recalculateAll);
+        yield create(WorktreeStatsEventSchema, {
+          snapshot: (scenario.worktreeStatsSnapshot ?? []).map(aWorktreeRow),
+        });
+        if (scenario.worktreeStatsUpdate) {
+          yield create(WorktreeStatsEventSchema, {
+            updated: aWorktreeRow(scenario.worktreeStatsUpdate),
+          });
+        }
+        await new Promise<never>(() => undefined);
+      },
+      calculateWorktreeSize: async (req) => {
+        calculatedWorktreePaths.push(req.worktreePath);
+        return create(CalculateWorktreeSizeResponseSchema, { ok: true, message: "" });
+      },
       // --- Host stats footer: single server-streaming RPC ---
       // Emits one event carrying both CPU and disk immediately (the server's on-subscribe snapshot),
       // optionally a second event with updated CPU, then stays open — a completed stream would look
@@ -475,6 +543,9 @@ export function aConnectionServiceBackend(
     cleanedWorktreePaths,
     removedWorktreePaths,
     restoredSessionIds,
+    worktreeStatsStreamCount: () => worktreeStatsStreamOpens,
+    worktreeStatsRecalculateAllFlags,
+    calculatedWorktreePaths,
   });
 }
 

@@ -13,6 +13,22 @@ export const worktreesPage = {
   deleteBtn: (index = 0) => byTestId(TEST_IDS.worktreeDelete).eq(index),
   confirmDeleteBtn: () => byTestId(TEST_IDS.worktreeDeleteConfirm),
   deletedPath: () => byTestId(TEST_IDS.worktreeDeletedPath),
+
+  // --- Lazy, streamed disk usage (docs/ft/web/worktree-disk-usage-streaming.md) ---
+  /** The size-status cell for the row at `index`. */
+  status: (index = 0) => byTestId(TEST_IDS.worktreeStatus).eq(index),
+  /** The "last calculated" label for the row at `index`. */
+  lastCalculated: (index = 0) => byTestId(TEST_IDS.worktreeLastCalculated).eq(index),
+  /** The row element at `index` (assert size presence/absence via its text). */
+  row: (index = 0) => byTestId(TEST_IDS.worktreeRow).eq(index),
+  /** The per-row Calculate / Recalculate button for the row at `index`. */
+  calculateBtn: (index = 0) => byTestId(TEST_IDS.worktreeCalculate).eq(index),
+  /** The screen-level Recalculate-all button. */
+  recalculateAll: () => byTestId(TEST_IDS.worktreesRecalculateAll),
+  /** Harness span recording the last path passed to `onCalculate`. */
+  calculatedPath: () => byTestId(TEST_IDS.worktreesCalculatedPath),
+  /** Harness span recording that `onRecalculateAll` fired. */
+  recalculatedAll: () => byTestId(TEST_IDS.worktreesRecalculatedAll),
 };
 
 /** @deprecated Use `worktreesPage` (lowercase). Kept for backward compatibility. */

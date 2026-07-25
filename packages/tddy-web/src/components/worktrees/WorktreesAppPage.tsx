@@ -3,34 +3,41 @@ import {
   ConnectionService,
   type EligibleDaemonEntry,
   type ProjectEntry,
-  type WorktreeRow,
 } from "../../gen/connection_pb";
 import { GitHubLoginButton } from "../GitHubLoginButton";
 import { AppShell } from "../shell/AppShell";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { WorktreesScreen, type WorktreesScreenMockRow } from "./WorktreesScreen";
-import { formatDiskBytes } from "../sessions/worktreeStatsFormat";
-import { Button } from "@/components/ui/button";
+import { useWorktreeStatsStream } from "../../rpc/useWorktreeStatsStream";
+import { formatLastCalculated, type WorktreeStatsRow } from "../../lib/worktreeSize";
 
 const selectClassName =
   "box-border min-w-[12rem] max-w-[24rem] rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-function rowFromRpc(w: WorktreeRow): WorktreesScreenMockRow {
+/** Map one streamed domain row to the presentational `WorktreesScreen` row shape. */
+function toScreenRow(row: WorktreeStatsRow, nowMs: number): WorktreesScreenMockRow {
   return {
-    path: w.path,
-    branch: w.branchLabel,
-    sizeLabel: formatDiskBytes(w.diskBytes),
-    changedFiles: w.changedFiles,
-    linesAdded: Number(w.linesAdded),
-    linesRemoved: Number(w.linesRemoved),
-    stale: w.stale,
+    path: row.path,
+    branch: row.branch,
+    status: row.status,
+    sizeLabel: row.status === "cached" ? row.sizeLabel : undefined,
+    lastCalculatedLabel: formatLastCalculated(row.calculatedAtUnixMs, nowMs),
+    changedFiles: row.changedFiles,
+    linesAdded: row.linesAdded,
+    linesRemoved: row.linesRemoved,
   };
 }
 
 /**
  * Full-page Worktrees view: lists worktrees for a selected project via the local daemon
- * (ConnectionService worktree RPCs are not routed to remote hosts yet).
+ * (ConnectionService worktree RPCs are not routed to remote hosts yet). Disk sizes stream in lazily
+ * via `StreamWorktreeStats` — each worktree shows its size lifecycle (None / Calculating / Cached),
+ * a per-row Calculate control, and a project-wide Recalculate-all.
+ *
+ * TODO(follow-up): migrate the Session Inspector's Worktree tab (`SessionWorktreeTab` /
+ * `useSessionWorktreeStats`) off its 10-minute `ListWorktreesForProject` poll onto this same stream;
+ * out of scope for this milestone (would break `SessionWorktreeTabAcceptance`).
  */
 export function WorktreesAppPage({
   onNavigate,
@@ -44,10 +51,9 @@ export function WorktreesAppPage({
   const [daemons, setDaemons] = useState<EligibleDaemonEntry[]>([]);
   const [projectId, setProjectId] = useState("");
   const [daemonId, setDaemonId] = useState("");
-  const [rows, setRows] = useState<WorktreesScreenMockRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [loadingList, setLoadingList] = useState(false);
-  const [loadingRefresh, setLoadingRefresh] = useState(false);
+
+  const { rows, recalculateAll, refresh, calculate } = useWorktreeStatsStream(projectId);
 
   const loadProjectsAndDaemons = useCallback(() => {
     if (!sessionToken || !client) return;
@@ -88,41 +94,6 @@ export function WorktreesAppPage({
     }
   }, [daemons]);
 
-  const fetchWorktrees = useCallback(
-    async (refresh: boolean) => {
-      if (!sessionToken || !projectId.trim() || !client) {
-        setRows([]);
-        return;
-      }
-      setError(null);
-      if (refresh) setLoadingRefresh(true);
-      else setLoadingList(true);
-      try {
-        const res = await client.listWorktreesForProject({
-          sessionToken,
-          projectId: projectId.trim(),
-          refresh,
-        });
-        setRows(res.worktrees.map(rowFromRpc));
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load worktrees");
-        setRows([]);
-      } finally {
-        setLoadingList(false);
-        setLoadingRefresh(false);
-      }
-    },
-    [client, sessionToken, projectId],
-  );
-
-  useEffect(() => {
-    if (!sessionToken || !projectId.trim()) {
-      setRows([]);
-      return;
-    }
-    void fetchWorktrees(false);
-  }, [sessionToken, projectId, fetchWorktrees]);
-
   const handleDelete = async (path: string) => {
     if (!sessionToken || !projectId.trim() || !client) return;
     setError(null);
@@ -132,7 +103,7 @@ export function WorktreesAppPage({
         projectId: projectId.trim(),
         worktreePath: path,
       });
-      await fetchWorktrees(false);
+      refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to remove worktree");
     }
@@ -155,12 +126,16 @@ export function WorktreesAppPage({
       ? "Worktree list and actions use the local daemon only; switch the host back to the local instance to manage worktrees."
       : null;
 
+  const nowMs = Date.now();
+  const screenRows = rows.map((row) => toScreenRow(row, nowMs));
+
   return (
     <AppShell title="Worktrees" onNavigate={onNavigate} variant="scroll">
       <p className="max-w-2xl text-sm text-muted-foreground">
-        Select a project to view git worktrees and cached size/diff stats. Use <strong>Refresh stats</strong> to
-        re-run <code className="text-xs">git worktree list</code> and per-worktree diffs (expensive). Delete removes
-        a secondary worktree only.
+        Select a project to view git worktrees and their diff stats. Each worktree's on-disk size is
+        calculated lazily and streamed in — use a row's <strong>Calculate</strong> to size one
+        worktree, or <strong>Recalculate all</strong> to re-size the whole project. Delete removes a
+        secondary worktree only.
       </p>
 
       <div className="mt-4 flex flex-wrap items-end gap-4">
@@ -202,15 +177,6 @@ export function WorktreesAppPage({
             ))}
           </select>
         </div>
-        <Button
-          type="button"
-          variant="secondary"
-          data-testid="worktrees-refresh-stats"
-          disabled={!sessionToken || !projectId.trim() || loadingRefresh}
-          onClick={() => void fetchWorktrees(true)}
-        >
-          {loadingRefresh ? "Refreshing…" : "Refresh stats"}
-        </Button>
       </div>
 
       {worktreesHostNote ? (
@@ -224,18 +190,15 @@ export function WorktreesAppPage({
       ) : null}
 
       <div className="mt-6">
-        {loadingList && !loadingRefresh ? (
-          <p className="text-sm text-muted-foreground" data-testid="worktrees-loading">
-            Loading…
-          </p>
-        ) : null}
         <WorktreesScreen
-          worktrees={rows}
+          worktrees={screenRows}
           onConfirmDelete={(path) => void handleDelete(path)}
+          onCalculate={(path) => calculate(path)}
+          onRecalculateAll={() => recalculateAll()}
           emptyHint={
             projectId.trim() === ""
               ? "Select a project to list worktrees."
-              : "No cached rows yet. Click Refresh stats to populate (or open this project from Connection after stats were refreshed)."
+              : "No worktrees for this project yet."
           }
         />
       </div>
