@@ -313,9 +313,36 @@ existing Prism `SyntaxHighlighter` (`language="json"`, the same component that b
 preview), so no new dependency is added. Only tool-call entries are clickable; agent-text, user, and
 goal bubbles stay non-interactive.
 
-To carry the payload, `useAcpReplay` retains the ACP `ToolCall`'s `raw_input`/`raw_output` on the tool
-`ChatMessage` (they are currently dropped after the `title`/`status` are read); the persisted
-`acp-transcript.jsonl` tool frames must include `raw_output` alongside the already-baked `raw_input`.
+The payload source is described in [§4 Lazy tool bodies](#4-lazy-tool-bodies--fetch-on-click-added-2026-07-25):
+it is **fetched on click**, not carried on the streamed frame.
+
+### 4. Lazy tool bodies — fetch on click (Added: 2026-07-25)
+
+The `StreamAcpReplay` transcript no longer inlines a tool call's `raw_input`/`raw_output` — the
+server strips them from every `SNAPSHOT_THEN_LIVE`/`LIVE_ONLY` frame (keeping `title`/`kind`/
+`status`/`tool_call_id`) and serves them on demand via a new unary **`GetAcpToolCallDetail`**
+(Rust side shipped in [acp-replay-lazy-tool-bodies.md](../coder/acp-replay-lazy-tool-bodies.md)).
+This section covers the **web adoption** of that lookup.
+
+- **The stream is no longer the detail source of truth.** `useAcpReplay` stops copying
+  `raw_input`/`raw_output` off the streamed `ToolCall` (they arrive empty now); instead it carries
+  the frame's **`tool_call_id`** onto the tool `ChatMessage` so the detail dialog knows which call to
+  fetch. The transcript stays fully renderable from the body-less stream (title + status).
+- **The detail dialog fetches on open.** Clicking a tool-call entry opens
+  `AgentActivityDetailDialog`, which calls `GetAcpToolCallDetail({ sessionToken, sessionId,
+  daemonInstanceId: "", toolCallId })` for that one call. While the call is in flight the dialog
+  shows a **loading** state (`agent-activity-detail-loading`); a failed lookup shows an **error**
+  state (`agent-activity-detail-error`); on success it renders the returned
+  `raw_input`/`raw_output` exactly as §3 describes.
+- **Bodies are cached per `(sessionId, callId)`** in the `AgentActivityRegistry`, alongside the
+  transcript and count. Re-opening the same tool call — even after a session switch and back — reads
+  the cached body instead of re-fetching; a call in flight is not fetched twice. A **failed** lookup
+  is not cached persistently, so re-opening the row retries. The cache is in-memory only (does not
+  survive a full page reload), matching the rest of the registry.
+
+Because the wire change is additive (a new RPC; the streamed frame simply omits two optional fields),
+nothing else in the transcript path changes: frames still decode with the `AcpAgentMessage` schema,
+and the count/snapshot/live-tail behavior is untouched.
 
 ## Scope
 
@@ -334,6 +361,12 @@ To carry the payload, `useAcpReplay` retains the ACP `ToolCall`'s `raw_input`/`r
   `activity_count` field, honoured by both hosts; the overlay's lazy snapshot pull (full transcript
   only on first open, cached per session); the tool-call **detail dialog** with color-highlighted
   `raw_input`/`raw_output` JSON, and carrying `raw_output` on the persisted tool frame.
+- **In scope (Added: 2026-07-25, web adoption of lazy bodies):** `useAcpReplay` carries the streamed
+  tool call's `tool_call_id` (not its now-stripped body) onto the tool `ChatMessage`; the detail
+  dialog fetches the clicked call's `raw_input`/`raw_output` via `GetAcpToolCallDetail`, showing a
+  loading state while in flight and an error state on failure; bodies are cached per
+  `(sessionId, callId)` in the `AgentActivityRegistry` (in-memory, retry-on-error). Regenerated
+  `connection_pb.ts` for the new RPC.
 - **Out of scope (Added: 2026-07-25):** persisting the activity registry across a full page reload
   (in-memory only); a detail dialog for non-tool entries (agent text / user / goal stay
   non-interactive); back-pressure/debouncing of the live count stream.

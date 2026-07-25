@@ -2,7 +2,10 @@ import { useEffect } from "react";
 import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import json from "react-syntax-highlighter/dist/esm/languages/prism/json";
+import type { Client } from "@connectrpc/connect";
+import type { ConnectionService } from "../../gen/connection_pb";
 import type { ChatMessage } from "../chat/useAgentChat";
+import { useToolCallDetail } from "./useToolCallDetail";
 
 SyntaxHighlighter.registerLanguage("json", json);
 
@@ -35,19 +38,35 @@ function JsonHighlight({ raw }: { raw: string }) {
 }
 
 export interface AgentActivityDetailDialogProps {
-  /** The clicked tool-call entry whose input/output are shown. */
+  /** The clicked tool-call entry whose input/output are shown. Its `toolCallId` drives the on-demand
+   *  body fetch. */
   message: ChatMessage;
+  /** The session the tool call belongs to — part of the `GetAcpToolCallDetail` lookup key. */
+  sessionId: string;
+  /** The session token authorizing the lookup. */
+  sessionToken: string;
+  /** The resolved RPC client the lookup runs over. */
+  client: Client<typeof ConnectionService>;
   onClose: () => void;
 }
 
 /**
  * Modal dialog rendering a tool call's `raw_input` and `raw_output` as prettified, color-highlighted
- * JSON. Reuses the modal chrome established by `SessionWorkflowFilesModal` (`fixed inset-0 z-50`,
- * `role="dialog"`, Escape- and backdrop-close, scrollable body).
+ * JSON. The body is not carried on the stream frame (PR #345 strips it); it is fetched on demand via
+ * `GetAcpToolCallDetail` (see {@link useToolCallDetail}) — the dialog shows a loading state while the
+ * fetch is in flight and an error state if it fails. Reuses the modal chrome established by
+ * `SessionWorkflowFilesModal` (`fixed inset-0 z-50`, `role="dialog"`, Escape- and backdrop-close,
+ * scrollable body).
  *
- * PRD: docs/ft/web/agent-activity-pane.md § Persisted, lazily-counted activity (§3).
+ * PRD: docs/ft/web/agent-activity-pane.md § 4 Lazy tool bodies — fetch on click.
  */
-export function AgentActivityDetailDialog({ message, onClose }: AgentActivityDetailDialogProps) {
+export function AgentActivityDetailDialog({
+  message,
+  sessionId,
+  sessionToken,
+  client,
+  onClose,
+}: AgentActivityDetailDialogProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -59,8 +78,12 @@ export function AgentActivityDetailDialog({ message, onClose }: AgentActivityDet
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const rawInput = message.rawInput ?? "";
-  const rawOutput = message.rawOutput ?? "";
+  const body = useToolCallDetail({
+    sessionId,
+    callId: message.toolCallId ?? "",
+    sessionToken,
+    client,
+  });
 
   return (
     <div
@@ -92,23 +115,40 @@ export function AgentActivityDetailDialog({ message, onClose }: AgentActivityDet
           </button>
         </header>
         <div className="min-h-0 flex-1 space-y-4 overflow-auto p-4">
-          <section>
-            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Input
-            </h3>
-            <div data-testid="agent-activity-detail-input">
-              <JsonHighlight raw={rawInput} />
+          {body.status === "loading" && (
+            <div
+              data-testid="agent-activity-detail-loading"
+              className="text-sm text-muted-foreground"
+            >
+              Loading…
             </div>
-          </section>
-          {rawOutput && (
-            <section>
-              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Output
-              </h3>
-              <div data-testid="agent-activity-detail-output">
-                <JsonHighlight raw={rawOutput} />
-              </div>
-            </section>
+          )}
+          {body.status === "error" && (
+            <div data-testid="agent-activity-detail-error" className="text-sm text-destructive">
+              {body.error}
+            </div>
+          )}
+          {body.status === "loaded" && (
+            <>
+              <section>
+                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Input
+                </h3>
+                <div data-testid="agent-activity-detail-input">
+                  <JsonHighlight raw={body.rawInput ?? ""} />
+                </div>
+              </section>
+              {body.rawOutput && (
+                <section>
+                  <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Output
+                  </h3>
+                  <div data-testid="agent-activity-detail-output">
+                    <JsonHighlight raw={body.rawOutput} />
+                  </div>
+                </section>
+              )}
+            </>
           )}
         </div>
       </div>

@@ -135,7 +135,13 @@ export function AgentActivityOverlay({
       )}
 
       {detail && (
-        <AgentActivityDetailDialog message={detail} onClose={() => setDetail(null)} />
+        <AgentActivityDetailDialog
+          message={detail}
+          sessionId={sessionId}
+          sessionToken={sessionToken}
+          client={resolvedClient}
+          onClose={() => setDetail(null)}
+        />
       )}
     </>
   );

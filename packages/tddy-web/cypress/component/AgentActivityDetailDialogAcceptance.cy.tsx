@@ -1,12 +1,14 @@
 /**
- * Acceptance: clicking a **tool-call** entry in the Agent Activity transcript opens a **detail
- * dialog** rendering the call's `raw_input` and `raw_output` as **prettified, color-highlighted
- * JSON** (Requirement #3). Only tool-call entries are interactive — agent text stays inert.
+ * Acceptance: the tool-call **detail dialog** — its rendering and chrome. Clicking a tool-call entry
+ * opens a dialog rendering the call's body (fetched on demand, see
+ * `AgentActivityDetailLazyBodyAcceptance`) as **prettified, color-highlighted JSON**. Only tool-call
+ * entries are interactive — agent text stays inert — and the dialog closes via its close control.
  *
  * The overlay body is the read-only ACP transcript; these mount it over an in-memory `StreamAcpReplay`
- * backend whose snapshot carries a tool call with both input and output JSON.
+ * backend whose snapshot carries a **body-less** tool call, with the body served by the
+ * `GetAcpToolCallDetail` lookup.
  *
- * PRD: docs/ft/web/agent-activity-pane.md § Persisted, lazily-counted activity (§3).
+ * PRD: docs/ft/web/agent-activity-pane.md § Persisted, lazily-counted activity (§3–§4).
  */
 
 import React from "react";
@@ -16,73 +18,50 @@ import { agentActivityPage } from "../support/pages/agentActivityPage";
 import {
   aReplayBackend,
   replayAgentText,
-  replayToolCall,
+  replayToolCallStripped,
   ToolCallStatus,
   ToolKind,
+  type ReplayBackendHandle,
 } from "../support/rpc/acpReplay";
 
-type Backend = ReturnType<typeof aReplayBackend>["backend"];
-
-function mountOverlay(backend: Backend, sessionId: string) {
+function mountOverlay(handle: ReplayBackendHandle, sessionId: string) {
   mountWithRpc(
     <AgentActivityOverlay sessionId={sessionId} sessionToken="tok" sessionType="tool" />,
-    backend,
+    handle.backend,
   );
 }
 
-/** A completed Bash tool call carrying both input and output JSON. */
-function aBashCall() {
-  return replayToolCall({
+/** A body-less completed Bash tool call whose body is served by the lookup. */
+function aStrippedBashCall() {
+  return replayToolCallStripped({
     id: "tool-1",
     title: "Bash cargo test",
     kind: ToolKind.EXECUTE,
     status: ToolCallStatus.COMPLETED,
-    input: { command: "cargo test --workspace", description: "run the tests" },
-    output: { exit_code: 0, stdout: "test result: ok. 42 passed" },
     atUnixMs: 1_000,
   });
 }
+
+/** The body the lookup serves for `tool-1`. */
+const TOOL_1_BODY = {
+  rawInput: JSON.stringify({ command: "cargo test --workspace", description: "run the tests" }),
+  rawOutput: JSON.stringify({ exit_code: 0, stdout: "test result: ok. 42 passed" }),
+};
 
 beforeEach(() => {
   cy.viewport(1280, 800);
 });
 
-it("opens a detail dialog showing the tool call's input JSON when its entry is clicked", () => {
-  // Given — a transcript with one completed tool call
-  const { backend } = aReplayBackend({ counts: [1], snapshot: [aBashCall()] });
-
-  // When — the overlay is opened and the tool entry clicked
-  mountOverlay(backend, "detail-input");
-  agentActivityPage.open();
-  agentActivityPage.detailDialog({ timeout: 1000 }).should("not.exist");
-  agentActivityPage.openDetail(0);
-
-  // Then — the dialog shows the full input as JSON
-  agentActivityPage.detailDialog().should("exist");
-  agentActivityPage.detailInput().should("contain.text", "command");
-  agentActivityPage.detailInput().should("contain.text", "cargo test --workspace");
-});
-
-it("shows the tool call's output JSON in the detail dialog", () => {
-  // Given — the same tool call (input + output)
-  const { backend } = aReplayBackend({ counts: [1], snapshot: [aBashCall()] });
-
-  // When
-  mountOverlay(backend, "detail-output");
-  agentActivityPage.open();
-  agentActivityPage.openDetail(0);
-
-  // Then — the output block renders the result JSON
-  agentActivityPage.detailOutput().should("contain.text", "exit_code");
-  agentActivityPage.detailOutput().should("contain.text", "test result: ok. 42 passed");
-});
-
 it("color-highlights the detail JSON", () => {
-  // Given — a tool call whose input is shown in the dialog
-  const { backend } = aReplayBackend({ counts: [1], snapshot: [aBashCall()] });
+  // Given — a tool call whose fetched input is shown in the dialog
+  const handle = aReplayBackend({
+    counts: [1],
+    snapshot: [aStrippedBashCall()],
+    details: { "tool-1": TOOL_1_BODY },
+  });
 
   // When
-  mountOverlay(backend, "detail-highlight");
+  mountOverlay(handle, "detail-highlight");
   agentActivityPage.open();
   agentActivityPage.openDetail(0);
 
@@ -94,13 +73,13 @@ it("color-highlights the detail JSON", () => {
 
 it("does not open a dialog for a non-tool (agent text) entry", () => {
   // Given — a transcript whose only entry is agent text
-  const { backend } = aReplayBackend({
+  const handle = aReplayBackend({
     counts: [1],
     snapshot: [replayAgentText("Just some prose.", 1_000)],
   });
 
   // When — the operator clicks the agent-text bubble
-  mountOverlay(backend, "detail-nontool");
+  mountOverlay(handle, "detail-nontool");
   agentActivityPage.open();
   agentActivityPage.openDetail(0);
 
@@ -110,8 +89,12 @@ it("does not open a dialog for a non-tool (agent text) entry", () => {
 
 it("closes the detail dialog via its close control", () => {
   // Given — an open detail dialog
-  const { backend } = aReplayBackend({ counts: [1], snapshot: [aBashCall()] });
-  mountOverlay(backend, "detail-close");
+  const handle = aReplayBackend({
+    counts: [1],
+    snapshot: [aStrippedBashCall()],
+    details: { "tool-1": TOOL_1_BODY },
+  });
+  mountOverlay(handle, "detail-close");
   agentActivityPage.open();
   agentActivityPage.openDetail(0);
   agentActivityPage.detailDialog().should("exist");

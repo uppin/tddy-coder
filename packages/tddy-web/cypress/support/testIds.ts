@@ -407,6 +407,10 @@ export const TEST_IDS = {
   agentActivityDetailOutput: "agent-activity-detail-output",
   /** A color-highlighted JSON block (Prism output) inside the detail dialog. */
   agentActivityJsonHighlight: "agent-activity-json-highlight",
+  /** Shown while the clicked tool call's body is being fetched via `GetAcpToolCallDetail`. */
+  agentActivityDetailLoading: "agent-activity-detail-loading",
+  /** Shown when the tool call's body lookup fails (e.g. `NOT_FOUND`). */
+  agentActivityDetailError: "agent-activity-detail-error",
 
   // PR-Stack Chat Screen — manually adding a planned PR (deterministic, non-chat path)
   prStackAddPlannedPrBtn: "pr-stack-add-planned-pr-btn",
