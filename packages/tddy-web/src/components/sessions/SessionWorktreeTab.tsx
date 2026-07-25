@@ -3,6 +3,7 @@ import type { Client } from "@connectrpc/connect";
 import type { ConnectionService } from "../../gen/connection_pb";
 import { useSessionWorktreeStats } from "../../rpc/useSessionWorktreeStats";
 import { formatDiskBytes } from "./worktreeStatsFormat";
+import { formatLastCalculated } from "../../lib/worktreeSize";
 import { Button } from "../ui/button";
 
 export interface SessionWorktreeTabProps {
@@ -14,9 +15,10 @@ export interface SessionWorktreeTabProps {
 }
 
 /**
- * Session Inspector → Worktree tab: the selected session's own worktree — disk size + diff summary
- * with a 10-minute refresh, plus Clear (`git clean -fdx`) / Delete (two-step confirm) and, when the
- * worktree is missing, Restore. See docs/ft/web/session-worktree-inspector.md.
+ * Session Inspector → Worktree tab: the selected session's own worktree — lazy, streamed disk size
+ * (None/Calculating/Cached) + diff summary, plus Clear (`git clean -fdx`) / Delete (two-step confirm)
+ * and, when the worktree is missing, Restore. Refresh re-triggers the size calculation.
+ * See docs/ft/web/session-worktree-inspector.md and docs/ft/web/worktree-disk-usage-streaming.md.
  */
 export function SessionWorktreeTab({
   client,
@@ -25,7 +27,7 @@ export function SessionWorktreeTab({
   sessionId,
   repoPath,
 }: SessionWorktreeTabProps) {
-  const { row, missing, refresh } = useSessionWorktreeStats(
+  const { row, status, missing, refresh } = useSessionWorktreeStats(
     client,
     sessionToken,
     projectId,
@@ -45,7 +47,7 @@ export function SessionWorktreeTab({
     if (!client) return;
     await client.removeWorktree({ sessionToken, projectId, worktreePath: repoPath });
     setPendingDelete(false);
-    refresh();
+    // No recalculation here — the worktree is gone; the daemon's stream drops it from the snapshot.
   }
 
   async function onRestore() {
@@ -82,8 +84,22 @@ export function SessionWorktreeTab({
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
             <dt className="text-muted-foreground">Disk</dt>
             <dd className="text-foreground tabular-nums" data-testid="session-worktree-size">
-              {formatDiskBytes(row.diskBytes)}
+              {status === "cached" ? formatDiskBytes(row.diskBytes) : "Calculating…"}
             </dd>
+            {status === "cached" ? (
+              <>
+                <dt className="text-muted-foreground">Last calculated</dt>
+                <dd
+                  className="text-foreground"
+                  data-testid="session-worktree-last-calculated"
+                >
+                  {formatLastCalculated(
+                    row.sizeCalculatedAtUnixMs > 0n ? Number(row.sizeCalculatedAtUnixMs) : undefined,
+                    Date.now(),
+                  )}
+                </dd>
+              </>
+            ) : null}
             <dt className="text-muted-foreground">Branch</dt>
             <dd className="text-foreground" data-testid="session-worktree-branch">
               {row.branchLabel}

@@ -14,7 +14,8 @@ use tddy_core::{BranchWorktreeIntent, Changeset, ChangesetWorkflow};
 use tddy_rpc::{Request, Response, Status, Streaming};
 use tddy_service::proto::connection::{
     AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest, AddProjectToHostResponse,
-    AgentInfo, ClaimTerminalControlRequest, ClaimTerminalControlResponse, CleanWorktreeRequest,
+    AgentInfo, CalculateWorktreeSizeRequest, CalculateWorktreeSizeResponse,
+    ClaimTerminalControlRequest, ClaimTerminalControlResponse, CleanWorktreeRequest,
     CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
     ConnectionService as ConnectionServiceTrait, CreateProjectRequest, CreateProjectResponse,
     DeleteSessionRequest, DeleteSessionResponse, DeleteSessionUploadRequest,
@@ -36,9 +37,11 @@ use tddy_service::proto::connection::{
     SessionUploadEntry, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, Signal,
     SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
     StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
-    StopTerminalSessionResponse, StreamTerminalOutputRequest, SubagentInfo, TerminalControlEvent,
-    TerminalSessionInfo, ToolInfo, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
-    WatchTerminalControlRequest, WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
+    StopTerminalSessionResponse, StreamTerminalOutputRequest, StreamWorktreeStatsRequest,
+    SubagentInfo, TerminalControlEvent, TerminalSessionInfo, ToolInfo,
+    UploadSessionFileChunkRequest, UploadSessionFileChunkResponse, WatchTerminalControlRequest,
+    WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
+    WorktreeSizeStatus as ProtoWorktreeSizeStatus, WorktreeStatsEvent,
 };
 use uuid::Uuid;
 
@@ -60,7 +63,10 @@ use crate::user_sessions_path::{
     project_path_under_home_from_user_relative, projects_path_for_user, repos_base_for_user,
 };
 use crate::workspace_session;
-use crate::worktrees::{self, CleanWorktreeError, RemoveWorktreeError, WorktreeStatsCache};
+use crate::worktrees::{
+    self, CleanWorktreeError, RemoveWorktreeError, WorktreeDiffRow, WorktreeSizeCalculator,
+    WorktreeSizeStatus, WorktreeStatsCache,
+};
 use tddy_service::proto::connection::{
     AcpReplayFrame, AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState,
     ExecuteToolRequest, ExecuteToolResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
@@ -459,6 +465,62 @@ impl Stream for MpscHostStatsStream {
 
 impl Unpin for MpscHostStatsStream {}
 
+/// Stream adapter backed by an mpsc channel for [`WorktreeStatsEvent`] server-streaming. The first
+/// event carries a full snapshot; each subsequent event carries one worktree's updated size row.
+#[derive(Debug)]
+pub struct MpscWorktreeStatsStream {
+    rx: tokio::sync::mpsc::UnboundedReceiver<WorktreeStatsEvent>,
+}
+
+impl Stream for MpscWorktreeStatsStream {
+    type Item = Result<WorktreeStatsEvent, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.rx.poll_recv(cx) {
+            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+impl Unpin for MpscWorktreeStatsStream {}
+
+/// Map the library disk-size lifecycle status to its wire enum.
+fn proto_worktree_size_status(status: WorktreeSizeStatus) -> ProtoWorktreeSizeStatus {
+    match status {
+        WorktreeSizeStatus::None => ProtoWorktreeSizeStatus::None,
+        WorktreeSizeStatus::Calculating => ProtoWorktreeSizeStatus::Calculating,
+        WorktreeSizeStatus::Cached => ProtoWorktreeSizeStatus::Cached,
+    }
+}
+
+/// Build a `WorktreeRow` from a worktree's branch/diff summary plus its current size state. The
+/// size fields (`disk_bytes`, `size_status`, `size_calculated_at_unix_ms`) come from the
+/// calculator; `disk_bytes`/timestamp are 0 until a size has been computed.
+fn worktree_row_from_diff(
+    diff: &WorktreeDiffRow,
+    status: WorktreeSizeStatus,
+    disk_bytes: Option<u64>,
+    calculated_at_unix_ms: Option<i64>,
+) -> WorktreeRow {
+    WorktreeRow {
+        path: diff.path.to_string_lossy().to_string(),
+        branch_label: diff.branch_label.clone(),
+        disk_bytes: disk_bytes.unwrap_or(0),
+        changed_files: diff.changed_files,
+        lines_added: diff.lines_added,
+        lines_removed: diff.lines_removed,
+        updated_at_unix_ms: calculated_at_unix_ms.unwrap_or(0),
+        stale: false,
+        size_status: proto_worktree_size_status(status) as i32,
+        size_calculated_at_unix_ms: calculated_at_unix_ms.unwrap_or(0),
+    }
+}
+
 /// Milliseconds since the Unix epoch, for agent-activity timestamps.
 pub(crate) fn now_unix_ms() -> u64 {
     std::time::SystemTime::now()
@@ -604,6 +666,9 @@ pub struct ConnectionServiceImpl {
     common_room_livekit_room: Option<Arc<tokio::sync::RwLock<Option<Arc<Room>>>>>,
     telegram: Option<Arc<TelegramDaemonHooks>>,
     worktree_stats_cache: Arc<WorktreeStatsCache>,
+    /// Lazy, semaphore-bounded per-worktree disk-size calculator backing `StreamWorktreeStats` and
+    /// `CalculateWorktreeSize`. Shares the stats cache root so persisted sizes survive restarts.
+    worktree_size_calculator: Arc<WorktreeSizeCalculator>,
     claude_cli_manager: Arc<CliSessionManager>,
     /// Sandboxed claude-cli sessions (darwin Seatbelt).
     sandbox_manager: Arc<crate::sandbox_session::SandboxSessionManager>,
@@ -673,6 +738,12 @@ impl ConnectionServiceImpl {
         let worktree_stats_cache = Arc::new(WorktreeStatsCache::new(
             worktrees::projects_stats_cache_root(&tddy_data_dir),
         ));
+        // Daemon-global cap of 2 concurrent size walks; shares the stats cache root so a fresh
+        // calculator serves persisted sizes without re-walking.
+        let worktree_size_calculator = Arc::new(WorktreeSizeCalculator::new(
+            worktrees::projects_stats_cache_root(&tddy_data_dir),
+            2,
+        ));
         let task_registry = claude_cli_manager.task_registry();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let session_stdio = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
@@ -688,6 +759,7 @@ impl ConnectionServiceImpl {
             common_room_livekit_room,
             telegram,
             worktree_stats_cache,
+            worktree_size_calculator,
             claude_cli_manager,
             sandbox_manager: Arc::new(crate::sandbox_session::SandboxSessionManager::new()),
             task_registry,
@@ -728,6 +800,17 @@ impl ConnectionServiceImpl {
     /// deterministic fake in place of the live `sysinfo`-backed provider.
     pub fn with_host_stats(mut self, host_stats: Arc<dyn HostStats>) -> Self {
         self.host_stats = host_stats;
+        self
+    }
+
+    /// Substitute the per-worktree disk-size calculator (builder pattern) — lets tests inject a
+    /// deterministic, instant sizer via [`WorktreeSizeCalculator::with_sizer`] in place of the live
+    /// directory walk.
+    pub fn with_worktree_size_calculator(
+        mut self,
+        calculator: Arc<WorktreeSizeCalculator>,
+    ) -> Self {
+        self.worktree_size_calculator = calculator;
         self
     }
 
@@ -4932,15 +5015,26 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         let worktrees: Vec<WorktreeRow> = snapshots
             .into_iter()
-            .map(|s| WorktreeRow {
-                path: s.path.to_string_lossy().to_string(),
-                branch_label: s.branch_label,
-                disk_bytes: s.disk_bytes,
-                changed_files: s.changed_files,
-                lines_added: s.lines_added,
-                lines_removed: s.lines_removed,
-                updated_at_unix_ms: s.updated_at_unix_ms,
-                stale: s.stale,
+            .map(|s| {
+                // Overlay the lazy calculator's view of this worktree's size: report its status and
+                // (when Cached) prefer its byte count/timestamp over the stats cache's eager walk.
+                let size = self.worktree_size_calculator.state(project_id, &s.path);
+                let disk_bytes = match size.status {
+                    WorktreeSizeStatus::Cached => size.disk_bytes.unwrap_or(s.disk_bytes),
+                    _ => s.disk_bytes,
+                };
+                WorktreeRow {
+                    path: s.path.to_string_lossy().to_string(),
+                    branch_label: s.branch_label,
+                    disk_bytes,
+                    changed_files: s.changed_files,
+                    lines_added: s.lines_added,
+                    lines_removed: s.lines_removed,
+                    updated_at_unix_ms: s.updated_at_unix_ms,
+                    stale: s.stale,
+                    size_status: proto_worktree_size_status(size.status) as i32,
+                    size_calculated_at_unix_ms: size.calculated_at_unix_ms.unwrap_or(0),
+                }
             })
             .collect();
 
@@ -6933,6 +7027,213 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         });
 
         Ok(Response::new(MpscHostStatsStream { rx }))
+    }
+
+    type StreamWorktreeStatsStream = MpscWorktreeStatsStream;
+
+    /// Stream per-worktree disk-size status for a project. Authenticates `session_token`, resolves
+    /// the project's main repo, then discovers its worktrees (with branch/diff, but **not** the
+    /// expensive size walk). Emits one snapshot event carrying every worktree's current size state,
+    /// then lazily enqueues size calculations (all worktrees when `recalculate_all`, otherwise only
+    /// those never sized) and forwards each `Calculating` -> `Cached` transition as a single-row
+    /// `updated` event. The forwarding task ends when the client drops the stream.
+    async fn stream_worktree_stats(
+        &self,
+        request: Request<StreamWorktreeStatsRequest>,
+    ) -> Result<Response<Self::StreamWorktreeStatsStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let project_id = req.project_id.trim();
+        if project_id.is_empty() {
+            return Err(Status::invalid_argument("project_id is required"));
+        }
+
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+
+        let local_id = local_instance_id_for_config(&self.config);
+        let main_repo_str =
+            project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
+                .map_err(|e| Status::internal(e.to_string()))?
+                .ok_or_else(|| Status::not_found("project not found"))?;
+
+        let main_repo = PathBuf::from(&main_repo_str);
+        if !main_repo.exists() {
+            return Err(Status::invalid_argument(
+                "project main repo path does not exist",
+            ));
+        }
+
+        // Discover worktrees + branch/diff off the async runtime, without the size walk.
+        let repo = main_repo.clone();
+        let timeout = self.config.spawn_worker_request_timeout();
+        let diff_rows = spawn_blocking_with_timeout(
+            timeout,
+            "StreamWorktreeStats: git worktree list + diff",
+            move || Ok(worktrees::list_worktree_diff_rows(&repo)),
+        )
+        .await?;
+
+        // Branch/diff lookup keyed by path, so each later size update rebuilds a full row.
+        let diff_by_path: std::collections::HashMap<PathBuf, WorktreeDiffRow> = diff_rows
+            .iter()
+            .map(|r| (r.path.clone(), r.clone()))
+            .collect();
+
+        let calculator = Arc::clone(&self.worktree_size_calculator);
+
+        // Subscribe before enqueuing so no Calculating/Cached transition is missed.
+        let mut updates = calculator.subscribe(project_id);
+
+        // Snapshot: current size state per worktree (before any enqueue triggered below).
+        let snapshot: Vec<WorktreeRow> = diff_rows
+            .iter()
+            .map(|r| {
+                let state = calculator.state(project_id, &r.path);
+                worktree_row_from_diff(
+                    r,
+                    state.status,
+                    state.disk_bytes,
+                    state.calculated_at_unix_ms,
+                )
+            })
+            .collect();
+
+        // Lazily enqueue: all worktrees on recalculate_all, otherwise only the never-sized ones.
+        for r in &diff_rows {
+            let status = calculator.state(project_id, &r.path).status;
+            if req.recalculate_all || status == WorktreeSizeStatus::None {
+                calculator.enqueue(project_id, &r.path).await;
+            }
+        }
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<WorktreeStatsEvent>();
+        if tx
+            .send(WorktreeStatsEvent {
+                snapshot,
+                updated: None,
+            })
+            .is_err()
+        {
+            return Ok(Response::new(MpscWorktreeStatsStream { rx }));
+        }
+
+        tokio::spawn(async move {
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                match updates.recv().await {
+                    Ok(update) => {
+                        // Only forward worktrees present in the snapshot; a worktree created after
+                        // this subscribe is picked up by a fresh StreamWorktreeStats call.
+                        let Some(diff) = diff_by_path.get(&update.path) else {
+                            continue;
+                        };
+                        let row = worktree_row_from_diff(
+                            diff,
+                            update.status,
+                            update.disk_bytes,
+                            update.calculated_at_unix_ms,
+                        );
+                        if tx
+                            .send(WorktreeStatsEvent {
+                                snapshot: Vec::new(),
+                                updated: Some(row),
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(RecvError::Lagged(_)) => {}
+                    Err(RecvError::Closed) => break,
+                }
+            }
+        });
+
+        Ok(Response::new(MpscWorktreeStatsStream { rx }))
+    }
+
+    /// (Re)trigger the on-disk size calculation for a single worktree. Authenticates
+    /// `session_token`, resolves the project's main repo, and requires `worktree_path` to appear in
+    /// `git worktree list` (membership-gated, mirroring `RemoveWorktree`), then enqueues the walk.
+    /// The result surfaces on any `StreamWorktreeStats` subscriber and in `ListWorktreesForProject`.
+    async fn calculate_worktree_size(
+        &self,
+        request: Request<CalculateWorktreeSizeRequest>,
+    ) -> Result<Response<CalculateWorktreeSizeResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let project_id = req.project_id.trim();
+        if project_id.is_empty() {
+            return Err(Status::invalid_argument("project_id is required"));
+        }
+        let worktree_path_raw = req.worktree_path.trim();
+        if worktree_path_raw.is_empty() {
+            return Err(Status::invalid_argument("worktree_path is required"));
+        }
+
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+
+        let local_id = local_instance_id_for_config(&self.config);
+        let main_repo_str =
+            project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
+                .map_err(|e| Status::internal(e.to_string()))?
+                .ok_or_else(|| Status::not_found("project not found"))?;
+
+        let main_repo = PathBuf::from(&main_repo_str);
+        if !main_repo.exists() {
+            return Err(Status::invalid_argument(
+                "project main repo path does not exist",
+            ));
+        }
+
+        let worktree_path = PathBuf::from(worktree_path_raw);
+
+        // Membership-gate on git's own worktree list (mirrors RemoveWorktree::NotListed -> NotFound).
+        let repo_check = main_repo.clone();
+        let wt_check = worktree_path.clone();
+        let timeout = self.config.spawn_worker_request_timeout();
+        let listed = spawn_blocking_with_timeout(
+            timeout,
+            "CalculateWorktreeSize: worktree membership check",
+            move || Ok(worktrees::worktree_path_is_listed(&repo_check, &wt_check)),
+        )
+        .await?;
+        if !listed {
+            return Err(Status::not_found(
+                "worktree path is not in git worktree list",
+            ));
+        }
+
+        self.worktree_size_calculator
+            .enqueue(project_id, &worktree_path)
+            .await;
+
+        Ok(Response::new(CalculateWorktreeSizeResponse {
+            ok: true,
+            message: String::new(),
+        }))
     }
 
     async fn upload_session_file_chunk(

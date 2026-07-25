@@ -32,18 +32,18 @@ use crate::config::DaemonConfig;
 use tddy_service::proto::connection::ConnectionService as RpcConnectionService;
 use tddy_service::proto::connection::{
     AcpReplayFrame, AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest,
-    AddProjectToHostResponse, AgentActivityRecord, ClaimTerminalControlRequest,
-    ClaimTerminalControlResponse, CleanWorktreeRequest, CleanWorktreeResponse,
-    ConnectSessionRequest, ConnectSessionResponse, CreateProjectRequest, CreateProjectResponse,
-    DeleteSessionRequest, DeleteSessionResponse, ExecuteToolRequest, ExecuteToolResponse,
-    GetDemoVmStatusRequest, GetDemoVmStatusResponse, GetPrStatusRequest, GetPrStatusResponse,
-    HostStatsEvent, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
-    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
-    ListExecToolsRequest, ListExecToolsResponse, ListProjectBranchesRequest,
-    ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ListSessionWorkflowFilesRequest,
-    ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
+    AddProjectToHostResponse, AgentActivityRecord, CalculateWorktreeSizeRequest,
+    CalculateWorktreeSizeResponse, ClaimTerminalControlRequest, ClaimTerminalControlResponse,
+    CleanWorktreeRequest, CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
+    CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse,
+    ExecuteToolRequest, ExecuteToolResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
+    GetPrStatusRequest, GetPrStatusResponse, HostStatsEvent, ListAgentModelsRequest,
+    ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
+    ListEligibleDaemonsResponse, ListExecToolsRequest, ListExecToolsResponse,
+    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
+    ListProjectsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
+    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse,
@@ -58,8 +58,9 @@ use tddy_service::proto::connection::{
     StartSessionResponse, StartTerminalSessionRequest, StartTerminalSessionResponse,
     StopDemoVmRequest, StopDemoVmResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
     StreamAcpReplayRequest, StreamHostStatsRequest, StreamSessionActivityRequest,
-    StreamTerminalOutputRequest, TerminalControlEvent, UploadSessionFileChunkRequest,
-    UploadSessionFileChunkResponse, WatchTerminalControlRequest,
+    StreamTerminalOutputRequest, StreamWorktreeStatsRequest, TerminalControlEvent,
+    UploadSessionFileChunkRequest, UploadSessionFileChunkResponse, WatchTerminalControlRequest,
+    WorktreeStatsEvent,
 };
 use tddy_service::proto::connection::{
     DeleteSessionUploadRequest, DeleteSessionUploadResponse, ListSessionUploadsRequest,
@@ -850,6 +851,39 @@ where
         .map_err(to_tonic_status)?;
         let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
         Ok(tonic::Response::new(Box::pin(outbound)))
+    }
+
+    /// Server streaming: per-worktree disk-size status (snapshot frame, then one row per change).
+    type StreamWorktreeStatsStream =
+        Pin<Box<dyn Stream<Item = Result<WorktreeStatsEvent, tonic::Status>> + Send>>;
+
+    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    #[allow(clippy::result_large_err)]
+    async fn stream_worktree_stats(
+        &self,
+        request: tonic::Request<StreamWorktreeStatsRequest>,
+    ) -> Result<tonic::Response<Self::StreamWorktreeStatsStream>, tonic::Status> {
+        let resp = RpcConnectionService::stream_worktree_stats(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
+        Ok(tonic::Response::new(Box::pin(outbound)))
+    }
+
+    async fn calculate_worktree_size(
+        &self,
+        request: tonic::Request<CalculateWorktreeSizeRequest>,
+    ) -> Result<tonic::Response<CalculateWorktreeSizeResponse>, tonic::Status> {
+        let resp = RpcConnectionService::calculate_worktree_size(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
     }
 
     async fn upload_session_file_chunk(

@@ -78,11 +78,19 @@ export const TEST_IDS = {
   worktreeDelete: "worktrees-delete",
   worktreeDeleteConfirm: "worktrees-delete-confirm",
   worktreeDeletedPath: "worktrees-deleted-path",
+  // Lazy, streamed disk usage (docs/ft/web/worktree-disk-usage-streaming.md)
+  worktreeStatus: "worktrees-status",
+  worktreeLastCalculated: "worktrees-last-calculated",
+  worktreeCalculate: "worktrees-calculate",
+  worktreesRecalculateAll: "worktrees-recalculate-all",
+  worktreesCalculatedPath: "worktrees-calculated-path",
+  worktreesRecalculatedAll: "worktrees-recalculated-all",
 
   // Session Inspector → Worktree tab (docs/ft/web/session-worktree-inspector.md)
   sessionInspectorTabWorktree: "sessions-inspector-tab-worktree",
   sessionWorktreeTab: "session-worktree-tab",
   sessionWorktreeSize: "session-worktree-size",
+  sessionWorktreeLastCalculated: "session-worktree-last-calculated",
   sessionWorktreeBranch: "session-worktree-branch",
   sessionWorktreeChanged: "session-worktree-changed",
   sessionWorktreeRefresh: "session-worktree-refresh",
