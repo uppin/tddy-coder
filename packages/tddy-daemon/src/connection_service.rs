@@ -17,13 +17,14 @@ use tddy_service::proto::connection::{
     AgentInfo, ClaimTerminalControlRequest, ClaimTerminalControlResponse, CleanWorktreeRequest,
     CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
     ConnectionService as ConnectionServiceTrait, CreateProjectRequest, CreateProjectResponse,
-    DeleteSessionRequest, DeleteSessionResponse, EligibleDaemonEntry, ListAgentModelsRequest,
+    DeleteSessionRequest, DeleteSessionResponse, DeleteSessionUploadRequest,
+    DeleteSessionUploadResponse, EligibleDaemonEntry, ListAgentModelsRequest,
     ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
     ListEligibleDaemonsResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
-    ListProjectsRequest, ListProjectsResponse, ListSessionWorkflowFilesRequest,
-    ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
-    ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
+    ListProjectsRequest, ListProjectsResponse, ListSessionUploadsRequest,
+    ListSessionUploadsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
+    ListSessionsRequest, ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse,
+    ListTerminalSessionsRequest, ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse, ModelInfo,
     ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
@@ -32,12 +33,12 @@ use tddy_service::proto::connection::{
     ReportSessionStatusResponse, RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse,
     ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse,
     SessionEntry as ProtoSessionEntry, SessionTerminalInput, SessionTerminalOutput,
-    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, Signal, SignalSessionRequest,
-    SignalSessionResponse, StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
-    StartTerminalSessionResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    StreamTerminalOutputRequest, SubagentInfo, TerminalControlEvent, TerminalSessionInfo, ToolInfo,
-    UploadSessionFileChunkRequest, UploadSessionFileChunkResponse, WatchTerminalControlRequest,
-    WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
+    SessionUploadEntry, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, Signal,
+    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
+    StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
+    StopTerminalSessionResponse, StreamTerminalOutputRequest, SubagentInfo, TerminalControlEvent,
+    TerminalSessionInfo, ToolInfo, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
+    WatchTerminalControlRequest, WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
 };
 use uuid::Uuid;
 
@@ -675,6 +676,20 @@ impl ConnectionServiceImpl {
         if let Some(ref tracker) = self.idle_tracker {
             tracker.record_activity();
         }
+    }
+
+    /// Resolves the caller's per-user sessions base from a `session_token`, rejecting an invalid
+    /// token before any filesystem access. Shared by the session-uploads RPCs (list/delete), which
+    /// address files under `{sessions_base}/sessions/{session_id}/uploads/`.
+    fn uploads_sessions_base(&self, session_token: &str) -> Result<PathBuf, Status> {
+        let github_user = (self.user_resolver)(session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))
     }
 
     fn maybe_spawn_telegram_observer(&self, session_id: &str, grpc_port: u16) {
@@ -6815,6 +6830,52 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default(),
         }))
+    }
+
+    async fn list_session_uploads(
+        &self,
+        request: Request<ListSessionUploadsRequest>,
+    ) -> Result<Response<ListSessionUploadsResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        let sessions_base = self.uploads_sessions_base(&req.session_token)?;
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+
+        let uploads = crate::session_uploads::list_uploads(&sessions_base, &req.session_id)?;
+        Ok(Response::new(ListSessionUploadsResponse {
+            uploads: uploads
+                .into_iter()
+                .map(|u| SessionUploadEntry {
+                    upload_id: u.upload_id,
+                    file_name: u.file_name,
+                    host_path: u.host_path.to_string_lossy().into_owned(),
+                    size_bytes: u.size_bytes,
+                    uploaded_at_ms: u.uploaded_at_ms,
+                })
+                .collect(),
+        }))
+    }
+
+    async fn delete_session_upload(
+        &self,
+        request: Request<DeleteSessionUploadRequest>,
+    ) -> Result<Response<DeleteSessionUploadResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        let sessions_base = self.uploads_sessions_base(&req.session_token)?;
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+
+        crate::session_uploads::delete_upload(
+            &sessions_base,
+            &req.session_id,
+            &req.upload_id,
+            &req.file_name,
+        )?;
+        Ok(Response::new(DeleteSessionUploadResponse {}))
     }
 }
 

@@ -46,3 +46,32 @@ export function dropFilesOnto(selector: string, files: File[]): void {
   cy.get(selector).trigger("dragover", { dataTransfer, force: true });
   cy.get(selector).trigger("drop", { dataTransfer, force: true });
 }
+
+/** The private MIME an internal (already-uploaded) file drag carries — its host path. */
+export const HOST_PATH_MIME = "application/x-tddy-host-path";
+
+/** A `DataTransfer` carrying an already-uploaded file's host path under {@link HOST_PATH_MIME}. */
+function aDataTransferOfHostPath(hostPath: string): DataTransfer {
+  const dataTransfer = new DataTransfer();
+  dataTransfer.setData(HOST_PATH_MIME, hostPath);
+  return dataTransfer;
+}
+
+/** Dispatch only a `dragover` carrying an internal host-path drag (for asserting the overlay). */
+export function dragOverWithHostPath(selector: string, hostPath: string): void {
+  cy.get(selector).trigger("dragover", {
+    dataTransfer: aDataTransferOfHostPath(hostPath),
+    force: true,
+  });
+}
+
+/**
+ * Dispatch a `dragover` then `drop` on the element at `selector`, carrying an already-uploaded
+ * file's host path under {@link HOST_PATH_MIME} (as a drag out of the Files tab does) — no
+ * `DataTransfer.files`, so the drop must insert the path rather than re-upload.
+ */
+export function dropHostPathOnto(selector: string, hostPath: string): void {
+  const dataTransfer = aDataTransferOfHostPath(hostPath);
+  cy.get(selector).trigger("dragover", { dataTransfer, force: true });
+  cy.get(selector).trigger("drop", { dataTransfer, force: true });
+}

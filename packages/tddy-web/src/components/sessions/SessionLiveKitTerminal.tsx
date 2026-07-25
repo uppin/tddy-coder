@@ -29,6 +29,9 @@ interface SessionLiveKitTerminalProps {
    *  `GhosttyTerminalLiveKit.onRegisterFocus`). Lets the runtime re-focus the terminal when its
    *  session is re-selected, without a click. */
   onRegisterFocus?: (focus: () => void) => void;
+  /** Called with this terminal's text-insert function (see `GhosttyTerminalLiveKit.onRegisterInsertInput`),
+   *  so the runtime can expose it to the inspector's Files-tab click/tap route. */
+  onRegisterInsertInput?: (insertInput: (text: string) => void) => void;
   /** Fired when the underlying LiveKit room's connection status changes (connecting → connected, or
    *  → error). Lets the runtime cover the panes with a connection overlay until the room connects. */
   onConnectionStatusChange?: (status: LiveKitChromeStatus) => void;
@@ -55,6 +58,7 @@ export function SessionLiveKitTerminal({
   mobileShortcuts,
   onRoom,
   onRegisterFocus,
+  onRegisterInsertInput,
   onConnectionStatusChange,
   onBytes,
 }: SessionLiveKitTerminalProps) {
@@ -83,6 +87,7 @@ export function SessionLiveKitTerminal({
       mobileShortcuts={mobileShortcuts}
       onRoom={onRoom}
       onRegisterFocus={onRegisterFocus}
+      onRegisterInsertInput={onRegisterInsertInput}
       onConnectionStatusChange={onConnectionStatusChange}
       onBytes={onBytes}
     />

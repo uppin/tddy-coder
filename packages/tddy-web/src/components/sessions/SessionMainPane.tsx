@@ -67,6 +67,11 @@ interface SessionMainPaneProps {
   focusedRuntimeId?: string | null;
   /** Capture a session's connected LiveKit `Room` so session-scoped RPCs can route over it. */
   onSessionRoom?: (sessionId: string, room: Room) => void;
+  /** Register a session's Agent-terminal text-insert (for the inspector Files-tab click/tap route). */
+  onSessionRegisterInsert?: (sessionId: string, insertInput: (text: string) => void) => void;
+  /** Insert an uploaded file's host path into the focused session's terminal (Files tab → Insert /
+   *  tap), closing the inspector. */
+  onInsertPathIntoTerminal?: (hostPath: string) => void;
   /** Evict a session's runtime terminal (e.g. remote session ended). */
   onSessionDisconnect?: (sessionId: string) => void;
   /** Fold a session's terminal I/O bytes into its runtime counters (inspector I/O meter). */
@@ -107,6 +112,8 @@ export function SessionMainPane({
   sessions = [],
   focusedRuntimeId = null,
   onSessionRoom,
+  onSessionRegisterInsert,
+  onInsertPathIntoTerminal,
   onSessionDisconnect,
   onSessionBytes,
   buildSessionClient,
@@ -176,6 +183,7 @@ export function SessionMainPane({
           tokenClient={tokenClient}
           mobileShortcuts={mobileShortcuts}
           onSessionRoom={onSessionRoom}
+          onSessionRegisterInsert={onSessionRegisterInsert}
           onSessionDisconnect={onSessionDisconnect}
           onSessionBytes={onSessionBytes}
           liveKitFactory={liveKitFactory}
@@ -318,6 +326,7 @@ export function SessionMainPane({
                 }
                 traffic={traffic}
                 buildSessionClient={buildSessionClient}
+                onInsertPathIntoTerminal={onInsertPathIntoTerminal}
               />
             </div>
           )}

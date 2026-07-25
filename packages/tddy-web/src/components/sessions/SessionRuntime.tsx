@@ -36,6 +36,9 @@ export interface SessionRuntimeProps {
   mobileShortcuts?: ToolShortcutDef[];
   /** Capture the runtime's connected LiveKit `Room` (for session-scoped RPC routing). */
   onSessionRoom?: (sessionId: string, room: Room) => void;
+  /** Register this session's Agent-terminal text-insert (for the inspector Files-tab click/tap
+   *  route). Fired once the terminal mounts. */
+  onSessionRegisterInsert?: (sessionId: string, insertInput: (text: string) => void) => void;
   /** Evict this runtime's terminal (e.g. remote session ended). */
   onSessionDisconnect?: (sessionId: string) => void;
   /** Account this session's terminal I/O bytes (see `GhosttyTerminalLiveKit.onBytes`) so the
@@ -79,6 +82,7 @@ export function SessionRuntime({
   tokenClient,
   mobileShortcuts,
   onSessionRoom,
+  onSessionRegisterInsert,
   onSessionDisconnect,
   onSessionBytes,
   liveKitFactory,
@@ -186,6 +190,15 @@ export function SessionRuntime({
     [onSessionRoom, runtime.sessionId],
   );
 
+  // Expose this session's Agent-terminal text-insert to the screen, keyed by session id, so the
+  // inspector Files-tab click/tap route can reach the focused session's terminal.
+  const registerInsertInput = useCallback(
+    (insertInput: (text: string) => void) => {
+      onSessionRegisterInsert?.(runtime.sessionId, insertInput);
+    },
+    [onSessionRegisterInsert, runtime.sessionId],
+  );
+
   // Account the Agent terminal's byte traffic to this session's own id, so the inspector counters
   // tick per output chunk / input yield even while this runtime is backgrounded.
   const handleBytes = useCallback(
@@ -283,6 +296,7 @@ export function SessionRuntime({
               mobileShortcuts={focused && activeTerminalId === AGENT_TERMINAL_ID ? mobileShortcuts : undefined}
               onRoom={handleRoom}
               onRegisterFocus={registerAgentFocus}
+              onRegisterInsertInput={registerInsertInput}
               onConnectionStatusChange={setLiveKitStatus}
               onBytes={handleBytes}
             />
@@ -300,6 +314,7 @@ export function SessionRuntime({
               connected={connected}
               onDisconnect={() => onSessionDisconnect?.(runtime.sessionId)}
               mobileShortcuts={focused && activeTerminalId === AGENT_TERMINAL_ID ? mobileShortcuts : undefined}
+              onRegisterInsertInput={registerInsertInput}
             />
           )}
         </div>
@@ -344,6 +359,7 @@ export function SessionRuntime({
               tokenClient={tokenClient}
               mobileShortcuts={mobileShortcuts}
               onSessionRoom={onSessionRoom}
+              onSessionRegisterInsert={onSessionRegisterInsert}
               onSessionBytes={onSessionBytes}
               onDisconnect={dropChild}
               liveKitFactory={liveKitFactory}
@@ -393,6 +409,8 @@ interface SessionChildRuntimeProps {
   tokenClient?: TokenClient;
   mobileShortcuts?: ToolShortcutDef[];
   onSessionRoom?: (sessionId: string, room: Room) => void;
+  /** Register this child's Agent-terminal text-insert (see `SessionRuntime.onSessionRegisterInsert`). */
+  onSessionRegisterInsert?: (sessionId: string, insertInput: (text: string) => void) => void;
   /** Account this child's terminal I/O bytes to its own session id (see `SessionRuntime.onSessionBytes`). */
   onSessionBytes?: (sessionId: string, delta: ByteDelta) => void;
   /** Drop this child (its output stream ended) — removes the pane and returns focus to the parent. */
@@ -417,6 +435,7 @@ function SessionChildRuntime({
   tokenClient,
   mobileShortcuts,
   onSessionRoom,
+  onSessionRegisterInsert,
   onSessionBytes,
   onDisconnect,
   liveKitFactory,
@@ -477,6 +496,7 @@ function SessionChildRuntime({
       tokenClient={tokenClient}
       mobileShortcuts={mobileShortcuts}
       onSessionRoom={onSessionRoom}
+      onSessionRegisterInsert={onSessionRegisterInsert}
       onSessionBytes={onSessionBytes}
       onSessionDisconnect={onDisconnect}
       liveKitFactory={liveKitFactory}

@@ -88,6 +88,11 @@ export const TEST_IDS = {
   sessionWorktreeMissing: "session-worktree-missing",
   sessionWorktreeRestore: "session-worktree-restore",
 
+  // Session Inspector → Files tab (docs/ft/web/session-files-inspector.md)
+  sessionInspectorTabFiles: "sessions-inspector-tab-files",
+  sessionFilesPanel: "session-files-panel",
+  sessionFilesEmpty: "session-files-empty",
+
   // CodexOAuth dialog
   codexOauthDialog: "codex-oauth-dialog",
   codexOauthDismiss: "codex-oauth-dismiss",
@@ -760,3 +765,26 @@ export const daemonSelectorOption = (instanceId: string) => `daemon-selector-opt
 
 /** `[data-testid="cpu-core-bar-<index>"]` — the mini bar for logical core `<index>` (0-based). */
 export const cpuCoreBar = (index: number) => `cpu-core-bar-${index}`;
+
+// ---------------------------------------------------------------------------
+// Session Inspector → Files tab dynamic helpers (docs/ft/web/session-files-inspector.md)
+// ---------------------------------------------------------------------------
+
+/** `[data-testid="session-upload-row-<fileName>"]` — one uploaded-file row. */
+export const sessionUploadRow = (fileName: string) => `session-upload-row-${fileName}`;
+
+/** The size readout inside an uploaded-file row. */
+export const sessionUploadSize = (fileName: string) => `session-upload-size-${fileName}`;
+
+/** The Insert-into-terminal button of an uploaded-file row. */
+export const sessionUploadInsert = (fileName: string) => `session-upload-insert-${fileName}`;
+
+/** The Copy-host-path button of an uploaded-file row. */
+export const sessionUploadCopyPath = (fileName: string) => `session-upload-copy-path-${fileName}`;
+
+/** The Delete button (first step) of an uploaded-file row. */
+export const sessionUploadDelete = (fileName: string) => `session-upload-delete-${fileName}`;
+
+/** The Confirm-delete button (second step) of an uploaded-file row. */
+export const sessionUploadDeleteConfirm = (fileName: string) =>
+  `session-upload-delete-confirm-${fileName}`;

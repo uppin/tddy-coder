@@ -41,6 +41,7 @@ import { Signal } from "../../gen/connection_pb";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { detectIsMobile, useIsMobile } from "../../hooks/useIsMobile";
 import { resolveShortcutsForSession } from "../../lib/toolShortcuts";
+import { joinQuotedPaths } from "../../lib/shellQuote";
 import { isCliTerminalSession } from "../../constants/claudeCliModels";
 import { PanelLeftOpen } from "lucide-react";
 // ---------------------------------------------------------------------------
@@ -192,6 +193,16 @@ export function SessionsDrawerScreen({
   const onSessionRoom = useCallback(
     (sessionId: string, sessionRoom: Room) => {
       runtimeRegistry.setRoom(sessionId, sessionRoom);
+    },
+    [runtimeRegistry],
+  );
+
+  // Register a session's Agent-terminal text-insert (fired once its terminal mounts), so the
+  // inspector's Files tab can insert an uploaded file's host path into the focused session's terminal
+  // via a click/tap.
+  const onSessionRegisterInsert = useCallback(
+    (sessionId: string, insertInput: (text: string) => void) => {
+      runtimeRegistry.setInsertInput(sessionId, insertInput);
     },
     [runtimeRegistry],
   );
@@ -548,6 +559,15 @@ export function SessionsDrawerScreen({
   };
 
   const handleInspectorClose = () => setInspectorState("closed");
+
+  // Insert an uploaded file's host path (Files tab → Insert / tap) into the focused session's
+  // terminal, shell-escaped exactly as a native terminal file-drag would type it. The Files tab
+  // closes the inspector itself (via `onCloseInspector`), so this only performs the insert.
+  const handleInsertPathIntoTerminal = (hostPath: string) => {
+    const focusedId = runtimeRegistry.focusedSessionId;
+    if (!focusedId) return;
+    runtimeRegistry.get(focusedId)?.insertInput?.(joinQuotedPaths([hostPath]));
+  };
   const handleInspectorExpand = () => setInspectorState("expanded");
   const handleInspectorRestore = () => setInspectorState("open");
 
@@ -661,6 +681,8 @@ export function SessionsDrawerScreen({
               sessions={sortedSessions}
               focusedRuntimeId={runtimeRegistry.focusedSessionId}
               onSessionRoom={onSessionRoom}
+              onSessionRegisterInsert={onSessionRegisterInsert}
+              onInsertPathIntoTerminal={handleInsertPathIntoTerminal}
               onSessionDisconnect={onSessionDisconnect}
               onSessionBytes={onSessionBytes}
               buildSessionClient={buildSessionClient}
