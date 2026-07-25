@@ -3,8 +3,10 @@ import type { Client } from "@connectrpc/connect";
 import { ConnectionService } from "../../gen/connection_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { AgentChatView } from "../chat/AgentChat";
+import type { ChatMessage } from "../chat/useAgentChat";
 import { useAcpReplay } from "../chat/useAcpReplay";
 import { Button } from "../ui/button";
+import { AgentActivityDetailDialog } from "./AgentActivityDetailDialog";
 
 interface AgentActivityOverlayProps {
   sessionId: string;
@@ -37,17 +39,24 @@ export function AgentActivityOverlay({
   const resolvedClient = client ?? httpClient;
 
   const chat = useAcpReplay({ sessionId, sessionToken, client: resolvedClient });
-  const { hasActivity, unreadCount, markSeen, messages } = chat;
+  const { hasActivity, unreadCount, markSeen, loadSnapshot } = chat;
 
   const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<ChatMessage | null>(null);
 
-  // While the overlay is open, freshly-arriving entries are considered seen the moment they land.
+  // Opening the overlay pulls the (lazy, once-per-session) transcript snapshot and marks the current
+  // count seen; a live count increment while it stays open is folded into the seen baseline too, so
+  // the unread badge stays clear.
   useEffect(() => {
-    if (open) markSeen();
-    // markSeen closes over the current messages; re-running when messages change keeps the badge
-    // clear while the operator is looking at the transcript.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, messages]);
+    if (!open) return;
+    loadSnapshot();
+    if (unreadCount > 0) markSeen();
+  }, [open, unreadCount, loadSnapshot, markSeen]);
+
+  // Switching to a session with no activity closes any open detail dialog carried over from another.
+  useEffect(() => {
+    setDetail(null);
+  }, [sessionId]);
 
   if (!hasActivity) {
     return null;
@@ -61,12 +70,7 @@ export function AgentActivityOverlay({
           variant="ghost"
           size="icon-sm"
           title="Agent activity"
-          onClick={() => {
-            setOpen((prev) => {
-              if (!prev) markSeen();
-              return !prev;
-            });
-          }}
+          onClick={() => setOpen((prev) => !prev)}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -126,8 +130,12 @@ export function AgentActivityOverlay({
             </Button>
           </div>
 
-          <AgentChatView room={null} readOnly chat={chat} />
+          <AgentChatView room={null} readOnly chat={chat} onToolClick={setDetail} />
         </div>
+      )}
+
+      {detail && (
+        <AgentActivityDetailDialog message={detail} onClose={() => setDetail(null)} />
       )}
     </>
   );

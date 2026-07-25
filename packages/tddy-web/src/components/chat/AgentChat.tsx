@@ -65,6 +65,9 @@ export interface AgentChatProps {
    *  and each entry gains a right-aligned "+Ns" elapsed badge (plus a status marker on tool calls).
    *  Used by the Agent Activity overlay to replay a session's ACP conversation. */
   readOnly?: boolean;
+  /** Read-only transcript only: invoked when a `from: "tool"` entry is clicked, so the host can open
+   *  its detail dialog. Non-tool entries stay inert. Unset ⇒ no entry is interactive. */
+  onToolClick?: (message: ChatMessage) => void;
 }
 
 /**
@@ -92,6 +95,7 @@ export function AgentChatView({
   roomStatus = "idle",
   roomError = null,
   readOnly = false,
+  onToolClick,
   chat,
 }: AgentChatProps & { chat: UseAgentChatResult }) {
   const {
@@ -198,7 +202,14 @@ export function AgentChatView({
               <div
                 data-testid={`agent-chat-message-${i}`}
                 data-message-kind={m.from}
-                className={bubbleClass(m.from)}
+                className={
+                  m.from === "tool" && onToolClick
+                    ? `${bubbleClass(m.from)} cursor-pointer hover:bg-muted`
+                    : bubbleClass(m.from)
+                }
+                onClick={
+                  m.from === "tool" && onToolClick ? () => onToolClick(m) : undefined
+                }
               >
                 {m.from === "goal" ? `Goal: ${m.text}` : m.text}
               </div>

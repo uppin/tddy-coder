@@ -348,6 +348,8 @@ impl Unpin for MpscAcpReplayStream {}
 fn acp_replay_frame(frame: &tddy_service::proto::acp::AcpAgentMessage) -> AcpReplayFrame {
     AcpReplayFrame {
         acp_agent_message: frame.encode_to_vec(),
+        // A transcript frame carries no count; the count-first mode sets this instead.
+        activity_count: 0,
     }
 }
 
@@ -367,6 +369,46 @@ async fn relay_acp_replay(
                 let frame =
                     acp_replay_frame(&tddy_service::acp_replay::frame_for_agent_activity(&record));
                 if tx.send(frame).is_err() {
+                    break;
+                }
+            }
+            Err(RecvError::Lagged(_)) => {}
+            Err(RecvError::Closed) => break,
+        }
+    }
+}
+
+/// Count-only relay task for `StreamAcpReplay`'s `CountThenLive` mode: each **newly-seen** tool call
+/// published to the session hub bumps `count` by one and emits a fresh count-only `AcpReplayFrame`
+/// (no transcript payload) into `tx`, until the client disconnects. A call's `running` and terminal
+/// records share a `call_id` and so count once (matching the coalesced rows the pane renders);
+/// `seen_ids` is pre-seeded with the snapshot's ids so a call straddling the subscribe boundary is
+/// not double-counted. This is the cheap feed that drives the overlay's activity badge before the
+/// full pane is opened.
+async fn relay_acp_replay_count(
+    mut broadcast_rx: tokio::sync::broadcast::Receiver<
+        tddy_core::agent_activity::AgentActivityRecord,
+    >,
+    tx: tokio::sync::mpsc::UnboundedSender<AcpReplayFrame>,
+    mut count: u64,
+    mut seen_ids: std::collections::HashSet<String>,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+    loop {
+        match broadcast_rx.recv().await {
+            Ok(record) => {
+                if !seen_ids.insert(record.call_id) {
+                    // A record for a call already counted (its terminal row, or a snapshot straddler).
+                    continue;
+                }
+                count += 1;
+                if tx
+                    .send(AcpReplayFrame {
+                        acp_agent_message: Vec::new(),
+                        activity_count: count,
+                    })
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -6462,6 +6504,30 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // first, then relays everything subsequently published to the hub for this session.
         // Live-only skips the snapshot entirely and carries only frames produced after subscribe.
         let mode = StreamMode::try_from(req.mode).unwrap_or(StreamMode::SnapshotThenLive);
+
+        // Count-first mode emits only the running count of persisted transcript frames — one frame
+        // now with the current count, then a fresh count each time a record is published — with no
+        // transcript payload. It never replays the snapshot itself.
+        if mode == StreamMode::CountThenLive {
+            let snapshot =
+                tddy_service::acp_replay::read_acp_transcript(&session_dir).unwrap_or_default();
+            let count = tddy_service::acp_replay::count_activity_entries(&snapshot);
+            let seen_ids = tddy_service::acp_replay::tool_call_ids(&snapshot);
+            if tx
+                .send(AcpReplayFrame {
+                    acp_agent_message: Vec::new(),
+                    activity_count: count,
+                })
+                .is_err()
+            {
+                // Receiver already gone — return an empty live stream that terminates immediately.
+                return Ok(Response::new(MpscAcpReplayStream { rx }));
+            }
+            let broadcast_rx = self.agent_activity_hub.subscribe(&req.session_id);
+            tokio::spawn(relay_acp_replay_count(broadcast_rx, tx, count, seen_ids));
+            return Ok(Response::new(MpscAcpReplayStream { rx }));
+        }
+
         if mode == StreamMode::SnapshotThenLive {
             let snapshot =
                 tddy_service::acp_replay::read_acp_transcript(&session_dir).unwrap_or_default();
@@ -8347,6 +8413,114 @@ mod agent_activity_unit_tests {
         // Then the subscriber receives it as an ACP tool_call frame.
         let live = next_replay_frame(&mut stream).await;
         assert_eq!(acp_tool_call_id(&live), "call-live");
+    }
+
+    /// Pull one raw `AcpReplayFrame` envelope (the count-carrying wrapper), with a timeout so a
+    /// count-mode subscription that never broadcasts a count fails fast instead of hanging.
+    async fn next_replay_envelope(
+        stream: &mut super::MpscAcpReplayStream,
+    ) -> tddy_service::proto::connection::AcpReplayFrame {
+        tokio::time::timeout(Duration::from_secs(1), stream.next())
+            .await
+            .expect("no replay frame arrived within the timeout")
+            .expect("replay stream closed unexpectedly")
+            .expect("replay stream yielded an error")
+    }
+
+    /// COUNT_THEN_LIVE emits the current persisted-frame count first (no transcript payload), then a
+    /// fresh count each time a new activity is published — the cheap feed that drives the overlay's
+    /// icon/badge before the pane is opened.
+    #[tokio::test]
+    async fn stream_acp_replay_count_then_live_broadcasts_the_activity_count() {
+        // Given a session whose persisted transcript already holds three frames.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-count-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            &session_dir,
+            &tddy_service::acp_replay::agent_text_frame("Analyzing.", 1_000),
+        )
+        .unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            &session_dir,
+            &tddy_service::acp_replay::frame_for_agent_activity(&a_seeded_record("call-a", "Read")),
+        )
+        .unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            &session_dir,
+            &tddy_service::acp_replay::frame_for_agent_activity(&a_seeded_record("call-b", "Grep")),
+        )
+        .unwrap();
+        let service = make_unit_service(sessions_base);
+        let hub = service.agent_activity_hub();
+
+        // When a client subscribes in count-first mode.
+        let mut stream = service
+            .stream_acp_replay(Request::new(StreamAcpReplayRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                mode: StreamMode::CountThenLive as i32,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Then the first frame carries the current count (3) and no transcript payload.
+        let first = next_replay_envelope(&mut stream).await;
+        assert_eq!(first.activity_count, 3);
+        assert!(
+            first.acp_agent_message.is_empty(),
+            "a count frame must not carry a transcript payload"
+        );
+
+        // And a newly-published activity raises the broadcast count to 4.
+        hub.publish(session_id, a_seeded_record("call-live", "Bash"));
+        let next = next_replay_envelope(&mut stream).await;
+        assert_eq!(next.activity_count, 4);
+    }
+
+    /// A single tool call publishes two records (running then terminal) under one call_id; the count
+    /// must rise by one, not two — matching the single coalesced row the pane renders.
+    #[tokio::test]
+    async fn stream_acp_replay_count_then_live_counts_a_tool_call_once_across_its_two_records() {
+        // Given a session whose transcript holds one agent-text frame (count baseline 1).
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-count-dedupe-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            &session_dir,
+            &tddy_service::acp_replay::agent_text_frame("Analyzing.", 1_000),
+        )
+        .unwrap();
+        let service = make_unit_service(sessions_base);
+        let hub = service.agent_activity_hub();
+
+        let mut stream = service
+            .stream_acp_replay(Request::new(StreamAcpReplayRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                mode: StreamMode::CountThenLive as i32,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(next_replay_envelope(&mut stream).await.activity_count, 1);
+
+        // When a tool call publishes its running then terminal record under the same call_id.
+        hub.publish(session_id, a_seeded_record("call-x", "Bash"));
+        // Then the first (running) record lifts the count to 2.
+        assert_eq!(next_replay_envelope(&mut stream).await.activity_count, 2);
+        // The terminal record for call-x emits nothing; a distinct call is the next frame — and it
+        // reads 3, proving call-x was not counted twice.
+        hub.publish(session_id, a_seeded_record("call-x", "Bash"));
+        hub.publish(session_id, a_seeded_record("call-y", "Read"));
+        assert_eq!(next_replay_envelope(&mut stream).await.activity_count, 3);
     }
 }
 

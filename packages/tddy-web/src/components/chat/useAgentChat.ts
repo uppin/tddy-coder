@@ -30,6 +30,13 @@ export interface ChatMessage {
   /** Coarse status of a `from: "tool"` entry, rendered as a marker on the read-only transcript.
    *  Unset for non-tool bubbles. */
   toolStatus?: "running" | "completed" | "error";
+  /** The tool call's full input as JSON (from the ACP `ToolCall.raw_input`) — carried on `from:
+   *  "tool"` entries so the detail dialog can render it. Unset for non-tool bubbles. */
+  rawInput?: string;
+  /** The tool call's full output as JSON (from the ACP `ToolCall.raw_output`) — carried on `from:
+   *  "tool"` entries so the detail dialog can render it. Unset for non-tool bubbles or a call with
+   *  no recorded output. */
+  rawOutput?: string;
   /** Epoch ms when this message was first shown — used for the exported transcript timeline. */
   at: number;
 }

@@ -764,6 +764,10 @@ message AgentActivityRecord {
 enum StreamMode {
   SNAPSHOT_THEN_LIVE = 0;   // default: replay the coalesced history, then tail live records
   LIVE_ONLY          = 1;   // skip the snapshot; deliver only records that arrive after subscribe
+  // Count-first (StreamAcpReplay only): emit the current activity count as the first frame, then a
+  // new count for each frame appended live. Carries no transcript payload — the cheap "minimal
+  // activity data" that drives the Agent Activity icon/badge before the pane is opened.
+  COUNT_THEN_LIVE    = 2;
 }
 
 message StreamSessionActivityRequest {
@@ -789,6 +793,9 @@ message StreamAcpReplayRequest {
 // schema and reuses the same session/update switch as the live ACP stream.
 message AcpReplayFrame {
   bytes acp_agent_message = 1;
+  // Set only in COUNT_THEN_LIVE frames (the current number of persisted transcript frames); the
+  // SNAPSHOT_THEN_LIVE / LIVE_ONLY modes leave this 0 and carry acp_agent_message instead.
+  uint64 activity_count = 2;
 }
 
 /// Sent by `tddy-tools session-hook`; bearer is the per-session hook_token.
