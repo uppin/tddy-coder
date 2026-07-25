@@ -6,6 +6,8 @@ import type { StackNode } from "./stackPlan";
  * Tests for `deriveStackBaseBranch` — the base branch the Start-Session dialog shows for a planned
  * node. It mirrors the daemon's `effective_base_refs`: a node branches from its nearest non-merged
  * ancestor's branch, collapsing to the stack default when it is a root or all ancestors are merged.
+ * Only a created `branch` is a ref — a `branchSuggestion` is a planned name the daemon will not
+ * base a spawn onto.
  */
 
 const DEFAULT_BRANCH = "master";
@@ -104,13 +106,26 @@ describe("deriveStackBaseBranch", () => {
     expect(base).toBe(DEFAULT_BRANCH);
   });
 
-  it("falls back to a parent's branch suggestion when its branch is not created yet", () => {
+  it("ignores a parent's branch suggestion when its branch is not created yet", () => {
     // Given — the predecessor has only a suggested branch so far
     const n1 = aNode({ nodeId: "n1", branchSuggestion: "feature/auth/token-store" });
     const n2 = aNode({ nodeId: "n2", branchSuggestion: "feature/auth/middleware", parents: ["n1"] });
 
     // When
     const base = deriveStackBaseBranch(n2, [n1, n2], DEFAULT_BRANCH);
+
+    // Then — a suggestion names no ref, so there is nothing to base onto but the default
+    expect(base).toBe(DEFAULT_BRANCH);
+  });
+
+  it("skips a branchless parent to a predecessor that owns a branch", () => {
+    // Given — n2 is planned only; n1 owns a real branch
+    const n1 = aNode({ nodeId: "n1", branch: "feature/auth/token-store" });
+    const n2 = aNode({ nodeId: "n2", branchSuggestion: "feature/auth/middleware" });
+    const n3 = aNode({ nodeId: "n3", parents: ["n2", "n1"] });
+
+    // When
+    const base = deriveStackBaseBranch(n3, [n1, n2, n3], DEFAULT_BRANCH);
 
     // Then
     expect(base).toBe("feature/auth/token-store");

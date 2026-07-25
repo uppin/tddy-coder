@@ -153,11 +153,16 @@ pub fn effective_base_ref(node_id: &str, views: &[NodeView], default_branch: &st
         return default_branch.to_string();
     }
     // Walk each parent; if all are merged, collapse to default_branch.
-    // Otherwise return the branch of the nearest unmerged parent.
+    // Otherwise return the branch of the nearest unmerged parent. A parent whose branch is not
+    // known yet names no ref, so it is skipped exactly like an absent one — same rule as
+    // `tddy_core::changeset::Stack::effective_base_refs`.
     for parent_id in &node.parent_dep_ids {
         let Some(parent_view) = views.iter().find(|v| &v.node_id == parent_id) else {
             continue;
         };
+        if parent_view.branch.is_empty() {
+            continue;
+        }
         if !matches!(parent_view.pr, PrLiveStatus::Merged) {
             return parent_view.branch.clone();
         }
@@ -174,7 +179,7 @@ pub fn assemble_views(
     gh: &dyn GithubPrApi,
     _default_branch: &str,
 ) -> Result<Vec<NodeView>, tddy_core::WorkflowError> {
-    use tddy_core::changeset::read_changeset;
+    use tddy_core::changeset::{read_changeset, resolve_stack_node_branch};
     use tddy_core::session_lifecycle::unified_session_dir_path;
 
     let order = stack.topo_order()?;
@@ -188,10 +193,10 @@ pub fn assemble_views(
             .find(|n| &n.node_id == node_id)
             .expect("topo_order only contains node ids from the stack");
 
-        let branch = node
-            .branch
-            .clone()
-            .unwrap_or_else(|| format!("feature/{node_id}"));
+        // The branch a node stands on, hydrated from its child session when the node itself never
+        // recorded one. Empty means "this node owns no branch yet" — never a fabricated name, which
+        // would make the view claim a ref that does not exist.
+        let branch = resolve_stack_node_branch(sessions_root, node).unwrap_or_default();
 
         let (child_state, child_phase) = if let Some(ref session_id) = node.session_id {
             let child_dir = unified_session_dir_path(sessions_root, session_id);
@@ -214,7 +219,9 @@ pub fn assemble_views(
             }
         };
 
-        let pr = if node.session_id.is_some() {
+        // A PR belongs to the branch, not to the child session that happened to create it: report
+        // it for every node that owns a branch, whether or not a session is still attached.
+        let pr = if !branch.is_empty() {
             match gh.get_open_pr(&branch)? {
                 Some(pr_ref) => PrLiveStatus::Open {
                     number: pr_ref.number,

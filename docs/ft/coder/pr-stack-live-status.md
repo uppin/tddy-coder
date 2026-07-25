@@ -17,9 +17,10 @@ This feature makes the **remote branch name the durable link** between a Planned
 worktree/session, and its GitHub PR, and surfaces live status directly in the web view —
 independent of whether the orchestrator agent is running:
 
-1. **Definitive branch at creation.** A Planned PR is assigned a canonical remote branch name
-   when it is created (the branch need not exist on the remote yet). That name is the single
-   join key used for every downstream lookup.
+1. **Definitive branch on materialization.** A Planned PR carries a canonical `branch_suggestion`
+   from creation, and records it as its `branch` the moment a child worktree actually creates that
+   branch. `branch` therefore means "a branch that exists", and is the single join key used for
+   every downstream lookup; the suggestion is a planned name only.
 2. **Branch → session resolution (in-progress).** The PR-Stack view resolves the child session
    for a node by matching the node's branch against each session's branch, and marks the node
    *in progress* when a live session owns that branch.
@@ -32,8 +33,9 @@ independent of whether the orchestrator agent is running:
    effective base, and re-targets the open GitHub PR's base branch.
 5. **Sequence-respecting base at spawn.** When a session is started for a planned node, its
    worktree is branched off the node's parent branch (the effective base, skipping merged
-   ancestors) — not off the default branch. Starting a node whose non-merged parent has not been
-   started yet is refused, enforcing bottom-up ordering.
+   ancestors) — not off the default branch. Starting a node whose non-merged parent owns no branch
+   yet is refused, enforcing bottom-up ordering. The gate is the parent's *branch*, never its child
+   session: a branch can be built on whether or not a session is still attached to it.
 
 ## Current behavior being fixed (capability 5)
 
@@ -56,7 +58,7 @@ respected.
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D1 | `StackNode.branch` is assigned at planned-PR creation, not deferred to worktree creation | The branch is the link key; it must exist on the node before any worktree/session/PR does. `branch_suggestion` is retained for back-compat and as the derivation source. |
+| D1 | `StackNode.branch` is recorded when a child worktree creates the branch; planning only sets `branch_suggestion` | The branch is the link key *and* the spawn gate — descendants base onto `origin/<branch>`. Pre-filling it from the suggestion would unblock a spawn onto a ref nothing created. The suggestion is the derivation source and the name the child is asked to create. |
 | D2 | The web resolves the in-progress session by matching `node.branch` against `SessionEntry.branch`; a new `SessionEntry.branch` proto field carries it | Keeps session resolution in the frontend (no new "which session owns this branch" backend signal), reusing the sessions list the drawer already loads. |
 | D3 | GitHub PR status comes from a new `GetPrStatus(branch)` RPC, polled on an interval | Live status without requiring the orchestrator agent to run; polling keeps the number/link/state fresh. |
 | D4 | Repoint performs DAG-parent update **and** local-branch rebase **and** GitHub base re-target | Matches the orchestrator's existing repoint semantics (`bridge::execute_stack_repoint`) so a web-triggered repoint and an agent-triggered one converge. |
@@ -172,9 +174,13 @@ The handler reuses the `get_pr_status` prologue (auth → os_user → sessions_b
 
 ### Rust (`tddy-core`, `tddy-workflow-recipes`, `tddy-daemon`)
 
-- **`StackNode.branch` at creation** — `pr_stack::add_planned_pr_node` and
-  `plan_pr_stack::planned_prs_into_stack_nodes` set `branch = Some(<canonical>)` (derived from
-  the supplied `branch_suggestion`) instead of `None`.
+- **`StackNode.branch` on materialization** — `pr_stack::add_planned_pr_node` and
+  `plan_pr_stack::planned_prs_into_stack_nodes` leave `branch = None` and record the canonical name
+  in `branch_suggestion`. `ConnectionServiceImpl::link_stack_node_to_spawned_branch` writes
+  `branch` (plus `session_id`, as a fallback route back to the branch) once the child worktree has
+  created it; a later session claiming the same branch repoints the fallback, last writer wins.
+  `changeset::resolve_stack_node_branch` reads a node's branch, falling back to the branch recorded
+  by its child session's changeset for a node linked before its branch was known.
 - **`GithubPrApi::get_pr_by_head`** — new trait method returning the PR (open, merged, or closed)
   whose head matches a branch, with a derived `state`:
 
@@ -194,12 +200,14 @@ The handler reuses the `get_pr_status` prologue (auth → os_user → sessions_b
 - **Enrichment** — `session_list_enrichment` populates `SessionEntry.branch` from
   `Changeset.branch`.
 - **Sequence-respecting base (capability 5)** — `resolve_chain_base_ref` (renamed/extended to
-  accept the new branch name) resolves, for a pr-stack orchestrator parent, the stack node whose
-  `branch == new_branch_name` and returns `Stack::effective_base_refs(node_id)`'s nearest
-  non-merged ancestor ref (or the stack default when the node is a root). It first enforces the
-  ordering guard: if a non-merged parent has no `session_id` yet, it errors
-  (`failed_precondition`) with a message naming the un-started parent. Both spawn paths reach this
-  via `spawn_claude_cli_session_inner`.
+  accept the new branch name) resolves, for a pr-stack orchestrator parent, the stack node that
+  owns `new_branch_name` (by `branch`, else by `branch_suggestion` for a node not yet materialized)
+  and returns `Stack::effective_base_refs(node_id)`'s nearest non-merged ancestor ref (or the stack
+  default when the node is a root; only branch-bearing parents contribute a ref). It first enforces
+  the ordering guard: if a non-merged parent owns no `branch`, it errors (`failed_precondition`)
+  with a message naming that parent. The guard never consults a parent's `session_id` — a closed or
+  never-linked child session must not wedge a stack whose branch exists. Both spawn paths reach
+  this via `spawn_claude_cli_session_inner`.
 
 ### Web (`tddy-web`)
 

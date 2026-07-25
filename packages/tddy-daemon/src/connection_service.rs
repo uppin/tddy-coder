@@ -931,8 +931,12 @@ impl ConnectionServiceImpl {
     }
 
     /// Locate the planned stack node a child spawn belongs to: the node in `stack_parent`'s stack
-    /// whose `branch` is the branch the child is about to create. Returns the orchestrator's session
-    /// dir, its stack, and the matched node id.
+    /// that owns the branch the child is about to create. Returns the orchestrator's session dir,
+    /// its stack, and the matched node id.
+    ///
+    /// A planned node carries only a `branch_suggestion` until a child materializes it, so both are
+    /// matched — the recorded `branch` first, so a node materialized on a branch other than the one
+    /// suggested still resolves to itself rather than to whichever sibling still suggests that name.
     ///
     /// `None` means "this spawn is not materializing a planned node" — the parent is not a pr-stack
     /// orchestrator, carries no stack, the branch is blank, or no node claims that branch. Callers
@@ -953,28 +957,40 @@ impl ConnectionServiceImpl {
             return None;
         }
         let parent_dir = unified_session_dir_path(sessions_base, stack_parent);
-        let stack = tddy_core::read_changeset(&parent_dir).ok()?.stack?;
+        // Hydrated, so a node whose branch was only ever recorded by its child session still
+        // resolves to that branch here — both for matching below and for the base a descendant
+        // is given. The hydrated copy is read-only; the forward link writes through `parent_dir`.
+        let stack =
+            tddy_core::changeset::read_stack_with_resolved_branches(sessions_base, stack_parent)
+                .ok()??;
         let node_id = stack
             .nodes
             .iter()
             .find(|n| n.branch.as_deref() == Some(branch))
+            .or_else(|| {
+                stack
+                    .nodes
+                    .iter()
+                    .find(|n| n.branch.is_none() && n.branch_suggestion.as_deref() == Some(branch))
+            })
             .map(|n| n.node_id.clone())?;
         Some((parent_dir, stack, node_id))
     }
 
-    /// Record the forward link from a pr-stack orchestrator's planned node to the child session that
-    /// just materialized it (`node.session_id`, plus `node.branch` for a node planned without one).
+    /// Record on a pr-stack orchestrator's planned node the branch a child spawn just created, plus
+    /// the child session as the fallback route back to that branch.
     ///
     /// The spawn paths already write the *reverse* link (`orchestrator_session_id` in the child's
-    /// changeset). Without this forward link the node stays "planned" forever, and the stack wedges:
+    /// changeset). Without this forward link the node owns no branch, and the stack wedges:
     /// [`tddy_core::changeset::Stack::base_ref_for_spawn`] refuses every descendant ("non-merged
-    /// parent … has not been started yet"), [`StackChildSpawnHandler`]'s duplicate-child guard never
-    /// trips, and the orchestrator dashboard shows no child state or PR for a running child.
+    /// parent … has no branch to base onto yet"), [`StackChildSpawnHandler`]'s duplicate-spawn guard
+    /// never trips, and the orchestrator dashboard shows no child state or PR for a running child.
     ///
     /// Called once the child's branch exists (right after worktree setup) — that is precisely the
-    /// condition `base_ref_for_spawn` gates descendants on. A node already linked to a *different*
-    /// session is an error rather than a silent repoint, which would orphan the earlier child.
-    fn link_stack_parent_node_to_child(
+    /// condition `base_ref_for_spawn` gates descendants on. A new session claiming a branch a node
+    /// already owns repoints the fallback to it (last writer wins): the branch is what the stack is
+    /// built on, and sessions on it come and go (restart, re-attach) without changing that.
+    fn link_stack_node_to_spawned_branch(
         sessions_base: &std::path::Path,
         stack_parent: Option<&str>,
         new_branch_name: &str,
@@ -983,20 +999,11 @@ impl ConnectionServiceImpl {
         let Some(sp) = stack_parent else {
             return Ok(());
         };
-        let Some((parent_dir, stack, node_id)) =
+        let Some((parent_dir, _stack, node_id)) =
             Self::pr_stack_node_for_spawn(sessions_base, sp, new_branch_name)
         else {
             return Ok(());
         };
-        if let Some(existing) = stack
-            .node(&node_id)
-            .and_then(|n| n.session_id.as_deref())
-            .filter(|existing| *existing != child_session_id)
-        {
-            return Err(Status::failed_precondition(format!(
-                "stack node '{node_id}' is already linked to child session {existing}"
-            )));
-        }
         tddy_core::changeset::link_stack_node_to_child_session(
             &parent_dir,
             &node_id,
@@ -1010,7 +1017,8 @@ impl ConnectionServiceImpl {
         })?;
         log::info!(
             target: "tddy_daemon::connection_service",
-            "linked pr-stack node '{}' of orchestrator {} to child session {}",
+            "recorded branch '{}' on pr-stack node '{}' of orchestrator {} (child session {})",
+            new_branch_name.trim(),
             node_id,
             sp,
             child_session_id
@@ -1466,7 +1474,7 @@ async fn spawn_claude_cli_session_inner(
     // The child's branch now exists (and, when requested, is on origin), so a pr-stack
     // orchestrator's planned node can record it — which is what lets this node's descendants be
     // spawned at all, since they base onto `origin/<branch>`.
-    ConnectionServiceImpl::link_stack_parent_node_to_child(
+    ConnectionServiceImpl::link_stack_node_to_spawned_branch(
         &sessions_base,
         stack_parent,
         new_branch_name,
@@ -2096,9 +2104,9 @@ impl ConnectionServiceImpl {
                 )
                 .await?;
                 // Branch exists now — record it on the orchestrator's planned node (see
-                // `link_stack_parent_node_to_child`). Only this arm creates a branch; a
+                // `link_stack_node_to_spawned_branch`). Only this arm creates a branch; a
                 // client-supplied `repo_path` materializes no planned node.
-                Self::link_stack_parent_node_to_child(
+                Self::link_stack_node_to_spawned_branch(
                     &sessions_base,
                     stack_parent,
                     new_branch_name,
@@ -3395,19 +3403,15 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             .iter()
             .find(|n| n.node_id == node_id)
             .ok_or_else(|| format!("no planned PR node with id '{node_id}' in the stack"))?;
-        if node.session_id.is_some() {
-            return Err(format!(
-                "node '{node_id}' already has a child session ({})",
-                node.session_id.as_deref().unwrap_or("")
-            ));
+        // "Already spawned" means the node owns a branch: that branch is the work, and it outlives
+        // whichever session created it. Spawning again would try to create a branch that exists.
+        if let Some(branch) = node.branch.as_deref() {
+            return Err(format!("node '{node_id}' already owns branch '{branch}'"));
         }
         let new_branch_name = node
-            .branch
+            .branch_suggestion
             .clone()
-            .or_else(|| node.branch_suggestion.clone())
-            .ok_or_else(|| {
-                format!("node '{node_id}' has no branch or branch_suggestion to create")
-            })?;
+            .ok_or_else(|| format!("node '{node_id}' has no branch_suggestion to create"))?;
         let initial_prompt = if node.description.trim().is_empty() {
             node.title.clone()
         } else {
@@ -10050,6 +10054,69 @@ mod stack_child_link_tests {
         dir
     }
 
+    /// The same stack, except `bottom` never recorded its branch — only the child session that
+    /// created it knows the name. Models a link written before the branch was known.
+    fn an_orchestrator_whose_bottom_branch_only_its_session_knows(
+        sessions_base: &std::path::Path,
+    ) -> PathBuf {
+        let child_dir = unified_session_dir_path(sessions_base, "child-1");
+        std::fs::create_dir_all(&child_dir).expect("create child session dir");
+        write_changeset(
+            &child_dir,
+            &Changeset {
+                branch: Some("feature/bottom".to_string()),
+                ..Changeset::default()
+            },
+        )
+        .expect("write child changeset");
+
+        let dir = unified_session_dir_path(sessions_base, "orchestrator-1");
+        std::fs::create_dir_all(&dir).expect("create orchestrator session dir");
+        write_changeset(
+            &dir,
+            &Changeset {
+                recipe: Some("pr-stack".to_string()),
+                stack: Some(Stack {
+                    version: 1,
+                    nodes: vec![
+                        StackNode {
+                            session_id: Some("child-1".to_string()),
+                            ..a_planned_node("bottom", "feature/bottom", &[])
+                        },
+                        a_planned_node("top", "feature/top", &["bottom"]),
+                    ],
+                }),
+                ..Changeset::default()
+            },
+        )
+        .expect("write orchestrator changeset");
+        dir
+    }
+
+    #[test]
+    fn spawning_bases_a_node_on_a_parent_branch_only_its_child_session_recorded() {
+        // Given — `bottom` owns no branch of its own; only its child session names one
+        let tmp = tempfile::tempdir().expect("temp dir");
+        an_orchestrator_whose_bottom_branch_only_its_session_knows(tmp.path());
+
+        // When — `top` is spawned and the daemon resolves the node it materializes
+        let (_dir, stack, node_id) = ConnectionServiceImpl::pr_stack_node_for_spawn(
+            tmp.path(),
+            "orchestrator-1",
+            "feature/top",
+        )
+        .expect("the planned node for the spawned branch must resolve");
+
+        // Then — the session fallback supplies the parent's branch, so `top` is not blocked
+        assert_eq!(node_id, "top");
+        assert_eq!(
+            stack
+                .base_ref_for_spawn(&node_id, "origin/master")
+                .expect("a session-resolved parent branch must unblock its dependent"),
+            "origin/feature/bottom"
+        );
+    }
+
     fn stack_of(orchestrator_dir: &std::path::Path) -> Stack {
         read_changeset(orchestrator_dir)
             .expect("read orchestrator changeset")
@@ -10823,9 +10890,15 @@ mod remote_branch_push_gating_tests {
         .await;
 
         // Then
-        assert!(result.is_ok(), "gated call must succeed without pushing: {result:?}");
+        assert!(
+            result.is_ok(),
+            "gated call must succeed without pushing: {result:?}"
+        );
         let after = tddy_core::read_changeset(session.path()).unwrap();
-        assert!(!after.remote_pushed, "remote_pushed must stay false when intent is not new-branch");
+        assert!(
+            !after.remote_pushed,
+            "remote_pushed must stay false when intent is not new-branch"
+        );
     }
 
     /// The push is skipped when the operator opts out (flag false), even for a new branch.
@@ -10846,8 +10919,14 @@ mod remote_branch_push_gating_tests {
         .await;
 
         // Then
-        assert!(result.is_ok(), "opt-out call must succeed without pushing: {result:?}");
+        assert!(
+            result.is_ok(),
+            "opt-out call must succeed without pushing: {result:?}"
+        );
         let after = tddy_core::read_changeset(session.path()).unwrap();
-        assert!(!after.remote_pushed, "remote_pushed must stay false when the flag is off");
+        assert!(
+            !after.remote_pushed,
+            "remote_pushed must stay false when the flag is off"
+        );
     }
 }

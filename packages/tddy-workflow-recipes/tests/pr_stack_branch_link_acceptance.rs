@@ -1,9 +1,11 @@
-//! Acceptance: a planned PR is assigned a definitive branch at creation.
+//! Acceptance: a planned PR owns no branch until a child worktree creates one.
 //!
 //! The remote branch name is the durable link between a planned PR, its worktree/session, and its
-//! GitHub PR. It must be set on the node when the node is created — from the agent plan
-//! (`planned_prs_into_stack_nodes`) or from a manual add (`add_planned_pr_node`) — not deferred
-//! until a worktree exists.
+//! GitHub PR — and the stack's spawn ordering is gated on it: a node's descendants base onto
+//! `origin/<branch>`. So `branch` means "a branch that exists". At planning time only a
+//! `branch_suggestion` is known, from the agent plan (`planned_prs_into_stack_nodes`) or from a
+//! manual add (`add_planned_pr_node`); pre-filling `branch` from it would unblock descendants onto
+//! a ref nothing created.
 //!
 //! PRD: docs/ft/coder/pr-stack-live-status.md § capability 1.
 
@@ -12,7 +14,7 @@ use tddy_workflow_recipes::plan_pr_stack::{planned_prs_into_stack_nodes, Planned
 use tddy_workflow_recipes::pr_stack::{add_planned_pr_node, AddPlannedPrInput};
 
 #[test]
-fn add_planned_pr_node_assigns_a_definitive_branch_at_creation() {
+fn a_manually_added_planned_pr_keeps_its_branch_name_as_a_suggestion_only() {
     // Given — a fresh orchestrator session with no stack yet
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path();
@@ -31,12 +33,16 @@ fn add_planned_pr_node_assigns_a_definitive_branch_at_creation() {
     )
     .expect("add_planned_pr_node should succeed");
 
-    // Then — the node carries a definitive branch, ready to link a worktree/session/PR
-    assert_eq!(node.branch.as_deref(), Some("feature/auth/token-store"));
+    // Then — the proposed name is recorded as a suggestion, and no branch is claimed yet
+    assert_eq!(
+        node.branch_suggestion.as_deref(),
+        Some("feature/auth/token-store")
+    );
+    assert_eq!(node.branch, None);
 }
 
 #[test]
-fn planned_prs_into_stack_nodes_assigns_branch_from_the_branch_suggestion() {
+fn a_planned_pr_from_the_agent_plan_keeps_its_branch_name_as_a_suggestion_only() {
     // Given — an agent plan entry with a branch suggestion
     let pr = PlannedPr {
         node_id: "n1".to_string(),
@@ -50,6 +56,10 @@ fn planned_prs_into_stack_nodes_assigns_branch_from_the_branch_suggestion() {
     // When
     let nodes = planned_prs_into_stack_nodes(&[pr]);
 
-    // Then — the converted node's branch is the definitive link key
-    assert_eq!(nodes[0].branch.as_deref(), Some("feature/auth/token-store"));
+    // Then — the proposed name is recorded as a suggestion, and no branch is claimed yet
+    assert_eq!(
+        nodes[0].branch_suggestion.as_deref(),
+        Some("feature/auth/token-store")
+    );
+    assert_eq!(nodes[0].branch, None);
 }

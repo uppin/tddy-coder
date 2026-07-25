@@ -152,6 +152,11 @@ impl Stack {
     /// Effective base origin refs for a node, skipping merged ancestors.
     /// Returns `origin/<branch>` for each nearest non-skipped ancestor across all `parents`,
     /// or `[stack_bottom_base.to_string()]` when all parents are merged/absent.
+    ///
+    /// Only a parent that owns a real `branch` contributes a ref: a branch is the only thing a
+    /// worktree can be created from, and a node id (or a planner's `branch_suggestion`) names no
+    /// ref that exists. Use [`Stack::base_ref_for_spawn`] when a branchless parent must be a hard
+    /// refusal rather than a silent omission.
     pub fn effective_base_refs(&self, node_id: &str, stack_bottom_base: &str) -> Vec<String> {
         let Some(node) = self.node(node_id) else {
             return vec![stack_bottom_base.to_string()];
@@ -161,12 +166,8 @@ impl Stack {
             .iter()
             .filter_map(|parent_id| self.node(parent_id))
             .filter(|parent| !parent.is_skipped())
-            .map(|parent| {
-                format!(
-                    "origin/{}",
-                    parent.branch.as_deref().unwrap_or(parent.node_id.as_str())
-                )
-            })
+            .filter_map(|parent| parent.branch.as_deref())
+            .map(|branch| format!("origin/{branch}"))
             .collect();
         if refs.is_empty() {
             vec![stack_bottom_base.to_string()]
@@ -177,9 +178,12 @@ impl Stack {
 
     /// Resolve the base ref a child worktree for `node_id` must branch off.
     ///
-    /// Enforces bottom-up ordering first: if any non-merged parent has not been started yet
-    /// (no `session_id`), spawning is refused with a `ChangesetInvalid` error naming that parent,
-    /// because its branch does not exist to base onto. Merged parents are skipped, not required.
+    /// Enforces bottom-up ordering first: if any non-merged parent owns no `branch`, spawning is
+    /// refused with a `ChangesetInvalid` error naming that parent, because there is no ref to base
+    /// onto. Merged parents are skipped, not required. A parent's child *session* plays no part in
+    /// this decision — a branch can be built on whether or not a session is still attached to it
+    /// (see [`resolve_stack_node_branch`], which hydrates a node's branch from its child session
+    /// when the node itself never recorded one).
     ///
     /// Otherwise returns the nearest non-merged ancestor's `origin/<branch>` (the first
     /// `effective_base_refs` entry), or `stack_bottom_base` for a root node or a node whose
@@ -192,9 +196,9 @@ impl Stack {
         if let Some(node) = self.node(node_id) {
             for parent_id in &node.parents {
                 if let Some(parent) = self.node(parent_id) {
-                    if !parent.is_skipped() && parent.session_id.is_none() {
+                    if !parent.is_skipped() && parent.branch.is_none() {
                         return Err(WorkflowError::ChangesetInvalid(format!(
-                            "cannot spawn node '{node_id}': non-merged parent '{parent_id}' has not been started yet"
+                            "cannot spawn node '{node_id}': non-merged parent '{parent_id}' has no branch to base onto yet"
                         )));
                     }
                 }
@@ -810,6 +814,42 @@ pub fn link_stack_node_to_child_session(
             }
         }
     })
+}
+
+/// Resolve the branch a stack node stands on: the branch the node recorded itself, falling back
+/// to the branch recorded by its child session's changeset.
+///
+/// The node's own record is authoritative — the session is only a fallback route to the same
+/// answer, for a node linked before its branch was known (or an older manifest). A node with no
+/// branch and no reachable session resolves to `None`; a session directory that is gone from disk
+/// is `None` too, never an error, because a deleted session must not un-resolve stack progression.
+pub fn resolve_stack_node_branch(sessions_root: &Path, node: &StackNode) -> Option<String> {
+    if let Some(branch) = node.branch.clone() {
+        return Some(branch);
+    }
+    let session_id = node.session_id.as_deref()?;
+    let child_dir = crate::session_lifecycle::unified_session_dir_path(sessions_root, session_id);
+    read_changeset(&child_dir).ok()?.branch
+}
+
+/// Read an orchestrator session's stack with every node's `branch` hydrated via
+/// [`resolve_stack_node_branch`], so branch-gated decisions (spawn ordering, PR lookup) see the
+/// branch a child session created even when the node itself never recorded it.
+///
+/// `Ok(None)` when the session carries no stack (an ordinary, non-orchestrator session).
+pub fn read_stack_with_resolved_branches(
+    sessions_root: &Path,
+    orchestrator_session_id: &str,
+) -> Result<Option<Stack>, WorkflowError> {
+    let dir =
+        crate::session_lifecycle::unified_session_dir_path(sessions_root, orchestrator_session_id);
+    let Some(mut stack) = read_changeset(&dir)?.stack else {
+        return Ok(None);
+    };
+    for node in &mut stack.nodes {
+        node.branch = resolve_stack_node_branch(sessions_root, node);
+    }
+    Ok(Some(stack))
 }
 
 /// Sync a stack node's child_state + pr_status from the child session's changeset.

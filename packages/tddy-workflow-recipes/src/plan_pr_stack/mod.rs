@@ -58,7 +58,7 @@ pub fn planned_prs_into_stack_nodes(prs: &[PlannedPr]) -> Vec<StackNode> {
             title: pr.title.clone(),
             description: pr.description.clone(),
             branch_suggestion: pr.branch_suggestion.clone(),
-            branch: pr.branch_suggestion.clone(),
+            branch: None,
             session_id: None,
             parents: pr.parents.clone(),
             pr_status: None,
@@ -343,7 +343,6 @@ mod tests {
         assert!(n1.parents.is_empty());
         assert_eq!(n1.branch_suggestion.as_deref(), Some("feature/auth-store"));
         assert!(n1.session_id.is_none());
-        assert_eq!(n1.branch, n1.branch_suggestion);
 
         let n2 = nodes.iter().find(|n| n.node_id == "n2").unwrap();
         assert_eq!(n2.parents, vec!["n1".to_string()]);

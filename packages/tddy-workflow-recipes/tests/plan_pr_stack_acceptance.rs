@@ -69,8 +69,8 @@ prs:
         "no session_id before materialization"
     );
     assert_eq!(
-        n1.branch, n1.branch_suggestion,
-        "branch is the definitive link key, assigned from the suggestion at creation"
+        n1.branch, None,
+        "a suggestion is a planned name, not a ref: `branch` stays empty until a child creates it"
     );
 }
 
