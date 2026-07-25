@@ -48,12 +48,13 @@ use tddy_service::proto::connection::{
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse,
-    ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse, ReadWorktreeFileRequest,
-    ReadWorktreeFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
-    RepointPlannedPrRequest, RepointPlannedPrResponse, ReportAgentActivityRequest,
-    ReportAgentActivityResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
-    RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse, ResumeSessionRequest,
-    ResumeSessionResponse, SendTerminalInputResponse, SessionTerminalInput, SessionTerminalOutput,
+    QueryBranchRequest, QueryBranchResponse, ReadSessionWorkflowFileRequest,
+    ReadSessionWorkflowFileResponse, ReadWorktreeFileRequest, ReadWorktreeFileResponse,
+    RemoveWorktreeRequest, RemoveWorktreeResponse, RepointPlannedPrRequest,
+    RepointPlannedPrResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
+    ReportSessionStatusRequest, ReportSessionStatusResponse, RestoreSessionWorktreeRequest,
+    RestoreSessionWorktreeResponse, ResumeSessionRequest, ResumeSessionResponse,
+    SendTerminalInputResponse, SessionTerminalInput, SessionTerminalOutput,
     SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, SignalSessionRequest,
     SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse, StartSessionRequest,
     StartSessionResponse, StartTerminalSessionRequest, StartTerminalSessionResponse,
@@ -780,6 +781,19 @@ where
         request: tonic::Request<GetPrStatusRequest>,
     ) -> Result<tonic::Response<GetPrStatusResponse>, tonic::Status> {
         let resp = RpcConnectionService::get_pr_status(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn query_branch(
+        &self,
+        request: tonic::Request<QueryBranchRequest>,
+    ) -> Result<tonic::Response<QueryBranchResponse>, tonic::Status> {
+        let resp = RpcConnectionService::query_branch(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

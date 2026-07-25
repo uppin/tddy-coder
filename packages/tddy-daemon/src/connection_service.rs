@@ -73,10 +73,10 @@ use tddy_service::proto::connection::{
     GetAcpToolCallDetailResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
     GetPrStatusRequest, GetPrStatusResponse, HostCpuStats, HostDiskStats, HostStatsEvent,
     ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
-    ReportAgentActivityRequest, ReportAgentActivityResponse, StartDemoVmRequest,
-    StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, StreamAcpReplayRequest,
-    StreamHostStatsRequest, StreamMode, StreamSessionActivityRequest,
+    ListSessionToolCallsResponse, QueryBranchRequest, QueryBranchResponse, RepointPlannedPrRequest,
+    RepointPlannedPrResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
+    StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
+    StreamAcpReplayRequest, StreamHostStatsRequest, StreamMode, StreamSessionActivityRequest,
     ToolCallInfo as ProtoToolCallInfo,
 };
 use tddy_task::{TaskRegistry, TerminalCapture};
@@ -107,6 +107,43 @@ pub(crate) async fn spawn_blocking_with_timeout<T: Send + 'static>(
             )))
         }
     }
+}
+
+/// After a `new_branch_from_base` worktree is created, optionally push the freshly created branch to
+/// `origin`. Reads the actual created branch from the session's changeset (it may carry a collision
+/// suffix), runs `git push -u origin <branch>` from the worktree, and records
+/// `Changeset.remote_pushed = true`. A push failure fails the session start — no silent fallback.
+pub(crate) async fn push_new_branch_to_origin_if_requested(
+    create_remote_branch: bool,
+    intent: BranchWorktreeIntent,
+    session_dir: &Path,
+    worktree_path: &Path,
+    timeout: Duration,
+) -> Result<(), Status> {
+    if !create_remote_branch || !matches!(intent, BranchWorktreeIntent::NewBranchFromBase) {
+        return Ok(());
+    }
+    let session_dir = session_dir.to_path_buf();
+    let worktree_path = worktree_path.to_path_buf();
+    spawn_blocking_with_timeout(
+        timeout,
+        "StartSession: push new branch to origin",
+        move || {
+            let mut cs = tddy_core::read_changeset(&session_dir)
+                .map_err(|e| anyhow::anyhow!("read changeset for remote push: {e}"))?;
+            let branch = cs
+                .branch
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("no branch recorded after worktree setup"))?;
+            tddy_core::worktree::push_new_branch_to_origin(&worktree_path, &branch)
+                .map_err(|e| anyhow::anyhow!(e))?;
+            cs.remote_pushed = true;
+            tddy_core::write_changeset(&session_dir, &cs)
+                .map_err(|e| anyhow::anyhow!("write changeset after remote push: {e}"))?;
+            Ok(())
+        },
+    )
+    .await
 }
 
 /// Resolves session token to GitHub user login.
@@ -1005,6 +1042,8 @@ impl ConnectionServiceImpl {
         managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
         // When true, index the worktree before launch and expose the `SemanticSearch` tool.
         semantic_index: bool,
+        // When true (new_branch_from_base only), push the new branch to origin at session start.
+        create_remote_branch: bool,
     ) -> Result<Response<StartSessionResponse>, Status> {
         // A pr-stack orchestrator gets a child-spawn handler bound to its toolcall listener so the
         // agent's `pr_spawn_child` relay can materialize planned nodes into child sessions.
@@ -1060,6 +1099,7 @@ impl ConnectionServiceImpl {
             child_spawn_handler,
             conversation_spawn_handler,
             semantic_index,
+            create_remote_branch,
             &self.task_registry,
         )
         .await
@@ -1205,6 +1245,9 @@ async fn spawn_claude_cli_session_inner(
     // When true, index the worktree into the session dir before launch (blocking; aborts the start
     // on failure) and point the `SemanticSearch` tool at that per-session index DB.
     semantic_index: bool,
+    // When true (and the intent is new_branch_from_base), push the freshly created branch to origin
+    // at session start; a push failure fails the start.
+    create_remote_branch: bool,
     task_registry: &TaskRegistry,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
@@ -1333,6 +1376,15 @@ async fn spawn_claude_cli_session_inner(
             )
             .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
         },
+    )
+    .await?;
+
+    push_new_branch_to_origin_if_requested(
+        create_remote_branch,
+        intent,
+        &session_dir,
+        &worktree_path,
+        timeout,
     )
     .await?;
 
@@ -1798,6 +1850,8 @@ impl ConnectionServiceImpl {
         // When true, index the worktree before launch (blocking; aborts on failure) and expose the
         // in-jail `SemanticSearch` tool backed by that per-session index.
         semantic_index: bool,
+        // When true (new_branch_from_base + registered project), push the new branch to origin.
+        create_remote_branch: bool,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -1935,7 +1989,7 @@ impl ConnectionServiceImpl {
                 let repo_root_clone = repo_root.clone();
                 let session_dir_clone = session_dir.clone();
                 let timeout = self.config.spawn_worker_request_timeout();
-                spawn_blocking_with_timeout(
+                let wt = spawn_blocking_with_timeout(
                     timeout,
                     "start_sandboxed_claude_cli_session: create worktree",
                     move || {
@@ -1947,7 +2001,16 @@ impl ConnectionServiceImpl {
                         .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
                     },
                 )
-                .await?
+                .await?;
+                push_new_branch_to_origin_if_requested(
+                    create_remote_branch,
+                    intent,
+                    &session_dir,
+                    &wt,
+                    timeout,
+                )
+                .await?;
+                wt
             }
             WorktreeSource::RepoPath(path) => {
                 let canonical = std::fs::canonicalize(&path).map_err(|e| {
@@ -2306,6 +2369,8 @@ impl ConnectionServiceImpl {
         // When true, index the worktree before launch (blocking; aborts on failure) and point the
         // in-jail `SemanticSearch` tool at the per-session index.
         semantic_index: bool,
+        // When true (new_branch_from_base only), push the new branch to origin at session start.
+        create_remote_branch: bool,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -2424,6 +2489,15 @@ impl ConnectionServiceImpl {
                 )
                 .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
             },
+        )
+        .await?;
+
+        push_new_branch_to_origin_if_requested(
+            create_remote_branch,
+            intent,
+            &session_dir,
+            &worktree_path,
+            timeout,
         )
         .await?;
 
@@ -3277,6 +3351,9 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             None,
             // A spawned child session never runs its own semantic index.
             false,
+            // Child spawns are created by the orchestrator agent, not the Start-Session dialog, and
+            // never push a remote branch here.
+            false,
             &self.claude_cli_manager.task_registry(),
         )
         .await
@@ -3393,6 +3470,8 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             None,
             None,
             // A spawned child conversation never runs its own semantic index.
+            false,
+            // Child conversations are spawned by the orchestrator, never pushing a remote branch.
             false,
             &self.claude_cli_manager.task_registry(),
         )
@@ -4224,6 +4303,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         &req.specialized_agents,
                         managed_recipe,
                         req.semantic_index,
+                        req.create_remote_branch,
                     )
                     .await;
             }
@@ -4244,6 +4324,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     stack_parent_for_claude_cli.as_deref(),
                     managed_recipe,
                     req.semantic_index,
+                    req.create_remote_branch,
                 )
                 .await;
         }
@@ -4284,6 +4365,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         &req.specialized_agents,
                         managed_recipe,
                         req.semantic_index,
+                        req.create_remote_branch,
                     )
                     .await;
             }
@@ -4305,6 +4387,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 &req.specialized_agents,
                 managed_recipe,
                 req.semantic_index,
+                req.create_remote_branch,
                 &self.task_registry,
             )
             .await;
@@ -6968,6 +7051,138 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         };
         Ok(Response::new(GetPrStatusResponse {
             status: Some(status),
+        }))
+    }
+
+    async fn query_branch(
+        &self,
+        request: Request<QueryBranchRequest>,
+    ) -> Result<Response<QueryBranchResponse>, Status> {
+        use tddy_service::proto::connection::{
+            BranchResolution, BranchSession, BranchWorktree, PrStatusView,
+        };
+
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        if req.branch.trim().is_empty() {
+            return Err(Status::invalid_argument("branch is required"));
+        }
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+        require_pr_stack_orchestrator(&session_dir)?;
+
+        let changeset =
+            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
+        let repo_root = changeset
+            .repo_path
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| session_dir.clone());
+        let branch = req.branch.trim().to_string();
+
+        // Session — scan sessions under the user's root for one whose Changeset.branch matches,
+        // preferring an active session, tie-broken by most-recently-updated.
+        let branch_for_scan = branch.clone();
+        let sessions_base_for_scan = sessions_base.clone();
+        let session = spawn_blocking_with_timeout(
+            self.config.spawn_worker_request_timeout(),
+            "QueryBranch: scan sessions by branch",
+            move || {
+                let sessions = session_reader::list_sessions_in_dir(&sessions_base_for_scan)
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                let mut best: Option<session_reader::SessionEntry> = None;
+                for s in sessions {
+                    let dir = sessions_base_for_scan
+                        .join(SESSIONS_SUBDIR)
+                        .join(&s.session_id);
+                    let cs = match tddy_core::read_changeset(&dir) {
+                        Ok(cs) => cs,
+                        Err(_) => continue,
+                    };
+                    if cs.branch.as_deref() != Some(branch_for_scan.as_str()) {
+                        continue;
+                    }
+                    best = Some(match best {
+                        None => s,
+                        Some(cur) => {
+                            // Prefer active; then the most-recently-updated.
+                            if (s.is_active, s.updated_at.as_str())
+                                > (cur.is_active, cur.updated_at.as_str())
+                            {
+                                s
+                            } else {
+                                cur
+                            }
+                        }
+                    });
+                }
+                Ok(best)
+            },
+        )
+        .await?;
+        let session = match session {
+            Some(s) => BranchSession {
+                exists: true,
+                session_id: s.session_id,
+                is_active: s.is_active,
+                status: s.status,
+            },
+            None => BranchSession::default(),
+        };
+
+        // Worktree — the on-disk worktree checked out for the branch (non-erroring).
+        let worktree = match tddy_core::worktree::worktree_path_for_branch(&repo_root, &branch) {
+            Some(path) => BranchWorktree {
+                exists: true,
+                path: path.to_string_lossy().into_owned(),
+            },
+            None => BranchWorktree::default(),
+        };
+
+        // PR — same path as get_pr_status; an unresolvable repo/token yields exists = false.
+        let pr = match owner_repo_from_repo_root(&repo_root) {
+            Some(owner_repo) => {
+                let branch_for_pr = branch.clone();
+                let view = tokio::task::spawn_blocking(move || {
+                    use tddy_workflow_recipes::orchestrate_pr_stack::github::GithubPrApi;
+                    let gh =
+                        tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::new(
+                            owner_repo,
+                        );
+                    gh.get_pr_by_head(&branch_for_pr)
+                })
+                .await
+                .map_err(|e| Status::internal(format!("query_branch join error: {e}")))?
+                .map_err(|e| Status::internal(e.to_string()))?;
+                match view {
+                    Some(pr) => PrStatusView {
+                        exists: true,
+                        number: pr.number,
+                        url: pr.url,
+                        state: pr_state_label(pr.state).to_string(),
+                    },
+                    None => PrStatusView::default(),
+                }
+            }
+            None => PrStatusView::default(),
+        };
+
+        Ok(Response::new(QueryBranchResponse {
+            resolution: Some(BranchResolution {
+                branch,
+                session: Some(session),
+                worktree: Some(worktree),
+                pr: Some(pr),
+            }),
         }))
     }
 
@@ -10220,5 +10435,71 @@ mod list_agent_models_probe_tests {
                 "claude".to_string(),
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod remote_branch_push_gating_tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// A session dir whose changeset records `branch` but has not been pushed.
+    fn a_session_with_unpushed_branch() -> tempfile::TempDir {
+        let session = tempfile::tempdir().unwrap();
+        let cs = tddy_core::changeset::Changeset {
+            branch: Some("feature/x".to_string()),
+            remote_pushed: false,
+            ..Default::default()
+        };
+        tddy_core::write_changeset(session.path(), &cs).unwrap();
+        session
+    }
+
+    /// The push is skipped for "work on existing branch" even when Create Remote Branch is ticked —
+    /// only a freshly created branch is ever pushed. The worktree is not a git repo, so a broken
+    /// guard that attempted the push would fail loudly instead of returning Ok.
+    #[tokio::test]
+    async fn push_is_skipped_for_work_on_selected_branch_intent() {
+        // Given
+        let session = a_session_with_unpushed_branch();
+        let worktree = tempfile::tempdir().unwrap();
+
+        // When
+        let result = push_new_branch_to_origin_if_requested(
+            true,
+            tddy_core::changeset::BranchWorktreeIntent::WorkOnSelectedBranch,
+            session.path(),
+            worktree.path(),
+            Duration::from_secs(10),
+        )
+        .await;
+
+        // Then
+        assert!(result.is_ok(), "gated call must succeed without pushing: {result:?}");
+        let after = tddy_core::read_changeset(session.path()).unwrap();
+        assert!(!after.remote_pushed, "remote_pushed must stay false when intent is not new-branch");
+    }
+
+    /// The push is skipped when the operator opts out (flag false), even for a new branch.
+    #[tokio::test]
+    async fn push_is_skipped_when_create_remote_branch_is_false() {
+        // Given
+        let session = a_session_with_unpushed_branch();
+        let worktree = tempfile::tempdir().unwrap();
+
+        // When
+        let result = push_new_branch_to_origin_if_requested(
+            false,
+            tddy_core::changeset::BranchWorktreeIntent::NewBranchFromBase,
+            session.path(),
+            worktree.path(),
+            Duration::from_secs(10),
+        )
+        .await;
+
+        // Then
+        assert!(result.is_ok(), "opt-out call must succeed without pushing: {result:?}");
+        let after = tddy_core::read_changeset(session.path()).unwrap();
+        assert!(!after.remote_pushed, "remote_pushed must stay false when the flag is off");
     }
 }

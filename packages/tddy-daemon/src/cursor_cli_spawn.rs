@@ -78,6 +78,8 @@ pub async fn spawn_cursor_cli_session_inner(
     // When true, index the worktree before launch (blocking; aborts on failure) and point the
     // `SemanticSearch` tool at the per-session index via `TDDY_SEMANTIC_INDEX_DB`.
     semantic_index: bool,
+    // When true (new_branch_from_base only), push the new branch to origin at session start.
+    create_remote_branch: bool,
     task_registry: &tddy_task::TaskRegistry,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
@@ -177,6 +179,15 @@ pub async fn spawn_cursor_cli_session_inner(
             )
             .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
         },
+    )
+    .await?;
+
+    crate::connection_service::push_new_branch_to_origin_if_requested(
+        create_remote_branch,
+        intent,
+        &session_dir,
+        &worktree_path,
+        timeout,
     )
     .await?;
 

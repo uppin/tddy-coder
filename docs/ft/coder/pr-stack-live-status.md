@@ -124,6 +124,52 @@ message RepointPlannedPrResponse {
 }
 ```
 
+**New RPC — `QueryBranch`** *(added 2026-07-25)*
+
+Resolves, for one head branch, the in-progress child **session**, its on-disk **worktree**, and the
+live GitHub **PR status** in a single call. Added **additively** — `GetPrStatus` (and `usePrStatus` /
+`resolveNodeSession`) remain in place; `QueryBranch` reuses `PrStatusView` for its `pr` field.
+
+```proto
+rpc QueryBranch(QueryBranchRequest) returns (QueryBranchResponse);
+
+message QueryBranchRequest {
+  string session_token = 1;
+  // The "pr-stack" orchestrator session — resolves the repo (owner/repo + repo_path) and the
+  // sessions root to scan.
+  string session_id = 2;
+  // Head branch to resolve.
+  string branch = 3;
+}
+message QueryBranchResponse {
+  BranchResolution resolution = 1;
+}
+
+// Everything the PR-Stack row needs about one branch, resolved server-side by branch name.
+message BranchResolution {
+  string branch = 1;              // echoes the request; lets a response self-identify
+  BranchSession session = 2;      // the in-progress child session working the branch
+  BranchWorktree worktree = 3;    // the worktree checked out for the branch on disk
+  PrStatusView pr = 4;            // live GitHub PR status (reuses PrStatusView)
+}
+message BranchSession {
+  bool exists = 1;                // false when no session owns the branch
+  string session_id = 2;
+  bool is_active = 3;
+  string status = 4;              // e.g. "active" | "idle"
+}
+message BranchWorktree {
+  bool exists = 1;                // false when no worktree is checked out for the branch
+  string path = 2;                // absolute worktree path when exists = true
+}
+```
+
+The handler reuses the `get_pr_status` prologue (auth → os_user → sessions_base →
+`require_pr_stack_orchestrator`) and composes: **PR** via `RealGithubPrApi::get_pr_by_head` (token-less
+/ unresolvable repo → `exists = false`, never an error), **session** by scanning sessions whose
+`Changeset.branch == branch` (prefers active, ties by most-recently-updated), and **worktree** via
+`tddy_core::worktree::worktree_path_for_branch`.
+
 ### Rust (`tddy-core`, `tddy-workflow-recipes`, `tddy-daemon`)
 
 - **`StackNode.branch` at creation** — `pr_stack::add_planned_pr_node` and
@@ -167,6 +213,12 @@ message RepointPlannedPrResponse {
 - `PlannedPrRow` renders: an **in-progress** indicator (branch resolves to a live session), the
   **PR number as a link** + **PR state**, and a **Repoint** control when the node needs repoint
   (a predecessor merged).
+- **`useQueryBranch(client, sessionToken, orchestratorId, branches)`** *(added 2026-07-25)* — sibling
+  of `usePrStatus`, per-branch polled, returning a `branch → BranchResolution` map. `PrStackScreen`
+  threads it through `PlannedPrList` into `PlannedPrRow`, which now sources the **worktree** indicator
+  (`pr-stack-worktree-<nodeId>`), **in-progress** badge (`pr-stack-session-<nodeId>`), and **PR**
+  link/state from the `QueryBranch` resolution. Additive alongside the existing `usePrStatus` /
+  `resolveNodeSession` surfaces.
 
 ## Behavior and semantics
 

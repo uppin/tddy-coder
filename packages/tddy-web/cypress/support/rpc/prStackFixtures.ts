@@ -33,6 +33,39 @@ export function aPlannedNode(overrides: Partial<StackNodeFixture> & { nodeId: st
   };
 }
 
+/** A `QueryBranch` resolution fixture — the session/worktree/PR resolved for one branch. */
+export interface BranchResolutionFixture {
+  branch: string;
+  session?: { exists: boolean; sessionId?: string; isActive?: boolean; status?: string };
+  worktree?: { exists: boolean; path?: string };
+  pr?: { exists: boolean; number?: number; url?: string; state?: string };
+}
+
+/** Build a `QueryBranchResponse`-shaped object for an in-memory `queryBranch` stub. */
+export function aBranchResolutionResponse(fx: BranchResolutionFixture) {
+  return {
+    resolution: {
+      branch: fx.branch,
+      session: {
+        exists: fx.session?.exists ?? false,
+        sessionId: fx.session?.sessionId ?? "",
+        isActive: fx.session?.isActive ?? false,
+        status: fx.session?.status ?? "",
+      },
+      worktree: {
+        exists: fx.worktree?.exists ?? false,
+        path: fx.worktree?.path ?? "",
+      },
+      pr: {
+        exists: fx.pr?.exists ?? false,
+        number: BigInt(fx.pr?.number ?? 0),
+        url: fx.pr?.url ?? "",
+        state: fx.pr?.state ?? "",
+      },
+    },
+  };
+}
+
 /** Serialize a `Stack` fixture to the `stack_plan_json` wire format. */
 export function aStackPlanJson(version: number, nodes: StackNodeFixture[]): string {
   return JSON.stringify({

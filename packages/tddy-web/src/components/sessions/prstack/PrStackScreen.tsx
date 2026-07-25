@@ -9,6 +9,8 @@ import { AddPlannedPrForm, type AddPlannedPrFormSubmission } from "./AddPlannedP
 import { PrStackChat } from "./PrStackChat";
 import { parseStackPlan, type StackNode } from "./stackPlan";
 import { usePrStatus } from "./usePrStatus";
+import { useQueryBranch } from "./useQueryBranch";
+import { deriveStackBaseBranch } from "./deriveStackBaseBranch";
 import { CreateSessionDialog } from "../CreateSessionDialog";
 import type { CreateSessionInitialValues } from "../CreateSessionPane";
 
@@ -81,6 +83,14 @@ export function PrStackScreen({
     [stack.nodes],
   );
   const prStatusByBranch = usePrStatus(client, sessionToken, session.sessionId, branches);
+  // One-call branch resolution (worktree + in-progress session + PR) per rendered branch, polled on
+  // the same interval and independent of the agent.
+  const branchResolutionByBranch = useQueryBranch(
+    client,
+    sessionToken,
+    session.sessionId,
+    branches,
+  );
 
   // Opening "Start session" no longer spawns the child directly — it opens the shared creation
   // form pre-filled from the planned node, so the operator can review/adjust before spawning.
@@ -103,6 +113,11 @@ export function PrStackScreen({
         // The planned branch (feature/<stack>/<node>, pre-filled by the pr-stack agent). Prefer an
         // already-created branch, else the plan's suggestion.
         newBranchName: startSessionNode.branch ?? startSessionNode.branchSuggestion ?? "",
+        // The concrete base branch the child will branch from — the node's nearest non-merged
+        // ancestor's branch (predecessor stack branch), collapsing to the project default for a
+        // root. The project default isn't surfaced on the orchestrator session here, so a root
+        // node shows the plain label rather than a name.
+        baseBranchLabel: deriveStackBaseBranch(startSessionNode, stack.nodes, ""),
         initialPrompt: [startSessionNode.title, startSessionNode.description]
           .filter(Boolean)
           .join("\n\n"),
@@ -175,6 +190,7 @@ export function PrStackScreen({
           startingNodeId={startSessionNode?.nodeId ?? null}
           sessions={sessions}
           prStatusByBranch={prStatusByBranch}
+          branchResolutionByBranch={branchResolutionByBranch}
           onRepoint={handleRepoint}
         />
       </div>
