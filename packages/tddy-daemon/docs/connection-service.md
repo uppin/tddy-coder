@@ -269,6 +269,18 @@ carry an optional `terminal_id` (empty ⇒ `"main"`) and resolve the target via
 `get_terminal(session_id, terminal_id)`. All four new/extended RPCs authenticate `session_token`
 via the same GitHub → OS user path as the other endpoints.
 
+### Input-offset acknowledgement
+
+`SendTerminalInput` carries a cumulative byte `input_offset` (0 = unset). After the bytes reach the
+PTY, `send_terminal_input` records the applied offset (monotonic max) and `stream_terminal_output`
+emits an ACK frame — `SessionTerminalOutput { data: [], acked_input_offset: N }` — interleaved with
+output data (a fresh subscriber gets the current offset up front). The web terminal uses this to
+render an [enqueued-input overlay](../../../docs/ft/web/enqueued-input-overlay.md) on slow links.
+Because `get_terminal` **rebuilds a `PtyHandle` per RPC**, the offset accumulator and the ack
+`watch` channel live on the shared `tddy_task::TaskChannel` (`acknowledge_input` /
+`subscribe_acked_offset`), not on the handle — so an ACK from the input path reaches an already-open
+output stream. The tddy-coder session participant serves the same contract for its bash terminals.
+
 ## Host stats (Host Stats Footer)
 
 Two unary RPCs feed the web's bottom **Host Stats Footer** (see

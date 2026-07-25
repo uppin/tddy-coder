@@ -268,6 +268,7 @@ async fn send_terminal_input_rejected_without_valid_control_token() {
             data: vec![b'x'],
             terminal_id: String::new(), // → "main"
             control_token: "wrong-token".to_string(),
+            input_offset: 0,
         }))
         .await
         .expect_err("SendTerminalInput with invalid control token must be rejected");
@@ -303,6 +304,7 @@ async fn send_terminal_input_succeeds_for_current_controller() {
             data: vec![b'h', b'i'],
             terminal_id: String::new(),
             control_token: token,
+            input_offset: 0,
         }))
         .await
         .expect("SendTerminalInput from the current controller must succeed");

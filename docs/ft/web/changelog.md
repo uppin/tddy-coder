@@ -9,6 +9,10 @@ Release note history for the Web product area.
 - The Session Inspector has a new **Files** tab listing the files already uploaded to the session (server-read from `{session_dir}/uploads/`, newest first), so an upload stays reusable instead of its path being typed once and lost. See [session-files-inspector.md](session-files-inspector.md).
 - Reuse a file by **dragging** its row onto the terminal (desktop) or **tapping / Insert** (mobile) — the file's host path is inserted without re-uploading (it is already on the host). Starting a drag or an insert **auto-closes the Inspector** so the terminal beneath becomes the drop target.
 - Each row also offers **Copy path** (insecure-origin-safe clipboard) and a two-step **Delete** (removes the upload from the host and prunes the emptied drop folder).
+## 2026-07-25 — Enqueued input overlay & input-offset ACK
+
+- The web terminal now stays responsive on slow links: every input chunk carries a cumulative byte `input_offset`, the server acks the applied offset on `StreamTerminalOutput` (new `SessionTerminalOutput.acked_input_offset`), and un-acknowledged input surfaces after 500 ms as a single-line **enqueued-input overlay** that collapses from the front as ACKs arrive and hides when caught up. Mouse events coalesce into one glyph with a count; overflow past the line collapses into a trailing count. See [enqueued-input-overlay.md](enqueued-input-overlay.md) and [web-terminal.md § Enqueued-input overlay](web-terminal.md#enqueued-input-overlay-slow-networks).
+- Works for both hosting models — daemon-hosted claude-cli terminals and tddy-coder-participant-hosted bash tabs — because the ACK state lives on the shared `tddy_task::TaskChannel` (the daemon rebuilds a `PtyHandle` per RPC).
 
 ## 2026-07-24 — Terminal file drop actually delivers the path
 
