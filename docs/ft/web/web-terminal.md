@@ -35,6 +35,18 @@ When the terminal connects and renders, it supports:
 - **Font zoom (pitch)**: The terminal supports **pitch-in** (larger glyphs), **pitch-out** (smaller glyphs), and **reset** to the session baseline. There are **no on-screen +/−/0 buttons**; zoom is via **keyboard** (**Ctrl** or **⌘** with **+**/**=**, **-**, or **0** when focus is inside **`[data-testid='ghostty-terminal']`**), **two-finger touch pinch**, **trackpad pinch** (**`wheel`** with **`ctrlKey`**), or programmatic **`CustomEvent`** dispatch. Default font bounds are **8–32** px with step **1**; at the minimum or maximum, further pitch-in or pitch-out is ignored. **`GhosttyTerminal`** exposes the live size on **`data-terminal-font-size`** (integer string). Font changes apply to the running ghostty-web **`Terminal`** (`options.fontSize`), then **`FitAddon.fit()`** recomputes columns and rows; **`onResize`** runs when the grid changes, so the existing resize OSC sequence reaches the TUI backend on the same input path as keyboard data. **`GhosttyTerminalLiveKit`** accepts **`fontSize`** (default **14**) and passes it to **`GhosttyTerminal`** as the reset baseline. Bridge events use **`tddy-terminal-zoom`** and **`tddy-terminal-font-size-sync`**; payloads are validated before handling. Optional trace logging uses **`VITE_TERMINAL_ZOOM_DEBUG=true`** in the Vite build, or **`debugLogging`** on **`GhosttyTerminal`**. Implementation reference: [terminal-zoom.md](../../../packages/tddy-web/docs/terminal-zoom.md).
 - **Touch/mouse mode**: When `--mouse` is set on tddy-coder, the TUI sends EnableMouseCapture. GhosttyTerminal encodes SGR mouse sequences `\x1b[<Pb;Px;PyM/m` (press/release) and forwards them via onData. Click-to-select and scroll work. Touch events (touchstart/touchend) are forwarded for tap-to-click on mobile. The TUI draws Enter and (when wide enough) Stop affordances to the right of the prompt; see [Mouse mode: Enter control](../coder/tui-status-bar.md#mouse-mode-enter-control) and [Mouse mode: Stop control](../coder/tui-status-bar.md#mouse-mode-stop-control).
 
+### Enqueued-input overlay (slow networks)
+
+Terminal input is accountable end-to-end: each chunk the browser sends carries a cumulative byte
+**`input_offset`**, and the daemon (or tddy-coder participant) **acks the applied offset** back on the
+`StreamTerminalOutput` stream via a new `SessionTerminalOutput.acked_input_offset` field. If input
+stays un-acknowledged for **500 ms**, the terminal shows a single-line **enqueued-input overlay** of
+exactly what was typed-but-not-yet-confirmed; as ACKs arrive it collapses from the front (typing
+`HELLO WORLD`, an ACK of `HEL` leaves `LO WORLD`), and it hides once everything is acked. Keyboard
+text renders inline; a run of mouse events collapses to one `🖱` glyph with a count; content past the
+line collapses to a trailing overflow glyph. On a fast link the ACKs beat the threshold and the
+overlay never appears. Full spec: [enqueued-input-overlay.md](enqueued-input-overlay.md).
+
 ### File drop upload
 
 Dragging one or more files from the host OS onto the terminal viewport uploads them to the

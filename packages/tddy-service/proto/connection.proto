@@ -594,10 +594,20 @@ message SessionTerminalInput {
   // Control token from ClaimTerminalControl; must match the current holder token or the input is
   // rejected with FAILED_PRECONDITION (if the session has an active controller).
   string control_token = 5;
+  // Cumulative byte offset of this input on the terminal's input stream: the running total number
+  // of input bytes the client has sent through this terminal *including* this chunk's `data`. The
+  // daemon acks the highest applied offset on StreamTerminalOutput (see acked_input_offset), so the
+  // client can render an overlay of un-acknowledged input on slow links. Zero = unset (legacy).
+  uint64 input_offset  = 6;
 }
 
 message SessionTerminalOutput {
   bytes data = 1;
+  // Highest input_offset (see SessionTerminalInput) the daemon has applied to the PTY. On a normal
+  // output-data frame this is 0 (unset); on an ACK frame `data` is empty and this carries the
+  // acknowledged offset. Monotonic: never regresses. The client uses it to collapse its
+  // enqueued-input overlay as the server confirms applied bytes.
+  uint64 acked_input_offset = 2;
 }
 
 // Used by StreamTerminalOutput (browser-compatible server-streaming variant).

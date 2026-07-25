@@ -4,6 +4,7 @@ Wrapped changeset history for tddy-task.
 
 **Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
 
+- **2026-07-25** [Feature] enqueued-input-overlay: `AppliedOffset` (monotonic `AtomicU64` accumulator: `record` returns whether the max advanced, `get` reads it) and `TaskChannel` gains the shared input-offset ACK state — `acknowledge_input(offset)` records + publishes on a `watch<u64>`, `subscribe_acked_offset()` for output-stream subscribers. Shared home so a daemon `PtyHandle` rebuilt per RPC still shares ack state across the input and output paths. Unit tests in `task.rs`. Cross-package [changeset](../../../docs/dev/changesets.md). (tddy-task)
 - **2026-07-22** [Feature] reusable-lsp: add `IdleTimeoutTracker` (`idle.rs`, lifted from `tddy-daemon::relay_idle`) — `new`/`record_activity`/`should_shutdown` with unit tests; used by the LSP registry and re-exported by the daemon. Cross-package [changeset](../../../docs/dev/changesets.md). PR [#310](https://github.com/uppin/tddy-coder/pull/310).
 
 - **2026-06-29** [Feature] **PTY channel kind for action tasks** — `ChannelKind::Pty` for unified PTY runtime tasks; used by `PtyRuntime` and sandbox runner-PTY actions. Feature [background-tasks.md](../../../docs/ft/daemon/background-tasks.md). (tddy-task, tddy-actions, tddy-daemon)
