@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { fromBinary } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
 import { type ConnectionService, StreamMode } from "../../gen/connection_pb";
 import { AcpAgentMessageSchema, ToolCallStatus } from "../../gen/tddy/acp/v1/acp_pb";
+import { agentActivityRegistry } from "../sessions/agentActivityRegistry";
 import { createAgentChunkMerger } from "./acpAgentMerge";
 import type { ChatMessage, UseAgentChatResult } from "./useAgentChat";
 
@@ -21,35 +22,42 @@ function toolStatusOf(status: ToolCallStatus): "running" | "completed" | "error"
 
 /** The read-only transcript surface the Agent Activity overlay renders. Extends the shared
  *  {@link UseAgentChatResult} (so `AgentChatView` can render it interchangeably) with the overlay's
- *  icon/badge signals. Send/answer methods are inert — a replay is not interactive. */
+ *  icon/badge signals and the lazy-snapshot controls. Send/answer methods are inert — a replay is
+ *  not interactive. */
 export interface UseAcpReplayResult extends UseAgentChatResult {
-  /** True once the replay has produced at least one transcript entry. */
+  /** True once the count feed reports at least one persisted activity frame. */
   hasActivity: boolean;
-  /** How many entries have not yet been marked seen (drives the unread badge). */
+  /** Activity frames counted since the overlay was last opened (drives the unread badge). */
   unreadCount: number;
-  /** Mark every currently-known entry as seen (clears the unread count for them). */
+  /** Mark the current count as seen (clears the unread badge). */
   markSeen: () => void;
+  /** Open the heavy transcript snapshot for this session — call on first overlay open. Reuses the
+   *  cached transcript on a later open (or a switch-back), so the snapshot stream opens at most once
+   *  per session. */
+  loadSnapshot: () => void;
+  /** True once the snapshot pull has been started for this session. */
+  snapshotLoaded: boolean;
 }
 
 const NOOP_SEND = () => false;
 
 /**
- * Subscribes to `ConnectionService.StreamAcpReplay` for one session and projects the agent's ACP
- * conversation (`AcpAgentMessage` frames) into a read-only chat transcript for the Agent Activity
- * overlay. The server replays the coalesced history then tails live (`SNAPSHOT_THEN_LIVE`), so the
- * transcript is populated on open for live and dormant sessions alike.
+ * Subscribes to `ConnectionService.StreamAcpReplay` for one session in two phases, backed by the
+ * module-level {@link agentActivityRegistry} so state survives a session switch:
  *
- * Each frame carries the protobuf bytes of an `AcpAgentMessage`; only the `session_update` variant
- * is projected. `agent_message_chunk` text merges into agent bubbles (via the shared
- * {@link createAgentChunkMerger}, finalized per recorded chunk so discrete chunks stay separate
- * bubbles); `tool_call` becomes a tool entry carrying the server-enriched `title` and a coarse
- * status; `user_message_chunk` a user bubble; `agent_thought_chunk` a goal bubble. Every entry's
- * timestamp is the frame's `SessionNotification.timestamp_unix_ms` (wall-clock at record time), so
- * the transcript's elapsed badges reflect the recorded timeline, not render time.
+ * - a **count** feed (`COUNT_THEN_LIVE`), opened while the session is focused, whose frames carry
+ *   `activity_count` (no transcript payload). This drives `hasActivity` and `unreadCount` cheaply,
+ *   without pulling the full transcript.
+ * - a **snapshot** feed (`SNAPSHOT_THEN_LIVE`), opened lazily by {@link UseAcpReplayResult.loadSnapshot}
+ *   on the first overlay open. Its ACP `session_update` frames are projected into the read-only chat
+ *   transcript and cached in the registry, so a switch away and back reuses it rather than re-pulling.
  *
- * The streaming-subscription and cancellation shape mirrors `useSessionActivity` — a `cancelled`
- * flag plus a cleanup that stops iterating, swallowing the unmount AbortError. Unread semantics also
- * mirror it: an entry stays unread until `markSeen()` is called at/after its arrival.
+ * Frame projection mirrors the live ACP path: `agent_message_chunk` text merges into agent bubbles
+ * (via {@link createAgentChunkMerger}, finalized per recorded chunk so discrete chunks stay separate);
+ * `tool_call` becomes a tool entry carrying the server-enriched `title`, a coarse status, and its
+ * `raw_input`/`raw_output` (for the detail dialog), coalesced by `tool_call_id`; `user_message_chunk`
+ * a user bubble; `agent_thought_chunk` a goal bubble. Each entry's timestamp is the frame's
+ * `SessionNotification.timestamp_unix_ms`, so elapsed badges reflect the recorded timeline.
  */
 export function useAcpReplay(args: {
   sessionId: string;
@@ -58,13 +66,53 @@ export function useAcpReplay(args: {
 }): UseAcpReplayResult {
   const { sessionId, sessionToken, client } = args;
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [seenKeys, setSeenKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const state = useSyncExternalStore(
+    (listener) => agentActivityRegistry.subscribe(listener),
+    () => agentActivityRegistry.get(sessionId),
+  );
 
+  const count = state?.count ?? 0;
+  const seenCount = state?.seenCount ?? 0;
+  const messages = state?.messages ?? [];
+  const snapshotLoaded = state?.snapshotOpened ?? false;
+
+  // The count feed runs while the session is focused: cheap frames carrying only `activity_count`.
   useEffect(() => {
-    setMessages([]);
     let cancelled = false;
+    (async () => {
+      try {
+        for await (const frame of client.streamAcpReplay({
+          sessionToken,
+          sessionId,
+          daemonInstanceId: "",
+          mode: StreamMode.COUNT_THEN_LIVE,
+        })) {
+          if (cancelled) break;
+          agentActivityRegistry.setCount(sessionId, Number(frame.activityCount));
+        }
+      } catch (err) {
+        // A stream aborted on unmount surfaces as an AbortError; ignore it (no fallback fabrication).
+        if (!cancelled) console.debug("[useAcpReplay] count stream error", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, sessionId, sessionToken]);
 
+  // Which session's snapshot has been requested via `loadSnapshot`. Held per-hook (not per-session)
+  // so switching away to an unvisited session does NOT eagerly open its snapshot.
+  const [snapshotSession, setSnapshotSession] = useState<string | null>(null);
+  const loadSnapshot = useCallback(() => setSnapshotSession(sessionId), [sessionId]);
+
+  // The snapshot feed: opened lazily once `loadSnapshot` targets the current session, and only when
+  // the registry has not already pulled it (a switch-back reuses the cached transcript).
+  useEffect(() => {
+    if (snapshotSession !== sessionId) return;
+    if (agentActivityRegistry.get(sessionId)?.snapshotOpened) return;
+    agentActivityRegistry.markSnapshotOpened(sessionId);
+
+    let cancelled = false;
     const merger = createAgentChunkMerger();
     const acc: ChatMessage[] = [];
     // Position in `acc` of the entry for each seen tool_call_id, so a later frame carrying an id we
@@ -101,16 +149,20 @@ export function useAcpReplay(args: {
           } else if (update.case === "toolCall") {
             // The server emits a tool call as it progresses (e.g. in-progress then completed) under
             // one tool_call_id. Coalesce by id: a repeat refines the existing entry's label/status/
-            // timestamp in place (keeping its key + position), mirroring how the agent-activity log
-            // coalesces by call_id. Only non-empty ids coalesce; a missing id always opens a new entry.
+            // timestamp/payload in place (keeping its key + position). Only non-empty ids coalesce;
+            // a missing id always opens a new entry.
             const id = update.value.toolCallId?.value ?? "";
             const existingIndex = id ? toolIndexById.get(id) : undefined;
+            const rawInput = update.value.rawInput ?? "";
+            const rawOutput = update.value.rawOutput ?? "";
             if (existingIndex !== undefined) {
               acc[existingIndex] = {
                 ...acc[existingIndex],
                 text: update.value.title,
                 at,
                 toolStatus: toolStatusOf(update.value.status),
+                rawInput,
+                rawOutput,
               };
             } else {
               if (id) toolIndexById.set(id, acc.length);
@@ -120,6 +172,8 @@ export function useAcpReplay(args: {
                 from: "tool",
                 at,
                 toolStatus: toolStatusOf(update.value.status),
+                rawInput,
+                rawOutput,
               });
             }
           } else if (update.case === "userMessageChunk") {
@@ -136,30 +190,25 @@ export function useAcpReplay(args: {
           }
           // tool_call_update / plan carry no additional bubble; ignored on purpose.
 
-          if (!cancelled) setMessages(acc.slice());
+          if (!cancelled) agentActivityRegistry.setMessages(sessionId, acc.slice());
         }
       } catch (err) {
         // A stream aborted on unmount surfaces as an AbortError; ignore it. Any other error while
         // still mounted leaves the transcript showing what it has (no fallback fabrication).
-        if (!cancelled) {
-          console.debug("[useAcpReplay] stream error", err);
-        }
+        if (!cancelled) console.debug("[useAcpReplay] snapshot stream error", err);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [client, sessionId, sessionToken]);
+  }, [client, sessionId, sessionToken, snapshotSession]);
 
-  const markSeen = () => {
-    setSeenKeys(new Set(messages.map((m) => m.key)));
-  };
+  const markSeen = useCallback(() => {
+    agentActivityRegistry.markSeen(sessionId);
+  }, [sessionId]);
 
-  const unreadCount = useMemo(
-    () => messages.filter((m) => !seenKeys.has(m.key)).length,
-    [messages, seenKeys],
-  );
+  const unreadCount = Math.max(0, count - seenCount);
 
   return {
     messages,
@@ -172,8 +221,10 @@ export function useAcpReplay(args: {
     streamError: null,
     sendError: null,
     workflowError: null,
-    hasActivity: messages.length > 0,
+    hasActivity: count > 0,
     unreadCount,
     markSeen,
+    loadSnapshot,
+    snapshotLoaded,
   };
 }

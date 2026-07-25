@@ -376,7 +376,7 @@ impl RpcService for SessionConnectionServiceRpc {
                 let replay = handle
                     .capture
                     .lock()
-                    .map(|cap| cap.clone())
+                    .map(|cap| cap.replay())
                     .unwrap_or_default();
                 if !replay.is_empty() {
                     let frame = SessionTerminalOutput {
@@ -530,6 +530,18 @@ impl RpcService for SessionConnectionServiceRpc {
                 ) -> Vec<u8> {
                     AcpReplayFrame {
                         acp_agent_message: frame.encode_to_vec(),
+                        // A transcript frame carries no count; count-first mode sets this instead.
+                        activity_count: 0,
+                    }
+                    .encode_to_vec()
+                }
+
+                // Encode a count-only `AcpReplayFrame` envelope (no transcript payload) carrying the
+                // running number of persisted activity frames — the cheap feed for the overlay badge.
+                fn count_frame_bytes(activity_count: u64) -> Vec<u8> {
+                    AcpReplayFrame {
+                        acp_agent_message: Vec::new(),
+                        activity_count,
                     }
                     .encode_to_vec()
                 }
@@ -538,6 +550,53 @@ impl RpcService for SessionConnectionServiceRpc {
                 // snapshot read and the first bridge recv() is still delivered (via the broadcast)
                 // rather than dropped in the gap.
                 let live_rx = self.svc.presenter_events.as_ref().map(|tx| tx.subscribe());
+
+                // Count-first mode emits only the running count of persisted transcript frames — one
+                // frame now with the current count, then a fresh count for each subsequent renderable
+                // presenter event — with no transcript payload. It never replays the snapshot itself.
+                if mode == StreamMode::CountThenLive {
+                    let snapshot =
+                        tddy_service::acp_replay::read_acp_transcript(&self.svc.agent_activity_dir)
+                            .unwrap_or_default();
+                    let mut count = tddy_service::acp_replay::count_activity_entries(&snapshot);
+                    let mut seen_ids = tddy_service::acp_replay::tool_call_ids(&snapshot);
+                    if tx.try_send(Ok(count_frame_bytes(count))).is_err() {
+                        // Receiver already gone — return the (now-closed) stream.
+                        return RpcResult::ServerStream(Ok(rx));
+                    }
+                    if let Some(mut live_rx) = live_rx {
+                        tokio::spawn(async move {
+                            use tddy_core::PresenterEvent;
+                            use tokio::sync::broadcast::error::RecvError;
+                            loop {
+                                match live_rx.recv().await {
+                                    Ok(event) => {
+                                        // Count each new entry the pane would render: agent text
+                                        // always, a tool call once (coalesced by call_id across its
+                                        // running + terminal records).
+                                        let counts = match &event {
+                                            PresenterEvent::AgentOutput(_) => true,
+                                            PresenterEvent::AgentActivity(record) => {
+                                                seen_ids.insert(record.call_id.clone())
+                                            }
+                                            _ => false,
+                                        };
+                                        if !counts {
+                                            continue;
+                                        }
+                                        count += 1;
+                                        if tx.send(Ok(count_frame_bytes(count))).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                    Err(RecvError::Closed) => break,
+                                    Err(RecvError::Lagged(_)) => continue,
+                                }
+                            }
+                        });
+                    }
+                    return RpcResult::ServerStream(Ok(rx));
+                }
 
                 // Snapshot-then-live (the default) replays the persisted ACP transcript first;
                 // live-only skips it and carries only frames produced after subscribe.
@@ -910,5 +969,118 @@ mod tests {
             .expect("broadcast send");
         let live = recv_acp_frame(&mut rx).await;
         assert_eq!(acp_tool_call_id(&live), "call-2");
+    }
+
+    /// Receive one streamed byte-frame and decode the raw `AcpReplayFrame` envelope (the count
+    /// carrier), with a timeout so a count-mode subscription that never emits fails fast.
+    async fn recv_acp_envelope(
+        rx: &mut tokio::sync::mpsc::Receiver<Result<Vec<u8>, Status>>,
+    ) -> AcpReplayFrame {
+        let bytes = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("expected a streamed replay frame")
+            .expect("stream ended unexpectedly")
+            .expect("frame carried an error status");
+        AcpReplayFrame::decode(&bytes[..]).expect("decode AcpReplayFrame")
+    }
+
+    #[tokio::test]
+    async fn stream_acp_replay_count_then_live_broadcasts_the_activity_count() {
+        // Given — a session dir with two persisted transcript frames and a presenter broadcast
+        let dir = tempfile::tempdir().unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            dir.path(),
+            &tddy_service::acp_replay::agent_text_frame("Analyzing.", 1_000),
+        )
+        .unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            dir.path(),
+            &tddy_service::acp_replay::frame_for_agent_activity(&a_running_record("call-a")),
+        )
+        .unwrap();
+        let (events, _keepalive) = broadcast::channel(16);
+        let rpc = rpc_for(dir.path(), events.clone());
+
+        // When — the StreamAcpReplay arm is dispatched in count-first mode
+        let req = StreamAcpReplayRequest {
+            session_token: "caller-token".to_string(),
+            session_id: "sess-1".to_string(),
+            daemon_instance_id: String::new(),
+            mode: StreamMode::CountThenLive as i32,
+        };
+        let message = RpcMessage::new(req.encode_to_vec(), Default::default());
+        let result = rpc
+            .handle_rpc("connection.ConnectionService", "StreamAcpReplay", &message)
+            .await;
+        let mut rx = match result {
+            RpcResult::ServerStream(Ok(rx)) => rx,
+            RpcResult::ServerStream(Err(status)) => {
+                panic!("expected a server stream, got error status: {status:?}")
+            }
+            _ => panic!("expected a server stream, got a unary result"),
+        };
+
+        // Then — the first frame carries the current count (2) and no transcript payload
+        let first = recv_acp_envelope(&mut rx).await;
+        assert_eq!(first.activity_count, 2);
+        assert!(
+            first.acp_agent_message.is_empty(),
+            "a count frame must not carry a transcript payload"
+        );
+
+        // And — a subsequently-broadcast AgentActivity raises the count to 3
+        events
+            .send(PresenterEvent::AgentActivity(a_running_record("call-live")))
+            .expect("broadcast send");
+        let next = recv_acp_envelope(&mut rx).await;
+        assert_eq!(next.activity_count, 3);
+    }
+
+    #[tokio::test]
+    async fn stream_acp_replay_count_then_live_counts_a_tool_call_once_across_its_two_records() {
+        // Given — a session dir with one persisted agent-text frame (count baseline 1)
+        let dir = tempfile::tempdir().unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            dir.path(),
+            &tddy_service::acp_replay::agent_text_frame("Analyzing.", 1_000),
+        )
+        .unwrap();
+        let (events, _keepalive) = broadcast::channel(16);
+        let rpc = rpc_for(dir.path(), events.clone());
+
+        let req = StreamAcpReplayRequest {
+            session_token: "caller-token".to_string(),
+            session_id: "sess-1".to_string(),
+            daemon_instance_id: String::new(),
+            mode: StreamMode::CountThenLive as i32,
+        };
+        let message = RpcMessage::new(req.encode_to_vec(), Default::default());
+        let mut rx = match rpc
+            .handle_rpc("connection.ConnectionService", "StreamAcpReplay", &message)
+            .await
+        {
+            RpcResult::ServerStream(Ok(rx)) => rx,
+            RpcResult::ServerStream(Err(status)) => {
+                panic!("expected a server stream, got error status: {status:?}")
+            }
+            _ => panic!("expected a server stream, got a unary result"),
+        };
+        assert_eq!(recv_acp_envelope(&mut rx).await.activity_count, 1);
+
+        // When — a tool call broadcasts its running then terminal record under one call_id
+        events
+            .send(PresenterEvent::AgentActivity(a_running_record("call-x")))
+            .expect("broadcast send");
+        // Then — the first (running) record lifts the count to 2
+        assert_eq!(recv_acp_envelope(&mut rx).await.activity_count, 2);
+        // The terminal record for call-x emits nothing; a distinct call is the next frame and reads
+        // 3, proving call-x was counted once.
+        events
+            .send(PresenterEvent::AgentActivity(a_running_record("call-x")))
+            .expect("broadcast send");
+        events
+            .send(PresenterEvent::AgentActivity(a_running_record("call-y")))
+            .expect("broadcast send");
+        assert_eq!(recv_acp_envelope(&mut rx).await.activity_count, 3);
     }
 }

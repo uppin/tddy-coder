@@ -9,7 +9,7 @@
 
 import { create, toBinary } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ConnectionService, AcpReplayFrameSchema } from "../../../src/gen/connection_pb";
+import { ConnectionService, AcpReplayFrameSchema, StreamMode } from "../../../src/gen/connection_pb";
 import {
   AcpAgentMessageSchema,
   ToolCallStatus,
@@ -38,13 +38,15 @@ export function replayAgentText(text: string, atUnixMs: number): AcpAgentMessage
 }
 
 /** A replayed tool call stamped at `atUnixMs`. `rawInput` carries the full tool input as JSON — the
- *  transcript derives the inline detail (e.g. `Read main.rs L10-49`) from it. */
+ *  transcript derives the inline detail (e.g. `Read main.rs L10-49`) from it. `output`, when given,
+ *  rides as `rawOutput` (the tool's result) so the detail dialog can render it. */
 export function replayToolCall(fields: {
   id: string;
   title: string;
   kind: ToolKind;
   status: ToolCallStatus;
   input: unknown;
+  output?: unknown;
   atUnixMs: number;
 }): AcpAgentMessage {
   return create(AcpAgentMessageSchema, {
@@ -63,6 +65,9 @@ export function replayToolCall(fields: {
               kind: fields.kind,
               status: fields.status,
               rawInput: JSON.stringify(fields.input),
+              ...(fields.output === undefined
+                ? {}
+                : { rawOutput: JSON.stringify(fields.output) }),
             },
           },
         },
@@ -71,21 +76,58 @@ export function replayToolCall(fields: {
   });
 }
 
-/** A backend whose `StreamAcpReplay` yields exactly `frames` (each wrapped in an `AcpReplayFrame`),
- *  then stays open. */
+/** A backend whose `StreamAcpReplay` serves the two-phase protocol for a fixed transcript: the
+ *  `COUNT_THEN_LIVE` feed reports one count of `frames.length`, and the `SNAPSHOT_THEN_LIVE` feed
+ *  yields the `frames` transcript. Both stay open. Delegates to {@link aReplayBackend} so the mode
+ *  branching lives in one place. */
 export function backendReplaying(...frames: AcpAgentMessage[]) {
-  return anInMemoryRpcBackend().implement(ConnectionService, {
-    async *streamAcpReplay() {
-      for (const frame of frames) {
-        // The frame rides as protobuf bytes; the client decodes them with the AcpAgentMessage schema.
-        yield create(AcpReplayFrameSchema, {
-          acpAgentMessage: toBinary(AcpAgentMessageSchema, frame),
-        });
+  return aReplayBackend({ counts: [frames.length], snapshot: frames }).backend;
+}
+
+/** Records how many times each stream mode was opened on the backend, so a spec can assert lazy /
+ *  once-only subscription behaviour (the in-memory testkit records unary calls only, not streams). */
+export interface ReplayOpens {
+  /** COUNT_THEN_LIVE subscriptions opened (the cheap icon/badge feed). */
+  count: number;
+  /** SNAPSHOT_THEN_LIVE subscriptions opened (the lazy full-transcript pull). */
+  snapshot: number;
+}
+
+/**
+ * A `StreamAcpReplay` backend that answers the two phases separately:
+ *
+ * - `COUNT_THEN_LIVE` → yields one `activity_count` frame per entry in `counts` (e.g. `[3]` for a
+ *   fixed count, or `[1, 2]` to model a live increment), then stays open. No transcript payload.
+ * - `SNAPSHOT_THEN_LIVE` → yields the `snapshot` transcript frames, then stays open.
+ *
+ * `opens` tallies how many times each mode was subscribed, so specs can assert the count feed drives
+ * the icon without pulling the snapshot, and that the snapshot is pulled lazily and only once.
+ */
+export function aReplayBackend(config: { counts: number[]; snapshot?: AcpAgentMessage[] }) {
+  const opens: ReplayOpens = { count: 0, snapshot: 0 };
+  const backend = anInMemoryRpcBackend().implement(ConnectionService, {
+    async *streamAcpReplay(req: { mode: StreamMode }) {
+      if (req.mode === StreamMode.COUNT_THEN_LIVE) {
+        opens.count += 1;
+        for (const c of config.counts) {
+          yield create(AcpReplayFrameSchema, {
+            acpAgentMessage: new Uint8Array(),
+            activityCount: BigInt(c),
+          });
+        }
+      } else {
+        opens.snapshot += 1;
+        for (const frame of config.snapshot ?? []) {
+          yield create(AcpReplayFrameSchema, {
+            acpAgentMessage: toBinary(AcpAgentMessageSchema, frame),
+          });
+        }
       }
       // Keep the stream open so the live-tail consumer stays subscribed.
       await new Promise<void>(() => {});
     },
   });
+  return { backend, opens };
 }
 
-export { ToolCallStatus, ToolKind };
+export { StreamMode, ToolCallStatus, ToolKind };

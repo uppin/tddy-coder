@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use tddy_pty::Bytes;
-use tddy_task::{TaskChannel, TaskId, TaskRegistry};
+use tddy_task::{TaskChannel, TaskId, TaskRegistry, TerminalCapture};
 use tokio::sync::{broadcast, mpsc, watch, RwLock};
 
 /// Reserved terminal id for a session's original (agent) terminal. It is not managed here — it is
@@ -29,7 +29,7 @@ pub struct PtyHandle {
     pub pid: u32,
     stdin_tx: mpsc::UnboundedSender<Bytes>,
     pub stdout_tx: broadcast::Sender<Bytes>,
-    pub capture: Arc<Mutex<Vec<u8>>>,
+    pub capture: Arc<Mutex<TerminalCapture>>,
     pub pty_done: watch::Receiver<bool>,
     task_id: TaskId,
     pty_registry: tddy_pty::PtyRegistry,

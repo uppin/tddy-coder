@@ -17,6 +17,9 @@
 #                     VITE_URL=http://192.168.1.10:5173 (host must match how you open the page).
 #                     web-dev exports WEB_PUBLIC_URL=$VITE_URL for tddy-daemon (do not set WEB_PUBLIC_URL
 #                     for web-dev; a stale value in .env is overridden).
+#   BUILD_TARGETS   — Space-separated cargo packages built (debug) before anything starts, so the
+#                     compile is not charged against the daemon readiness timeout.
+#                     Default: tddy-daemon. E.g. BUILD_TARGETS="tddy-daemon tddy-coder" ./web-dev
 #   DAEMON_CONFIG   — YAML for tddy-daemon (default: dev.daemon.yaml at repo root).
 #                     CONFIG from .env is not used for the daemon backend; use DAEMON_CONFIG.
 #   TDDY_DAEMON_INSTANCE_ID — Override the daemon's LiveKit instance id (its participant identity in
@@ -108,6 +111,27 @@ if [ "$HEADLESS" != "true" ] && [ ! -f packages/tddy-web/dist/index.html ]; then
   echo "=== Note: packages/tddy-web/dist/index.html missing — open the Vite URL above for HMR; optional: ./dev bun run build for daemon static bundle ===" >&2
 fi
 
+# Build first, while nothing is running yet: source changes are still picked up automatically,
+# but the compile time is not charged against the daemon readiness timeout further below.
+# BUILD_TARGETS (space-separated cargo package names) can extend what is built, e.g.
+#   BUILD_TARGETS="tddy-daemon tddy-coder" ./web-dev
+BUILD_TARGETS="${BUILD_TARGETS:-tddy-daemon}"
+build_pkg_args=()
+for pkg in $BUILD_TARGETS; do
+  build_pkg_args+=("-p" "$pkg")
+done
+echo "=== Building (debug): ${BUILD_TARGETS} ==="
+if ! ./dev cargo build "${build_pkg_args[@]}"; then
+  echo "Error: build failed — not starting the daemon." >&2
+  exit 1
+fi
+
+DAEMON_BIN="${CARGO_TARGET_DIR:-target}/debug/tddy-daemon"
+if [ ! -x "$DAEMON_BIN" ]; then
+  echo "Error: ${DAEMON_BIN} not found after build." >&2
+  exit 1
+fi
+
 # Clean up stale processes from previous runs. SIGKILLs listeners on these ports; on a shared
 # machine, ensure ports are free or avoid conflicts before running ./web-dev.
 # In headless mode the Vite port is never used, so leave it alone.
@@ -121,8 +145,9 @@ sleep 2
 # Ensure writable build output dirs exist before the daemon starts.
 mkdir -p tmp/buildroot/disks tmp/buildroot/dl
 
-# Build and start daemon via cargo run so source changes are picked up automatically.
-./dev cargo run -p tddy-daemon -- "${daemon_args[@]}" &
+# Start the built binary directly (not `cargo run`) so compilation happens here, before the
+# readiness timeout below: a cold/nix build takes far longer than the 90s the wait loop allows.
+./dev "$DAEMON_BIN" "${daemon_args[@]}" &
 daemon_pid=$!
 
 # Wait for daemon to be ready (HTTP 200 on /api/config, verified twice to avoid race)

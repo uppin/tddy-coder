@@ -255,6 +255,68 @@ same writer) for a live session; the **daemon** serves snapshot-only from the fi
 - `AgentActivityOverlay` swaps its data source to `useAcpReplay` and renders `<AgentChatView readOnly>`
   as the panel body (keeping the top-bar icon, unread badge, and open/close behavior).
 
+## Persisted, lazily-counted activity (Added: 2026-07-25)
+
+Three refinements to the read-only ACP transcript overlay. They change **how** the overlay loads and
+retains its data and **how a tool call's detail is inspected** — the transcript's content and the
+capture/persistence seams are unchanged.
+
+### 1. Per-session persistence — activity survives a session switch
+
+Today the overlay's transcript, unread state, and "has activity" flag live in the component-local
+`useAcpReplay` hook. `AgentActivityOverlay` is **not** remounted when the operator switches sessions
+(it has no React `key`), but the hook's effect is keyed on `sessionId`, so on every switch it
+**wipes `messages` and re-opens the stream from scratch** — switching away and back re-downloads the
+whole snapshot and loses the unread baseline.
+
+The transcript, activity count, and seen-baseline move out of the hook into a module-level
+**`AgentActivityRegistry`** — a per-session in-memory store mirroring the existing
+`SessionRuntimeRegistry` (observable store + cached snapshot consumed via `useSyncExternalStore`),
+keyed by `sessionId`. Switching to another session and back **reuses the cached per-session state**:
+the transcript is not wiped, the snapshot is not re-pulled, and the unread badge survives the switch.
+The store is in-memory only (it does not survive a full page reload).
+
+### 2. Lazy, count-first loading — minimal data until the pane is visited
+
+The overlay currently opens the heavy `SNAPSHOT_THEN_LIVE` replay **on mount**, downloading the full
+transcript just to decide whether to show its icon. Instead, loading becomes two-phase:
+
+- **`StreamMode.COUNT_THEN_LIVE`** (new enum value on the shared `StreamMode`): the server emits the
+  **current activity count** as the first message, then an **updated count as each new entry lands
+  live**. The count is the number of **coalesced** entries the pane renders — one per agent-text
+  frame plus one per **distinct tool call** (a tool call persists a `running` then a terminal frame
+  under the same `call_id`, and both hosts count it once, tracking seen `call_id`s) — so the badge
+  matches the visible rows rather than the raw frame count. It carries **no transcript payload**.
+  This is the "minimal activity data" that drives the icon and unread badge cheaply.
+- `AcpReplayFrame` gains a `uint64 activity_count` field, set **only** in `COUNT_THEN_LIVE` frames
+  (`acp_agent_message` stays empty). This is an **additive, non-breaking** wire change — the two
+  existing modes still carry `acp_agent_message` and never set `activity_count`.
+- While a session is focused, the overlay opens **`COUNT_THEN_LIVE`**: the icon appears once the count
+  is > 0, and live increments raise the count. The **full snapshot** (`SNAPSHOT_THEN_LIVE`) is pulled
+  **lazily only when the overlay is first opened** ("visited once") — and, because it is cached in the
+  registry, only once per session for the pane's lifetime.
+- **Unread** = `count − seen-count-at-last-open`. On open the current count is marked seen (badge
+  clears); frames arriving afterward re-raise it. The **first** broadcast count is displayed as the
+  initial unread total, then incremented — exactly as required.
+- Both hosts honour `COUNT_THEN_LIVE` identically: the **coder participant** counts the persisted
+  frames then tails `presenter_events` (each append raises the count) for a live session; the
+  **daemon** serves the current file line-count for a dormant one (no live tail).
+
+### 3. Tool-call detail dialog — prettified, color-highlighted JSON
+
+Clicking a **tool-call** entry in the transcript opens a detail dialog
+(`agent-activity-detail-dialog`, reusing the modal chrome established for `SessionWorkflowFilesModal`:
+`fixed inset-0 z-50`, `role="dialog"`, Escape- and backdrop-close, scrollable body) showing the tool
+call's **`raw_input`** (`agent-activity-detail-input`) and **`raw_output`**
+(`agent-activity-detail-output`) as **prettified, syntax-highlighted JSON** — rendered with the
+existing Prism `SyntaxHighlighter` (`language="json"`, the same component that backs the worktree code
+preview), so no new dependency is added. Only tool-call entries are clickable; agent-text, user, and
+goal bubbles stay non-interactive.
+
+To carry the payload, `useAcpReplay` retains the ACP `ToolCall`'s `raw_input`/`raw_output` on the tool
+`ChatMessage` (they are currently dropped after the `title`/`status` are read); the persisted
+`acp-transcript.jsonl` tool frames must include `raw_output` alongside the already-baked `raw_input`.
+
 ## Scope
 
 - **In scope:** the `agent-activity.jsonl` log + shared `AgentActivityRecord` (in `tddy-core`);
@@ -267,6 +329,14 @@ same writer) for a live session; the **daemon** serves snapshot-only from the fi
   event-time ACP frames with real timestamps) as the self-contained source of truth for the
   transcript; the write-time ACP mapping at the coder presenter seam (tool / cursor-cli); the
   `StreamAcpReplay` RPC reading it (daemon snapshot-only + coder live-tail).
+- **In scope (Added: 2026-07-25):** the `AgentActivityRegistry` per-session in-memory store (activity
+  survives a session switch); the `StreamMode.COUNT_THEN_LIVE` count-first mode + `AcpReplayFrame`
+  `activity_count` field, honoured by both hosts; the overlay's lazy snapshot pull (full transcript
+  only on first open, cached per session); the tool-call **detail dialog** with color-highlighted
+  `raw_input`/`raw_output` JSON, and carrying `raw_output` on the persisted tool frame.
+- **Out of scope (Added: 2026-07-25):** persisting the activity registry across a full page reload
+  (in-memory only); a detail dialog for non-tool entries (agent text / user / goal stay
+  non-interactive); back-pressure/debouncing of the live count stream.
 - **Out of scope (Added: 2026-07-24):** persisting agent **text** frames for the hook-driven
   **claude-cli / sandbox** session types (they persist tool-call frames only; agent-text capture for
   those is a follow-up); a retention/size cap on `acp-transcript.jsonl` (tracked with the
