@@ -36,7 +36,8 @@ use tddy_service::proto::connection::{
     CalculateWorktreeSizeResponse, ClaimTerminalControlRequest, ClaimTerminalControlResponse,
     CleanWorktreeRequest, CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
     CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse,
-    ExecuteToolRequest, ExecuteToolResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
+    ExecuteToolRequest, ExecuteToolResponse, GetAcpToolCallDetailRequest,
+    GetAcpToolCallDetailResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
     GetPrStatusRequest, GetPrStatusResponse, HostStatsEvent, ListAgentModelsRequest,
     ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
     ListEligibleDaemonsResponse, ListExecToolsRequest, ListExecToolsResponse,
@@ -674,6 +675,19 @@ where
         .map_err(to_tonic_status)?;
         let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
         Ok(tonic::Response::new(Box::pin(outbound)))
+    }
+
+    async fn get_acp_tool_call_detail(
+        &self,
+        request: tonic::Request<GetAcpToolCallDetailRequest>,
+    ) -> Result<tonic::Response<GetAcpToolCallDetailResponse>, tonic::Status> {
+        let resp = RpcConnectionService::get_acp_tool_call_detail(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
     }
 
     async fn start_demo_vm(

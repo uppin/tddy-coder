@@ -337,6 +337,60 @@ pub fn frame_for_agent_activity(
     session_update_frame(update, at_unix_ms)
 }
 
+/// A single tool call's stripped-out bodies: the exact JSON strings the transcript inlines. Either
+/// may be absent — a still-running call carries `raw_input` but no `raw_output` yet.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ToolCallDetail {
+    pub raw_input: Option<String>,
+    pub raw_output: Option<String>,
+}
+
+/// Return `frame` with a tool-call's heavy bodies removed: `raw_input`/`raw_output` cleared,
+/// `title`/`kind`/`status`/`tool_call_id` retained. Any non-tool-call frame (agent text) is returned
+/// unchanged. This is the seam both replay hosts apply at their frame-wrap point so every streamed
+/// `SNAPSHOT_THEN_LIVE` / `LIVE_ONLY` tool-call frame is body-less.
+pub fn strip_tool_body(frame: &AcpAgentMessage) -> AcpAgentMessage {
+    let mut frame = frame.clone();
+    if let Some(acp_agent_message::Msg::SessionUpdate(n)) = frame.msg.as_mut() {
+        if let Some(session_update::Update::ToolCall(tc)) =
+            n.update.as_mut().and_then(|u| u.update.as_mut())
+        {
+            tc.raw_input = None;
+            tc.raw_output = None;
+        }
+    }
+    frame
+}
+
+/// Resolve one tool call's full bodies from the session's coalesced transcript.
+///
+/// Reads [`read_session_transcript`] (the same view the stream replays) and returns the
+/// [`ToolCallDetail`] of the frame whose `tool_call_id` equals `tool_call_id`, or `None` when no
+/// frame carries that id. Because it reads the identical deduped view, the id an operator clicked in
+/// the stream resolves to the same call the stream showed (latest recorded state).
+pub fn tool_call_detail(
+    session_dir: &Path,
+    tool_call_id: &str,
+) -> io::Result<Option<ToolCallDetail>> {
+    let frames = read_session_transcript(session_dir)?;
+    for frame in &frames {
+        if tool_call_id_of(frame) != Some(tool_call_id) {
+            continue;
+        }
+        if let Some(acp_agent_message::Msg::SessionUpdate(n)) = &frame.msg {
+            if let Some(session_update::Update::ToolCall(tc)) =
+                n.update.as_ref().and_then(|u| u.update.as_ref())
+            {
+                return Ok(Some(ToolCallDetail {
+                    raw_input: tc.raw_input.clone(),
+                    raw_output: tc.raw_output.clone(),
+                }));
+            }
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -630,5 +684,92 @@ mod tests {
 
         // Then — both frames survive, in write order
         assert_eq!(frames, vec![first, second]);
+    }
+
+    // -----------------------------------------------------------------------
+    // strip_tool_body — the seam both replay hosts apply so streamed tool-call frames carry only
+    // metadata (title/status/kind/id), never the heavy raw_input/raw_output bodies.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn stripping_a_tool_call_frame_drops_its_raw_input_and_raw_output() {
+        // Given — a completed tool-call frame carrying a full raw_input and raw_output
+        let frame = frame_for_agent_activity(&a_completed_read_record());
+
+        // When — the body is stripped
+        let stripped = strip_tool_body(&frame);
+
+        // Then — both bodies are gone
+        let (tc, _) = tool_call(&stripped);
+        assert_eq!(tc.raw_input, None);
+        assert_eq!(tc.raw_output, None);
+    }
+
+    #[test]
+    fn stripping_a_tool_call_frame_keeps_its_title_kind_status_and_id() {
+        // Given — a completed Read tool-call frame
+        let frame = frame_for_agent_activity(&a_completed_read_record());
+
+        // When — the body is stripped
+        let stripped = strip_tool_body(&frame);
+
+        // Then — the lightweight metadata (and timestamp) is retained
+        let (tc, at) = tool_call(&stripped);
+        assert_eq!(tc.tool_call_id.expect("tool_call_id").value, "call-read-1");
+        assert_eq!(tc.title, "Read main.rs L10-49");
+        assert_eq!(tc.kind, ToolKind::Read as i32);
+        assert_eq!(tc.status, ToolCallStatus::Completed as i32);
+        assert_eq!(at, 3_000);
+    }
+
+    #[test]
+    fn stripping_a_non_tool_frame_leaves_it_unchanged() {
+        // Given — an agent-text frame (no tool body to strip)
+        let frame = agent_text_frame("Analyzing the parser.", 1_000);
+
+        // When — it is passed through the stripper
+        let stripped = strip_tool_body(&frame);
+
+        // Then — it is returned unchanged
+        assert_eq!(stripped, frame);
+    }
+
+    // -----------------------------------------------------------------------
+    // tool_call_detail — the on-demand body lookup GetAcpToolCallDetail is built on, resolved from
+    // the same coalesced transcript view the stream replays.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tool_call_detail_returns_the_full_bodies_for_a_recorded_call() {
+        // Given — a session dir whose durable activity log holds one completed call
+        let dir = tempfile::tempdir().unwrap();
+        append_agent_activity(dir.path(), &a_completed_read_record()).unwrap();
+
+        // When — its detail is looked up by tool_call_id
+        let detail = tool_call_detail(dir.path(), "call-read-1")
+            .expect("read transcript")
+            .expect("call-read-1 is in the transcript");
+
+        // Then — the full raw_input and raw_output are returned
+        let raw_input: serde_json::Value =
+            serde_json::from_str(&detail.raw_input.expect("raw_input")).expect("raw_input is JSON");
+        let raw_output: serde_json::Value =
+            serde_json::from_str(&detail.raw_output.expect("raw_output"))
+                .expect("raw_output is JSON");
+        assert_eq!(raw_input, a_read_input());
+        assert_eq!(raw_output, serde_json::json!({ "content": "fn main() {}" }));
+    }
+
+    #[test]
+    fn tool_call_detail_returns_none_for_an_unknown_tool_call_id() {
+        // Given — a session dir holding one call
+        let dir = tempfile::tempdir().unwrap();
+        append_agent_activity(dir.path(), &a_completed_read_record()).unwrap();
+
+        // When — an id not present in the transcript is looked up
+        let detail = tool_call_detail(dir.path(), "no-such-call").expect("read transcript");
+
+        // Then — no detail is found
+        assert_eq!(detail, None);
     }
 }
