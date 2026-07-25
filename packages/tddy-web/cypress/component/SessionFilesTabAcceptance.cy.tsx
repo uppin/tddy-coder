@@ -9,8 +9,13 @@
 
 import React from "react";
 import { createClient } from "@connectrpc/connect";
+import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ConnectionService } from "../../src/gen/connection_pb";
+import {
+  ConnectionService,
+  ListSessionUploadsResponseSchema,
+  DeleteSessionUploadResponseSchema,
+} from "../../src/gen/connection_pb";
 import { SessionFilesTab } from "../../src/components/sessions/SessionFilesTab";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { sessionFilesTabPage as page } from "../support/pages/sessionFilesTabPage";
@@ -46,12 +51,14 @@ function anUpload(overrides: Partial<Upload> = {}): Upload {
 function anUploadsBackend(initial: Upload[]): InMemoryRpcBackend {
   let uploads = [...initial];
   return anInMemoryRpcBackend()
-    .onUnary(ConnectionService.method.listSessionUploads, () => ({ uploads }))
+    .onUnary(ConnectionService.method.listSessionUploads, () =>
+      create(ListSessionUploadsResponseSchema, { uploads }),
+    )
     .onUnary(ConnectionService.method.deleteSessionUpload, (req) => {
       uploads = uploads.filter(
         (u) => !(u.uploadId === req.uploadId && u.fileName === req.fileName),
       );
-      return {};
+      return create(DeleteSessionUploadResponseSchema, {});
     });
 }
 
@@ -131,7 +138,7 @@ describe("Session Inspector — Files tab", () => {
     const file = anUpload({ fileName: "report.pdf" });
     mountTab(anUploadsBackend([file]), stubHandlers());
     cy.window().then((win) => {
-      cy.stub(win.navigator.clipboard, "writeText").resolves().as("clipboardWrite");
+      cy.stub(win.navigator.clipboard, "writeText").as("clipboardWrite").resolves();
     });
 
     // When — Copy path is pressed
