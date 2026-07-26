@@ -407,9 +407,14 @@ export const TEST_IDS = {
   agentActivityDetailOutput: "agent-activity-detail-output",
   /** A color-highlighted JSON block (Prism output) inside the detail dialog. */
   agentActivityJsonHighlight: "agent-activity-json-highlight",
-  /** Shown while the clicked tool call's body is being fetched via `GetAcpToolCallDetail`. */
-  agentActivityDetailLoading: "agent-activity-detail-loading",
-  /** Shown when the tool call's body lookup fails (e.g. `NOT_FOUND`). */
+  /** Placeholder shown in place of a JSON body while `GetAcpToolCallDetail` is in flight. */
+  agentActivityDetailSkeleton: "agent-activity-detail-skeleton",
+  /** Note shown under the Output heading when the call has produced no output yet. */
+  agentActivityDetailNoOutput: "agent-activity-detail-no-output",
+  /** Note shown under the Input heading when the lookup resolved without an input body. */
+  agentActivityDetailNoInput: "agent-activity-detail-no-input",
+  /** Inline error shown when the detail lookup cannot be answered (entry carries no tool call id,
+   *  unknown id, or transport failure). */
   agentActivityDetailError: "agent-activity-detail-error",
 
   // PR-Stack Chat Screen — manually adding a planned PR (deterministic, non-chat path)

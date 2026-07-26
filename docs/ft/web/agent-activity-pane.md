@@ -330,19 +330,45 @@ This section covers the **web adoption** of that lookup.
   fetch. The transcript stays fully renderable from the body-less stream (title + status).
 - **The detail dialog fetches on open.** Clicking a tool-call entry opens
   `AgentActivityDetailDialog`, which calls `GetAcpToolCallDetail({ sessionToken, sessionId,
-  daemonInstanceId: "", toolCallId })` for that one call. While the call is in flight the dialog
-  shows a **loading** state (`agent-activity-detail-loading`); a failed lookup shows an **error**
-  state (`agent-activity-detail-error`); on success it renders the returned
-  `raw_input`/`raw_output` exactly as §3 describes.
-- **Bodies are cached per `(sessionId, callId)`** in the `AgentActivityRegistry`, alongside the
+  daemonInstanceId: "", toolCallId })` for that one call (see
+  [§ Rendering an unanswered lookup](#rendering-an-unanswered-lookup-updated-2026-07-26) for the
+  states it renders).
+- **Bodies are cached per `(sessionId, toolCallId)`** in the `AgentActivityRegistry`, alongside the
   transcript and count. Re-opening the same tool call — even after a session switch and back — reads
   the cached body instead of re-fetching; a call in flight is not fetched twice. A **failed** lookup
-  is not cached persistently, so re-opening the row retries. The cache is in-memory only (does not
-  survive a full page reload), matching the rest of the registry.
+  is not cached, so re-opening the row retries. A call whose status is still **`running`** is neither
+  cached nor served from cache: its output can still arrive, and a cached partial body would stay
+  stale for the rest of the page's life. The cache is in-memory only (does not survive a full page
+  reload), matching the rest of the registry.
 
 Because the wire change is additive (a new RPC; the streamed frame simply omits two optional fields),
 nothing else in the transcript path changes: frames still decode with the `AcpAgentMessage` schema,
 and the count/snapshot/live-tail behavior is untouched.
+
+### Rendering an unanswered lookup (Updated: 2026-07-26)
+
+Both response fields are `optional`, so a resolved lookup may legitimately carry **neither, either, or
+both** bodies — an absent body is a *success*, not an error. Together with an entry that never carried a
+`tool_call_id`, that gives several distinct ways for a dialog to have nothing to show, and each is
+rendered distinctly rather than collapsed into one blank panel:
+
+| Condition | Rendering |
+|---|---|
+| Lookup in flight | An `animate-pulse` **skeleton** (`agent-activity-detail-skeleton`, `role="status"`) standing in for each JSON block, occupying the shape of the block it replaces — a muted text line was rejected because it does not convey where content will appear |
+| Resolved | The prettified, Prism-highlighted JSON, as §3 describes |
+| `raw_input` absent | `agent-activity-detail-no-input` — "No input recorded for this tool call." An **empty highlighted block** is never rendered in its place: that reads as "the input was empty", a claim the response does not make |
+| `raw_output` absent | `agent-activity-detail-no-output` — "No output yet — tool call still running." for a **running** call, "No output recorded for this tool call." for a settled one. The Output heading is **always** shown; it never silently disappears |
+| Lookup failed | `agent-activity-detail-error` (`role="alert"`) — "Could not load tool call details." |
+| Host knows no such call (`NOT_FOUND`) | Same element — "This tool call is not in the session transcript." The Rust side goes out of its way to distinguish an unknown id from a call with no output, so the web keeps that signal instead of discarding it |
+| Entry carried no `tool_call_id` | Same element — "This activity entry has no tool call id, so its input and output are unavailable." **No request is issued**: nothing was ever asked, so borrowing `NOT_FOUND`'s wording (which asserts the host looked) would be a lie |
+
+Error text is **curated per cause**, never the raw transport message — an operator should not be shown
+`[unavailable] replay host unreachable`.
+
+The cache is read **during render** (a `useMemo` keyed on the lookup's identity, not an effect), so
+re-opening a cached row paints its JSON on the first frame with no skeleton flash. Keyed on the lookup
+rather than evaluated once per mount, it also means a dialog that stays mounted while the operator
+switches rows cannot show the previous row's bodies.
 
 ## Scope
 
@@ -367,6 +393,14 @@ and the count/snapshot/live-tail behavior is untouched.
   loading state while in flight and an error state on failure; bodies are cached per
   `(sessionId, callId)` in the `AgentActivityRegistry` (in-memory, retry-on-error). Regenerated
   `connection_pb.ts` for the new RPC.
+- **In scope (Added: 2026-07-26):** distinct rendering for every way a lookup can end without bodies —
+  skeleton while in flight, stated-absent `raw_input`/`raw_output` (worded apart for a running vs a
+  settled call), and curated error text separating a failed lookup, an unknown `tool_call_id`, and an
+  entry that never carried one (which issues **no request**); a render-time cache read so a cached row
+  never flashes a skeleton; running calls excluded from the body cache in both directions.
+- **Out of scope (Added: 2026-07-26):** a retry **affordance** on a failed lookup (closing and
+  reopening the row already retries); a per-session cap on cached bodies (the `MAX_SESSIONS` session
+  LRU is the only bound); prefetching bodies for rows the operator has not opened.
 - **Out of scope (Added: 2026-07-25):** persisting the activity registry across a full page reload
   (in-memory only); a detail dialog for non-tool entries (agent text / user / goal stay
   non-interactive); back-pressure/debouncing of the live count stream.
