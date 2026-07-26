@@ -21,6 +21,9 @@
 
 Feature complete; only the wrap-phase changelog and index entries remain.
 
+**Commit**: `fa91f202` — *feat(daemon): session attachment store under artifacts/attachments/*
+**PR**: [#353](https://github.com/uppin/tddy-coder/pull/353) (draft, base `master`)
+
 **Verification** (`./dev cargo …`, nix dev shell):
 
 | Command | Result |
@@ -44,6 +47,62 @@ missing runner binary.
 | Kind + size on context docs | `packages/tddy-daemon/src/session_context_docs.rs:25` (kind), `:72` (listing) |
 | Wire mapping | `packages/tddy-daemon/src/session_list_enrichment.rs:274` (kind map), `:312` (proto row) |
 | Proto | `packages/tddy-service/proto/connection.proto:194` |
+
+## Handoff
+
+### What is left in *this* changeset
+
+One item: the wrap-phase docs. `/wrap-context-docs` transfers State B into permanent docs and deletes
+this file. Concretely:
+
+- `docs/ft/coder/changelog.md` — a release-note section. Follow
+  [changelog merge hygiene](../guides/changelog-merge-hygiene.md); if another section already carries
+  today's date, give this one a **distinct title** rather than merging into it.
+- Index bullets in `docs/dev/changesets.md` and `packages/tddy-{workflow,core,daemon,service,web}/docs/changesets.md`.
+- `docs/dev/changesets.d/` does not exist in this repo yet, so the index stays in `changesets.md` — do
+  not create the shard directory for a change this size.
+- The PRD (`docs/ft/coder/session-attachments.md`) and the `session-layout.md` section are already
+  permanent docs written in present tense; they need **no** transfer, only a re-read to confirm they
+  still match the code.
+
+### The client half is greenfield — verified, not assumed
+
+Both facts below were checked by grep at handoff time, and both are easy to assume otherwise:
+
+- **`SessionContextDoc` has no consumer in `tddy-web`** outside `src/gen/connection_pb.ts`. There is
+  no Docs tab reading this list yet; the field has been populated since the pr-stack work but nothing
+  renders it.
+- **`read_session_context_doc_utf8` has no wire caller at all.** No RPC exposes context-doc contents,
+  for either kind. Whoever builds the web surface adds that RPC too.
+
+So "surface attachments in the UI" is not a matter of extending an existing view — the reading surface
+does not exist on either side.
+
+### Direction for the next changeset
+
+The natural next PR is **materializing `StartSessionRequest.attachments` into the session** before the
+agent launches — the item this store was built for:
+
+- `copy_attachment_into_session` is the write primitive; the caller does the per-request policy:
+  reject duplicate basenames **within one request** (rather than letting the second copy hit the
+  store's `FAILED_PRECONDITION`), and refuse a `StagedAttachmentRef` naming a host other than the one
+  `StartSession` runs on — a request error, never a cross-host fetch.
+- That wire contract lives on the sibling branch `feature/session-attach-docs/attach-proto`
+  (unmerged), in `packages/tddy-daemon/docs/connection-service.md` § *Start-session attachments*. Read
+  it from that branch, and mind the path discrepancy in [Known follow-ups](#known-follow-ups-out-of-scope-here).
+- For a future **attachment content fetch**, mirror the `ListSessionWorkflowFiles` /
+  `ReadSessionWorkflowFile` pair (`connection.proto:32`) rather than inventing a shape — and keep it
+  **unary**: the streaming RPCs return `unimplemented` for `PeerRoute::Forward`, so only unary calls
+  can be peer-forwarded today. It must be byte-oriented, not UTF-8, since attachments may be images.
+
+### Working in this repo (non-obvious)
+
+- `cargo` lives in the nix dev shell and `nix` is not on `PATH`:
+  `export PATH="/nix/var/nix/profiles/default/bin:$PATH"`, then `./dev cargo …`.
+- `cargo build -p tddy-sandbox-runner` once, or `cargo test -p tddy-daemon --lib` fails on an
+  unrelated sandbox stdio-relay test.
+- Regenerating `connection_pb.ts` needs `node_modules` in the worktree: `./dev bun install`, then
+  `./dev bun run --filter tddy-web generate`.
 
 ## Technical debt
 
@@ -90,13 +149,13 @@ recipe-owned manifest rows. Full contract in the PRD.
 | `packages/tddy-core/src/lib.rs` | Same three items added to the existing blanket `pub use tddy_workflow::{…}` re-export |
 | `packages/tddy-daemon/src/lib.rs` | `pub mod session_attachments;` |
 | `packages/tddy-daemon/src/session_context_docs.rs` | `ContextDocKind`, `kind` + `size_bytes` on `ContextDoc`, `ATTACHMENT_DOC_DESCRIPTION`, attachment rows appended in `context_docs_for_session` |
-| `packages/tddy-daemon/src/session_file_upload.rs` | Widen `validate_segment` / `contained_canonical_dir` visibility to the attachments module (same crate — `pub(crate)` already suffices; no change expected, listed in case the module moves) |
+| ~~`packages/tddy-daemon/src/session_file_upload.rs`~~ | **No change needed** — `validate_segment` and `contained_canonical_dir` are already `pub(crate)` and are reused verbatim by the attachments module |
 | `packages/tddy-daemon/src/session_list_enrichment.rs` | Map `kind` (as i32) and `size_bytes` into the proto `SessionContextDoc` |
 | `packages/tddy-service/proto/connection.proto` | `enum SessionContextDocKind`; `kind = 6`, `size_bytes = 7` on `SessionContextDoc` |
 | `packages/tddy-web/src/gen/connection_pb.ts` | Regenerated from the proto |
 | `docs/ft/coder/session-layout.md` | ✅ Attachments subdirectory section linking the PRD |
 | `docs/ft/coder/changelog.md` | Release note (wrap phase) |
-| `docs/dev/changesets.md`, `packages/tddy-{workflow,daemon,service,web}/docs/changesets.md` | Index entries (wrap phase) |
+| `docs/dev/changesets.md`, `packages/tddy-{workflow,core,daemon,service,web}/docs/changesets.md` | Index entries (wrap phase) — note `tddy-core` is in the list because its re-export was touched |
 
 ## Design decisions
 
