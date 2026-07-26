@@ -5,8 +5,11 @@ import type { StackNode } from "./stackPlan";
  * `effective_base_refs`: a node branches from its nearest non-merged ancestor's branch, collapsing
  * to `defaultBranch` when the node is a root or all of its ancestors are merged.
  *
- * A parent's branch is read as `branch ?? branchSuggestion` — the concrete branch once created,
- * otherwise the planned suggestion. A parent is "merged" when `prStatus.phase === "merged"`.
+ * Only a parent's concrete `branch` counts. A `branchSuggestion` is a planned name, not a ref: the
+ * daemon refuses to base a child onto a parent that owns no branch yet, so previewing the suggestion
+ * would promise a base the spawn then rejects. A parent without a branch is passed over exactly like
+ * an absent one, collapsing to `defaultBranch` when no ancestor offers a ref. A parent is "merged"
+ * when `prStatus.phase === "merged"`.
  */
 export function deriveStackBaseBranch(
   node: StackNode,
@@ -31,8 +34,7 @@ export function deriveStackBaseBranch(
         if (skipped) return skipped;
         continue;
       }
-      const branch = parent.branch ?? parent.branchSuggestion;
-      if (branch) return branch;
+      if (parent.branch) return parent.branch;
     }
     return null;
   };

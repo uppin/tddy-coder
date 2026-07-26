@@ -586,9 +586,11 @@ orchestrator, so the operator can review and adjust before spawning:
 - `stackParent` = this orchestrator session's id; `sessionType` = `"claude-cli"`.
 - Branch mode = `new_branch_from_base`, `newBranchName` = the node's `branch ?? branchSuggestion`.
 - `baseBranchLabel` = the node's concrete base branch — derived from its stack position by
-  `deriveStackBaseBranch(node, nodes, defaultBranch)` (the nearest non-merged ancestor's branch,
-  collapsing to the project default for a root or all-merged node) — so the dialog reads
-  **"New branch from base: `<predecessor branch>`"**.
+  `deriveStackBaseBranch(node, nodes, defaultBranch)` (the nearest non-merged ancestor that owns a
+  **created `branch`**, collapsing to the project default for a root or all-merged node) — so the
+  dialog reads **"New branch from base: `<predecessor branch>`"**. A parent holding only a
+  `branchSuggestion` is passed over like an absent one: a suggestion names no ref, so previewing it
+  would promise a base the daemon's branch-gated spawn then refuses.
 - `createRemoteBranch` is pre-checked, so submitting also pushes the new branch to `origin` (see
   [Create Session § Fields](#fields)).
 - Initial prompt = the node's title + description.

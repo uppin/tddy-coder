@@ -323,12 +323,13 @@ impl SessionArtifactManifest for PrStackRecipe {
 }
 
 /// Re-seed the orchestrator's `Changeset.stack` from a refined [`StackPlanOutput`], but only
-/// while no node has been materialized into a child session yet.
+/// while no node has been materialized yet.
 ///
 /// Unlike [`crate::orchestrate_pr_stack::bridge::seed_orchestrator_stack_from_plan`] (which only
 /// seeds an *empty* stack), this overwrites `version` + `nodes` wholesale — the refine-after-plan
-/// chat loop calls this every time the agent re-emits `stack-plan.yaml`. Once any node has a
-/// `session_id`, the refinement is refused so an in-progress child session is never orphaned.
+/// chat loop calls this every time the agent re-emits `stack-plan.yaml`. Once any node owns a
+/// `branch` or a `session_id`, the refinement is refused: the branch is real work the stack is
+/// built on, and it outlives the child session that created it.
 ///
 /// Validates the incoming plan (unique node ids, no dangling parents, no cycle) before touching
 /// disk — an invalid refinement leaves the previously-persisted stack untouched.
@@ -343,9 +344,13 @@ pub fn reseed_stack_from_plan_if_unspawned(
         format!("reseed_stack_from_plan_if_unspawned: failed to read changeset: {e}")
     })?;
     if let Some(stack) = changeset.stack.as_ref() {
-        if stack.nodes.iter().any(|n| n.session_id.is_some()) {
+        if stack
+            .nodes
+            .iter()
+            .any(|n| n.branch.is_some() || n.session_id.is_some())
+        {
             return Err(
-                "reseed_stack_from_plan_if_unspawned: refusing to overwrite a stack that already has a spawned child session"
+                "reseed_stack_from_plan_if_unspawned: refusing to overwrite a stack whose nodes already own a branch or a child session"
                     .to_string(),
             );
         }
@@ -405,7 +410,9 @@ pub fn add_planned_pr_node(
         node_id,
         title: input.title,
         description: input.description,
-        branch: input.branch_suggestion.clone(),
+        // A suggestion is a planned name, not a ref: `branch` stays empty until a child worktree
+        // actually creates it (same contract as [`planned_prs_into_stack_nodes`]).
+        branch: None,
         branch_suggestion: input.branch_suggestion,
         session_id: None,
         parents: input.parents,
@@ -984,6 +991,46 @@ mod tests {
         let loaded = read_changeset(dir).unwrap().stack.unwrap();
         let n1 = loaded.node("n1").unwrap();
         assert_eq!(n1.session_id.as_deref(), Some("child-session-1"));
+    }
+
+    #[test]
+    fn reseeding_refuses_to_overwrite_a_stack_once_a_node_owns_a_branch() {
+        // Given — node n1 owns a real branch; no session is attached to it (it was closed)
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let cs = Changeset {
+            stack: Some(Stack {
+                version: 1,
+                nodes: vec![StackNode {
+                    node_id: "n1".to_string(),
+                    title: "Add token store".to_string(),
+                    description: String::new(),
+                    branch_suggestion: Some("feature/token-store".to_string()),
+                    branch: Some("feature/token-store".to_string()),
+                    session_id: None,
+                    parents: vec![],
+                    pr_status: None,
+                    child_state: None,
+                    internal_status: None,
+                }],
+            }),
+            ..Changeset::default()
+        };
+        tddy_core::changeset::write_changeset(dir, &cs).unwrap();
+
+        // When — a chat refinement tries to reshape the plan
+        let result = reseed_stack_from_plan_if_unspawned(dir, &a_two_node_plan());
+
+        // Then — refused: the branch is real work, whether or not a session still points at it
+        assert!(
+            result.is_err(),
+            "expected Err once a node owns a materialized branch"
+        );
+        let loaded = read_changeset(dir).unwrap().stack.unwrap();
+        assert_eq!(
+            loaded.node("n1").unwrap().branch.as_deref(),
+            Some("feature/token-store")
+        );
     }
 
     #[test]

@@ -2,6 +2,15 @@
 
 Release note history for the Coder product area.
 
+## 2026-07-26 — PR-Stack: a stack progresses on branches, not on child sessions
+
+- **Bug fix — a closed child session no longer wedges the stack below it.** Starting a planned node was gated on its parent node having a *session* ("non-merged parent '<id>' has not been started yet"), so a session that was closed, cleaned up, or never linked blocked every descendant even though the parent's branch existed and was a fine base. The gate is now the parent's **branch** ([pr-stack-live-status.md](pr-stack-live-status.md), [pr-stacking.md](pr-stacking.md)).
+- A child **session** is now only a *fallback* route to resolving a node's branch — a node whose branch was recorded only by its child session still supplies a base to its descendants, and a missing session directory yields no branch rather than an error.
+- **A planned PR owns no branch until a child worktree creates one.** Planning sets `branch_suggestion` only; `branch` means "a branch that exists" and is what the spawn gate, the link key and the PR lookup all key on. This supersedes the "definitive branch at creation" behaviour noted on 2026-07-25.
+- A spawn no longer bases a node on a fabricated `origin/<node_id>` when a non-merged parent has no branch — that ref never existed; the spawn is refused with a message naming the parent and its missing branch.
+- Re-spawning a node's branch (restart, re-attach) **repoints** the link instead of failing — last writer wins.
+- The Start-Session dialog no longer previews a parent's `branchSuggestion` as the base, so it cannot promise a base the daemon then refuses ([session-drawer.md](../web/session-drawer.md)).
+
 ## 2026-07-25 — PR-Stack: branch resolution, remote-branch push & base label
 
 - A new **`QueryBranch`** RPC resolves the in-progress child session, on-disk worktree, and live GitHub PR status for one head branch; PR-Stack "Planned PRs" rows now render worktree + in-progress + PR from it (via `useQueryBranch`). Added additively — `GetPrStatus` / `usePrStatus` / `resolveNodeSession` are kept ([pr-stack-live-status.md](pr-stack-live-status.md)).
