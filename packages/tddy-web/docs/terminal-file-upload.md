@@ -69,6 +69,17 @@ host. An OS file drag (carrying `DataTransfer.files`) is unchanged and still upl
 route (Files-tab **Insert** button) reaches the focused terminal through the runtime registry's
 `insertInput` hook instead of the drop zone.
 
+## Reuse: start-session attachments (not built yet)
+
+The pre-session staging upload for start-session attachments is deliberately the **same** shape as
+this flow — `UploadStagedAttachmentChunk` is `UploadSessionFileChunk` with `session_id` replaced by
+`daemon_instance_id` and `upload_id` by `staging_id`. So `chunkFile()` / `UPLOAD_CHUNK_SIZE` and the
+per-file chunk loop are reusable as-is; only the request builder differs. Nothing in this package
+calls it yet (the daemon returns `UNIMPLEMENTED`) — see
+[connection-service.md § Start-session attachments](../../tddy-daemon/docs/connection-service.md#start-session-attachments-wire-contract-only)
+before wiring a picker, in particular the rule that a staged batch is usable only by a session
+started on the host it was uploaded to.
+
 ## Tests
 
 Units `randomId.test.ts` (6), `fileUploadChunks.test.ts` (5), `shellQuote`/`uploadProgress`; Cypress

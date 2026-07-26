@@ -929,8 +929,10 @@ export type StartSessionRequest = Message<"connection.StartSessionRequest"> & {
   /**
    * Documents to attach to the new session. Each descriptor names the basename the document is
    * materialized under plus where its bytes come from — a pre-session staged upload, or a document
-   * that already exists on a connected host. Empty = no attachments. See
-   * docs/dev/1-WIP/changeset-start-session-attachments.md.
+   * that already exists on a connected host. Empty = no attachments. NOT IMPLEMENTED: the daemon's
+   * start_session currently ignores this field — a request carrying attachments starts a session
+   * with none, and no error. See packages/tddy-daemon/docs/connection-service.md § Start-session
+   * attachments.
    *
    * @generated from field: repeated connection.SessionAttachment attachments = 29;
    */
@@ -4921,8 +4923,9 @@ export const ConnectionService: GenService<{
     output: typeof DeleteSessionUploadResponseSchema;
   },
   /**
-   * Start-session attachments — pre-session staging (see docs/dev/1-WIP/changeset-start-session-
-   * attachments.md). Documents picked in the Start-Session form are uploaded exactly like the
+   * Start-session attachments — pre-session staging. NOT IMPLEMENTED: all three return
+   * UNIMPLEMENTED; see packages/tddy-daemon/docs/connection-service.md § Start-session attachments
+   * for the intended semantics. Documents picked in the Start-Session form are uploaded like the
    * terminal "Attach" flow (client-side 48 KiB chunks, one unary per chunk, `last` on the final
    * one), but no session exists yet — so the bytes land in a per-host staging area keyed by
    * `staging_id` and are referenced from StartSessionRequest.attachments. Staged batches are
