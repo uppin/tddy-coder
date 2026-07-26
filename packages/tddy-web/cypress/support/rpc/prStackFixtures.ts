@@ -33,12 +33,22 @@ export function aPlannedNode(overrides: Partial<StackNodeFixture> & { nodeId: st
   };
 }
 
-/** A `QueryBranch` resolution fixture — the session/worktree/PR resolved for one branch. */
+/** A `QueryBranch` resolution fixture — the session/worktree/remote/PR resolved for one branch. */
 export interface BranchResolutionFixture {
   branch: string;
   session?: { exists: boolean; sessionId?: string; isActive?: boolean; status?: string };
   worktree?: { exists: boolean; path?: string };
-  pr?: { exists: boolean; number?: number; url?: string; state?: string };
+  pr?: {
+    exists: boolean;
+    number?: number;
+    url?: string;
+    state?: string;
+    /** True when the lookup could not be performed — distinct from "no PR exists". */
+    unavailable?: boolean;
+    unavailableReason?: string;
+  };
+  /** The branch on `origin` — whether a descendant's worktree can be based onto it. */
+  remote?: { exists: boolean; sha?: string };
 }
 
 /** Build a `QueryBranchResponse`-shaped object for an in-memory `queryBranch` stub. */
@@ -61,6 +71,12 @@ export function aBranchResolutionResponse(fx: BranchResolutionFixture) {
         number: BigInt(fx.pr?.number ?? 0),
         url: fx.pr?.url ?? "",
         state: fx.pr?.state ?? "",
+        unavailable: fx.pr?.unavailable ?? false,
+        unavailableReason: fx.pr?.unavailableReason ?? "",
+      },
+      remote: {
+        exists: fx.remote?.exists ?? false,
+        sha: fx.remote?.sha ?? "",
       },
     },
   };

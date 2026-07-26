@@ -37,7 +37,7 @@ Each node in the DAG is a `StackNode`:
 | `description` | Longer description for the PR body. |
 | `branch_suggestion` | Planner's suggested branch name — a *planned* name, set at planning time. It names no ref and never satisfies the spawn gate; it is the name the child worktree is asked to create. |
 | `branch` | Actual branch name once the child worktree has created it — "a branch that exists". Planning leaves this `None`. **This is the spawn gate and the durable link key.** |
-| `session_id` | Child session id once the node is materialised. A *fallback* route to resolving `branch` only; the stack does not depend on it, and a closed or cleaned-up session never blocks the nodes below. |
+| `session_id` | Child session id once the node is materialised. A *fallback* route to resolving `branch` only; the stack does not depend on it, and a closed or cleaned-up session never blocks the nodes below. A deleted session leaves the id in place — the node is then **orphaned** and offers "Start session" again (see [PR-Stack live status § Orphaned-node recovery](pr-stack-live-status.md#orphaned-node-recovery-added-2026-07-26)). |
 | `parents` | List of parent `node_id` values. Empty list = root node (branches off the stack base). More than one entry = DAG node that integrates multiple unmerged parents. |
 | `pr_status` | Mirrors `GithubPrStatus` (`phase` one of `planned`, `open`, `merged`, `closed`, `error`). Reflects **GitHub reality**. |
 | `child_state` | Coarse mirror of the child session's `WorkflowState`. |
@@ -46,6 +46,29 @@ Each node in the DAG is a `StackNode`:
 **Derived, never persisted:** effective base refs are computed on demand, not stored. The predicate `StackNode::is_skipped()` returns true when `pr_status.phase == "merged"`. Base-ref derivation climbs the `parents` list, skipping merged ancestors, and returns the nearest non-skipped ancestor **branches** as `origin/<branch>` refs; when all ancestors are merged the node's effective base collapses to the stack bottom (i.e. `origin/main` or equivalent). A non-merged ancestor that owns no branch contributes nothing — it is never given a synthesized `origin/<node_id>` ref, because nothing ever created that ref.
 
 **Helpers on `Stack`:** `topo_order` (Kahn sort; cycle → error), `effective_base_refs(node_id, stack_bottom_base) -> Vec<String>`, `base_ref_for_spawn(node_id, stack_bottom_base) -> Result<String, WorkflowError>` (the spawn base; refuses when a non-merged parent owns no branch), `node(node_id)`.
+
+### Effective spawn branch *(added 2026-07-26)*
+
+Both the node link and chain-base resolution used to key on the spawn request's `new_branch_name`, which
+is **empty** when the operator resumes an existing branch (`work_on_selected_branch`). A resumed spawn
+therefore never re-linked to its node — `pr_stack_node_for_spawn` returns `None` for a blank branch — so
+each click produced another unlinked session and the row stayed stuck in its recovered state.
+
+The linking key is now the spawn's **effective branch** (`connection_service::effective_spawn_branch`):
+
+- `new_branch_name` (trimmed) when a branch is being created;
+- otherwise `selected_branch_to_work_on`, normalised through `tddy_core::worktree::local_branch_name`
+  so an `origin/`-prefixed selection resolves to the local branch name;
+- a new-branch spawn ignores `selected_branch_to_work_on` entirely — the dialog sends that field
+  unconditionally, so "prefer whichever field is non-empty" would pick the wrong one.
+
+Applied at the **node-link** sites in both spawn paths that take a `stack_parent`
+(`spawn_claude_cli_session_inner`, `start_sandboxed_claude_cli_session`), so **a resumed spawn re-links
+its node** and the recovery sticks. `resolve_chain_base_ref` deliberately keeps keying on
+`new_branch_name`: under `work_on_selected_branch` a resolved chain base would make worktree setup run a
+real `fetch_chain_pr_integration_base` — a fetch that can fail, and that is pointless for a resume which
+creates no branch. `start_sandboxed_cursor_cli_session` takes no `stack_parent` at all and is unaffected
+(tracked in `docs/dev/TODO.md`).
 
 **Branch resolution helpers** (free functions in `changeset.rs`): `resolve_stack_node_branch(sessions_root, node) -> Option<String>` — the node's own `branch`, else the `branch` in its child session's changeset (a missing session directory resolves to `None`, never an error) — and `read_stack_with_resolved_branches(sessions_root, orchestrator_session_id)`, the orchestrator's stack with every node's `branch` hydrated through that resolver. The hydrated copy is read-only; persisting it would write a fallback-derived branch onto a node that never recorded one.
 
@@ -246,7 +269,7 @@ The session's **context documents** — the recipe manifest's planning artifacts
 
 ### Per-workflow session views: the PR-Stack Chat Screen
 
-Once a `pr-stack` session is selected in the session drawer, the main pane opens a dedicated **PR-Stack Chat Screen** instead of the terminal — a chat window backed by a remote Presenter (over the existing `TddyRemote.Stream` RPC) alongside a live list of the planned PRs with a **"Start session"** CTA per unspawned node. This chat *is* the `orchestrate` free-prompting loop: the developer types instructions ("merge n1", "repoint the dependents", "what needs action?") and the agent responds and calls the [PR-management tools](#pr-management-tools). Full UI spec: [Session drawer § Per-Workflow Session Views](../web/session-drawer.md#per-workflow-session-views).
+Once a `pr-stack` session is selected in the session drawer, the main pane opens a dedicated **PR-Stack Chat Screen** instead of the terminal — a full-width chat window backed by a remote Presenter (over the existing `TddyRemote.Stream` RPC) plus a dismissible **Planned PRs panel** on the right listing the planned PRs, with a **"Start session"** CTA per startable node (*since 2026-07-26*; it was a fixed half-width left pane before). This chat *is* the `orchestrate` free-prompting loop: the developer types instructions ("merge n1", "repoint the dependents", "what needs action?") and the agent responds and calls the [PR-management tools](#pr-management-tools). Full UI spec: [Session drawer § Per-Workflow Session Views](../web/session-drawer.md#per-workflow-session-views).
 
 Each planned-PR row (`PlannedPrRow.tsx`) renders an **internal-status badge** next to the existing phase chip, colored by `internal_status.kind` (e.g. amber `needs-repoint`, red `has-conflicts`, green `ready-to-merge`), with `internal_status.note` as hover text. The badge is parsed from the `internal_status` field carried inside `SessionEntry.stack_plan_json` (`stackPlan.ts::parseStackPlan`).
 

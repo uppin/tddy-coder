@@ -392,6 +392,11 @@ when multiple tools are available.
 > (`tddy_core::worktree::push_new_branch_to_origin`) and records `Changeset.remote_pushed = true`; a
 > push failure fails session start (no fallback).
 
+> **Updated 2026-07-26** — `CreateSessionInitialValues.selectedBranch` pre-fills the **Work on existing
+> branch** select, honoured only when `branchIntent === "work_on_selected_branch"`. It is what lets a
+> caller open the dialog pre-set to *resume* a branch that already exists instead of creating one — see
+> [§ PR-Stack Chat Screen § Start session CTA](#start-session-cta).
+
 ### Recipe Dropdown
 
 The recipe `<select>` lists all 8 workflow recipes (constant `WORKFLOW_RECIPES` in
@@ -506,7 +511,7 @@ See [PR Stack Parent Picker](#pr-stack-parent-picker) in the Create Session sect
 > screen instead of the terminal. First consumer: the PR-Stack Chat Screen below.
 >
 > **Updated: 2026-07-21** — chat is now the default surface for **every** tddy-coder workflow.
-> `pr-stack` keeps its dedicated two-pane screen; every other `tool` workflow recipe opens the
+> `pr-stack` keeps its dedicated screen (chat + Planned PRs panel); every other `tool` workflow recipe opens the
 > single-pane full-screen [Workflow Chat Screen](#workflow-chat-screen). `claude-cli` / `cursor-cli`
 > PTY sessions keep the terminal (they have no Presenter).
 
@@ -533,7 +538,7 @@ resolveWorkflowView({ recipe: "", sessionType: "claude-cli" }) → null      // 
 The gate for the generic chat screen is `sessionType ∈ {"", "tool"} && recipe != ""` — only
 tddy-coder `tool` sessions run a Presenter/ACP surface the chat can reach, so a `claude-cli` /
 `cursor-cli` session keeps the terminal even when it carries a managed `recipe`. `pr-stack` is
-matched first and routes to its own two-pane screen.
+matched first and routes to its own chat + Planned PRs panel screen.
 
 Custom views own their own connection/chrome and render **in place of** the terminal
 container — they are not gated on `attachment.status`; a workflow session shows its chat screen
@@ -549,42 +554,90 @@ needed to decide *which* view opens.
 
 ## PR-Stack Chat Screen
 
-The custom screen for `recipe === "pr-stack"` sessions. Replaces the terminal with two
-panes: a live list of the planned PRs (left) and a chat window backed by a remote
-Presenter (right). Lets the operator review a freshly-written stack plan, keep refining it
-by chatting with the agent, and start child sessions for each planned PR — all without
-leaving the orchestrator session.
+The custom screen for `recipe === "pr-stack"` sessions. Replaces the terminal with a **full-width chat
+window** backed by a remote Presenter, plus a **Planned PRs panel** docked to its right. Lets the
+operator review a freshly-written stack plan, keep refining it by chatting with the agent, and start
+child sessions for each planned PR — all without leaving the orchestrator session.
 
 **Component:** `PrStackScreen` (`src/components/sessions/prstack/PrStackScreen.tsx`), with
-`PlannedPrList` / `PlannedPrRow` subcomponents.
+`PlannedPrPanel` / `PlannedPrList` / `PlannedPrRow` subcomponents.
+
+> **Rewritten 2026-07-26** — the screen was a fixed 50/50 split (`w-1/2` columns, no toggle, no
+> breakpoint handling), which permanently halved the chat on desktop and was unusable on mobile with no
+> way to dismiss the list. The list is now a panel with the same contract as the Session Inspector.
+
+### Planned PRs panel
+
+| Viewport | Default | Layout |
+|---|---|---|
+| Desktop (≥ 768px) | **open** | docked 360px column to the right of the chat |
+| Mobile (< 768px) | **closed** | full-screen overlay above the chat |
+
+- **Always mounted**; `data-state` ∈ `{closed, open}` drives visibility
+  (`data-testid="pr-stack-planned-pr-panel"`), matching `SessionInspectorDrawer` — so the list keeps its
+  scroll position and the screen keeps its branch poll set across a close and reopen.
+- Positioned `absolute top-0 right-0 z-10` against the screen's **content row** (which carries
+  `relative`), not the screen root — so the panel never covers the header toggle that opens it. The
+  chat owns the full width and reserves a `paddingRight` column only while the panel is docked; the
+  mobile overlay deliberately covers the chat instead.
+- **Width and closed-visibility are inline styles driven by an `isMobile` prop**, not `w-full
+  md:w-[360px]` + a Tailwind `hidden` class. They are the panel's layout contract rather than
+  decoration, and `SessionDrawer` already establishes the idiom: component tests mount without the app
+  stylesheet, so a media-query/class-only panel would have no width and no way to hide.
+- Two controls: a header **toggle** in the screen's own top strip
+  (`pr-stack-planned-pr-panel-toggle`, labelled "Planned PRs") and the panel's own **close** control
+  (`pr-stack-planned-pr-panel-close`). The open/closed seed is `detectIsMobile()`; live changes come
+  from `useIsMobile()`.
+- The panel contains the planned-PR list, the "+ New planned PR" entry point, and the add form.
 
 ### Planned-PR list
 
 Reads the orchestrator's `Stack` (see [PR stacking § Stack data model](../coder/pr-stacking.md#stack-data-model))
 via `SessionEntry.stackPlanJson` (proto field 23 — a JSON-serialized `Stack`, empty string
 until a plan exists) and renders one row per `StackNode` in `Stack::topo_order` (roots
-before dependents):
+before dependents).
 
-- **Unspawned node** (`session_id` empty) — shows a **"Start session"** CTA
-  (`data-testid="pr-stack-start-session-<nodeId>"`).
-- **Spawned node** (`session_id` set) — shows a status chip
-  (`data-testid="pr-stack-status-chip-<nodeId>"`) derived from `pr_status.phase` /
-  `child_state` instead of the CTA.
+Each row renders the node's **branch name** (`pr-stack-branch-<nodeId>`) or, when no branch exists yet,
+its `branchSuggestion` marked as **planned** (`pr-stack-planned-branch-<nodeId>`, rendered as
+`planned: <name>`) — a suggestion names no ref, so the two are never shown the same way. Alongside it:
+live **worktree** (`pr-stack-worktree-<nodeId>`), **in-progress session**
+(`pr-stack-session-<nodeId>`), **PR** link/state (`pr-stack-pr-link-<nodeId>` /
+`pr-stack-pr-state-<nodeId>`), or **"PR status unavailable"** (`pr-stack-pr-unavailable-<nodeId>`, with
+the reason as its `title` tooltip) — all resolved by branch through the `QueryBranch` RPC
+(`useQueryBranch`, per-branch polled). See
+[PR-Stack live status § QueryBranch](../coder/pr-stack-live-status.md#api-surface).
 
-> **Added 2026-07-25** — each row also renders live **worktree** (`pr-stack-worktree-<nodeId>`),
-> **in-progress session** (`pr-stack-session-<nodeId>`), and **PR** link/state resolved by branch via
-> the `QueryBranch` RPC (`useQueryBranch` hook, per-branch polled). See
-> [PR-Stack live status § QueryBranch](../coder/pr-stack-live-status.md#api-surface).
+**The CTA slot holds exactly one of three things** — they are mutually exclusive:
+
+| Node condition | CTA slot |
+|---|---|
+| No `session_id`, base branch present on `origin` (or the node is a root) | **"Start session"** button (`pr-stack-start-session-<nodeId>`) |
+| No `session_id`, base branch absent from `origin` / no ancestor branch / a branchless non-merged parent | blocked **"Missing branch: `<base>`"** indicator (`pr-stack-missing-branch-<nodeId>`) |
+| `session_id` set, and the branch resolution has not arrived or reports a session | status chip (`pr-stack-status-chip-<nodeId>`) from `pr_status.phase` / `child_state` |
+| `session_id` set, and the resolution reports **no** session (orphaned) | **"Start session"** button again, pre-filled to resume the node's branch |
+
+> **Added 2026-07-26** — the "Missing branch" indicator *replaces* the button rather than disabling it,
+> so the row names the branch it is waiting for instead of presenting a dead end. A node that already
+> owns a branch is never blocked (its spawn resumes that branch and fetches nothing), and a base whose
+> resolution has not arrived is *unknown*, never missing. `isNodeOrphaned` /
+> `branchlessNonMergedParent` / `resolveStackBase` are the pure modules behind those three states; see
+> [PR-Stack live status § Startability before the spawn](../coder/pr-stack-live-status.md#startability-before-the-spawn-added-2026-07-26).
 
 ### Start session CTA
 
-Clicking "Start session" on an unspawned node opens the shared **`CreateSessionDialog`** — the
+Clicking "Start session" on a node opens the shared **`CreateSessionDialog`** — the
 same `CreateSessionPane` form the sessions drawer uses — **pre-filled** from the node and its
 orchestrator, so the operator can review and adjust before spawning:
 
 - `projectId` and host (`daemonInstanceId`) come from the orchestrator session.
 - `stackParent` = this orchestrator session's id; `sessionType` = `"claude-cli"`.
-- Branch mode = `new_branch_from_base`, `newBranchName` = the node's `branch ?? branchSuggestion`.
+- Branch mode depends on whether the node already **owns** a branch *(2026-07-26)*:
+  - **no branch** → `new_branch_from_base`, `newBranchName` = the node's `branchSuggestion`.
+  - **owns a branch** (the orphaned-recovery case) → `work_on_selected_branch` with
+    `CreateSessionInitialValues.selectedBranch` = that branch, so the session **resumes** it. The
+    branch, its worktree and its remote ref outlive the session that made them, so
+    `new_branch_from_base` would fail on "branch already exists" — which is exactly the node this
+    recovery path exists for. `CreateSessionPane` honours `selectedBranch` only in that mode.
 - `baseBranchLabel` = the node's concrete base branch — derived from its stack position by
   `deriveStackBaseBranch(node, nodes, defaultBranch)` (the nearest non-merged ancestor that owns a
   **created `branch`**, collapsing to the project default for a root or all-merged node) — so the
@@ -608,7 +661,7 @@ row updates from CTA to status chip on the next session-list refresh.
 
 ### Chat window (remote Presenter over RPC)
 
-The right-hand chat panel is a thin UI over the session's existing **remote Presenter**
+The chat surface (full-width behind the Planned PRs panel) is a thin UI over the session's existing **remote Presenter**
 protocol — the same bidirectional `TddyRemote.Stream` RPC already used for programmatic
 control (`tddy-service/proto/tddy/v1/remote.proto`), not a new backend concept:
 

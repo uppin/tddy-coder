@@ -43,6 +43,24 @@ fn git_remote_command(repo_root: &Path) -> Command {
     cmd
 }
 
+/// The local branch name behind a branch reference: `origin/feature/x` → `feature/x`, and any name
+/// that is already local unchanged.
+///
+/// Branch *pickers* deal in remote-tracking names — [`list_recent_remote_branches`] reads
+/// `refs/remotes/origin`, so `ListProjectBranches` (and the Telegram branch picker) offer
+/// `origin/<branch>`. Everything that operates on a branch needs the local name instead:
+/// `git worktree add <path> origin/feature/x` succeeds with a **detached HEAD**, so a session started
+/// that way looks healthy while every commit it makes is unreachable, whereas the unprefixed name
+/// makes git create or reuse the local branch that tracks `origin/feature/x`.
+///
+/// Exactly one leading `origin/` is stripped: a repository may legitimately hold
+/// `refs/heads/origin/foo`, and stripping repeatedly would rename it.
+#[must_use]
+pub fn local_branch_name(reference: &str) -> &str {
+    let reference = reference.trim();
+    reference.strip_prefix("origin/").unwrap_or(reference)
+}
+
 /// Validates a per-project integration base ref: a single remote-tracking ref `origin/<branch>` with
 /// no shell metacharacters or extra git arguments.
 pub fn validate_integration_base_ref(s: &str) -> Result<(), String> {
@@ -736,17 +754,28 @@ pub fn setup_worktree_for_session_with_integration_base(
                     return Ok(worktree_path);
                 }
                 BranchWorktreeIntent::WorkOnSelectedBranch => {
-                    let branch_name = wf.selected_branch_to_work_on.clone().ok_or_else(|| {
-                        "workflow.selected_branch_to_work_on required for work_on_selected_branch"
-                            .to_string()
-                    })?;
+                    // The request may name the branch the way a remote-branch picker does
+                    // (`origin/<branch>`); the worktree has to be put on the *local* branch.
+                    let branch_name = wf
+                        .selected_branch_to_work_on
+                        .as_deref()
+                        .map(|b| local_branch_name(b).to_string())
+                        .filter(|b| !b.is_empty())
+                        .ok_or_else(|| {
+                            "workflow.selected_branch_to_work_on required for work_on_selected_branch"
+                                .to_string()
+                        })?;
                     log::info!(
                         "setup_worktree_for_session_with_integration_base: intent=work_on_selected_branch branch={}",
                         branch_name
                     );
                     fetch_integration_base(repo_root, integration_base_ref)?;
+                    // A branch that exists only on `origin` — the state after the session that created
+                    // it was deleted, or when it was pushed from another host — has no worktree here
+                    // yet. That is not an error: `git worktree add` below creates the local tracking
+                    // branch.
                     if let Some(existing) =
-                        find_existing_worktree_for_branch_ref(repo_root, &branch_name)?
+                        try_find_existing_worktree_for_branch_ref(repo_root, &branch_name)?
                     {
                         log::info!(
                             "setup_worktree_for_session_with_integration_base: reusing existing worktree {} for {} (no new git worktree add)",
@@ -886,6 +915,41 @@ fn remote_ref_exists(repo_root: &Path, rev: &str) -> Result<bool, String> {
     Ok(out.status.success())
 }
 
+/// Commit sha of `origin/<branch>` in `repo_root`, or `None` when the branch has no remote-tracking
+/// ref there (never pushed, deleted, or `repo_root` is not a git repository).
+///
+/// Resolves the *remote-tracking* ref, so it is only as fresh as the last fetch: conservative by
+/// construction, since a PR-stack child worktree is created from `origin/<base>` and a stale-missing
+/// answer delays a spawn rather than permitting one that would fail inside `git fetch`.
+///
+/// Runs on a polled display path (`QueryBranch`), so every failure — a bad path, a missing git, a
+/// non-repository — degrades to `None` rather than failing the enclosing call.
+#[must_use]
+pub fn remote_branch_ref_sha(repo_root: &Path, branch: &str) -> Option<String> {
+    let branch = branch.trim();
+    if branch.is_empty() {
+        return None;
+    }
+    let out = Command::new("git")
+        .args([
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/remotes/origin/{branch}"),
+        ])
+        .current_dir(repo_root)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if sha.is_empty() {
+        return None;
+    }
+    Some(sha)
+}
+
 /// Create worktree for a session. Fetches the resolved integration base, then creates,
 /// updates changeset with worktree, branch, repo_path. Returns the worktree path.
 ///
@@ -987,10 +1051,17 @@ pub fn setup_worktree_for_session_with_optional_chain_base(
                     return Ok(worktree_path);
                 }
                 BranchWorktreeIntent::WorkOnSelectedBranch => {
-                    let branch_name = wf.selected_branch_to_work_on.clone().ok_or_else(|| {
-                        "workflow.selected_branch_to_work_on required for work_on_selected_branch"
-                            .to_string()
-                    })?;
+                    // The request may name the branch the way a remote-branch picker does
+                    // (`origin/<branch>`); the worktree has to be put on the *local* branch.
+                    let branch_name = wf
+                        .selected_branch_to_work_on
+                        .as_deref()
+                        .map(|b| local_branch_name(b).to_string())
+                        .filter(|b| !b.is_empty())
+                        .ok_or_else(|| {
+                            "workflow.selected_branch_to_work_on required for work_on_selected_branch"
+                                .to_string()
+                        })?;
                     log::info!(
                         "setup_worktree_for_session_with_optional_chain_base: intent=work_on_selected_branch branch={}",
                         branch_name
@@ -1000,8 +1071,12 @@ pub fn setup_worktree_for_session_with_optional_chain_base(
                     } else {
                         fetch_integration_base(repo_root, &integration_base_ref)?;
                     }
+                    // A branch that exists only on `origin` — the state after the session that created
+                    // it was deleted, or when it was pushed from another host — has no worktree here
+                    // yet. That is not an error: `git worktree add` below creates the local tracking
+                    // branch.
                     if let Some(existing) =
-                        find_existing_worktree_for_branch_ref(repo_root, &branch_name)?
+                        try_find_existing_worktree_for_branch_ref(repo_root, &branch_name)?
                     {
                         log::info!(
                             "setup_worktree_for_session_with_optional_chain_base: reusing existing worktree {} for {} (no new git worktree add)",
@@ -1415,6 +1490,48 @@ mod integration_base_red_tests {
             "GREEN: must create worktree from origin/main; got {:?}",
             r.err()
         );
+    }
+}
+
+/// The local branch name behind a reference offered by a remote-branch picker.
+#[cfg(test)]
+mod local_branch_name_tests {
+    use super::*;
+
+    #[test]
+    fn strips_the_remote_prefix_from_a_remote_tracking_name() {
+        // Given / When — the form `ListProjectBranches` offers
+        let branch = local_branch_name("origin/feature/attach-docs/attach-store");
+
+        // Then
+        assert_eq!(branch, "feature/attach-docs/attach-store");
+    }
+
+    #[test]
+    fn leaves_a_name_that_is_already_local_unchanged() {
+        // Given / When
+        let branch = local_branch_name("feature/attach-docs/attach-store");
+
+        // Then
+        assert_eq!(branch, "feature/attach-docs/attach-store");
+    }
+
+    #[test]
+    fn strips_only_one_remote_prefix_so_a_local_origin_branch_keeps_its_name() {
+        // Given / When — `refs/heads/origin/legacy` is a legal local branch; stripping twice renames it
+        let branch = local_branch_name("origin/origin/legacy");
+
+        // Then
+        assert_eq!(branch, "origin/legacy");
+    }
+
+    #[test]
+    fn trims_surrounding_whitespace() {
+        // Given / When
+        let branch = local_branch_name("  origin/master\n");
+
+        // Then
+        assert_eq!(branch, "master");
     }
 }
 

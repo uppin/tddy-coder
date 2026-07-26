@@ -78,3 +78,6 @@ changeset.yaml
 tmp
 local.bun.lock
 
+
+# Cursor MCP config is generated per checkout and embeds an absolute target/ path.
+**/.cursor/mcp.json

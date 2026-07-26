@@ -39,6 +39,10 @@ pub struct AuthServiceImpl<P: GitHubOAuthProvider> {
     /// When set, session tokens are stateless HMAC-signed tokens (mint/verify). When `None`,
     /// authentication is non-functional: minting fails and every token is rejected.
     signer: Option<crate::session_token::SessionTokenSigner>,
+    /// When set, a real provider's GitHub access token is retained here on login so the server can
+    /// later act on that operator's behalf (e.g. read their PRs). Separate from `signer` on purpose:
+    /// the GitHub token never enters the session token and is never returned to the client.
+    token_store: Option<Arc<dyn crate::token_store::GitHubTokenStore>>,
 }
 
 impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
@@ -48,6 +52,7 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
         Self {
             provider: Arc::new(provider),
             signer: None,
+            token_store: None,
         }
     }
 
@@ -57,7 +62,18 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
         Self {
             provider: Arc::new(provider),
             signer: Some(signer),
+            token_store: None,
         }
+    }
+
+    /// Retain each real login's GitHub access token in `store` (builder). Without a store the token
+    /// is dropped at the end of the exchange, and GitHub-backed reads report themselves unavailable.
+    pub fn with_token_store(
+        mut self,
+        store: Arc<dyn crate::token_store::GitHubTokenStore>,
+    ) -> Self {
+        self.token_store = Some(store);
+        self
     }
 }
 
@@ -79,11 +95,39 @@ impl<P: GitHubOAuthProvider> AuthServiceTrait for AuthServiceImpl<P> {
         request: Request<ExchangeCodeRequest>,
     ) -> Result<Response<ExchangeCodeResponse>, Status> {
         let req = request.into_inner();
-        let (_access_token, user) = self
+        let (access_token, user) = self
             .provider
             .exchange_code(&req.code, &req.state)
             .await
             .map_err(Status::internal)?;
+
+        // Retain the operator's own credential for later server-side GitHub reads. A stub provider's
+        // token is synthetic and is never stored (D12), so a demo login holds none by construction.
+        //
+        // Retention failure fails the login. A session minted without its token is a half-login: the
+        // operator appears signed in while every GitHub-backed read silently reports itself
+        // unavailable, and re-authenticating is the one action that could fix it — which they have no
+        // reason to attempt, because they are already signed in. Failing here surfaces the real fault
+        // (an unwritable token store) at the moment it is caused and keeps retry the obvious remedy.
+        if self.provider.issues_usable_access_token() {
+            if let Some(ref store) = self.token_store {
+                store.put(&user.login, &access_token).map_err(|e| {
+                    // The store's own error names server-side detail — the filesystem path it could
+                    // not write, the OS error behind it. That belongs in the daemon log, not in a
+                    // status handed to a browser, so the client is told only *what* failed and for
+                    // which login.
+                    log::error!(
+                        target: "tddy_github::auth_service",
+                        "could not retain the GitHub access token for login '{}': {e}",
+                        user.login
+                    );
+                    Status::internal(format!(
+                        "could not retain the GitHub access token for login '{}'",
+                        user.login
+                    ))
+                })?;
+            }
+        }
 
         let proto_user = to_proto_user(&user);
 

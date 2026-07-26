@@ -2,6 +2,46 @@
 
 ## Future Enhancements
 
+### PR-Stack — status polling and stack hygiene (source: pr-stack-ux-recovery changeset, 2026-07-26)
+
+- **Manual verification against the live stack was never done** — orchestrator session
+  `019f9dd5-716d-7071-96ac-464ff7b98c2a` on `uppin/tddy-coder`: confirm node `attach-store` recovers
+  (its recorded session is gone, so the row must offer Start session pre-filled to resume
+  `feature/session-attach-docs/attach-store`) and that PR #351 shows on
+  `feature/session-attach-docs/attach-proto`. It needs the daemon **rebuilt and installed**,
+  `auth_storage` (`/var/lib/tddy/auth`) **created and chowned to the daemon user**, and a **re-login**
+  (the widened `read:user repo` scope). Every automated suite is green; this is the one unverified path,
+  and it is also the end-to-end check that the token store and the `remote` leg work against a real
+  repo rather than a fixture.
+- **GitHub poll volume is one lookup per rendered branch per 5s** — `useQueryBranch` polls every branch
+  a row renders. Adding each node's *base* branch to the poll set costs nothing extra: a base is by
+  definition some node's own `branch` and was already in the set (`resolvedBranches` is deduplicated).
+  The rate-limit problem was entirely the **two hooks polling the same fact** — `usePrStatus` and
+  `useQueryBranch` both reaching the same authenticated `GET /pulls` — which is fixed by removing
+  `usePrStatus`. What remains is a fixed 5s interval per branch: a ten-node stack is ~2 calls/second,
+  which is comfortable against a 5000/hour user limit but still linear in stack size and unaffected by
+  nothing having changed. Batch the resolution into one call per stack, cache per branch with ETags, or
+  back off when the response is unchanged.
+- **Dangling `session_id` links are never scrubbed** — `DeleteSession` leaves the deleted session's id
+  on the orchestrator's stack node; the orphan state is derived at render instead. A periodic (or
+  delete-time) reconciliation would make the stored stack match reality, which matters for anything
+  reading the changeset directly rather than through the web.
+- **`origin/<branch>` freshness depends on the last fetch** — the "Missing branch" indicator reads the
+  local remote-tracking ref, so a branch pushed from another machine reads as missing until this host
+  fetches. A periodic background fetch, or a fetch-on-demand from the row, would close the gap.
+- **Repoint availability still derives from the stored `pr_status`**, not the live poll — carried
+  forward from `pr-stack-live-status` and untouched here.
+- **A `tddy-coder`-embedded web server retains no GitHub token** — `packages/tddy-coder/src/run.rs`
+  builds its own `AuthServiceImpl` without a `GitHubTokenStore`, so PR status there reads
+  *unavailable* even after a real login. The daemon path is wired; this one is not.
+- **`start_sandboxed_cursor_cli_session` takes no `stack_parent`** and calls neither
+  `resolve_chain_base_ref` nor the node link, so a cursor-cli session cannot be a PR-stack child at
+  all. Wiring it is a larger gap than this changeset, not an oversight in it.
+- **Nothing tests that `qualified_head` is *applied* at the two call sites** — only that the function
+  itself is correct. `get_open_pr` / `get_pr_by_head` reach `api.github.com` through free `curl`
+  helpers with no injection seam, so pinning the outgoing `head` value would need either a network
+  call or an HTTP-transport abstraction. Worth adding the seam if that module grows.
+
 ### tddy-web — Agent Activity tool-detail dialog (source: acp-tool-detail-explicit-states changeset, 2026-07-26)
 
 - **No retry affordance on a failed body lookup** — `AgentActivityDetailDialog` reports a failure inline
