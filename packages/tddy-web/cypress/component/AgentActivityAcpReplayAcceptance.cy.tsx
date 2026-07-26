@@ -53,7 +53,6 @@ it("labels a Read tool call with its file and line range", () => {
       title: "Read main.rs L10-49",
       kind: ToolKind.READ,
       status: ToolCallStatus.COMPLETED,
-      input: { file_path: "src/main.rs", offset: 10, limit: 40 },
       atUnixMs: 1_000,
     }),
   );
@@ -77,7 +76,6 @@ it("marks an in-progress tool call as running", () => {
       title: "Bash",
       kind: ToolKind.EXECUTE,
       status: ToolCallStatus.IN_PROGRESS,
-      input: { command: "cargo test --workspace", description: "run the tests" },
       atUnixMs: 1_000,
     }),
   );
@@ -127,7 +125,6 @@ it("renders the ACP transcript in place of the legacy tool-call row list", () =>
       title: "Read",
       kind: ToolKind.READ,
       status: ToolCallStatus.COMPLETED,
-      input: { file_path: "src/lib.rs" },
       atUnixMs: 1_000,
     }),
   );
@@ -150,7 +147,6 @@ it("renders each streamed entry in order (agent text, tool call, agent text)", (
       title: "Read",
       kind: ToolKind.READ,
       status: ToolCallStatus.COMPLETED,
-      input: { file_path: "src/main.rs", offset: 1, limit: 20 },
       atUnixMs: 2_000,
     }),
     replayAgentText("Now I understand it.", 3_000),
@@ -176,7 +172,6 @@ it("coalesces a tool call's running then completed frames into one entry", () =>
       title: "Bash cargo test",
       kind: ToolKind.EXECUTE,
       status: ToolCallStatus.IN_PROGRESS,
-      input: { command: "cargo test" },
       atUnixMs: 1_000,
     }),
     replayToolCall({
@@ -184,7 +179,6 @@ it("coalesces a tool call's running then completed frames into one entry", () =>
       title: "Bash cargo test",
       kind: ToolKind.EXECUTE,
       status: ToolCallStatus.COMPLETED,
-      input: { command: "cargo test" },
       atUnixMs: 3_000,
     }),
   );

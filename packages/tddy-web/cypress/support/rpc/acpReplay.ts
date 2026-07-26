@@ -8,14 +8,9 @@
  */
 
 import { create, toBinary } from "@bufbuild/protobuf";
-import { ConnectError, Code } from "@connectrpc/connect";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import {
-  ConnectionService,
-  AcpReplayFrameSchema,
-  GetAcpToolCallDetailResponseSchema,
-  StreamMode,
-} from "../../../src/gen/connection_pb";
+import { ConnectionService, AcpReplayFrameSchema, StreamMode } from "../../../src/gen/connection_pb";
 import {
   AcpAgentMessageSchema,
   ToolCallStatus,
@@ -43,16 +38,18 @@ export function replayAgentText(text: string, atUnixMs: number): AcpAgentMessage
   });
 }
 
-/** A replayed tool call stamped at `atUnixMs`. `rawInput` carries the full tool input as JSON — the
- *  transcript derives the inline detail (e.g. `Read main.rs L10-49`) from it. `output`, when given,
- *  rides as `rawOutput` (the tool's result) so the detail dialog can render it. */
+/**
+ * A replayed tool call stamped at `atUnixMs`, carrying **metadata only** — `title`, `kind`, `status`,
+ * `tool_call_id`. The real hosts strip `raw_input`/`raw_output` out of every streamed frame
+ * (`tddy_service::acp_replay::strip_tool_body`), so a frame builder that inlined them would model a
+ * server that no longer exists. Bodies are served separately by `GetAcpToolCallDetail` — see
+ * {@link aToolDetail} and the `details` map on {@link aReplayBackend}.
+ */
 export function replayToolCall(fields: {
   id: string;
   title: string;
   kind: ToolKind;
   status: ToolCallStatus;
-  input: unknown;
-  output?: unknown;
   atUnixMs: number;
 }): AcpAgentMessage {
   return create(AcpAgentMessageSchema, {
@@ -70,10 +67,6 @@ export function replayToolCall(fields: {
               title: fields.title,
               kind: fields.kind,
               status: fields.status,
-              rawInput: JSON.stringify(fields.input),
-              ...(fields.output === undefined
-                ? {}
-                : { rawOutput: JSON.stringify(fields.output) }),
             },
           },
         },
@@ -82,39 +75,28 @@ export function replayToolCall(fields: {
   });
 }
 
-/** A **body-less** replayed tool call stamped at `atUnixMs` — mirrors the server-stripped stream
- *  (PR #345): it carries only `tool_call_id`/`title`/`kind`/`status`, no `raw_input`/`raw_output`.
- *  The bodies are fetched on demand via `GetAcpToolCallDetail` (see the `details` config on
- *  {@link aReplayBackend}). */
-export function replayToolCallStripped(fields: {
-  id: string;
-  title: string;
-  kind: ToolKind;
-  status: ToolCallStatus;
-  atUnixMs: number;
-}): AcpAgentMessage {
-  return create(AcpAgentMessageSchema, {
-    id: 0n,
-    msg: {
-      case: "sessionUpdate",
-      value: {
-        sessionId: { value: "s1" },
-        timestampUnixMs: BigInt(fields.atUnixMs),
-        update: {
-          update: {
-            case: "toolCall",
-            value: {
-              toolCallId: { value: fields.id },
-              title: fields.title,
-              kind: fields.kind,
-              status: fields.status,
-              // No rawInput / rawOutput — the stream no longer inlines bodies.
-            },
-          },
-        },
-      },
-    },
-  });
+/** One tool call's bodies as `GetAcpToolCallDetail` returns them: the exact JSON strings the stream
+ *  used to inline. `output` is omitted for a call that has not produced one yet — the response field
+ *  is `optional`, and an absent output is a success, not an error. */
+export function aToolDetail(fields: { input: unknown; output?: unknown }): ToolDetail {
+  return {
+    rawInput: JSON.stringify(fields.input),
+    ...(fields.output === undefined ? {} : { rawOutput: JSON.stringify(fields.output) }),
+  };
+}
+
+/** One tool call's bodies as the lookup returns them when it has an **output but no input**. Both
+ *  response fields are `optional`, so a resolved detail may legitimately carry neither, either, or
+ *  both; this models the asymmetric case the `input`-taking {@link aToolDetail} cannot express. */
+export function aToolDetailWithoutInput(fields: { output: unknown }): ToolDetail {
+  return { rawOutput: JSON.stringify(fields.output) };
+}
+
+/** The bodies of one tool call, keyed by `tool_call_id` in a backend's `details` map. Both sides are
+ *  optional, mirroring `GetAcpToolCallDetailResponse`. */
+export interface ToolDetail {
+  rawInput?: string;
+  rawOutput?: string;
 }
 
 /** A backend whose `StreamAcpReplay` serves the two-phase protocol for a fixed transcript: the
@@ -147,19 +129,9 @@ export interface ReplayOpens {
 export function aReplayBackend(config: {
   counts: number[];
   snapshot?: AcpAgentMessage[];
-  /** Bodies served by the on-demand `GetAcpToolCallDetail` lookup, keyed by `tool_call_id`. A
-   *  `tool_call_id` absent from this map is answered `NOT_FOUND` — exactly as the real server
-   *  answers for an unknown call — which drives the detail dialog's error path. */
-  details?: Record<string, { rawInput?: string; rawOutput?: string }>;
-  /** When true, the `GetAcpToolCallDetail` response is withheld until {@link ReplayBackendHandle.releaseDetail}
-   *  is called, so a spec can observe the dialog's loading state while the fetch is in flight. */
-  holdDetail?: boolean;
-}): ReplayBackendHandle {
+  details?: Record<string, ToolDetail>;
+}) {
   const opens: ReplayOpens = { count: 0, snapshot: 0 };
-  let releaseDetail: () => void = () => undefined;
-  const detailGate = new Promise<void>((resolve) => {
-    releaseDetail = resolve;
-  });
   const backend = anInMemoryRpcBackend().implement(ConnectionService, {
     async *streamAcpReplay(req: { mode: StreamMode }) {
       if (req.mode === StreamMode.COUNT_THEN_LIVE) {
@@ -172,30 +144,97 @@ export function aReplayBackend(config: {
       // Keep the stream open so the live-tail consumer stays subscribed.
       await new Promise<void>(() => {});
     },
-    async getAcpToolCallDetail(req: { toolCallId: string }) {
-      if (config.holdDetail) await detailGate;
-      const detail = config.details?.[req.toolCallId];
-      if (!detail) {
-        throw new ConnectError(
-          `no tool call with id ${req.toolCallId}`,
-          Code.NotFound,
-        );
-      }
-      return create(GetAcpToolCallDetailResponseSchema, {
-        rawInput: detail.rawInput,
-        rawOutput: detail.rawOutput,
-      });
-    },
+    getAcpToolCallDetail: (req: { toolCallId: string }) => detailOrNotFound(config.details, req),
   });
-  return { backend, opens, releaseDetail: () => releaseDetail() };
+  return { backend, opens };
 }
 
-/** What {@link aReplayBackend} returns: the in-memory backend, the stream-open tallies, and a
- *  release for a held detail response (a no-op unless `holdDetail` was set). */
-export interface ReplayBackendHandle {
-  backend: InMemoryRpcBackend;
-  opens: ReplayOpens;
-  releaseDetail: () => void;
+/**
+ * A backend whose **`GetAcpToolCallDetail`** unary is held open — received, but silent — until the test
+ * calls `releaseDetail()`. The replay stream answers immediately, exactly as in {@link aReplayBackend}.
+ *
+ * Lets a spec observe the dialog while the body lookup is genuinely **in flight**, which is what
+ * production does: the real lookup crosses a network and re-reads the session transcript from disk.
+ */
+export function aReplayBackendWithHeldDetail(config: {
+  counts: number[];
+  snapshot: AcpAgentMessage[];
+  details: Record<string, ToolDetail>;
+}) {
+  const opens: ReplayOpens = { count: 0, snapshot: 0 };
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const backend = anInMemoryRpcBackend().implement(ConnectionService, {
+    async *streamAcpReplay(req: { mode: StreamMode }) {
+      if (req.mode === StreamMode.COUNT_THEN_LIVE) {
+        opens.count += 1;
+        yield* countFrames(config.counts);
+      } else {
+        opens.snapshot += 1;
+        yield* transcriptFrames(config.snapshot);
+      }
+      await new Promise<void>(() => {});
+    },
+    getAcpToolCallDetail: async (req: { toolCallId: string }) => {
+      await held;
+      return detailOrNotFound(config.details, req);
+    },
+  });
+  return { backend, opens, releaseDetail: () => release() };
+}
+
+/**
+ * A backend whose `GetAcpToolCallDetail` always fails with `code` — a **transport-level** failure
+ * (default `UNAVAILABLE`), as distinct from the `NOT_FOUND` that {@link aReplayBackend} raises for a
+ * `tool_call_id` absent from the transcript. The replay stream answers normally.
+ */
+export function aReplayBackendWithFailingDetail(config: {
+  counts: number[];
+  snapshot: AcpAgentMessage[];
+  code?: Code;
+}) {
+  const opens: ReplayOpens = { count: 0, snapshot: 0 };
+  const backend = anInMemoryRpcBackend().implement(ConnectionService, {
+    async *streamAcpReplay(req: { mode: StreamMode }) {
+      if (req.mode === StreamMode.COUNT_THEN_LIVE) {
+        opens.count += 1;
+        yield* countFrames(config.counts);
+      } else {
+        opens.snapshot += 1;
+        yield* transcriptFrames(config.snapshot);
+      }
+      await new Promise<void>(() => {});
+    },
+    getAcpToolCallDetail: () => {
+      throw new ConnectError("replay host unreachable", config.code ?? Code.Unavailable);
+    },
+  });
+  return { backend, opens };
+}
+
+/** The `tool_call_id`s the component has asked bodies for, in call order. Lets a spec assert both
+ *  *which* call was looked up and *how many* lookups happened (the cache's observable contract)
+ *  without reaching into the RPC plumbing. */
+export function requestedToolCallIds(backend: InMemoryRpcBackend): string[] {
+  return backend
+    .callsTo(ConnectionService.method.getAcpToolCallDetail)
+    .map((req) => req.toolCallId);
+}
+
+/** Resolve one call's bodies from a `details` map. An id the map does not carry is a `NOT_FOUND`
+ *  error — mirroring the hosts, which map a `tool_call_id` absent from the transcript to `NOT_FOUND`
+ *  rather than to an empty success. */
+function detailOrNotFound(
+  details: Record<string, ToolDetail> | undefined,
+  req: { toolCallId: string },
+): ToolDetail {
+  const detail = (details ?? {})[req.toolCallId];
+  if (!detail) {
+    throw new ConnectError(`no tool call ${req.toolCallId} in transcript`, Code.NotFound);
+  }
+  return detail;
 }
 
 /**
@@ -253,4 +292,4 @@ function* transcriptFrames(frames: AcpAgentMessage[]) {
   }
 }
 
-export { StreamMode, ToolCallStatus, ToolKind };
+export { Code, StreamMode, ToolCallStatus, ToolKind };

@@ -30,8 +30,9 @@ export interface ChatMessage {
   /** Coarse status of a `from: "tool"` entry, rendered as a marker on the read-only transcript.
    *  Unset for non-tool bubbles. */
   toolStatus?: "running" | "completed" | "error";
-  /** The ACP `ToolCall.tool_call_id` — carried on `from: "tool"` entries so the detail dialog knows
-   *  which call's body to fetch on demand via `GetAcpToolCallDetail`. Unset for non-tool bubbles. */
+  /** The ACP `ToolCall.tool_call_id` of a `from: "tool"` entry. The transcript stream carries tool
+   *  metadata only, so the detail dialog names the call by this id to fetch its bodies through
+   *  `ConnectionService.GetAcpToolCallDetail`. Unset for non-tool bubbles. */
   toolCallId?: string;
   /** Epoch ms when this message was first shown — used for the exported transcript timeline. */
   at: number;
