@@ -28,6 +28,7 @@ pub mod pty_runtime;
 pub mod relay_idle;
 pub mod semantic_index;
 pub mod server;
+pub mod session_attachments;
 pub mod session_context_docs;
 pub mod session_deletion;
 pub mod session_file_upload;

@@ -113,9 +113,10 @@ pub use session_metadata::{
 pub use source_path::{classify_rust_source_path, RustSourcePathKind};
 pub use stream::ProgressEvent;
 pub use tddy_workflow::{
-    canonical_artifact_write_path, read_session_artifact_utf8,
+    canonical_artifact_write_path, canonical_attachment_write_path, read_session_artifact_utf8,
     read_session_artifact_utf8_or_placeholder, resolve_existing_session_artifact,
-    session_artifacts_root, SESSION_ARTIFACT_READ_PLACEHOLDER,
+    session_artifacts_root, session_attachments_root, SESSION_ARTIFACT_READ_PLACEHOLDER,
+    SESSION_ATTACHMENTS_SUBDIR,
 };
 pub use workflow::{
     engine::WorkflowEngine,

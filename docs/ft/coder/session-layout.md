@@ -24,6 +24,14 @@ Each YAML file conforms to **`ActionManifest`** (see **[Session actions feature]
 
 Listing and invocation use **`--session-dir`** pointing at **`{sessions_base}/sessions/{session_id}/`**; tooling reads manifests from **`actions/`** and optional **`repo_path`** from **`changeset.yaml`** when present.
 
+## Attachments subdirectory
+
+User-attached documents live under **`artifacts/attachments/`**:
+
+`{sessions_base}/sessions/{session_id}/artifacts/attachments/<basename>`
+
+They are session artifacts the recipe does not own, addressed by **basename** in a single flat level, and surfaced alongside recipe-owned planning docs on **`SessionEntry.context_docs`** with **`kind = ATTACHMENT`**. See **[Session attachments](session-attachments.md)**.
+
 ## Engine identity
 
 When a backend reports a different agent thread id than the process-bound session id, the effective id for the workflow engine follows the **process-bound** session id. Policy lives in `tddy_core::session_lifecycle::resolve_effective_session_id`.

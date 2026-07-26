@@ -190,15 +190,27 @@ message ListSessionsRequest {
 message ListSessionsResponse {
   repeated SessionEntry sessions = 1;
 }
-// A recipe-manifest–derived planning document surfaced for a session (web Docs tab, child
-// "Start session" prompts). `path` is the absolute artifacts/ location; `exists` reflects whether
-// the file is currently on disk.
+// Whether a context doc is recipe-owned or user-attached (docs/ft/coder/session-attachments.md).
+enum SessionContextDocKind {
+  // Recipe-owned planning artifact under artifacts/ (the zero value, so a producer or reader that
+  // knows nothing about `kind` keeps treating rows as recipe-owned docs).
+  SESSION_CONTEXT_DOC_KIND_MANIFEST = 0;
+  // User-attached document under artifacts/attachments/.
+  SESSION_CONTEXT_DOC_KIND_ATTACHMENT = 1;
+}
+
+// A planning document surfaced for a session (web Docs tab, child "Start session" prompts): either
+// a recipe-manifest–derived artifact or a user attachment, told apart by `kind`. `path` is the
+// absolute on-disk location; `exists` reflects whether the file is currently on disk, and
+// `size_bytes` its size there (0 when it does not exist).
 message SessionContextDoc {
   string key = 1;
   string basename = 2;
   string path = 3;
   string description = 4;
   bool exists = 5;
+  SessionContextDocKind kind = 6;
+  uint64 size_bytes = 7;
 }
 
 message SessionEntry {
