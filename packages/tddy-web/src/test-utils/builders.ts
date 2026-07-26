@@ -20,10 +20,12 @@ import type { DescMethod } from "@bufbuild/protobuf";
 
 import {
   AgentInfoSchema,
+  BranchResolutionSchema,
   EligibleDaemonEntrySchema,
   ProjectEntrySchema,
   SessionEntrySchema,
   type AgentInfo,
+  type BranchResolution,
   type EligibleDaemonEntry,
   type ProjectEntry,
   type SessionEntry,
@@ -65,6 +67,28 @@ export function anActiveSession(overrides: Partial<SessionEntry> = {}): SessionE
 /** Convenience: inactive/exited session with isActive:false, status:"exited", pid:0. */
 export function anInactiveSession(overrides: Partial<SessionEntry> = {}): SessionEntry {
   return aSessionEntry({ isActive: false, status: "exited", pid: 0, ...overrides });
+}
+
+// ---------------------------------------------------------------------------
+// Proto: BranchResolution (QueryBranch)
+// ---------------------------------------------------------------------------
+
+/**
+ * A `QueryBranch` resolution with every leg present and empty — no session, no worktree, no PR, and
+ * no branch on `origin`. Override only the leg a scenario cares about. Every leg is set explicitly
+ * rather than left `undefined`, because "the leg is absent" and "the leg says nothing exists" are
+ * different conditions in the PR-Stack view — the `remote` leg most of all, since a *missing*
+ * resolution leaves a node startable while `remote.exists === false` blocks it.
+ */
+export function aBranchResolution(overrides: Partial<BranchResolution> = {}): BranchResolution {
+  return create(BranchResolutionSchema, {
+    branch: "feature/x/n1",
+    session: { exists: false, sessionId: "", isActive: false, status: "" },
+    worktree: { exists: false, path: "" },
+    pr: { exists: false, number: 0n, url: "", state: "" },
+    remote: { exists: false, sha: "" },
+    ...overrides,
+  });
 }
 
 // ---------------------------------------------------------------------------

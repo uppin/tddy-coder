@@ -2,8 +2,13 @@
  * Acceptance tests: the PR-Stack Chat Screen's live status & repoint.
  *
  * A planned-PR row resolves its in-progress session by branch, shows the GitHub PR number (as a
- * link) and state polled from `GetPrStatus`, and offers a Repoint control when a predecessor has
- * merged — wired to `RepointPlannedPr`.
+ * link) and state carried by `QueryBranch`'s `pr` leg, and offers a Repoint control when a
+ * predecessor has merged — wired to `RepointPlannedPr`.
+ *
+ * `QueryBranch` is the *only* PR lookup the screen makes. `GetPrStatus` resolves the same PR through
+ * the same authenticated `GET /pulls` on the daemon, so polling both doubled the GitHub request rate
+ * for no extra information — enough to exhaust a 5000/hour user limit within the hour on a five-node
+ * stack, after which every row reads "PR status unavailable" and stays there.
  *
  * PRD: docs/ft/coder/pr-stack-live-status.md. Changeset: docs/dev/1-WIP/pr-stack-live-status.md.
  */
@@ -16,7 +21,12 @@ import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
-import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
+import {
+  aPlannedNode,
+  aStackPlanJson,
+  aBranchResolutionResponse,
+  type BranchResolutionFixture,
+} from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -25,15 +35,8 @@ import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
 const ORCHESTRATOR_SESSION_ID = "pr-stack-session-2222-0000-0000-0000-000000000020";
 const PROJECT_ID = "proj-pr-stack";
 
-/** The interval (ms) at which the PR-Stack view re-polls `GetPrStatus`. */
+/** The interval (ms) at which the PR-Stack view re-polls `QueryBranch`. */
 const POLL_INTERVAL_MS = 5000;
-
-interface PrStatusFixture {
-  exists: boolean;
-  number?: number;
-  url?: string;
-  state?: string;
-}
 
 function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
   return {
@@ -65,33 +68,22 @@ function aChildSessionOnBranch(branch: string, sessionId: string): Partial<Sessi
 
 interface MountOptions {
   sessions: Partial<SessionEntry>[];
-  /** Static `GetPrStatus` result per branch. */
-  prStatusByBranch?: Record<string, PrStatusFixture>;
-  /** Dynamic `GetPrStatus` result per branch, re-evaluated on every poll (polling tests). */
-  prStatusFactory?: (branch: string) => PrStatusFixture;
+  /** Static `QueryBranch` resolution per branch. */
+  resolutionByBranch?: Record<string, BranchResolutionFixture>;
+  /** Dynamic `QueryBranch` resolution per branch, re-evaluated on every poll (polling tests). */
+  resolutionFactory?: (branch: string) => BranchResolutionFixture;
   /** `RepointPlannedPr` response stack JSON. */
   repointResponseStackJson?: string;
-}
-
-function toStatusResponse(fx: PrStatusFixture) {
-  return {
-    status: {
-      exists: fx.exists,
-      number: BigInt(fx.number ?? 0),
-      url: fx.url ?? "",
-      state: fx.state ?? "",
-    },
-  };
 }
 
 function openPrStackScreen(opts: MountOptions) {
   const repointSpy = cy.stub().as("repointPlannedPr");
   const backend = aSessionsDrawerBackend(opts.sessions)
-    .onUnary(ConnectionService.method.getPrStatus, (req: { branch: string }) => {
-      const fx = opts.prStatusFactory
-        ? opts.prStatusFactory(req.branch)
-        : (opts.prStatusByBranch?.[req.branch] ?? { exists: false });
-      return toStatusResponse(fx);
+    .onUnary(ConnectionService.method.queryBranch, (req: { branch: string }) => {
+      const fx = opts.resolutionFactory
+        ? opts.resolutionFactory(req.branch)
+        : (opts.resolutionByBranch?.[req.branch] ?? { branch: req.branch });
+      return aBranchResolutionResponse(fx);
     })
     .onUnary(ConnectionService.method.repointPlannedPr, (req: { nodeId: string }) => {
       repointSpy(req);
@@ -153,7 +145,7 @@ it("shows no in-progress indicator when no session owns the node branch", () => 
 });
 
 // ---------------------------------------------------------------------------
-// GitHub PR status (number, link, state)
+// GitHub PR status (number, link, state) — from the branch resolution
 // ---------------------------------------------------------------------------
 
 it("shows the GitHub PR number as a link to the PR for the node branch", () => {
@@ -165,12 +157,15 @@ it("shows the GitHub PR number as a link to the PR for the node branch", () => {
   // When
   openPrStackScreen({
     sessions: [anOrchestratorSession(plan)],
-    prStatusByBranch: {
+    resolutionByBranch: {
       "feature/x/n1": {
-        exists: true,
-        number: 42,
-        url: "https://github.com/acme/repo/pull/42",
-        state: "open",
+        branch: "feature/x/n1",
+        pr: {
+          exists: true,
+          number: 42,
+          url: "https://github.com/acme/repo/pull/42",
+          state: "open",
+        },
       },
     },
   });
@@ -191,12 +186,15 @@ it("shows the GitHub PR state reported for the node branch", () => {
   // When
   openPrStackScreen({
     sessions: [anOrchestratorSession(plan)],
-    prStatusByBranch: {
+    resolutionByBranch: {
       "feature/x/n1": {
-        exists: true,
-        number: 42,
-        url: "https://github.com/acme/repo/pull/42",
-        state: "merged",
+        branch: "feature/x/n1",
+        pr: {
+          exists: true,
+          number: 42,
+          url: "https://github.com/acme/repo/pull/42",
+          state: "merged",
+        },
       },
     },
   });
@@ -214,13 +212,16 @@ it("updates the PR status on the polling interval without user action", () => {
   let polls = 0;
   openPrStackScreen({
     sessions: [anOrchestratorSession(plan)],
-    prStatusFactory: () => {
+    resolutionFactory: (branch) => {
       polls += 1;
       return {
-        exists: true,
-        number: 42,
-        url: "https://github.com/acme/repo/pull/42",
-        state: polls === 1 ? "open" : "merged",
+        branch,
+        pr: {
+          exists: true,
+          number: 42,
+          url: "https://github.com/acme/repo/pull/42",
+          state: polls === 1 ? "open" : "merged",
+        },
       };
     },
   });

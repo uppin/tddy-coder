@@ -14,6 +14,8 @@ pub mod connection_service;
 pub mod connection_tonic_adapter;
 pub mod cursor_cli_spawn;
 pub mod elicitation;
+pub mod github_pr_credentials;
+pub mod github_token_store;
 pub mod host_session_service;
 pub mod host_stats;
 pub mod livekit_peer_discovery;

@@ -48,6 +48,51 @@ When the refresh token itself expires (7 days idle) or is rejected, there is no 
 - `AuthProvider` owns the shared store, exposes an `isRefreshing` flag, and drives a transparent refresh on mount when the stored access token has expired but the refresh token is still valid — so waking the app does not drop to the login screen. A top-bar indicator (`UserAvatar.tsx`) shows "Refreshing…" while a refresh is in flight.
 - Daemon-level RPC over LiveKit is not routed through the ConnectRPC interceptor (LiveKit uses a custom `Transport` without interceptor support); it stays fresh because the shared context `sessionToken` is synced on every refresh. Gating the LiveKit transport itself is a documented follow-up, not required for the fix.
 
+## GitHub access-token retention *(added 2026-07-26)*
+
+The daemon needs a GitHub credential of its own to read PRs on the operator's behalf (the PR-Stack
+Chat Screen's PR status — see [PR-Stack live status § Authenticated PR
+status](../coder/pr-stack-live-status.md#authenticated-pr-status-added-2026-07-26)). Previously
+`ExchangeCode` **discarded** the access token the operator had just granted and every server-side
+GitHub read fell back to `GITHUB_TOKEN`/`GH_TOKEN` from the daemon's own environment — unset under
+systemd — so a live PR read as "no PR".
+
+- The OAuth authorize scope widened from **`read:user`** to **`read:user repo`** (`repo` is required to
+  read PRs on a private repository).
+- `AuthServiceImpl::exchange_code` retains the access token in a `GitHubTokenStore` keyed by GitHub
+  login. The daemon's implementation is `FileGitHubTokenStore`, rooted at the `auth_storage` config
+  path: `github-tokens.json` at mode `0600` in a `0700` directory, writes serialised on a process-wide
+  mutex and published via `.tmp` + `fsync` + `rename` (an interrupted in-place write parsed as an empty
+  map, i.e. lost *every* operator's token at once).
+- **The token never leaves the server.** It is not part of the HMAC session token and is never returned
+  to the client, so it cannot end up in browser storage on a plain-http origin.
+- **A login that cannot retain its token fails.** A session minted without its token is a half-login:
+  the operator appears signed in while every GitHub-backed read reports itself *unavailable*, and
+  re-authenticating — the one remedy — is the one action they have no reason to attempt. The
+  client-visible status names only the login and what failed; the store's own error (which names the
+  file path) goes to the daemon log.
+- **A stub/demo login stores nothing** and is never a failure: `github.stub: true` retains no token by
+  construction, and PR lookups for it resolve to a clean "no PRs" result. This is enforced by
+  `GitHubOAuthProvider::issues_usable_access_token()`, which has no default impl.
+
+### Operator migration (breaking for running deployments)
+
+1. **Every already-signed-in operator must log out and log in again.** Tokens minted before this change
+   carry only `read:user`; there is no way to widen an existing grant in place. Until the re-login,
+   PR-backed rows read "PR status unavailable" (with the reason) rather than silently claiming no PR
+   exists.
+2. **`auth_storage` must exist and be writable by the daemon user.** It is no longer an inert setting:
+   - A **configured** `auth_storage` is probed at boot (`build_auth_entries` → `probe_writable`: create
+     the directory, write a probe file, remove it). If the probe fails the daemon **refuses to start**,
+     with a message naming the path — because retention is now a hard login dependency, an unwritable
+     path would otherwise fail *every* login one operator at a time for a fault fully visible at boot.
+     There is no fallback to a store-less service.
+   - An **unset** `auth_storage` is a deliberate deployment choice, not a failure: the daemon starts,
+     logins succeed, and GitHub-backed reads report themselves *unavailable*.
+   - `./install` creates and chowns only the parent `/var/lib/tddy` on the root/systemd path, so the
+     configured directory (default `/var/lib/tddy/auth`) is a reachable misconfiguration — create it
+     and chown it to the daemon user when upgrading.
+
 ## Security / configuration
 
 - The shared secret is `livekit.api_secret`. When **no** secret is configured the daemon still starts, but auth is non-functional: minting/refresh return an error and the resolver rejects every token (all token-gated RPCs return `Unauthenticated`). **There is no fallback to the legacy local-map behavior.**

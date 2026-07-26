@@ -369,6 +369,13 @@ export const TEST_IDS = {
   prStackScreen: "pr-stack-screen",
   prStackPlannedPrList: "pr-stack-planned-pr-list",
 
+  // PR-Stack "Planned PRs" panel — right-side dock on desktop, full-screen overlay on mobile.
+  // Always mounted; `data-state` ∈ {closed, open} drives visibility (same contract as the
+  // Session Inspector drawer).
+  prStackPlannedPrPanel: "pr-stack-planned-pr-panel",
+  prStackPlannedPrPanelToggle: "pr-stack-planned-pr-panel-toggle",
+  prStackPlannedPrPanelClose: "pr-stack-planned-pr-panel-close",
+
   // Full-screen Workflow Chat Screen (per-workflow session view for every non-"pr-stack" tool recipe)
   workflowChatScreen: "workflow-chat-screen",
 
@@ -729,6 +736,21 @@ export const prStackWorktree = (nodeId: string) => `pr-stack-worktree-${nodeId}`
 
 /** `[data-testid="pr-stack-session-<nodeId>"]` — the resolved in-progress session reference (QueryBranch) */
 export const prStackSession = (nodeId: string) => `pr-stack-session-${nodeId}`;
+
+/** `[data-testid="pr-stack-branch-<nodeId>"]` — the branch this planned PR owns (a branch that exists) */
+export const prStackBranch = (nodeId: string) => `pr-stack-branch-${nodeId}`;
+
+/** `[data-testid="pr-stack-planned-branch-<nodeId>"]` — the planned branch *name* (`branch_suggestion`),
+ *  rendered distinctly from an owned branch because a suggestion names no ref yet */
+export const prStackPlannedBranch = (nodeId: string) => `pr-stack-planned-branch-${nodeId}`;
+
+/** `[data-testid="pr-stack-missing-branch-<nodeId>"]` — the blocked indicator shown in place of the
+ *  Start-session CTA while the node's base branch is not available to be based upon */
+export const prStackMissingBranch = (nodeId: string) => `pr-stack-missing-branch-${nodeId}`;
+
+/** `[data-testid="pr-stack-pr-unavailable-<nodeId>"]` — shown when the GitHub PR lookup could not be
+ *  performed (no credential, rate limit, transport error) — distinct from "this branch has no PR" */
+export const prStackPrUnavailable = (nodeId: string) => `pr-stack-pr-unavailable-${nodeId}`;
 
 /** `[data-testid="agent-chat-message-<index>"]` — a single rendered chat bubble (reusable AgentChat) */
 export const agentChatMessage = (index: number) => `agent-chat-message-${index}`;

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
 import type { AgentInfo, ConnectionService, ProjectEntry, SessionEntry, SubagentInfo, ToolInfo } from "../../gen/connection_pb";
+import { localBranchName } from "../../lib/branchNames";
 import { prStackOrchestrators } from "../../utils/stackParents";
 import { useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useAgentModels } from "../../rpc/useAgentModels";
@@ -46,6 +47,15 @@ export type CreateSessionInitialValues = Partial<{
   stackParent: string;
   branchIntent: BranchIntent;
   newBranchName: string;
+  /**
+   * Existing branch to pre-select in "Work on existing branch" mode — e.g. the branch a planned PR
+   * already owns, which is resumed rather than re-created. Survives the async `ListProjectBranches`
+   * load, which would otherwise auto-select the project's first branch.
+   *
+   * Named the way the rest of the domain names a branch (`feature/x`); the picker's own options are
+   * remote-tracking refs (`origin/feature/x`) and are matched on the local name behind them.
+   */
+  selectedBranch: string;
   /** Pre-check state for the "Create Remote Branch" toggle (new-branch mode). Defaults to checked. */
   createRemoteBranch: boolean;
   /** Concrete base branch shown in the new-branch option: "New branch from base: <baseBranchLabel>". */
@@ -105,7 +115,10 @@ export function CreateSessionPane({
   const [createRemoteBranch, setCreateRemoteBranch] = useState(
     initialValues?.createRemoteBranch ?? true,
   );
-  const [selectedBranchToWorkOn, setSelectedBranchToWorkOn] = useState("");
+  // Read out of `initialValues` once: the branch load effect below needs it as a dependency, and
+  // `initialValues` itself is a fresh object on every render of the caller.
+  const preFilledBranchToWorkOn = initialValues?.selectedBranch ?? "";
+  const [selectedBranchToWorkOn, setSelectedBranchToWorkOn] = useState(preFilledBranchToWorkOn);
   // Which daemon/host runs the session. Defaults to the pre-filled host, else the selected daemon,
   // else empty (which the daemon treats as "run locally on the connected daemon"). An empty
   // pre-filled host falls through to the selected daemon so the Host <select>'s displayed option
@@ -227,7 +240,18 @@ export function CreateSessionPane({
         if (!cancelled) {
           setRemoteBranches(resp.branches);
           if (resp.branches.length > 0) {
-            setSelectedBranchToWorkOn(resp.branches[0]!);
+            // A pre-filled branch wins over the default first entry, but only while the project
+            // actually offers it — otherwise the <select> would hold a value none of its options
+            // match, and submit would send a branch this project does not have.
+            //
+            // Matched on the *local* branch name behind each option, because `ListProjectBranches`
+            // lists remote-tracking refs (`origin/<branch>`) while callers name the branch the way
+            // the rest of the domain does. Comparing the raw strings never matches, and the
+            // pre-fill then degrades silently into an unrelated branch — the operator resumes the
+            // wrong branch with no warning.
+            const wanted = localBranchName(preFilledBranchToWorkOn);
+            const offered = resp.branches.find((b) => localBranchName(b) === wanted);
+            setSelectedBranchToWorkOn(offered ?? resp.branches[0]!);
           }
         }
       })
@@ -239,7 +263,7 @@ export function CreateSessionPane({
     return () => {
       cancelled = true;
     };
-  }, [client, sessionToken, projectId, branchIntent, daemonInstanceId]);
+  }, [client, sessionToken, projectId, branchIntent, daemonInstanceId, preFilledBranchToWorkOn]);
 
   const isSubmitEnabled = (() => {
     if (submitting) return false;

@@ -23,11 +23,17 @@ independent of whether the orchestrator agent is running:
    every downstream lookup; the suggestion is a planned name only.
 2. **Branch → session resolution (in-progress).** The PR-Stack view resolves the child session
    for a node by matching the node's branch against each session's branch, and marks the node
-   *in progress* when a live session owns that branch.
+   *in progress* when a live session owns that branch. *(Amended 2026-07-26 — a node whose recorded
+   child session no longer resolves is **orphaned**, not in progress: it offers **Start session**
+   again, pre-filled to resume the branch it already owns. See
+   [Orphaned-node recovery](#orphaned-node-recovery-added-2026-07-26).)*
 3. **Branch → GitHub PR status (number, link, state).** The view queries GitHub for the PR whose
    head is the node's branch and shows the PR number as a link plus its state
    (open / merged / closed / draft). Status is polled on an interval so it updates without user
-   action.
+   action. *(Amended 2026-07-26 — the lookup is authenticated with the **operator's own GitHub
+   token** from their web login, the `head` filter is qualified as `owner:branch`, and a lookup that
+   cannot be performed reads **"PR status unavailable"** instead of silently claiming no PR exists.
+   See [Authenticated PR status](#authenticated-pr-status-added-2026-07-26).)*
 4. **Repoint / restack control.** When a node's predecessor has already merged, the row offers a
    Repoint control that drops the merged parent, rebases the node's local branch onto the new
    effective base, and re-targets the open GitHub PR's base branch.
@@ -35,7 +41,11 @@ independent of whether the orchestrator agent is running:
    worktree is branched off the node's parent branch (the effective base, skipping merged
    ancestors) — not off the default branch. Starting a node whose non-merged parent owns no branch
    yet is refused, enforcing bottom-up ordering. The gate is the parent's *branch*, never its child
-   session: a branch can be built on whether or not a session is still attached to it.
+   session: a branch can be built on whether or not a session is still attached to it. *(Amended
+   2026-07-26 — startability is now **shown, not discovered on failure**: `BranchResolution` carries a
+   `remote` leg, and a node whose base branch is absent from `origin` shows a blocked **"Missing
+   branch"** indicator in place of the Start-session button. See
+   [Startability before the spawn](#startability-before-the-spawn-added-2026-07-26).)*
 
 ## Current behavior being fixed (capability 5)
 
@@ -64,6 +74,91 @@ respected.
 | D4 | Repoint performs DAG-parent update **and** local-branch rebase **and** GitHub base re-target | Matches the orchestrator's existing repoint semantics (`bridge::execute_stack_repoint`) so a web-triggered repoint and an agent-triggered one converge. |
 | D5 | The spawn-time base is resolved in the daemon (`resolve_chain_base_ref`), the single point both the web and agent spawn paths funnel through | One source of truth; the fix lands for both `Start session` and `spawn-child` at once. |
 | D6 | Starting a node whose non-merged parent owns **no branch** is refused | Enforces bottom-up ordering: the parent's branch must exist to base onto it. Keyed on the branch, never on the parent's session — a closed or cleaned-up child session must not wedge the nodes below it. A merged parent is skipped, not required. |
+| D7 *(2026-07-26)* | A node is **orphaned** when it records a `session_id` **and** its branch resolution has arrived with `session.exists = false` | Server-authoritative and already polled — `QueryBranch` scans sessions by changeset branch. Deriving it from the web's `sessions` list would misread a node as orphaned whenever its host is merely offline. Requiring the resolution to have *arrived* keeps the first render deterministic: an absent resolution is "unknown", never "orphaned". |
+| D8 *(2026-07-26)* | Restarting an orphaned node that owns a branch pre-fills `work_on_selected_branch` with that branch | The branch, worktree and remote ref already exist, so `new_branch_from_base` would fail on "branch already exists". Resuming is also what the operator means — the work on that branch is not lost, only its session. |
+| D9 *(2026-07-26)* | `BranchResolution` gains `BranchRemote { exists, sha }`, resolved server-side per branch | "Available to be based upon" is a fact about `origin`, and only the daemon can see the repo. Deriving it in the web from `Changeset.remote_pushed` or from a branch name being non-empty would report *available* for a local-only branch — exactly the case that fails inside `git fetch`. |
+| D10 *(2026-07-26)* | "Missing branch" **replaces** the Start-session button rather than disabling it | A disabled button with no explanation is the dead end operators already hit. The blocked indicator names the branch being waited on, so the next action (start the predecessor) is obvious. |
+| D11 *(2026-07-26)* | PR lookups authenticate with the **operator's own GitHub access token**, retained daemon-side at login; the OAuth scope widens to `read:user repo` | The operator's own credential, already granted, and the only one that works for private repos and for future write operations. Chosen over an ambient `gh auth token` fallback (invisible state) and over embedding the token in the HMAC session token (which would put a live `repo` token into browser storage on a plain-http origin). Cost: an unavoidable re-login — see [Operator migration](#operator-migration-re-login-required). |
+| D12 *(2026-07-26)* | A PR lookup that cannot be performed is reported as **unavailable**, never as "no PR" | The silent `Ok(None)` is why a live PR was invisible for a day. A stub/demo login is explicitly *not* a failure (D13). |
+| D13 *(2026-07-26)* | **Stub / demo authentication resolves to "no PRs"** — never an error, never *unavailable* | `github.stub: true` exists so the product can be demoed and tested without real GitHub credentials. A stub login holds no access token by construction, so the lookup short-circuits to a clean empty result and must not fail the enclosing RPC — a demo must never surface an error banner or a red row. |
+| D14 *(2026-07-26)* | A login that **cannot retain** its access token fails | Minting a session without its token is a half-login: the operator appears signed in while every GitHub-backed read reports itself unavailable, and re-authenticating — the one action that would fix it — is the one action they have no reason to attempt. Failing the exchange surfaces the real fault (an unwritable `auth_storage`) at the moment it is caused. Does not apply to a stub login (D13, stores nothing by construction) nor to an unconfigured store, which is a deliberate deployment choice. |
+| D15 *(2026-07-26)* | `head` is qualified as `owner:branch` in both `get_open_pr` and `get_pr_by_head` | GitHub **ignores** an unqualified `head` and returns every PR, so `arr.first()` yields an arbitrary one (verified live: 30 PRs returned for a bare branch name vs 1 for `owner:branch`). Fixing only the display path would leave the orchestrator able to repoint or merge the wrong PR. |
+
+## Orphaned-node recovery *(added 2026-07-26)*
+
+`DeleteSession` removes a session directory and never touches any orchestrator's `Changeset.stack`, so
+the node keeps a dangling `session_id`. Previously the row derived its mode from that field alone
+(`isSpawned = Boolean(node.sessionId)`), so it showed a status chip forever and the planned PR became
+unworkable with no recovery path.
+
+- A node is **orphaned** when it records a `session_id` and its `QueryBranch` resolution has arrived
+  with `session.exists = false` (D7). An absent resolution is *unknown*, not orphaned.
+- An orphaned node offers **Start session** again. When it owns a `branch`, the dialog is pre-filled
+  into `work_on_selected_branch` on that branch (D8) rather than asked to create it.
+- The restarted session **re-links** to the node, so the recovery is durable: the daemon keys both the
+  node link and chain-base resolution on the spawn's **effective branch** — see
+  [PR stacking § Effective spawn branch](pr-stacking.md#effective-spawn-branch-added-2026-07-26).
+- The dangling `session_id` is deliberately **left in the changeset**. Deriving the orphan state at
+  render keeps `DeleteSession` free of a stack scan and self-heals across hosts; a restarted session
+  repoints the link (last writer wins).
+
+## Startability before the spawn *(added 2026-07-26)*
+
+The spawn gate used to be pure changeset metadata: `Stack::base_ref_for_spawn` refuses a non-merged
+branchless parent, but nothing checked git. A base branch absent from `origin` was caught much later
+by `git fetch origin <branch>` inside worktree creation — *after* `StartSession` was accepted and the
+session directory and changeset were written, leaving a broken session behind.
+
+- `BranchResolution.remote` (`BranchRemote { exists, sha }`) is resolved per branch by
+  `tddy_core::worktree::remote_branch_ref_sha` (`git rev-parse --verify --quiet
+  refs/remotes/origin/<branch>`; every failure mode collapses to `None`, since it runs on the polled
+  `QueryBranch` path).
+- The PR-Stack view polls **each node's base branch as well as its own** — startability is a property
+  of the *base*, and an unspawned node owns no branch to query.
+- A node with no `session_id` whose base is unavailable renders a blocked **"Missing branch:
+  `<base>`"** indicator **in place of** the Start-session button (D10), naming the branch it waits for.
+  Three independent blockers produce it: a direct parent that is non-merged and owns no branch (the
+  daemon's own gate), no ancestor owning a created branch at all, or a base branch whose `remote.exists`
+  is `false`.
+- A **root** node is always startable — its base is the project default branch, which exists by
+  construction. A node that already **owns** a branch is never blocked either: its spawn *resumes* that
+  branch, which creates nothing and fetches nothing.
+- A base whose resolution has **not arrived** is *unknown*, never missing — blocking on it would be a
+  permanent dead end of exactly the kind the indicator exists to remove.
+
+## Authenticated PR status *(added 2026-07-26)*
+
+Previously the daemon read `GITHUB_TOKEN` / `GH_TOKEN` from its own process environment — unset under
+systemd — and `get_pr_by_head` returned `Ok(None)`, indistinguishable from "no PR exists". A live PR
+was therefore invisible. The token the operator had already granted was discarded at the end of
+`ExchangeCode`.
+
+- The GitHub OAuth authorize scope is **`read:user repo`**, and `AuthServiceImpl::exchange_code`
+  retains the access token in a `GitHubTokenStore` (`put(login, token)` / `get(login)`). The daemon's
+  `FileGitHubTokenStore` is rooted at the (previously unread) `auth_storage` config path.
+- `ConnectionServiceImpl` resolves the **caller's own** token from their session-token login for
+  `query_branch` / `get_pr_status`, and `RealGithubPrApi::with_token` takes it explicitly — it never
+  falls back to the process environment, which would be a silent credential swap.
+- `PrStatusView` gains `unavailable` + `unavailable_reason`: absent token for a real login, an
+  insufficiently-scoped or expired token, a rate limit, or a transport error (D12). "No PR for this
+  head branch" stays `exists = false`.
+- A **stub/demo login** short-circuits to an empty result (`exists = false`, `unavailable = false`) —
+  never an error, never *unavailable* (D13). Enforced through
+  `GitHubOAuthProvider::issues_usable_access_token()`, which has **no default impl**, so every provider
+  must state its answer rather than a test-environment branch deciding it.
+- The `head` filter is qualified `owner:branch` in **both** `get_open_pr` and `get_pr_by_head` (D15).
+- A failed lookup **degrades only the `pr` leg**: `QueryBranch` and `GetPrStatus` always succeed as
+  RPCs, so the session / worktree / remote legs stay usable. `get_pr_by_head` drops its `Result`
+  entirely — with no error channel, no caller can re-raise a failed lookup as `Status::internal`
+  (previously a GitHub error propagated and the web's `.catch()` discarded the whole resolution).
+
+### Operator migration: re-login required
+
+Tokens minted before this change carry only `read:user`, so **every already-signed-in operator must
+log out and log in again** before PR status works; a stored token with insufficient scope surfaces as
+*unavailable* with a reason, not as "no PR". Because retention is now a hard login dependency (D14), a
+configured `auth_storage` must be writable by the daemon user or the daemon **refuses to start**. See
+[daemon § GitHub access-token retention](../daemon/session-auth.md#github-access-token-retention-added-2026-07-26).
 
 ## API surface
 
@@ -88,6 +183,12 @@ message PrStatusView {
   string url = 3;
   // "open" | "merged" | "closed" | "draft". Empty when exists = false.
   string state = 4;
+  // Added 2026-07-26. True when the lookup could not be performed (no GitHub credential for this
+  // login, insufficient scope, rate limit, transport error). Distinct from exists = false, which
+  // means "no PR exists for this head branch". A stub/demo login is never unavailable (D13).
+  bool unavailable = 5;
+  // Operator-facing reason when unavailable = true; empty otherwise. Rendered as a tooltip.
+  string unavailable_reason = 6;
 }
 ```
 
@@ -128,9 +229,17 @@ message RepointPlannedPrResponse {
 
 **New RPC — `QueryBranch`** *(added 2026-07-25)*
 
-Resolves, for one head branch, the in-progress child **session**, its on-disk **worktree**, and the
-live GitHub **PR status** in a single call. Added **additively** — `GetPrStatus` (and `usePrStatus` /
-`resolveNodeSession`) remain in place; `QueryBranch` reuses `PrStatusView` for its `pr` field.
+Resolves, for one head branch, the in-progress child **session**, its on-disk **worktree**, the
+branch's **remote-tracking state**, and the live GitHub **PR status** in a single call. Added
+**additively** — `QueryBranch` reuses `PrStatusView` for its `pr` field.
+
+> **Updated 2026-07-26** — `QueryBranch` is now the PR-Stack view's **only** source of live branch and
+> PR state. `GetPrStatus` is still served by the daemon (same handler path, same
+> `pr_status_for_caller`) but **no longer called by the web**: both RPCs make the same authenticated
+> `GET /pulls`, so polling both was two requests per branch per tick — ≈1440 requests/hour/branch
+> against a 5000/hour user limit, exhausted within the hour on a five-node stack, after which every row
+> read "PR status unavailable" permanently. `resolution.pr` is authoritative and arrives on the same
+> tick, so the web's `usePrStatus` hook was removed.
 
 ```proto
 rpc QueryBranch(QueryBranchRequest) returns (QueryBranchResponse);
@@ -153,6 +262,16 @@ message BranchResolution {
   BranchSession session = 2;      // the in-progress child session working the branch
   BranchWorktree worktree = 3;    // the worktree checked out for the branch on disk
   PrStatusView pr = 4;            // live GitHub PR status (reuses PrStatusView)
+  BranchRemote remote = 5;        // added 2026-07-26 — the branch on `origin`
+}
+
+// Added 2026-07-26. The remote-tracking state of a branch on `origin` — whether a descendant's
+// worktree can be based onto it yet.
+message BranchRemote {
+  // False when `origin/<branch>` is absent; a descendant cannot be based onto it yet.
+  bool exists = 1;
+  // Commit the remote ref points at when exists = true; empty otherwise.
+  string sha = 2;
 }
 message BranchSession {
   bool exists = 1;                // false when no session owns the branch
@@ -167,10 +286,11 @@ message BranchWorktree {
 ```
 
 The handler reuses the `get_pr_status` prologue (auth → os_user → sessions_base →
-`require_pr_stack_orchestrator`) and composes: **PR** via `RealGithubPrApi::get_pr_by_head` (token-less
-/ unresolvable repo → `exists = false`, never an error), **session** by scanning sessions whose
-`Changeset.branch == branch` (prefers active, ties by most-recently-updated), and **worktree** via
-`tddy_core::worktree::worktree_path_for_branch`.
+`require_pr_stack_orchestrator`) and composes: **PR** via `pr_status_for_caller` (the caller's own
+retained token; unresolvable `owner/repo` → `exists = false`; no usable credential → `unavailable`;
+never an error), **session** by scanning sessions whose `Changeset.branch == branch` (prefers active,
+ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_path_for_branch`, and
+**remote** via `tddy_core::worktree::remote_branch_ref_sha` (added 2026-07-26).
 
 ### Rust (`tddy-core`, `tddy-workflow-recipes`, `tddy-daemon`)
 
@@ -208,6 +328,29 @@ The handler reuses the `get_pr_status` prologue (auth → os_user → sessions_b
   with a message naming that parent. The guard never consults a parent's `session_id` — a closed or
   never-linked child session must not wedge a stack whose branch exists. Both spawn paths reach
   this via `spawn_claude_cli_session_inner`.
+- **Remote-branch leg (added 2026-07-26)** — `tddy_core::worktree::remote_branch_ref_sha(repo_root,
+  branch) -> Option<String>`, the public form of the private `remote_ref_exists`, backs
+  `BranchResolution.remote`.
+- **Effective spawn branch (added 2026-07-26)** — `connection_service::effective_spawn_branch(intent,
+  new_branch_name, selected_branch_to_work_on)` returns `local_branch_name(selected_branch_to_work_on)`
+  under `work_on_selected_branch` and the trimmed `new_branch_name` otherwise, and feeds the
+  **node-link** sites in both spawn paths that take a `stack_parent`. `resolve_chain_base_ref`
+  deliberately still keys on `new_branch_name`: under `work_on_selected_branch` a `Some(chain_base)`
+  makes worktree setup run a real `fetch_chain_pr_integration_base`, which can fail and is pointless
+  for a resume that creates nothing. See
+  [PR stacking § Effective spawn branch](pr-stacking.md#effective-spawn-branch-added-2026-07-26).
+- **GitHub credentials (added 2026-07-26)** — `tddy-github` widens the authorize scope to
+  `read:user repo`, adds the `GitHubTokenStore` trait plus `AuthServiceImpl::with_token_store`, and
+  gates retention on `GitHubOAuthProvider::issues_usable_access_token()` (no default impl, so every
+  provider must state its answer instead of a test-environment branch deciding it). `tddy-daemon` adds
+  `FileGitHubTokenStore` (rooted at `auth_storage`; `github-tokens.json` at mode `0600`, dir `0700`;
+  `put` serialised on a process-wide mutex and published via `.tmp` + `fsync` + `rename`), a boot-time
+  `probe_writable` in `build_auth_entries`, and `pr_status_for_caller`, which resolves the caller's
+  token by login and returns a `PrStatusView` value rather than a `Status`.
+  `tddy-workflow-recipes` adds `RealGithubPrApi::with_token` (never falling back to the process
+  environment — an explicit-token instance authenticating as the host's ambient token would be a silent
+  credential swap), `qualified_head`, and `PrLookupOutcome { Found | NotFound | Unavailable(reason) }`;
+  `get_pr_by_head` drops its `Result` entirely.
 
 ### Web (`tddy-web`)
 
@@ -221,12 +364,28 @@ The handler reuses the `get_pr_status` prologue (auth → os_user → sessions_b
 - `PlannedPrRow` renders: an **in-progress** indicator (branch resolves to a live session), the
   **PR number as a link** + **PR state**, and a **Repoint** control when the node needs repoint
   (a predecessor merged).
-- **`useQueryBranch(client, sessionToken, orchestratorId, branches)`** *(added 2026-07-25)* — sibling
-  of `usePrStatus`, per-branch polled, returning a `branch → BranchResolution` map. `PrStackScreen`
+- **`useQueryBranch(client, sessionToken, orchestratorId, branches)`** *(added 2026-07-25)* —
+  per-branch polled, returning a `branch → BranchResolution` map. `PrStackScreen`
   threads it through `PlannedPrList` into `PlannedPrRow`, which now sources the **worktree** indicator
   (`pr-stack-worktree-<nodeId>`), **in-progress** badge (`pr-stack-session-<nodeId>`), and **PR**
-  link/state from the `QueryBranch` resolution. Additive alongside the existing `usePrStatus` /
-  `resolveNodeSession` surfaces.
+  link/state from the `QueryBranch` resolution.
+- *(2026-07-26)* `usePrStatus` is **removed** (no remaining caller) and the `prStatusByBranch` /
+  `prStatus` props are off `PlannedPrList` / `PlannedPrRow`: `useQueryBranch` is the screen's single
+  source. `PrStackScreen`'s poll set is `resolvedBranches` — the branches nodes own **plus** every
+  node's base branch (deduplicated and sorted), because startability is a property of the base and an
+  unspawned node owns no branch. Base branches add no volume of their own: a base is by definition some
+  node's own `branch` and was already in the set.
+- *(2026-07-26)* `isNodeOrphaned(node, resolution)` (pure module) decides the recovered state;
+  `resolveStackBase(node, nodes) -> StackBase` (`default-branch` | `ancestor-branch` |
+  `no-ancestor-branch`) and `branchlessNonMergedParent(node, nodes)` in `deriveStackBaseBranch.ts`
+  decide startability — the discriminated and flat-direct-parent forms of the daemon's own gate, since
+  the flattened label collapses a root, an all-merged chain and a chain with no ancestor branch to the
+  same string while only the last is unstartable. `deriveStackBaseBranch` is now a thin wrapper over
+  `resolveStackBase`, unchanged in behaviour.
+- *(2026-07-26)* `CreateSessionInitialValues.selectedBranch` threads an existing branch into the
+  dialog, honoured when `branchIntent === "work_on_selected_branch"`; `PlannedPrPanel` is the
+  right-side docked/overlay container (see
+  [session-drawer.md § PR-Stack Chat Screen](../web/session-drawer.md#pr-stack-chat-screen)).
 
 ## Behavior and semantics
 
@@ -234,8 +393,26 @@ The handler reuses the `get_pr_status` prologue (auth → os_user → sessions_b
   off `node.branch`; `branch_suggestion` is only a derivation input, never the join key.
 - **In-progress.** A node is *in progress* when some `SessionEntry.branch === node.branch` and that
   session is active. A node with no matching session shows its "Start session" CTA as today.
-- **PR link/state.** When `GetPrStatus` returns `exists = true`, the row shows `#<number>` linking to
-  `url` and the `state`. When `exists = false`, no PR chip is shown.
+- **PR link/state.** When the resolution's `pr.exists = true`, the row shows `#<number>` linking to
+  `url` and the `state`. When `exists = false`, no PR chip is shown; when `unavailable = true` the row
+  reads "PR status unavailable" with `unavailable_reason` as a tooltip *(2026-07-26)*.
+- **CTA slot (mutually exclusive, 2026-07-26).** Exactly one of three things occupies a row's CTA slot:
+
+  | Node condition | CTA slot shows |
+  |---|---|
+  | No `session_id`, base branch on `origin` (or node is a root) | **Start session** button |
+  | No `session_id`, base branch absent from `origin` / unreachable | **Missing branch** blocked indicator, naming the base branch |
+  | `session_id` set, resolution not yet arrived, or says a session exists | status chip (unchanged) |
+  | `session_id` set, resolution says **no** session exists | **Start session** button, pre-filled to resume `node.branch` |
+
+- **PR display (2026-07-26).**
+
+  | Lookup outcome | Row shows |
+  |---|---|
+  | PR found | `#<number>` link + state chip |
+  | No PR for this head branch | nothing |
+  | Stub / demo login (D13) | nothing — identical to "no PR"; never an error |
+  | Lookup unavailable | "PR status unavailable" with the reason as a tooltip |
 - **Repoint availability.** The Repoint control appears only when the node has at least one parent
   whose PR is merged (`StackNode::is_skipped`) — i.e. the derived `needs-repoint` condition.
 - **Repoint effect.** Repoint drops merged parents, rebases the local branch onto the effective
@@ -249,16 +426,33 @@ The handler reuses the `get_pr_status` prologue (auth → os_user → sessions_b
 
 ## Edge cases and constraints
 
-- **Branch not yet on remote.** `GetPrStatus` returns `exists = false`; the row shows no PR chip and
-  no in-progress indicator until a session claims the branch. Not an error.
-- **No `GITHUB_TOKEN`/`GH_TOKEN`.** `GetPrStatus` returns `exists = false` (same as the orchestrator
-  path, which is token-gated). No crash, no spurious error banner.
+- **Branch not yet on remote.** The PR lookup returns `exists = false`; the row shows no PR chip and
+  no in-progress indicator until a session claims the branch. Not an error. Its `remote.exists` is
+  `false`, which blocks a *descendant's* spawn with the "Missing branch" indicator *(2026-07-26)*.
+- **No GitHub credential for the calling operator** *(revised 2026-07-26)* — the lookup reports
+  `unavailable = true` with a reason, **not** `exists = false`. Previously the daemon read
+  `GITHUB_TOKEN`/`GH_TOKEN` from its own environment and an absent token collapsed to "no PR",
+  which is exactly how a live PR stayed invisible.
+- **Re-login is required** *(2026-07-26)* — tokens minted before the scope widened carry only
+  `read:user`; an insufficiently-scoped token surfaces as *unavailable* with a reason.
+- **A stub/demo login is a first-class supported state**, not a degraded one *(2026-07-26)*: rows simply
+  show no PR, every RPC succeeds, and no error surface appears anywhere in the screen. The stub
+  provider (`packages/tddy-github/src/stub.rs`, `github.stub: true`) stores no token, and that must be
+  indistinguishable from a repository with no open PRs.
+- **`origin/<branch>` is only as fresh as the last fetch** *(2026-07-26)* — a branch pushed by another
+  machine reads as missing until this host fetches. The "Missing branch" indicator is therefore
+  conservative: it can delay a spawn, never permit one that would fail.
+- **A dangling `session_id` is left in the changeset**, not scrubbed *(2026-07-26)* — the orphan state is
+  derived at render, which keeps `DeleteSession` free of a stack scan and self-heals across hosts.
+- **`work_on_selected_branch` skips chain-base resolution** *(2026-07-26)* — correct, since no branch is
+  created and nothing is fetched. Only the node link needs the effective branch.
 - **Branch resolves to more than one session.** Resolution prefers the active session; ties resolve to
   the most recently updated. (Should not happen for a well-formed stack.)
 - **Repoint with no local branch.** Git rebase is skipped (remote-only branch); PR base is still
   re-targeted — mirrors `execute_stack_repoint`'s existing "branch not local; skipping rebase" path.
-- **Polling churn.** The poll interval is fixed and shared per screen; only the branches currently
-  rendered are queried.
+- **Polling churn.** The poll interval is fixed (5 s) and shared per screen; only the branches currently
+  rendered — and their base branches, which are themselves rendered nodes' branches — are queried. Since
+  2026-07-26 that is **one** GitHub lookup per branch per tick, not two.
 - **Multi-parent DAG base.** A node with more than one non-merged parent uses the nearest
   ancestor ref (`effective_base_refs`' first entry) as its single base; a true octopus/merge base
   across multiple parents is out of scope for this changeset (documented non-goal).

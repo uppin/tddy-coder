@@ -613,13 +613,14 @@ mod tests {
         fn get_pr_by_head(
             &self,
             _head: &str,
-        ) -> Result<Option<crate::orchestrate_pr_stack::github::PrView>, tddy_core::WorkflowError>
-        {
-            Ok(Some(crate::orchestrate_pr_stack::github::PrView {
-                number: self.pr_number,
-                url: "https://github.com/o/r/pull/1".into(),
-                state: crate::orchestrate_pr_stack::github::PrState::Open,
-            }))
+        ) -> crate::orchestrate_pr_stack::github::PrLookupOutcome {
+            crate::orchestrate_pr_stack::github::PrLookupOutcome::Found(
+                crate::orchestrate_pr_stack::github::PrView {
+                    number: self.pr_number,
+                    url: "https://github.com/o/r/pull/1".into(),
+                    state: crate::orchestrate_pr_stack::github::PrState::Open,
+                },
+            )
         }
         fn merge_pr(&self, _number: u64) -> Result<String, tddy_core::WorkflowError> {
             Ok("sha".into())
@@ -660,9 +661,8 @@ mod tests {
         fn get_pr_by_head(
             &self,
             _head: &str,
-        ) -> Result<Option<crate::orchestrate_pr_stack::github::PrView>, tddy_core::WorkflowError>
-        {
-            Ok(None)
+        ) -> crate::orchestrate_pr_stack::github::PrLookupOutcome {
+            crate::orchestrate_pr_stack::github::PrLookupOutcome::NotFound
         }
         fn merge_pr(&self, _number: u64) -> Result<String, tddy_core::WorkflowError> {
             Ok("sha".into())

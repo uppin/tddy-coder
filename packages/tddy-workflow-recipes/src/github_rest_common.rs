@@ -113,8 +113,19 @@ pub fn curl_github_patch_json(
     let token = github_token_from_env().ok_or_else(|| {
         curl_err("curl_github_patch_json: no GitHub token set (GITHUB_TOKEN / GH_TOKEN)")
     })?;
+    curl_github_patch_json_with_token(repo, path, body, &token)
+}
+
+/// HTTP PATCH with a caller-supplied token — for a server acting on behalf of one operator, whose
+/// own credential must be used rather than the host process environment.
+pub fn curl_github_patch_json_with_token(
+    repo: &str,
+    path: &str,
+    body: &str,
+    token: &str,
+) -> Result<String, tddy_core::WorkflowError> {
     let url = github_api_url(repo, path);
-    run_curl_json_body(&url, "PATCH", body, &token)
+    run_curl_json_body(&url, "PATCH", body, token)
 }
 
 /// HTTP POST with a JSON body string, returns the response body.
@@ -127,8 +138,18 @@ pub fn curl_github_post_json(
     let token = github_token_from_env().ok_or_else(|| {
         curl_err("curl_github_post_json: no GitHub token set (GITHUB_TOKEN / GH_TOKEN)")
     })?;
+    curl_github_post_json_with_token(repo, path, body, &token)
+}
+
+/// HTTP POST with a caller-supplied token (see [`curl_github_patch_json_with_token`]).
+pub fn curl_github_post_json_with_token(
+    repo: &str,
+    path: &str,
+    body: &str,
+    token: &str,
+) -> Result<String, tddy_core::WorkflowError> {
     let url = github_api_url(repo, path);
-    run_curl_json_body(&url, "POST", body, &token)
+    run_curl_json_body(&url, "POST", body, token)
 }
 
 /// HTTP GET with query parameters, returns the response body.
@@ -140,6 +161,16 @@ pub fn curl_github_get_json(
     let token = github_token_from_env().ok_or_else(|| {
         curl_err("curl_github_get_json: no GitHub token set (GITHUB_TOKEN / GH_TOKEN)")
     })?;
+    curl_github_get_json_with_token(repo, path, query, &token)
+}
+
+/// HTTP GET with a caller-supplied token (see [`curl_github_patch_json_with_token`]).
+pub fn curl_github_get_json_with_token(
+    repo: &str,
+    path: &str,
+    query: &[(&str, &str)],
+    token: &str,
+) -> Result<String, tddy_core::WorkflowError> {
     let url = github_api_url(repo, path);
     let out_path = temp_github_path("tddy-gh-get");
 
@@ -198,8 +229,18 @@ pub fn curl_github_put_json(
     let token = github_token_from_env().ok_or_else(|| {
         curl_err("curl_github_put_json: no GitHub token set (GITHUB_TOKEN / GH_TOKEN)")
     })?;
+    curl_github_put_json_with_token(repo, path, body, &token)
+}
+
+/// HTTP PUT with a caller-supplied token (see [`curl_github_patch_json_with_token`]).
+pub fn curl_github_put_json_with_token(
+    repo: &str,
+    path: &str,
+    body: &str,
+    token: &str,
+) -> Result<String, tddy_core::WorkflowError> {
     let url = github_api_url(repo, path);
-    run_curl_json_body(&url, "PUT", body, &token)
+    run_curl_json_body(&url, "PUT", body, token)
 }
 
 #[cfg(test)]

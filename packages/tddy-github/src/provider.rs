@@ -22,4 +22,12 @@ pub trait GitHubOAuthProvider: Send + Sync + 'static {
     /// The state parameter must match one previously issued by authorize_url.
     /// Returns (access_token, user) on success.
     async fn exchange_code(&self, code: &str, state: &str) -> Result<(String, GitHubUser), String>;
+
+    /// Whether [`Self::exchange_code`]'s access token is a real GitHub credential that can
+    /// authenticate API calls.
+    ///
+    /// `false` for the in-memory stub, whose token is synthetic — GitHub would reject it, so it must
+    /// never be retained: a demo login holds no credential *by construction*, and its PR lookups
+    /// resolve to a clean empty result rather than to an error (PR-stack UX recovery, D12).
+    fn issues_usable_access_token(&self) -> bool;
 }
