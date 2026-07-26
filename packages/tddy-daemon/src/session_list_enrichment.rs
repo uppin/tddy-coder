@@ -19,7 +19,11 @@ use tddy_core::{
     format_elapsed_compact, read_changeset, read_session_metadata, Changeset,
     SessionEntry as CsSessionEntry,
 };
-use tddy_service::proto::connection::SessionEntry as ProtoSessionEntry;
+use tddy_service::proto::connection::{
+    SessionContextDocKind as ProtoContextDocKind, SessionEntry as ProtoSessionEntry,
+};
+
+use crate::session_context_docs::ContextDocKind;
 
 /// Display strings aligned with the TUI status bar (goal, state, elapsed, agent, model).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -266,6 +270,14 @@ pub fn resolve_model_label_for_tag(changeset: &Changeset, tag: &str) -> Option<S
     out
 }
 
+/// Map a context doc's kind to its wire enum.
+fn proto_context_doc_kind(kind: ContextDocKind) -> ProtoContextDocKind {
+    match kind {
+        ContextDocKind::Manifest => ProtoContextDocKind::Manifest,
+        ContextDocKind::Attachment => ProtoContextDocKind::Attachment,
+    }
+}
+
 /// Copies enrichment display strings into a proto `SessionEntry` (daemon list path).
 pub fn apply_session_list_status_to_proto(
     session_dir: &Path,
@@ -297,6 +309,8 @@ pub fn apply_session_list_status_to_proto(
                 path: doc.path.to_string_lossy().into_owned(),
                 description: doc.description,
                 exists: doc.exists,
+                kind: proto_context_doc_kind(doc.kind) as i32,
+                size_bytes: doc.size_bytes,
             })
             .collect();
     entry.recipe = status.recipe;
@@ -1337,6 +1351,286 @@ recipe: pr-stack
         assert!(
             !exploration.description.trim().is_empty(),
             "each context doc must carry a human description for the web to render"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Acceptance tests: attachments on context_docs
+    // ---------------------------------------------------------------------------
+
+    use crate::session_attachments::copy_attachment_into_session;
+    use tddy_service::proto::connection::{
+        SessionContextDoc as ProtoContextDoc, SessionContextDocKind,
+    };
+    use tddy_workflow::session_attachments_root;
+    use tempfile::TempDir;
+
+    /// A session directory on disk — `.session.yaml`, `changeset.yaml`, `artifacts/` — plus a
+    /// separate directory holding the source files an attachment is copied from. Attachments are
+    /// written through the production store, so no test fabricates the attachments layout by hand.
+    struct SessionUnderTest {
+        dir: TempDir,
+        sources: TempDir,
+    }
+
+    const ATTACH_SESSION_ID: &str = "attach-sess";
+
+    /// A session whose `changeset.yaml` names `recipe`.
+    fn a_session_with_recipe(recipe: &str) -> SessionUnderTest {
+        a_session_with_changeset_recipe_line(&format!("recipe: {recipe}\n"))
+    }
+
+    /// A session whose `changeset.yaml` carries no `recipe` field at all.
+    fn a_session_without_a_recipe() -> SessionUnderTest {
+        a_session_with_changeset_recipe_line("")
+    }
+
+    fn a_session_with_changeset_recipe_line(recipe_line: &str) -> SessionUnderTest {
+        let session = SessionUnderTest {
+            dir: tempdir().unwrap(),
+            sources: tempdir().unwrap(),
+        };
+        let dir = session.dir.path();
+        fs::write(
+            dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            format!(
+                r"session_id: {ATTACH_SESSION_ID}
+project_id: proj-attach
+created_at: '2026-07-20T10:00:00Z'
+updated_at: '2026-07-20T10:05:00Z'
+status: active
+repo_path: /tmp/repo
+pid: 91
+"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("changeset.yaml"),
+            format!(
+                r"version: 1
+models: {{}}
+sessions: []
+state:
+  current: Init
+  updated_at: '2026-07-20T10:05:00Z'
+  history:
+    - state: Init
+      at: '2026-07-20T10:05:00Z'
+{recipe_line}"
+            ),
+        )
+        .unwrap();
+        fs::create_dir_all(dir.join("artifacts")).unwrap();
+        session
+    }
+
+    impl SessionUnderTest {
+        fn path(&self) -> &Path {
+            self.dir.path()
+        }
+
+        /// Writes a recipe-owned artifact straight into `artifacts/`, as a recipe writer does.
+        fn with_manifest_artifact(self, basename: &str, contents: &str) -> Self {
+            fs::write(self.path().join("artifacts").join(basename), contents).unwrap();
+            self
+        }
+
+        /// Attaches a document through the production store.
+        fn with_attachment(self, basename: &str, contents: &str) -> Self {
+            let source = self.sources.path().join(basename);
+            fs::write(&source, contents).unwrap();
+            copy_attachment_into_session(self.path(), &source, basename)
+                .expect("attaching a document must succeed");
+            self
+        }
+
+        /// Runs list enrichment over the session and returns the populated proto row.
+        fn enriched_entry(&self) -> ProtoSessionEntry {
+            let mut entry = ProtoSessionEntry {
+                session_id: ATTACH_SESSION_ID.to_string(),
+                ..Default::default()
+            };
+            apply_session_list_status_to_proto(self.path(), &mut entry)
+                .expect("enrichment must not error");
+            entry
+        }
+    }
+
+    /// The one context-doc row with this `kind` and `basename`, failing with the full list otherwise.
+    fn context_doc<'a>(
+        entry: &'a ProtoSessionEntry,
+        kind: SessionContextDocKind,
+        basename: &str,
+    ) -> &'a ProtoContextDoc {
+        entry
+            .context_docs
+            .iter()
+            .find(|d| d.kind == kind as i32 && d.basename == basename)
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected a {kind:?} context doc named {basename:?}, got {:?}",
+                    context_doc_kinds_and_basenames(entry)
+                )
+            })
+    }
+
+    /// `(kind, basename)` for every context-doc row, in the order the wire carries them.
+    fn context_doc_kinds_and_basenames(
+        entry: &ProtoSessionEntry,
+    ) -> Vec<(SessionContextDocKind, String)> {
+        entry
+            .context_docs
+            .iter()
+            .map(|d| {
+                let kind = SessionContextDocKind::try_from(d.kind).unwrap_or_else(|_| {
+                    panic!(
+                        "context doc {:?} carries an unknown kind value {}",
+                        d.basename, d.kind
+                    )
+                });
+                (kind, d.basename.clone())
+            })
+            .collect()
+    }
+
+    trait ProtoContextDocAssertions {
+        fn assert_path(&self, expected: &Path) -> &Self;
+        fn assert_size_bytes(&self, expected: u64) -> &Self;
+        fn assert_exists(&self, expected: bool) -> &Self;
+        fn assert_has_description(&self) -> &Self;
+    }
+
+    impl ProtoContextDocAssertions for ProtoContextDoc {
+        fn assert_path(&self, expected: &Path) -> &Self {
+            assert_eq!(
+                self.path,
+                expected.to_string_lossy(),
+                "context doc {:?} path",
+                self.basename
+            );
+            self
+        }
+
+        fn assert_size_bytes(&self, expected: u64) -> &Self {
+            assert_eq!(
+                self.size_bytes, expected,
+                "context doc {:?} size_bytes",
+                self.basename
+            );
+            self
+        }
+
+        fn assert_exists(&self, expected: bool) -> &Self {
+            assert_eq!(
+                self.exists, expected,
+                "context doc {:?} on-disk existence",
+                self.basename
+            );
+            self
+        }
+
+        // The exact wording is a copy decision; the contract here is that every row the web renders
+        // carries a non-empty human description.
+        fn assert_has_description(&self) -> &Self {
+            assert!(
+                !self.description.trim().is_empty(),
+                "context doc {:?} must carry a non-empty description",
+                self.basename
+            );
+            self
+        }
+    }
+
+    #[test]
+    fn an_attachment_copied_into_a_session_surfaces_on_the_proto_entry_with_the_attachment_kind() {
+        // Given — a pr-stack session with one attached document
+        let session = a_session_with_recipe("pr-stack")
+            .with_attachment("requirements.md", "# Requirements\n");
+
+        // When — list enrichment builds the proto row the web reads
+        let entry = session.enriched_entry();
+
+        // Then — the attachment is listed with its stored path, byte size, and a description
+        context_doc(&entry, SessionContextDocKind::Attachment, "requirements.md")
+            .assert_path(&session_attachments_root(session.path()).join("requirements.md"))
+            .assert_size_bytes("# Requirements\n".len() as u64)
+            .assert_exists(true)
+            .assert_has_description();
+    }
+
+    #[test]
+    fn manifest_context_docs_keep_the_manifest_kind_when_the_session_also_has_attachments() {
+        // Given — a pr-stack session holding the recipe's exploration doc and one attachment
+        let session = a_session_with_recipe("pr-stack")
+            .with_manifest_artifact("exploration.md", "# Exploration\n")
+            .with_attachment("notes.md", "later\n");
+
+        // When
+        let entry = session.enriched_entry();
+
+        // Then — the recipe's docs keep MANIFEST and come first in manifest order; the attachment follows
+        assert_eq!(
+            context_doc_kinds_and_basenames(&entry),
+            vec![
+                (
+                    SessionContextDocKind::Manifest,
+                    "stack-plan.yaml".to_string()
+                ),
+                (
+                    SessionContextDocKind::Manifest,
+                    "pr-stack-plan.md".to_string()
+                ),
+                (
+                    SessionContextDocKind::Manifest,
+                    "stack-status.md".to_string()
+                ),
+                (
+                    SessionContextDocKind::Manifest,
+                    "stack-status.json".to_string()
+                ),
+                (
+                    SessionContextDocKind::Manifest,
+                    "exploration.md".to_string()
+                ),
+                (SessionContextDocKind::Attachment, "notes.md".to_string()),
+            ],
+            "recipe-owned docs must stay MANIFEST and precede attachments"
+        );
+    }
+
+    #[test]
+    fn an_attachment_named_like_a_recipe_artifact_does_not_replace_the_manifest_row() {
+        // Given — the recipe's own exploration.md and an attachment that happens to share its name
+        let session = a_session_with_recipe("pr-stack")
+            .with_manifest_artifact("exploration.md", "# Recipe exploration\n")
+            .with_attachment("exploration.md", "# My notes\n");
+
+        // When
+        let entry = session.enriched_entry();
+
+        // Then — two rows survive: the recipe's file under artifacts/, the attachment under attachments/
+        context_doc(&entry, SessionContextDocKind::Manifest, "exploration.md")
+            .assert_path(&session.path().join("artifacts").join("exploration.md"))
+            .assert_size_bytes("# Recipe exploration\n".len() as u64);
+        context_doc(&entry, SessionContextDocKind::Attachment, "exploration.md")
+            .assert_path(&session_attachments_root(session.path()).join("exploration.md"))
+            .assert_size_bytes("# My notes\n".len() as u64);
+    }
+
+    #[test]
+    fn a_session_with_no_recipe_still_surfaces_its_attachments_on_the_proto_entry() {
+        // Given — a session whose changeset names no recipe, with one attached document
+        let session = a_session_without_a_recipe().with_attachment("spec.pdf", "%PDF-1.4\n");
+
+        // When
+        let entry = session.enriched_entry();
+
+        // Then — the manifest half is empty, and the attachment is listed regardless
+        assert_eq!(
+            context_doc_kinds_and_basenames(&entry),
+            vec![(SessionContextDocKind::Attachment, "spec.pdf".to_string())],
+            "attachments must not depend on recipe resolution"
         );
     }
 
