@@ -135,6 +135,17 @@ service ConnectionService {
   // newest-first list, and deletes a single uploaded file on demand.
   rpc ListSessionUploads(ListSessionUploadsRequest) returns (ListSessionUploadsResponse);
   rpc DeleteSessionUpload(DeleteSessionUploadRequest) returns (DeleteSessionUploadResponse);
+  // Start-session attachments — pre-session staging. NOT IMPLEMENTED: all three return
+  // UNIMPLEMENTED; see packages/tddy-daemon/docs/connection-service.md § Start-session attachments
+  // for the intended semantics. Documents picked in the Start-Session form are uploaded like the
+  // terminal "Attach" flow (client-side 48 KiB chunks, one unary per chunk, `last` on the final
+  // one), but no session exists yet — so the bytes land in a per-host staging area keyed by
+  // `staging_id` and are referenced from StartSessionRequest.attachments. Staged batches are
+  // addressed to one host (`daemon_instance_id`) and are only usable by a session started on that
+  // same host. List/Delete back the form's attachment chips (re-open, remove before starting).
+  rpc UploadStagedAttachmentChunk(UploadStagedAttachmentChunkRequest) returns (UploadStagedAttachmentChunkResponse);
+  rpc ListStagedAttachments(ListStagedAttachmentsRequest) returns (ListStagedAttachmentsResponse);
+  rpc DeleteStagedAttachment(DeleteStagedAttachmentRequest) returns (DeleteStagedAttachmentResponse);
 }
 
 message ListToolsRequest {}
@@ -382,6 +393,13 @@ message StartSessionRequest {
   // A push failure fails the session start (no silent fallback). See
   // docs/ft/coder/1-WIP/PRD-2026-07-25-branch-query-and-remote-branch.md.
   bool create_remote_branch = 28;
+  // Documents to attach to the new session. Each descriptor names the basename the document is
+  // materialized under plus where its bytes come from — a pre-session staged upload, or a document
+  // that already exists on a connected host. Empty = no attachments. NOT IMPLEMENTED: the daemon's
+  // start_session currently ignores this field — a request carrying attachments starts a session
+  // with none, and no error. See packages/tddy-daemon/docs/connection-service.md § Start-session
+  // attachments.
+  repeated SessionAttachment attachments = 29;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved
@@ -1150,3 +1168,119 @@ message DeleteSessionUploadRequest {
   string file_name = 4;  // untrusted — validated as a basename
 }
 message DeleteSessionUploadResponse {}
+
+// --- Start-session attachments: pre-session staging upload + StartSessionRequest descriptors ---
+
+message UploadStagedAttachmentChunkRequest {
+  string session_token = 1;
+  // Host authority to stage the bytes on. Empty or matching the local instance = stage locally.
+  // A session can only consume a staged batch that lives on the host it starts on, so this is the
+  // same daemon_instance_id the subsequent StartSession is addressed to.
+  string daemon_instance_id = 2;
+  // Client-generated UUID grouping all files of one Start-Session form into
+  // {staging_root}/<staging_id>/. Untrusted — validated as a basename by the daemon.
+  string staging_id = 3;
+  // Basename only — path separators, "." / ".." and empty are rejected by the daemon.
+  string file_name = 4;
+  // Next chunk of this file's bytes; chunks for a given (staging_id, file_name) arrive in order.
+  bytes data = 5;
+  // True on the final chunk of this file — the response then carries the completed entry.
+  bool last = 6;
+}
+message UploadStagedAttachmentChunkResponse {
+  // The staged file, populated only when the request's `last` was true. Its `staging_id` /
+  // `file_name` are what a StagedAttachmentRef refers to.
+  StagedAttachmentEntry entry = 1;
+}
+
+message ListStagedAttachmentsRequest {
+  string session_token = 1;
+  // Host authority holding the staging area (see UploadStagedAttachmentChunkRequest).
+  string daemon_instance_id = 2;
+  // When set, list only this batch. Empty = every batch still staged for the caller.
+  string staging_id = 3;
+}
+message ListStagedAttachmentsResponse {
+  repeated StagedAttachmentEntry attachments = 1;  // newest first
+}
+
+message DeleteStagedAttachmentRequest {
+  string session_token = 1;
+  string daemon_instance_id = 2;
+  string staging_id = 3;  // untrusted — validated as a basename, contained under the staging root
+  string file_name = 4;   // untrusted — validated as a basename
+}
+message DeleteStagedAttachmentResponse {}
+
+// One file sitting in a host's pre-session staging area.
+message StagedAttachmentEntry {
+  // Host authority holding the bytes (the resolved daemon instance, never empty in a response).
+  string daemon_instance_id = 1;
+  string staging_id = 2;
+  string file_name = 3;  // basename
+  string host_path = 4;  // absolute host path of the staged file
+  uint64 size_bytes = 5;
+  int64 staged_at_ms = 6;  // file mtime, unix milliseconds
+}
+
+// One document attached to a session at start. The daemon running the session materializes each
+// attachment under {session_dir}/attachments/<basename> before launching the agent, so the agent
+// sees a plain local file regardless of which source variant produced it.
+message SessionAttachment {
+  // Basename the document is materialized under. Basename only — path separators, "." / ".." and
+  // empty are rejected; duplicate basenames within one StartSessionRequest are a request error
+  // (no silent renaming).
+  string basename = 1;
+  // Where the bytes come from. Exactly one variant must be set; an unset source is a request error.
+  oneof source {
+    // Bytes uploaded ahead of the session by UploadStagedAttachmentChunk.
+    StagedAttachmentRef staged = 2;
+    // A document that already exists on one of the connected hosts.
+    HostDocumentRef host_document = 3;
+  }
+}
+
+// Reference to a file in a host's pre-session staging area.
+message StagedAttachmentRef {
+  // Host authority holding the staged bytes — the daemon_instance_id UploadStagedAttachmentChunk
+  // was addressed to. Must be the host the session starts on; a mismatch is a request error rather
+  // than a cross-host fetch. Empty = the daemon handling the call.
+  string daemon_instance_id = 1;
+  string staging_id = 2;
+  // Basename under the staging batch. Untrusted — validated as a basename contained under the
+  // staging root. May differ from SessionAttachment.basename (the UI can rename an attachment).
+  string file_name = 3;
+}
+
+// Reference to a document that already exists on a connected host — an artifacts/ planning doc, a
+// file previously uploaded to a session, a worktree file, or a checked-in project doc.
+message HostDocumentRef {
+  // Host authority that owns the document. The read is performed by that daemon under its own
+  // os_user mapping — the referencing client's host grants it no access. Empty = the daemon
+  // handling the call.
+  string daemon_instance_id = 1;
+  // Root that `relative_path` resolves against. There is deliberately no "absolute host path"
+  // scope: the owning daemon resolves the root itself and refuses a path that escapes it, so a
+  // caller cannot name an arbitrary file on that host.
+  HostDocumentScope scope = 2;
+  // Owning session for the SESSION_* scopes; ignored otherwise.
+  string session_id = 3;
+  // Owning project for HOST_DOCUMENT_SCOPE_PROJECT_REPO; ignored otherwise.
+  string project_id = 4;
+  // Path relative to the resolved root: POSIX separators, no "." / ".." segments, not absolute.
+  // For SESSION_ARTIFACT the basename of a SessionContextDoc; for SESSION_UPLOAD
+  // "<upload_id>/<file_name>" (see SessionUploadEntry).
+  string relative_path = 5;
+}
+
+enum HostDocumentScope {
+  HOST_DOCUMENT_SCOPE_UNSPECIFIED = 0;
+  // {session_dir}/artifacts/ — recipe-manifest planning docs (see SessionContextDoc).
+  HOST_DOCUMENT_SCOPE_SESSION_ARTIFACT = 1;
+  // {session_dir}/uploads/ — files already uploaded to a session (see SessionUploadEntry).
+  HOST_DOCUMENT_SCOPE_SESSION_UPLOAD = 2;
+  // The session's git worktree.
+  HOST_DOCUMENT_SCOPE_SESSION_WORKTREE = 3;
+  // The project's main checkout (ProjectEntry.main_repo_path) — e.g. a checked-in docs/ft/*.md.
+  HOST_DOCUMENT_SCOPE_PROJECT_REPO = 4;
+}

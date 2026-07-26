@@ -2,6 +2,15 @@
 
 Release note history for the Coder product area.
 
+## 2026-07-26 — PR-Stack planning: every planned PR is self-contained
+
+- **The planning agent no longer plans layer-split stacks.** It had no guidance on PR size or self-containment — dependency order, parallelism and branch naming were the only rules — so "node 1: declare the API / node 2: implement it" was a legitimate plan, and the resulting PR shipped surface with no behavior: nothing to review for correctness, nothing to test beyond compiling, and a contract in the tree that misrepresented the system. Planning now requires the API/schema change, its implementation and its tests in **one** node ([pr-stacking.md § PR boundary contract](pr-stacking.md#pr-boundary-contract-every-node-is-self-contained)).
+- Splitting a schema from its behavior, an endpoint from its handler, a model from its persistence, or a signature from its body is explicitly named as one node, never two.
+- **An oversized slice now has somewhere to go:** split by *capability* — one source variant, one enum case, one screen, happy path before edge cases — each part still end-to-end, so the prohibition does not push the agent back into layer splits.
+- Two narrow exceptions may omit implementation: a mechanical rename/move with no behavior change, or regenerating already-committed generated code. A debatable third case goes in the node's `description` for a human to decide instead of being invented silently.
+- **Refining a plan by chat keeps the rule.** The refinement turn re-runs `write-stack-plan`, whose prompt restates the scoping rules and states that a refinement request must not talk the agent into a layer split.
+- The rule is **guidance to the planning model, not a validated gate** — `validate_stack_plan` never sees the diff a node will produce, so it still checks only graph shape and branch naming. A layer-split plan remains possible; the node `description` is what surfaces it to a reviewer.
+
 ## 2026-07-26 — PR-Stack: a stack progresses on branches, not on child sessions
 
 - **Bug fix — a closed child session no longer wedges the stack below it.** Starting a planned node was gated on its parent node having a *session* ("non-merged parent '<id>' has not been started yet"), so a session that was closed, cleaned up, or never linked blocked every descendant even though the parent's branch existed and was a fine base. The gate is now the parent's **branch** ([pr-stack-live-status.md](pr-stack-live-status.md), [pr-stacking.md](pr-stacking.md)).
