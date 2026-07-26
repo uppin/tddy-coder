@@ -907,23 +907,40 @@ impl ConnectionServiceImpl {
 
     /// PR status for one branch, resolved with the calling operator's own GitHub credential.
     ///
+    /// `repo_root` is `None` when no file in the session directory records a checkout (see
+    /// [`tddy_core::repo_root_for_session`]) — an unknown repository, not a repository without PRs.
+    ///
     /// Never fails: a lookup that cannot be performed degrades this one field to *unavailable* (D8),
     /// and stub/demo authentication resolves to an empty result (D12) — so the enclosing RPC keeps
     /// returning its other legs instead of collapsing into an error the web discards wholesale.
     async fn pr_status_for_caller(
         &self,
         github_login: &str,
-        repo_root: &std::path::Path,
+        repo_root: Option<&std::path::Path>,
         branch: &str,
     ) -> tddy_service::proto::connection::PrStatusView {
         use crate::github_pr_credentials::{pr_lookup_for_caller, PrLookup};
         use tddy_service::proto::connection::PrStatusView;
         use tddy_workflow_recipes::orchestrate_pr_stack::github::PrLookupOutcome;
 
-        // No GitHub namespace for this checkout means no PR can exist for the branch — a fact about
-        // the repository, not a failed lookup, so it stays `exists = false`.
+        // Both ways of failing to name a GitHub repository leave the lookup un-performable, so they
+        // are *unavailable* with a reason — reporting `exists = false` would claim the branch has no
+        // PR when in fact nothing was ever asked (D8).
+        let Some(repo_root) = repo_root else {
+            return pr_status_unavailable(
+                branch,
+                "no checkout is recorded for this session, so its GitHub repository is unknown"
+                    .to_string(),
+            );
+        };
         let Some(owner_repo) = owner_repo_from_repo_root(repo_root) else {
-            return PrStatusView::default();
+            return pr_status_unavailable(
+                branch,
+                format!(
+                    "no GitHub repository could be resolved from the origin remote of {}",
+                    repo_root.display()
+                ),
+            );
         };
         let stub_mode = self
             .config
@@ -937,23 +954,17 @@ impl ConnectionServiceImpl {
             .and_then(|store| store.get(github_login));
         let token = match pr_lookup_for_caller(stub_mode, stored.as_deref()) {
             PrLookup::Empty => return PrStatusView::default(),
-            PrLookup::Unavailable(reason) => {
-                return PrStatusView {
-                    unavailable: true,
-                    unavailable_reason: reason,
-                    ..PrStatusView::default()
-                };
-            }
+            PrLookup::Unavailable(reason) => return pr_status_unavailable(branch, reason),
             PrLookup::Perform(token) => token,
         };
 
-        let branch = branch.to_string();
+        let head_branch = branch.to_string();
         let outcome = tokio::task::spawn_blocking(move || {
             use tddy_workflow_recipes::orchestrate_pr_stack::github::GithubPrApi;
             tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::with_token(
                 owner_repo, token,
             )
-            .get_pr_by_head(&branch)
+            .get_pr_by_head(&head_branch)
         })
         .await;
 
@@ -967,16 +978,11 @@ impl ConnectionServiceImpl {
                 unavailable_reason: String::new(),
             },
             Ok(PrLookupOutcome::NotFound) => PrStatusView::default(),
-            Ok(PrLookupOutcome::Unavailable(reason)) => PrStatusView {
-                unavailable: true,
-                unavailable_reason: reason,
-                ..PrStatusView::default()
-            },
-            Err(join_error) => PrStatusView {
-                unavailable: true,
-                unavailable_reason: format!("the PR lookup did not complete: {join_error}"),
-                ..PrStatusView::default()
-            },
+            Ok(PrLookupOutcome::Unavailable(reason)) => pr_status_unavailable(branch, reason),
+            Err(join_error) => pr_status_unavailable(
+                branch,
+                format!("the PR lookup did not complete: {join_error}"),
+            ),
         }
     }
 
@@ -7242,19 +7248,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
         require_pr_stack_orchestrator(&session_dir)?;
 
-        // The orchestrator session's `repo_path` is a filesystem path; `pr_status_for_caller`
-        // resolves the GitHub namespace from its remote and reports a lookup it cannot perform as
-        // unavailable rather than failing this call.
-        let changeset =
-            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        let repo_root = changeset
-            .repo_path
-            .clone()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| session_dir.clone());
+        // An orchestrator never gets a worktree, so its `changeset.yaml` records no checkout and only
+        // `.session.yaml` names the one it plans over. `pr_status_for_caller` resolves the GitHub
+        // namespace from that checkout's remote and reports a lookup it cannot perform — including
+        // one over an unknown checkout — as unavailable rather than failing this call.
+        let repo_root = tddy_core::repo_root_for_session(&session_dir);
 
         let status = self
-            .pr_status_for_caller(&github_user, &repo_root, req.branch.trim())
+            .pr_status_for_caller(&github_user, repo_root.as_deref(), req.branch.trim())
             .await;
         Ok(Response::new(GetPrStatusResponse {
             status: Some(status),
@@ -7287,13 +7288,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
         require_pr_stack_orchestrator(&session_dir)?;
 
-        let changeset =
-            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        let repo_root = changeset
-            .repo_path
-            .clone()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| session_dir.clone());
+        // `None` when nothing in the session directory names a checkout: every repo-derived leg below
+        // then reads as absent or unavailable, never as a confident answer about a repo we don't know.
+        let repo_root = tddy_core::repo_root_for_session(&session_dir);
         let branch = req.branch.trim().to_string();
 
         // Session — scan sessions under the user's root for one whose Changeset.branch matches,
@@ -7347,7 +7344,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         };
 
         // Worktree — the on-disk worktree checked out for the branch (non-erroring).
-        let worktree = match tddy_core::worktree::worktree_path_for_branch(&repo_root, &branch) {
+        let worktree = match repo_root
+            .as_deref()
+            .and_then(|root| tddy_core::worktree::worktree_path_for_branch(root, &branch))
+        {
             Some(path) => BranchWorktree {
                 exists: true,
                 path: path.to_string_lossy().into_owned(),
@@ -7358,7 +7358,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // Remote — `origin/<branch>` in the orchestrator's repo, which is what a descendant's
         // worktree is created from. Only as fresh as the last fetch, so it can delay a spawn but
         // never permit one that would fail inside `git fetch`.
-        let remote = match tddy_core::worktree::remote_branch_ref_sha(&repo_root, &branch) {
+        let remote = match repo_root
+            .as_deref()
+            .and_then(|root| tddy_core::worktree::remote_branch_ref_sha(root, &branch))
+        {
             Some(sha) => BranchRemote { exists: true, sha },
             None => BranchRemote::default(),
         };
@@ -7366,7 +7369,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // PR — same path as get_pr_status. A lookup that cannot be performed degrades this leg
         // alone; the session, worktree and remote legs above stay usable.
         let pr = self
-            .pr_status_for_caller(&github_user, &repo_root, &branch)
+            .pr_status_for_caller(&github_user, repo_root.as_deref(), &branch)
             .await;
 
         Ok(Response::new(QueryBranchResponse {
@@ -7402,13 +7405,13 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
         require_pr_stack_orchestrator(&session_dir)?;
 
-        let changeset =
-            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        let repo_root = changeset
-            .repo_path
-            .clone()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| session_dir.clone());
+        // A repoint rebases a local branch and re-targets a PR base, so it needs the real checkout:
+        // an unknown one is a precondition failure, not a repoint attempted in the session directory.
+        let repo_root = tddy_core::repo_root_for_session(&session_dir).ok_or_else(|| {
+            Status::failed_precondition(
+                "no checkout is recorded for this session, so its repository could not be resolved",
+            )
+        })?;
         let owner_repo = owner_repo_from_repo_root(&repo_root).unwrap_or_default();
         let default_branch =
             tddy_core::resolve_default_integration_base_ref(&repo_root).map_err(|e| {
@@ -7902,6 +7905,21 @@ fn owner_repo_from_repo_root(repo_root: &std::path::Path) -> Option<String> {
     }
     let remote_url = String::from_utf8_lossy(&out.stdout).trim().to_string();
     tddy_workflow_recipes::orchestrate_pr_stack::github::owner_repo_from_remote_url(&remote_url)
+}
+
+/// A PR status the daemon could not look up: *unavailable* with an operator-facing `reason`, never
+/// `exists = false` (D8). Logged, because a lookup that never happened is otherwise invisible — the
+/// daemon log carried no PR line at all for an orchestrator polled hundreds of times.
+fn pr_status_unavailable(
+    branch: &str,
+    reason: String,
+) -> tddy_service::proto::connection::PrStatusView {
+    log::warn!("PR status unavailable for branch {branch}: {reason}");
+    tddy_service::proto::connection::PrStatusView {
+        unavailable: true,
+        unavailable_reason: reason,
+        ..Default::default()
+    }
 }
 
 /// GitHub PR state → the lowercase label carried on the `PrStatusView.state` wire field.
