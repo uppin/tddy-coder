@@ -81,7 +81,7 @@ Every child session carries:
 - **`uses_primary_session_document`:** `false` (no PRD-style document approval gate).
 - **One session, whole lifecycle:** the same session that analyzes the feature and writes the plan also operates it to master — there is no second "orchestrate" session seeded from the first.
 - **Pipeline:** `analyze-stack` → `write-stack-plan` → `orchestrate` (terminal interactive loop)
-  - `analyze-stack` — read-only, `PermissionHint::ReadOnly`, no structured submit. The agent studies the feature description and plans how to split it into a PR stack or DAG.
+  - `analyze-stack` — read-only, `PermissionHint::ReadOnly`, no structured submit. The agent studies the feature description and plans how to split it into a PR stack or DAG, subject to the [PR boundary contract](#pr-boundary-contract-every-node-is-self-contained).
   - `write-stack-plan` — the agent emits both plan artifacts via `tddy-tools submit`. No structured JSON goal schema is shared with TDD; the submit carries the YAML plan payload. Seeding `Changeset.stack` from the written plan happens here / on entry to `orchestrate` (idempotent — same guard as the old `seed_orchestrator_stack_from_plan`).
   - `orchestrate` — the **free-prompting operator loop**. A single `BackendInvokeTask` goal with **no `end` edge**: `FlowRunner` hits "no successor" and pauses as `WaitingForInput`, keeping the session `Running` for multi-turn chat (identical mechanism to the `free-prompting` recipe). `PermissionHint::AcceptEdits` (the agent edits files during conflict resolution), and its allowed tools are the [PR-management tools](#pr-management-tools) plus `Agent`. There is **no** automatic `assess → spawn / merge / repoint` cycle; the developer prompts the agent, which calls the tools explicitly. Each `orchestrate` turn's prompt is preceded by the `<context-reminder>` header (`before_task` → `prepend_context_header`) listing the manifest docs that exist on disk — so the planning knowledge in `artifacts/exploration.md` (and the other stack artifacts) is advertised to the operator agent; when no such file exists no header is injected.
 - **Removed:** the `begin-orchestrate` host bridge task and the `assess` / `spawn` / `merge` / `repoint` graph nodes and edges. The underlying helpers (`assemble_views`, `effective_base_ref`, `execute_stack_merge`, `execute_stack_repoint`, `RealGithubPrApi`, conflict detection) are **kept** — they are now called by the PR-management tools rather than by graph tasks.
@@ -90,6 +90,27 @@ Every child session carries:
 - **Parser types** in `plan_pr_stack/mod.rs` (reused as-is by the unified recipe): `StackPlanOutput { version, exploration: Option<String>, prs: Vec<PlannedPr> }`, `PlannedPr { node_id, title, description, branch_suggestion, parents, child_recipe }`, and `planned_prs_into_stack_nodes(prs) -> Vec<StackNode>`. Validation (`validate_stack_plan`): unique `node_id`s, all referenced `parents` resolve, no cycle detected via `Stack::topo_order`, and every `branch_suggestion` is present, in `feature/<stack>/<node>` form, and shares one `feature/<stack>/` namespace.
 - **State table:** `Init | AnalyzeStack → analyze-stack`; `WriteStackPlan → write-stack-plan`; `StackPlanned → orchestrate` (drops into the interactive loop — **not** a terminal "Completed" state); `orchestrate → orchestrate` (pauses for input each turn); `failed → None`. `next_goal_for_state_with_changeset` still disambiguates a legacy `"Init"` with a populated `Changeset.stack` by resuming into `orchestrate` (previously `assess`). `status_for_state`: `StackPlanned | orchestrate → "Active"`, `failed → "Failed"`, else `"Active"`.
 - **Refining the plan via chat:** `plan_refinement_goal()` returns `write-stack-plan` — the same goal used to author the plan. After the plan exists (state `StackPlanned`), the operator can keep chatting; each refinement turn re-runs `write-stack-plan` on the **same session**, the agent re-emits `stack-plan.yaml`, and the host re-validates and re-seeds `Changeset.stack` (`reseed_stack_from_plan_if_unspawned`) — overwriting `version` + `nodes` wholesale as long as no node has been materialised yet. Once a node owns a **`branch` or** a `session_id`, further refinement is refused: the branch is real work that outlives the session that created it, so overwriting the node would orphan the branch as well as any in-progress child session. An invalid refinement (cycle, dangling parent) is rejected and the previously-persisted stack is left untouched. On resume/continue, `StackPlanned` moves on into `assess` — refinement is an operator-initiated side path, not the default resume target.
+
+### PR boundary contract: every node is self-contained
+
+A planned PR must be **independently reviewable and independently mergeable**: the API/schema change, the code implementing it, and its tests land in **one** node. A reviewer can judge it without waiting for a later node in the stack.
+
+**Splitting by layer is forbidden.** These pairs are one node, never two:
+
+| ✗ Layer split (invalid) | ✓ One self-contained node |
+|---|---|
+| `n1` add proto RPCs → `n2` implement them | `n1` attachment staging: proto + daemon handler + tests |
+| `n1` add an endpoint → `n2` add its handler | `n1` the endpoint, serving real responses |
+| `n1` add a data model → `n2` persist it | `n1` the model with its persistence |
+| `n1` change a signature → `n2` fill in the body | `n1` the working function |
+
+A node that ships only **surface** — RPCs returning `unimplemented`, a field nothing reads, a trait with stub impls — is not a valid PR. It cannot be reviewed for correctness (there is no behavior to check), it cannot be tested beyond compiling, and it leaves a contract in the tree that misrepresents what the system does.
+
+**When a vertical slice is too large, split by capability, not by layer.** Cut along user-visible increments where each part is still end-to-end: one source variant rather than all of them, one scope/enum case rather than the full set, one screen or entry point, the happy path before the edge cases. Each such PR carries its own contract *plus* behavior *plus* tests, and the next node extends it.
+
+**Two narrow exceptions** — a node may omit implementation when it is a purely mechanical rename/move/extraction with no behavior change, or a regeneration of already-committed generated code exposing no new surface. Anything else goes in the node's `description` for a human to decide; the agent is told not to invent a third exception.
+
+This contract is **advisory, not machine-enforced** — `validate_stack_plan` checks graph shape and branch naming only, and cannot tell a vertical slice from a layer split. It is carried by the `analyze-stack` and `write-stack-plan` system prompts (`pr_stack/hooks.rs`). It appears in **both** deliberately: `write-stack-plan` is re-run on every chat-driven refinement, so a rule present only in `analyze-stack` would be silently dropped the first time an operator refined the plan. Pinned by `pr_boundary_scoping_rule_tests` in `hooks.rs`, which drives the real `before_task` seam rather than asserting on the constants.
 
 ### Loop shape (free-prompting)
 
