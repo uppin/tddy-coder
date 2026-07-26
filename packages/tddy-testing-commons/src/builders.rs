@@ -93,6 +93,12 @@ impl ChangesetBuilder {
         self
     }
 
+    /// The checkout the session works in — written when the session gets a worktree of its own.
+    pub fn with_repo_path(mut self, path: impl Into<String>) -> Self {
+        self.0.repo_path = Some(path.into());
+        self
+    }
+
     pub fn with_workflow(mut self, workflow: ChangesetWorkflow) -> Self {
         self.0.workflow = Some(workflow);
         self
