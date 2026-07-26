@@ -78,7 +78,11 @@ fn a_parents_own_branch_is_accepted() {
 #[test]
 fn a_target_that_is_neither_the_default_branch_nor_a_parents_branch_is_rejected() {
     // Given / When — a stale or mistyped label that happens to name a real branch elsewhere
-    let target = validate_repoint_target("feature/somebody-elses-work", DEFAULT_BRANCH, &[PARENT_BRANCH]);
+    let target = validate_repoint_target(
+        "feature/somebody-elses-work",
+        DEFAULT_BRANCH,
+        &[PARENT_BRANCH],
+    );
 
     // Then — accepting it would silently drop every parent and detach the node
     assert_eq!(

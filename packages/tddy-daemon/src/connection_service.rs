@@ -1421,6 +1421,48 @@ pub fn effective_spawn_branch<'a>(
     }
 }
 
+/// The repoint target a client may act on: `Ok(None)` for "no target named", `Ok(Some(target))`
+/// for an accepted one, `Err(reason)` for a target the daemon refuses.
+///
+/// `RepointPlannedPrRequest.target_base_branch` is applied by `repoint_planned_pr_node` as a
+/// **retain** rule — the parents that own that branch stay and the rest are dropped — so a target
+/// no parent owns *is* the instruction to detach the node onto the default branch. Validation is
+/// therefore not politeness: a stale label, a typo, or a client that has drifted from the daemon's
+/// view of the repo would each read as "detach this node" and silently rewrite the plan. An
+/// accepted target must name either the resolved default branch or one of the node's parents'
+/// branches; nothing else is a meaningful thing to be based onto.
+///
+/// An empty or whitespace-only target is not a rejection: it names no target at all and selects the
+/// original drop-merged-parents rule (`None`).
+///
+/// The default branch is compared with `origin/` stripped from both sides.
+/// `tddy_core::resolve_default_integration_base_ref` returns a remote-tracking ref
+/// (`origin/master`), while a node's `branch` and a GitHub PR base are plain names, so the label a
+/// client renders can legitimately carry either form. The accepted value returned is the caller's
+/// own trimmed input, not the normalized form, so the recipe matches parent branches as recorded.
+pub fn validate_repoint_target(
+    target_base_branch: &str,
+    default_branch: &str,
+    parent_branches: &[&str],
+) -> Result<Option<String>, String> {
+    let target = target_base_branch.trim();
+    if target.is_empty() {
+        return Ok(None);
+    }
+
+    let names_default = tddy_core::worktree::local_branch_name(target)
+        == tddy_core::worktree::local_branch_name(default_branch);
+    let names_parent = parent_branches.contains(&target);
+
+    if names_default || names_parent {
+        Ok(Some(target.to_string()))
+    } else {
+        Err(format!(
+            "target_base_branch '{target}' names neither the default branch '{default_branch}' nor any parent's branch"
+        ))
+    }
+}
+
 /// Resolve the `claude` binary for a ResumeSession relaunch through the same host resolver as
 /// StartSession, so an explicitly configured path is honored and a bare name is resolved to a host
 /// path instead of being spawned against the daemon's minimal systemd PATH.
@@ -7416,6 +7458,29 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             })?;
 
         let node_id = req.node_id.trim().to_string();
+
+        // The named target must be a branch this node can be based onto: the repoint retains only
+        // the parents that own it, so an unvalidated target is a silent plan rewrite.
+        let stack = changeset.stack.unwrap_or_default();
+        let parent_branches: Vec<String> = stack
+            .node(&node_id)
+            .map(|node| {
+                node.parents
+                    .iter()
+                    .filter_map(|parent_id| stack.node(parent_id)?.branch.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let target_base_branch = validate_repoint_target(
+            &req.target_base_branch,
+            &default_branch,
+            &parent_branches
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<&str>>(),
+        )
+        .map_err(Status::invalid_argument)?;
+
         let session_dir_for_op = session_dir.clone();
         tokio::task::spawn_blocking(move || {
             let gh = tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::new(
@@ -7426,6 +7491,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 &repo_root,
                 &node_id,
                 &default_branch,
+                target_base_branch.as_deref(),
                 &gh,
             )
         })

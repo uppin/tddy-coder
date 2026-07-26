@@ -84,13 +84,14 @@ anyway.
 **High-level deliverables tracking progress throughout development:**
 
 - [x] **Documentation**: `pr-stack-live-status.md` amended (D16–D20, new section, revised tables)
-- [ ] **Implementation**: proto field, recipe target rule + plan-only repoint, daemon validation, web
+- [x] **Implementation**: proto field, recipe target rule + plan-only repoint, daemon validation, web
       blockers/target/threading
-- [~] **Testing**: 41 acceptance/unit tests written and confirmed failing for the right reasons; none of
-      the new behaviour passes yet, by design (see [Implementation Evidence](#implementation-evidence))
+- [x] **Testing**: 41 of 41 passing (see [Implementation Evidence](#implementation-evidence))
 - [ ] **Integration**: verified against a live stack with a merged-and-deleted predecessor branch
-- [ ] **Technical Debt**: production readiness gaps addressed
-- [ ] **Code Quality**: `cargo clippy -- -D warnings` clean, `bun run build` clean
+- [~] **Technical Debt**: recorded below; the `docs/dev/TODO.md` entry this changeset resolves still
+      needs removing at wrap
+- [x] **Code Quality**: `cargo clippy -p tddy-workflow-recipes -p tddy-daemon --all-targets -- -D warnings`
+      clean, `cargo fmt --all --check` clean, `bun run build` clean
 
 ## Technical Changes
 
@@ -225,80 +226,88 @@ selectedSession.projectId)?.mainBranchRef ?? ""` into `WorkflowViewContext.defau
 
 ## Implementation Milestones
 
-- [ ] `RepointPlannedPrRequest.target_base_branch` added and TS regenerated
-- [ ] `repoint_planned_pr_node` honours an explicit target and repoints a branchless node plan-only
-- [ ] `validate_repoint_target` written; `repoint_planned_pr` validates the target and forwards it
-- [ ] A refused repoint surfaces the daemon's reason on the row and leaves it blocked
-- [ ] `startBlockers.ts` written with `startBlockers` + `resolveRepointTarget`
-- [ ] `PlannedPrRow` renders full information, a base-branch line, a warning strip, and a disabled CTA
-- [ ] Repoint control offered for any unresolvable base and labelled with its target
-- [ ] `defaultBranch` threaded `SessionMainPane` → `resolveWorkflowView` → `PrStackScreen`
-- [ ] Root node's Start-session dialog names its base branch
+- [x] `RepointPlannedPrRequest.target_base_branch` added and TS regenerated
+- [x] `repoint_planned_pr_node` honours an explicit target and repoints a branchless node plan-only
+- [x] `validate_repoint_target` written; `repoint_planned_pr` validates the target and forwards it
+- [x] A refused repoint surfaces the daemon's reason on the row and leaves it blocked
+- [x] `startBlockers.ts` written with `startBlockers` + `resolveRepointTarget`
+- [x] `PlannedPrRow` renders full information, a base-branch line, a warning strip, and a disabled CTA
+- [x] Repoint control offered for any unresolvable base and labelled with its target
+- [x] `defaultBranch` threaded `SessionMainPane` → `resolveWorkflowView` → `PrStackScreen`
+- [x] Root node's Start-session dialog names its base branch
 - [x] Test-support ids and page-object helpers moved to the new contract
       (`prStackBaseBranch`, `prStackStartWarning` in; `prStackMissingBranch` out)
 - [x] `PrStackMissingBranchAcceptance.cy.tsx` migrated to the disabled-CTA + warning contract
 - [x] `PrStackOrphanedNodeAcceptance.cy.tsx` migrated (one assertion; spec stays green)
 - [x] `pr_stack_repoint_acceptance.rs` call sites pass `target_base_branch = None`
-- [ ] `cargo clippy -- -D warnings` and `bun run build` clean
+- [x] `cargo clippy -- -D warnings` and `bun run build` clean
 
 ## Implementation Evidence
 
-**Phase: red complete, no production code written yet.** Every test below fails, and the failure of each
-was read and confirmed to be the absence of the feature rather than a mistake in the test.
+**Phase: green complete. 41 of 41 tests pass.** Implementation was delegated to two `tdd-implementer`
+agents on disjoint file sets (proto + Rust, and `packages/tddy-web/src/`); they met only at the
+regenerated `connection_pb.ts`, which is exactly what the `targetBaseBranch` assertion exercises.
 
-### Tests written
+### Production code
 
-| File | Count | Status |
-|---|---|---|
-| `packages/tddy-workflow-recipes/tests/pr_stack_repoint_dead_end_acceptance.rs` *(new)* | 5 | ✗ all fail |
-| `packages/tddy-daemon/tests/repoint_target_validation_acceptance.rs` *(new)* | 7 | ✗ all fail |
-| `packages/tddy-web/src/components/sessions/prstack/startBlockers.test.ts` *(new, `bun:test`)* | 13 | ✗ all fail |
-| `packages/tddy-web/cypress/component/PrStackRepointDeadEndAcceptance.cy.tsx` *(new)* | 10 | ✗ 9 fail, 1 guard passes |
-| `packages/tddy-web/cypress/component/PrStackMissingBranchAcceptance.cy.tsx` *(migrated)* | 6 | ✗ 3 fail, 3 already hold |
-| `packages/tddy-web/cypress/component/PrStackOrphanedNodeAcceptance.cy.tsx` *(migrated)* | 5 | ✓ 5 pass |
+| File | Change |
+|---|---|
+| `packages/tddy-service/proto/connection.proto` | `+ string target_base_branch = 4;` on `RepointPlannedPrRequest` (lines 1105–1110) |
+| `packages/tddy-web/src/gen/connection_pb.ts` | regenerated via the `generate` script (`buf generate ../tddy-service/proto`) — the new field plus the re-encoded `fileDesc`, not hand-edited |
+| `packages/tddy-workflow-recipes/src/pr_stack/mod.rs` | `repoint_planned_pr_node` gains `target_base_branch: Option<&str>` (line 480); the `merged_parents` drop-list became a single `retained_parents` survive-decision (492–508); the rebase / force-push / `patch_pr_base` block moved inside `if let Some(branch) = node.branch` (510–580) |
+| `packages/tddy-daemon/src/connection_service.rs` | new pure `pub fn validate_repoint_target` (1424–1465), beside `effective_spawn_branch`; `repoint_planned_pr` reads the node's parents' branches, validates, maps `Err` → `invalid_argument`, forwards `as_deref()` (7460–7494) |
+| `packages/tddy-web/src/components/sessions/prstack/startBlockers.ts` | **new**, 137 lines — `BranchRemoteState`, `StartBlocker`, `startBlockers`, `resolveRepointTarget` |
+| `PlannedPrRow.tsx` | row wrapper became a column: the existing info/badge/CTA row plus the base-branch line, with the warning strip and repoint error beneath; `pr-stack-missing-branch-*` deleted; CTA is a status chip **or** a Start-session button `disabled={starting \|\| isBlocked}` with the blocker summary as `title` |
+| `PlannedPrList.tsx` | inline blocker logic replaced by `startBlockers`; `canRepoint` widened; `defaultBranch` + `repointErrorByNodeId` props |
+| `PrStackScreen.tsx` | `defaultBranch` prop; `handleRepoint` sends `targetBaseBranch` and catches into per-node error state; `baseBranchLabel` uses the real default branch |
+| `workflowViews.tsx`, `SessionMainPane.tsx` | `WorkflowViewContext.defaultBranch`, resolved from the drawer's already-loaded `projects` |
 
-**41 tests: 37 failing for confirmed-correct reasons, 4 passing as regression guards.**
+### Test results
 
-### Confirmed failure reasons
+| Suite | Result |
+|---|---|
+| `pr_stack_repoint_dead_end_acceptance` | **5/5 pass** |
+| `pr_stack_repoint_acceptance` (existing, `None` mode) | **2/2 pass** |
+| `repoint_target_validation_acceptance` | **7/7 pass** |
+| `startBlockers.test.ts` | **13/13 pass** (36/36 for the whole `prstack/` unit dir) |
+| `PrStackRepointDeadEndAcceptance.cy.tsx` | **10/10 pass** |
+| `PrStackMissingBranchAcceptance.cy.tsx` | **6/6 pass** |
+| `PrStackOrphanedNodeAcceptance.cy.tsx` | **5/5 pass** |
 
-- **Recipe (5/5)** — `error[E0061]: this function takes 5 arguments but 6 arguments were supplied`
-  against `pr_stack/mod.rs:457`. The only error class in the target, so the fixtures and the
-  `FakeGithub` double are sound.
-- **Daemon (7/7)** — `error[E0432]: unresolved import
-  tddy_daemon::connection_service::validate_repoint_target`. The only error in the target.
-- **`bun:test` (13/13)** — `Cannot find module './startBlockers'`.
-- **Cypress `PrStackRepointDeadEndAcceptance` (9/10)** — `pr-stack-repoint-n2` never found (7 cases: the
-  control is still gated on the plan's recorded `merged` phase, which also blocks the two refusal cases
-  from reaching the error surface), `pr-stack-base-branch-n2` never found (1), and
-  `pr-stack-start-session-n2` **never found** (1) — the button is replaced, not disabled, which is D16's
-  defect stated as an assertion.
-- **Cypress `PrStackMissingBranchAcceptance` (3/6)** — `pr-stack-start-warning-<nodeId>` never found.
+Wider runs: `cargo test -p tddy-workflow-recipes` all green (41 binaries); full web unit set 476/476; a
+14-spec PR-stack + `PlannedPrRow` Cypress run 72/72; `SessionMainPane*` / `SessionsDrawer*` 54/54;
+`bun run build` clean; `cargo clippy -p tddy-workflow-recipes -p tddy-daemon --all-targets -- -D warnings`
+clean; `cargo fmt --all --check` clean; `cargo check --workspace --all-targets` clean.
 
-### Tests that pass today, deliberately
+**No test file was modified during green** — verified with `git diff HEAD -- '*test*' '*tests/*'
+'packages/tddy-web/cypress/'`, which is empty apart from a whitespace-only `cargo fmt` reflow of one
+over-long call in `repoint_target_validation_acceptance.rs` that the red-phase commit had left unformatted.
 
-Four assertions already hold and are kept as regression guards, not as coverage of new behaviour:
-`PrStackRepointDeadEndAcceptance.cy.tsx:255` (no Repoint control on a healthy base) and the three
-not-blocked cases in `PrStackMissingBranchAcceptance.cy.tsx` (`:124`, `:205`, `:217`).
+### Pre-existing failures, unrelated to this changeset
 
-### Fixture verification
+- `PrStackChatSystemMessagesAcceptance.cy.tsx` — 1 of 3 fails ("does not render a duplicate bubble for a
+  UserPrompt-kind activityLogged event"). Verified pre-existing three ways: it reproduces with
+  `packages/tddy-web/src` stashed, it fails identically on two consecutive runs (so it is not flaky), and
+  this branch touches no chat or activity file at all (`git diff --name-only master...HEAD` over
+  `packages/tddy-web/src` matches nothing under those names).
+- `cargo test -p tddy-daemon --no-fail-fast` — 11 sandbox/cgroups failures, all environmental and
+  documented (unprivileged user namespaces are forbidden on this host; the sandbox runner is not built by
+  `./test`). Nothing in the repoint or connection-service path fails: `effective_spawn_branch_acceptance`
+  6/6, `query_branch_resolution_acceptance` 5/5, `list_sessions_enriched` 2/2.
 
-A module-not-found red cannot show whether the unit-test bodies are right, so the riskiest fixtures were
-probed against the **real** `resolveStackBase` / `branchlessNonMergedParent` before being committed. Two
-findings, both of which changed the specification rather than just a fixture:
+### Two implementation judgment calls worth knowing about
 
-1. **An all-merged chain resolves to `default-branch` (startable), not `no-ancestor-branch`.** The first
-   fixture was wrong. The no-ancestor case is now modelled as a branchless non-merged ancestor *above* a
-   merged parent — confirmed to yield `{kind:"no-ancestor-branch"}` with **no** blocking direct parent.
-2. **A `parents` cycle makes both `blockingParent` and `no-ancestor-branch` true at once**, about the same
-   node. That surfaced an unstated rule: `no-ancestor-branch` must be reported only when no direct parent
-   is the blocker, or the warning states one fact twice. The rule is now written into the PRD and pinned
-   by both tests; without it the same fixture would have been implemented two different ways.
-
-### Environment notes
-
-- This worktree had no `node_modules`; `bun install` was run at the repo root (no `bun.lock` change).
-- `cypress` is not on `PATH` inside `./dev`. Working invocation:
-  `./dev bash -c 'cd packages/tddy-web && CYPRESS_DISABLE_REACT_COMPILER=1 ELECTRON_EXTRA_LAUNCH_ARGS="--disable-gpu --no-sandbox" bun x cypress run --component --spec <spec>'`
+1. **The warning is suppressed on an already-spawned node** (`PlannedPrRow.tsx:89-92`:
+   `isBlocked = !isSpawned && blockers.length > 0`). No test pins either behaviour. It is right: the
+   warning exists to explain a Start-session button that cannot be pressed, and a spawned node shows a
+   status chip instead — a warning about a base its child will never be created from is noise. D16's
+   thesis is preserved either way, since the row's *information* is unconditional and only the
+   CTA-explanation is conditional.
+2. **The `None` retain arm is `!parent.is_some_and(|p| p.is_skipped())`, not
+   `parent.is_some_and(|p| !p.is_skipped())`.** The difference is a *dangling* parent id: the first keeps
+   it, the second would prune it. The first is byte-for-byte the old rule, since the old code built a drop
+   list only from ids it could resolve to a merged node. The `Some(target)` arm deliberately drops a
+   dangling id, which is correct for a retain rule — an unresolvable parent cannot own the target.
 
 ## Testing Plan
 
@@ -466,8 +475,8 @@ The full table lives in
 - [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run all tests — verify 100% pass
 - [ ] Validate changes
