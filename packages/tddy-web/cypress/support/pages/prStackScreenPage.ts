@@ -23,7 +23,8 @@ import {
   prStackSession,
   prStackBranch,
   prStackPlannedBranch,
-  prStackMissingBranch,
+  prStackBaseBranch,
+  prStackStartWarning,
   prStackPrUnavailable,
   TEST_IDS,
 } from "../testIds";
@@ -102,9 +103,13 @@ export const prStackScreenPage = {
   plannedBranchName: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(prStackPlannedBranch(nodeId), { timeout: 5000, ...options }),
 
-  /** The blocked indicator shown in place of the Start-session CTA when the base branch is missing. */
-  missingBranch: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(prStackMissingBranch(nodeId), { timeout: 5000, ...options }),
+  /** The base branch a row's child worktree would be branched from. */
+  baseBranch: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackBaseBranch(nodeId), { timeout: 5000, ...options }),
+
+  /** The warning listing every reason a row cannot be started — shown beside its disabled CTA. */
+  startWarning: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackStartWarning(nodeId), { timeout: 5000, ...options }),
 
   /** The "PR status unavailable" indicator — the lookup could not be performed. */
   prUnavailable: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
