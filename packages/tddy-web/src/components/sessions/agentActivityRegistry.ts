@@ -1,8 +1,9 @@
 /**
  * `AgentActivityRegistry` — the per-session, module-level store that backs the Agent Activity
  * overlay. It holds the streamed activity `count`, the lazily-pulled transcript `messages`, the
- * `seenCount` baseline (for the unread badge), and whether the heavy snapshot has already
- * `snapshotLoaded`, keyed by `sessionId`.
+ * `seenCount` baseline (for the unread badge), whether the heavy snapshot has already
+ * `snapshotLoaded`, and the tool bodies fetched on demand by the detail dialog (`toolDetails`), keyed
+ * by `sessionId`.
  *
  * It mirrors {@link SessionRuntimeRegistry}: an observable store (subscribe/notify with an
  * immutably-replaced per-session snapshot) consumed via `useSyncExternalStore`. Because a session's
@@ -18,6 +19,13 @@
 
 import type { ChatMessage } from "../chat/useAgentChat";
 
+/** One tool call's bodies, as `ConnectionService.GetAcpToolCallDetail` resolved them. Either side may
+ *  be absent: a still-running call has an input but no output yet. */
+export interface ToolCallDetail {
+  readonly rawInput?: string;
+  readonly rawOutput?: string;
+}
+
 export interface AgentActivityState {
   readonly sessionId: string;
   /** Current number of coalesced activity entries (agent-text frames + distinct tool calls),
@@ -31,21 +39,25 @@ export interface AgentActivityState {
    *  that started but was cancelled before its first frame landed leaves this false, so it is
    *  retried on the next open rather than caching an empty transcript forever. */
   readonly snapshotLoaded: boolean;
+  /** Tool-call bodies already fetched for this session, keyed by `tool_call_id`. Populated by the
+   *  detail dialog's lookup so reopening a row costs no second request. Only settled calls are
+   *  cached — a still-running call's output can still arrive, so caching its partial body would keep
+   *  it stale for the rest of the session. */
+  readonly toolDetails: ReadonlyMap<string, ToolCallDetail>;
 }
 
-/** The lazily-fetched body of one tool call, as shown by the detail dialog. `loading` while the
- *  `GetAcpToolCallDetail` lookup is in flight, `loaded` once it resolves (either or both bodies may
- *  be absent for a call with no recorded input/output), `error` if the lookup fails. An `error` is
- *  not a permanent cache entry — re-opening the same row retries (see {@link useToolCallDetail}). */
-export type ToolCallBodyState =
-  | { readonly status: "loading" }
-  | { readonly status: "loaded"; readonly rawInput?: string; readonly rawOutput?: string }
-  | { readonly status: "error"; readonly error: string };
-
 const EMPTY_MESSAGES: ChatMessage[] = [];
+const EMPTY_TOOL_DETAILS: ReadonlyMap<string, ToolCallDetail> = new Map();
 
 function freshState(sessionId: string): AgentActivityState {
-  return { sessionId, count: 0, messages: EMPTY_MESSAGES, seenCount: 0, snapshotLoaded: false };
+  return {
+    sessionId,
+    count: 0,
+    messages: EMPTY_MESSAGES,
+    seenCount: 0,
+    snapshotLoaded: false,
+    toolDetails: EMPTY_TOOL_DETAILS,
+  };
 }
 
 /** Cap on retained per-session state. A long-lived dashboard can visit many sessions; beyond this
@@ -55,11 +67,6 @@ const MAX_SESSIONS = 100;
 
 export class AgentActivityRegistry {
   private readonly bySessionId = new Map<string, AgentActivityState>();
-  /** Lazily-fetched tool-call bodies, nested `sessionId → (callId → body)`. Held separately from the
-   *  per-session transcript state so caching a body never replaces `AgentActivityState` — the
-   *  transcript reference stays stable across body writes (the contract `useSyncExternalStore`
-   *  requires for the transcript subscription). */
-  private readonly bodiesBySession = new Map<string, Map<string, ToolCallBodyState>>();
   private readonly listeners = new Set<() => void>();
 
   /** The per-session state, or `undefined` when the session has never been seen. Reference-stable
@@ -89,30 +96,33 @@ export class AgentActivityRegistry {
     this.write(sessionId, { ...prev, snapshotLoaded: true });
   }
 
+  /** Cache one tool call's fetched bodies under its `tool_call_id`. The map is replaced (never
+   *  mutated) so the session's state object stays a snapshot, keeping `get()` reference-stable for
+   *  `useSyncExternalStore`. Callers cache settled calls only — see
+   *  {@link AgentActivityState.toolDetails}. No-op (no notify) when the same bodies are already
+   *  cached, so a repeated fetch of an unchanged call does not re-render the transcript.
+   *
+   *  Bodies live **in** the session snapshot rather than in a side map, which does mean the
+   *  transcript's `useSyncExternalStore` subscriber re-renders once when a body is first cached
+   *  (once per opened row). That is accepted deliberately: `messages` keeps its own array identity
+   *  across the write, so the rendered rows reconcile without work, and one store beats two that can
+   *  disagree about which sessions exist or when to evict them. */
+  setToolDetail(sessionId: string, toolCallId: string, detail: ToolCallDetail): void {
+    const prev = this.bySessionId.get(sessionId) ?? freshState(sessionId);
+    const cached = prev.toolDetails.get(toolCallId);
+    if (cached && cached.rawInput === detail.rawInput && cached.rawOutput === detail.rawOutput) {
+      return;
+    }
+    const toolDetails = new Map(prev.toolDetails);
+    toolDetails.set(toolCallId, detail);
+    this.write(sessionId, { ...prev, toolDetails });
+  }
+
   /** Set the unread baseline to the current count (called on overlay open). No-op when unchanged. */
   markSeen(sessionId: string): void {
     const prev = this.bySessionId.get(sessionId) ?? freshState(sessionId);
     if (prev.seenCount === prev.count) return;
     this.write(sessionId, { ...prev, seenCount: prev.count });
-  }
-
-  /** The cached body for one tool call, or `undefined` when it has never been fetched. Returns the
-   *  stored object reference, so a subscriber reading the same `(sessionId, callId)` across unrelated
-   *  notifications sees a stable reference (safe for `useSyncExternalStore`). */
-  getBody(sessionId: string, callId: string): ToolCallBodyState | undefined {
-    return this.bodiesBySession.get(sessionId)?.get(callId);
-  }
-
-  /** Cache the fetched (or in-flight, or failed) body for one tool call, then notify. Writing a body
-   *  never touches the per-session transcript state, so the transcript subscription does not churn. */
-  setBody(sessionId: string, callId: string, body: ToolCallBodyState): void {
-    let bodies = this.bodiesBySession.get(sessionId);
-    if (!bodies) {
-      bodies = new Map<string, ToolCallBodyState>();
-      this.bodiesBySession.set(sessionId, bodies);
-    }
-    bodies.set(callId, body);
-    this.notify();
   }
 
   /** Store `next` as the session's state (most-recently-written), evict the oldest entries beyond
@@ -131,9 +141,8 @@ export class AgentActivityRegistry {
   /** Drop all cached per-session state. Used to isolate component tests that reuse a `sessionId`
    *  across cases (in production a `sessionId` maps to one stable transcript, so no reset occurs). */
   reset(): void {
-    if (this.bySessionId.size === 0 && this.bodiesBySession.size === 0) return;
+    if (this.bySessionId.size === 0) return;
     this.bySessionId.clear();
-    this.bodiesBySession.clear();
     this.notify();
   }
 

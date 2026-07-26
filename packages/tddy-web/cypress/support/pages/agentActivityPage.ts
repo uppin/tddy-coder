@@ -55,11 +55,19 @@ export const agentActivityPage = {
   jsonHighlight: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.agentActivityJsonHighlight, { timeout: 5000, ...options }),
 
-  /** The dialog's loading state, shown while the tool body is being fetched on demand. */
-  detailLoading: (options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(TEST_IDS.agentActivityDetailLoading, { timeout: 5000, ...options }),
+  /** The placeholder shown in place of a JSON body while the body lookup is in flight. */
+  detailSkeleton: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.agentActivityDetailSkeleton, { timeout: 5000, ...options }),
 
-  /** The dialog's error state, shown when the tool body lookup fails. */
+  /** The note shown under the Output heading when the call has produced no output yet. */
+  detailNoOutput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.agentActivityDetailNoOutput, { timeout: 5000, ...options }),
+
+  /** The note shown under the Input heading when the lookup resolved without an input body. */
+  detailNoInput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.agentActivityDetailNoInput, { timeout: 5000, ...options }),
+
+  /** The inline error shown when the body lookup fails. */
   detailError: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.agentActivityDetailError, { timeout: 5000, ...options }),
 

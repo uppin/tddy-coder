@@ -2,6 +2,35 @@
 
 ## Future Enhancements
 
+### tddy-web — Agent Activity tool-detail dialog (source: acp-tool-detail-explicit-states changeset, 2026-07-26)
+
+- **No retry affordance on a failed body lookup** — `AgentActivityDetailDialog` reports a failure inline
+  and nothing is cached, so a retry *is* possible but only by closing and reopening the row. A "Retry"
+  button in the error block would make that discoverable.
+- **The tool-detail cache has no per-session entry cap** — `AgentActivityRegistry`'s
+  `MAX_SESSIONS = 100` LRU is the only bound, so a session in which the operator opens very many tool
+  rows retains every fetched body for the page's lifetime. Bound it per session if a heavy transcript
+  ever shows growth (related: the persisted-log size caps tracked below).
+- **The `animate-pulse` skeleton is inline in the dialog** rather than a shared UI primitive — it is the
+  only skeleton in tddy-web today. Promote it to `components/ui/` when a second surface needs one.
+
+### tddy-sandbox-recipes — host-independent sandbox path tests (source: acp-tool-detail-explicit-states changeset, 2026-07-26)
+
+- **`cursor_agent_prerequisite_reads` asserts a machine-specific path** —
+  `packages/tddy-sandbox-recipes/src/cursor_cli.rs:509` asserts `/Users` appears among the path-traversal
+  ancestor grants. That only holds where `HOME` sits under `/Users` (macOS); on Linux `HOME=/var/tddy`, the
+  ancestors end at `/var`, and the test fails permanently. Introduced by c018a176 (#303) and already on
+  `master`, so **no Linux developer can get a clean `cargo test --workspace`** — which trains everyone to
+  ignore workspace failures.
+  - **Tests should stub their environment** rather than read the ambient one: have
+    `cursor_agent_prerequisite_reads` take the home/share roots (or resolve them through an injectable
+    provider) so a test can pass a `tempfile::tempdir()` root and assert the *shape* of the ancestor chain —
+    "every ancestor from the install dir up to the filesystem root is granted" — instead of a literal
+    prefix belonging to one OS.
+  - **Production code should be testable by design**: the same seam removes the hidden `HOME` dependency
+    from the recipe, which is the actual reason the assertion had to name a real directory.
+  - Audit sibling recipes for the same pattern before fixing just this one assertion.
+
 ### tddy-service / tddy-coder / tddy-build (source: bsp-build-server changeset, 2026-07-22)
 
 - **Literal JSON-RPC 2.0 BSP transport** — the `bsp.BspService` is BSP-*shaped* over the workspace's

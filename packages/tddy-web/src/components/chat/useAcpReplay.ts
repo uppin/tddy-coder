@@ -57,11 +57,11 @@ const NOOP_SEND = () => false;
  * Frame projection mirrors the live ACP path: `agent_message_chunk` text merges into agent bubbles
  * (via {@link createAgentChunkMerger}, finalized per recorded chunk so discrete chunks stay separate);
  * `tool_call` becomes a tool entry carrying the server-enriched `title`, a coarse status, and its
- * `tool_call_id` (the detail dialog fetches the call's `raw_input`/`raw_output` on demand via
- * `GetAcpToolCallDetail`, since the stream no longer inlines bodies — PR #345), coalesced by
- * `tool_call_id`; `user_message_chunk` a user bubble; `agent_thought_chunk` a goal bubble. Each
- * entry's timestamp is the frame's `SessionNotification.timestamp_unix_ms`, so elapsed badges reflect
- * the recorded timeline.
+ * `tool_call_id`, coalesced by that id. The hosts strip `raw_input`/`raw_output` out of every streamed
+ * frame, so the bodies are **not** on the entry: the detail dialog fetches them by id through
+ * `GetAcpToolCallDetail`. `user_message_chunk` becomes a user bubble; `agent_thought_chunk` a goal
+ * bubble. Each entry's timestamp is the frame's `SessionNotification.timestamp_unix_ms`, so elapsed
+ * badges reflect the recorded timeline.
  */
 export function useAcpReplay(args: {
   sessionId: string;
@@ -163,9 +163,18 @@ export function useAcpReplay(args: {
           } else if (update.case === "toolCall") {
             // The server emits a tool call as it progresses (e.g. in-progress then completed) under
             // one tool_call_id. Coalesce by id: a repeat refines the existing entry's label/status/
-            // timestamp/payload in place (keeping its key + position). Only non-empty ids coalesce;
-            // a missing id always opens a new entry.
+            // timestamp in place (keeping its key + position). Only non-empty ids coalesce; a missing
+            // id always opens a new entry.
+            //
+            // The id is also persisted onto the entry: the streamed frame carries no
+            // `raw_input`/`raw_output` (the hosts strip them), so the detail dialog fetches the
+            // bodies by id instead of reading them off the message. It is written only when non-empty,
+            // by the same rule — an id-less frame leaves `toolCallId` `undefined` (as its optionality
+            // states) rather than carrying `""`, which would send the dialog looking up the empty id
+            // and have the host answer `NOT_FOUND`: a round trip whose result reads as "this call is
+            // missing from the transcript" for an entry that never had an id to look up.
             const id = update.value.toolCallId?.value ?? "";
+            const idField = id ? { toolCallId: id } : {};
             const existingIndex = id ? toolIndexById.get(id) : undefined;
             if (existingIndex !== undefined) {
               acc[existingIndex] = {
@@ -173,7 +182,7 @@ export function useAcpReplay(args: {
                 text: update.value.title,
                 at,
                 toolStatus: toolStatusOf(update.value.status),
-                toolCallId: id,
+                ...idField,
               };
             } else {
               if (id) toolIndexById.set(id, acc.length);
@@ -183,7 +192,7 @@ export function useAcpReplay(args: {
                 from: "tool",
                 at,
                 toolStatus: toolStatusOf(update.value.status),
-                toolCallId: id,
+                ...idField,
               });
             }
           } else if (update.case === "userMessageChunk") {
