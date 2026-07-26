@@ -752,6 +752,11 @@ export const prStackBaseBranch = (nodeId: string) => `pr-stack-base-branch-${nod
  *  be started. The row's information and its (disabled) Start-session CTA stay put beside it */
 export const prStackStartWarning = (nodeId: string) => `pr-stack-start-warning-${nodeId}`;
 
+/** `[data-testid="pr-stack-repoint-error-<nodeId>"]` — the daemon's reason for refusing a repoint. The
+ *  RPC can reject (a stale target names no acceptable base), so failing silently would leave the row
+ *  looking untouched with no explanation — the dead end this feature exists to remove */
+export const prStackRepointError = (nodeId: string) => `pr-stack-repoint-error-${nodeId}`;
+
 /** `[data-testid="pr-stack-pr-unavailable-<nodeId>"]` — shown when the GitHub PR lookup could not be
  *  performed (no credential, rate limit, transport error) — distinct from "this branch has no PR" */
 export const prStackPrUnavailable = (nodeId: string) => `pr-stack-pr-unavailable-${nodeId}`;

@@ -16,6 +16,7 @@
  */
 
 import React from "react";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import {
   ConnectionService,
@@ -124,6 +125,8 @@ function openPrStackScreen(options: {
   resolutionByBranch: Record<string, BranchResolutionFixture>;
   mainBranchRef?: string;
   repointedNodes?: StackNodeFixture[];
+  /** When set, `RepointPlannedPr` rejects with this message instead of returning a plan. */
+  repointRejection?: string;
 }) {
   const backend = aSessionsDrawerBackend([anOrchestratorSession(options.nodes)])
     .onUnary(ConnectionService.method.listProjects, () => ({
@@ -134,9 +137,12 @@ function openPrStackScreen(options: {
         options.resolutionByBranch[req.branch] ?? { branch: req.branch },
       ),
     )
-    .onUnary(ConnectionService.method.repointPlannedPr, () => ({
-      stackPlanJson: aStackPlanJson(1, options.repointedNodes ?? options.nodes),
-    }));
+    .onUnary(ConnectionService.method.repointPlannedPr, () => {
+      if (options.repointRejection) {
+        throw new ConnectError(options.repointRejection, Code.InvalidArgument);
+      }
+      return { stackPlanJson: aStackPlanJson(1, options.repointedNodes ?? options.nodes) };
+    });
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
   return backend;
@@ -294,6 +300,46 @@ it("disables Start session and warns that the base branch is not on origin", () 
   openPrStackScreen({ nodes: A_STRANDED_DEPENDENT, resolutionByBranch: A_DELETED_BASE });
 
   // Then — the CTA is disabled with the reason, not replaced by it
+  prStackScreenPage.startSessionBtn("n2").should("be.disabled");
+  prStackScreenPage
+    .startWarning("n2")
+    .should("have.text", `Base branch ${DELETED_BASE_BRANCH} is not on origin`);
+});
+
+// ---------------------------------------------------------------------------
+// A refused repoint must say so
+// ---------------------------------------------------------------------------
+
+it("surfaces the daemon's reason when a repoint is refused", () => {
+  // Given — the daemon rejects the target (a stale label naming no acceptable base)
+  openPrStackScreen({
+    nodes: A_STRANDED_DEPENDENT,
+    resolutionByBranch: A_DELETED_BASE,
+    repointRejection:
+      "target_base_branch 'origin/master' names neither the default branch 'origin/main' nor any parent's branch",
+  });
+
+  // When
+  prStackScreenPage.clickRepoint("n2");
+
+  // Then — a refusal the operator cannot see is the dead end this whole feature removes
+  prStackScreenPage
+    .repointError("n2")
+    .should("contain.text", "names neither the default branch");
+});
+
+it("leaves the row blocked when the repoint was refused", () => {
+  // Given
+  openPrStackScreen({
+    nodes: A_STRANDED_DEPENDENT,
+    resolutionByBranch: A_DELETED_BASE,
+    repointRejection: "could not resolve default branch: no origin/master, origin/main, or origin/HEAD",
+  });
+
+  // When
+  prStackScreenPage.clickRepoint("n2");
+
+  // Then — nothing was persisted, so the row must not read as recovered
   prStackScreenPage.startSessionBtn("n2").should("be.disabled");
   prStackScreenPage
     .startWarning("n2")

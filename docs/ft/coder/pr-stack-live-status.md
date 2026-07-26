@@ -156,7 +156,14 @@ tooltip (D16). Nothing is hidden.
 - Base branch absent from `origin` → *"Base branch `<base>` is not on origin"*.
 - A direct parent that is non-merged and owns no branch → *"`<parent title>` has not created its branch
   yet"*.
-- No ancestor owns a created branch at all → *"No predecessor owns a branch yet"*.
+- No ancestor owns a created branch at all → *"No predecessor owns a branch yet"*. Reported **only when
+  no direct parent is the blocker**: a branchless non-merged direct parent already makes the base
+  `no-ancestor-branch`, so naming both would state one fact twice. This blocker therefore appears only
+  when the block is *above* a merged parent, which is the one case the parent-level message cannot
+  express.
+
+A dangling parent id is not a blocker — a plan referencing a node that does not exist is malformed, not
+an unmet dependency, and the daemon's own gate likewise refuses only on a parent it can resolve.
 
 **Repoint is the action beside it.** The Repoint control is offered whenever the base cannot be resolved
 right now — *any* cause — as well as in its original merged-parent case (D17). It reads **"Repoint to
@@ -184,6 +191,12 @@ For a node that already owns a branch the git effect is unchanged (rebase onto t
 with lease, re-target the open PR's base). For a node that owns **no** branch the repoint is plan-only
 (D19): there is nothing to rebase and no PR to re-target, and the node becomes startable on the next
 render.
+
+**A refused repoint says so.** The RPC can now reject — a stale label whose target names neither the
+resolved default branch nor any parent's branch — and it can still fail for the reasons it always could
+(the default branch is unresolvable, a rebase conflicts). The row shows the daemon's reason inline
+(`pr-stack-repoint-error-<nodeId>`) and stays blocked, because nothing was persisted. A refusal the
+operator cannot see would be a fresh instance of the dead end this feature exists to remove.
 
 ## Authenticated PR status *(added 2026-07-26)*
 
@@ -385,6 +398,13 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
 - **Daemon handlers** — `get_pr_status` (resolve `owner/repo` from the orchestrator session's
   repo remote, call `get_pr_by_head`) and `repoint_planned_pr` (call
   `repoint_planned_pr_node`, return re-serialized `stack_plan_json`).
+- **Repoint target validation (added 2026-07-26)** — `connection_service::validate_repoint_target(target,
+  default_branch, parent_branches) -> Result<Option<String>, String>`, a pure helper in the same shape as
+  `effective_spawn_branch`. Empty or whitespace-only → `Ok(None)` (the drop-merged-parents rule). The
+  default branch is matched with `origin/` stripped from both sides, since the resolver returns a
+  remote-tracking ref while a node's `branch` and a GitHub PR base are plain names. Anything else is an
+  `invalid_argument` refusal — an unvalidated target would silently detach the node, because "no parent
+  owns this branch" *is* the detach instruction.
 - **Enrichment** — `session_list_enrichment` populates `SessionEntry.branch` from
   `Changeset.branch`.
 - **Sequence-respecting base (capability 5)** — `resolve_chain_base_ref` (renamed/extended to
@@ -472,6 +492,10 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   (`pr-stack-start-warning-<nodeId>`) listing those blockers; the base branch gets its own line
   (`pr-stack-base-branch-<nodeId>`). The `pr-stack-missing-branch-<nodeId>` replacement indicator is
   **removed** (D16).
+- *(2026-07-26, dead-end recovery)* `PrStackScreen.handleRepoint` records a per-node failure that the row
+  renders as `pr-stack-repoint-error-<nodeId>`. It previously `await`ed the call with no `catch`, so a
+  rejection was an unhandled promise and the row looked untouched — which the new `invalid_argument`
+  refusal would have made reachable.
 
 ## Behavior and semantics
 

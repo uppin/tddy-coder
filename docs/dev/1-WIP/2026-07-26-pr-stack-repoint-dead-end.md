@@ -14,8 +14,8 @@
   - `pr_stack/mod.rs` — `repoint_planned_pr_node` takes `target_base_branch: Option<&str>`; a node with
     `branch = None` becomes a plan-only repoint instead of an error.
 - **Daemon** (`packages/tddy-daemon/src/`): validate and forward the target.
-  - `connection_service.rs` — `repoint_planned_pr` validates `target_base_branch` against the resolved
-    default branch and the node's parents' branches, then passes it through.
+  - `connection_service.rs` — new pure `pub fn validate_repoint_target`; `repoint_planned_pr` calls it
+    against the resolved default branch and the node's parents' branches, then passes the result through.
 - **Web** (`packages/tddy-web/src/`): a blocked row keeps its information and gains a real action.
   - `components/sessions/prstack/startBlockers.ts` — **new** pure module: `startBlockers` and
     `resolveRepointTarget`.
@@ -25,13 +25,15 @@
   - `components/sessions/prstack/PlannedPrList.tsx` — computes blockers and the repoint target instead of
     the `baseBranchMissing` / `baseBranch` pair; widens `canRepoint`.
   - `components/sessions/prstack/PrStackScreen.tsx` — new `defaultBranch` prop; sends
-    `targetBaseBranch`; uses the default branch for `baseBranchLabel`.
+    `targetBaseBranch`; uses the default branch for `baseBranchLabel`; records a per-node repoint failure
+    (`handleRepoint` currently `await`s with no `catch`).
   - `components/sessions/workflowViews.tsx` — `WorkflowViewContext.defaultBranch`.
   - `components/sessions/SessionMainPane.tsx` — resolves the default branch from the already-loaded
     `projects` by `session.projectId`.
 - **Web test support** (`packages/tddy-web/cypress/support/`):
-  - `testIds.ts` — `prStackStartWarning`, `prStackBaseBranch`; `prStackMissingBranch` removed.
-  - `pages/prStackScreenPage.ts` — `startWarning`, `baseBranch`; `missingBranch` removed.
+  - `testIds.ts` — `prStackStartWarning`, `prStackBaseBranch`, `prStackRepointError`;
+    `prStackMissingBranch` removed.
+  - `pages/prStackScreenPage.ts` — `startWarning`, `baseBranch`, `repointError`; `missingBranch` removed.
 - **Documentation** (`docs/`): `docs/ft/coder/pr-stack-live-status.md` amended (D16–D20 + new section).
 
 ## Related Feature Documentation
@@ -84,8 +86,8 @@ anyway.
 - [x] **Documentation**: `pr-stack-live-status.md` amended (D16–D20, new section, revised tables)
 - [ ] **Implementation**: proto field, recipe target rule + plan-only repoint, daemon validation, web
       blockers/target/threading
-- [~] **Testing**: 24 acceptance/unit tests written and confirmed failing for the right reasons; none
-      passing yet by design (see [Implementation Evidence](#implementation-evidence))
+- [~] **Testing**: 41 acceptance/unit tests written and confirmed failing for the right reasons; none of
+      the new behaviour passes yet, by design (see [Implementation Evidence](#implementation-evidence))
 - [ ] **Integration**: verified against a live stack with a merged-and-deleted predecessor branch
 - [ ] **Technical Debt**: production readiness gaps addressed
 - [ ] **Code Quality**: `cargo clippy -- -D warnings` clean, `bun run build` clean
@@ -137,9 +139,22 @@ target_base_branch: Option<&str>, gh)`:
   force-push, no `patch_pr_base`.
 - Everything else unchanged.
 
-**Daemon.** `repoint_planned_pr` rejects (`invalid_argument`) a non-empty `target_base_branch` that names
-neither the resolved default branch (with or without an `origin/` prefix) nor any of the node's parents'
-branches, then forwards `Some(target)` / `None`.
+**Daemon.** A new pure helper, in the same shape as the existing `effective_spawn_branch`:
+
+```rust
+pub fn validate_repoint_target(
+    target_base_branch: &str,
+    default_branch: &str,
+    parent_branches: &[&str],
+) -> Result<Option<String>, String>;
+```
+
+Empty or whitespace-only → `Ok(None)` (the drop-merged-parents rule). The default branch matches with
+`origin/` stripped from both sides, since `resolve_default_integration_base_ref` returns a
+remote-tracking ref while a node's `branch` and a GitHub PR base are plain names. Anything else is an
+error, which `repoint_planned_pr` turns into `invalid_argument`. Validation is not optional politeness:
+"no parent owns this branch" *is* the detach instruction, so an unvalidated target silently rewrites the
+plan.
 
 **Startability (web).** A new pure module `startBlockers.ts`:
 
@@ -165,8 +180,16 @@ export function resolveRepointTarget(
 
 `startBlockers` returns every reason a node cannot be started, each with an operator-readable `message`;
 an empty array means startable. It preserves every existing suppression rule: a node that owns a branch
-has no blockers (its spawn resumes), an unarrived resolution is *unknown* rather than missing, and a root
-or all-merged node is startable.
+has no blockers (its spawn resumes), an unarrived resolution is *unknown* rather than missing, a root or
+all-merged node is startable, and a dangling parent id is a malformed plan rather than an unmet
+dependency. Two further rules, both pinned by tests:
+
+- `no-ancestor-branch` is reported **only when no direct parent is the blocker**. A branchless non-merged
+  direct parent already makes the base `no-ancestor-branch`, so emitting both states one fact twice; the
+  blocker therefore appears only when the block is *above* a merged parent, which is the case
+  `parent-has-no-branch` cannot express.
+- A `parents` cycle must terminate — this runs on every render, so a malformed `stackPlanJson` must not be
+  able to hang the screen.
 
 `resolveRepointTarget` returns the first direct parent branch that can serve as a base right now
 (non-merged, owns a `branch`, and whose `remote.exists` is not `false`), else `defaultBranch`. This is the
@@ -192,19 +215,20 @@ selectedSession.projectId)?.mainBranchRef ?? ""` into `WorkflowViewContext.defau
 |---|---|
 | `connection.proto` | `+ string target_base_branch = 4;` on `RepointPlannedPrRequest` |
 | `pr_stack/mod.rs` | `repoint_planned_pr_node` `+ target_base_branch: Option<&str>`; retain-by-target rule; plan-only branch for `branch == None` |
-| `connection_service.rs` | validate + forward `target_base_branch` |
+| `connection_service.rs` | new pure `validate_repoint_target`; `repoint_planned_pr` validates + forwards |
 | `startBlockers.ts` | **new** — `StartBlocker`, `startBlockers`, `resolveRepointTarget` |
 | `PlannedPrList.tsx` | `blockers` + `repointTarget` replace `baseBranchMissing` + `baseBranch`; `canRepoint` also true when blockers exist |
 | `PlannedPrRow.tsx` | unconditional full information; base-branch line; warning strip; disabled-not-replaced CTA; targeted Repoint label |
-| `PrStackScreen.tsx` | `defaultBranch` prop; `targetBaseBranch` on the `repointPlannedPr` call; real `baseBranchLabel` |
+| `PrStackScreen.tsx` | `defaultBranch` prop; `targetBaseBranch` on the `repointPlannedPr` call; real `baseBranchLabel`; per-node repoint error state |
 | `workflowViews.tsx`, `SessionMainPane.tsx` | thread `defaultBranch` from the loaded projects |
-| `testIds.ts`, `prStackScreenPage.ts` | `prStackStartWarning` + `prStackBaseBranch` in, `prStackMissingBranch` out |
+| `testIds.ts`, `prStackScreenPage.ts` | `prStackStartWarning` + `prStackBaseBranch` + `prStackRepointError` in, `prStackMissingBranch` out |
 
 ## Implementation Milestones
 
 - [ ] `RepointPlannedPrRequest.target_base_branch` added and TS regenerated
 - [ ] `repoint_planned_pr_node` honours an explicit target and repoints a branchless node plan-only
-- [ ] `repoint_planned_pr` validates the target and forwards it
+- [ ] `validate_repoint_target` written; `repoint_planned_pr` validates the target and forwards it
+- [ ] A refused repoint surfaces the daemon's reason on the row and leaves it blocked
 - [ ] `startBlockers.ts` written with `startBlockers` + `resolveRepointTarget`
 - [ ] `PlannedPrRow` renders full information, a base-branch line, a warning strip, and a disabled CTA
 - [ ] Repoint control offered for any unresolvable base and labelled with its target
@@ -227,21 +251,27 @@ was read and confirmed to be the absence of the feature rather than a mistake in
 | File | Count | Status |
 |---|---|---|
 | `packages/tddy-workflow-recipes/tests/pr_stack_repoint_dead_end_acceptance.rs` *(new)* | 5 | ✗ all fail |
-| `packages/tddy-web/src/components/sessions/prstack/startBlockers.test.ts` *(new, `bun:test`)* | 11 | ✗ all fail |
-| `packages/tddy-web/cypress/component/PrStackRepointDeadEndAcceptance.cy.tsx` *(new)* | 8 | ✗ 7 fail, 1 guard passes |
+| `packages/tddy-daemon/tests/repoint_target_validation_acceptance.rs` *(new)* | 7 | ✗ all fail |
+| `packages/tddy-web/src/components/sessions/prstack/startBlockers.test.ts` *(new, `bun:test`)* | 13 | ✗ all fail |
+| `packages/tddy-web/cypress/component/PrStackRepointDeadEndAcceptance.cy.tsx` *(new)* | 10 | ✗ 9 fail, 1 guard passes |
 | `packages/tddy-web/cypress/component/PrStackMissingBranchAcceptance.cy.tsx` *(migrated)* | 6 | ✗ 3 fail, 3 already hold |
 | `packages/tddy-web/cypress/component/PrStackOrphanedNodeAcceptance.cy.tsx` *(migrated)* | 5 | ✓ 5 pass |
 
+**41 tests: 37 failing for confirmed-correct reasons, 4 passing as regression guards.**
+
 ### Confirmed failure reasons
 
-- **Rust (5/5)** — `error[E0061]: this function takes 5 arguments but 6 arguments were supplied`
+- **Recipe (5/5)** — `error[E0061]: this function takes 5 arguments but 6 arguments were supplied`
   against `pr_stack/mod.rs:457`. The only error class in the target, so the fixtures and the
   `FakeGithub` double are sound.
-- **`bun:test` (11/11)** — `Cannot find module './startBlockers'`.
-- **Cypress `PrStackRepointDeadEndAcceptance` (7/8)** — `pr-stack-repoint-n2` never found (5 cases: the
-  control is still gated on the plan's recorded `merged` phase), `pr-stack-base-branch-n2` never found
-  (1), and `pr-stack-start-session-n2` **never found** (1) — the button is replaced, not disabled, which
-  is D16's defect stated as an assertion.
+- **Daemon (7/7)** — `error[E0432]: unresolved import
+  tddy_daemon::connection_service::validate_repoint_target`. The only error in the target.
+- **`bun:test` (13/13)** — `Cannot find module './startBlockers'`.
+- **Cypress `PrStackRepointDeadEndAcceptance` (9/10)** — `pr-stack-repoint-n2` never found (7 cases: the
+  control is still gated on the plan's recorded `merged` phase, which also blocks the two refusal cases
+  from reaching the error surface), `pr-stack-base-branch-n2` never found (1), and
+  `pr-stack-start-session-n2` **never found** (1) — the button is replaced, not disabled, which is D16's
+  defect stated as an assertion.
 - **Cypress `PrStackMissingBranchAcceptance` (3/6)** — `pr-stack-start-warning-<nodeId>` never found.
 
 ### Tests that pass today, deliberately
@@ -252,12 +282,17 @@ not-blocked cases in `PrStackMissingBranchAcceptance.cy.tsx` (`:124`, `:205`, `:
 
 ### Fixture verification
 
-A module-not-found red cannot show whether the 11 unit-test bodies are right, so the three riskiest
-fixtures were probed against the **real** `resolveStackBase` / `branchlessNonMergedParent` before being
-committed. One was wrong and was rebuilt: an all-merged chain resolves to `default-branch` (startable),
-not `no-ancestor-branch`, so the no-ancestor case is now modelled as a branchless non-merged ancestor
-*above* a merged parent — confirmed to yield `{kind:"no-ancestor-branch"}` with **no** blocking direct
-parent, which is what makes it a distinct blocker rather than a duplicate of `parent-has-no-branch`.
+A module-not-found red cannot show whether the unit-test bodies are right, so the riskiest fixtures were
+probed against the **real** `resolveStackBase` / `branchlessNonMergedParent` before being committed. Two
+findings, both of which changed the specification rather than just a fixture:
+
+1. **An all-merged chain resolves to `default-branch` (startable), not `no-ancestor-branch`.** The first
+   fixture was wrong. The no-ancestor case is now modelled as a branchless non-merged ancestor *above* a
+   merged parent — confirmed to yield `{kind:"no-ancestor-branch"}` with **no** blocking direct parent.
+2. **A `parents` cycle makes both `blockingParent` and `no-ancestor-branch` true at once**, about the same
+   node. That surfaced an unstated rule: `no-ancestor-branch` must be reported only when no direct parent
+   is the blocker, or the warning states one fact twice. The rule is now written into the PRD and pinned
+   by both tests; without it the same fixture would have been implemented two different ways.
 
 ### Environment notes
 
@@ -292,7 +327,8 @@ Three levels, each chosen for what only it can pin:
 
 | Option | Trade-off | Verdict |
 |---|---|---|
-| Daemon integration test for `repoint_planned_pr` end to end | Would need a real git repository with an `origin` remote and a GitHub double behind `RealGithubPrApi`; `resolve_default_integration_base_ref` runs `git fetch origin`, so the test either hits the network or needs a local bare-repo fixture | **Rejected** — the target validation is the only daemon-side logic, and it is a pure string check better covered by the recipe-level and web-level tests than by that much fixture |
+| Daemon integration test for `repoint_planned_pr` end to end | Would need a real git repository with an `origin` remote and a GitHub double behind `RealGithubPrApi`; `resolve_default_integration_base_ref` runs `git fetch origin`, so the test either hits the network or needs a local bare-repo fixture | **Rejected** — that much fixture buys nothing the recipe-level and web-level tests do not already cover |
+| Leave the target validation untested because the handler is hard to test | One less file | **Rejected on review** — this was the first conclusion and it was wrong. It conflated "the handler is hard to test" with "the rule is hard to test". The repo already has the pattern for exactly this: `effective_spawn_branch` is a pure `pub fn` in `connection_service.rs` with its own `packages/tddy-daemon/tests/effective_spawn_branch_acceptance.rs`. `validate_repoint_target` gets the same treatment, and the rule it encodes is load-bearing — "no parent owns this branch" *is* the detach instruction, so an unvalidated target is a silent plan rewrite |
 | Assert on `resolveRepointTarget` only through the rendered button label | One less test file | **Rejected** — the target rule has four distinct outcomes (surviving sibling, all-dead → default, merged parent skipped, root); mounting a screen per outcome is slow and the failure message points at a DOM string rather than the rule |
 | Keep `pr-stack-missing-branch-<nodeId>` alongside the new warning | No churn in the existing spec | **Rejected** — two test ids for one concept, and the existing spec's `startSessionBtn(...).should("not.exist")` assertions encode the behaviour being reversed. They must change to state the new contract, not be worked around |
 | Have the daemon re-derive dead parents from `remote_branch_ref_sha` instead of taking a target | No proto change | **Rejected** — see D18: every probe failure collapses to `None`, so the daemon would drop a live dependency whenever git was unavailable, and it would break `pr_stack_repoint_acceptance.rs`, whose `repo_root` is a bare tempdir where *every* branch reads as absent |
@@ -305,6 +341,11 @@ Three levels, each chosen for what only it can pin:
 - Both `repoint_planned_pr_node` target modes (`Some` / `None`) and both branch states
   (owns a branch / plan-only).
 - Every existing suppression rule re-asserted after the rewrite: owned branch, unarrived resolution, root.
+- Every `validate_repoint_target` outcome: empty, whitespace-only, the default branch with and without its
+  `origin/` prefix, a parent's branch, and both refusal paths.
+- Malformed-plan defensiveness: a dangling parent id, and a `parents` cycle (must terminate).
+- The refusal path end to end in the web: the reason is shown, and the row stays blocked because nothing
+  was persisted.
 
 ## Acceptance Tests
 
@@ -320,6 +361,8 @@ Three levels, each chosen for what only it can pin:
 | `names the surviving parent's branch as the Repoint target when only one of two parents is dead` | The target rule is "nearest usable ancestor", not "always the default branch" |
 | `reads "Repoint to default branch" when the project records no default branch` | D20 — a legacy project degrades the label only, never the action |
 | `offers no Repoint control on a node whose base branch is on origin` | The control does not become ambient noise on a healthy stack |
+| `surfaces the daemon's reason when a repoint is refused` | The new `invalid_argument` path is reachable; a refusal the operator cannot see is a fresh dead end |
+| `leaves the row blocked when the repoint was refused` | No optimistic clearing — nothing was persisted, so the row must not read as recovered |
 
 ### `packages/tddy-web/cypress/component/PrStackMissingBranchAcceptance.cy.tsx` *(migrated)*
 
@@ -352,6 +395,20 @@ asserted `disabled` / `enabled` rather than `not.exist` / `exist`, and `startWar
 | `resolves the repoint target to the surviving parent's branch when one parent is dead` | Nearest usable ancestor wins |
 | `resolves the repoint target past a merged parent to the next usable one` | The original merged-parent repoint keeps its target |
 | `resolves the repoint target to the default branch for a root node` | No parents at all |
+| `ignores a parent id that matches no node in the stack` | A malformed plan is not an unmet dependency — the daemon's gate takes the same stance |
+| `terminates on a parent cycle rather than recursing forever` | This runs on every render; a bad `stackPlanJson` must not hang the screen |
+
+### `packages/tddy-daemon/tests/repoint_target_validation_acceptance.rs` *(new)*
+
+| Test | Validates |
+|---|---|
+| `an_empty_target_selects_the_drop_merged_parents_rule` | `None` is the original behaviour, not a rejection |
+| `a_whitespace_only_target_is_no_target_at_all` | A blank field is not a branch literally named `"   "` |
+| `the_resolved_default_branch_is_accepted` | The reported case's target |
+| `the_default_branch_is_accepted_without_its_origin_prefix` | The resolver returns `origin/master`; a PR base and a node's `branch` are plain names |
+| `a_parents_own_branch_is_accepted` | The surviving-sibling target |
+| `a_target_that_is_neither_the_default_branch_nor_a_parents_branch_is_rejected` | An unvalidated target silently detaches the node |
+| `a_parents_branch_is_rejected_once_that_parent_is_no_longer_a_parent` | A stale label after an earlier repoint |
 
 ## Technical Debt & Production Readiness
 
@@ -370,10 +427,6 @@ Open items as of the red phase:
   operator-driven, target-naming control is the mitigation.
 - **Repointing an unstarted predecessor detaches a real dependency** (accepted, D17). Not recoverable
   from the UI — re-adding the parent edge needs a new planned-PR edit path, which is out of scope here.
-- **The daemon's target validation is not covered by a test.** It is a pure string check
-  (`target` ∈ {resolved default branch, any parent's branch}) and the testing plan deliberately rejected
-  a daemon integration test for it (see [Testing options considered](#testing-options-considered)). If it
-  grows past a string check it needs its own coverage.
 - **The `None` target mode stays reachable** for callers that do not name a target. Nothing in the web
   sends it after this change; it exists so the existing repoint semantics remain available and its
   acceptance tests keep meaning. Worth revisiting once the agent path is confirmed to be the only user.
@@ -412,7 +465,7 @@ The full table lives in
 - [x] Create failing acceptance tests
 - [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

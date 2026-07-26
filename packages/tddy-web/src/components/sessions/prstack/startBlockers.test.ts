@@ -159,6 +159,39 @@ describe("startBlockers", () => {
     ]);
   });
 
+  it("ignores a parent id that matches no node in the stack", () => {
+    // Given — a dangling parent reference, which is a malformed plan rather than an unmet dependency
+    const n2 = aNode({ nodeId: "n2", title: "Add middleware", parents: ["n-gone"] });
+
+    // When
+    const blockers = startBlockers(n2, [n2], {});
+
+    // Then — the daemon's own gate likewise refuses only on a parent it can resolve
+    expect(blockers).toEqual([]);
+  });
+
+  it("terminates on a parent cycle rather than recursing forever", () => {
+    // Given — a malformed `stackPlanJson` whose parents form a cycle. This runs on every render, so a
+    // bad plan must not be able to hang the screen.
+    const n1 = aNode({ nodeId: "n1", title: "Add token store", parents: ["n2"] });
+    const n2 = aNode({ nodeId: "n2", title: "Add middleware", parents: ["n1"] });
+
+    // When
+    const blockers = startBlockers(n1, [n1, n2], {});
+
+    // Then — n1's direct parent owns no branch, which is a plain unmet dependency. The base also
+    // resolves to `no-ancestor-branch` here, but that is the *same fact* about the same node, so it is
+    // not reported a second time (see "reports that no predecessor owns a branch yet ...", where the
+    // block is above a merged parent and there is no blocking direct parent to name).
+    expect(blockers).toEqual([
+      {
+        kind: "parent-has-no-branch",
+        parentTitle: "Add middleware",
+        message: "Add middleware has not created its branch yet",
+      },
+    ]);
+  });
+
   it("reports the unmet parent ahead of a base branch that is absent from origin", () => {
     // Given — n3 depends on n1 (branch pushed but gone from origin) and n2 (planned only)
     const n1 = aNode({ nodeId: "n1", title: "Add token store", branch: PREDECESSOR_BRANCH });
