@@ -8,8 +8,14 @@
  */
 
 import { create, toBinary } from "@bufbuild/protobuf";
-import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ConnectionService, AcpReplayFrameSchema, StreamMode } from "../../../src/gen/connection_pb";
+import { ConnectError, Code } from "@connectrpc/connect";
+import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import {
+  ConnectionService,
+  AcpReplayFrameSchema,
+  GetAcpToolCallDetailResponseSchema,
+  StreamMode,
+} from "../../../src/gen/connection_pb";
 import {
   AcpAgentMessageSchema,
   ToolCallStatus,
@@ -76,6 +82,41 @@ export function replayToolCall(fields: {
   });
 }
 
+/** A **body-less** replayed tool call stamped at `atUnixMs` — mirrors the server-stripped stream
+ *  (PR #345): it carries only `tool_call_id`/`title`/`kind`/`status`, no `raw_input`/`raw_output`.
+ *  The bodies are fetched on demand via `GetAcpToolCallDetail` (see the `details` config on
+ *  {@link aReplayBackend}). */
+export function replayToolCallStripped(fields: {
+  id: string;
+  title: string;
+  kind: ToolKind;
+  status: ToolCallStatus;
+  atUnixMs: number;
+}): AcpAgentMessage {
+  return create(AcpAgentMessageSchema, {
+    id: 0n,
+    msg: {
+      case: "sessionUpdate",
+      value: {
+        sessionId: { value: "s1" },
+        timestampUnixMs: BigInt(fields.atUnixMs),
+        update: {
+          update: {
+            case: "toolCall",
+            value: {
+              toolCallId: { value: fields.id },
+              title: fields.title,
+              kind: fields.kind,
+              status: fields.status,
+              // No rawInput / rawOutput — the stream no longer inlines bodies.
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
 /** A backend whose `StreamAcpReplay` serves the two-phase protocol for a fixed transcript: the
  *  `COUNT_THEN_LIVE` feed reports one count of `frames.length`, and the `SNAPSHOT_THEN_LIVE` feed
  *  yields the `frames` transcript. Both stay open. Delegates to {@link aReplayBackend} so the mode
@@ -103,8 +144,22 @@ export interface ReplayOpens {
  * `opens` tallies how many times each mode was subscribed, so specs can assert the count feed drives
  * the icon without pulling the snapshot, and that the snapshot is pulled lazily and only once.
  */
-export function aReplayBackend(config: { counts: number[]; snapshot?: AcpAgentMessage[] }) {
+export function aReplayBackend(config: {
+  counts: number[];
+  snapshot?: AcpAgentMessage[];
+  /** Bodies served by the on-demand `GetAcpToolCallDetail` lookup, keyed by `tool_call_id`. A
+   *  `tool_call_id` absent from this map is answered `NOT_FOUND` — exactly as the real server
+   *  answers for an unknown call — which drives the detail dialog's error path. */
+  details?: Record<string, { rawInput?: string; rawOutput?: string }>;
+  /** When true, the `GetAcpToolCallDetail` response is withheld until {@link ReplayBackendHandle.releaseDetail}
+   *  is called, so a spec can observe the dialog's loading state while the fetch is in flight. */
+  holdDetail?: boolean;
+}): ReplayBackendHandle {
   const opens: ReplayOpens = { count: 0, snapshot: 0 };
+  let releaseDetail: () => void = () => undefined;
+  const detailGate = new Promise<void>((resolve) => {
+    releaseDetail = resolve;
+  });
   const backend = anInMemoryRpcBackend().implement(ConnectionService, {
     async *streamAcpReplay(req: { mode: StreamMode }) {
       if (req.mode === StreamMode.COUNT_THEN_LIVE) {
@@ -117,8 +172,30 @@ export function aReplayBackend(config: { counts: number[]; snapshot?: AcpAgentMe
       // Keep the stream open so the live-tail consumer stays subscribed.
       await new Promise<void>(() => {});
     },
+    async getAcpToolCallDetail(req: { toolCallId: string }) {
+      if (config.holdDetail) await detailGate;
+      const detail = config.details?.[req.toolCallId];
+      if (!detail) {
+        throw new ConnectError(
+          `no tool call with id ${req.toolCallId}`,
+          Code.NotFound,
+        );
+      }
+      return create(GetAcpToolCallDetailResponseSchema, {
+        rawInput: detail.rawInput,
+        rawOutput: detail.rawOutput,
+      });
+    },
   });
-  return { backend, opens };
+  return { backend, opens, releaseDetail: () => releaseDetail() };
+}
+
+/** What {@link aReplayBackend} returns: the in-memory backend, the stream-open tallies, and a
+ *  release for a held detail response (a no-op unless `holdDetail` was set). */
+export interface ReplayBackendHandle {
+  backend: InMemoryRpcBackend;
+  opens: ReplayOpens;
+  releaseDetail: () => void;
 }
 
 /**
