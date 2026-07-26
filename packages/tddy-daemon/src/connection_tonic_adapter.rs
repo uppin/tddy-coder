@@ -65,8 +65,10 @@ use tddy_service::proto::connection::{
     WorktreeStatsEvent,
 };
 use tddy_service::proto::connection::{
-    DeleteSessionUploadRequest, DeleteSessionUploadResponse, ListSessionUploadsRequest,
-    ListSessionUploadsResponse,
+    DeleteSessionUploadRequest, DeleteSessionUploadResponse, DeleteStagedAttachmentRequest,
+    DeleteStagedAttachmentResponse, ListSessionUploadsRequest, ListSessionUploadsResponse,
+    ListStagedAttachmentsRequest, ListStagedAttachmentsResponse,
+    UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
 };
 use tddy_service::tonic_connection::connection_service_server::ConnectionService as TonicConnectionService;
 
@@ -945,6 +947,45 @@ where
         request: tonic::Request<DeleteSessionUploadRequest>,
     ) -> Result<tonic::Response<DeleteSessionUploadResponse>, tonic::Status> {
         let resp = RpcConnectionService::delete_session_upload(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn upload_staged_attachment_chunk(
+        &self,
+        request: tonic::Request<UploadStagedAttachmentChunkRequest>,
+    ) -> Result<tonic::Response<UploadStagedAttachmentChunkResponse>, tonic::Status> {
+        let resp = RpcConnectionService::upload_staged_attachment_chunk(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn list_staged_attachments(
+        &self,
+        request: tonic::Request<ListStagedAttachmentsRequest>,
+    ) -> Result<tonic::Response<ListStagedAttachmentsResponse>, tonic::Status> {
+        let resp = RpcConnectionService::list_staged_attachments(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn delete_staged_attachment(
+        &self,
+        request: tonic::Request<DeleteStagedAttachmentRequest>,
+    ) -> Result<tonic::Response<DeleteStagedAttachmentResponse>, tonic::Status> {
+        let resp = RpcConnectionService::delete_staged_attachment(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

@@ -19,13 +19,15 @@ use tddy_service::proto::connection::{
     CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
     ConnectionService as ConnectionServiceTrait, CreateProjectRequest, CreateProjectResponse,
     DeleteSessionRequest, DeleteSessionResponse, DeleteSessionUploadRequest,
-    DeleteSessionUploadResponse, EligibleDaemonEntry, ListAgentModelsRequest,
-    ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
-    ListEligibleDaemonsResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
-    ListProjectsRequest, ListProjectsResponse, ListSessionUploadsRequest,
-    ListSessionUploadsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
-    ListSessionsRequest, ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse,
-    ListTerminalSessionsRequest, ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
+    DeleteSessionUploadResponse, DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse,
+    EligibleDaemonEntry, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
+    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
+    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
+    ListProjectsResponse, ListSessionUploadsRequest, ListSessionUploadsResponse,
+    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
+    ListSessionsResponse, ListStagedAttachmentsRequest, ListStagedAttachmentsResponse,
+    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
+    ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse, ModelInfo,
     ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
@@ -39,8 +41,9 @@ use tddy_service::proto::connection::{
     StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
     StopTerminalSessionResponse, StreamTerminalOutputRequest, StreamWorktreeStatsRequest,
     SubagentInfo, TerminalControlEvent, TerminalSessionInfo, ToolInfo,
-    UploadSessionFileChunkRequest, UploadSessionFileChunkResponse, WatchTerminalControlRequest,
-    WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
+    UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
+    UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
+    WatchTerminalControlRequest, WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
     WorktreeSizeStatus as ProtoWorktreeSizeStatus, WorktreeStatsEvent,
 };
 use uuid::Uuid;
@@ -7816,6 +7819,39 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             &req.file_name,
         )?;
         Ok(Response::new(DeleteSessionUploadResponse {}))
+    }
+
+    // TODO(start-session-attachments): the three pre-session staging RPCs below are wire-only
+    // stubs — the proto contract is pinned so the web can be generated against it, but no staging
+    // area is written or read yet, and `StartSessionRequest.attachments` is ignored by
+    // `start_session`. Implement the host side (staging root under the caller's sessions base,
+    // basename validation, cross-host routing by `daemon_instance_id`) in the follow-up changeset.
+
+    async fn upload_staged_attachment_chunk(
+        &self,
+        _request: Request<UploadStagedAttachmentChunkRequest>,
+    ) -> Result<Response<UploadStagedAttachmentChunkResponse>, Status> {
+        Err(Status::unimplemented(
+            "UploadStagedAttachmentChunk is not implemented yet",
+        ))
+    }
+
+    async fn list_staged_attachments(
+        &self,
+        _request: Request<ListStagedAttachmentsRequest>,
+    ) -> Result<Response<ListStagedAttachmentsResponse>, Status> {
+        Err(Status::unimplemented(
+            "ListStagedAttachments is not implemented yet",
+        ))
+    }
+
+    async fn delete_staged_attachment(
+        &self,
+        _request: Request<DeleteStagedAttachmentRequest>,
+    ) -> Result<Response<DeleteStagedAttachmentResponse>, Status> {
+        Err(Status::unimplemented(
+            "DeleteStagedAttachment is not implemented yet",
+        ))
     }
 }
 

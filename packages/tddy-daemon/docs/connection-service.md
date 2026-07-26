@@ -34,6 +34,43 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 | `QueryBranch` | Resolves, by head **`branch`**, the in-progress child **session**, the on-disk **worktree** (**`tddy_core::worktree::worktree_path_for_branch`**), and the live GitHub **PR status** for a **`"pr-stack"`** orchestrator session (guarded by **`require_pr_stack_orchestrator`**). Returns one **`BranchResolution`** (`session`, `worktree`, `pr` — reusing **`PrStatusView`**); an unresolvable repo/token yields `pr.exists = false`, not an error, mirroring **`GetPrStatus`**. Additive alongside **`GetPrStatus`**; backs the PR-Stack rows via the web **`useQueryBranch`** hook. See [pr-stack-live-status.md](../../../docs/ft/coder/pr-stack-live-status.md). |
 | `ListSessionUploads` | Lists the files uploaded to a session (`{session_dir}/uploads/{upload_id}/{file_name}`, written by `UploadSessionFileChunk`) as a **flat, newest-first** list across all `upload_id` folders — one `SessionUploadEntry` (`upload_id`, `file_name`, absolute `host_path`, `size_bytes`, `uploaded_at_ms` = mtime in ms) per regular file; a missing uploads root returns an **empty** list, not an error. Auth/validation like the other session-dir RPCs (`session_token` → `sessions_base`, `validate_session_id_segment`). Backs the web Inspector **Files** tab. Implementation in **`session_uploads`**. |
 | `DeleteSessionUpload` | Removes one uploaded file addressed by `upload_id` + `file_name`. Both untrusted segments are basename-validated and confirmed to resolve inside the trusted `{session_dir}/uploads` root via the shared **`session_file_upload::contained_canonical_dir`** guard (unsafe segment → `INVALID_ARGUMENT`, removing nothing); a missing file → `NOT_FOUND`; the emptied `upload_id` folder is pruned. |
+| `UploadStagedAttachmentChunk` / `ListStagedAttachments` / `DeleteStagedAttachment` | **Wire contract only — all three return `UNIMPLEMENTED`.** Pre-session staging for [start-session attachments](#start-session-attachments-wire-contract-only); see that section for the intended semantics and what still has to be built. |
+
+## Start-session attachments (wire contract only)
+
+`StartSessionRequest.attachments` (field 29, `repeated SessionAttachment`) lets a client attach documents to a session **at start time**, before the session directory exists. The proto contract is pinned so `tddy-web` and the daemon can be built against it independently; **no part of it is implemented yet.**
+
+> ⚠️ **Status: not implemented.** The three staging RPCs return `UNIMPLEMENTED` (stubs in `connection_service.rs`, marked `TODO(start-session-attachments)`), and `start_session` **ignores** `attachments` entirely — a request carrying them starts a session with no attachments and no error. Do not build product behavior on this until the items below land.
+
+**Two attachment sources**, both naming the host authority that owns the bytes:
+
+| Source | Locator | Intended semantics |
+|--------|---------|--------------------|
+| `StagedAttachmentRef` | `daemon_instance_id` + `staging_id` + `file_name` | Bytes uploaded ahead of the session by `UploadStagedAttachmentChunk`. A staged batch belongs to **one** host: a ref naming a host other than the one `StartSession` runs on must be a request **error**, not a cross-host fetch — no fallback that uploads to A, starts on B, and silently yields an empty attachment. |
+| `HostDocumentRef` | `daemon_instance_id` + `HostDocumentScope` + `session_id`/`project_id` + `relative_path` | A document that already exists on a connected host. The read is performed by the **owning** daemon under **its own** os_user mapping; the referencing client's host grants it no access. |
+
+`HostDocumentScope` is deliberately a **scope + relative path, never an absolute host path** — a raw path field would let any caller name any file the daemon's user can read. Each scope names a root the owning daemon resolves itself, and `relative_path` (POSIX separators, no `.`/`..`, not absolute) is validated against it:
+
+| Scope | Root | Typical content |
+|-------|------|-----------------|
+| `SESSION_ARTIFACT` | `{session_dir}/artifacts/` | Recipe-manifest planning docs (see `SessionContextDoc`) |
+| `SESSION_UPLOAD` | `{session_dir}/uploads/` | Files already uploaded to a session; `relative_path` is `"<upload_id>/<file_name>"` (see `SessionUploadEntry`) |
+| `SESSION_WORKTREE` | The session's git worktree | Working-copy files |
+| `PROJECT_REPO` | `ProjectEntry.main_repo_path` | Checked-in docs, e.g. `docs/ft/*.md` |
+
+Adding a source of documents means adding a scope — that is the point, so each new root is reviewed rather than reachable by construction.
+
+`SessionAttachment.basename` is separate from the source locator, so the UI can rename an attachment without touching the stored file. Duplicate basenames within one request are to be rejected rather than silently renamed, and the intended materialization target is `{session_dir}/attachments/<basename>` before the agent launches — so the agent sees a plain local file regardless of which source produced it.
+
+The staging upload mirrors the terminal **"Attach"** flow (`UploadSessionFileChunk`) with `session_id` replaced by `daemon_instance_id` and `upload_id` by `staging_id`: same client-side 48 KiB chunking, one unary per chunk, `last` on the final one, and the completed `StagedAttachmentEntry` returned on the last response. That keeps `tddy-web`'s `lib/fileUploadChunks.ts` reusable unchanged and each chunk inside a single LiveKit data packet — see [terminal-file-upload.md](../../tddy-web/docs/terminal-file-upload.md).
+
+**Known limitations / still to build** (host side, then web):
+
+- Staging root + chunked writer (per-caller, basename-validated), and staging GC — consumed batches plus a TTL for batches abandoned when a form is never submitted.
+- Materializing `attachments` into `{session_dir}/attachments/` before spawn, including the cross-host refusal for a foreign `StagedAttachmentRef` and duplicate-basename rejection.
+- `HostDocumentRef` scope resolution and the cross-host fetch by `daemon_instance_id` (note the existing streaming RPCs return `unimplemented` for `PeerRoute::Forward`; a fetch path has to be unary).
+- `tddy-web`: the Start-Session attachment picker and a browser for referencing existing docs on connected hosts.
+- A product PRD under `docs/ft/web/` and acceptance tests. No tests cover the new RPCs beyond the fact that they compile.
 
 ## ListSessions workflow fields
 

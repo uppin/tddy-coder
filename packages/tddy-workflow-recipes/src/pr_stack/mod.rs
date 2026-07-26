@@ -206,9 +206,12 @@ impl WorkflowRecipe for PrStackRecipe {
             "orchestrate" => PR_STACK_ORCHESTRATE_PROMPT.to_string(),
             other => format!(
                 "You are working the '{other}' goal of the pr-stack workflow. Study the feature and \
-                 write the PR-stack plan (stack-plan.yaml) via `tddy-tools submit`. Once the plan is \
-                 written the session moves on to the interactive orchestrate phase, where you and \
-                 the developer manage the stack together."
+                 write the PR-stack plan (stack-plan.yaml) via `tddy-tools submit`. Each planned PR \
+                 must be self-contained — the API/schema change, its implementation, and its tests \
+                 in one node; never split a stack by layer (schema then behavior), and split an \
+                 oversized slice by capability instead. Once the plan is written the session moves \
+                 on to the interactive orchestrate phase, where you and the developer manage the \
+                 stack together."
             ),
         }
     }

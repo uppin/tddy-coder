@@ -68,6 +68,29 @@ fn analyze_stack_system_prompt() -> String {
      This is a **read-only** analysis phase — do not write code or create files. \
      Focus on understanding the feature scope and identifying the optimal PR decomposition strategy, \
      noting which PRs depend on others and which can be developed concurrently.\n\n\
+     ## Scoping rules: every PR is self-contained\n\n\
+     Each PR must stand on its own — a reviewer can judge it, and it can merge, without waiting for \
+     a later node in the stack. That means one node ships the **API/schema change, the code that \
+     implements it, and its tests, together**.\n\n\
+     **Do not split by layer.** These are the same node, never two:\n\
+     - a schema/proto/interface change and the behavior behind it\n\
+     - a backend endpoint and the handler that serves it\n\
+     - a data model and the migration or persistence that uses it\n\
+     - a function signature and its body; a type and its consumers\n\n\
+     A node that only declares surface — new RPCs that return `unimplemented`, a field nothing \
+     reads, a trait with stub impls — is **not** a valid PR. It cannot be reviewed for correctness \
+     (there is no behavior to check), it cannot be tested beyond compiling, and it strands a \
+     contract in the codebase that lies about what the system does.\n\n\
+     **When a vertical slice feels too large, split by capability, not by layer.** Cut along \
+     user-visible increments where each part is still end-to-end: one source variant instead of \
+     all of them, one scope/enum case instead of the full set, one screen or one entry point, the \
+     happy path before the edge cases. Each such PR ships its own contract plus behavior plus \
+     tests, and the next one extends it.\n\n\
+     **The only exceptions** — a node may omit implementation when it is:\n\
+     - a purely mechanical rename, move, or extraction with no behavior change, or\n\
+     - regenerating already-committed generated code, exposing no new surface.\n\n\
+     If you believe a case warrants a third exception, put the reasoning in the PR's description \
+     and let a human decide — do not invent one silently.\n\n\
      For each proposed PR, identify:\n\
      1. A stable slug (`node_id`, e.g. `auth-store`, `api-client`)\n\
      2. A concise title\n\
@@ -107,8 +130,19 @@ fn write_stack_plan_system_prompt() -> String {
      - Every `branch_suggestion` must be in `feature/<stack-slug>/<node>` form, and all PRs must \
      share the same `<stack-slug>` so the stack's branches group under one namespace \
      (e.g. `feature/auth/token-store`, `feature/auth/middleware`)\n\n\
+     **Scoping rules** (your judgment — the hook cannot check these, so they are on you):\n\
+     - Every PR is **self-contained**: the API/schema change, the code implementing it, and its \
+     tests are one node. A node whose `description` promises only surface — new endpoints that \
+     return `unimplemented`, a field nothing reads, stub impls — is not a valid PR.\n\
+     - **Never split by layer** (schema then behavior, endpoint then handler, signature then body). \
+     When a slice is too large, split by **capability**: one source variant, one enum case, one \
+     screen, happy path before edge cases — each part still end-to-end.\n\
+     - Sole exceptions: a mechanical rename/move with no behavior change, or regenerating \
+     already-committed generated code with no new surface. Anything else, say so in the \
+     `description` and let a human decide.\n\n\
      This may be the first time this plan is written, or a chat-driven refinement of an \
-     already-written plan — in both cases, re-emit the full plan.\n\n\
+     already-written plan — in both cases, re-emit the full plan **and re-apply the scoping rules \
+     above**: a refinement request must not talk you into a layer-split stack.\n\n\
      You may also include an optional top-level `exploration` field: a short markdown \
      code-discovery map of the key files you inspected, each with a `path:line` reference \
      (e.g. `- src/auth/store.rs:42 — token persistence`). When present it is persisted to \
@@ -382,6 +416,61 @@ impl RunnerHooks for PrStackHooks {
             return;
         };
         set_changeset_state(&dir, WorkflowState::new("Failed"));
+    }
+}
+
+#[cfg(test)]
+mod pr_boundary_scoping_rule_tests {
+    use super::*;
+
+    /// The scoping rule has to reach the agent through the seeded `system_prompt`, not merely exist
+    /// as a string constant — so each case drives the real `before_task` seam.
+    fn seeded_system_prompt(seed: fn(&Context, Option<&Path>)) -> String {
+        let ctx = Context::new();
+        seed(&ctx, None);
+        ctx.get_sync::<String>("system_prompt")
+            .expect("hook must seed a system_prompt")
+    }
+
+    /// A planning agent that splits a feature into "declare the API" then "implement it" produces
+    /// exactly the stack this rule exists to prevent, so both planning prompts must forbid it.
+    /// `write-stack-plan` is re-run on every chat-driven refinement — if the rule lived only in
+    /// `analyze-stack`, refinement would quietly drop it.
+    #[test]
+    fn both_planning_prompts_require_self_contained_prs_and_forbid_a_layer_split() {
+        for (goal, prompt) in [
+            ("analyze-stack", seeded_system_prompt(before_analyze_stack)),
+            (
+                "write-stack-plan",
+                seeded_system_prompt(before_write_stack_plan),
+            ),
+        ] {
+            let lower = prompt.to_lowercase();
+
+            assert!(
+                lower.contains("self-contained"),
+                "{goal} prompt must require each PR to be self-contained; got: {prompt}"
+            );
+            assert!(
+                lower.contains("split by layer"),
+                "{goal} prompt must name the layer-split anti-pattern; got: {prompt}"
+            );
+            assert!(
+                lower.contains("capability"),
+                "{goal} prompt must offer capability as the alternative split axis, so an \
+                 oversized slice has somewhere to go; got: {prompt}"
+            );
+            assert!(
+                lower.contains("unimplemented"),
+                "{goal} prompt must reject a surface-only node (stubs returning unimplemented); \
+                 got: {prompt}"
+            );
+            assert!(
+                lower.contains("rename") && lower.contains("generated code"),
+                "{goal} prompt must state the two narrow exceptions so the agent does not invent \
+                 its own; got: {prompt}"
+            );
+        }
     }
 }
 

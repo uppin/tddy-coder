@@ -1,6 +1,14 @@
 pub const STACK_PLAN_BASENAME: &str = "stack-plan.yaml";
 pub const PR_STACK_PLAN_MD_BASENAME: &str = "pr-stack-plan.md";
 
+/// **Superseded — not used in production.** `PlanPrStackRecipe` is never instantiated; every CLI
+/// name (`pr-stack`, `plan-pr-stack`, `orchestrate-pr-stack`) resolves to `PrStackRecipe`, whose
+/// live copy lives in `pr_stack/hooks.rs`. That copy carries the [PR boundary contract] (each node
+/// self-contained: API + implementation + tests, never a layer split) which this one lacks — port
+/// it across before reviving this recipe. Only the two *system* prompts here are dead; the user
+/// prompts below are still imported by `pr_stack/hooks.rs`.
+///
+/// [PR boundary contract]: ../../../../../docs/ft/coder/pr-stacking.md
 pub fn analyze_stack_system_prompt() -> String {
     "You are assisting with the **plan-pr-stack** workflow **analyze-stack** step.\n\n\
      ## Task: Analyze PR stack decomposition\n\n\
