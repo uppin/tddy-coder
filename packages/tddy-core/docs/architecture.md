@@ -63,6 +63,15 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **read_changeset / write_changeset**: Load and persist changeset.yaml.
 - **append_session_and_update_state**: Add session (agent from backend.name(), id, tag, system_prompt_file); update workflow state.
 
+**PR-stack DAG (`Changeset.stack`).** A stack progresses on **branches, not on sessions** — a branch can be built on whether or not a session is still attached to it. See [pr-stacking.md](../../../docs/ft/coder/pr-stacking.md).
+
+- **Stack::base_ref_for_spawn(node_id, stack_bottom_base) -> Result<String, WorkflowError>**: a node's spawn base — the nearest non-merged ancestor's `origin/<branch>`, else `stack_bottom_base`. Refuses (`ChangesetInvalid`) when a non-merged parent owns no `branch`, naming the parent and its missing branch. A parent's `session_id` is not consulted.
+- **Stack::effective_base_refs(node_id, stack_bottom_base)**: counts only branch-bearing non-merged parents. A branchless parent contributes nothing — it is never given a synthesized `origin/<node_id>` ref.
+- **resolve_stack_node_branch(sessions_root, node) -> Option<String>**: the node's own `branch`, else the `branch` recorded in its child session's changeset — the *fallback* route, for a node linked before its branch was known. A missing session directory resolves to `None`, never an error.
+- **read_stack_with_resolved_branches(sessions_root, orchestrator_session_id) -> Result<Option<Stack>, WorkflowError>**: the orchestrator's stack with every node's `branch` hydrated through the resolver; `Ok(None)` when the session carries no stack. The hydrated copy is read-only — persisting it would write a fallback-derived branch onto a node that never recorded one.
+- **link_stack_node_to_child_session(orchestrator_dir, node_id, child_session_id, branch)**: record the branch a spawn created (and its session) on the node.
+- **`branch` vs `branch_suggestion`**: `branch` means "a branch that exists"; `branch_suggestion` is a planned name that never satisfies the spawn gate. Planning leaves `branch = None`.
+
 ### Toolcall (`toolcall/`)
 
 - **store_submit_result / take_submit_result_for_goal**: Shared storage for submit results. Presenter writes via tool executor; workflow reads. Key: goal name; Value: JSON string.

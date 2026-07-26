@@ -63,7 +63,7 @@ respected.
 | D3 | GitHub PR status comes from a new `GetPrStatus(branch)` RPC, polled on an interval | Live status without requiring the orchestrator agent to run; polling keeps the number/link/state fresh. |
 | D4 | Repoint performs DAG-parent update **and** local-branch rebase **and** GitHub base re-target | Matches the orchestrator's existing repoint semantics (`bridge::execute_stack_repoint`) so a web-triggered repoint and an agent-triggered one converge. |
 | D5 | The spawn-time base is resolved in the daemon (`resolve_chain_base_ref`), the single point both the web and agent spawn paths funnel through | One source of truth; the fix lands for both `Start session` and `spawn-child` at once. |
-| D6 | Starting a node with a non-merged, un-started parent is refused | Enforces bottom-up ordering; the parent's branch must exist to base onto it. A merged parent is skipped, not required. |
+| D6 | Starting a node whose non-merged parent owns **no branch** is refused | Enforces bottom-up ordering: the parent's branch must exist to base onto it. Keyed on the branch, never on the parent's session — a closed or cleaned-up child session must not wedge the nodes below it. A merged parent is skipped, not required. |
 
 ## API surface
 
@@ -243,8 +243,9 @@ The handler reuses the `get_pr_status` prologue (auth → os_user → sessions_b
   `pr_status.phase = "error"` (existing `execute_stack_repoint` behavior) and surfaces as an error.
 - **Spawn base.** A node with a single non-merged parent `n1` is branched off
   `origin/<n1.branch>`. A root node (no parents, or all parents merged) is branched off the stack
-  default branch. Starting a node whose non-merged parent has not been started is refused with a
-  message naming the un-started parent.
+  default branch. Starting a node whose non-merged parent owns no branch is refused with a message
+  naming the parent and its missing branch. Whether that parent still has a child session is
+  irrelevant — a branch can be built on after its session is gone.
 
 ## Edge cases and constraints
 
@@ -261,6 +262,12 @@ The handler reuses the `get_pr_status` prologue (auth → os_user → sessions_b
 - **Multi-parent DAG base.** A node with more than one non-merged parent uses the nearest
   ancestor ref (`effective_base_refs`' first entry) as its single base; a true octopus/merge base
   across multiple parents is out of scope for this changeset (documented non-goal).
-- **Out-of-order start.** Starting a node before its non-merged parent is refused (D6). A node
-  whose parents are all merged is a root for base purposes and starts off the stack default.
+- **Out-of-order start.** Starting a node whose non-merged parent owns no branch yet is refused
+  (D6). A node whose parents are all merged is a root for base purposes and starts off the stack
+  default.
+- **Parent's child session closed or cleaned up.** Not an error and not a block: the parent's
+  branch is what the child worktree bases onto, and it outlives the session that created it.
+- **Parent's branch recorded only by its child session.** The node's `branch` resolves through
+  that session's changeset (`resolve_stack_node_branch`), so the descendant still spawns. A missing
+  session directory resolves to no branch, which is a refusal, not a crash.
 ```
