@@ -30,10 +30,10 @@ const CURSOR_MODELS = [
   { id: "gpt-5.2", label: "GPT-5.2" },
   { id: "composer-2.5", label: "Composer 2.5" },
 ];
-// Deliberately distinct from the (to-be-removed) hardcoded `CLAUDE_CLI_MODELS` web constant so this
-// test only passes once the dropdown is actually sourced from the daemon, not the constant.
+// Deliberately unlike the real `claude-cli` catalog so the assertions can only pass if the dropdown
+// renders what the daemon advertised — the web keeps no model list of its own.
 const CLAUDE_CLI_MODELS = [
-  { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
+  { id: "claude-opus-5", label: "Claude Opus 5" },
   { id: "daemon-advertised-cli-model", label: "Daemon-Advertised CLI Model" },
 ];
 

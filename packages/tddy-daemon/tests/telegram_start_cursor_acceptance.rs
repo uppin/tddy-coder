@@ -283,7 +283,7 @@ async fn start_cursor_model_callback_launches_cursor_cli_with_hooks() {
         "Telegram spawn must write .cursor/hooks.json"
     );
 
-    let (expected_model_id, _) = CURSOR_CLI_MODELS[0];
+    let expected_model_id = CURSOR_CLI_MODELS[0].id.as_str();
     assert_eq!(meta.model.as_deref(), Some(expected_model_id));
 
     let handle = manager

@@ -59,7 +59,12 @@ import {
   type SessionEntry,
   type StartSessionResponse,
 } from "../../../src/gen/connection_pb";
-import { aGitHubUser, DEFAULT_AGENTS } from "./responses";
+import {
+  aGitHubUser,
+  DEFAULT_AGENTS,
+  DEFAULT_CLAUDE_CLI_MODEL,
+  DEFAULT_CLAUDE_CLI_MODELS,
+} from "./responses";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -324,12 +329,8 @@ export function aConnectionServiceBackend(
         agents: (scenario.agents ?? DEFAULT_AGENTS).map((a) => anAgentInfo(a)),
       }),
       listAgentModels: async () => ({
-        models: [
-          { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
-          { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-          { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
-        ],
-        defaultModel: "claude-opus-4-8",
+        models: DEFAULT_CLAUDE_CLI_MODELS,
+        defaultModel: DEFAULT_CLAUDE_CLI_MODEL,
       }),
       listEligibleDaemons: async () => ({
         daemons: daemons.map((d) => anEligibleDaemonEntry(d)),

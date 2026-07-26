@@ -14,7 +14,10 @@ import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { TEST_IDS, byTestId } from "../support/testIds";
-import { CLAUDE_CLI_MODELS } from "../../src/constants/claudeCliModels";
+import {
+  DEFAULT_CLAUDE_CLI_MODEL,
+  DEFAULT_CLAUDE_CLI_MODELS,
+} from "../support/rpc/responses";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
 // ---------------------------------------------------------------------------
@@ -173,10 +176,10 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
   });
 
   // -------------------------------------------------------------------------
-  // AC6: Model dropdown shows CLAUDE_CLI_MODELS (claude-cli session)
+  // AC6: Model dropdown shows the daemon-advertised claude-cli catalog
   // -------------------------------------------------------------------------
 
-  it("shows all CLAUDE_CLI_MODELS in the model dropdown when session type is Claude CLI", () => {
+  it("shows every model the daemon advertises in the dropdown when session type is Claude CLI", () => {
     const backend = aConnectionServiceBackend({ sessions: [] });
 
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
@@ -185,10 +188,21 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
 
     byTestId(TEST_IDS.createSessionModelSelect).within(() => {
-      CLAUDE_CLI_MODELS.forEach((m) => {
+      DEFAULT_CLAUDE_CLI_MODELS.forEach((m) => {
         cy.get("option").should("contain.text", m.label);
       });
     });
+  });
+
+  it("preselects the versionless alias so a new Claude CLI session tracks the latest model", () => {
+    const backend = aConnectionServiceBackend({ sessions: [] });
+
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+
+    byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
+    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+
+    byTestId(TEST_IDS.createSessionModelSelect).should("have.value", DEFAULT_CLAUDE_CLI_MODEL);
   });
 
   // -------------------------------------------------------------------------

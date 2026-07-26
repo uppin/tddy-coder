@@ -2,8 +2,9 @@
 # Schema: packages/tddy-sandbox-app/src/config.rs (SandboxAppConfig). Every field is optional and
 # any equivalent CLI flag overrides the value here. Copy this file and edit as needed.
 
-# Claude model for the in-jail `claude` (default: claude-opus-4-8).
-model: claude-opus-4-8
+# Claude model for the in-jail `claude` (default: opus — the versionless alias that always tracks
+# the latest Opus). Use a pinned id such as claude-opus-5 to freeze a generation.
+model: opus
 
 # Permission mode: auto | bypassPermissions | plan (default: auto).
 permission_mode: auto

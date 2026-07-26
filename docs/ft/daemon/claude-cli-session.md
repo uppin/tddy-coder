@@ -115,7 +115,7 @@ Linux's unprivileged-userns restriction does not apply. See
 
 ```yaml
 session_type: claude-cli    # optional; absent/empty = "tool"
-model: claude-opus-4-8      # optional; stored for resume
+model: opus                 # optional; stored for resume
 sandbox: true               # optional; darwin Seatbelt jail (macOS only)
 ```
 
@@ -168,10 +168,15 @@ Uses existing `create_worktree_with_retry()` from `tddy-core`.
 | **Managed session** (default) | Tool, Backend, Recipe | — |
 | **Claude Code CLI** | Model dropdown | Tool, Backend, Recipe |
 
-The Model dropdown is a static list mapped from `ListAgents` `claude-cli` entries, or a hardcoded list if `ListAgents` does not yet return them:
-- `claude-opus-4-8` → "Claude Opus 4"
-- `claude-sonnet-4-6` → "Claude Sonnet 4.5"
-- `claude-haiku-4-5-20251001` → "Claude Haiku 4.5"
+The Model dropdown is populated from `ListAgentModels(agent: "claude-cli")` and preselects the
+response's `default_model`. The web holds no model list of its own; the catalog lives in
+`tddy_core::backend::claude_cli_models()` — versionless aliases first, version-pinned ids after:
+- `opus` → "Claude Opus (latest)" ← default
+- `sonnet` → "Claude Sonnet (latest)"
+- `haiku` → "Claude Haiku (latest)"
+- `claude-opus-5` → "Claude Opus 5 (pinned)"
+- `claude-sonnet-5` → "Claude Sonnet 5 (pinned)"
+- `claude-haiku-4-5-20251001` → "Claude Haiku 4.5 (pinned)"
 
 ### Web: terminal component
 

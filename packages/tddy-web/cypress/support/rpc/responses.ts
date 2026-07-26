@@ -295,3 +295,20 @@ export const DEFAULT_AGENTS: Array<{ id: string; label: string }> = [
 export function listDefaultAgents(): Uint8Array {
   return listAgents(DEFAULT_AGENTS);
 }
+
+/**
+ * The `claude-cli` catalog a stubbed daemon advertises, mirroring `tddy_core::backend::
+ * claude_cli_models` — versionless aliases first, version-pinned ids after. The production catalog
+ * lives in Rust; this is the fixture that stands in for it, so a change there is mirrored here.
+ */
+export const DEFAULT_CLAUDE_CLI_MODELS: Array<{ id: string; label: string }> = [
+  { id: "opus", label: "Claude Opus (latest)" },
+  { id: "sonnet", label: "Claude Sonnet (latest)" },
+  { id: "haiku", label: "Claude Haiku (latest)" },
+  { id: "claude-opus-5", label: "Claude Opus 5 (pinned)" },
+  { id: "claude-sonnet-5", label: "Claude Sonnet 5 (pinned)" },
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (pinned)" },
+];
+
+/** The id `claude-cli` preselects — the versionless `opus` alias. */
+export const DEFAULT_CLAUDE_CLI_MODEL = "opus";

@@ -2,7 +2,7 @@
 //! existing daemon session via gRPC or LiveKit.
 //!
 //! Local PTY mode (default):
-//!   tddy-tools pty-relay -- claude --model claude-opus-4-8
+//!   tddy-tools pty-relay -- claude --model opus
 //!
 //! Start sandboxed claude-cli and attach your terminal (gRPC, no LiveKit):
 //!   tddy-tools pty-relay \
@@ -95,8 +95,9 @@ pub struct PtyRelayArgs {
     #[arg(long)]
     pub agent: Option<String>,
 
-    /// Model for claude-cli sessions (e.g. claude-opus-4-8).
-    #[arg(long, default_value = "claude-opus-4-8")]
+    /// Model for claude-cli sessions. Defaults to the versionless `opus` alias so a relay started
+    /// today runs the current Opus; pass a pinned id (e.g. `claude-opus-5`) to fix a generation.
+    #[arg(long, default_value = tddy_core::backend::CLAUDE_DEFAULT_MODEL)]
     pub model: String,
 
     /// Session type: "claude-cli" (default) or empty for a tool session.

@@ -1,25 +1,11 @@
 /**
- * Claude Code CLI model list and session type helpers.
+ * Session-type predicates for the CLI-backed agents.
  *
- * `CreateSessionPane` no longer uses `CLAUDE_CLI_MODELS`: it sources the claude-cli catalog from the
- * daemon via the `ListAgentModels` RPC (agent `"claude-cli"`, backed by tddy-core). See
- * docs/ft/web/tool-session-model-selection.md. `CLAUDE_CLI_MODELS` is retained only for the legacy
- * `ConnectionScreen` inline form, which is out of scope for that change.
+ * There is deliberately no model list here. The Claude and Cursor CLI catalogs live in tddy-core
+ * (`backend::claude_cli_models`, `backend::cursor_cli_models`) and reach the web only over the
+ * `ListAgentModels` RPC — see `useAgentModels` and docs/ft/web/tool-session-model-selection.md. A
+ * second copy in the frontend would drift from the ids the daemon actually passes to `--model`.
  */
-
-export interface ClaudeCliModel {
-  /** Model identifier sent to the daemon (e.g. "claude-opus-4-8"). */
-  id: string;
-  /** Human-readable label for UI display (e.g. "Claude Opus 4.8"). */
-  label: string;
-}
-
-/** Ordered list of Claude CLI models available for selection (legacy ConnectionScreen only). */
-export const CLAUDE_CLI_MODELS: ClaudeCliModel[] = [
-  { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
-  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
-];
 
 /**
  * Returns `true` when the `agent` field from a session entry indicates that

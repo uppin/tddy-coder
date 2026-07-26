@@ -6,7 +6,7 @@
 //! 3. Proxies your terminal stdin/stdout and relays tool calls + HTTP egress on the host
 //!
 //! ```bash
-//! tddy-sandbox-app --repo /path/to/git/checkout --model claude-opus-4-8
+//! tddy-sandbox-app --repo /path/to/git/checkout --model opus
 //! ```
 
 mod bridge;
@@ -62,7 +62,7 @@ struct Args {
     #[arg(long, default_value = "claude")]
     agent_kind: String,
 
-    /// Claude model passed to the in-jail `claude` binary (default: `claude-opus-4-8`).
+    /// Claude model passed to the in-jail `claude` binary (default: the versionless `opus` alias).
     #[arg(long)]
     model: Option<String>,
 
@@ -266,7 +266,7 @@ async fn run_linux(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     let model = args
         .model
         .or(cfg.model)
-        .unwrap_or_else(|| "claude-opus-4-8".to_string());
+        .unwrap_or_else(|| tddy_core::backend::CLAUDE_DEFAULT_MODEL.to_string());
     let permission_mode = args
         .permission_mode
         .or(cfg.permission_mode)
@@ -411,7 +411,7 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     let model = args
         .model
         .or(cfg.model)
-        .unwrap_or_else(|| "claude-opus-4-8".to_string());
+        .unwrap_or_else(|| tddy_core::backend::CLAUDE_DEFAULT_MODEL.to_string());
     let permission_mode = args
         .permission_mode
         .or(cfg.permission_mode)

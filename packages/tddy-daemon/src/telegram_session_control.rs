@@ -6,10 +6,11 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use chrono::Utc;
 use serde::Deserialize;
+use tddy_core::backend::BackendModel;
 use tddy_core::changeset::{read_changeset, write_changeset, BranchWorktreeIntent, Changeset};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
@@ -255,22 +256,20 @@ pub const CB_TELEGRAM_CHAIN_PARENT: &str = "tcp:";
 pub const CB_TELEGRAM_CLAUDE_MODEL: &str = "tcm:";
 /// Cursor Agent CLI model picker: `tcur:<model_idx>|p:<proj_idx>|s:<session_id>`.
 pub const CB_TELEGRAM_CURSOR_MODEL: &str = "tcur:";
-/// Available Claude models for Claude Code CLI sessions (Telegram model-picker keyboard).
+/// Claude models offered by the Telegram model-picker keyboard, in button order.
+///
+/// Derived from [`tddy_core::backend::claude_cli_models`] rather than listed again here, so the
+/// Telegram picker, the tddy-web dropdown and the daemon's `--model` default cannot drift apart.
+/// Index 0 is the versionless `opus` alias — an operator who takes the first button tracks the
+/// latest Opus instead of whichever generation was current when the daemon was built.
 /// Per `docs/ft/daemon/claude-cli-session.md`.
-pub const CLAUDE_CLI_MODELS: [(&str, &str); 3] = [
-    ("claude-opus-4-8", "Claude Opus 4"),
-    ("claude-sonnet-4-6", "Claude Sonnet 4.5"),
-    ("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
-];
+pub static CLAUDE_CLI_MODELS: LazyLock<Vec<BackendModel>> =
+    LazyLock::new(|| tddy_core::backend::claude_cli_models().models);
 
-pub const CURSOR_CLI_MODELS: [(&str, &str); 3] = [
-    (
-        "claude-4.6-sonnet-medium-thinking",
-        "Claude 4.6 Sonnet (thinking)",
-    ),
-    ("gpt-5.3-codex", "GPT-5.3 Codex"),
-    ("composer-2.5", "Composer 2.5"),
-];
+/// Cursor models offered by the Telegram model-picker keyboard, from
+/// [`tddy_core::backend::cursor_cli_models`] for the same reason.
+pub static CURSOR_CLI_MODELS: LazyLock<Vec<BackendModel>> =
+    LazyLock::new(|| tddy_core::backend::cursor_cli_models().models);
 
 // ---------------------------------------------------------------------------
 // Session chaining Phase 2 — chain integration base merge
@@ -1747,14 +1746,14 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         session_id: &str,
     ) -> anyhow::Result<()> {
         let mut rows: InlineKeyboardRows = Vec::new();
-        for (i, (_model_id, label)) in CLAUDE_CLI_MODELS.iter().enumerate() {
+        for (i, model) in CLAUDE_CLI_MODELS.iter().enumerate() {
             let data = format!("{CB_TELEGRAM_CLAUDE_MODEL}{i}|p:{proj_idx}|s:{session_id}");
             debug_assert!(
                 data.len() <= 64,
                 "Telegram callback_data exceeds 64 bytes: len={} data={data:?}",
                 data.len()
             );
-            rows.push(vec![(label.to_string(), data)]);
+            rows.push(vec![(model.label.clone(), data)]);
         }
         self.sender
             .send_message_with_keyboard(chat_id, "Choose a model for the Claude CLI session:", rows)
@@ -1769,9 +1768,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         session_id: &str,
     ) -> anyhow::Result<()> {
         let mut rows: InlineKeyboardRows = Vec::new();
-        for (i, (_model_id, label)) in CURSOR_CLI_MODELS.iter().enumerate() {
+        for (i, model) in CURSOR_CLI_MODELS.iter().enumerate() {
             let data = format!("{CB_TELEGRAM_CURSOR_MODEL}{i}|p:{proj_idx}|s:{session_id}");
-            rows.push(vec![(label.to_string(), data)]);
+            rows.push(vec![(model.label.clone(), data)]);
         }
         self.sender
             .send_message_with_keyboard(chat_id, "Choose a model for the Cursor CLI session:", rows)
@@ -2649,8 +2648,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         session_id: &str,
     ) -> anyhow::Result<()> {
         self.ensure_authorized(chat_id)?;
-        let (model_id, _label) = CLAUDE_CLI_MODELS
+        let model_id = CLAUDE_CLI_MODELS
             .get(model_idx)
+            .map(|m| m.id.as_str())
             .ok_or_else(|| anyhow::anyhow!("invalid claude model index {model_idx}"))?;
         let Some(ref deps) = self.workflow_spawn else {
             anyhow::bail!("Telegram workflow spawn is not configured");
@@ -2847,8 +2847,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         session_id: &str,
     ) -> anyhow::Result<()> {
         self.ensure_authorized(chat_id)?;
-        let (model_id, _label) = CURSOR_CLI_MODELS
+        let model_id = CURSOR_CLI_MODELS
             .get(model_idx)
+            .map(|m| m.id.as_str())
             .ok_or_else(|| anyhow::anyhow!("invalid cursor model index {model_idx}"))?;
         let Some(ref deps) = self.workflow_spawn else {
             anyhow::bail!("Telegram workflow spawn is not configured");
