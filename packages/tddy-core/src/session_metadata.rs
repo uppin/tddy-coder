@@ -32,7 +32,7 @@ pub struct SessionMetadata {
     /// Session type: "tool" (default/empty) or "claude-cli". Absent in legacy files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_type: Option<String>,
-    /// Model id for claude-cli sessions (e.g. "claude-opus-4-8"). Absent in legacy files.
+    /// Model id for claude-cli sessions (e.g. "opus", "claude-opus-5"). Absent in legacy files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// Granular activity status reported by per-worktree claude-cli hooks (e.g. "Running",

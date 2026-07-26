@@ -32,7 +32,20 @@ both the SessionDrawer "+ New session" flow and the PR-stack "Start session" dia
 | `claude` | **curated** | maintained (id,label) list in `tddy-core` (opus / sonnet / haiku) |
 | `codex` | **curated** | maintained list in `tddy-core` (gpt-5) |
 | `stub` | static | `stub` |
-| `claude-cli` (session type) | **curated** | maintained Claude full-id list in `tddy-core` (claude-opus-4-8 / claude-sonnet-4-6 / claude-haiku-4-5-20251001) |
+| `claude-cli` (session type) | **curated** | maintained list in `tddy-core`: the versionless aliases first (opus / sonnet / haiku), then the version-pinned ids (claude-opus-5 / claude-sonnet-5 / claude-haiku-4-5-20251001) |
+
+`tddy_core::backend` is the **single source of truth** for every catalog above. `tddy-web` holds no
+model list of its own — the dropdowns render whatever `ListAgentModels` returns and preselect
+`default_model`. The Telegram model keyboard reads the same catalogs
+(`claude_cli_models()` / `cursor_cli_models()`), so a change in Rust reaches all three surfaces.
+
+### Versionless aliases vs pinned ids
+
+`opus` / `sonnet` / `haiku` are aliases the `claude` CLI resolves to the newest model in each tier,
+so a session started today keeps tracking the latest release. They lead the catalog and `opus` is
+the default (`CLAUDE_DEFAULT_MODEL`), which is also the `--model` default for `tddy-tools pty-relay`
+and `tddy-sandbox-app`. The pinned ids follow the aliases in the same dropdown for callers who need
+a frozen generation; labels disambiguate the two — `Claude Opus (latest)` vs `Claude Opus 5 (pinned)`.
 
 ## API Surface
 
@@ -57,8 +70,8 @@ message ListAgentModelsResponse {
   string default_model = 2;
 }
 message ModelInfo {
-  string id = 1;     // value passed as --model (e.g. "gpt-5.2", "opus", "claude-opus-4-8")
-  string label = 2;  // human-readable (e.g. "GPT-5.2", "Claude Opus 4.8")
+  string id = 1;     // value passed as --model (e.g. "gpt-5.2", "opus", "claude-opus-5")
+  string label = 2;  // human-readable (e.g. "GPT-5.2", "Claude Opus (latest)")
 }
 ```
 

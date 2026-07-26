@@ -122,7 +122,7 @@ Uses `StreamTerminalOutput` (server-streaming) + `SendTerminalInput` (unary) —
 Spawn a command in a local PTY for testing the relay itself without any network connection.
 
 ```bash
-tddy-tools pty-relay -- claude --model claude-opus-4-8
+tddy-tools pty-relay -- claude --model opus
 ```
 
 ### 5. Storybook (component development)

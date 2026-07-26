@@ -129,12 +129,14 @@ The daemon binary runs **long-polling** inbound handling (see above). Durable **
 
 3. **Branch callback** (`handle_telegram_branch_callback`): sets `workflow.selected_integration_base_ref`. For `claude-cli` sessions, also sets `workflow.new_branch_name` derived from `changeset.name` via `claude_cli_branch_name_from_changeset` (since `validate_workflow_branch_intent` requires `new_branch_name` when `intent == new_branch_from_base`). Detects `session_type == "claude-cli"` from the routing snapshot and sends the **model keyboard** instead of the agent/tddy-coder keyboard.
 
-4. **Model keyboard** (`tcm:` callbacks). Three static models:
-   - `claude-opus-4-8` → "Claude Opus 4"
-   - `claude-sonnet-4-6` → "Claude Sonnet 4.5"
-   - `claude-haiku-4-5-20251001` → "Claude Haiku 4.5"
+4. **Model keyboard** (`tcm:` callbacks). One button per entry of
+   `tddy_core::backend::claude_cli_models()` — the same catalog the web dropdown renders, so the
+   keyboard grows or shrinks with the Rust source of truth rather than a local copy. Versionless
+   aliases lead (`opus`, `sonnet`, `haiku`), version-pinned ids follow (`claude-opus-5`,
+   `claude-sonnet-5`, `claude-haiku-4-5-20251001`); button text is the catalog `label`.
    
-   Encoded as `tcm:<model_idx>|p:<proj_idx>|s:<session_id>` (≤64 bytes).
+   Encoded as `tcm:<model_idx>|p:<proj_idx>|s:<session_id>` (≤64 bytes). `model_idx` indexes the
+   catalog, so an out-of-range index is rejected rather than silently defaulted.
 
 5. **`handle_telegram_claude_model_callback`**: raw-merges `model` into `changeset.yaml`, calls `spawn_telegram_claude_cli`.
 
@@ -168,12 +170,14 @@ The current implementation is **launch-only**: `claude`'s PTY output is not stre
 
 3. **Branch callback**: for `session_type == "cursor-cli"`, sets `workflow.new_branch_name` from `changeset.name`, then sends the **Cursor model keyboard** (`tcur:`) instead of the agent keyboard.
 
-4. **Model keyboard** (`tcur:` callbacks). Static models from `tddy_core::cursor_cli_models()`:
-   - `composer-2.5` → "Composer 2.5"
-   - `claude-4.6-sonnet-medium-thinking` → "Claude 4.6 Sonnet"
-   - `gpt-5.3-codex` → "GPT-5.3 Codex"
+4. **Model keyboard** (`tcur:` callbacks). One button per entry of
+   `tddy_core::backend::cursor_cli_models()` — the catalog is the source of truth, not a local copy,
+   so the keyboard tracks it (currently `gpt-5.3-codex`, `claude-4.6-sonnet-medium-thinking`,
+   `claude-sonnet-5-thinking-high`, `composer-2.5`, `glm-5.2-high`); button text is the catalog
+   `label`.
 
-   Encoded as `tcur:<model_idx>|p:<proj_idx>|s:<session_id>` (≤64 bytes).
+   Encoded as `tcur:<model_idx>|p:<proj_idx>|s:<session_id>` (≤64 bytes). `model_idx` indexes the
+   catalog, so an out-of-range index is rejected rather than silently defaulted.
 
 5. **`handle_telegram_cursor_model_callback`**: raw-merges `model` into `changeset.yaml`, calls `spawn_telegram_cursor_cli`.
 

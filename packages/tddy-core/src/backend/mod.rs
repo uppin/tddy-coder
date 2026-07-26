@@ -619,6 +619,29 @@ pub fn backend_from_label(label: &str) -> (&'static str, &'static str) {
     }
 }
 
+/// Versionless Claude aliases, in dropdown order. `claude --model` resolves each to the newest
+/// model in that tier, so a session started today and one started next quarter both run the current
+/// best model without a code change here. Shared by every Claude catalog below — adding a tier here
+/// adds it everywhere.
+const CLAUDE_MODEL_ALIASES: &[(&str, &str)] = &[
+    ("opus", "Claude Opus (latest)"),
+    ("sonnet", "Claude Sonnet (latest)"),
+    ("haiku", "Claude Haiku (latest)"),
+];
+
+/// Version-pinned Claude ids, offered after [`CLAUDE_MODEL_ALIASES`] for a run that must not drift
+/// between releases (a reproduction, or a benchmark comparing two generations). Labelled `(pinned)`
+/// so the choice reads as deliberate.
+const CLAUDE_PINNED_MODELS: &[(&str, &str)] = &[
+    ("claude-opus-5", "Claude Opus 5 (pinned)"),
+    ("claude-sonnet-5", "Claude Sonnet 5 (pinned)"),
+    ("claude-haiku-4-5-20251001", "Claude Haiku 4.5 (pinned)"),
+];
+
+/// The alias every Claude backend preselects. Versionless on purpose: a pinned default would
+/// silently keep new sessions on an old generation once the next model ships.
+pub const CLAUDE_DEFAULT_MODEL: &str = "opus";
+
 /// Default model name for a given agent identifier (e.g. `claude`, `cursor`).
 #[must_use]
 pub fn default_model_for_agent(agent: &str) -> &'static str {
@@ -627,14 +650,25 @@ pub fn default_model_for_agent(agent: &str) -> &'static str {
         "codex" => "gpt-5",
         "codex-acp" => "gpt-5",
         "stub" => "stub",
-        _ => "opus",
+        _ => CLAUDE_DEFAULT_MODEL,
+    }
+}
+
+/// Build a catalog from `(id, label)` pairs and the id to preselect.
+fn catalog_from(pairs: &[(&str, &str)], default_model: &str) -> BackendModels {
+    BackendModels {
+        models: pairs
+            .iter()
+            .map(|(id, label)| BackendModel::new(*id, *label))
+            .collect(),
+        default_model: default_model.to_string(),
     }
 }
 
 /// A model a backend can run with, for UI selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendModel {
-    /// Value passed to the backend as `--model` (e.g. `"opus"`, `"gpt-5.2"`, `"claude-opus-4-8"`).
+    /// Value passed to the backend as `--model` (e.g. `"opus"`, `"gpt-5.2"`, `"claude-opus-5"`).
     pub id: String,
     /// Human-readable label (e.g. `"Claude Opus"`, `"GPT-5.2"`).
     pub label: String,
@@ -665,36 +699,25 @@ pub fn curated_models_for_agent(agent: &str) -> BackendModels {
         "codex" | "codex-acp" => (&[("gpt-5", "GPT-5")], "gpt-5"),
         "cursor" => (&[("composer-2.5", "Composer 2.5")], "composer-2.5"),
         "stub" => (&[("stub", "Stub")], "stub"),
-        _ => (
-            &[
-                ("opus", "Claude Opus"),
-                ("sonnet", "Claude Sonnet"),
-                ("haiku", "Claude Haiku"),
-            ],
-            "opus",
-        ),
+        _ => (CLAUDE_MODEL_ALIASES, CLAUDE_DEFAULT_MODEL),
     };
-    BackendModels {
-        models: models
-            .iter()
-            .map(|(id, label)| BackendModel::new(*id, *label))
-            .collect(),
-        default_model: default_model.to_string(),
-    }
+    catalog_from(models, default_model)
 }
 
-/// Curated model catalog for the `claude-cli` session type (full Claude ids passed to `claude
-/// --model`). Single source of truth (replaces the web `CLAUDE_CLI_MODELS` constant).
+/// Curated model catalog for the `claude-cli` session type (ids passed to `claude --model`). Single
+/// source of truth — the web sources this over `ListAgentModels` rather than keeping its own list.
+///
+/// The versionless aliases lead, so the preselected choice tracks each Claude release on its own;
+/// the version-pinned ids follow for a run that must not drift. See [`CLAUDE_MODEL_ALIASES`] and
+/// [`CLAUDE_PINNED_MODELS`].
 #[must_use]
 pub fn claude_cli_models() -> BackendModels {
-    BackendModels {
-        models: vec![
-            BackendModel::new("claude-opus-4-8", "Claude Opus 4.8"),
-            BackendModel::new("claude-sonnet-4-6", "Claude Sonnet 4.6"),
-            BackendModel::new("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
-        ],
-        default_model: "claude-opus-4-8".to_string(),
-    }
+    let pairs: Vec<(&str, &str)> = CLAUDE_MODEL_ALIASES
+        .iter()
+        .chain(CLAUDE_PINNED_MODELS)
+        .copied()
+        .collect();
+    catalog_from(&pairs, CLAUDE_DEFAULT_MODEL)
 }
 
 /// Curated model catalog for the `cursor-cli` session type (ids passed to `agent --model`).
@@ -852,20 +875,73 @@ mod tests {
     }
 
     #[test]
-    fn claude_cli_models_offer_the_full_claude_ids_defaulting_to_opus_4_8() {
+    fn claude_cli_models_lead_with_the_versionless_aliases_defaulting_to_opus() {
         // When
         let catalog = claude_cli_models();
 
-        // Then
+        // Then — the aliases come first so the dropdown preselects one, and `opus` is the default
         assert_eq!(
-            ids(&catalog),
-            vec![
-                "claude-opus-4-8",
-                "claude-sonnet-4-6",
+            ids(&catalog)[..3],
+            ["opus", "sonnet", "haiku"],
+            "the versionless aliases must lead the catalog"
+        );
+        assert_eq!(catalog.default_model, "opus");
+    }
+
+    #[test]
+    fn claude_cli_models_also_offer_version_pinned_ids_after_the_aliases() {
+        // When
+        let catalog = claude_cli_models();
+
+        // Then — pinning a generation stays available for a run that must not drift
+        assert_eq!(
+            ids(&catalog)[3..],
+            [
+                "claude-opus-5",
+                "claude-sonnet-5",
                 "claude-haiku-4-5-20251001"
             ]
         );
-        assert_eq!(catalog.default_model, "claude-opus-4-8");
+    }
+
+    #[test]
+    fn claude_cli_aliases_match_the_curated_claude_catalog() {
+        // Given — the two Claude catalogs are built from one alias table
+        let cli = claude_cli_models();
+        let curated = curated_models_for_agent("claude");
+
+        // Then — an alias added in one place appears in both
+        assert_eq!(ids(&curated), ids(&cli)[..curated.models.len()]);
+        assert_eq!(curated.default_model, cli.default_model);
+    }
+
+    #[test]
+    fn claude_cli_labels_distinguish_a_moving_alias_from_a_pinned_generation() {
+        // When
+        let catalog = claude_cli_models();
+
+        // Then — the operator can tell which choice drifts with each release
+        let labels: Vec<&str> = catalog.models.iter().map(|m| m.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "Claude Opus (latest)",
+                "Claude Sonnet (latest)",
+                "Claude Haiku (latest)",
+                "Claude Opus 5 (pinned)",
+                "Claude Sonnet 5 (pinned)",
+                "Claude Haiku 4.5 (pinned)",
+            ]
+        );
+    }
+
+    #[test]
+    fn every_claude_cli_default_is_selectable_in_its_own_catalog() {
+        // Given / When
+        let catalog = claude_cli_models();
+
+        // Then — a default absent from its own list would leave the dropdown unselected
+        assert!(ids(&catalog).contains(&catalog.default_model.as_str()));
     }
 
     #[test]

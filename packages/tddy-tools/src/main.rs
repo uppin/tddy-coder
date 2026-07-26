@@ -76,7 +76,7 @@ enum Subcommand {
     /// Spawn a command in a PTY and relay keyboard+output — same wiring as the daemon uses
     /// for claude-cli sessions. Also start/connect to daemon sessions (including sandbox):
     /// `pty-relay --daemon-url URL --project-id ID --sandbox`
-    /// Example: tddy-tools pty-relay -- claude --model claude-opus-4-8
+    /// Example: tddy-tools pty-relay -- claude --model opus
     PtyRelay(Box<pty_relay::PtyRelayArgs>),
 
     /// Remote codebase mode helpers: list-tools, etc.

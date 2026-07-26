@@ -2,6 +2,11 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-26 — Telegram model keyboards read the shared model catalog
+
+- The Telegram **Claude** and **Cursor** model keyboards no longer carry their own copies of the model lists — they render `tddy_core::backend::claude_cli_models()` / `cursor_cli_models()`, so a catalog change reaches Telegram, the web dropdowns, and the CLI defaults at once. This also corrects the Claude keyboard's stale labels and grows the Cursor keyboard from 3 entries to the catalog's 5. See [telegram-session-control.md](telegram-session-control.md).
+- An out-of-range `tcm:`/`tcur:` model index is now **rejected with an error** rather than resolving to some model; picking a Claude model still stores it in `changeset.yaml` and `.session.yaml` unchanged.
+
 ## 2026-07-23 — `SetProjectDefaultBranch` RPC + unified default-branch resolution
 
 - New `ConnectionService.SetProjectDefaultBranch(project_id, main_branch_ref, daemon_instance_id)` RPC stores a project's default branch (`main_branch_ref`) in `projects.yaml`, validating the ref and project up front (`INVALID_ARGUMENT`/`NOT_FOUND`) before any write and peer-forwarding by target host like `AddProjectToHost` so the default is a property of the logical project across hosts. `ProjectEntry` now carries `main_branch_ref` so clients can read it. See [project-concept.md](project-concept.md) and [git-integration-base-ref.md](../coder/git-integration-base-ref.md).

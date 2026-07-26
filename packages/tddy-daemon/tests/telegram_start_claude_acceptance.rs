@@ -20,7 +20,7 @@ use tddy_daemon::config::{ClaudeCliConfig, DaemonConfig};
 use tddy_daemon::telegram_notifier::InMemoryTelegramSender;
 use tddy_daemon::telegram_session_control::{
     collect_outbound_messages, read_changeset_routing_snapshot, StartClaudeCommand,
-    TelegramSessionControlHarness, TelegramWorkflowSpawn, CLAUDE_CLI_MODELS,
+    TelegramSessionControlHarness, TelegramWorkflowSpawn, CLAUDE_CLI_MODELS, CURSOR_CLI_MODELS,
 };
 
 const AUTHORIZED_CHAT: i64 = 777_001;
@@ -427,7 +427,7 @@ async fn start_claude_model_callback_launches_claude_cli() {
         "repo_path must be written to .session.yaml"
     );
 
-    let (expected_model_id, _label) = CLAUDE_CLI_MODELS[0];
+    let expected_model_id = CLAUDE_CLI_MODELS[0].id.as_str();
     assert_eq!(
         meta.model.as_deref(),
         Some(expected_model_id),
@@ -532,4 +532,37 @@ async fn start_claude_uses_shared_manager() {
         "initial_prompt must be passed as positional arg via Telegram flow; got: {:?}",
         output
     );
+}
+
+// ---------------------------------------------------------------------------
+// Model picker catalog — one source of truth with the web dropdown
+// ---------------------------------------------------------------------------
+
+#[test]
+fn telegram_claude_model_picker_leads_with_the_versionless_aliases() {
+    // Given / When — the picker's catalog
+    let ids: Vec<&str> = CLAUDE_CLI_MODELS.iter().map(|m| m.id.as_str()).collect();
+
+    // Then — index 0 is the alias, so a Telegram operator who takes the first button tracks the
+    // latest Opus rather than being pinned to whichever generation was current at build time.
+    assert_eq!(ids[..3], ["opus", "sonnet", "haiku"]);
+}
+
+#[test]
+fn telegram_claude_model_picker_matches_the_core_catalog_exactly() {
+    // Given — the catalog the web dropdown and `--model` default both read
+    let core = tddy_core::backend::claude_cli_models();
+
+    // Then — the Telegram keyboard offers the same ids in the same order, so a model available in
+    // one surface is available in the other
+    assert_eq!(*CLAUDE_CLI_MODELS, core.models);
+}
+
+#[test]
+fn telegram_cursor_model_picker_matches_the_core_catalog_exactly() {
+    // Given
+    let core = tddy_core::backend::cursor_cli_models();
+
+    // Then
+    assert_eq!(*CURSOR_CLI_MODELS, core.models);
 }

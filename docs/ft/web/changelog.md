@@ -4,6 +4,12 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-26 — Claude models: versionless aliases by default, one shared catalog
+
+- Claude sessions now default to the **versionless `opus` alias**, so a session tracks the newest Opus release instead of freezing on the generation that was current when it started; `sonnet` and `haiku` join it at the top of the dropdown.
+- **Version-pinned ids remain selectable** in the same dropdown for callers who need a frozen generation, refreshed to the Claude 5 family (`claude-opus-5`, `claude-sonnet-5`, `claude-haiku-4-5-20251001`); labels read `Claude Opus (latest)` vs `Claude Opus 5 (pinned)` so the two are never confused.
+- The web keeps **no model list of its own** — the hardcoded `CLAUDE_CLI_MODELS` constant is gone and every dropdown renders whatever `ListAgentModels` returns, preselecting the daemon's `default_model`. See [tool-session-model-selection.md § Model sourcing per backend](tool-session-model-selection.md#model-sourcing-per-backend).
+
 ## 2026-07-25 — Agent Activity: lazy tool-call bodies (fetch on click)
 
 - Tool-call input/output is **no longer downloaded with the transcript** — the replay stream now carries only each call's name/status, so opening the pane on a busy session is cheap regardless of how much the tools read or printed.
