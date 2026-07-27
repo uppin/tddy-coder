@@ -406,6 +406,38 @@ pub fn build_sandbox_runner_env(
     env
 }
 
+/// Build the sandboxed **cursor-cli** runner env: the base runner env ([`build_sandbox_runner_env`])
+/// extended with the Cursor-specific overlay (`CURSOR_TMPDIR` + `CURSOR_SKIP_KEYCHAIN=1` +
+/// `CI=true`).
+///
+/// Pure — no `&self` dependencies — so the Keychain-skip behavior is unit-testable without
+/// spawning the Seatbelt/cgroups jail. Specialized-subagent, LSP, and semantic-index overlays
+/// depend on `&self` / runtime state and are applied by the caller after this helper.
+///
+/// `CURSOR_SKIP_KEYCHAIN=1` + `CI=true` are mandatory for a sandboxed cursor session: the host
+/// (`tddy-daemon` / `tddy-sandbox-app`) is an unsigned Rust binary with no `keychain-access-group`
+/// entitlement, so any `securityd` probe would hang/time out with `errSecMissingEntitlement`.
+/// The caller must still supply `CURSOR_API_KEY` (or pre-seed `~/.cursor/auth.json` via
+/// `seed_cursor_credentials`) — this helper does not authenticate, it removes a path that
+/// cannot work in a sandbox.
+pub fn build_sandboxed_cursor_runner_env(
+    scratch_home: &Path,
+    scratch_tmp: &Path,
+    session_id: &str,
+    tool_ipc_socket: &Path,
+    egress_dir: &Path,
+) -> std::collections::BTreeMap<String, String> {
+    let mut env = build_sandbox_runner_env(
+        scratch_home,
+        scratch_tmp,
+        session_id,
+        tool_ipc_socket,
+        egress_dir,
+    );
+    env.extend(tddy_sandbox_recipes::cursor_runner_env_overlay(scratch_tmp));
+    env
+}
+
 /// Recursively copy a directory tree (follows symlinks).
 pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
     tddy_sandbox::copy_tree(src, dst).map_err(|e| e.to_string())
@@ -792,6 +824,54 @@ mod tests {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("../../target/debug/tddy-sandbox-runner")
             })
+    }
+
+    /// **build_sandboxed_cursor_runner_env_skips_macos_keychain_so_the_jailed_agent_never_probes_securityd**:
+    /// a sandboxed cursor-cli session must carry `CURSOR_SKIP_KEYCHAIN=1` and `CI=true` in its
+    /// runner env, so the Cursor Agent CLI never probes macOS Keychain from inside the jail
+    /// (the host is unsigned and has no `keychain-access-group` entitlement, so a `securityd`
+    /// probe would hang/time out with `errSecMissingEntitlement`). This pins the Keychain-skip
+    /// behavior at the daemon layer without requiring a real Seatbelt/cgroups harness — the
+    /// pure helper is unit-testable directly.
+    #[test]
+    fn cursor_runner_env_skips_keychain_so_the_jailed_agent_never_probes_securityd() {
+        // Given — a sandboxed cursor-cli session layout (paths need not exist for env assembly)
+        let tmp = tempfile::tempdir().unwrap();
+        let scratch_home = tmp.path().join("scratch/home");
+        let scratch_tmp = tmp.path().join("scratch/tmp");
+        let tool_ipc_socket = tmp.path().join("tool_ipc.sock");
+        let egress_dir = tmp.path().join("egress");
+        let session_id = "cursor-skip-keychain-test";
+
+        // When — building the sandboxed cursor runner env
+        let env = build_sandboxed_cursor_runner_env(
+            &scratch_home,
+            &scratch_tmp,
+            session_id,
+            &tool_ipc_socket,
+            &egress_dir,
+        );
+
+        // Then — the two env vars Cursor's own CI uses to suppress Keychain probes are both
+        // set, alongside CURSOR_TMPDIR redirected into the scratch tree. Without these, a
+        // sandboxed cursor session on macOS hangs ~30s on `securityd` and fails with
+        // "Failed to store authentication tokens: Security command failed: Security process
+        // exited with code: 36".
+        assert_eq!(
+            env.get("CURSOR_SKIP_KEYCHAIN").map(String::as_str),
+            Some("1"),
+            "CURSOR_SKIP_KEYCHAIN=1 must be set so the agent never calls /usr/bin/security: {env:?}"
+        );
+        assert_eq!(
+            env.get("CI").map(String::as_str),
+            Some("true"),
+            "CI=true must be set so a parent shell cannot re-enable interactive probes: {env:?}"
+        );
+        assert_eq!(
+            env.get("CURSOR_TMPDIR").map(String::as_str),
+            Some(scratch_tmp.to_str().unwrap()),
+            "CURSOR_TMPDIR must redirect into the scratch tree: {env:?}"
+        );
     }
 
     /// **dial_and_bridge_drives_run_host_relay_over_a_stdio_sandbox_client**: `dial_and_bridge`
