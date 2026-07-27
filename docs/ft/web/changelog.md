@@ -4,6 +4,13 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-26 — PR-Stack Chat Screen: a blocked planned PR keeps its row, and can be repointed
+
+- **A blocked row no longer replaces itself with an error.** It keeps its title, description, planned branch and the new **base branch** line; **Start session** is *disabled* with the reasons on hover, beside a warning listing each one. This reverses the "Missing branch" indicator shipped earlier the same day, which cost the operator the CTA and offered no action in its place.
+- **A stranded planned PR can be recovered.** When its base cannot be resolved — a predecessor's branch deleted after merging, deleted without merging, or never pushed — the row offers **"Repoint to `<branch>`"**, naming where the node will land before you click. Previously this appeared only when the plan itself recorded the predecessor as merged, which it does not if you merged on GitHub without running the orchestrator agent.
+- Repointing **collapses the node onto that single predecessor**, or detaches it onto the default branch when none survives. A refused or failed repoint now shows the daemon's reason on the row and leaves it blocked, instead of appearing to do nothing.
+- A **root** node's Start-session dialog finally names its base branch, rather than reading "New branch from base:" with no name.
+
 ## 2026-07-26 — PR-Stack Chat Screen: Planned PRs becomes a dismissible right-side panel
 
 - **The planned-PR list is no longer a fixed half-width pane.** It is now a **Planned PRs panel** — a docked 360px column to the right of the chat on desktop (open by default) and a full-screen overlay on mobile (closed by default), toggleable on both from the screen header and dismissible from its own close control. The chat gets the full width back. See [session-drawer.md § PR-Stack Chat Screen](session-drawer.md#pr-stack-chat-screen).

@@ -3,7 +3,8 @@
 **Type:** Fix · **Branch:** `fix-repoint-to-master`
 **Packages:** `tddy-service`, `tddy-workflow-recipes`, `tddy-daemon`, `tddy-web`
 **Index line:** [docs/dev/changesets.md](../changesets.md)
-**Features:** [pr-stack-live-status.md § Repointing a dead-end planned PR](../../ft/coder/pr-stack-live-status.md#repointing-a-dead-end-planned-pr-added-2026-07-26)
+**Features:** [pr-stack-live-status.md § Repointing a dead-end planned PR](../../ft/coder/pr-stack-live-status.md#repointing-a-dead-end-planned-pr-added-2026-07-26) ·
+[session-drawer.md § PR-Stack Chat Screen](../../ft/web/session-drawer.md#pr-stack-chat-screen)
 **Per-package:** [tddy-service](../../../packages/tddy-service/docs/changesets.md) ·
 [tddy-workflow-recipes](../../../packages/tddy-workflow-recipes/docs/changesets.md) ·
 [tddy-daemon](../../../packages/tddy-daemon/docs/changesets.md) ·

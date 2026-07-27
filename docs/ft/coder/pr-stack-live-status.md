@@ -83,7 +83,7 @@ respected.
 | D7 *(2026-07-26)* | A node is **orphaned** when it records a `session_id` **and** its branch resolution has arrived with `session.exists = false` | Server-authoritative and already polled — `QueryBranch` scans sessions by changeset branch. Deriving it from the web's `sessions` list would misread a node as orphaned whenever its host is merely offline. Requiring the resolution to have *arrived* keeps the first render deterministic: an absent resolution is "unknown", never "orphaned". |
 | D8 *(2026-07-26)* | Restarting an orphaned node that owns a branch pre-fills `work_on_selected_branch` with that branch | The branch, worktree and remote ref already exist, so `new_branch_from_base` would fail on "branch already exists". Resuming is also what the operator means — the work on that branch is not lost, only its session. |
 | D9 *(2026-07-26)* | `BranchResolution` gains `BranchRemote { exists, sha }`, resolved server-side per branch | "Available to be based upon" is a fact about `origin`, and only the daemon can see the repo. Deriving it in the web from `Changeset.remote_pushed` or from a branch name being non-empty would report *available* for a local-only branch — exactly the case that fails inside `git fetch`. |
-| D10 *(2026-07-26)* | "Missing branch" **replaces** the Start-session button rather than disabling it | A disabled button with no explanation is the dead end operators already hit. The blocked indicator names the branch being waited on, so the next action (start the predecessor) is obvious. |
+| D10 *(2026-07-26)* — **superseded by D16** | "Missing branch" **replaces** the Start-session button rather than disabling it | A disabled button with no explanation is the dead end operators already hit. The blocked indicator names the branch being waited on, so the next action (start the predecessor) is obvious. |
 | D11 *(2026-07-26)* | PR lookups authenticate with the **operator's own GitHub access token**, retained daemon-side at login; the OAuth scope widens to `read:user repo` | The operator's own credential, already granted, and the only one that works for private repos and for future write operations. Chosen over an ambient `gh auth token` fallback (invisible state) and over embedding the token in the HMAC session token (which would put a live `repo` token into browser storage on a plain-http origin). Cost: an unavoidable re-login — see [Operator migration](#operator-migration-re-login-required). |
 | D12 *(2026-07-26)* | A PR lookup that cannot be performed is reported as **unavailable**, never as "no PR" | The silent `Ok(None)` is why a live PR was invisible for a day. A stub/demo login is explicitly *not* a failure (D13). |
 | D13 *(2026-07-26)* | **Stub / demo authentication resolves to "no PRs"** — never an error, never *unavailable* | `github.stub: true` exists so the product can be demoed and tested without real GitHub credentials. A stub login holds no access token by construction, so the lookup short-circuits to a clean empty result and must not fail the enclosing RPC — a demo must never surface an error banner or a red row. |
@@ -126,9 +126,10 @@ session directory and changeset were written, leaving a broken session behind.
   `QueryBranch` path).
 - The PR-Stack view polls **each node's base branch as well as its own** — startability is a property
   of the *base*, and an unspawned node owns no branch to query.
-- A node with no `session_id` whose base is unavailable renders a blocked **"Missing branch:
-  `<base>`"** indicator **in place of** the Start-session button (D10), naming the branch it waits for.
-  Three independent blockers produce it: a direct parent that is non-merged and owns no branch (the
+- A node with no `session_id` whose base is unavailable is blocked. *(Superseded 2026-07-26 — it first
+  rendered a **"Missing branch: `<base>`"** indicator **in place of** the Start-session button (D10);
+  the row now keeps that button, disabled, beside a warning naming every reason (D16).)* Three
+  independent blockers produce it: a direct parent that is non-merged and owns no branch (the
   daemon's own gate), no ancestor owning a created branch at all, or a base branch whose `remote.exists`
   is `false`.
 - A **root** node is always startable — its base is the project default branch, which exists by
@@ -141,7 +142,7 @@ session directory and changeset were written, leaving a broken session behind.
 
 [Startability before the spawn](#startability-before-the-spawn-added-2026-07-26) made a dead end
 *visible*; it did not make it *recoverable*. A planned PR whose predecessor's PR was merged and whose
-branch was then deleted on `origin` reads "Missing branch: `<deleted branch>`" forever: the base ref is
+branch was then deleted on `origin` read "Missing branch: `<deleted branch>`" forever: the base ref is
 gone, so the row is blocked, and Repoint was offered only when the plan's own `pr_status.phase` said
 `merged` — a field written by the orchestrator agent, which is frequently stale or was never run. The
 row also **replaced** its own contents with the blocked indicator, so the operator lost the planned PR's
@@ -556,7 +557,7 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
 
 - **Branch not yet on remote.** The PR lookup returns `exists = false`; the row shows no PR chip and
   no in-progress indicator until a session claims the branch. Not an error. Its `remote.exists` is
-  `false`, which blocks a *descendant's* spawn with the "Missing branch" indicator *(2026-07-26)*.
+  `false`, which blocks a *descendant's* spawn and warns that the base is not on origin *(2026-07-26)*.
 - **No GitHub credential for the calling operator** *(revised 2026-07-26)* — the lookup reports
   `unavailable = true` with a reason, **not** `exists = false`. Previously the daemon read
   `GITHUB_TOKEN`/`GH_TOKEN` from its own environment and an absent token collapsed to "no PR",
@@ -568,8 +569,10 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   provider (`packages/tddy-github/src/stub.rs`, `github.stub: true`) stores no token, and that must be
   indistinguishable from a repository with no open PRs.
 - **`origin/<branch>` is only as fresh as the last fetch** *(2026-07-26)* — a branch pushed by another
-  machine reads as missing until this host fetches. The "Missing branch" indicator is therefore
-  conservative: it can delay a spawn, never permit one that would fail.
+  machine reads as missing until this host fetches. The start-blocked warning is therefore
+  conservative: it can delay a spawn, never permit one that would fail. The **Repoint** control it
+  enables is not conservative, though — offered against a base that is actually alive, taking it drops
+  that parent edge from the plan for good.
 - **A dangling `session_id` is left in the changeset**, not scrubbed *(2026-07-26)* — the orphan state is
   derived at render, which keeps `DeleteSession` free of a stack scan and self-heals across hosts.
 - **`work_on_selected_branch` skips chain-base resolution** *(2026-07-26)* — correct, since no branch is

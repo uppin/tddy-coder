@@ -18,7 +18,7 @@
 //! were made.
 //!
 //! PRD: docs/ft/coder/pr-stack-live-status.md § Repointing a dead-end planned PR (D18, D19).
-//! Changeset: docs/dev/1-WIP/2026-07-26-pr-stack-repoint-dead-end.md.
+//! Changeset: docs/dev/changesets.d/2026-07-26-pr-stack-repoint-dead-end.md.
 
 use std::path::Path;
 use std::sync::Mutex;
