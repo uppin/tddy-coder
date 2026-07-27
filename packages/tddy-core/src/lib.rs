@@ -99,7 +99,8 @@ pub use session_activity::{
 pub use session_chain::{
     integrate_chain_base_into_session_worktree_bootstrap, parent_is_pr_stack_orchestrator,
     pr_stack_node_for_spawn, resolve_chain_base_for_session_spawn, resolve_chain_base_ref,
-    resolve_chain_integration_base_ref_from_parent_session, spawn_chain_child_worktree,
+    resolve_chain_integration_base_ref_from_parent_session, select_worktree_base_ref,
+    spawn_chain_child_worktree,
 };
 pub use session_lifecycle::{
     materialize_unified_session_directory, resolve_effective_session_id, unified_session_dir_path,

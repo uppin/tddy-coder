@@ -178,6 +178,23 @@ pub fn resolve_chain_base_ref(
         .map_err(|e| format!("could not resolve stack parent branch: {e}"))
 }
 
+/// Select the worktree base ref for a session spawn: an explicit, non-empty operator-chosen
+/// `selected_integration_base_ref` (sent from the web Start-session dialog's "Base branch"
+/// selector) wins over the stack-parent-resolved chain base; an empty/whitespace override falls
+/// through to the stack-parent resolution (today's behavior). The returned value, when `Some`,
+/// is the ref handed to `setup_worktree_for_session_with_optional_chain_base`.
+pub fn select_worktree_base_ref(
+    explicit_selected_integration_base_ref: &str,
+    chain_base_ref: Option<String>,
+) -> Option<String> {
+    let trimmed = explicit_selected_integration_base_ref.trim();
+    if !trimmed.is_empty() {
+        Some(trimmed.to_string())
+    } else {
+        chain_base_ref
+    }
+}
+
 /// Resolve the chain integration base for session spawn, honoring runtime `stack_parent` over a
 /// persisted `worktree_integration_base_ref` when both are present.
 pub fn resolve_chain_base_for_session_spawn(

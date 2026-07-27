@@ -185,6 +185,8 @@ pub async fn spawn_cursor_cli_session_inner(
                 new_branch_name,
             )
             .map_err(Status::failed_precondition)?;
+            let worktree_base_ref =
+                tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
             let repo_root_clone = repo_root.clone();
             let session_dir_clone = session_dir.clone();
             let wt = spawn_blocking_with_timeout(
@@ -194,7 +196,7 @@ pub async fn spawn_cursor_cli_session_inner(
                     tddy_core::setup_worktree_for_session_with_optional_chain_base(
                         &repo_root_clone,
                         &session_dir_clone,
-                        chain_base_ref.as_deref(),
+                        worktree_base_ref.as_deref(),
                     )
                     .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
                 },

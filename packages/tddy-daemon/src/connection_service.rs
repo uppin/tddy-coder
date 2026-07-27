@@ -1519,6 +1519,8 @@ async fn spawn_claude_cli_session_inner(
         &repo_root,
         new_branch_name,
     )?;
+    let worktree_base_ref =
+        tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
 
     // Create the real git worktree (blocking: involves git fetch + git worktree add).
     let repo_root_clone = repo_root.clone();
@@ -1531,7 +1533,7 @@ async fn spawn_claude_cli_session_inner(
             tddy_core::setup_worktree_for_session_with_optional_chain_base(
                 &repo_root_clone,
                 &session_dir_clone,
-                chain_base_ref.as_deref(),
+                worktree_base_ref.as_deref(),
             )
             .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
         },
@@ -2160,6 +2162,10 @@ impl ConnectionServiceImpl {
                     &repo_root,
                     new_branch_name,
                 )?;
+                let worktree_base_ref = tddy_core::select_worktree_base_ref(
+                    selected_integration_base_ref,
+                    chain_base_ref,
+                );
                 let repo_root_clone = repo_root.clone();
                 let session_dir_clone = session_dir.clone();
                 let timeout = self.config.spawn_worker_request_timeout();
@@ -2170,7 +2176,7 @@ impl ConnectionServiceImpl {
                         tddy_core::setup_worktree_for_session_with_optional_chain_base(
                             &repo_root_clone,
                             &session_dir_clone,
-                            chain_base_ref.as_deref(),
+                            worktree_base_ref.as_deref(),
                         )
                         .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
                     },
@@ -2671,6 +2677,8 @@ impl ConnectionServiceImpl {
             &repo_root,
             new_branch_name,
         )?;
+        let worktree_base_ref =
+            tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
         let repo_root_clone = repo_root.clone();
         let session_dir_clone = session_dir.clone();
         let timeout = self.config.spawn_worker_request_timeout();
@@ -2681,7 +2689,7 @@ impl ConnectionServiceImpl {
                 tddy_core::setup_worktree_for_session_with_optional_chain_base(
                     &repo_root_clone,
                     &session_dir_clone,
-                    chain_base_ref.as_deref(),
+                    worktree_base_ref.as_deref(),
                 )
                 .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
             },
