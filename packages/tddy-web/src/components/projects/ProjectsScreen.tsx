@@ -27,7 +27,7 @@ export interface ProjectsScreenProps {
   loadProjectBranches: (input: {
     projectId: string;
     daemonInstanceId: string;
-  }) => Promise<string[]>;
+  }) => Promise<{ branches: string[]; defaultRemote: string }>;
 }
 
 interface ProjectGroup {
@@ -62,11 +62,14 @@ function groupByProject(projects: ProjectEntry[]): ProjectGroup[] {
 
 /**
  * The branch to show selected when a project has no stored default: mirror the daemon's live
- * resolution order (`origin/master`, then `origin/main`), else the first branch.
+ * resolution order (`<remote>/master`, then `<remote>/main`), else the first branch. The remote is
+ * the project's resolved default (`defaultRemote` from `ListProjectBranchesResponse`); `origin` is
+ * only the last-resort fallback when the daemon could not detect one.
  */
-function defaultSelectedBranch(branches: string[]): string {
-  if (branches.includes("origin/master")) return "origin/master";
-  if (branches.includes("origin/main")) return "origin/main";
+function defaultSelectedBranch(branches: string[], remote: string): string {
+  const r = remote || "origin";
+  if (branches.includes(`${r}/master`)) return `${r}/master`;
+  if (branches.includes(`${r}/main`)) return `${r}/main`;
   return branches[0] ?? "";
 }
 
@@ -184,11 +187,15 @@ function ProjectCard({
   // address the set-default RPC to — the project's first hosting daemon.
   const primaryHost = group.hosts[0]?.daemonInstanceId ?? "";
   const [branches, setBranches] = useState<string[]>([]);
+  const [defaultRemote, setDefaultRemote] = useState<string>("");
   useEffect(() => {
     let cancelled = false;
     loadProjectBranches({ projectId: group.projectId, daemonInstanceId: primaryHost })
       .then((loaded) => {
-        if (!cancelled) setBranches(loaded);
+        if (!cancelled) {
+          setBranches(loaded.branches);
+          setDefaultRemote(loaded.defaultRemote);
+        }
       })
       .catch(() => {});
     return () => {
@@ -196,7 +203,7 @@ function ProjectCard({
     };
   }, [loadProjectBranches, group.projectId, primaryHost]);
 
-  const selectedDefaultBranch = group.mainBranchRef || defaultSelectedBranch(branches);
+  const selectedDefaultBranch = group.mainBranchRef || defaultSelectedBranch(branches, defaultRemote);
   const targetDaemons = useMemo(
     () => daemons.filter((d) => !hostingIds.has(d.instanceId)),
     [daemons, hostingIds],

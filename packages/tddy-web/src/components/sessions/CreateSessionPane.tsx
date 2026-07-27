@@ -268,12 +268,14 @@ export function CreateSessionPane({
             // match, and submit would send a branch this project does not have.
             //
             // Matched on the *local* branch name behind each option, because `ListProjectBranches`
-            // lists remote-tracking refs (`origin/<branch>`) while callers name the branch the way
+            // lists remote-tracking refs (`<remote>/<branch>`) while callers name the branch the way
             // the rest of the domain does. Comparing the raw strings never matches, and the
             // pre-fill then degrades silently into an unrelated branch — the operator resumes the
-            // wrong branch with no warning.
-            const wanted = localBranchName(preFilledBranchToWorkOn);
-            const offered = resp.branches.find((b) => localBranchName(b) === wanted);
+            // wrong branch with no warning. The remote is the daemon-resolved default
+            // (`resp.defaultRemote`), so a non-`origin` project strips the right prefix.
+            const remote = resp.defaultRemote || "origin";
+            const wanted = localBranchName(preFilledBranchToWorkOn, remote);
+            const offered = resp.branches.find((b) => localBranchName(b, remote) === wanted);
             setSelectedBranchToWorkOn(offered ?? resp.branches[0]!);
           }
         }

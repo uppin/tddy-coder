@@ -109,6 +109,7 @@ impl EligibleDaemonSource for AsyncPeerProjectsSource {
             main_repo_path: "/peer/a".to_string(),
             daemon_instance_id: "workstation-1".to_string(),
             main_branch_ref: String::new(),
+            default_remote: String::new(),
         }]
     }
 }
@@ -170,6 +171,7 @@ fn a_project_entry(project_id: &str) -> ProtoProjectEntry {
         main_repo_path: "/repo".to_string(),
         daemon_instance_id: String::new(),
         main_branch_ref: String::new(),
+        default_remote: String::new(),
     }
 }
 

@@ -50,7 +50,7 @@ function aCreateSessionBackend(): InMemoryRpcBackend {
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
     .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: [] }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches: ["origin/main"] }))
+    .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches: ["origin/main"], defaultRemote: "origin" }))
     .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "host-sel-1" }));
 }
 

@@ -113,9 +113,11 @@ pub(crate) async fn spawn_blocking_with_timeout<T: Send + 'static>(
 }
 
 /// After a `new_branch_from_base` worktree is created, optionally push the freshly created branch to
-/// `origin`. Reads the actual created branch from the session's changeset (it may carry a collision
-/// suffix), runs `git push -u origin <branch>` from the worktree, and records
-/// `Changeset.remote_pushed = true`. A push failure fails the session start — no silent fallback.
+/// its remote. Reads the actual created branch from the session's changeset (it may carry a
+/// collision suffix), resolves the remote from the persisted integration base ref
+/// (`<remote>/<branch>`) — falling back to main-worktree detection then `origin` — runs
+/// `git push -u <remote> <branch>` from the worktree, and records `Changeset.remote_pushed = true`.
+/// A push failure fails the session start — no silent fallback.
 pub(crate) async fn push_new_branch_to_origin_if_requested(
     create_remote_branch: bool,
     intent: BranchWorktreeIntent,
@@ -130,7 +132,7 @@ pub(crate) async fn push_new_branch_to_origin_if_requested(
     let worktree_path = worktree_path.to_path_buf();
     spawn_blocking_with_timeout(
         timeout,
-        "StartSession: push new branch to origin",
+        "StartSession: push new branch to remote",
         move || {
             let mut cs = tddy_core::read_changeset(&session_dir)
                 .map_err(|e| anyhow::anyhow!("read changeset for remote push: {e}"))?;
@@ -138,7 +140,15 @@ pub(crate) async fn push_new_branch_to_origin_if_requested(
                 .branch
                 .clone()
                 .ok_or_else(|| anyhow::anyhow!("no branch recorded after worktree setup"))?;
-            tddy_core::worktree::push_new_branch_to_origin(&worktree_path, &branch)
+            // Resolve the remote from the persisted integration base ref (`<remote>/<branch>`),
+            // falling back to main-worktree detection then `origin` as the last resort.
+            let remote = cs
+                .effective_worktree_integration_base_ref
+                .as_deref()
+                .and_then(|r| r.split_once('/').map(|(remote, _)| remote.to_string()))
+                .or_else(|| tddy_core::worktree::detect_default_remote_name(&worktree_path))
+                .unwrap_or_else(|| "origin".to_string());
+            tddy_core::worktree::push_new_branch_to_remote(&worktree_path, &branch, &remote)
                 .map_err(|e| anyhow::anyhow!(e))?;
             cs.remote_pushed = true;
             tddy_core::write_changeset(&session_dir, &cs)
@@ -1314,20 +1324,54 @@ pub fn resolve_start_session_claude_binary(config: &DaemonConfig) -> String {
 /// spawn never touches would link the node to the wrong branch.
 ///
 /// A resumed branch is reduced to its local name: the dialog's picker is fed by
-/// `ListProjectBranches`, which offers remote-tracking names (`origin/<branch>`), while a stack node
-/// records the local one. Keying on the prefixed form matches no node, which is the same silent
-/// non-link this function exists to prevent.
+/// `ListProjectBranches`, which offers remote-tracking names (`<remote>/<branch>`), while a stack
+/// node records the local one. Keying on the prefixed form matches no node, which is the same
+/// silent non-link this function exists to prevent. The `remote` argument is the project's resolved
+/// default remote so a non-`origin` prefix is stripped correctly.
 #[must_use]
 pub fn effective_spawn_branch<'a>(
     branch_worktree_intent: &str,
     new_branch_name: &'a str,
     selected_branch_to_work_on: &'a str,
+    remote: &str,
 ) -> &'a str {
     match branch_worktree_intent.trim() {
         "work_on_selected_branch" => {
-            tddy_core::worktree::local_branch_name(selected_branch_to_work_on)
+            tddy_core::worktree::local_branch_name_for_remote(selected_branch_to_work_on, remote)
         }
         _ => new_branch_name.trim(),
+    }
+}
+
+/// Resolves the default remote name for a registered project, degrading to an empty string when the
+/// resolver itself errors (e.g. unreadable `projects.yaml`) so a list RPC never fails on a single
+/// bad row. The resolver already falls back to `origin` as the last resort, so the empty case is the
+/// rare "registry unreadable" path — clients apply their own `origin` fallback then.
+fn resolve_default_remote_or_empty(
+    projects_dir: &Path,
+    project_id: &str,
+    repo_root: &Path,
+) -> String {
+    project_storage::effective_remote_name_for_project(projects_dir, project_id, repo_root)
+        .unwrap_or_default()
+}
+
+/// Builds a proto [`ProjectEntry`] from a stored [`project_storage::ProjectData`] plus the resolved
+/// `default_remote`. Centralizing the mapping keeps every response (ListProjects, CreateProject,
+/// AddProjectToHost, SetProjectDefaultBranch) consistent as fields are added.
+fn project_entry_from(
+    p: &project_storage::ProjectData,
+    daemon_instance_id: String,
+    default_remote: String,
+) -> ProtoProjectEntry {
+    ProtoProjectEntry {
+        project_id: p.project_id.clone(),
+        name: p.name.clone(),
+        git_url: p.git_url.clone(),
+        main_repo_path: p.main_repo_path.clone(),
+        daemon_instance_id,
+        main_branch_ref: p.main_branch_ref.clone().unwrap_or_default(),
+        default_remote,
     }
 }
 
@@ -1345,11 +1389,13 @@ pub fn effective_spawn_branch<'a>(
 /// An empty or whitespace-only target is not a rejection: it names no target at all and selects the
 /// original drop-merged-parents rule (`None`).
 ///
-/// The default branch is compared with `origin/` stripped from both sides.
+/// The default branch is compared with the remote prefix stripped from both sides.
 /// `tddy_core::resolve_default_integration_base_ref` returns a remote-tracking ref
-/// (`origin/master`), while a node's `branch` and a GitHub PR base are plain names, so the label a
-/// client renders can legitimately carry either form. The accepted value returned is the caller's
-/// own trimmed input, not the normalized form, so the recipe matches parent branches as recorded.
+/// (`<remote>/<branch>`), while a node's `branch` and a GitHub PR base are plain names, so the label
+/// a client renders can legitimately carry either form. The remote is parsed off `default_branch`
+/// (the segment before its first `/`) so a non-`origin` default is normalized correctly. The
+/// accepted value returned is the caller's own trimmed input, not the normalized form, so the
+/// recipe matches parent branches as recorded.
 pub fn validate_repoint_target(
     target_base_branch: &str,
     default_branch: &str,
@@ -1360,8 +1406,9 @@ pub fn validate_repoint_target(
         return Ok(None);
     }
 
-    let names_default = tddy_core::worktree::local_branch_name(target)
-        == tddy_core::worktree::local_branch_name(default_branch);
+    let remote = default_branch.split_once('/').map(|(r, _)| r).unwrap_or("origin");
+    let names_default = tddy_core::worktree::local_branch_name_for_remote(target, remote)
+        == tddy_core::worktree::local_branch_name_for_remote(default_branch, remote);
     let names_parent = parent_branches.contains(&target);
 
     if names_default || names_parent {
@@ -1551,8 +1598,10 @@ async fn spawn_claude_cli_session_inner(
 
     // The child's branch now exists (and, when requested, is on origin), so a pr-stack
     // orchestrator's planned node can record it — which is what lets this node's descendants be
-    // spawned at all, since they base onto `origin/<branch>`. Keyed on the effective branch, so a
+    // spawned at all, since they base onto `<remote>/<branch>`. Keyed on the effective branch, so a
     // session resuming the branch a node already owns re-links to that node.
+    let remote = project_storage::effective_remote_name_for_project(&projects_dir, project_id, &repo_root)
+        .map_err(|e| Status::internal(e.to_string()))?;
     ConnectionServiceImpl::link_stack_node_to_spawned_branch(
         &sessions_base,
         stack_parent,
@@ -1560,6 +1609,7 @@ async fn spawn_claude_cli_session_inner(
             branch_worktree_intent,
             new_branch_name,
             selected_branch_to_work_on,
+            &remote,
         ),
         session_id,
     )?;
@@ -2194,6 +2244,12 @@ impl ConnectionServiceImpl {
                 // node (see `link_stack_node_to_spawned_branch`), keyed on the effective branch so a
                 // resumed branch re-links its node. Only this arm resolves a project worktree; a
                 // client-supplied `repo_path` materializes no planned node.
+                let remote = project_storage::effective_remote_name_for_project(
+                    &projects_dir,
+                    &pid,
+                    &repo_root,
+                )
+                .map_err(|e| Status::internal(e.to_string()))?;
                 Self::link_stack_node_to_spawned_branch(
                     &sessions_base,
                     stack_parent,
@@ -2201,6 +2257,7 @@ impl ConnectionServiceImpl {
                         branch_worktree_intent,
                         new_branch_name,
                         selected_branch_to_work_on,
+                        &remote,
                     ),
                     session_id,
                 )?;
@@ -3965,13 +4022,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let local_daemon_id = local_instance_id_for_config(&self.config);
         let entries: Vec<ProtoProjectEntry> = projects
             .into_iter()
-            .map(|p| ProtoProjectEntry {
-                project_id: p.project_id,
-                name: p.name,
-                git_url: p.git_url,
-                main_repo_path: p.main_repo_path,
-                daemon_instance_id: local_daemon_id.clone(),
-                main_branch_ref: p.main_branch_ref.unwrap_or_default(),
+            .map(|p| {
+                let repo_root = PathBuf::from(&p.main_repo_path);
+                let default_remote = resolve_default_remote_or_empty(&projects_dir, &p.project_id, &repo_root);
+                project_entry_from(&p, local_daemon_id.clone(), default_remote)
             })
             .collect();
         log::debug!(
@@ -4062,16 +4116,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             git_url: git_url.to_string(),
             main_repo_path,
             main_branch_ref: None,
+            remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
         };
-        let entry = ProtoProjectEntry {
-            project_id: project.project_id.clone(),
-            name: project.name.clone(),
-            git_url: project.git_url.clone(),
-            main_repo_path: project.main_repo_path.clone(),
-            daemon_instance_id: local_instance_id_for_config(&self.config),
-            main_branch_ref: project.main_branch_ref.clone().unwrap_or_default(),
-        };
+        let repo_root = PathBuf::from(&project.main_repo_path);
+        let default_remote = resolve_default_remote_or_empty(&projects_dir, &project.project_id, &repo_root);
+        let entry = project_entry_from(&project, local_instance_id_for_config(&self.config), default_remote);
         project_storage::add_project(&projects_dir, project)
             .map_err(|e| Status::internal(e.to_string()))?;
 
@@ -4157,15 +4207,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 "AddProjectToHost: project_id={} already present on this host, returning existing row",
                 project_id
             );
+            let repo_root = PathBuf::from(&existing.main_repo_path);
+            let default_remote = resolve_default_remote_or_empty(&projects_dir, &existing.project_id, &repo_root);
             return Ok(Response::new(AddProjectToHostResponse {
-                project: Some(ProtoProjectEntry {
-                    project_id: existing.project_id,
-                    name: existing.name,
-                    git_url: existing.git_url,
-                    main_repo_path: existing.main_repo_path,
-                    daemon_instance_id: local_id,
-                    main_branch_ref: existing.main_branch_ref.unwrap_or_default(),
-                }),
+                project: Some(project_entry_from(&existing, local_id, default_remote)),
             }));
         }
 
@@ -4213,20 +4258,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             git_url: git_url.to_string(),
             main_repo_path,
             main_branch_ref,
+            remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
         };
         let (stored, _created) = project_storage::add_or_get_project(&projects_dir, project)
             .map_err(|e| Status::internal(e.to_string()))?;
 
+        let repo_root = PathBuf::from(&stored.main_repo_path);
+        let default_remote = resolve_default_remote_or_empty(&projects_dir, &stored.project_id, &repo_root);
         Ok(Response::new(AddProjectToHostResponse {
-            project: Some(ProtoProjectEntry {
-                project_id: stored.project_id,
-                name: stored.name,
-                git_url: stored.git_url,
-                main_repo_path: stored.main_repo_path,
-                daemon_instance_id: local_id,
-                main_branch_ref: stored.main_branch_ref.unwrap_or_default(),
-            }),
+            project: Some(project_entry_from(&stored, local_id, default_remote)),
         }))
     }
 
@@ -4315,15 +4356,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             project_id,
             stored.main_branch_ref.as_deref().unwrap_or_default()
         );
+        let repo_root = PathBuf::from(&stored.main_repo_path);
+        let default_remote = resolve_default_remote_or_empty(&projects_dir, &stored.project_id, &repo_root);
         Ok(Response::new(SetProjectDefaultBranchResponse {
-            project: Some(ProtoProjectEntry {
-                project_id: stored.project_id,
-                name: stored.name,
-                git_url: stored.git_url,
-                main_repo_path: stored.main_repo_path,
-                daemon_instance_id: local_id,
-                main_branch_ref: stored.main_branch_ref.unwrap_or_default(),
-            }),
+            project: Some(project_entry_from(&stored, local_id, default_remote)),
         }))
     }
 
@@ -6079,11 +6115,18 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         }
 
         let timeout = self.config.spawn_worker_request_timeout();
+        let remote = project_storage::effective_remote_name_for_project(
+            &projects_dir,
+            project_id,
+            &repo_root,
+        )
+        .map_err(|e| Status::internal(e.to_string()))?;
+        let remote_for_closure = remote.clone();
         let branches = spawn_blocking_with_timeout(
             timeout,
             "ListProjectBranches: git remote refs",
             move || {
-                tddy_core::list_recent_remote_branches(&repo_root, BRANCH_LIST_LIMIT)
+                tddy_core::list_recent_remote_branches(&repo_root, &remote_for_closure, BRANCH_LIST_LIMIT)
                     .map_err(|e| anyhow::anyhow!("list_recent_remote_branches failed: {}", e))
             },
         )
@@ -6096,7 +6139,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             branches.len()
         );
 
-        Ok(Response::new(ListProjectBranchesResponse { branches }))
+        Ok(Response::new(ListProjectBranchesResponse {
+            branches,
+            default_remote: remote,
+        }))
     }
 
     async fn execute_tool(
@@ -10385,7 +10431,7 @@ mod stack_child_link_tests {
         ConnectionServiceImpl::link_stack_node_to_spawned_branch(
             tmp.path(),
             Some("orchestrator-1"),
-            effective_spawn_branch("work_on_selected_branch", "", "feature/bottom"),
+            effective_spawn_branch("work_on_selected_branch", "", "feature/bottom", "origin"),
             "child-2",
         )
         .expect("a resumed branch must link its planned node");
@@ -10413,7 +10459,7 @@ mod stack_child_link_tests {
         ConnectionServiceImpl::link_stack_node_to_spawned_branch(
             tmp.path(),
             Some("orchestrator-1"),
-            effective_spawn_branch("work_on_selected_branch", "", "origin/feature/bottom"),
+            effective_spawn_branch("work_on_selected_branch", "", "origin/feature/bottom", "origin"),
             "child-2",
         )
         .expect("a resumed remote-tracking branch must link its planned node");

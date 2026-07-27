@@ -89,6 +89,7 @@ fn legacy_project_resolves_its_default_live_from_the_repository_not_a_hardcoded_
             git_url: source.clone(),
             main_repo_path: repo,
             main_branch_ref: None,
+            remote_name: None,
             host_repo_paths: HashMap::new(),
         },
     )
@@ -122,6 +123,7 @@ fn a_stored_default_branch_wins_over_the_legacy_probe() {
             git_url: source.clone(),
             main_repo_path: repo,
             main_branch_ref: Some("origin/release/2025".to_string()),
+            remote_name: None,
             host_repo_paths: HashMap::new(),
         },
     )
@@ -149,6 +151,7 @@ fn any_remote_branch_including_a_slashed_name_is_a_valid_stored_default() {
             git_url: "https://example.com/a.git".to_string(),
             main_repo_path: "/tmp/a".to_string(),
             main_branch_ref: Some("origin/release/2025".to_string()),
+            remote_name: None,
             host_repo_paths: HashMap::new(),
         },
     );
@@ -171,6 +174,7 @@ fn a_default_branch_with_shell_metacharacters_is_still_rejected() {
             git_url: "https://example.com/a.git".to_string(),
             main_repo_path: "/tmp/a".to_string(),
             main_branch_ref: Some("origin/main;rm -rf /".to_string()),
+            remote_name: None,
             host_repo_paths: HashMap::new(),
         },
     );

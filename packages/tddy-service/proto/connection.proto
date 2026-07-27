@@ -279,10 +279,14 @@ message ProjectEntry {
   string main_repo_path = 4;
   // Owning daemon for this registry row (multi-daemon aggregated ListProjects).
   string daemon_instance_id = 5;
-  // Stored default integration base ref (`origin/<branch>`, possibly multi-segment). Empty = unset;
-  // legacy rows resolve their default live from the repository. See
+  // Stored default integration base ref (`<remote>/<branch>`, possibly multi-segment). Empty =
+  // unset; legacy rows resolve their default live from the repository. See
   // docs/ft/coder/git-integration-base-ref.md.
   string main_branch_ref = 6;
+  // Resolved default remote name for the project's main repo (`origin`, `upstream`, ...). Empty when
+  // undetected (legacy rows without an upstream and without a stored `remote_name`). Clients use this
+  // to normalize `<remote>/<branch>` picker values to local branch names without assuming `origin`.
+  string default_remote = 7;
 }
 
 message ListProjectsRequest {
@@ -656,6 +660,10 @@ message ListProjectBranchesRequest {
 
 message ListProjectBranchesResponse {
   repeated string branches = 1;
+  // The default remote name the listed branches are tracked under (`origin`, `upstream`, ...).
+  // Clients strip this prefix to recover local branch names. Empty means undetected; clients fall
+  // back to `origin` only as a last resort.
+  string default_remote = 2;
 }
 
 // --- Project default branch (integration base ref) ---
