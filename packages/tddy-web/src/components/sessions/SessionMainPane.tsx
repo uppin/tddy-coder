@@ -235,12 +235,22 @@ export function SessionMainPane({
     : (onSessionCreated ?? (() => undefined));
   const createPaneInitialValues = activePeerMode ? peerCreateInitialValues ?? undefined : undefined;
 
+  // The selected session's project default branch, read from the registry the drawer already loaded
+  // rather than an RPC or a git probe (D20). Empty when the project is not in the list or stores no
+  // `main_branch_ref` (a legacy project): the PR-Stack view then labels the base "default branch" and
+  // the daemon resolves the real ref when it is asked to act.
+  const defaultBranch = React.useMemo(
+    () => projects.find((p) => p.projectId === resolvedProjectId)?.mainBranchRef ?? "",
+    [projects, resolvedProjectId],
+  );
+
   const customView = !isCreating
     ? resolveWorkflowView(selectedSession, {
         client,
         sessionToken,
         attachment,
         sessions: [...sessions],
+        defaultBranch,
         onChildSessionStarted,
       })
     : null;

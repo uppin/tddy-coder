@@ -764,9 +764,18 @@ export const prStackBranch = (nodeId: string) => `pr-stack-branch-${nodeId}`;
  *  rendered distinctly from an owned branch because a suggestion names no ref yet */
 export const prStackPlannedBranch = (nodeId: string) => `pr-stack-planned-branch-${nodeId}`;
 
-/** `[data-testid="pr-stack-missing-branch-<nodeId>"]` — the blocked indicator shown in place of the
- *  Start-session CTA while the node's base branch is not available to be based upon */
-export const prStackMissingBranch = (nodeId: string) => `pr-stack-missing-branch-${nodeId}`;
+/** `[data-testid="pr-stack-base-branch-<nodeId>"]` — the branch this planned PR's child worktree would
+ *  be based onto (its nearest usable ancestor's branch, or the project default) */
+export const prStackBaseBranch = (nodeId: string) => `pr-stack-base-branch-${nodeId}`;
+
+/** `[data-testid="pr-stack-start-warning-<nodeId>"]` — the warning listing every reason the node cannot
+ *  be started. The row's information and its (disabled) Start-session CTA stay put beside it */
+export const prStackStartWarning = (nodeId: string) => `pr-stack-start-warning-${nodeId}`;
+
+/** `[data-testid="pr-stack-repoint-error-<nodeId>"]` — the daemon's reason for refusing a repoint. The
+ *  RPC can reject (a stale target names no acceptable base), so failing silently would leave the row
+ *  looking untouched with no explanation — the dead end this feature exists to remove */
+export const prStackRepointError = (nodeId: string) => `pr-stack-repoint-error-${nodeId}`;
 
 /** `[data-testid="pr-stack-pr-unavailable-<nodeId>"]` — shown when the GitHub PR lookup could not be
  *  performed (no credential, rate limit, transport error) — distinct from "this branch has no PR" */

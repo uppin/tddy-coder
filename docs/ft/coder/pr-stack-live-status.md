@@ -36,7 +36,10 @@ independent of whether the orchestrator agent is running:
    See [Authenticated PR status](#authenticated-pr-status-added-2026-07-26).)*
 4. **Repoint / restack control.** When a node's predecessor has already merged, the row offers a
    Repoint control that drops the merged parent, rebases the node's local branch onto the new
-   effective base, and re-targets the open GitHub PR's base branch.
+   effective base, and re-targets the open GitHub PR's base branch. *(Amended 2026-07-26 — Repoint is
+   offered for **any** unresolvable base, not only a merged predecessor, and reads **"Repoint to
+   `<default branch>`"** when that is where it lands; a node that owns no branch is repointed as a
+   plan-only edit. See [Repointing a dead-end planned PR](#repointing-a-dead-end-planned-pr-added-2026-07-26).)*
 5. **Sequence-respecting base at spawn.** When a session is started for a planned node, its
    worktree is branched off the node's parent branch (the effective base, skipping merged
    ancestors) — not off the default branch. Starting a node whose non-merged parent owns no branch
@@ -45,7 +48,10 @@ independent of whether the orchestrator agent is running:
    2026-07-26 — startability is now **shown, not discovered on failure**: `BranchResolution` carries a
    `remote` leg, and a node whose base branch is absent from `origin` shows a blocked **"Missing
    branch"** indicator in place of the Start-session button. See
-   [Startability before the spawn](#startability-before-the-spawn-added-2026-07-26).)*
+   [Startability before the spawn](#startability-before-the-spawn-added-2026-07-26). Further amended
+   2026-07-26 — the indicator no longer **replaces** the row's contents: a blocked row keeps its full
+   information and a disabled Start-session button beside a warning naming the issue. See
+   [Repointing a dead-end planned PR](#repointing-a-dead-end-planned-pr-added-2026-07-26).)*
 
 ## Current behavior being fixed (capability 5)
 
@@ -77,12 +83,17 @@ respected.
 | D7 *(2026-07-26)* | A node is **orphaned** when it records a `session_id` **and** its branch resolution has arrived with `session.exists = false` | Server-authoritative and already polled — `QueryBranch` scans sessions by changeset branch. Deriving it from the web's `sessions` list would misread a node as orphaned whenever its host is merely offline. Requiring the resolution to have *arrived* keeps the first render deterministic: an absent resolution is "unknown", never "orphaned". |
 | D8 *(2026-07-26)* | Restarting an orphaned node that owns a branch pre-fills `work_on_selected_branch` with that branch | The branch, worktree and remote ref already exist, so `new_branch_from_base` would fail on "branch already exists". Resuming is also what the operator means — the work on that branch is not lost, only its session. |
 | D9 *(2026-07-26)* | `BranchResolution` gains `BranchRemote { exists, sha }`, resolved server-side per branch | "Available to be based upon" is a fact about `origin`, and only the daemon can see the repo. Deriving it in the web from `Changeset.remote_pushed` or from a branch name being non-empty would report *available* for a local-only branch — exactly the case that fails inside `git fetch`. |
-| D10 *(2026-07-26)* | "Missing branch" **replaces** the Start-session button rather than disabling it | A disabled button with no explanation is the dead end operators already hit. The blocked indicator names the branch being waited on, so the next action (start the predecessor) is obvious. |
+| D10 *(2026-07-26)* — **superseded by D16** | "Missing branch" **replaces** the Start-session button rather than disabling it | A disabled button with no explanation is the dead end operators already hit. The blocked indicator names the branch being waited on, so the next action (start the predecessor) is obvious. |
 | D11 *(2026-07-26)* | PR lookups authenticate with the **operator's own GitHub access token**, retained daemon-side at login; the OAuth scope widens to `read:user repo` | The operator's own credential, already granted, and the only one that works for private repos and for future write operations. Chosen over an ambient `gh auth token` fallback (invisible state) and over embedding the token in the HMAC session token (which would put a live `repo` token into browser storage on a plain-http origin). Cost: an unavoidable re-login — see [Operator migration](#operator-migration-re-login-required). |
 | D12 *(2026-07-26)* | A PR lookup that cannot be performed is reported as **unavailable**, never as "no PR" | The silent `Ok(None)` is why a live PR was invisible for a day. A stub/demo login is explicitly *not* a failure (D13). |
 | D13 *(2026-07-26)* | **Stub / demo authentication resolves to "no PRs"** — never an error, never *unavailable* | `github.stub: true` exists so the product can be demoed and tested without real GitHub credentials. A stub login holds no access token by construction, so the lookup short-circuits to a clean empty result and must not fail the enclosing RPC — a demo must never surface an error banner or a red row. |
 | D14 *(2026-07-26)* | A login that **cannot retain** its access token fails | Minting a session without its token is a half-login: the operator appears signed in while every GitHub-backed read reports itself unavailable, and re-authenticating — the one action that would fix it — is the one action they have no reason to attempt. Failing the exchange surfaces the real fault (an unwritable `auth_storage`) at the moment it is caused. Does not apply to a stub login (D13, stores nothing by construction) nor to an unconfigured store, which is a deliberate deployment choice. |
 | D15 *(2026-07-26)* | `head` is qualified as `owner:branch` in both `get_open_pr` and `get_pr_by_head` | GitHub **ignores** an unqualified `head` and returns every PR, so `arr.first()` yields an arbitrary one (verified live: 30 PRs returned for a bare branch name vs 1 for `owner:branch`). Fixing only the display path would leave the orchestrator able to repoint or merge the wrong PR. |
+| D16 *(2026-07-26)* — **reverses D10** | A blocked row keeps its **full information and its Start-session button (disabled)**, with a separate warning naming every blocking issue | D10 traded one dead end for another: the operator learned *why* the node was blocked but the row stopped showing what the node *was*, and there was still no action to take. The row is the only place a planned PR's title, description, planned branch, base and PR live; suppressing all of it to render one amber chip is strictly less information at the moment the operator most needs it. With Repoint beside it (D17) the disabled button is no longer a dead end — it is the thing that becomes enabled. |
+| D17 *(2026-07-26)* | Repoint is offered whenever the node's base **cannot be resolved right now**, not only when a parent merged | "Merged predecessor" is one cause of a dead end among several — the base branch deleted after its PR merged, deleted without merging, or never pushed — and the plan's own `pr_status` is written by the orchestrator agent, so a merged predecessor frequently *is not* recorded as merged. Gating on the recorded phase is why the reported case (PR merged, branch deleted, plan still says open) had no recovery at all. All of these causes are indistinguishable to the operator and all are resolved identically: re-base onto the default branch. |
+| D18 *(2026-07-26)* | The web computes the repoint **target** and **sends it** — `RepointPlannedPrRequest.target_base_branch` — and the daemon applies one rule: **retain exactly the parents that own that branch, drop the rest** | The button must promise exactly what the daemon will do, so the target has to be decided once, by the side that rendered the label. Having the daemon re-derive "which parents are dead" from git instead was rejected: `remote_branch_ref_sha` collapses every failure to `None`, so "absent from `origin`" and "could not tell" are indistinguishable, and the daemon would drop a real dependency whenever a probe failed or `repo_path` was not a working repo. The web is not inventing the fact either — it reads `BranchResolution.remote`, which the daemon itself resolved. **A repoint therefore collapses the node to a single parent** — the one owning the target, or none when no parent owns it. That is the intent, not a limitation of carrying one branch name: repointing is a decision to stack on one predecessor, so a multi-parent node comes out of it single-parent and its other edges are dropped. |
+| D19 *(2026-07-26)* | Repointing a node that owns **no branch** is a **plan-only** edit — no rebase, no force-push, no PR re-target | `repoint_planned_pr_node` refused with `node '<id>' has no branch to repoint`, which rejected precisely the node this recovery exists for: planned, never started, wedged behind a base that no longer exists. A node with no branch has nothing to rebase and no PR to re-target; dropping the dead parents *is* the whole repoint. |
+| D20 *(2026-07-26)* | The default-branch **name** reaches the row from `ProjectEntry.main_branch_ref`, the project list the drawer already loads — not a new RPC and not a live git probe | The label is rendered on every poll tick, and the authoritative resolver (`resolve_default_integration_base_ref`) runs `git fetch origin`. A legacy project with no stored default yields an empty name, in which case the button reads "Repoint to default branch" and **the daemon substitutes its own resolved default branch for the empty target**. That substitution is load-bearing, not a nicety: without it the empty string reaches the recipe as "no target named" and selects the drop-merged-parents rule, which in the dead-end case drops nothing and returns success against an unchanged plan — no error, no change. The recipe's no-target mode is in-process only. This is also what finally gives the Start-session dialog a named base for a root node (it passed `""`). |
 
 ## Orphaned-node recovery *(added 2026-07-26)*
 
@@ -115,9 +126,10 @@ session directory and changeset were written, leaving a broken session behind.
   `QueryBranch` path).
 - The PR-Stack view polls **each node's base branch as well as its own** — startability is a property
   of the *base*, and an unspawned node owns no branch to query.
-- A node with no `session_id` whose base is unavailable renders a blocked **"Missing branch:
-  `<base>`"** indicator **in place of** the Start-session button (D10), naming the branch it waits for.
-  Three independent blockers produce it: a direct parent that is non-merged and owns no branch (the
+- A node with no `session_id` whose base is unavailable is blocked. *(Superseded 2026-07-26 — it first
+  rendered a **"Missing branch: `<base>`"** indicator **in place of** the Start-session button (D10);
+  the row now keeps that button, disabled, beside a warning naming every reason (D16).)* Three
+  independent blockers produce it: a direct parent that is non-merged and owns no branch (the
   daemon's own gate), no ancestor owning a created branch at all, or a base branch whose `remote.exists`
   is `false`.
 - A **root** node is always startable — its base is the project default branch, which exists by
@@ -125,6 +137,72 @@ session directory and changeset were written, leaving a broken session behind.
   branch, which creates nothing and fetches nothing.
 - A base whose resolution has **not arrived** is *unknown*, never missing — blocking on it would be a
   permanent dead end of exactly the kind the indicator exists to remove.
+
+## Repointing a dead-end planned PR *(added 2026-07-26)*
+
+[Startability before the spawn](#startability-before-the-spawn-added-2026-07-26) made a dead end
+*visible*; it did not make it *recoverable*. A planned PR whose predecessor's PR was merged and whose
+branch was then deleted on `origin` read "Missing branch: `<deleted branch>`" forever: the base ref is
+gone, so the row is blocked, and Repoint was offered only when the plan's own `pr_status.phase` said
+`merged` — a field written by the orchestrator agent, which is frequently stale or was never run. The
+row also **replaced** its own contents with the blocked indicator, so the operator lost the planned PR's
+title, description, planned branch and PR link at exactly the moment they needed them.
+
+**A blocked row is a full row.** Every planned PR renders its complete information regardless of
+startability: title, description, the branch it owns or its planned branch, its base branch, its
+worktree, and its PR link/state — every field it *has*. A blocked node necessarily owns no branch (a
+node that owns one is never blocked, since its spawn resumes rather than creates), and branch is the
+join key for the worktree and PR legs, so in practice a blocked row shows title, description, planned
+branch and base branch. Nothing it has is suppressed; the point of D16 is that the row is not replaced. When a spawn is not currently possible the row adds a **warning** that
+names each blocking issue, and its **Start-session button is disabled** with the same text as its
+tooltip (D16). Nothing is hidden.
+
+- Base branch absent from `origin` → *"Base branch `<base>` is not on origin"*.
+- A direct parent that is non-merged and owns no branch → *"`<parent title>` has not created its branch
+  yet"*.
+- No ancestor owns a created branch at all → *"No predecessor owns a branch yet"*. Reported **only when
+  no direct parent is the blocker**: a branchless non-merged direct parent already makes the base
+  `no-ancestor-branch`, so naming both would state one fact twice. This blocker therefore appears only
+  when the block is *above* a merged parent, which is the one case the parent-level message cannot
+  express.
+
+A dangling parent id is not a blocker — a plan referencing a node that does not exist is malformed, not
+an unmet dependency, and the daemon's own gate likewise refuses only on a parent it can resolve.
+
+**Repoint is the action beside it.** The Repoint control is offered whenever the base cannot be resolved
+right now — *any* cause — as well as in its original merged-parent case (D17). It reads **"Repoint to
+`<target>`"** so the operator knows where the node will land before clicking:
+
+- The web computes the target by dropping every parent that cannot serve as a base right now — merged,
+  branchless, or branch absent from `origin` per `BranchResolution.remote` — and then taking the nearest
+  remaining ancestor's branch, or the project's default branch when none remains. In the reported case
+  none remains, so the button reads "Repoint to `origin/master`".
+- The default branch's *name* comes from `ProjectEntry.main_branch_ref` (D20). A legacy project that has
+  none renders "Repoint to default branch"; the daemon still resolves the real ref when clicked.
+- The target is **sent** with the click as `RepointPlannedPrRequest.target_base_branch` (D18), so the
+  daemon does exactly what the label promised rather than re-deriving it from a git probe that cannot
+  distinguish "absent" from "could not tell". An **empty** target on the wire means "the project's
+  default branch", which the daemon substitutes from its own resolution — a client cannot always name
+  it (D20).
+
+**Repointing persists the new base in the plan.** Given a `target_base_branch`, the daemon retains
+exactly the parents that own that branch and drops the rest, atomically — so the plan reflects reality
+and every later read (the row, a spawn, `base_ref_for_spawn`, the orchestrator agent) agrees without
+re-deriving anything. A target no parent owns means "detach": all parents are dropped and the node's base
+collapses to the project default. The daemon rejects a target that names neither the resolved default
+branch nor any parent's branch, so a stale label cannot silently rewrite the plan. An **empty** target
+keeps the original behaviour (drop merged parents only) for any other caller.
+
+For a node that already owns a branch the git effect is unchanged (rebase onto the new base, force-push
+with lease, re-target the open PR's base). For a node that owns **no** branch the repoint is plan-only
+(D19): there is nothing to rebase and no PR to re-target, and the node becomes startable on the next
+render.
+
+**A refused repoint says so.** The RPC can now reject — a stale label whose target names neither the
+resolved default branch nor any parent's branch — and it can still fail for the reasons it always could
+(the default branch is unresolvable, a rebase conflicts). The row shows the daemon's reason inline
+(`pr-stack-repoint-error-<nodeId>`) and stays blocked, because nothing was persisted. A refusal the
+operator cannot see would be a fresh instance of the dead end this feature exists to remove.
 
 ## Authenticated PR status *(added 2026-07-26)*
 
@@ -220,6 +298,12 @@ message RepointPlannedPrRequest {
   string session_id = 2;
   // The planned node to repoint (drop merged parents, rebase, re-target PR base).
   string node_id = 3;
+  // The branch the node should be based onto after the repoint — the target the operator's
+  // "Repoint to <target>" control named (added 2026-07-26, D18). The daemon retains exactly the
+  // parents that own this branch and drops the rest; a target no parent owns means "detach", and the
+  // node's base collapses to the project default. Rejected when it names neither the resolved default
+  // branch nor any parent's branch. Empty keeps the original behaviour: drop merged parents only.
+  string target_base_branch = 4;
 }
 message RepointPlannedPrResponse {
   // Updated JSON-serialized Stack, same wire shape as SessionEntry.stack_plan_json (field 23).
@@ -313,10 +397,20 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   `node.parents` (persisted via `update_stack_atomic`), computes the effective base via
   `Stack::effective_base_refs`, rebases the node's local branch onto it, and calls
   `patch_pr_base` on the open PR. Reuses the `git_ops` + `github` primitives behind
-  `bridge::execute_stack_repoint`.
+  `bridge::execute_stack_repoint`. *(Revised 2026-07-26 — takes `target_base_branch: Option<&str>`.
+  `Some(target)` retains exactly the parents that own `target` and drops the rest (D18); `None` keeps the
+  original drop-merged-parents behaviour. A node with `branch = None` is a plan-only repoint — the
+  rebase, force-push and `patch_pr_base` are skipped rather than erroring (D19).)*
 - **Daemon handlers** — `get_pr_status` (resolve `owner/repo` from the orchestrator session's
   repo remote, call `get_pr_by_head`) and `repoint_planned_pr` (call
   `repoint_planned_pr_node`, return re-serialized `stack_plan_json`).
+- **Repoint target validation (added 2026-07-26)** — `connection_service::validate_repoint_target(target,
+  default_branch, parent_branches) -> Result<Option<String>, String>`, a pure helper in the same shape as
+  `effective_spawn_branch`. Empty or whitespace-only → `Ok(None)` (the drop-merged-parents rule). The
+  default branch is matched with `origin/` stripped from both sides, since the resolver returns a
+  remote-tracking ref while a node's `branch` and a GitHub PR base are plain names. Anything else is an
+  `invalid_argument` refusal — an unvalidated target would silently detach the node, because "no parent
+  owns this branch" *is* the detach instruction.
 - **Enrichment** — `session_list_enrichment` populates `SessionEntry.branch` from
   `Changeset.branch`.
 - **Sequence-respecting base (capability 5)** — `resolve_chain_base_ref` (renamed/extended to
@@ -386,6 +480,28 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   dialog, honoured when `branchIntent === "work_on_selected_branch"`; `PlannedPrPanel` is the
   right-side docked/overlay container (see
   [session-drawer.md § PR-Stack Chat Screen](../web/session-drawer.md#pr-stack-chat-screen)).
+- *(2026-07-26, dead-end recovery)* `startBlockers(node, nodes, branchResolutionByBranch) ->
+  StartBlocker[]` (pure module, `startBlockers.ts`) returns every reason a node cannot be started, each
+  with a human-readable `message`; the empty array means startable. It replaces the boolean
+  `baseBranchMissing` / `baseBranch` pair, which could express only one reason and no text.
+  `resolveRepointTarget(node, nodes, branchResolutionByBranch, defaultBranch) -> string` (same module)
+  returns the branch a repoint would land on — the nearest ancestor branch surviving the drop of every
+  unusable parent, else `defaultBranch` — and both names the Repoint control and is sent as
+  `target_base_branch` (D18).
+- *(2026-07-26, dead-end recovery)* `PrStackScreen` gains a `defaultBranch` prop, threaded from
+  `SessionMainPane`'s already-loaded `projects` through `resolveWorkflowView`'s `WorkflowViewContext`
+  (matched on `session.projectId` → `ProjectEntry.mainBranchRef`, D20). It feeds both the Repoint label
+  and `baseBranchLabel`, which previously passed the empty string and left a root node's dialog with an
+  unnamed base.
+- *(2026-07-26, dead-end recovery)* `PlannedPrRow` always renders the row's full information and its
+  Start-session button, `disabled` when `startBlockers` is non-empty, beside a warning
+  (`pr-stack-start-warning-<nodeId>`) listing those blockers; the base branch gets its own line
+  (`pr-stack-base-branch-<nodeId>`). The `pr-stack-missing-branch-<nodeId>` replacement indicator is
+  **removed** (D16).
+- *(2026-07-26, dead-end recovery)* `PrStackScreen.handleRepoint` records a per-node failure that the row
+  renders as `pr-stack-repoint-error-<nodeId>`. It previously `await`ed the call with no `catch`, so a
+  rejection was an unhandled promise and the row looked untouched — which the new `invalid_argument`
+  refusal would have made reachable.
 
 ## Behavior and semantics
 
@@ -396,14 +512,18 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
 - **PR link/state.** When the resolution's `pr.exists = true`, the row shows `#<number>` linking to
   `url` and the `state`. When `exists = false`, no PR chip is shown; when `unavailable = true` the row
   reads "PR status unavailable" with `unavailable_reason` as a tooltip *(2026-07-26)*.
-- **CTA slot (mutually exclusive, 2026-07-26).** Exactly one of three things occupies a row's CTA slot:
+- **Row information is unconditional (2026-07-26, D16).** Every row renders the planned PR's full
+  information — title, description, owned branch or planned branch, base branch, worktree, PR link/state
+  and internal-status badge — whatever its startability. A row is never reduced to a single indicator.
+- **CTA slot (mutually exclusive, revised 2026-07-26).** Exactly one of two things occupies a row's CTA
+  slot, and a blocked row carries a warning beside it rather than in place of it:
 
-  | Node condition | CTA slot shows |
-  |---|---|
-  | No `session_id`, base branch on `origin` (or node is a root) | **Start session** button |
-  | No `session_id`, base branch absent from `origin` / unreachable | **Missing branch** blocked indicator, naming the base branch |
-  | `session_id` set, resolution not yet arrived, or says a session exists | status chip (unchanged) |
-  | `session_id` set, resolution says **no** session exists | **Start session** button, pre-filled to resume `node.branch` |
+  | Node condition | CTA slot shows | Warning |
+  |---|---|---|
+  | No `session_id`, base branch on `origin` (or node is a root) | **Start session** button, enabled | — |
+  | No `session_id`, base branch absent from `origin` / unreachable | **Start session** button, **disabled** | warning naming each blocking issue *(D16)* |
+  | `session_id` set, resolution not yet arrived, or says a session exists | status chip (unchanged) | — |
+  | `session_id` set, resolution says **no** session exists | **Start session** button, pre-filled to resume `node.branch` | — |
 
 - **PR display (2026-07-26).**
 
@@ -413,11 +533,20 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   | No PR for this head branch | nothing |
   | Stub / demo login (D13) | nothing — identical to "no PR"; never an error |
   | Lookup unavailable | "PR status unavailable" with the reason as a tooltip |
-- **Repoint availability.** The Repoint control appears only when the node has at least one parent
-  whose PR is merged (`StackNode::is_skipped`) — i.e. the derived `needs-repoint` condition.
-- **Repoint effect.** Repoint drops merged parents, rebases the local branch onto the effective
-  base, force-pushes, and re-targets the open PR's base. A rebase conflict marks the node
-  `pr_status.phase = "error"` (existing `execute_stack_repoint` behavior) and surfaces as an error.
+- **Repoint availability** *(revised 2026-07-26, D17)*. The Repoint control appears when the node has at
+  least one parent whose PR is merged (`StackNode::is_skipped` — the derived `needs-repoint` condition)
+  **or** when the node's base cannot be resolved right now, for any cause.
+- **Repoint label** *(2026-07-26, D18/D20)*. The control reads **"Repoint to `<target>`"**, where
+  `<target>` is the nearest ancestor branch that survives dropping the unusable parents, else the
+  project's default branch (`ProjectEntry.main_branch_ref`). With no stored default it reads "Repoint to
+  default branch".
+- **Repoint effect.** Repoint retains exactly the parents that own the requested
+  `target_base_branch` and drops the rest *(2026-07-26, D18)*, persists that in the plan, rebases the
+  local branch onto the effective base, force-pushes, and re-targets the open PR's base. A rebase
+  conflict marks the node
+  `pr_status.phase = "error"` (existing `execute_stack_repoint` behavior) and surfaces as an error. A
+  node that owns **no** branch is repointed as a plan-only edit *(2026-07-26, D19)*: no rebase, no
+  force-push, no PR re-target.
 - **Spawn base.** A node with a single non-merged parent `n1` is branched off
   `origin/<n1.branch>`. A root node (no parents, or all parents merged) is branched off the stack
   default branch. Starting a node whose non-merged parent owns no branch is refused with a message
@@ -428,7 +557,7 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
 
 - **Branch not yet on remote.** The PR lookup returns `exists = false`; the row shows no PR chip and
   no in-progress indicator until a session claims the branch. Not an error. Its `remote.exists` is
-  `false`, which blocks a *descendant's* spawn with the "Missing branch" indicator *(2026-07-26)*.
+  `false`, which blocks a *descendant's* spawn and warns that the base is not on origin *(2026-07-26)*.
 - **No GitHub credential for the calling operator** *(revised 2026-07-26)* — the lookup reports
   `unavailable = true` with a reason, **not** `exists = false`. Previously the daemon read
   `GITHUB_TOKEN`/`GH_TOKEN` from its own environment and an absent token collapsed to "no PR",
@@ -440,8 +569,10 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   provider (`packages/tddy-github/src/stub.rs`, `github.stub: true`) stores no token, and that must be
   indistinguishable from a repository with no open PRs.
 - **`origin/<branch>` is only as fresh as the last fetch** *(2026-07-26)* — a branch pushed by another
-  machine reads as missing until this host fetches. The "Missing branch" indicator is therefore
-  conservative: it can delay a spawn, never permit one that would fail.
+  machine reads as missing until this host fetches. The start-blocked warning is therefore
+  conservative: it can delay a spawn, never permit one that would fail. The **Repoint** control it
+  enables is not conservative, though — offered against a base that is actually alive, taking it drops
+  that parent edge from the plan for good.
 - **A dangling `session_id` is left in the changeset**, not scrubbed *(2026-07-26)* — the orphan state is
   derived at render, which keeps `DeleteSession` free of a stack scan and self-heals across hosts.
 - **`work_on_selected_branch` skips chain-base resolution** *(2026-07-26)* — correct, since no branch is
@@ -450,6 +581,18 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   the most recently updated. (Should not happen for a well-formed stack.)
 - **Repoint with no local branch.** Git rebase is skipped (remote-only branch); PR base is still
   re-targeted — mirrors `execute_stack_repoint`'s existing "branch not local; skipping rebase" path.
+- **Repoint with no branch at all** *(2026-07-26)* — a plan-only edit (D19). Previously an error
+  (`node '<id>' has no branch to repoint`), which rejected exactly the planned-but-never-started node
+  the recovery is for.
+- **Repointing detaches a real dependency when the predecessor simply has not started** *(2026-07-26)* —
+  deliberate and operator-driven. The control names its target, so choosing "Repoint to `origin/master`"
+  on a node whose predecessor is merely unstarted is an explicit decision to stop stacking on it, not an
+  accident. The alternative — offering Repoint only for provably merged-and-deleted bases — leaves the
+  indistinguishable cases (branch deleted without merging, never pushed) with no recovery, which is the
+  defect being fixed.
+- **A repointed node's plan no longer records its original parents** *(2026-07-26)* — dropping them is
+  the persisted effect (D18), so the stack's DAG loses that edge. This is the intended meaning of
+  "repoint": the node is no longer stacked on that predecessor.
 - **Polling churn.** The poll interval is fixed (5 s) and shared per screen; only the branches currently
   rendered — and their base branches, which are themselves rendered nodes' branches — are queried. Since
   2026-07-26 that is **one** GitHub lookup per branch per tick, not two.

@@ -97,7 +97,7 @@ Update milestone checkboxes as work completes:
    - **No knowledge transfer needed** — content was already transferred via changeset/PRD wrapping
    - **Delete source**: Remove the file (not archived); no separate changelog entry needed
 
-**Changelog / changeset index format (merge hygiene)** — follow [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md): **prepend** one new **`##`** (product changelog) or **one new bullet line** (indexes); **single-line** bullets; **do not** rewrite existing shipped lines in the same PR as unrelated work; optional **`docs/dev/changesets.d/YYYY-MM-DD-slug.md`** for long cross-package notes plus one line in `docs/dev/changesets.md`.
+**Changelog / changeset index format (merge hygiene)** — follow [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md): **prepend** one new **`##`** (product changelog) or **one new bullet line** (indexes); **single-line** bullets; **do not** rewrite existing shipped lines in the same PR as unrelated work.
 
 **State B, Not Delta**: Documentation must read as cohesive, unified documents without traces of change process. No "previously", "now", "changed from", or temporal language.
 
