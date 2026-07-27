@@ -13,6 +13,14 @@
   (the widened `read:user repo` scope). Every automated suite is green; this is the one unverified path,
   and it is also the end-to-end check that the token store and the `remote` leg work against a real
   repo rather than a fixture.
+- **The repoint recovery was never run against a live stack** — deferred to after merge by the
+  developer (source: `pr-stack-repoint-dead-end`, 2026-07-26). Exercise a genuinely stranded node — a
+  predecessor whose PR merged on GitHub and whose branch was deleted, with the plan still recording
+  `open` — and confirm the row offers "Repoint to `<default>`", that taking it drops the dead parent and
+  leaves the node startable, and that a refusal shows its reason. Do it on **two** projects: one that
+  stores `main_branch_ref` and one that does not. The second matters most: sending an empty target used
+  to select a different rule server-side and silently do nothing, and no automated test covers that path
+  end to end.
 - **GitHub poll volume is one lookup per rendered branch per 5s** — `useQueryBranch` polls every branch
   a row renders. Adding each node's *base* branch to the poll set costs nothing extra: a base is by
   definition some node's own `branch` and was already in the set (`resolvedBranches` is deduplicated).
