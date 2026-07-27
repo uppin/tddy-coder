@@ -25,6 +25,15 @@ export interface WorkflowViewContext {
    * for a legacy project that stores none (D20).
    */
   defaultBranch?: string;
+  /**
+   * The session's project resolved default remote (`ProjectEntry.default_remote`, e.g. `origin`,
+   * `upstream`). The PR-Stack view prepends it to the local branch names a planned-PR child session's
+   * "Base branch" picker offers, so the value sent as `selected_integration_base_ref` is the
+   * `<remote>/<branch>` ref the daemon fetches — not a bare local name whose first path segment it
+   * would mistake for a remote. Empty for a legacy project that stored none; the view falls back to
+   * `origin` (the daemon's own last resort).
+   */
+  defaultRemote?: string;
   /** Fired after a child session is spawned inside the view — see `PrStackScreenProps.onChildSessionStarted`. */
   onChildSessionStarted?: (entry: {
     sessionId: string;
@@ -61,6 +70,7 @@ export function resolveWorkflowView(
         sessions={context.sessions}
         attachment={context.attachment}
         defaultBranch={context.defaultBranch}
+        defaultRemote={context.defaultRemote}
         onChildSessionStarted={context.onChildSessionStarted}
       />
     );

@@ -239,9 +239,20 @@ export function SessionMainPane({
   // rather than an RPC or a git probe (D20). Empty when the project is not in the list or stores no
   // `main_branch_ref` (a legacy project): the PR-Stack view then labels the base "default branch" and
   // the daemon resolves the real ref when it is asked to act.
-  const defaultBranch = React.useMemo(
-    () => projects.find((p) => p.projectId === resolvedProjectId)?.mainBranchRef ?? "",
+  const projectForSession = React.useMemo(
+    () => projects.find((p) => p.projectId === resolvedProjectId),
     [projects, resolvedProjectId],
+  );
+  const defaultBranch = React.useMemo(
+    () => projectForSession?.mainBranchRef ?? "",
+    [projectForSession],
+  );
+  // The project's resolved default remote (`origin`, `upstream`, ...). Empty for a legacy project that
+  // stored none — the PR-Stack view falls back to `origin` (the daemon's own last resort) when lifting
+  // a stack node's local branch name into the `<remote>/<branch>` ref the daemon fetches.
+  const defaultRemote = React.useMemo(
+    () => projectForSession?.defaultRemote ?? "",
+    [projectForSession],
   );
 
   const customView = !isCreating
@@ -251,6 +262,7 @@ export function SessionMainPane({
         attachment,
         sessions: [...sessions],
         defaultBranch,
+        defaultRemote,
         onChildSessionStarted,
       })
     : null;
