@@ -5,6 +5,9 @@
 //! PR's base — the same primitives `bridge::execute_stack_repoint` uses, applied to one node so
 //! the web Repoint control and the agent repoint converge.
 //!
+//! These cases pass `target_base_branch = None`, which selects that original drop-merged-parents rule.
+//! The explicit-target rule is covered by `pr_stack_repoint_dead_end_acceptance.rs`.
+//!
 //! PRD: docs/ft/coder/pr-stack-live-status.md § capability 4.
 
 use std::path::Path;
@@ -134,7 +137,7 @@ fn repoint_planned_pr_node_drops_a_merged_parent_from_the_node_parents() {
     let gh = FakeGithub::new();
 
     // When
-    repoint_planned_pr_node(dir, dir, "n2", "master", &gh).expect("repoint should succeed");
+    repoint_planned_pr_node(dir, dir, "n2", "master", None, &gh).expect("repoint should succeed");
 
     // Then — the merged parent n1 is gone; the open parent n3 remains
     let loaded = read_changeset(dir).unwrap().stack.unwrap();
@@ -156,7 +159,7 @@ fn repoint_planned_pr_node_retargets_the_open_pr_base_to_the_effective_base() {
     let gh = FakeGithub::new();
 
     // When
-    repoint_planned_pr_node(dir, dir, "n2", "master", &gh).expect("repoint should succeed");
+    repoint_planned_pr_node(dir, dir, "n2", "master", None, &gh).expect("repoint should succeed");
 
     // Then — the open PR (#42) is re-based onto the stack default branch on GitHub
     assert_eq!(

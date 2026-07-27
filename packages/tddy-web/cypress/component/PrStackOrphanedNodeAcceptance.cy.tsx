@@ -234,6 +234,6 @@ it("offers Start session for an orphaned node whose base branch is missing from 
   });
 
   // Then — blocking here would be an unrecoverable dead end for work that is not lost at all
-  prStackScreenPage.startSessionBtn("n1").should("exist");
-  prStackScreenPage.missingBranch("n1").should("not.exist");
+  prStackScreenPage.startSessionBtn("n1").should("be.enabled");
+  prStackScreenPage.startWarning("n1").should("not.exist");
 });

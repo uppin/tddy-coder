@@ -12,6 +12,7 @@ import { PrStackChat } from "./PrStackChat";
 import { parseStackPlan, type StackNode } from "./stackPlan";
 import { useQueryBranch } from "./useQueryBranch";
 import { deriveStackBaseBranch, resolveStackBase } from "./deriveStackBaseBranch";
+import { resolveRepointTarget } from "./startBlockers";
 import { CreateSessionDialog } from "../CreateSessionDialog";
 import type { CreateSessionInitialValues } from "../CreateSessionPane";
 
@@ -34,6 +35,13 @@ export interface PrStackScreenProps {
    * above — `SessionMainPane`'s `room` prop is VNC-purpose and unrelated.
    */
   attachment?: SessionAttachmentState;
+  /**
+   * The project's default branch (`ProjectEntry.main_branch_ref`, resolved by `session.projectId`).
+   * Names the base in a root node's Start-session dialog and is the repoint target when no parent can
+   * serve as a base. Empty for a legacy project that stores none — the label then reads "default
+   * branch" and the daemon resolves the real ref when the repoint arrives (D20).
+   */
+  defaultBranch?: string;
   /**
    * Fired after a child session is spawned so the caller can make it appear in the drawer.
    * Receives just enough of the new `SessionEntry` to render a drawer row immediately —
@@ -59,6 +67,7 @@ export function PrStackScreen({
   sessionToken = "",
   sessions = [],
   attachment = IDLE_ATTACHMENT,
+  defaultBranch = "",
   onChildSessionStarted,
 }: PrStackScreenProps) {
   const { room, status: roomStatus, error: roomError } = usePresenterLiveKitRoom(attachment);
@@ -77,6 +86,13 @@ export function PrStackScreen({
   );
   const [startSessionNode, setStartSessionNode] = useState<StackNode | null>(null);
   const [isAddingPlannedPr, setIsAddingPlannedPr] = useState(false);
+  // Why a node's last repoint did not happen, keyed by node id. Per node rather than one banner: the
+  // list shows several nodes at once and only the one that was refused is still blocked.
+  const [repointErrorByNodeId, setRepointErrorByNodeId] = useState<Record<string, string>>({});
+  // Nodes with a repoint in flight, so a second click cannot start one beside it. Repointing a node
+  // that owns a branch rebases and force-pushes it, which is not safe to run twice concurrently. A set
+  // rather than a single id: repoints of different nodes are independent and may legitimately overlap.
+  const [repointingNodeIds, setRepointingNodeIds] = useState<ReadonlySet<string>>(new Set());
   // The panel keeps today's at-a-glance view of the plan on desktop, where there is room for it, and
   // starts out of the way on mobile, where it covers the chat entirely (same seed as the session
   // list's own `sessionListOpen`).
@@ -146,10 +162,9 @@ export function PrStackScreen({
         // meaningful when a branch still has to be created.
         newBranchName: ownedBranch ? "" : (startSessionNode.branchSuggestion ?? ""),
         // The concrete base branch the child will branch from — the node's nearest non-merged
-        // ancestor's branch (predecessor stack branch), collapsing to the project default for a
-        // root. The project default isn't surfaced on the orchestrator session here, so a root
-        // node shows the plain label rather than a name.
-        baseBranchLabel: deriveStackBaseBranch(startSessionNode, stack.nodes, ""),
+        // ancestor's branch (predecessor stack branch), collapsing to the project's default branch
+        // for a root.
+        baseBranchLabel: deriveStackBaseBranch(startSessionNode, stack.nodes, defaultBranch),
         initialPrompt: [startSessionNode.title, startSessionNode.description]
           .filter(Boolean)
           .join("\n\n"),
@@ -183,17 +198,59 @@ export function PrStackScreen({
     setIsAddingPlannedPr(false);
   };
 
-  // Repoint drops the node's merged parents, rebases its branch onto the new effective base, and
-  // re-targets the open PR — then re-renders the list from the returned stack (same override
-  // mechanism as `handleAddPlannedPr`, since the `session` prop only refreshes on a later refetch).
+  // Repoint retains exactly the parents that own the target branch, rebases the node's branch onto the
+  // new effective base and re-targets the open PR — then re-renders the list from the returned stack
+  // (same override mechanism as `handleAddPlannedPr`, since the `session` prop only refreshes on a
+  // later refetch).
+  //
+  // The target is the same value the row's control named, so the daemon does exactly what the operator
+  // was promised rather than re-deriving it from a git probe that cannot tell "absent from origin"
+  // from "could not tell" (D18).
   const handleRepoint = async (nodeId: string) => {
     if (!client) return;
-    const res = await client.repointPlannedPr({
-      sessionToken,
-      sessionId: session.sessionId,
-      nodeId,
+    const node = stack.nodes.find((n) => n.nodeId === nodeId);
+    if (!node) return;
+    // The control is disabled while a repoint is in flight, but a second call must be impossible
+    // rather than merely hard to trigger: a repeat rebase and force-push of the same branch is not a
+    // repeat of a harmless read.
+    if (repointingNodeIds.has(nodeId)) return;
+    setRepointingNodeIds((prev) => new Set(prev).add(nodeId));
+    // A new attempt clears the previous reason: keeping it beside a repoint that is in flight would
+    // report a failure that is no longer the current state.
+    setRepointErrorByNodeId((prev) => {
+      if (!(nodeId in prev)) return prev;
+      const next = { ...prev };
+      delete next[nodeId];
+      return next;
     });
-    setStackPlanOverride(res.stackPlanJson);
+    try {
+      const res = await client.repointPlannedPr({
+        sessionToken,
+        sessionId: session.sessionId,
+        nodeId,
+        targetBaseBranch: resolveRepointTarget(
+          node,
+          stack.nodes,
+          branchResolutionByBranch,
+          defaultBranch,
+        ),
+      });
+      setStackPlanOverride(res.stackPlanJson);
+    } catch (err) {
+      // The daemon refuses a target that names neither the default branch nor any parent's branch, and
+      // the repoint can still fail on an unresolvable default branch or a rebase conflict. Nothing was
+      // persisted in either case, so the row stays blocked and has to say why.
+      setRepointErrorByNodeId((errors) => ({
+        ...errors,
+        [nodeId]: err instanceof Error ? err.message : String(err),
+      }));
+    } finally {
+      setRepointingNodeIds((prev) => {
+        const next = new Set(prev);
+        next.delete(nodeId);
+        return next;
+      });
+    }
   };
 
   const plannedPrPanelState = plannedPrPanelOpen ? "open" : "closed";
@@ -259,6 +316,9 @@ export function PrStackScreen({
             sessions={sessions}
             branchResolutionByBranch={branchResolutionByBranch}
             onRepoint={handleRepoint}
+            defaultBranch={defaultBranch}
+            repointErrorByNodeId={repointErrorByNodeId}
+            repointingNodeIds={repointingNodeIds}
           />
         </PlannedPrPanel>
       </div>

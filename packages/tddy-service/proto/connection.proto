@@ -1102,6 +1102,12 @@ message RepointPlannedPrRequest {
   string session_id = 2;
   // The planned node to repoint (drop merged parents, rebase, re-target PR base).
   string node_id = 3;
+  // The branch the node should be based onto after the repoint — the target the operator's
+  // "Repoint to <target>" control named. The daemon retains exactly the parents that own this
+  // branch and drops the rest; a target no parent owns means "detach", and the node's base
+  // collapses to the project default. Rejected when it names neither the resolved default branch
+  // nor any parent's branch. Empty keeps the original behaviour: drop merged parents only.
+  string target_base_branch = 4;
 }
 message RepointPlannedPrResponse {
   // Updated JSON-serialized `Stack`, same wire shape as `SessionEntry.stack_plan_json` (field 23).
