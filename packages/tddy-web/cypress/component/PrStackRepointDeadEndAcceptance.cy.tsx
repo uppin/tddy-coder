@@ -12,7 +12,7 @@
  * land on, which is also the `target_base_branch` sent with the click (D17, D18, D20).
  *
  * PRD: docs/ft/coder/pr-stack-live-status.md § Repointing a dead-end planned PR (D16–D20).
- * Changeset: docs/dev/changesets.d/2026-07-26-pr-stack-repoint-dead-end.md.
+ * Changeset: docs/dev/changesets.md (2026-07-26, pr-stack-repoint-dead-end).
  */
 
 import React from "react";
