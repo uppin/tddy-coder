@@ -505,6 +505,66 @@ Groups are sorted newest-first by the orchestrator's `createdAt`.
 
 See [PR Stack Parent Picker](#pr-stack-parent-picker) in the Create Session section above.
 
+## Session Agents (Peer Agent Sessions)
+
+A session detail view (`SessionMainPane`) hosts **peer agent sessions** — additional coding
+backends (e.g. a Cursor session alongside the session's Claude agent) that share the current
+session's **worktree**. Each peer is a normal child session linked back to its orchestrator via
+`SessionEntry.orchestratorSessionId` (the same field the PR-stack grouping above uses); the
+operator switches between peers from the session detail view. There is **no agent-to-agent
+messaging** — agents co-exist on the same checkout and the operator coordinates them.
+
+### Add agent
+
+`SessionMainPane`'s header carries an **"Add agent"** button
+(`data-testid="session-agents-add-btn"`, a peer of the `Code` / `Inspector` / activity-overlay
+toggles). Clicking it opens `CreateSessionPane` in **peer mode**, pre-filled to spawn a peer that
+runs on the **same worktree** as the selected session:
+
+- `stackParent = selectedSession.sessionId`
+- `projectId` / `daemonInstanceId` = the selected session's (project resolved via
+  `projectForUnscopedSession` for unscoped sessions, so the Create button enables)
+- `repoPath = selectedSession.repoPath` → sets `StartSession.repo_path`; per the daemon contract a
+  non-empty `repo_path` makes the session's worktree **be** that path — no git worktree is created
+  and no branch is checked out
+- `sessionType` / `agent` / `model` / `initialPrompt` = operator-chosen (the peer's backend is a
+  separate pick)
+
+In peer mode the branch selectors (branch mode / new branch name / branch to work on / create
+remote branch), the PR-stack parent picker, the **Project** selector, and the **Host** selector are
+hidden — the peer reuses the orchestrator's worktree, project, and host, so those controls have no
+effect. Submit sends the frozen orchestrator `projectId` / `daemonInstanceId` (not live form state),
+so a peer always matches the worktree it runs on.
+
+A peer `StartSession` is async. The capture used for the optimistic drawer overlay is held in a
+ref that survives a mid-flight drawer selection change, so the new peer always appears in the list
+immediately (via the same `onChildSessionStarted` optimistic-overlay path the PR-stack orchestrator
+uses). A peer→standalone transition (the drawer opens its own new-session flow while peer mode is
+open) remounts `CreateSessionPane` with fresh state, so a standalone submit never carries a stale
+`stackParent`.
+
+### Session agents section
+
+`SessionAgentsSection` (`src/components/sessions/SessionAgentsSection.tsx`) mounts below the
+header and lists the selected session's peers — sessions with
+`orchestratorSessionId === selectedSession.sessionId`, derived by the pure
+`sessionPeers(sessions, currentSessionId)` util (`src/utils/sessionPeers.ts`). Each row shows the
+peer's `sessionId` / `agent` / `model` / `status` and a **switch** button
+(`data-testid="session-agents-switch-<peerSessionId>"`) that selects the peer in the drawer
+(focusing its runtime). An empty-state message is shown when there are no peers, so a session
+without peers sees no list noise.
+
+> A peer and a PR-stack child are indistinguishable in the section today (both are children via
+> `orchestratorSessionId`). A future filter could distinguish by recipe.
+
+### Reused infrastructure
+
+- `StartSession.stack_parent` (proto field 15) — the spawned coder receives `--stack-parent <id>`.
+- `SessionEntry.orchestratorSessionId` (proto field 21) — back-reference from child to orchestrator.
+- `SessionsDrawerScreen.onChildSessionStarted` — the optimistic drawer overlay.
+
+No proto or daemon changes; no new external dependencies. The feature is tddy-web-only.
+
 ## Per-Workflow Session Views
 
 > **Added: 2026-07-01** — a session's `recipe` can now select a fully custom main-pane

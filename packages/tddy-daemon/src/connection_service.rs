@@ -7481,6 +7481,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         // The named target must be a branch this node can be based onto: the repoint retains only
         // the parents that own it, so an unvalidated target is a silent plan rewrite.
+        let changeset = tddy_core::read_changeset(&session_dir)
+            .map_err(|e| Status::internal(e.to_string()))?;
         let stack = changeset.stack.unwrap_or_default();
         let parent_branches: Vec<String> = stack
             .node(&node_id)
