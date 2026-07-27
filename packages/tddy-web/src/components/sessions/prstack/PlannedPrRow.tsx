@@ -34,6 +34,11 @@ export interface PlannedPrRowProps {
   /** The daemon's reason for refusing or failing this node's last repoint, shown inline. */
   repointError?: string;
   /**
+   * True while this node's repoint is in flight. Disables the control: a repoint of a node that owns a
+   * branch rebases and force-pushes it, so a second concurrent run is destructive, not just wasteful.
+   */
+  repointing?: boolean;
+  /**
    * Every reason a spawn cannot succeed right now, each with the text to show. Non-empty *disables*
    * the Start-session button — it never replaces it, and never suppresses any of the row's own
    * information (D16): the row is the only place a planned PR's title, description, branch, base and
@@ -41,7 +46,7 @@ export interface PlannedPrRowProps {
    */
   blockers?: StartBlocker[];
   /** The base branch the row states its child worktree would be created from. */
-  baseBranch?: string;
+  baseBranchLabel?: string;
 }
 
 /** Tailwind classes for an internal-status badge, keyed by status kind. */
@@ -69,8 +74,9 @@ export function PlannedPrRow({
   onRepoint,
   repointTarget = "",
   repointError = "",
+  repointing = false,
   blockers = [],
-  baseBranch = "",
+  baseBranchLabel = "",
 }: PlannedPrRowProps) {
   // A node whose recorded child session has been deleted is workable again, so it shows the CTA
   // rather than a status chip for a session that no longer exists.
@@ -130,9 +136,9 @@ export function PlannedPrRow({
           <p
             data-testid={`pr-stack-base-branch-${node.nodeId}`}
             className="text-xs text-muted-foreground/70 truncate font-mono"
-            title={`Base branch: ${baseBranch}`}
+            title={`Base branch: ${baseBranchLabel}`}
           >
-            base: {baseBranch}
+            base: {baseBranchLabel}
           </p>
           {showWorktree && (
             <p
@@ -197,6 +203,7 @@ export function PlannedPrRow({
             data-testid={`pr-stack-repoint-${node.nodeId}`}
             size="sm"
             variant="outline"
+            disabled={repointing}
             onClick={() => onRepoint?.(node.nodeId)}
           >
             {/* The target is named so the operator knows where the node lands before clicking, and it

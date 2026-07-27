@@ -117,7 +117,9 @@ it("blocks Start session and names the base branch when that branch is absent fr
   });
 
   // Then
-  prStackScreenPage.startWarning("n2").should("contain.text", BASE_BRANCH);
+  prStackScreenPage
+    .startWarning("n2")
+    .should("have.text", `Base branch ${BASE_BRANCH} is not on origin`);
   prStackScreenPage.startSessionBtn("n2").should("be.disabled");
 });
 
@@ -161,7 +163,7 @@ it("blocks Start session when no ancestor owns a created branch yet", () => {
   prStackScreenPage.startSessionBtn("n2").should("be.disabled");
 });
 
-it("blocks Start session when one of several parents owns no branch, naming that parent's branch", () => {
+it("blocks Start session when one of several parents owns no branch, naming that parent", () => {
   // Given — n3 depends on both n1 (branch pushed) and n2 (planned only)
   const nodes = [
     aPlannedNode({
@@ -194,7 +196,7 @@ it("blocks Start session when one of several parents owns no branch, naming that
   // not mask the unmet one; the row names the predecessor it is waiting for
   prStackScreenPage
     .startWarning("n3")
-    .should("contain.text", "Session attachment storage has not created its branch yet");
+    .should("have.text", "Session attachment storage has not created its branch yet");
   prStackScreenPage.startSessionBtn("n3").should("be.disabled");
 });
 

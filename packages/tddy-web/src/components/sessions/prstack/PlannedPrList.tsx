@@ -29,6 +29,8 @@ export interface PlannedPrListProps {
   defaultBranch?: string;
   /** The daemon's reason per node whose last repoint was refused or failed, keyed by node id. */
   repointErrorByNodeId?: Record<string, string>;
+  /** Nodes whose repoint is in flight — their control is disabled so it cannot be started twice. */
+  repointingNodeIds?: ReadonlySet<string>;
 }
 
 /** Renders one row per planned `StackNode`, roots before their dependents. */
@@ -41,6 +43,7 @@ export function PlannedPrList({
   onRepoint,
   defaultBranch = "",
   repointErrorByNodeId = {},
+  repointingNodeIds = new Set<string>(),
 }: PlannedPrListProps) {
   const ordered = topoSortStackNodes(nodes);
   const nodeById = new Map(nodes.map((n) => [n.nodeId, n]));
@@ -71,7 +74,7 @@ export function PlannedPrList({
           // than with the blocked ancestor's *planned* branch, since that branch does not exist and
           // would read as a base the child could be created from.
           const base = resolveStackBase(node, nodes);
-          const baseBranch =
+          const baseBranchLabel =
             base.kind === "ancestor-branch"
               ? base.branch
               : base.kind === "default-branch"
@@ -96,8 +99,9 @@ export function PlannedPrList({
                 defaultBranch,
               )}
               repointError={repointErrorByNodeId[node.nodeId]}
+              repointing={repointingNodeIds.has(node.nodeId)}
               blockers={blockers}
-              baseBranch={baseBranch}
+              baseBranchLabel={baseBranchLabel}
             />
           );
         })

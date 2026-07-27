@@ -120,32 +120,47 @@ const A_DELETED_BASE: Record<string, BranchResolutionFixture> = {
   },
 };
 
-function openPrStackScreen(options: {
+interface PrStackScreenOptions {
   nodes: StackNodeFixture[];
   resolutionByBranch: Record<string, BranchResolutionFixture>;
   mainBranchRef?: string;
+  /** The plan `RepointPlannedPr` returns; defaults to the plan the screen opened with. */
   repointedNodes?: StackNodeFixture[];
-  /** When set, `RepointPlannedPr` rejects with this message instead of returning a plan. */
-  repointRejection?: string;
-}) {
-  const backend = aSessionsDrawerBackend([anOrchestratorSession(options.nodes)])
+}
+
+/** Everything but `RepointPlannedPr`, which is what the two openers differ on. */
+function aPrStackBackend(options: PrStackScreenOptions) {
+  return aSessionsDrawerBackend([anOrchestratorSession(options.nodes)])
     .onUnary(ConnectionService.method.listProjects, () => ({
       projects: [aProject(options.mainBranchRef ?? DEFAULT_BRANCH)],
     }))
     .onUnary(ConnectionService.method.queryBranch, (req: { branch: string }) =>
-      aBranchResolutionResponse(
-        options.resolutionByBranch[req.branch] ?? { branch: req.branch },
-      ),
-    )
-    .onUnary(ConnectionService.method.repointPlannedPr, () => {
-      if (options.repointRejection) {
-        throw new ConnectError(options.repointRejection, Code.InvalidArgument);
-      }
-      return { stackPlanJson: aStackPlanJson(1, options.repointedNodes ?? options.nodes) };
-    });
+      aBranchResolutionResponse(options.resolutionByBranch[req.branch] ?? { branch: req.branch }),
+    );
+}
+
+function mountAndOpenPrStackSession(backend: ReturnType<typeof aPrStackBackend>) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
   return backend;
+}
+
+/** Open the screen with a `RepointPlannedPr` that succeeds and returns the repointed plan. */
+function openPrStackScreen(options: PrStackScreenOptions) {
+  return mountAndOpenPrStackSession(
+    aPrStackBackend(options).onUnary(ConnectionService.method.repointPlannedPr, () => ({
+      stackPlanJson: aStackPlanJson(1, options.repointedNodes ?? options.nodes),
+    })),
+  );
+}
+
+/** Open the screen with a `RepointPlannedPr` the daemon refuses, carrying `message` as its reason. */
+function openPrStackScreenWithRefusedRepoint(message: string, options: PrStackScreenOptions) {
+  return mountAndOpenPrStackSession(
+    aPrStackBackend(options).onUnary(ConnectionService.method.repointPlannedPr, () => {
+      throw new ConnectError(message, Code.InvalidArgument);
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -279,20 +294,20 @@ it("offers no Repoint control on a node whose base branch is on origin", () => {
 // A blocked row is still a full row
 // ---------------------------------------------------------------------------
 
-it("keeps the planned PR's title, description, planned branch, base branch and PR link on a row that cannot be started", () => {
+it("keeps its title, description, planned branch and base branch on a row that cannot be started", () => {
   // Given / When
   openPrStackScreen({ nodes: A_STRANDED_DEPENDENT, resolutionByBranch: A_DELETED_BASE });
 
-  // Then — being blocked must never cost the operator the information they need to act
+  // Then — being blocked must never cost the operator the information they need to act. The row is
+  // the whole card, so `contain.text`: it also holds the base line, the CTA and the warning.
   prStackScreenPage
     .plannedPrRow("n2")
     .should("contain.text", "Copy attachments during StartSession")
     .and("contain.text", "Copies every attachment into the child session directory.");
   prStackScreenPage
     .plannedBranchName("n2")
-    .should("contain.text", "feature/attach-docs/attach-start");
-  prStackScreenPage.baseBranch("n2").should("contain.text", DELETED_BASE_BRANCH);
-  prStackScreenPage.prLink("n1").should("have.text", "#351");
+    .should("have.text", "planned: feature/attach-docs/attach-start");
+  prStackScreenPage.baseBranch("n2").should("have.text", `base: ${DELETED_BASE_BRANCH}`);
 });
 
 it("disables Start session and warns that the base branch is not on origin", () => {
@@ -306,35 +321,123 @@ it("disables Start session and warns that the base branch is not on origin", () 
     .should("have.text", `Base branch ${DELETED_BASE_BRANCH} is not on origin`);
 });
 
+it("carries every blocker message as the disabled Start-session button's tooltip", () => {
+  // Given / When
+  openPrStackScreen({ nodes: A_STRANDED_DEPENDENT, resolutionByBranch: A_DELETED_BASE });
+
+  // Then — hovering the control that cannot be pressed answers why, without hunting for the warning
+  prStackScreenPage
+    .startSessionBtn("n2")
+    .should("have.attr", "title", `Base branch ${DELETED_BASE_BRANCH} is not on origin`);
+});
+
+it("warns with every reason at once when a row is blocked for two of them", () => {
+  // Given — n3 depends on n1 (branch gone from origin) and n2 (planned only, so it owns no ref)
+  const nodes = [
+    aPlannedNode({
+      nodeId: "n1",
+      title: "Start-session attachment proto",
+      branch: DELETED_BASE_BRANCH,
+      prStatus: { phase: "open" },
+    }),
+    aPlannedNode({
+      nodeId: "n2",
+      title: "Session attachment storage",
+      branchSuggestion: LIVE_BASE_BRANCH,
+    }),
+    aPlannedNode({
+      nodeId: "n3",
+      title: "Copy attachments during StartSession",
+      parents: ["n1", "n2"],
+    }),
+  ];
+
+  // When
+  openPrStackScreen({ nodes, resolutionByBranch: A_DELETED_BASE });
+
+  // Then — naming one reason and hiding the other is what left the operator guessing (D16). The two
+  // messages render as adjacent block spans, so the element's text is their concatenation.
+  prStackScreenPage
+    .startWarning("n3")
+    .should(
+      "have.text",
+      `Session attachment storage has not created its branch yetBase branch ${DELETED_BASE_BRANCH} is not on origin`,
+    );
+});
+
+it("offers a Repoint control on a node blocked by a predecessor that owns no branch yet", () => {
+  // Given — nothing has merged and no branch was deleted; n1 was simply never started
+  const nodes = [
+    aPlannedNode({
+      nodeId: "n1",
+      title: "Start-session attachment proto",
+      branchSuggestion: DELETED_BASE_BRANCH,
+    }),
+    aPlannedNode({
+      nodeId: "n2",
+      title: "Copy attachments during StartSession",
+      parents: ["n1"],
+    }),
+  ];
+
+  // When
+  openPrStackScreen({ nodes, resolutionByBranch: {} });
+
+  // Then — Repoint is offered for *any* unresolvable base (D17), and no parent can serve as one here,
+  // so the node would land on the default branch
+  prStackScreenPage.repointBtn("n2").should("have.text", `Repoint to ${DEFAULT_BRANCH}`);
+});
+
+it("shows no start warning on a node whose child session already exists", () => {
+  // Given — n2 was already spawned, and its base branch is gone from origin
+  const nodes = [
+    A_STRANDED_DEPENDENT[0],
+    aPlannedNode({
+      nodeId: "n2",
+      title: "Copy attachments during StartSession",
+      sessionId: "child-n2",
+      parents: ["n1"],
+    }),
+  ];
+
+  // When
+  openPrStackScreen({ nodes, resolutionByBranch: A_DELETED_BASE });
+
+  // Then — the blockers exist to explain a Start-session button that cannot be pressed; this row shows
+  // a status chip instead, and a base its child will never be created from is not news
+  prStackScreenPage.statusChip("n2").should("exist");
+  prStackScreenPage.startWarning("n2").should("not.exist");
+});
+
 // ---------------------------------------------------------------------------
 // A refused repoint must say so
 // ---------------------------------------------------------------------------
 
+/** A daemon refusal of a stale label that names no acceptable base. */
+const A_REJECTED_TARGET_REASON =
+  "target_base_branch 'origin/master' names neither the default branch 'origin/main' nor any parent's branch";
+
 it("surfaces the daemon's reason when a repoint is refused", () => {
-  // Given — the daemon rejects the target (a stale label naming no acceptable base)
-  openPrStackScreen({
+  // Given
+  openPrStackScreenWithRefusedRepoint(A_REJECTED_TARGET_REASON, {
     nodes: A_STRANDED_DEPENDENT,
     resolutionByBranch: A_DELETED_BASE,
-    repointRejection:
-      "target_base_branch 'origin/master' names neither the default branch 'origin/main' nor any parent's branch",
   });
 
   // When
   prStackScreenPage.clickRepoint("n2");
 
-  // Then — a refusal the operator cannot see is the dead end this whole feature removes
-  prStackScreenPage
-    .repointError("n2")
-    .should("contain.text", "names neither the default branch");
+  // Then — a refusal the operator cannot see is the dead end this whole feature removes. `have.text`
+  // is impossible here: `ConnectError.message` prepends "[invalid_argument] " to the daemon's reason.
+  prStackScreenPage.repointError("n2").should("contain.text", A_REJECTED_TARGET_REASON);
 });
 
 it("leaves the row blocked when the repoint was refused", () => {
   // Given
-  openPrStackScreen({
-    nodes: A_STRANDED_DEPENDENT,
-    resolutionByBranch: A_DELETED_BASE,
-    repointRejection: "could not resolve default branch: no origin/master, origin/main, or origin/HEAD",
-  });
+  openPrStackScreenWithRefusedRepoint(
+    "could not resolve default branch: no origin/master, origin/main, or origin/HEAD",
+    { nodes: A_STRANDED_DEPENDENT, resolutionByBranch: A_DELETED_BASE },
+  );
 
   // When
   prStackScreenPage.clickRepoint("n2");

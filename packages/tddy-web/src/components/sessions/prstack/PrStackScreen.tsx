@@ -89,6 +89,10 @@ export function PrStackScreen({
   // Why a node's last repoint did not happen, keyed by node id. Per node rather than one banner: the
   // list shows several nodes at once and only the one that was refused is still blocked.
   const [repointErrorByNodeId, setRepointErrorByNodeId] = useState<Record<string, string>>({});
+  // Nodes with a repoint in flight, so a second click cannot start one beside it. Repointing a node
+  // that owns a branch rebases and force-pushes it, which is not safe to run twice concurrently. A set
+  // rather than a single id: repoints of different nodes are independent and may legitimately overlap.
+  const [repointingNodeIds, setRepointingNodeIds] = useState<ReadonlySet<string>>(new Set());
   // The panel keeps today's at-a-glance view of the plan on desktop, where there is room for it, and
   // starts out of the way on mobile, where it covers the chat entirely (same seed as the session
   // list's own `sessionListOpen`).
@@ -206,6 +210,11 @@ export function PrStackScreen({
     if (!client) return;
     const node = stack.nodes.find((n) => n.nodeId === nodeId);
     if (!node) return;
+    // The control is disabled while a repoint is in flight, but a second call must be impossible
+    // rather than merely hard to trigger: a repeat rebase and force-push of the same branch is not a
+    // repeat of a harmless read.
+    if (repointingNodeIds.has(nodeId)) return;
+    setRepointingNodeIds((prev) => new Set(prev).add(nodeId));
     // A new attempt clears the previous reason: keeping it beside a repoint that is in flight would
     // report a failure that is no longer the current state.
     setRepointErrorByNodeId((prev) => {
@@ -235,6 +244,12 @@ export function PrStackScreen({
         ...errors,
         [nodeId]: err instanceof Error ? err.message : String(err),
       }));
+    } finally {
+      setRepointingNodeIds((prev) => {
+        const next = new Set(prev);
+        next.delete(nodeId);
+        return next;
+      });
     }
   };
 
@@ -303,6 +318,7 @@ export function PrStackScreen({
             onRepoint={handleRepoint}
             defaultBranch={defaultBranch}
             repointErrorByNodeId={repointErrorByNodeId}
+            repointingNodeIds={repointingNodeIds}
           />
         </PlannedPrPanel>
       </div>

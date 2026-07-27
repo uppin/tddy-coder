@@ -26,11 +26,26 @@
   on the orchestrator's stack node; the orphan state is derived at render instead. A periodic (or
   delete-time) reconciliation would make the stored stack match reality, which matters for anything
   reading the changeset directly rather than through the web.
-- **`origin/<branch>` freshness depends on the last fetch** — the "Missing branch" indicator reads the
+- **`origin/<branch>` freshness depends on the last fetch** — the start-blocked warning reads the
   local remote-tracking ref, so a branch pushed from another machine reads as missing until this host
-  fetches. A periodic background fetch, or a fetch-on-demand from the row, would close the gap.
-- **Repoint availability still derives from the stored `pr_status`**, not the live poll — carried
-  forward from `pr-stack-live-status` and untouched here.
+  fetches. A periodic background fetch, or a fetch-on-demand from the row, would close the gap. Since
+  `pr-stack-repoint-dead-end` this also has a **destructive** consequence, not just a delaying one: the
+  row will offer "Repoint to `<default>`" for a base that is actually alive, and taking it drops the
+  parent edge from the plan for good.
+- **Two checked-in generations of `connection.proto` disagree** — `packages/tddy-rust-typescript-tests/gen/connection_pb.ts` predates `RepointPlannedPr` entirely, while
+  `packages/tddy-web/src/gen/connection_pb.ts` is kept current. Regenerating the former is a large diff
+  unrelated to any one changeset, which is why it keeps being skipped. Source: `pr-stack-repoint-dead-end`.
+- **A repoint names its target but not what it drops** — the control reads "Repoint to `<target>`" and
+  collapses the node onto that single parent, dropping every other edge (intended, D18). The operator is
+  never shown *which* predecessors that removes, and there is no undo. Naming them in the button's
+  tooltip, or a confirm step when more than one edge would go, would make the cost visible.
+  Source: `pr-stack-repoint-dead-end`.
+- **`repoint_planned_pr_node` has three pre-existing silent-failure paths** — a failed `git rev-parse`
+  collapses to an empty `expected_sha`, which git reads as "the remote ref must not exist" and turns a
+  `--force-with-lease` into a guaranteed rejection; `merge_base` failure invents `effective_base`; and a
+  force-push failure is only `log::warn!`, so the RPC returns success while `origin/<branch>` still points
+  at the old base and the PR was re-targeted anyway. Untouched by `pr-stack-repoint-dead-end`, which only
+  moved them inside a branch guard. Source: `pr-stack-repoint-dead-end`.
 - **A `tddy-coder`-embedded web server retains no GitHub token** — `packages/tddy-coder/src/run.rs`
   builds its own `AuthServiceImpl` without a `GitHubTokenStore`, so PR status there reads
   *unavailable* even after a real login. The daemon path is wired; this one is not.

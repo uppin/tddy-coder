@@ -192,7 +192,7 @@ describe("startBlockers", () => {
     ]);
   });
 
-  it("reports the unmet parent ahead of a base branch that is absent from origin", () => {
+  it("reports both the unmet parent and the absent base branch, the unmet parent first", () => {
     // Given — n3 depends on n1 (branch pushed but gone from origin) and n2 (planned only)
     const n1 = aNode({ nodeId: "n1", title: "Add token store", branch: PREDECESSOR_BRANCH });
     const n2 = aNode({
@@ -306,6 +306,24 @@ describe("resolveRepointTarget", () => {
 
     // Then — a merged parent is dropped even though its branch is still on origin
     expect(target).toBe(SIBLING_BRANCH);
+  });
+
+  it("keeps a parent whose branch resolution has not arrived yet", () => {
+    // Given — n1 owns a branch and has not merged, and no `QueryBranch` answer has come back for it
+    const n1 = aNode({
+      nodeId: "n1",
+      title: "Add token store",
+      branch: PREDECESSOR_BRANCH,
+      prStatus: { phase: "open" },
+    });
+    const n2 = aNode({ nodeId: "n2", title: "Add middleware", parents: ["n1"] });
+
+    // When — the resolution map is empty, so nothing is known about the branch's `origin` ref
+    const target = resolveRepointTarget(n2, [n1, n2], {}, DEFAULT_BRANCH);
+
+    // Then — an unarrived resolution is unknown, never absent: reading it as absent would drop a live
+    // parent and silently detach the node onto the default branch
+    expect(target).toBe(PREDECESSOR_BRANCH);
   });
 
   it("resolves to the default branch for a root node", () => {

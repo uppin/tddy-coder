@@ -59,6 +59,16 @@ fn the_default_branch_is_accepted_without_its_origin_prefix() {
 }
 
 #[test]
+fn the_default_branch_is_accepted_with_an_origin_prefix_it_does_not_itself_carry() {
+    // Given / When — a project whose stored default branch is a bare name, against the remote-tracking
+    // form the web may render
+    let target = validate_repoint_target("origin/master", "master", &[PARENT_BRANCH]);
+
+    // Then — the comparison strips `origin/` from both sides, so neither direction is a refusal
+    assert_eq!(target, Ok(Some("origin/master".to_string())));
+}
+
+#[test]
 fn a_parents_own_branch_is_accepted() {
     // Given / When — one parent is dead and another is still a usable base, so the target is that
     // surviving parent's branch rather than the default
@@ -78,16 +88,15 @@ fn a_parents_own_branch_is_accepted() {
 #[test]
 fn a_target_that_is_neither_the_default_branch_nor_a_parents_branch_is_rejected() {
     // Given / When — a stale or mistyped label that happens to name a real branch elsewhere
-    let target = validate_repoint_target(
-        "feature/somebody-elses-work",
-        DEFAULT_BRANCH,
-        &[PARENT_BRANCH],
-    );
+    let unrelated_branch = "feature/somebody-elses-work";
+    let target = validate_repoint_target(unrelated_branch, DEFAULT_BRANCH, &[PARENT_BRANCH]);
 
     // Then — accepting it would silently drop every parent and detach the node
     assert_eq!(
         target,
-        Err("target_base_branch 'feature/somebody-elses-work' names neither the default branch 'origin/master' nor any parent's branch".to_string())
+        Err(format!(
+            "target_base_branch '{unrelated_branch}' names neither the default branch '{DEFAULT_BRANCH}' nor any parent's branch"
+        ))
     );
 }
 

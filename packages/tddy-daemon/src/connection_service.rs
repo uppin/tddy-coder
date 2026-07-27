@@ -7459,6 +7459,23 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         let node_id = req.node_id.trim().to_string();
 
+        // On the wire, an unnamed target means "the project's default branch" — the daemon's own
+        // resolved ref, substituted here.
+        //
+        // A client cannot always name it: `ProjectEntry.main_branch_ref` is empty for a project that
+        // stores no default, and the web then renders "Repoint to default branch". Forwarding that
+        // empty string would instead select the recipe's drop-merged-parents rule, which in the very
+        // case this feature exists for — a predecessor whose PR merged but whose plan still records
+        // `open` — drops nothing at all and returns success against an unchanged plan. The operator
+        // would see no error and no change.
+        //
+        // The recipe's `None` mode is therefore in-process only; it is never reachable from here.
+        let requested_target = if req.target_base_branch.trim().is_empty() {
+            default_branch.as_str()
+        } else {
+            req.target_base_branch.as_str()
+        };
+
         // The named target must be a branch this node can be based onto: the repoint retains only
         // the parents that own it, so an unvalidated target is a silent plan rewrite.
         let stack = changeset.stack.unwrap_or_default();
@@ -7472,7 +7489,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             })
             .unwrap_or_default();
         let target_base_branch = validate_repoint_target(
-            &req.target_base_branch,
+            requested_target,
             &default_branch,
             &parent_branches
                 .iter()

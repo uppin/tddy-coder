@@ -461,8 +461,17 @@ pub fn add_planned_pr_node(
 /// non-merged ancestor's branch, or `default_branch` when none remains) is then computed, the
 /// node's local branch is rebased onto it and force-pushed, and the open GitHub PR's base is
 /// re-targeted to it. Mirrors `bridge::execute_stack_repoint` applied to one node so the web
-/// Repoint control and the agent repoint converge. When the branch is not local (remote-only),
+/// Repoint control and that agent path stay coherent. When the branch is not local (remote-only),
 /// the git rebase is skipped and the PR base is still re-targeted.
+///
+/// `Some(target)` **collapses the node to a single parent** — the one owning `target` — or to none
+/// when no parent owns it. Repointing is a decision to stack on one predecessor, so a multi-parent
+/// node comes out of it single-parent by design; the other edges are dropped, not preserved.
+///
+/// `None` is the in-process drop-merged-parents mode. It is not reachable over the wire: the daemon
+/// substitutes the project's resolved default branch for an empty `target_base_branch`, because a
+/// client cannot always name that branch and forwarding the empty string would silently select this
+/// different rule.
 ///
 /// A node that owns no branch is a **plan-only** repoint: the parent change is persisted and the
 /// updated node returned, with no rebase, no force-push and no PR re-target. There is nothing to
@@ -490,26 +499,38 @@ pub fn repoint_planned_pr_node(
         .clone();
 
     // Which of the node's parents survive the repoint.
-    let retained_parents: Vec<String> = node
-        .parents
-        .iter()
-        .filter(|parent_id| {
-            let parent = stack.node(parent_id);
-            match target_base_branch {
-                // A retain rule: only the parents that own the target base branch stay, so a
-                // target no parent owns detaches the node onto the default branch.
-                Some(target) => parent.is_some_and(|p| p.branch.as_deref() == Some(target)),
-                // No target named: drop only the parents that are known to have merged, which
-                // leaves a dangling parent id in place rather than silently pruning the plan.
-                None => !parent.is_some_and(|p| p.is_skipped()),
-            }
-        })
-        .cloned()
-        .collect();
+    //
+    // Decided *inside* the `update_stack_atomic` closure, against the stack that is about to be
+    // written. `update_stack_atomic` re-reads the file before applying its closure, and the
+    // orchestrator agent writes the same file, so a set computed from the snapshot above would be
+    // stale: a keep-list drops any parent added between the two reads, where the drop-list this
+    // replaced would have kept it.
+    let survives = |stack: &tddy_core::changeset::Stack, parent_id: &str| match target_base_branch {
+        // A retain rule: only the parents that own the target base branch stay. A repoint therefore
+        // *collapses* the node onto that one predecessor — or detaches it onto the default branch
+        // when no parent owns the target, which is what a stranded node needs.
+        Some(target) => stack
+            .node(parent_id)
+            .is_some_and(|p| p.branch.as_deref() == Some(target)),
+        // No target named: drop only the parents that are known to have merged. Written as "not
+        // known-merged" rather than "resolvable and not merged" so an unresolvable parent id is
+        // kept, exactly as the drop-list form this replaced did.
+        None => !stack.node(parent_id).is_some_and(|p| p.is_skipped()),
+    };
 
     update_stack_atomic(session_dir, |stack| {
+        let retained: Vec<String> = stack
+            .node(node_id)
+            .map(|n| {
+                n.parents
+                    .iter()
+                    .filter(|parent_id| survives(stack, parent_id))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
         if let Some(node) = stack.nodes.iter_mut().find(|n| n.node_id == node_id) {
-            node.parents.retain(|p| retained_parents.contains(p));
+            node.parents = retained;
         }
     })
     .map_err(|e| format!("repoint_planned_pr_node: failed to persist stack: {e}"))?;

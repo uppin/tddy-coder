@@ -37,17 +37,24 @@ const DELETED_BASE_BRANCH: &str = "feature/attach-docs/attach-proto";
 /// A second predecessor's branch, still open and still on `origin`.
 const LIVE_BASE_BRANCH: &str = "feature/attach-docs/attach-store";
 
-// --- a fake GitHub PR API that records base re-targeting ---------------------
+// --- a fake GitHub PR API that records every call it is asked to make --------
 
 struct FakeGithub {
+    /// Every head branch a PR was looked up for — so a test can assert GitHub was never consulted.
+    looked_up: Mutex<Vec<String>>,
     patched_bases: Mutex<Vec<(u64, String)>>,
 }
 
 impl FakeGithub {
     fn new() -> Self {
         Self {
+            looked_up: Mutex::new(Vec::new()),
             patched_bases: Mutex::new(Vec::new()),
         }
+    }
+
+    fn looked_up(&self) -> Vec<String> {
+        self.looked_up.lock().unwrap().clone()
     }
 
     fn patched_bases(&self) -> Vec<(u64, String)> {
@@ -56,7 +63,8 @@ impl FakeGithub {
 }
 
 impl GithubPrApi for FakeGithub {
-    fn get_open_pr(&self, _head_branch: &str) -> Result<Option<PrRef>, tddy_core::WorkflowError> {
+    fn get_open_pr(&self, head_branch: &str) -> Result<Option<PrRef>, tddy_core::WorkflowError> {
+        self.looked_up.lock().unwrap().push(head_branch.to_string());
         Ok(Some(PrRef {
             number: 42,
             head_sha: "sha42".to_string(),
@@ -188,7 +196,7 @@ fn repointing_a_branchless_node_to_the_default_branch_drops_its_stranded_parent(
 }
 
 #[test]
-fn repointing_a_branchless_node_re_targets_no_pull_request() {
+fn repointing_a_branchless_node_makes_no_github_call() {
     // Given — the same stranded node, which owns no branch
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path();
@@ -205,7 +213,9 @@ fn repointing_a_branchless_node_re_targets_no_pull_request() {
     repoint_planned_pr_node(dir, dir, "n2", DEFAULT_BRANCH, Some(DEFAULT_BRANCH), &gh)
         .expect("repointing a branchless node should succeed");
 
-    // Then — a node with no branch has no PR of its own; dropping the dead parent is the whole repoint
+    // Then — a node with no branch has no PR of its own, so there is nothing to look up and nothing to
+    // re-target: dropping the dead parent is the whole repoint
+    assert_eq!(gh.looked_up(), Vec::<String>::new());
     assert_eq!(gh.patched_bases(), Vec::<(u64, String)>::new());
 }
 
@@ -233,6 +243,33 @@ fn repointing_retains_the_parent_that_owns_the_target_base_branch() {
 }
 
 #[test]
+fn repointing_collapses_a_multi_parent_node_onto_the_single_target_parent() {
+    // Given — n4 stacks on three predecessors, two of which are perfectly healthy: n2 owns the target
+    // branch and n3 owns a different live one
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    write_stack(
+        dir,
+        vec![
+            a_merged_node("n1", DELETED_BASE_BRANCH),
+            an_open_node("n2", LIVE_BASE_BRANCH, &[]),
+            an_open_node("n3", "feature/attach-docs/attach-third", &[]),
+            a_planned_node("n4", &["n1", "n2", "n3"]),
+        ],
+    );
+    let gh = FakeGithub::new();
+
+    // When
+    repoint_planned_pr_node(dir, dir, "n4", DEFAULT_BRANCH, Some(LIVE_BASE_BRANCH), &gh)
+        .expect("repointing a multi-parent node should succeed");
+
+    // Then — repointing is a decision to stack on one predecessor, so n3's healthy edge is dropped
+    // too and the node comes out single-parent. This is the intended collapse, not a casualty of the
+    // target being a single branch name.
+    assert_eq!(parents_of(dir, "n4"), vec!["n2".to_string()]);
+}
+
+#[test]
 fn repointing_drops_a_parent_whose_pull_request_is_not_recorded_as_merged() {
     // Given — n1's plan status is "open" (the orchestrator agent never ran an assess pass) even though
     // its branch is gone; n2 owns a branch, so the git/PR half of the repoint also runs
@@ -251,8 +288,30 @@ fn repointing_drops_a_parent_whose_pull_request_is_not_recorded_as_merged() {
     repoint_planned_pr_node(dir, dir, "n2", DEFAULT_BRANCH, Some(DEFAULT_BRANCH), &gh)
         .expect("repointing should succeed");
 
-    // Then — a stale "open" phase no longer protects a dead parent, and n2's open PR follows the base
+    // Then — a stale "open" phase no longer protects a dead parent
     assert_eq!(parents_of(dir, "n2"), Vec::<String>::new());
+}
+
+#[test]
+fn repointing_onto_an_explicit_target_re_targets_the_nodes_own_open_pull_request() {
+    // Given — n2 owns a branch and has an open PR of its own, so the git/PR half of the repoint runs
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    write_stack(
+        dir,
+        vec![
+            an_open_node("n1", DELETED_BASE_BRANCH, &[]),
+            an_open_node("n2", "feature/attach-docs/attach-start", &["n1"]),
+        ],
+    );
+    let gh = FakeGithub::new();
+
+    // When — the operator names the default branch as the target (rather than the `None` mode, which
+    // `pr_stack_repoint_acceptance.rs` covers)
+    repoint_planned_pr_node(dir, dir, "n2", DEFAULT_BRANCH, Some(DEFAULT_BRANCH), &gh)
+        .expect("repointing should succeed");
+
+    // Then — the PR on GitHub follows the new base, so it no longer diffs against a dead branch
     assert_eq!(gh.patched_bases(), vec![(42, DEFAULT_BRANCH.to_string())]);
 }
 

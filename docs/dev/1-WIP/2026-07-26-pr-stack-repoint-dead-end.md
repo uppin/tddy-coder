@@ -88,8 +88,8 @@ anyway.
       blockers/target/threading
 - [x] **Testing**: 41 of 41 passing (see [Implementation Evidence](#implementation-evidence))
 - [ ] **Integration**: verified against a live stack with a merged-and-deleted predecessor branch
-- [~] **Technical Debt**: recorded below; the `docs/dev/TODO.md` entry this changeset resolves still
-      needs removing at wrap
+- [x] **Technical Debt**: recorded below; the resolved `docs/dev/TODO.md` entry is removed and three new
+      ones are filed
 - [x] **Code Quality**: `cargo clippy -p tddy-workflow-recipes -p tddy-daemon --all-targets -- -D warnings`
       clean, `cargo fmt --all --check` clean, `bun run build` clean
 
@@ -244,70 +244,106 @@ selectedSession.projectId)?.mainBranchRef ?? ""` into `WorkflowViewContext.defau
 
 ## Implementation Evidence
 
-**Phase: green complete. 41 of 41 tests pass.** Implementation was delegated to two `tdd-implementer`
-agents on disjoint file sets (proto + Rust, and `packages/tddy-web/src/`); they met only at the
-regenerated `connection_pb.ts`, which is exactly what the `targetBaseBranch` assertion exercises.
+**Phase: green complete and validated. 47 of 47 tests pass.** Implementation was delegated to two
+`tdd-implementer` agents on disjoint file sets (proto + Rust, and `packages/tddy-web/src/`), then put
+through a validation pass that found and fixed four real defects — see
+[Validation Results](#validation-results).
 
 ### Production code
 
 | File | Change |
 |---|---|
-| `packages/tddy-service/proto/connection.proto` | `+ string target_base_branch = 4;` on `RepointPlannedPrRequest` (lines 1105–1110) |
-| `packages/tddy-web/src/gen/connection_pb.ts` | regenerated via the `generate` script (`buf generate ../tddy-service/proto`) — the new field plus the re-encoded `fileDesc`, not hand-edited |
-| `packages/tddy-workflow-recipes/src/pr_stack/mod.rs` | `repoint_planned_pr_node` gains `target_base_branch: Option<&str>` (line 480); the `merged_parents` drop-list became a single `retained_parents` survive-decision (492–508); the rebase / force-push / `patch_pr_base` block moved inside `if let Some(branch) = node.branch` (510–580) |
-| `packages/tddy-daemon/src/connection_service.rs` | new pure `pub fn validate_repoint_target` (1424–1465), beside `effective_spawn_branch`; `repoint_planned_pr` reads the node's parents' branches, validates, maps `Err` → `invalid_argument`, forwards `as_deref()` (7460–7494) |
-| `packages/tddy-web/src/components/sessions/prstack/startBlockers.ts` | **new**, 137 lines — `BranchRemoteState`, `StartBlocker`, `startBlockers`, `resolveRepointTarget` |
-| `PlannedPrRow.tsx` | row wrapper became a column: the existing info/badge/CTA row plus the base-branch line, with the warning strip and repoint error beneath; `pr-stack-missing-branch-*` deleted; CTA is a status chip **or** a Start-session button `disabled={starting \|\| isBlocked}` with the blocker summary as `title` |
-| `PlannedPrList.tsx` | inline blocker logic replaced by `startBlockers`; `canRepoint` widened; `defaultBranch` + `repointErrorByNodeId` props |
-| `PrStackScreen.tsx` | `defaultBranch` prop; `handleRepoint` sends `targetBaseBranch` and catches into per-node error state; `baseBranchLabel` uses the real default branch |
-| `workflowViews.tsx`, `SessionMainPane.tsx` | `WorkflowViewContext.defaultBranch`, resolved from the drawer's already-loaded `projects` |
+| `packages/tddy-service/proto/connection.proto` | `+ string target_base_branch = 4;` on `RepointPlannedPrRequest` |
+| `packages/tddy-web/src/gen/connection_pb.ts` | regenerated via the `generate` script (`buf generate ../tddy-service/proto`), not hand-edited |
+| `packages/tddy-workflow-recipes/src/pr_stack/mod.rs` | `repoint_planned_pr_node` gains `target_base_branch: Option<&str>`; the retain decision is made **inside** the `update_stack_atomic` closure; the git/PR block moved inside `if let Some(branch) = node.branch` |
+| `packages/tddy-daemon/src/connection_service.rs` | new pure `pub fn validate_repoint_target`; `repoint_planned_pr` substitutes the resolved default branch for an empty wire target, then validates and forwards |
+| `packages/tddy-web/src/components/sessions/prstack/startBlockers.ts` | **new** — `BranchRemoteState`, `StartBlocker`, `startBlockers`, `resolveRepointTarget` |
+| `PlannedPrRow.tsx` | full information unconditionally + base-branch line, warning strip, disabled CTA with the blockers as its tooltip, repoint error, in-flight-disabled Repoint control |
+| `PlannedPrList.tsx` | `startBlockers` / `resolveRepointTarget`; `canRepoint` widened; `defaultBranch`, `repointErrorByNodeId`, `repointingNodeIds` props |
+| `PrStackScreen.tsx` | `defaultBranch` prop; sends `targetBaseBranch`; catches failures per node; re-entrancy guard on repoint |
+| `workflowViews.tsx`, `SessionMainPane.tsx` | `defaultBranch` threaded from the drawer's already-loaded `projects` |
+| `package.json`, `packages/tddy-web/package.json` | `test:unit` wired into the `test` scripts (see Validation Results) |
 
 ### Test results
 
 | Suite | Result |
 |---|---|
-| `pr_stack_repoint_dead_end_acceptance` | **5/5 pass** |
-| `pr_stack_repoint_acceptance` (existing, `None` mode) | **2/2 pass** |
-| `repoint_target_validation_acceptance` | **7/7 pass** |
-| `startBlockers.test.ts` | **13/13 pass** (36/36 for the whole `prstack/` unit dir) |
-| `PrStackRepointDeadEndAcceptance.cy.tsx` | **10/10 pass** |
-| `PrStackMissingBranchAcceptance.cy.tsx` | **6/6 pass** |
-| `PrStackOrphanedNodeAcceptance.cy.tsx` | **5/5 pass** |
+| `pr_stack_repoint_dead_end_acceptance` | **7/7** |
+| `pr_stack_repoint_acceptance` (existing, no-target mode) | **2/2** |
+| `repoint_target_validation_acceptance` | **8/8** |
+| `startBlockers.test.ts` | **14/14** |
+| `PrStackRepointDeadEndAcceptance.cy.tsx` | **14/14** |
+| `PrStackMissingBranchAcceptance.cy.tsx` | **6/6** |
+| `PrStackOrphanedNodeAcceptance.cy.tsx` | **5/5** |
 
-Wider runs: `cargo test -p tddy-workflow-recipes` all green (41 binaries); full web unit set 476/476; a
-14-spec PR-stack + `PlannedPrRow` Cypress run 72/72; `SessionMainPane*` / `SessionsDrawer*` 54/54;
-`bun run build` clean; `cargo clippy -p tddy-workflow-recipes -p tddy-daemon --all-targets -- -D warnings`
-clean; `cargo fmt --all --check` clean; `cargo check --workspace --all-targets` clean.
+Wider: web unit set **477/477** · six PR-stack Cypress specs **39/39** · `cargo fmt --all --check` clean ·
+`clippy -p tddy-workflow-recipes -p tddy-daemon --all-targets -D warnings` clean · `bun run build` clean.
 
-**No test file was modified during green** — verified with `git diff HEAD -- '*test*' '*tests/*'
-'packages/tddy-web/cypress/'`, which is empty apart from a whitespace-only `cargo fmt` reflow of one
-over-long call in `repoint_target_validation_acceptance.rs` that the red-phase commit had left unformatted.
+`cargo test --workspace --no-fail-fast` reports 10 failing targets, all environmental and pre-existing:
+`tddy-daemon` sandbox/cgroups (this host forbids unprivileged user namespaces), `tddy-integration-tests`
+ACP backends (external binaries), `tddy-sandbox-darwin` (macOS-only), `tddy-sandbox-recipes --lib`.
+`tddy-daemon --test terminal_control_acceptance` also appeared in that list but passes 10/10 in isolation
+— that run overlapped concurrent edits and is not trustworthy for the web-adjacent targets.
 
-### Pre-existing failures, unrelated to this changeset
+## Validation Results
 
-- `PrStackChatSystemMessagesAcceptance.cy.tsx` — 1 of 3 fails ("does not render a duplicate bubble for a
-  UserPrompt-kind activityLogged event"). Verified pre-existing three ways: it reproduces with
-  `packages/tddy-web/src` stashed, it fails identically on two consecutive runs (so it is not flaky), and
-  this branch touches no chat or activity file at all (`git diff --name-only master...HEAD` over
-  `packages/tddy-web/src` matches nothing under those names).
-- `cargo test -p tddy-daemon --no-fail-fast` — 11 sandbox/cgroups failures, all environmental and
-  documented (unprivileged user namespaces are forbidden on this host; the sandbox runner is not built by
-  `./test`). Nothing in the repoint or connection-service path fails: `effective_spawn_branch_acceptance`
-  6/6, `query_branch_resolution_acceptance` 5/5, `list_sessions_enriched` 2/2.
+Four defects were found after the implementation reported green. Two were mine by design, not the
+implementers'.
 
-### Two implementation judgment calls worth knowing about
+### [CRITICAL, fixed] An empty default branch made the whole recovery a silent no-op
 
-1. **The warning is suppressed on an already-spawned node** (`PlannedPrRow.tsx:89-92`:
-   `isBlocked = !isSpawned && blockers.length > 0`). No test pins either behaviour. It is right: the
-   warning exists to explain a Start-session button that cannot be pressed, and a spawned node shows a
-   status chip instead — a warning about a base its child will never be created from is noise. D16's
-   thesis is preserved either way, since the row's *information* is unconditional and only the
-   CTA-explanation is conditional.
-2. **The `None` retain arm is `!parent.is_some_and(|p| p.is_skipped())`, not
-   `parent.is_some_and(|p| !p.is_skipped())`.** The difference is a *dangling* parent id: the first keeps
-   it, the second would prune it. The first is byte-for-byte the old rule, since the old code built a drop
-   list only from ids it could resolve to a merged node. The `Some(target)` arm deliberately drops a
-   dangling id, which is correct for a retain rule — an unresolvable parent cannot own the target.
+On a project with no stored `main_branch_ref`, `resolveRepointTarget` returns `""`, which the web sent as
+`target_base_branch`. The daemon read empty as *"no target named"* and selected the drop-merged-parents
+rule — which, in the exact dead-end case this feature exists for (predecessor still recorded `open`),
+drops nothing. The RPC returned success against an unchanged plan: no error, no change, row still blocked.
+
+D20 had claimed "the daemon resolves the real ref at click time". It did not. The test for that path
+asserted only the button's **label** and never clicked it.
+
+Fixed by substituting the daemon's resolved `default_branch` for an empty wire target
+(`connection_service.rs`), making the recipe's no-target mode in-process only. D20 and the proto comment
+now say so.
+
+### [WARNING, fixed] Repoint had no re-entrancy guard
+
+`handleRepoint` could be entered twice and the control was never disabled, so a double-click ran two
+rebase + `force_push_with_lease` + `patch_pr_base` sequences against one branch. Pre-existing, but D17
+took the control from rare to present on every stranded row. Now guarded by `repointingNodeIds` plus a
+`disabled` control.
+
+### [WARNING, fixed] The retain decision was computed against a stale snapshot
+
+`retained_parents` was built from the changeset read *before* `update_stack_atomic`, which re-reads the
+file before applying its closure — and the orchestrator agent writes that same file. Converting a
+drop-list into a keep-list across that boundary inverted the behaviour for any parent added between the
+two reads. The filter now runs inside the closure, against the stack about to be written.
+
+### [WARNING, resolved as intended behaviour] Multi-parent collapse
+
+The retain rule keeps only parents owning the target, so a node with `[merged A, healthy B, healthy C]`
+comes out of a repoint with B alone — master dropped only A. Raised as a possible regression; confirmed
+by the developer as the **intended** semantic: repointing is a decision to stack on one predecessor, so
+the node becomes single-parent. Now stated in D18 and pinned by
+`repointing_collapses_a_multi_parent_node_onto_the_single_target_parent`.
+
+### Test-quality pass
+
+13 audit items applied. Most valuable: a mutation check showed `resolveRepointTarget`'s
+"unarrived resolution is unknown, not absent" rule was **unpinned** (flipping `=== false` to `!== true`
+passed every test) — now covered. Also added: no-GitHub-call assertion for the plan-only path, the
+`origin/` prefix equivalence in both directions, the disabled button's tooltip, multi-blocker rendering,
+D17's "any cause", and the spawned-node warning suppression. Two tests were split for asserting two
+behaviours; several loose matchers tightened to `have.text`.
+
+**One requested test could not be written.** "A blocked row keeps its PR link" is unsatisfiable: a
+blocked node owns no branch by construction, branch is the join key for the PR leg, so a blocked row can
+never have a PR link. The PRD's full-information claim was corrected rather than the code changed.
+
+### Coverage gate
+
+`startBlockers.test.ts` — and every unit test under `src/components/` — was reachable only through
+`test:unit`, which **nothing invoked**. There is no CI workflow in this repo; the gate is `bun run test`.
+Both the root and package `test` scripts now run `test:unit` (477 tests, 2.5s).
 
 ## Testing Plan
 
@@ -425,9 +461,8 @@ No `TODO` or `FIXME` annotations exist in either touched area
 (`packages/tddy-web/src/components/sessions/prstack/`, `packages/tddy-workflow-recipes/src/pr_stack/`).
 Open items as of the red phase:
 
-- **`docs/dev/TODO.md` records "Repoint availability still derives from the stored `pr_status`, not the
-  live poll"** — that entry is exactly what D17 fixes. It should be **removed** from `TODO.md` during the
-  wrap, not carried forward.
+- ~~`docs/dev/TODO.md` records "Repoint availability still derives from the stored `pr_status`"~~ —
+  resolved by D17 and **removed** from `TODO.md` in this changeset.
 - **`origin/<branch>` freshness still depends on the last fetch** (existing `TODO.md` entry, untouched
   here). It now has a second consequence: a branch pushed from another machine reads as absent, so the
   row offers "Repoint to `origin/master`" for a base that is actually alive. The warning is still
@@ -477,10 +512,11 @@ The full table lives in
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
 - [x] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run all tests — verify 100% pass
-- [ ] Validate changes
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run all tests — every test for this changeset passes; the only workspace failures are the
+      documented environmental ones (sandbox/cgroups, ACP binaries, macOS-only)
+- [x] Validate changes
 - [ ] USER REVIEW — development complete
-- [ ] Linting and type checking
+- [x] Linting and type checking
 - [ ] Wrap documentation
 - [ ] USER REVIEW — work complete, decide next steps
