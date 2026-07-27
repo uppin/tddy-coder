@@ -33,3 +33,31 @@ export function localBranchName(reference: string, remote = "origin"): string {
   const prefix = `${remote}/`;
   return trimmed.startsWith(prefix) ? trimmed.slice(prefix.length) : trimmed;
 }
+
+/**
+ * The remote-tracking ref for a local branch name: prepends `<remote>/` when the name does not already
+ * carry that prefix, and leaves a name that is already remote-tracking unchanged. The inverse of
+ * [`localBranchName`].
+ *
+ * The daemon's `selected_integration_base_ref` is a remote-tracking ref (`<remote>/<branch>`, e.g.
+ * `origin/feature/x`), while the rest of the domain — a stack node's `branch`, a session's `branch` —
+ * names the local branch. This helper bridges the two at the Start-session dialog's submit seam so the
+ * daemon receives the form it validates and fetches (`git fetch <remote> <branch>`), instead of a bare
+ * local name whose first path segment (`feature/...`) it would mistake for a remote.
+ *
+ * Idempotent: `remoteTrackingName("origin/master", "origin")` returns `"origin/master"`, so it is safe
+ * to apply to a value that may already be remote-tracking (e.g. `ProjectEntry.main_branch_ref`).
+ *
+ * @param branch  The local branch name (e.g. `feature/x`) or an already-remote-tracking ref
+ *                (e.g. `origin/master`). An empty/whitespace string is returned unchanged.
+ * @param remote  The project's resolved default remote (`origin`, `upstream`, ...). Defaults to
+ *                `"origin"` for callers that have not threaded the resolved remote — the legacy
+ *                behavior — but new code should pass the value from
+ *                `ProjectEntry.defaultRemote` / `ListProjectBranchesResponse.defaultRemote`.
+ */
+export function remoteTrackingName(branch: string, remote = "origin"): string {
+  const trimmed = branch.trim();
+  if (trimmed === "") return "";
+  const prefix = `${remote}/`;
+  return trimmed.startsWith(prefix) ? trimmed : `${prefix}${trimmed}`;
+}

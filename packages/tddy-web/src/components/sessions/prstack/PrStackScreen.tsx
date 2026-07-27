@@ -16,6 +16,7 @@ import { prioritiseBaseBranchOptions } from "./prioritiseBaseBranchOptions";
 import { resolveRepointTarget } from "./startBlockers";
 import { CreateSessionDialog } from "../CreateSessionDialog";
 import type { CreateSessionInitialValues } from "../CreateSessionPane";
+import { remoteTrackingName } from "../../../lib/branchNames";
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
@@ -44,6 +45,15 @@ export interface PrStackScreenProps {
    */
   defaultBranch?: string;
   /**
+   * The project's resolved default remote (`ProjectEntry.default_remote`, e.g. `origin`,
+   * `upstream`). Prepended to the local branch names the Start-session dialog's "Base branch" picker
+   * offers, so the value sent as `selected_integration_base_ref` is the `<remote>/<branch>` ref the
+   * daemon fetches — not a bare local name whose first path segment it would mistake for a remote.
+   * Empty for a legacy project that stored none; the view falls back to `origin` (the daemon's own
+   * last resort).
+   */
+  defaultRemote?: string;
+  /**
    * Fired after a child session is spawned so the caller can make it appear in the drawer.
    * Receives just enough of the new `SessionEntry` to render a drawer row immediately —
    * callers still refetch the full session list separately (`refreshSessions` in
@@ -69,6 +79,7 @@ export function PrStackScreen({
   sessions = [],
   attachment = IDLE_ATTACHMENT,
   defaultBranch = "",
+  defaultRemote = "",
   onChildSessionStarted,
 }: PrStackScreenProps) {
   const { room, status: roomStatus, error: roomError } = usePresenterLiveKitRoom(attachment);
@@ -144,6 +155,14 @@ export function PrStackScreen({
     setStartSessionNode(node);
   };
 
+  // The daemon's `selected_integration_base_ref` is a remote-tracking ref (`<remote>/<branch>`), but a
+  // stack node's `branch` and the base-branch picker's options are local names. Lift the local names
+  // into the form the daemon fetches (`git fetch <remote> <branch>`), using the project's resolved
+  // default remote — falling back to `origin` (the daemon's own last resort) for a legacy project that
+  // stored none. `remoteTrackingName` is idempotent, so a `defaultBranch` that is already
+  // `<remote>/<branch>` (e.g. `origin/master`) passes through unchanged.
+  const remote = defaultRemote || "origin";
+
   // Planned-PR sessions default to a Claude Code CLI session, stack-parented to this orchestrator so
   // the child's worktree chains onto its branch, and pre-fill the planned branch and title/description.
   //
@@ -152,7 +171,9 @@ export function PrStackScreen({
   // would fail on "branch already exists" — which is exactly the node this recovery path is for.
   const ownedBranch = startSessionNode?.branch ?? "";
   const baseBranchOptions = startSessionNode
-    ? prioritiseBaseBranchOptions(startSessionNode, stack.nodes)
+    ? prioritiseBaseBranchOptions(startSessionNode, stack.nodes).map((b) =>
+        remoteTrackingName(b, remote),
+      )
     : [];
   const selectedBaseBranch = baseBranchOptions[0] ?? "";
   const startSessionInitialValues: CreateSessionInitialValues | undefined = startSessionNode
@@ -168,8 +189,12 @@ export function PrStackScreen({
         newBranchName: ownedBranch ? "" : (startSessionNode.branchSuggestion ?? ""),
         // The concrete base branch the child will branch from — the node's nearest non-merged
         // ancestor's branch (predecessor stack branch), collapsing to the project's default branch
-        // for a root.
-        baseBranchLabel: deriveStackBaseBranch(startSessionNode, stack.nodes, defaultBranch),
+        // for a root. Lifted to `<remote>/<branch>` so the label matches the picker's options and
+        // reads the same ref the daemon will fetch.
+        baseBranchLabel: remoteTrackingName(
+          deriveStackBaseBranch(startSessionNode, stack.nodes, defaultBranch),
+          remote,
+        ),
         baseBranchOptions,
         selectedBaseBranch,
         initialPrompt: [startSessionNode.title, startSessionNode.description]
