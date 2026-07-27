@@ -363,6 +363,12 @@ export const prStackScreenPage = {
   dialogBranchToWorkOnSelect: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionBranchToWorkOnSelect, { timeout: 5000, ...options }),
 
+  /** The dialog's base-branch <select> for a planned-PR child session — lists the node's direct
+   *  dependency branches first (ordered by dependency depth), then the stack's other materialized
+   *  branches. The selected value is sent as `selected_integration_base_ref`. */
+  dialogBaseBranchSelect: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionBaseBranchSelect, { timeout: 5000, ...options }),
+
   /** The dialog's pre-checked "Create Remote Branch" toggle. */
   dialogCreateRemoteBranchToggle: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionCreateRemoteBranchToggle, { timeout: 5000, ...options }),

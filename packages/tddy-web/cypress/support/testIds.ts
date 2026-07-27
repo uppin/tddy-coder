@@ -234,6 +234,11 @@ export const TEST_IDS = {
   createSessionBranchToWorkOnSelect: "create-session-branch-to-work-on-select",
   /** "Create Remote Branch" checkbox — pre-checked; pushes the new branch to origin at session start. */
   createSessionCreateRemoteBranchToggle: "create-session-create-remote-branch-toggle",
+  /** Base-branch <select> for a planned-PR child session — lists the node's direct dependency branches
+   *  first (ordered by dependency depth, deepest first, ties by `node.parents` order), then the stack's
+   *  other materialized branches. Shown only when `initialValues.stackParent` is set and not peer mode.
+   *  The selected value is sent as `StartSessionRequest.selected_integration_base_ref`. */
+  createSessionBaseBranchSelect: "create-session-base-branch-select",
   createSessionCancelBtn: "create-session-cancel-btn",
   createSessionSubmitBtn: "create-session-submit-btn",
   createSessionError: "create-session-error",

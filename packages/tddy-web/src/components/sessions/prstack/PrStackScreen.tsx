@@ -12,6 +12,7 @@ import { PrStackChat } from "./PrStackChat";
 import { parseStackPlan, type StackNode } from "./stackPlan";
 import { useQueryBranch } from "./useQueryBranch";
 import { deriveStackBaseBranch, resolveStackBase } from "./deriveStackBaseBranch";
+import { prioritiseBaseBranchOptions } from "./prioritiseBaseBranchOptions";
 import { resolveRepointTarget } from "./startBlockers";
 import { CreateSessionDialog } from "../CreateSessionDialog";
 import type { CreateSessionInitialValues } from "../CreateSessionPane";
@@ -150,6 +151,10 @@ export function PrStackScreen({
   // its worktree and its remote ref all outlive the session that made them, so `new_branch_from_base`
   // would fail on "branch already exists" — which is exactly the node this recovery path is for.
   const ownedBranch = startSessionNode?.branch ?? "";
+  const baseBranchOptions = startSessionNode
+    ? prioritiseBaseBranchOptions(startSessionNode, stack.nodes)
+    : [];
+  const selectedBaseBranch = baseBranchOptions[0] ?? "";
   const startSessionInitialValues: CreateSessionInitialValues | undefined = startSessionNode
     ? {
         projectId: session.projectId,
@@ -165,6 +170,8 @@ export function PrStackScreen({
         // ancestor's branch (predecessor stack branch), collapsing to the project's default branch
         // for a root.
         baseBranchLabel: deriveStackBaseBranch(startSessionNode, stack.nodes, defaultBranch),
+        baseBranchOptions,
+        selectedBaseBranch,
         initialPrompt: [startSessionNode.title, startSessionNode.description]
           .filter(Boolean)
           .join("\n\n"),

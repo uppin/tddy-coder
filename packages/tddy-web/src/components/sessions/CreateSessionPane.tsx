@@ -60,6 +60,10 @@ export type CreateSessionInitialValues = Partial<{
   createRemoteBranch: boolean;
   /** Concrete base branch shown in the new-branch option: "New branch from base: <baseBranchLabel>". */
   baseBranchLabel: string;
+  /** Ordered base-branch options for the "Base branch" selector (planned-PR child sessions). */
+  baseBranchOptions: string[];
+  /** Pre-selected base branch in the "Base branch" selector (defaults to the first option). */
+  selectedBaseBranch: string;
   initialPrompt: string;
   daemonInstanceId: string;
   /**
@@ -129,6 +133,10 @@ export function CreateSessionPane({
   const [newBranchName, setNewBranchName] = useState(initialValues?.newBranchName ?? "");
   const [createRemoteBranch, setCreateRemoteBranch] = useState(
     initialValues?.createRemoteBranch ?? true,
+  );
+  const [baseBranchOptions] = useState<string[]>(initialValues?.baseBranchOptions ?? []);
+  const [selectedBaseBranch, setSelectedBaseBranch] = useState<string>(
+    initialValues?.selectedBaseBranch ?? "",
   );
   // Read out of `initialValues` once: the branch load effect below needs it as a dependency, and
   // `initialValues` itself is a fresh object on every render of the caller.
@@ -318,7 +326,7 @@ export function CreateSessionPane({
         branchWorktreeIntent: peerMode ? "" : branchIntent,
         newBranchName: peerMode ? "" : newBranchName,
         createRemoteBranch: peerMode ? false : createRemoteBranch,
-        selectedIntegrationBaseRef: "",
+        selectedIntegrationBaseRef: peerMode ? "" : selectedBaseBranch,
         selectedBranchToWorkOn: peerMode ? "" : selectedBranchToWorkOn,
         daemonInstanceId: effectiveDaemonInstanceId,
         repoPath: peerRepoPath,
@@ -862,6 +870,27 @@ export function CreateSessionPane({
               <option value="work_on_selected_branch">Work on existing branch</option>
             </select>
           </div>
+
+          {!peerMode && initialValues?.stackParent && baseBranchOptions.length > 0 && (
+            <div>
+              <label className={labelClass} htmlFor="create-session-base-branch">
+                Base branch
+              </label>
+              <select
+                id="create-session-base-branch"
+                data-testid="create-session-base-branch-select"
+                className={inputClass}
+                value={selectedBaseBranch}
+                onChange={(e) => setSelectedBaseBranch(e.target.value)}
+              >
+                {baseBranchOptions.map((branch) => (
+                  <option key={branch} value={branch}>
+                    {branch}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {branchIntent === "new_branch_from_base" && (
             <div>
