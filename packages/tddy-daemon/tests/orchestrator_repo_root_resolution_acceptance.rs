@@ -25,8 +25,8 @@ use tddy_daemon::connection_service::{
 };
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
-    BranchResolution, ConnectionService as ConnectionServiceTrait, GetPrStatusRequest, PrStatusView,
-    QueryBranchRequest,
+    BranchResolution, ConnectionService as ConnectionServiceTrait, GetPrStatusRequest,
+    PrStatusView, QueryBranchRequest,
 };
 use tddy_testing_commons::{a_changeset, a_session_metadata, fs::write_session_yaml};
 
@@ -100,10 +100,7 @@ fn a_branch_pushed_to_origin(repo: &Path) -> String {
 /// creates it. Returns its canonical path.
 fn a_worktree_for_the_branch(repo: &Path) -> PathBuf {
     let path = repo.join(".worktrees").join(BRANCH.replace('/', "-"));
-    git(
-        repo,
-        &["worktree", "add", path.to_str().unwrap(), BRANCH],
-    );
+    git(repo, &["worktree", "add", path.to_str().unwrap(), BRANCH]);
     path.canonicalize().expect("worktree path must exist")
 }
 
@@ -111,7 +108,11 @@ fn a_worktree_for_the_branch(repo: &Path) -> PathBuf {
 fn a_config() -> (tddy_daemon::config::DaemonConfig, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
-    std::fs::write(&path, "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n").unwrap();
+    std::fs::write(
+        &path,
+        "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n",
+    )
+    .unwrap();
     (tddy_daemon::config::DaemonConfig::load(&path).unwrap(), dir)
 }
 
@@ -237,7 +238,9 @@ async fn finds_the_worktree_of_a_branch_for_an_orchestrator_whose_repo_is_only_i
     let resolution = query(&a_service(sessions_base)).await;
 
     // Then — the row shows where the work lives
-    let worktree = resolution.worktree.expect("the worktree leg must be present");
+    let worktree = resolution
+        .worktree
+        .expect("the worktree leg must be present");
     assert_eq!(
         (worktree.exists, PathBuf::from(worktree.path)),
         (true, worktree_path)

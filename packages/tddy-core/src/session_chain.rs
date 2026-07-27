@@ -4,7 +4,7 @@
 //! [`integrate_chain_base_into_session_worktree_bootstrap`] and
 //! [`crate::setup_worktree_for_session_with_optional_chain_base`].
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::changeset::read_changeset;
 use crate::session_lifecycle::unified_session_dir_path;
@@ -103,6 +103,97 @@ pub fn resolve_chain_integration_base_ref_from_parent_session(
         "resolve_chain_integration_base_ref_from_parent_session: ok origin_ref={origin_ref}"
     );
     Ok(origin_ref)
+}
+
+/// True when the parent session is a pr-stack orchestrator — a planning session carrying a
+/// planned `stack` (or the `pr-stack` recipe) and therefore no git branch of its own.
+pub fn parent_is_pr_stack_orchestrator(sessions_base: &Path, parent_session_id: &str) -> bool {
+    let parent_dir = unified_session_dir_path(sessions_base, parent_session_id);
+    match read_changeset(&parent_dir) {
+        Ok(cs) => cs.recipe.as_deref() == Some("pr-stack") || cs.stack.is_some(),
+        Err(_) => false,
+    }
+}
+
+/// Locate the planned stack node a child spawn belongs to: the node in `stack_parent`'s stack
+/// that owns the branch the child is about to create.
+pub fn pr_stack_node_for_spawn(
+    sessions_base: &Path,
+    stack_parent: &str,
+    new_branch_name: &str,
+) -> Option<(PathBuf, crate::changeset::Stack, String)> {
+    if !parent_is_pr_stack_orchestrator(sessions_base, stack_parent) {
+        return None;
+    }
+    let branch = new_branch_name.trim();
+    if branch.is_empty() {
+        return None;
+    }
+    let parent_dir = unified_session_dir_path(sessions_base, stack_parent);
+    let stack =
+        crate::changeset::read_stack_with_resolved_branches(sessions_base, stack_parent).ok()??;
+    let node_id = stack
+        .nodes
+        .iter()
+        .find(|n| n.branch.as_deref() == Some(branch))
+        .or_else(|| {
+            stack
+                .nodes
+                .iter()
+                .find(|n| n.branch.is_none() && n.branch_suggestion.as_deref() == Some(branch))
+        })
+        .map(|n| n.node_id.clone())?;
+    Some((parent_dir, stack, node_id))
+}
+
+/// Resolve the integration base ref for a session spawned with an optional `stack_parent`.
+///
+/// A pr-stack orchestrator parent bases the child off the planned node's effective base via
+/// [`crate::changeset::Stack::base_ref_for_spawn`]. A regular code-session parent bases off
+/// `origin/<parent-branch>`. When there is no `stack_parent`, returns `Ok(None)` so the caller
+/// uses the default integration base.
+pub fn resolve_chain_base_ref(
+    sessions_base: &Path,
+    stack_parent: Option<&str>,
+    repo_root: &Path,
+    new_branch_name: &str,
+) -> Result<Option<String>, String> {
+    let Some(sp) = stack_parent else {
+        return Ok(None);
+    };
+    if parent_is_pr_stack_orchestrator(sessions_base, sp) {
+        let Some((_, stack, node_id)) = pr_stack_node_for_spawn(sessions_base, sp, new_branch_name)
+        else {
+            return Ok(None);
+        };
+        let default_base = crate::resolve_default_integration_base_ref(repo_root)
+            .map_err(|e| format!("could not resolve default branch for pr-stack node: {e}"))?;
+        let base = stack
+            .base_ref_for_spawn(&node_id, &default_base)
+            .map_err(|e| e.to_string())?;
+        return Ok(Some(base));
+    }
+    resolve_chain_integration_base_ref_from_parent_session(sessions_base, sp, repo_root)
+        .map(Some)
+        .map_err(|e| format!("could not resolve stack parent branch: {e}"))
+}
+
+/// Resolve the chain integration base for session spawn, honoring runtime `stack_parent` over a
+/// persisted `worktree_integration_base_ref` when both are present.
+pub fn resolve_chain_base_for_session_spawn(
+    sessions_base: &Path,
+    stack_parent: Option<&str>,
+    repo_root: &Path,
+    new_branch_name: &str,
+    persisted_worktree_integration_base_ref: Option<&str>,
+) -> Result<Option<String>, String> {
+    if let Some(sp) = stack_parent {
+        return resolve_chain_base_ref(sessions_base, Some(sp), repo_root, new_branch_name);
+    }
+    if let Some(persisted) = persisted_worktree_integration_base_ref {
+        return Ok(Some(persisted.to_string()));
+    }
+    Ok(None)
 }
 
 /// Transport-agnostic helper: bootstrap a child worktree using a parent session's branch

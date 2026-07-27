@@ -2715,7 +2715,20 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
 
         // The changeset on disk already has the correct branch intent (written by the branch
         // callback) and model (raw-merged by persist_changeset_model).
-        // setup_worktree_for_session_with_optional_chain_base reads it from session_dir directly.
+        let cs = tddy_core::read_changeset(&session_dir)?;
+        let new_branch_name = cs
+            .workflow
+            .as_ref()
+            .and_then(|w| w.new_branch_name.as_deref())
+            .unwrap_or("");
+        let chain_base = tddy_core::resolve_chain_base_for_session_spawn(
+            &self.sessions_base,
+            None,
+            repo_root,
+            new_branch_name,
+            cs.worktree_integration_base_ref.as_deref(),
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
         // Setup the worktree (blocking: involves git fetch + git worktree add).
         let repo_root_owned = repo_root.to_path_buf();
@@ -2724,7 +2737,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             tddy_core::setup_worktree_for_session_with_optional_chain_base(
                 &repo_root_owned,
                 &session_dir_clone,
-                None,
+                chain_base.as_deref(),
             )
             .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
         })
@@ -2895,13 +2908,28 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             );
         }
 
+        let cs = tddy_core::read_changeset(&session_dir)?;
+        let new_branch_name = cs
+            .workflow
+            .as_ref()
+            .and_then(|w| w.new_branch_name.as_deref())
+            .unwrap_or("");
+        let chain_base = tddy_core::resolve_chain_base_for_session_spawn(
+            &self.sessions_base,
+            None,
+            repo_root,
+            new_branch_name,
+            cs.worktree_integration_base_ref.as_deref(),
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
         let repo_root_owned = repo_root.to_path_buf();
         let session_dir_clone = session_dir.clone();
         let worktree_path: std::path::PathBuf = tokio::task::spawn_blocking(move || {
             tddy_core::setup_worktree_for_session_with_optional_chain_base(
                 &repo_root_owned,
                 &session_dir_clone,
-                None,
+                chain_base.as_deref(),
             )
             .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
         })

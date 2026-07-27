@@ -103,7 +103,23 @@ Follow-up work can branch from an open remote branch (a **chain PR**) instead of
 
 ## Session chaining (parent session → `origin/<branch>`)
 
-**tddy-core** exposes **`resolve_chain_integration_base_ref_from_parent_session(sessions_root, parent_session_id, child_project_repo)`**: it reads the parent session directory under **`{sessions_root}/sessions/{parent_session_id}/`**, loads **`changeset.yaml`**, takes the persisted **branch** or **branch suggestion**, builds **`origin/<trimmed-path>`**, validates with **`validate_chain_pr_integration_base_ref`**, and compares canonical **`repo_path`** on the parent changeset with the child project repository when **`repo_path`** is present. When the parent names a branch (or branch suggestion), **`repo_path`** on the parent **`changeset.yaml`** is **required**; without it, resolution fails as **`WorkflowError::ChangesetInvalid`** before repository alignment.
+A child session spawned with a **`stack_parent`** bases its worktree off the parent's branch instead of the project default. **tddy-core::session_chain** is the single source of truth for that resolution.
+
+### Parent kinds
+
+**Code-session parent** — a regular session that owns a git branch. **`resolve_chain_integration_base_ref_from_parent_session(sessions_root, parent_session_id, child_project_repo)`** reads the parent session directory under **`{sessions_root}/sessions/{parent_session_id}/`**, loads **`changeset.yaml`**, takes the persisted **branch** or **branch suggestion**, builds **`origin/<trimmed-path>`**, validates with **`validate_chain_pr_integration_base_ref`**, and compares canonical **`repo_path`** on the parent changeset with the child project repository when **`repo_path`** is present. When the parent names a branch (or branch suggestion), **`repo_path`** on the parent **`changeset.yaml`** is **required**; without it, resolution fails as **`WorkflowError::ChangesetInvalid`** before repository alignment. A branchless code-session parent is an error, not a default-base fallback.
+
+**PR-stack orchestrator parent** — a planning session that carries a planned **`stack`** (or the **`pr-stack`** recipe) and has no branch of its own. **`parent_is_pr_stack_orchestrator`** identifies it; **`pr_stack_node_for_spawn`** locates the planned node the child materializes (matching the branch the child is about to create, by **`branch`** then **`branch_suggestion`**). The child bases off that node's effective base — its nearest non-merged ancestor's **`origin/<branch>`**, else the stack default — via **`Stack::base_ref_for_spawn`**, enforcing bottom-up ordering. A branch matching no planned node resolves to **`Ok(None)`** (the stack/default base), not an error.
+
+### The spawn resolver
+
+**`resolve_chain_base_ref(sessions_base, stack_parent, repo_root, new_branch_name)`** dispatches between the two parent kinds above and returns **`Ok(None)`** when there is no **`stack_parent`**. **`resolve_chain_base_for_session_spawn`** wraps it with the spawn-time precedence rule:
+
+1. **Runtime `stack_parent`** — resolve via `resolve_chain_base_ref` (a stack or code-session parent).
+2. **Persisted `worktree_integration_base_ref`** — return it verbatim (operator-selected chain base, e.g. Telegram's branch callback).
+3. **Neither** — `Ok(None)`, so `setup_worktree_for_session_with_optional_chain_base` resolves the default base.
+
+A runtime `stack_parent` wins over a persisted field so a re-spawn onto a planned node follows the stack, not a stale persisted value.
 
 **`integrate_chain_base_into_session_worktree_bootstrap`** validates the resolved ref and calls **`setup_worktree_for_session_with_optional_chain_base(child_repo, child_session_dir, Some(resolved_ref))`** so **`changeset.yaml`** receives **`effective_worktree_integration_base_ref`** and **`worktree_integration_base_ref`** under the same rules as the existing chain-PR path.
 
@@ -111,4 +127,6 @@ Product reference for Telegram ordering and **`tcp:`** wire format: **[telegram-
 
 ## Call-site behavior
 
-**`setup_worktree_for_session(repo_root, session_dir)`** resolves the integration base inside **tddy-core** using the default remote branch rules above. Registry helpers (**`effective_integration_base_ref_for_project`**) apply when a caller has loaded **`ProjectData`**; those callers pass the explicit ref into **`setup_worktree_for_session_with_integration_base`**. Layers that only supply repository root and session directory rely on default resolution. Workflow hooks that create worktrees after plan approval should prefer **`setup_worktree_for_session_with_optional_chain_base`** when **`changeset.yaml`** may carry **`worktree_integration_base_ref`** (Telegram chain selection, future RPC fields).
+Every session-start path that supports a **`stack_parent`** — Claude CLI (sandboxed and non-sandboxed), Cursor CLI (sandboxed and non-sandboxed), and Telegram — resolves its chain base through **`tddy_core::resolve_chain_base_ref`** / **`resolve_chain_base_for_session_spawn`** before calling **`setup_worktree_for_session_with_optional_chain_base`**, so a PR-stack child bases off its planned node and a Telegram operator selection honors the persisted **`worktree_integration_base_ref`** the branch callback wrote. The daemon keeps a thin **`resolve_chain_base_ref_status`** wrapper that maps the resolver's **`String`** error to **`Status::failed_precondition`**.
+
+**`setup_worktree_for_session(repo_root, session_dir)`** resolves the integration base inside **tddy-core** using the default remote branch rules above when no chain base is supplied. Registry helpers (**`effective_integration_base_ref_for_project`**) apply when a caller has loaded **`ProjectData`**; those callers pass the explicit ref into **`setup_worktree_for_session_with_integration_base`**. Layers that only supply repository root and session directory rely on default resolution. **`tddy-workflow-recipes::ensure_worktree_for_session`** has no **`stack_parent`** and no project **`sessions_base`**, so it reads **`changeset.yaml`**'s **`worktree_integration_base_ref`** directly — the precedence rule reduces to that field (or the default base) on this path.
