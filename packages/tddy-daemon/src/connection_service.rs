@@ -986,94 +986,14 @@ impl ConnectionServiceImpl {
         }
     }
 
-    fn resolve_chain_base_ref(
+    fn resolve_chain_base_ref_status(
         sessions_base: &std::path::Path,
         stack_parent: Option<&str>,
         repo_root: &std::path::Path,
         new_branch_name: &str,
     ) -> Result<Option<String>, Status> {
-        let Some(sp) = stack_parent else {
-            return Ok(None);
-        };
-        // A pr-stack orchestrator is a planning session with no branch of its own. The child being
-        // spawned owns a planned node, identified by the branch it is about to create: base it off
-        // that node's effective base (its nearest non-merged ancestor branch, skipping merged
-        // ones), enforcing bottom-up ordering. When the branch matches no node — or the parent
-        // carries no stack — fall back to the stack/default branch (`Ok(None)`), not an error. A
-        // branchless *code* session still errors below, per the session-chaining PRD.
-        if Self::parent_is_pr_stack_orchestrator(sessions_base, sp) {
-            let Some((_, stack, node_id)) =
-                Self::pr_stack_node_for_spawn(sessions_base, sp, new_branch_name)
-            else {
-                return Ok(None);
-            };
-            let default_base =
-                tddy_core::resolve_default_integration_base_ref(repo_root).map_err(|e| {
-                    Status::failed_precondition(format!(
-                        "could not resolve default branch for pr-stack node: {e}"
-                    ))
-                })?;
-            let base = stack
-                .base_ref_for_spawn(&node_id, &default_base)
-                .map_err(|e| Status::failed_precondition(e.to_string()))?;
-            return Ok(Some(base));
-        }
-        tddy_core::resolve_chain_integration_base_ref_from_parent_session(
-            sessions_base,
-            sp,
-            repo_root,
-        )
-        .map(Some)
-        .map_err(|e| {
-            Status::failed_precondition(format!("could not resolve stack parent branch: {e}"))
-        })
-    }
-
-    /// Locate the planned stack node a child spawn belongs to: the node in `stack_parent`'s stack
-    /// that owns the branch the child is about to create. Returns the orchestrator's session dir,
-    /// its stack, and the matched node id.
-    ///
-    /// A planned node carries only a `branch_suggestion` until a child materializes it, so both are
-    /// matched — the recorded `branch` first, so a node materialized on a branch other than the one
-    /// suggested still resolves to itself rather than to whichever sibling still suggests that name.
-    ///
-    /// `None` means "this spawn is not materializing a planned node" — the parent is not a pr-stack
-    /// orchestrator, carries no stack, the branch is blank, or no node claims that branch. Callers
-    /// treat that as the non-chaining default, never as an error.
-    ///
-    /// Single matching rule shared by base resolution and child linking, so the node a child bases
-    /// itself off is exactly the node that records it.
-    fn pr_stack_node_for_spawn(
-        sessions_base: &std::path::Path,
-        stack_parent: &str,
-        new_branch_name: &str,
-    ) -> Option<(PathBuf, tddy_core::changeset::Stack, String)> {
-        if !Self::parent_is_pr_stack_orchestrator(sessions_base, stack_parent) {
-            return None;
-        }
-        let branch = new_branch_name.trim();
-        if branch.is_empty() {
-            return None;
-        }
-        let parent_dir = unified_session_dir_path(sessions_base, stack_parent);
-        // Hydrated, so a node whose branch was only ever recorded by its child session still
-        // resolves to that branch here — both for matching below and for the base a descendant
-        // is given. The hydrated copy is read-only; the forward link writes through `parent_dir`.
-        let stack =
-            tddy_core::changeset::read_stack_with_resolved_branches(sessions_base, stack_parent)
-                .ok()??;
-        let node_id = stack
-            .nodes
-            .iter()
-            .find(|n| n.branch.as_deref() == Some(branch))
-            .or_else(|| {
-                stack
-                    .nodes
-                    .iter()
-                    .find(|n| n.branch.is_none() && n.branch_suggestion.as_deref() == Some(branch))
-            })
-            .map(|n| n.node_id.clone())?;
-        Some((parent_dir, stack, node_id))
+        tddy_core::resolve_chain_base_ref(sessions_base, stack_parent, repo_root, new_branch_name)
+            .map_err(Status::failed_precondition)
     }
 
     /// Record on a pr-stack orchestrator's planned node the branch a child spawn just created, plus
@@ -1099,7 +1019,7 @@ impl ConnectionServiceImpl {
             return Ok(());
         };
         let Some((parent_dir, _stack, node_id)) =
-            Self::pr_stack_node_for_spawn(sessions_base, sp, new_branch_name)
+            tddy_core::pr_stack_node_for_spawn(sessions_base, sp, new_branch_name)
         else {
             return Ok(());
         };
@@ -1123,22 +1043,6 @@ impl ConnectionServiceImpl {
             child_session_id
         );
         Ok(())
-    }
-
-    /// True when the parent session is a pr-stack orchestrator — a planning session carrying a
-    /// planned `stack` (or the `pr-stack` recipe) and therefore no git branch of its own. Such a
-    /// parent is a valid chain target that resolves to the stack/default branch, unlike a branchless
-    /// code session (which is an error). A missing/unreadable parent changeset returns `false` so
-    /// the caller's normal resolution/validation still runs.
-    fn parent_is_pr_stack_orchestrator(
-        sessions_base: &std::path::Path,
-        parent_session_id: &str,
-    ) -> bool {
-        let parent_dir = unified_session_dir_path(sessions_base, parent_session_id);
-        match tddy_core::read_changeset(&parent_dir) {
-            Ok(cs) => cs.recipe.as_deref() == Some("pr-stack") || cs.stack.is_some(),
-            Err(_) => false,
-        }
     }
 
     /// Handle `StartSession` for `session_type = "claude-cli"` sessions.
@@ -1609,7 +1513,7 @@ async fn spawn_claude_cli_session_inner(
     tddy_core::write_changeset(&session_dir, &cs)
         .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
-    let chain_base_ref = ConnectionServiceImpl::resolve_chain_base_ref(
+    let chain_base_ref = ConnectionServiceImpl::resolve_chain_base_ref_status(
         &sessions_base,
         stack_parent,
         &repo_root,
@@ -2250,7 +2154,7 @@ impl ConnectionServiceImpl {
                         "project main repo path does not exist",
                     ));
                 }
-                let chain_base_ref = Self::resolve_chain_base_ref(
+                let chain_base_ref = Self::resolve_chain_base_ref_status(
                     &sessions_base,
                     stack_parent,
                     &repo_root,
@@ -2646,6 +2550,7 @@ impl ConnectionServiceImpl {
         new_branch_name: &str,
         selected_integration_base_ref: &str,
         selected_branch_to_work_on: &str,
+        stack_parent: Option<&str>,
         initial_prompt: &str,
         _managed_codebase: bool,
         specialized_agents: &[String],
@@ -2747,6 +2652,7 @@ impl ConnectionServiceImpl {
         };
         let mut cs = Changeset {
             workflow: Some(cs_workflow),
+            orchestrator_session_id: stack_parent.map(str::to_string),
             recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
             ..Changeset::default()
         };
@@ -2759,6 +2665,12 @@ impl ConnectionServiceImpl {
         tddy_core::write_changeset(&session_dir, &cs)
             .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
+        let chain_base_ref = Self::resolve_chain_base_ref_status(
+            &sessions_base,
+            stack_parent,
+            &repo_root,
+            new_branch_name,
+        )?;
         let repo_root_clone = repo_root.clone();
         let session_dir_clone = session_dir.clone();
         let timeout = self.config.spawn_worker_request_timeout();
@@ -2769,7 +2681,7 @@ impl ConnectionServiceImpl {
                 tddy_core::setup_worktree_for_session_with_optional_chain_base(
                     &repo_root_clone,
                     &session_dir_clone,
-                    None,
+                    chain_base_ref.as_deref(),
                 )
                 .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
             },
@@ -4629,7 +4541,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 None
             };
             if req.sandbox {
-                // TODO: sandboxed cursor-cli path does not yet honor repo_path/stack_parent (mirror of the non-sandboxed fix); tracked separately.
                 return self
                     .start_sandboxed_cursor_cli_session(
                         os_user,
@@ -4641,6 +4552,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         req.new_branch_name.trim(),
                         req.selected_integration_base_ref.trim(),
                         req.selected_branch_to_work_on.trim(),
+                        Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
                         req.initial_prompt.trim(),
                         req.managed_codebase,
                         &req.specialized_agents,
@@ -7484,8 +7396,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         // The named target must be a branch this node can be based onto: the repoint retains only
         // the parents that own it, so an unvalidated target is a silent plan rewrite.
-        let changeset = tddy_core::read_changeset(&session_dir)
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let changeset =
+            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
         let stack = changeset.stack.unwrap_or_default();
         let parent_branches: Vec<String> = stack
             .node(&node_id)
@@ -10135,86 +10047,6 @@ mod add_planned_pr_unit_tests {
     }
 }
 
-#[cfg(test)]
-mod chain_base_resolution_tests {
-    use super::*;
-    use tddy_core::changeset::Stack;
-    use tddy_core::session_lifecycle::unified_session_dir_path;
-    use tddy_core::{write_changeset, Changeset};
-
-    /// Persist `changeset.yaml` for a parent session under `sessions_base`.
-    fn write_parent_changeset(sessions_base: &std::path::Path, session_id: &str, cs: Changeset) {
-        let dir = unified_session_dir_path(sessions_base, session_id);
-        std::fs::create_dir_all(&dir).expect("create parent session dir");
-        write_changeset(&dir, &cs).expect("write parent changeset");
-    }
-
-    #[test]
-    fn resolve_chain_base_ref_returns_none_for_a_branchless_pr_stack_orchestrator_parent() {
-        // Given — a pr-stack orchestrator parent session: it has a planned stack but no branch of
-        // its own (planning sessions never own a code branch).
-        let tmp = tempfile::tempdir().expect("temp dir");
-        let sessions_base = tmp.path();
-        write_parent_changeset(
-            sessions_base,
-            "orchestrator-1",
-            Changeset {
-                recipe: Some("pr-stack".to_string()),
-                stack: Some(Stack {
-                    version: 1,
-                    nodes: vec![],
-                }),
-                branch: None,
-                ..Changeset::default()
-            },
-        );
-
-        // When — a child chains onto that orchestrator with a branch that matches no planned node
-        let result = ConnectionServiceImpl::resolve_chain_base_ref(
-            sessions_base,
-            Some("orchestrator-1"),
-            tmp.path(),
-            "feature/x/unmatched",
-        );
-
-        // Then — no chaining; the child bases off the stack/default branch (Ok(None)), not an error
-        assert_eq!(
-            result.expect("branchless orchestrator parent must resolve, not error"),
-            None,
-            "a pr-stack orchestrator parent with no matching node must yield no chain base (default branch), not failed_precondition"
-        );
-    }
-
-    #[test]
-    fn resolve_chain_base_ref_errors_for_a_branchless_code_session_parent() {
-        // Given — a regular code-session parent with no branch and no stack (not an orchestrator).
-        let tmp = tempfile::tempdir().expect("temp dir");
-        let sessions_base = tmp.path();
-        write_parent_changeset(
-            sessions_base,
-            "code-session-1",
-            Changeset {
-                recipe: Some("tdd".to_string()),
-                stack: None,
-                branch: None,
-                ..Changeset::default()
-            },
-        );
-
-        // When
-        let result = ConnectionServiceImpl::resolve_chain_base_ref(
-            sessions_base,
-            Some("code-session-1"),
-            tmp.path(),
-            "feature/some-branch",
-        );
-
-        // Then — the session-chaining PRD still applies: a branchless code parent cannot be chained
-        let err = result.expect_err("a branchless code-session parent must error");
-        assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
-    }
-}
-
 /// A spawned child must record its **branch** on the planned node it materializes. Without that
 /// forward link the orchestrator's stack still reads "no branch anywhere", so `base_ref_for_spawn`
 /// refuses every descendant — a stack wedged at its bottom node. The child session id is recorded
@@ -10365,12 +10197,9 @@ mod stack_child_link_tests {
         an_orchestrator_whose_bottom_branch_only_its_session_knows(tmp.path());
 
         // When — `top` is spawned and the daemon resolves the node it materializes
-        let (_dir, stack, node_id) = ConnectionServiceImpl::pr_stack_node_for_spawn(
-            tmp.path(),
-            "orchestrator-1",
-            "feature/top",
-        )
-        .expect("the planned node for the spawned branch must resolve");
+        let (_dir, stack, node_id) =
+            tddy_core::pr_stack_node_for_spawn(tmp.path(), "orchestrator-1", "feature/top")
+                .expect("the planned node for the spawned branch must resolve");
 
         // Then — the session fallback supplies the parent's branch, so `top` is not blocked
         assert_eq!(node_id, "top");

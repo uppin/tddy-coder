@@ -97,7 +97,8 @@ pub use session_activity::{
     activity_status_from_hook, parse_hook_event, HookEvent, SessionActivityStatus,
 };
 pub use session_chain::{
-    integrate_chain_base_into_session_worktree_bootstrap,
+    integrate_chain_base_into_session_worktree_bootstrap, parent_is_pr_stack_orchestrator,
+    pr_stack_node_for_spawn, resolve_chain_base_for_session_spawn, resolve_chain_base_ref,
     resolve_chain_integration_base_ref_from_parent_session, spawn_chain_child_worktree,
 };
 pub use session_lifecycle::{
