@@ -19,6 +19,12 @@ export interface WorkflowViewContext {
   attachment?: SessionAttachmentState;
   /** The full session list — the PR-Stack view resolves each node's in-progress child by branch. */
   sessions?: SessionEntry[];
+  /**
+   * The session's project default branch (`ProjectEntry.main_branch_ref`). The PR-Stack view names it
+   * as a root node's spawn base and as the branch a repoint would land a stranded node on; it is empty
+   * for a legacy project that stores none (D20).
+   */
+  defaultBranch?: string;
   /** Fired after a child session is spawned inside the view — see `PrStackScreenProps.onChildSessionStarted`. */
   onChildSessionStarted?: (entry: {
     sessionId: string;
@@ -54,6 +60,7 @@ export function resolveWorkflowView(
         sessionToken={context.sessionToken}
         sessions={context.sessions}
         attachment={context.attachment}
+        defaultBranch={context.defaultBranch}
         onChildSessionStarted={context.onChildSessionStarted}
       />
     );

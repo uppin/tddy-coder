@@ -607,21 +607,32 @@ the reason as its `title` tooltip) — all resolved by branch through the `Query
 (`useQueryBranch`, per-branch polled). See
 [PR-Stack live status § QueryBranch](../coder/pr-stack-live-status.md#api-surface).
 
-**The CTA slot holds exactly one of three things** — they are mutually exclusive:
+Every row also renders the **base branch** its child worktree would be created from
+(`pr-stack-base-branch-<nodeId>`), whatever its startability.
 
-| Node condition | CTA slot |
-|---|---|
-| No `session_id`, base branch present on `origin` (or the node is a root) | **"Start session"** button (`pr-stack-start-session-<nodeId>`) |
-| No `session_id`, base branch absent from `origin` / no ancestor branch / a branchless non-merged parent | blocked **"Missing branch: `<base>`"** indicator (`pr-stack-missing-branch-<nodeId>`) |
-| `session_id` set, and the branch resolution has not arrived or reports a session | status chip (`pr-stack-status-chip-<nodeId>`) from `pr_status.phase` / `child_state` |
-| `session_id` set, and the resolution reports **no** session (orphaned) | **"Start session"** button again, pre-filled to resume the node's branch |
+**The CTA slot holds exactly one of two things**, and a blocked row carries its warning *beside* the
+CTA rather than in place of it:
 
-> **Added 2026-07-26** — the "Missing branch" indicator *replaces* the button rather than disabling it,
-> so the row names the branch it is waiting for instead of presenting a dead end. A node that already
-> owns a branch is never blocked (its spawn resumes that branch and fetches nothing), and a base whose
-> resolution has not arrived is *unknown*, never missing. `isNodeOrphaned` /
-> `branchlessNonMergedParent` / `resolveStackBase` are the pure modules behind those three states; see
+| Node condition | CTA slot | Warning |
+|---|---|---|
+| No `session_id`, base branch present on `origin` (or the node is a root) | **"Start session"** button (`pr-stack-start-session-<nodeId>`), enabled | — |
+| No `session_id`, base branch absent from `origin` / no ancestor branch / a branchless non-merged parent | the same button, **disabled**, with the reasons as its `title` | `pr-stack-start-warning-<nodeId>`, one line per blocking reason |
+| `session_id` set, and the branch resolution has not arrived or reports a session | status chip (`pr-stack-status-chip-<nodeId>`) from `pr_status.phase` / `child_state` | — |
+| `session_id` set, and the resolution reports **no** session (orphaned) | **"Start session"** button again, pre-filled to resume the node's branch | — |
+
+> **Added 2026-07-26** — a node that already owns a branch is never blocked (its spawn resumes that
+> branch and fetches nothing), and a base whose resolution has not arrived is *unknown*, never missing.
+> `isNodeOrphaned` / `branchlessNonMergedParent` / `resolveStackBase` are the pure modules behind those
+> states; see
 > [PR-Stack live status § Startability before the spawn](../coder/pr-stack-live-status.md#startability-before-the-spawn-added-2026-07-26).
+
+> **Revised 2026-07-26** — the blocked state no longer **replaces** the row's contents. It used to
+> render a `pr-stack-missing-branch-<nodeId>` indicator in place of the button, which cost the operator
+> the CTA and gave them no action; that test id is **gone**. The row now keeps everything it has, the
+> button is disabled with its reasons, and a **Repoint** control sits beside it — see
+> [PR-Stack live status § Repointing a dead-end planned PR](../coder/pr-stack-live-status.md#repointing-a-dead-end-planned-pr-added-2026-07-26).
+> The Repoint control reads **"Repoint to `<target>`"** (`pr-stack-repoint-<nodeId>`), is disabled while
+> its call is in flight, and reports a refusal inline as `pr-stack-repoint-error-<nodeId>`.
 
 ### Start session CTA
 

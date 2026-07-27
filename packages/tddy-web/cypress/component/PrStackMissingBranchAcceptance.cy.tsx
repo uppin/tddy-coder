@@ -1,16 +1,20 @@
 /**
- * Acceptance tests: a planned PR whose base branch is not available to be based upon shows a blocked
- * "Missing branch" indicator instead of a Start-session CTA.
+ * Acceptance tests: a planned PR whose base branch is not available to be based upon **disables** its
+ * Start-session CTA and warns which branch it is waiting for.
  *
  * A child worktree is created from `origin/<base>`, so a base branch absent from the remote makes the
  * spawn fail inside `git fetch` — after `StartSession` was already accepted and a session directory
  * written. The row reads the base branch's remote state from `QueryBranch`'s `remote` leg and blocks
  * up front, naming the branch it is waiting for.
  *
+ * The warning sits *beside* the CTA rather than replacing it (D16, which reverses D10): a blocked row
+ * keeps everything it renders, and the disabled button is the control that Repoint re-enables. See
+ * `PrStackRepointDeadEndAcceptance.cy.tsx` for the recovery itself.
+ *
  * An unanswered poll must never block: `useQueryBranch` swallows failures, so treating "unknown" as
  * "missing" would create a permanent dead end of exactly the kind this feature removes.
  *
- * PRD: docs/ft/coder/pr-stack-live-status.md (C2, D4–D6).
+ * PRD: docs/ft/coder/pr-stack-live-status.md (C2, D4–D6, D16).
  */
 
 import React from "react";
@@ -113,8 +117,10 @@ it("blocks Start session and names the base branch when that branch is absent fr
   });
 
   // Then
-  prStackScreenPage.missingBranch("n2").should("contain.text", BASE_BRANCH);
-  prStackScreenPage.startSessionBtn("n2").should("not.exist");
+  prStackScreenPage
+    .startWarning("n2")
+    .should("have.text", `Base branch ${BASE_BRANCH} is not on origin`);
+  prStackScreenPage.startSessionBtn("n2").should("be.disabled");
 });
 
 it("offers Start session once the base branch exists on the remote", () => {
@@ -128,8 +134,8 @@ it("offers Start session once the base branch exists on the remote", () => {
   });
 
   // Then
-  prStackScreenPage.startSessionBtn("n2").should("exist");
-  prStackScreenPage.missingBranch("n2").should("not.exist");
+  prStackScreenPage.startSessionBtn("n2").should("be.enabled");
+  prStackScreenPage.startWarning("n2").should("not.exist");
 });
 
 it("blocks Start session when no ancestor owns a created branch yet", () => {
@@ -151,11 +157,13 @@ it("blocks Start session when no ancestor owns a created branch yet", () => {
   openPrStackScreen(nodes, {});
 
   // Then — a suggestion names no ref; the daemon refuses such a spawn, so the row must not offer it
-  prStackScreenPage.missingBranch("n2").should("exist");
-  prStackScreenPage.startSessionBtn("n2").should("not.exist");
+  prStackScreenPage
+    .startWarning("n2")
+    .should("have.text", "Start-session attachment proto has not created its branch yet");
+  prStackScreenPage.startSessionBtn("n2").should("be.disabled");
 });
 
-it("blocks Start session when one of several parents owns no branch, naming that parent's branch", () => {
+it("blocks Start session when one of several parents owns no branch, naming that parent", () => {
   // Given — n3 depends on both n1 (branch pushed) and n2 (planned only)
   const nodes = [
     aPlannedNode({
@@ -185,11 +193,11 @@ it("blocks Start session when one of several parents owns no branch, naming that
   });
 
   // Then — the daemon refuses on *any* branchless non-merged parent, so a good sibling branch must
-  // not mask the unmet one; the row names the branch it is waiting for
+  // not mask the unmet one; the row names the predecessor it is waiting for
   prStackScreenPage
-    .missingBranch("n3")
-    .should("contain.text", "feature/attach-docs/attach-store");
-  prStackScreenPage.startSessionBtn("n3").should("not.exist");
+    .startWarning("n3")
+    .should("have.text", "Session attachment storage has not created its branch yet");
+  prStackScreenPage.startSessionBtn("n3").should("be.disabled");
 });
 
 // ---------------------------------------------------------------------------
@@ -204,8 +212,8 @@ it("offers Start session for a root node, whose base is the project default bran
   openPrStackScreen(nodes, {});
 
   // Then — the default branch exists by construction, so a root is always startable
-  prStackScreenPage.startSessionBtn("n1").should("exist");
-  prStackScreenPage.missingBranch("n1").should("not.exist");
+  prStackScreenPage.startSessionBtn("n1").should("be.enabled");
+  prStackScreenPage.startWarning("n1").should("not.exist");
 });
 
 it("offers Start session while the base branch resolution has not arrived", () => {
@@ -213,6 +221,6 @@ it("offers Start session while the base branch resolution has not arrived", () =
   openPrStackScreenWithUnansweredResolution(A_SPAWNED_PREDECESSOR_AND_ITS_DEPENDENT);
 
   // Then — an unanswered poll must not wedge a node whose predecessor already owns a branch
-  prStackScreenPage.startSessionBtn("n2").should("exist");
-  prStackScreenPage.missingBranch("n2").should("not.exist");
+  prStackScreenPage.startSessionBtn("n2").should("be.enabled");
+  prStackScreenPage.startWarning("n2").should("not.exist");
 });
