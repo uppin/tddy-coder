@@ -301,16 +301,68 @@ pub fn build_cursor_sandbox_argv(
 }
 
 /// Cursor-specific env vars layered on [`tddy_sandbox::scratch_runner_env`].
+///
+/// Emits `CURSOR_TMPDIR` (redirected temp), plus `CURSOR_SKIP_KEYCHAIN=1` and `CI=true` so the
+/// Cursor Agent CLI never probes macOS Keychain from inside the jail. The host (`tddy-sandbox-app`
+/// or `tddy-daemon`) is an unsigned Rust binary with no `keychain-access-group` entitlement, so
+/// `securityd` rejects `SecItem*` calls with `errSecMissingEntitlement` (-34018) and the CLI
+/// hangs/times out ("Failed to store authentication tokens: Security command failed: Security
+/// process exited with code: 36"). `CURSOR_SKIP_KEYCHAIN=1` is Cursor's own CI convention for
+/// exactly this scenario; `CI=true` prevents a parent shell from re-enabling interactive
+/// Keychain probes. The caller must still supply `CURSOR_API_KEY` (or pre-seed
+/// `~/.cursor/auth.json` via `seed_cursor_credentials`) — this overlay does not authenticate,
+/// it only removes a path that cannot work in a sandbox.
 pub fn cursor_runner_env_overlay(scratch_tmp: &Path) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
     let tmp = scratch_tmp.to_string_lossy().to_string();
     env.insert("CURSOR_TMPDIR".into(), tmp);
+    env.insert("CURSOR_SKIP_KEYCHAIN".into(), "1".into());
+    env.insert("CI".into(), "true".into());
     env
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursor_runner_env_overlay_redirects_cursor_tmpdir_into_the_scratch_tree() {
+        // Given — a scratch tmp inside the jail
+        let scratch_tmp = Path::new("/private/tmp/tddy-sess/scratch/tmp");
+
+        // When — building the cursor runner env overlay
+        let env = cursor_runner_env_overlay(scratch_tmp);
+
+        // Then — CURSOR_TMPDIR points at the scratch tmp, not the host's real TMPDIR
+        assert_eq!(
+            env.get("CURSOR_TMPDIR").map(String::as_str),
+            Some("/private/tmp/tddy-sess/scratch/tmp"),
+            "CURSOR_TMPDIR must redirect into the scratch tree: {env:?}"
+        );
+    }
+
+    #[test]
+    fn cursor_runner_env_overlay_skips_macos_keychain_so_the_agent_never_probes_securityd() {
+        // Given — a scratch tmp (value irrelevant to the keychain decision)
+        let scratch_tmp = Path::new("/tmp/tddy/scratch/tmp");
+
+        // When — building the cursor runner env overlay
+        let env = cursor_runner_env_overlay(scratch_tmp);
+
+        // Then — the two env vars Cursor's own CI uses to suppress Keychain probes are both set.
+        // The host is unsigned and lacks keychain-access-group, so a probe would otherwise hang
+        // for 30s and fail with errSecMissingEntitlement; this overlay removes that path.
+        assert_eq!(
+            env.get("CURSOR_SKIP_KEYCHAIN").map(String::as_str),
+            Some("1"),
+            "CURSOR_SKIP_KEYCHAIN=1 must be set so the agent never calls /usr/bin/security: {env:?}"
+        );
+        assert_eq!(
+            env.get("CI").map(String::as_str),
+            Some("true"),
+            "CI=true must be set so a parent shell cannot re-enable interactive probes: {env:?}"
+        );
+    }
 
     #[test]
     fn write_cursor_mcp_config_registers_tddy_tools_mcp_server() {

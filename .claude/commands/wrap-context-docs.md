@@ -18,7 +18,6 @@ Follow [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygien
 
 - **Product changelog** (`docs/ft/{coder,daemon,web}/changelog.md`): prepend a **new** top `## YYYY-MM-DD — Distinct title` section; single-line bullets; do not edit older `##` sections for unrelated work.
 - **Package index** (`packages/*/docs/changesets.md`) and **cross-package index** (`docs/dev/changesets.md`): prepend **one new single-line bullet** under the intro block.
-- **Optional** long cross-package narrative: add `docs/dev/changesets.d/YYYY-MM-DD-slug.md` and one index line linking it—see [changesets.d/README.md](../../docs/dev/changesets.d/README.md).
 
 Repo `.gitattributes` uses **union** merge on these paths; **same-line** edits on two branches still conflict.
 
@@ -62,7 +61,7 @@ For changesets in `docs/dev/1-WIP/`:
 2. **Apply to dev docs**: Update `packages/*/docs/` with the final state descriptions
 3. **Update change history**:
    - Add **one** release-note-style bullet line to each affected `packages/{package}/docs/changesets.md` (prepend, single line).
-   - If the work is cross-package, add **one** bullet line to `docs/dev/changesets.md` (and optionally create `docs/dev/changesets.d/YYYY-MM-DD-slug.md` for a long narrative—see merge hygiene above).
+   - If the work is cross-package, add **one** bullet line to `docs/dev/changesets.md`.
 4. **Delete** the changeset file from `docs/dev/1-WIP/` (not archived)
 
 ## Wrapping PRDs

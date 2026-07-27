@@ -2935,7 +2935,7 @@ impl ConnectionServiceImpl {
             semantic_index_env_pair = Some(crate::semantic_index::semantic_index_env(&session_dir));
         }
 
-        let mut env = crate::sandbox_session::build_sandbox_runner_env(
+        let mut env = crate::sandbox_session::build_sandboxed_cursor_runner_env(
             &scratch_home,
             &scratch_tmp,
             session_id,

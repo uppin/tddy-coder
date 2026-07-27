@@ -276,7 +276,7 @@ Feature requirement → Create changeset → Implement → Wrap changeset → Up
 
 ### File Format
 
-**Canonical merge rules**: [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md) (single-line bullets, prepend-only, optional `docs/dev/changesets.d/` shards for cross-package narratives).
+**Canonical merge rules**: [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md) (single-line bullets, prepend-only).
 
 **Package index** (`packages/{package-name}/docs/changesets.md`) and **cross-package index** (`docs/dev/changesets.md`): flat bullet list under the H1 (and short intro, if present).
 
