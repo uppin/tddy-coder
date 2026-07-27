@@ -24,22 +24,44 @@ consults when the caller supplies no explicit override:
 1. **Default branch set** — when the project row has a `main_branch_ref`, that ref is returned
    verbatim. The probe below **does not run** and has no effect.
 2. **Legacy project (no default branch set)** — the ref is resolved live against the project's
-   repository via **`resolve_default_integration_base_ref`** after `git fetch origin`:
-   1. `origin/master` when that ref exists on the remote.
-   2. Otherwise `origin/main` when that ref exists.
-   3. Otherwise the symbolic ref `refs/remotes/origin/HEAD` when it points at a valid `origin/<branch>`.
+   repository via **`resolve_default_integration_base_ref_with_remote`**, using the remote resolved
+   by **`effective_remote_name_for_project`** (main worktree upstream → project config `remote_name`
+   → `origin` last resort), after `git fetch <remote>`:
+   1. `<remote>/master` when that ref exists on the remote.
+   2. Otherwise `<remote>/main` when that ref exists.
+   3. Otherwise the symbolic ref `refs/remotes/<remote>/HEAD` when it points at a valid `<remote>/<branch>`.
 
-Live probing (`origin/master` → `origin/main` → `origin/HEAD`) is therefore **legacy-only**: it
-resolves the default for rows that predate the setting and loses effect the moment a default branch
-is stored. This replaces the previous hardcoded `origin/master` fallback for unset rows.
+No code path assumes the remote is `origin`. `origin` survives only as the last-resort fallback
+when neither the main worktree's upstream nor the project config names a remote. Live probing
+(`<remote>/master` → `<remote>/main` → `<remote>/HEAD`) is therefore **legacy-only**: it resolves
+the default for rows that predate the setting and loses effect the moment a default branch is
+stored. This replaces the previous hardcoded `origin/master` fallback for unset rows.
+
+### Default remote resolution
+
+**`effective_remote_name_for_project(projects_dir, project_id, repo_root)`** resolves the remote
+name a project's branches are tracked under, in this order:
+
+1. **Main worktree upstream** — `tddy_core::worktree::detect_default_remote_name(repo_root)` runs
+   `git rev-parse --abbrev-ref @{upstream}` and takes the segment before the first `/`. This is the
+   developer's actual remote and the most authoritative signal; returns `None` on a detached HEAD,
+   a branch with no upstream, or any git error (the probe never errors the caller).
+2. **Project config** — `ProjectData.remote_name` when the main worktree has no upstream.
+3. **`origin`** — last-resort fallback when neither signal is available.
+
+The resolved remote is exposed to clients as `ProjectEntry.default_remote` and
+`ListProjectBranchesResponse.default_remote` so the web can normalize `<remote>/<branch>` picker
+values and pick a default branch without assuming `origin`.
 
 ### Project registry
 
 Registered projects live in `~/.tddy/projects/projects.yaml`. Each row has optional
-**`main_branch_ref`**: a remote-tracking ref of the form `origin/<path>` (one or more segments,
-e.g. `origin/main` or `origin/release/2025`).
+**`main_branch_ref`**: a remote-tracking ref of the form `<remote>/<path>` (any remote name, one or
+more segments, e.g. `origin/main`, `upstream/release/2025`), and optional **`remote_name`**: the
+default remote for the project when the main worktree's upstream cannot be detected.
 
-- Rows **without** `main_branch_ref` resolve live (legacy path above).
+- Rows **without** `main_branch_ref` resolve live (legacy path above), using the resolved default
+  remote.
 - **`effective_integration_base_ref_for_project`** returns the stored ref, or the live-resolved
   ref for legacy rows.
 - **`set_project_default_branch`** updates a project's stored ref (validated before any YAML write);
@@ -47,18 +69,24 @@ e.g. `origin/main` or `origin/release/2025`).
 
 ### Validation
 
-A project default branch must be an `origin/<path>` remote-tracking ref with no shell
-metacharacters, no `..`, no `--`, and no whitespace — the same class of unsafe input rejected
-elsewhere (`validate_chain_pr_integration_base_ref` in **tddy-core**). Any remote branch listed by
-`list_recent_remote_branches` is therefore a valid choice, including slash-containing names.
-(`validate_integration_base_ref` — single-segment only — still governs the per-session
-`selected_integration_base_ref` override.)
+A project default branch must be a `<remote>/<path>` remote-tracking ref (any safe remote name —
+`origin` is not required) with no shell metacharacters, no `..`, no `--`, and no whitespace — the
+same class of unsafe input rejected elsewhere (`validate_chain_pr_integration_base_ref` in
+**tddy-core**). Any remote branch listed by `list_recent_remote_branches` is therefore a valid
+choice, including slash-containing names. The validator is pure string rules — it does **not** probe
+git, so a ref whose remote does not exist (e.g. `refs/heads/main`) is accepted at the boundary and
+rejected later by `git fetch`. (`validate_integration_base_ref` — single-segment remainder only —
+still governs the per-session `selected_integration_base_ref` override.)
 
 ## API and tooling surface
 
-- **tddy-daemon** `ProjectData` includes optional `main_branch_ref` (serde).
-- **ConnectionService** `ProjectEntry` carries `main_branch_ref` so clients can read a project's
-  stored default; empty means "not set" (legacy resolution applies).
+- **tddy-daemon** `ProjectData` includes optional `main_branch_ref` and `remote_name` (serde).
+- **ConnectionService** `ProjectEntry` carries `main_branch_ref` and **`default_remote`** (the
+  resolved default remote) so clients can read a project's stored default and normalize picker
+  values; empty `main_branch_ref` means "not set" (legacy resolution applies), empty `default_remote`
+  means "undetected" (clients fall back to `origin`).
+- **`ListProjectBranchesResponse`** carries **`default_remote`** so the web branch picker knows
+  which `<remote>/` prefix to strip.
 - **`SetProjectDefaultBranch`** persists a project's default branch and forwards the change to peer
   hosts that own the same logical `project_id` (logical-project scope, mirroring `AddProjectToHost`).
 - **`StartSession`** with an empty `selected_integration_base_ref` resolves its default base through
@@ -68,8 +96,8 @@ elsewhere (`validate_chain_pr_integration_base_ref` in **tddy-core**). Any remot
 ## Related
 
 - [Project concept](../daemon/project-concept.md) — projects registry and session `project_id`.
-- **tddy-core** `worktree` module — `fetch_integration_base`, `setup_worktree_for_session_with_integration_base`, `resolve_default_integration_base_ref`, `setup_worktree_for_session`.
-- **tddy-daemon** `project_storage` — `effective_integration_base_ref_for_project`, `add_project`.
+- **tddy-core** `worktree` module — `fetch_integration_base`, `setup_worktree_for_session_with_integration_base`, `resolve_default_integration_base_ref`, `resolve_default_integration_base_ref_with_remote`, `detect_default_remote_name`, `local_branch_name_for_remote`, `setup_worktree_for_session`.
+- **tddy-daemon** `project_storage` — `effective_integration_base_ref_for_project`, `effective_remote_name_for_project`, `add_project`.
 - **Changeset workflow** — When **`changeset.yaml`** **`workflow`** includes **`branch_worktree_intent`** (**`new_branch_from_base`** or **`work_on_selected_branch`**), worktree creation follows that intent together with **`selected_integration_base_ref`**, **`new_branch_name`**, and **`selected_branch_to_work_on`** as validated by the **`changeset-workflow`** schema. See [Workflow JSON schemas — Changeset workflow](workflow-json-schemas.md#changeset-workflow-persist-changeset-workflow) and [Workflow recipes — TDD](workflow-recipes.md#developer-reference-shipped-recipes).
 
 ## Chain PR optional base (multi-segment `origin/...`)
@@ -78,12 +106,12 @@ Follow-up work can branch from an open remote branch (a **chain PR**) instead of
 
 ### Ref shape and validation
 
-- **`validate_integration_base_ref`** continues to govern single-segment project defaults: **`origin/<one-segment>`** only.
-- **`validate_chain_pr_integration_base_ref`** accepts **`origin/<path>`** where **`path`** contains one or more non-empty segments separated by **`/`** (for example **`origin/feature/foo`**). The same class of unsafe characters as the single-segment validator is rejected, along with **`..`**, **`--`**, and whitespace in the path.
+- **`validate_integration_base_ref`** continues to govern single-segment project defaults: **`<remote>/<one-segment>`** only (any safe remote name).
+- **`validate_chain_pr_integration_base_ref`** accepts **`<remote>/<path>`** where **`path`** contains one or more non-empty segments separated by **`/`** (for example **`upstream/feature/foo`**). The same class of unsafe characters as the single-segment validator is rejected, along with **`..`**, **`--`**, and whitespace in the path. The remote is not required to be `origin`.
 
 ### Fetch and worktree creation
 
-- **`fetch_chain_pr_integration_base`** validates, then runs **`git fetch origin <path>`** with the path after **`origin/`** (no shell).
+- **`fetch_chain_pr_integration_base`** validates, then splits the ref on the first `/` into `(remote, path)` and runs **`git fetch <remote> <path>`** (no shell).
 - **`setup_worktree_for_session_with_optional_chain_base(repo_root, session_dir, optional_chain_base_ref)`**:
   - With **`None`**: behavior matches default resolution and worktree creation (**`resolve_default_integration_base_ref`**, **`fetch_integration_base`**, worktree from that tip). **`changeset.yaml`** records **`effective_worktree_integration_base_ref`**; **`worktree_integration_base_ref`** is omitted.
   - With **`Some(ref)`**: the worktree branch starts at the tip of that ref after fetch; **`changeset.yaml`** records both **`effective_worktree_integration_base_ref`** and **`worktree_integration_base_ref`**.
@@ -101,15 +129,15 @@ Follow-up work can branch from an open remote branch (a **chain PR**) instead of
 
 - After recipe and project selection, **`telegram_session_control`** offers **Default** or a **recent remote branch** list; non-default choices set **`worktree_integration_base_ref`** before **`tddy-coder`** is spawned. See **[telegram-session-control.md](../daemon/telegram-session-control.md)** (**Integration base branch**).
 
-## Session chaining (parent session → `origin/<branch>`)
+## Session chaining (parent session → `<remote>/<branch>`)
 
 A child session spawned with a **`stack_parent`** bases its worktree off the parent's branch instead of the project default. **tddy-core::session_chain** is the single source of truth for that resolution.
 
 ### Parent kinds
 
-**Code-session parent** — a regular session that owns a git branch. **`resolve_chain_integration_base_ref_from_parent_session(sessions_root, parent_session_id, child_project_repo)`** reads the parent session directory under **`{sessions_root}/sessions/{parent_session_id}/`**, loads **`changeset.yaml`**, takes the persisted **branch** or **branch suggestion**, builds **`origin/<trimmed-path>`**, validates with **`validate_chain_pr_integration_base_ref`**, and compares canonical **`repo_path`** on the parent changeset with the child project repository when **`repo_path`** is present. When the parent names a branch (or branch suggestion), **`repo_path`** on the parent **`changeset.yaml`** is **required**; without it, resolution fails as **`WorkflowError::ChangesetInvalid`** before repository alignment. A branchless code-session parent is an error, not a default-base fallback.
+**Code-session parent** — a regular session that owns a git branch. **`resolve_chain_integration_base_ref_from_parent_session(sessions_root, parent_session_id, child_project_repo)`** reads the parent session directory under **`{sessions_root}/sessions/{parent_session_id}/`**, loads **`changeset.yaml`**, takes the persisted **branch** or **branch suggestion**, resolves the child project's default remote via **`detect_default_remote_name(child_project_repo)`** (→ project config → `origin` last resort), builds **`<remote>/<trimmed-path>`**, validates with **`validate_chain_pr_integration_base_ref`**, and compares canonical **`repo_path`** on the parent changeset with the child project repository when **`repo_path`** is present. When the parent names a branch (or branch suggestion), **`repo_path`** on the parent **`changeset.yaml`** is **required**; without it, resolution fails as **`WorkflowError::ChangesetInvalid`** before repository alignment. A branchless code-session parent is an error, not a default-base fallback.
 
-**PR-stack orchestrator parent** — a planning session that carries a planned **`stack`** (or the **`pr-stack`** recipe) and has no branch of its own. **`parent_is_pr_stack_orchestrator`** identifies it; **`pr_stack_node_for_spawn`** locates the planned node the child materializes (matching the branch the child is about to create, by **`branch`** then **`branch_suggestion`**). The child bases off that node's effective base — its nearest non-merged ancestor's **`origin/<branch>`**, else the stack default — via **`Stack::base_ref_for_spawn`**, enforcing bottom-up ordering. A branch matching no planned node resolves to **`Ok(None)`** (the stack/default base), not an error.
+**PR-stack orchestrator parent** — a planning session that carries a planned **`stack`** (or the **`pr-stack`** recipe) and has no branch of its own. **`parent_is_pr_stack_orchestrator`** identifies it; **`pr_stack_node_for_spawn`** locates the planned node the child materializes (matching the branch the child is about to create, by **`branch`** then **`branch_suggestion`**). The child bases off that node's effective base — its nearest non-merged ancestor's **`<remote>/<branch>`**, else the stack default — via **`Stack::base_ref_for_spawn`**, enforcing bottom-up ordering. A branch matching no planned node resolves to **`Ok(None)`** (the stack/default base), not an error.
 
 ### The spawn resolver
 

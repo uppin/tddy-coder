@@ -79,10 +79,10 @@ function useProjectsRpc(
   );
 
   const loadProjectBranches = useCallback(
-    async (input: { projectId: string; daemonInstanceId: string }): Promise<string[]> => {
-      if (!client) return [];
+    async (input: { projectId: string; daemonInstanceId: string }): Promise<{ branches: string[]; defaultRemote: string }> => {
+      if (!client) return { branches: [], defaultRemote: "" };
       const res = await client.listProjectBranches({ sessionToken, ...input });
-      return res.branches;
+      return { branches: res.branches, defaultRemote: res.defaultRemote };
     },
     [client, sessionToken],
   );

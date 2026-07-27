@@ -128,15 +128,19 @@ pub use workflow::{
     GoalOptions,
 };
 pub use worktree::{
-    create_worktree, fetch_integration_base, fetch_origin_master, list_recent_remote_branches,
-    list_recent_remote_branches_skip, list_worktrees, push_new_branch_to_origin, remove_worktree,
-    resolve_default_integration_base_ref, resolve_persisted_worktree_integration_base_for_session,
-    set_git_ssh_command, setup_worktree_for_session,
-    setup_worktree_for_session_with_integration_base,
+    create_worktree, detect_default_remote_name, fetch_integration_base, fetch_origin_master,
+    list_recent_remote_branches, list_recent_remote_branches_skip, list_worktrees,
+    local_branch_name, local_branch_name_for_remote, push_new_branch_to_origin,
+    push_new_branch_to_remote, remove_worktree, resolve_default_integration_base_ref,
+    resolve_default_integration_base_ref_with_remote,
+    resolve_persisted_worktree_integration_base_for_session, set_git_ssh_command,
+    setup_worktree_for_session, setup_worktree_for_session_with_integration_base,
     setup_worktree_for_session_with_optional_chain_base, validate_chain_pr_integration_base_ref,
     validate_integration_base_ref, worktree_dir, worktree_path_for_branch, WorktreeInfo,
-    DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF,
+    FALLBACK_DEFAULT_INTEGRATION_BASE_REF,
 };
+#[allow(deprecated)]
+pub use worktree::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF;
 
 #[cfg(test)]
 mod workflow_decouple_acceptance {

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::changeset::read_changeset;
 use crate::session_lifecycle::unified_session_dir_path;
-use crate::worktree::validate_chain_pr_integration_base_ref;
+use crate::worktree::{detect_default_remote_name, validate_chain_pr_integration_base_ref};
 use crate::WorkflowError;
 
 const NO_BRANCH_CHAIN_MSG: &str = "PRD acceptance copy: parent session must record a branch before chaining (operators: push or persist branch name)";
@@ -76,7 +76,11 @@ pub fn resolve_chain_integration_base_ref_from_parent_session(
         ));
     }
 
-    let origin_ref = format!("origin/{trimmed}");
+    // The remote is the child project's default — detected from the main worktree's upstream, with
+    // `origin` only as the last-resort fallback. The parent's persisted branch name is local (no
+    // remote prefix), so the remote-tracking ref the child bases off is `<remote>/<trimmed>`.
+    let remote = detect_default_remote_name(child_project_repo).unwrap_or_else(|| "origin".to_string());
+    let origin_ref = format!("{remote}/{trimmed}");
     validate_chain_pr_integration_base_ref(&origin_ref).map_err(WorkflowError::PlanDirInvalid)?;
 
     if let Some(ref parent_repo) = cs.repo_path {

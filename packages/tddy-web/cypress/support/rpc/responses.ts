@@ -265,11 +265,15 @@ export function aResumeSessionResponse(
 // Wire-encoded boolean responses (SignalSession, DeleteSession)
 // ---------------------------------------------------------------------------
 
-/** Protobuf encoding of `{ ok: true }` — field 1 varint 1. */
-export function listProjectBranches(branches: string[] = []): Uint8Array {
+/**
+ * Protobuf encoding of a `ListProjectBranchesResponse`. `defaultRemote` defaults to `"origin"` so
+ * legacy intercept-based tests that offer `origin/<branch>` names keep matching without changes;
+ * pass an explicit remote for non-`origin` scenarios.
+ */
+export function listProjectBranches(branches: string[] = [], defaultRemote = "origin"): Uint8Array {
   return toBinary(
     ListProjectBranchesResponseSchema,
-    create(ListProjectBranchesResponseSchema, { branches }),
+    create(ListProjectBranchesResponseSchema, { branches, defaultRemote }),
   );
 }
 
