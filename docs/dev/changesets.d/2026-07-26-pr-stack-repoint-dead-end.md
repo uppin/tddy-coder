@@ -16,7 +16,7 @@ A planned PR whose predecessor's PR merged and whose branch was then deleted on 
 GitHub flow, with "automatically delete head branches" on — was **unrecoverable**. Three things had to be
 wrong at once, and all three were:
 
-1. **The row replaced itself with an error.** [`pr-stack-ux-recovery`](2026-07-26-pr-stack-ux-recovery.md)
+1. **The row replaced itself with an error.** The `pr-stack-ux-recovery` changeset
    chose (D10) to render a blocked "Missing branch: `<base>`" chip **in place of** the Start-session
    button. The reasoning was sound — a disabled control with no explanation is a dead end — but the row is
    the only place a planned PR's title, description, planned branch and PR live, and the operator lost the
