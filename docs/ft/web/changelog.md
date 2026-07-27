@@ -4,7 +4,11 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
-## 2026-07-26 — PR-Stack Chat Screen: Planned PRs becomes a dismissible right-side panel
+## 2026-07-27 — Session Agents: spawn peer agent sessions on the same worktree
+
+- **The session detail view gains an "Add agent" entry point** that spawns a **peer agent session sharing the current session's worktree** — e.g. a Cursor session alongside the session's Claude agent. The peer is a normal child session linked via `orchestratorSessionId`; the operator switches between peers from a new **"Session agents"** section. There is no agent-to-agent messaging — agents co-exist on the same checkout and the operator coordinates them.
+- The peer spawn reuses the existing `stack_parent` / `orchestratorSessionId` / `onChildSessionStarted` infrastructure — **no proto or daemon changes**. It sets `StartSession.repo_path` to the current session's `repoPath`, so the peer runs on the **same worktree** (no new git worktree, no branch checkout); branch / Project / Host selection is hidden in peer mode (irrelevant/locked when reusing the orchestrator's worktree).
+- A new `SessionAgentsSection` lists the session's peers (children via `orchestratorSessionId`) with `agent` / `model` / `status` and a switch action; an empty state keeps sessions without peers free of UI noise. See [session-drawer.md § Session Agents](session-drawer.md#session-agents-peer-agent-sessions).
 
 - **The planned-PR list is no longer a fixed half-width pane.** It is now a **Planned PRs panel** — a docked 360px column to the right of the chat on desktop (open by default) and a full-screen overlay on mobile (closed by default), toggleable on both from the screen header and dismissible from its own close control. The chat gets the full width back. See [session-drawer.md § PR-Stack Chat Screen](session-drawer.md#pr-stack-chat-screen).
 - Each row now shows its **branch name**, or its planned branch name explicitly marked `planned:` — previously the branch was never rendered at all.
