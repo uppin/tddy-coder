@@ -237,6 +237,11 @@ export const TEST_IDS = {
   createSessionCancelBtn: "create-session-cancel-btn",
   createSessionSubmitBtn: "create-session-submit-btn",
   createSessionError: "create-session-error",
+  /** Start-session optional document attachments (claude-cli / cursor-cli). */
+  createSessionAttachmentsField: "create-session-attachments-field",
+  createSessionAttachmentsAddBtn: "create-session-attachments-add-btn",
+  createSessionAttachmentsInput: "create-session-attachments-input",
+  createSessionAttachmentsError: "create-session-attachments-error",
 
   // Session agents — peer agent sessions section in SessionMainPane
   /** The "Add agent" button in the session-detail header (spawns a peer child session). */
@@ -474,6 +479,14 @@ export const connectBtn = (sessionId: string) => `connect-${sessionId}`;
  * codebase" specialized-subagent multi-select. See docs/ft/coder/specialized-subagents.md. */
 export const createSessionSubagentCheckbox = (name: string) =>
   `create-session-subagent-checkbox-${name}`;
+
+/** `[data-testid="create-session-attachment-row-<index>"]` */
+export const createSessionAttachmentRow = (index: number) =>
+  `create-session-attachment-row-${index}`;
+
+/** `[data-testid="create-session-attachment-remove-<index>"]` */
+export const createSessionAttachmentRemove = (index: number) =>
+  `create-session-attachment-remove-${index}`;
 
 /** `[data-testid="delete-session-<sessionId>"]` */
 export const deleteSessionBtn = (sessionId: string) => `delete-session-${sessionId}`;

@@ -9,7 +9,7 @@ use tddy_core::{
     ChangesetWorkflow, HookCommandParams, SessionMetadata,
 };
 use tddy_rpc::{Response, Status};
-use tddy_service::proto::connection::{ResumeSessionResponse, StartSessionResponse};
+use tddy_service::proto::connection::{ResumeSessionResponse, SessionAttachment, StartSessionResponse};
 use uuid::Uuid;
 
 use crate::cli_session_manager::CliSessionManager;
@@ -88,6 +88,7 @@ pub async fn spawn_cursor_cli_session_inner(
     semantic_index: bool,
     // When true (new_branch_from_base only), push the new branch to origin at session start.
     create_remote_branch: bool,
+    attachments: &[SessionAttachment],
     task_registry: &tddy_task::TaskRegistry,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
@@ -101,6 +102,12 @@ pub async fn spawn_cursor_cli_session_inner(
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
     std::fs::create_dir_all(&session_dir)
         .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
+
+    crate::session_start_attachments::materialize_start_session_attachments(
+        &sessions_base,
+        &session_dir,
+        attachments,
+    )?;
 
     let short_id = &session_id[..8.min(session_id.len())];
     let (intent, resolved_new_branch, resolved_selected_branch) = match branch_worktree_intent

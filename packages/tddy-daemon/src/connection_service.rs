@@ -37,6 +37,7 @@ use tddy_service::proto::connection::{
     ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse,
     SessionEntry as ProtoSessionEntry, SessionTerminalInput, SessionTerminalOutput,
     SessionUploadEntry, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, Signal,
+    SessionAttachment, StagedAttachmentEntry,
     SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
     StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
     StopTerminalSessionResponse, StreamTerminalOutputRequest, StreamWorktreeStatsRequest,
@@ -1130,6 +1131,7 @@ impl ConnectionServiceImpl {
         semantic_index: bool,
         // When true (new_branch_from_base only), push the new branch to origin at session start.
         create_remote_branch: bool,
+        attachments: &[SessionAttachment],
     ) -> Result<Response<StartSessionResponse>, Status> {
         // A pr-stack orchestrator gets a child-spawn handler bound to its toolcall listener so the
         // agent's `pr_spawn_child` relay can materialize planned nodes into child sessions.
@@ -1186,6 +1188,7 @@ impl ConnectionServiceImpl {
             conversation_spawn_handler,
             semantic_index,
             create_remote_branch,
+            attachments,
             &self.task_registry,
         )
         .await
@@ -1407,6 +1410,7 @@ async fn spawn_claude_cli_session_inner(
     // When true (and the intent is new_branch_from_base), push the freshly created branch to origin
     // at session start; a push failure fails the start.
     create_remote_branch: bool,
+    attachments: &[SessionAttachment],
     task_registry: &TaskRegistry,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
@@ -1438,6 +1442,12 @@ async fn spawn_claude_cli_session_inner(
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
     std::fs::create_dir_all(&session_dir)
         .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
+
+    crate::session_start_attachments::materialize_start_session_attachments(
+        &sessions_base,
+        &session_dir,
+        attachments,
+    )?;
 
     // Build branch intent and write a minimal changeset so the worktree setup fn can read it.
     let short_id = &session_id[..8.min(session_id.len())];
@@ -2026,6 +2036,7 @@ impl ConnectionServiceImpl {
         semantic_index: bool,
         // When true (new_branch_from_base + registered project), push the new branch to origin.
         create_remote_branch: bool,
+        attachments: &[SessionAttachment],
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -2050,6 +2061,12 @@ impl ConnectionServiceImpl {
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
+
+        crate::session_start_attachments::materialize_start_session_attachments(
+            &sessions_base,
+            &session_dir,
+            attachments,
+        )?;
 
         let short_id = &session_id[..8.min(session_id.len())];
         let (intent, resolved_new_branch, resolved_selected_branch) = match branch_worktree_intent
@@ -2560,6 +2577,7 @@ impl ConnectionServiceImpl {
         semantic_index: bool,
         // When true (new_branch_from_base only), push the new branch to origin at session start.
         create_remote_branch: bool,
+        attachments: &[SessionAttachment],
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -2600,6 +2618,12 @@ impl ConnectionServiceImpl {
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
+
+        crate::session_start_attachments::materialize_start_session_attachments(
+            &sessions_base,
+            &session_dir,
+            attachments,
+        )?;
 
         let short_id = &session_id[..8.min(session_id.len())];
         let (intent, resolved_new_branch, resolved_selected_branch) = match branch_worktree_intent
@@ -3546,6 +3570,7 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             // Child spawns are created by the orchestrator agent, not the Start-Session dialog, and
             // never push a remote branch here.
             false,
+            &[],
             &self.claude_cli_manager.task_registry(),
         )
         .await
@@ -3665,6 +3690,7 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             false,
             // Child conversations are spawned by the orchestrator, never pushing a remote branch.
             false,
+            &[],
             &self.claude_cli_manager.task_registry(),
         )
         .await
@@ -4388,6 +4414,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             crate::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
         }
 
+        let local_daemon_id = local_instance_id_for_config(&self.config);
+        crate::session_start_attachments::validate_start_session_attachments(
+            &req.attachments,
+            &local_daemon_id,
+        )?;
+
         // Validate cheap, session-type-specific inputs before the (potentially expensive) project
         // auto-provision below: claude-cli always requires a model, so reject an empty one up front
         // — a bad request should fail fast with INVALID_ARGUMENT, not a project NotFound. The
@@ -4496,6 +4528,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         managed_recipe,
                         req.semantic_index,
                         req.create_remote_branch,
+                        &req.attachments,
                     )
                     .await;
             }
@@ -4517,6 +4550,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     managed_recipe,
                     req.semantic_index,
                     req.create_remote_branch,
+                    &req.attachments,
                 )
                 .await;
         }
@@ -4559,6 +4593,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         managed_recipe,
                         req.semantic_index,
                         req.create_remote_branch,
+                        &req.attachments,
                     )
                     .await;
             }
@@ -4583,6 +4618,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 managed_recipe,
                 req.semantic_index,
                 req.create_remote_branch,
+                &req.attachments,
                 &self.task_registry,
             )
             .await;
@@ -7824,37 +7860,115 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(DeleteSessionUploadResponse {}))
     }
 
-    // TODO(start-session-attachments): the three pre-session staging RPCs below are wire-only
-    // stubs — the proto contract is pinned so the web can be generated against it, but no staging
-    // area is written or read yet, and `StartSessionRequest.attachments` is ignored by
-    // `start_session`. Implement the host side (staging root under the caller's sessions base,
-    // basename validation, cross-host routing by `daemon_instance_id`) in the follow-up changeset.
-
     async fn upload_staged_attachment_chunk(
         &self,
-        _request: Request<UploadStagedAttachmentChunkRequest>,
+        request: Request<UploadStagedAttachmentChunkRequest>,
     ) -> Result<Response<UploadStagedAttachmentChunkResponse>, Status> {
-        Err(Status::unimplemented(
-            "UploadStagedAttachmentChunk is not implemented yet",
-        ))
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+
+        let local_id = local_instance_id_for_config(&self.config);
+        let requested_daemon = req.daemon_instance_id.trim();
+        if !requested_daemon.is_empty() && requested_daemon != local_id {
+            return Err(Status::invalid_argument(format!(
+                "staged attachments must be uploaded to the host the session starts on (requested {requested_daemon:?}, local {local_id:?})"
+            )));
+        }
+
+        let host_path = crate::staged_attachment_upload::write_staged_chunk(
+            &sessions_base,
+            &req.staging_id,
+            &req.file_name,
+            &req.data,
+            req.last,
+        )?;
+
+        let entry = host_path.map(|path| {
+            let metadata = std::fs::metadata(&path).ok();
+            StagedAttachmentEntry {
+                daemon_instance_id: local_id.clone(),
+                staging_id: req.staging_id.clone(),
+                file_name: req.file_name.clone(),
+                host_path: path.to_string_lossy().into_owned(),
+                size_bytes: metadata.as_ref().map(|m| m.len()).unwrap_or(0),
+                staged_at_ms: metadata
+                    .and_then(|m| {
+                        m.modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_millis() as i64)
+                    })
+                    .unwrap_or(0),
+            }
+        });
+
+        Ok(Response::new(UploadStagedAttachmentChunkResponse { entry }))
     }
 
     async fn list_staged_attachments(
         &self,
-        _request: Request<ListStagedAttachmentsRequest>,
+        request: Request<ListStagedAttachmentsRequest>,
     ) -> Result<Response<ListStagedAttachmentsResponse>, Status> {
-        Err(Status::unimplemented(
-            "ListStagedAttachments is not implemented yet",
-        ))
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        let sessions_base = self.uploads_sessions_base(&req.session_token)?;
+        let local_id = local_instance_id_for_config(&self.config);
+        let requested_daemon = req.daemon_instance_id.trim();
+        if !requested_daemon.is_empty() && requested_daemon != local_id {
+            return Err(Status::invalid_argument(format!(
+                "staged attachments are listed on the host that holds them (requested {requested_daemon:?}, local {local_id:?})"
+            )));
+        }
+
+        let attachments = crate::staged_attachments::list_staged(&sessions_base, &req.staging_id)?;
+        Ok(Response::new(ListStagedAttachmentsResponse {
+            attachments: attachments
+                .into_iter()
+                .map(|a| StagedAttachmentEntry {
+                    daemon_instance_id: local_id.clone(),
+                    staging_id: a.staging_id,
+                    file_name: a.file_name,
+                    host_path: a.host_path.to_string_lossy().into_owned(),
+                    size_bytes: a.size_bytes,
+                    staged_at_ms: a.staged_at_ms,
+                })
+                .collect(),
+        }))
     }
 
     async fn delete_staged_attachment(
         &self,
-        _request: Request<DeleteStagedAttachmentRequest>,
+        request: Request<DeleteStagedAttachmentRequest>,
     ) -> Result<Response<DeleteStagedAttachmentResponse>, Status> {
-        Err(Status::unimplemented(
-            "DeleteStagedAttachment is not implemented yet",
-        ))
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        let sessions_base = self.uploads_sessions_base(&req.session_token)?;
+        let local_id = local_instance_id_for_config(&self.config);
+        let requested_daemon = req.daemon_instance_id.trim();
+        if !requested_daemon.is_empty() && requested_daemon != local_id {
+            return Err(Status::invalid_argument(format!(
+                "staged attachments are deleted on the host that holds them (requested {requested_daemon:?}, local {local_id:?})"
+            )));
+        }
+
+        crate::staged_attachments::delete_staged(
+            &sessions_base,
+            &req.staging_id,
+            &req.file_name,
+        )?;
+        Ok(Response::new(DeleteStagedAttachmentResponse {}))
     }
 }
 
