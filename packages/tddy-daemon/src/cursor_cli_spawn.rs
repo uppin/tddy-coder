@@ -14,7 +14,9 @@ use uuid::Uuid;
 
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::{resolve_cursor_binary_path, DaemonConfig};
-use crate::connection_service::spawn_blocking_with_timeout;
+use crate::connection_service::{
+    session_worktree_source, spawn_blocking_with_timeout, WorktreeSource,
+};
 use crate::project_storage;
 use crate::user_sessions_path::projects_path_for_user;
 
@@ -71,6 +73,12 @@ pub async fn spawn_cursor_cli_session_inner(
     new_branch_name: &str,
     selected_integration_base_ref: &str,
     selected_branch_to_work_on: &str,
+    // Client-supplied local checkout to run against directly (StartSessionRequest.repo_path).
+    // When non-empty it wins over `project_id`: the session's worktree IS this path (no git
+    // worktree is created and it is never removed on session end). Empty → resolve from
+    // `project_id` as before.
+    repo_path: &str,
+    stack_parent: Option<&str>,
     initial_prompt: &str,
     managed_codebase: bool,
     specialized_agents: &[String],
@@ -88,22 +96,7 @@ pub async fn spawn_cursor_cli_session_inner(
         ));
     }
     let project_id = project_id.trim();
-    if project_id.is_empty() {
-        return Err(Status::invalid_argument(
-            "project_id is required for cursor-cli sessions",
-        ));
-    }
-    let projects_dir = projects_path_for_user(os_user, Some(tddy_data_dir))
-        .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-    let project = project_storage::find_project(&projects_dir, project_id)
-        .map_err(|e| Status::internal(e.to_string()))?
-        .ok_or_else(|| Status::not_found("project not found"))?;
-    let repo_root = PathBuf::from(&project.main_repo_path);
-    if !repo_root.exists() {
-        return Err(Status::invalid_argument(
-            "project main repo path does not exist",
-        ));
-    }
+    let repo_path = repo_path.trim();
 
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
     std::fs::create_dir_all(&session_dir)
@@ -153,6 +146,7 @@ pub async fn spawn_cursor_cli_session_inner(
     };
     let mut cs = Changeset {
         workflow: Some(cs_workflow),
+        orchestrator_session_id: stack_parent.map(str::to_string),
         recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
         ..Changeset::default()
     };
@@ -165,31 +159,71 @@ pub async fn spawn_cursor_cli_session_inner(
     tddy_core::write_changeset(&session_dir, &cs)
         .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
-    let repo_root_clone = repo_root.clone();
-    let session_dir_clone = session_dir.clone();
     let timeout = config.spawn_worker_request_timeout();
-    let worktree_path = spawn_blocking_with_timeout(
-        timeout,
-        "start_cursor_cli_session: create worktree",
-        move || {
-            tddy_core::setup_worktree_for_session_with_optional_chain_base(
-                &repo_root_clone,
-                &session_dir_clone,
-                None,
+    let worktree_path = match session_worktree_source(repo_path, project_id) {
+        WorktreeSource::Project(pid) => {
+            if pid.is_empty() {
+                return Err(Status::invalid_argument(
+                    "project_id is required for cursor-cli sessions",
+                ));
+            }
+            let projects_dir = projects_path_for_user(os_user, Some(tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+            let project = project_storage::find_project(&projects_dir, &pid)
+                .map_err(|e| Status::internal(e.to_string()))?
+                .ok_or_else(|| Status::not_found("project not found"))?;
+            let repo_root = PathBuf::from(&project.main_repo_path);
+            if !repo_root.exists() {
+                return Err(Status::invalid_argument(
+                    "project main repo path does not exist",
+                ));
+            }
+            let repo_root_clone = repo_root.clone();
+            let session_dir_clone = session_dir.clone();
+            let wt = spawn_blocking_with_timeout(
+                timeout,
+                "start_cursor_cli_session: create worktree",
+                move || {
+                    tddy_core::setup_worktree_for_session_with_optional_chain_base(
+                        &repo_root_clone,
+                        &session_dir_clone,
+                        None,
+                    )
+                    .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
+                },
             )
-            .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
-        },
-    )
-    .await?;
-
-    crate::connection_service::push_new_branch_to_origin_if_requested(
-        create_remote_branch,
-        intent,
-        &session_dir,
-        &worktree_path,
-        timeout,
-    )
-    .await?;
+            .await?;
+            crate::connection_service::push_new_branch_to_origin_if_requested(
+                create_remote_branch,
+                intent,
+                &session_dir,
+                &wt,
+                timeout,
+            )
+            .await?;
+            wt
+        }
+        WorktreeSource::RepoPath(path) => {
+            let canonical = std::fs::canonicalize(&path).map_err(|e| {
+                Status::invalid_argument(format!(
+                    "repo_path {} is not accessible: {e}",
+                    path.display()
+                ))
+            })?;
+            if !canonical.is_dir() {
+                return Err(Status::invalid_argument(format!(
+                    "repo_path {} is not a directory",
+                    canonical.display()
+                )));
+            }
+            log::info!(
+                target: "tddy_daemon::cursor_cli_spawn",
+                "spawn_cursor_cli_session_inner {session_id}: using client-supplied repo_path {} directly as worktree (not daemon-managed; not removed on session end)",
+                canonical.display()
+            );
+            canonical
+        }
+    };
 
     let hook_token = install_cursor_hooks_in_worktree(config, &worktree_path, session_id, os_user);
 

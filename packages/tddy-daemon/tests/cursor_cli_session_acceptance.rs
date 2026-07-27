@@ -7,7 +7,7 @@ use tddy_core::session_metadata::{read_session_metadata, SessionMetadata};
 use tddy_daemon::claude_cli_session::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_rpc::Request;
+use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ListSessionsRequest, StartSessionRequest,
 };
@@ -312,4 +312,234 @@ async fn cursor_cli_session_enrichment_reads_from_metadata() {
         .expect("session must appear in list");
     assert_eq!(entry.agent, "cursor-cli");
     assert_eq!(entry.model, TEST_MODEL);
+}
+
+// ---------------------------------------------------------------------------
+// Peer-agent spawn ("Add agent") — reusing the orchestrator's worktree via
+// `repo_path` and recording the `stack_parent` link.
+//
+// These mirror the contract the claude-cli sandboxed path already honors
+// (`start_sandboxed_claude_cli_session` → `session_worktree_source` +
+// `orchestrator_session_id: stack_parent.map(...)`). The cursor-cli path must
+// honor the same two fields so a peer cursor-cli child of a claude-cli (or
+// cursor-cli) orchestrator runs on the SAME worktree and is linked back to the
+// orchestrator, instead of becoming a standalone session on a fresh branch.
+// ---------------------------------------------------------------------------
+
+/// Build a peer-spawn `StartSessionRequest`: `session_type = "cursor-cli"`,
+/// `repo_path` set to the orchestrator's worktree, `stack_parent` set to the
+/// orchestrator's session id, and `branch_worktree_intent` empty (the web
+/// `CreateSessionPane` peer mode sends exactly these — see
+/// `packages/tddy-web/src/components/sessions/CreateSessionPane.tsx`).
+fn peer_cursor_cli_request(repo_path: &str, stack_parent: &str) -> StartSessionRequest {
+    let mut req = start_cursor_cli_request();
+    req.repo_path = repo_path.to_string();
+    req.stack_parent = stack_parent.to_string();
+    req.branch_worktree_intent = String::new();
+    req.new_branch_name = String::new();
+    req.selected_branch_to_work_on = String::new();
+    req
+}
+
+/// `git -C <repo> branch --list <pattern>` → the matching branch names, one per line, trimmed.
+fn local_branches_matching(repo: &std::path::Path, pattern: &str) -> Vec<String> {
+    let output = std::process::Command::new("git")
+        .current_dir(repo)
+        .args(["branch", "--list", pattern])
+        .output()
+        .expect("git branch --list must run");
+    assert!(output.status.success(), "git branch --list failed");
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|l| l.trim().trim_start_matches("* ").trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+#[tokio::test]
+async fn cursor_cli_peer_spawn_reuses_the_orchestrator_worktree_when_repo_path_is_set() {
+    // Given — a registered project repo, and a separate pre-existing checkout
+    // that the orchestrating session already runs in (the peer must reuse it).
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+    let (_cfg_dir, config) = write_config_with_cursor_cli_binary("/bin/cat");
+    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+
+    let orchestrator_worktree = tempfile::tempdir().unwrap();
+    let orchestrator_session_id = "019f9fdb-cf83-70d2-aef5-062db0db7e75";
+    let orchestrator_worktree_canonical =
+        std::fs::canonicalize(orchestrator_worktree.path()).unwrap();
+
+    // When — a peer "Add agent" spawn pointing at the orchestrator's worktree
+    let resp = service
+        .start_session(Request::new(peer_cursor_cli_request(
+            orchestrator_worktree.path().to_str().unwrap(),
+            orchestrator_session_id,
+        )))
+        .await
+        .expect("peer cursor-cli StartSession must succeed");
+
+    // Then — the session runs on the orchestrator's worktree, not a fresh one
+    let session_id = resp.into_inner().session_id;
+    let session_dir = sessions_tmp.path().join("sessions").join(&session_id);
+    let meta = read_session_metadata(&session_dir).expect(".session.yaml must exist");
+    let recorded_worktree =
+        std::fs::canonicalize(meta.repo_path.as_deref().expect("repo_path must be set")).unwrap();
+    assert_eq!(
+        recorded_worktree, orchestrator_worktree_canonical,
+        "peer cursor-cli must reuse the orchestrator's worktree via repo_path, \
+         not create a new daemon-managed worktree"
+    );
+
+    // And — the orchestrator link is recorded on the changeset
+    let cs = tddy_core::read_changeset(&session_dir).expect("changeset must exist");
+    assert_eq!(
+        cs.orchestrator_session_id.as_deref(),
+        Some(orchestrator_session_id),
+        "peer cursor-cli must record orchestrator_session_id from stack_parent"
+    );
+
+    // And — no daemon-managed worktree was created under the project repo
+    let project_worktrees = repo_dir.path().join(".worktrees");
+    assert!(
+        !project_worktrees.exists()
+            || std::fs::read_dir(&project_worktrees)
+                .unwrap()
+                .next()
+                .is_none(),
+        "peer cursor-cli with repo_path set must not create a worktree under the project repo"
+    );
+}
+
+#[tokio::test]
+async fn cursor_cli_peer_spawn_records_the_orchestrator_link_even_without_repo_path() {
+    // Given — a registered project repo, no client repo_path (standalone worktree path)
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+    let (_cfg_dir, config) = write_config_with_cursor_cli_binary("/bin/cat");
+    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+
+    let orchestrator_session_id = "019f9dd5-716d-7071-96ac-464ff7b98c2a";
+
+    // When — a cursor-cli spawn that carries only a stack_parent (no repo_path),
+    // creating its own worktree as before but still linked to the orchestrator
+    let mut req = start_cursor_cli_request();
+    req.stack_parent = orchestrator_session_id.to_string();
+    req.branch_worktree_intent = "new_branch_from_base".to_string();
+    let resp = service
+        .start_session(Request::new(req))
+        .await
+        .expect("cursor-cli StartSession with stack_parent must succeed");
+
+    // Then — the orchestrator link is recorded even though repo_path was empty
+    let session_id = resp.into_inner().session_id;
+    let session_dir = sessions_tmp.path().join("sessions").join(&session_id);
+    let cs = tddy_core::read_changeset(&session_dir).expect("changeset must exist");
+    assert_eq!(
+        cs.orchestrator_session_id.as_deref(),
+        Some(orchestrator_session_id),
+        "cursor-cli must record orchestrator_session_id from stack_parent even without repo_path"
+    );
+}
+
+#[tokio::test]
+async fn cursor_cli_peer_spawn_with_repo_path_creates_no_new_branch_in_the_project_repo() {
+    // Given — a registered project repo with an origin, and an orchestrator worktree
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+    let (_cfg_dir, config) = write_config_with_cursor_cli_binary("/bin/cat");
+    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+
+    let orchestrator_worktree = tempfile::tempdir().unwrap();
+
+    // When — a peer spawn reusing the orchestrator's worktree
+    let resp = service
+        .start_session(Request::new(peer_cursor_cli_request(
+            orchestrator_worktree.path().to_str().unwrap(),
+            "orchestrator-branch-test",
+        )))
+        .await
+        .expect("peer cursor-cli StartSession must succeed");
+
+    // Then — no `cursor-cli/*` branch was created in the project repo
+    let _ = resp;
+    let branches = local_branches_matching(repo_dir.path(), "cursor-cli/*");
+    assert!(
+        branches.is_empty(),
+        "peer cursor-cli with repo_path set must not create a cursor-cli/* branch in the project repo, \
+         got: {branches:?}"
+    );
+}
+
+#[tokio::test]
+async fn cursor_cli_peer_spawn_rejects_a_repo_path_that_is_not_a_directory() {
+    // Given — a registered project repo and a regular file masquerading as repo_path
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+    let (_cfg_dir, config) = write_config_with_cursor_cli_binary("/bin/cat");
+    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+
+    let file_dir = tempfile::tempdir().unwrap();
+    let file_path = file_dir.path().join("not-a-dir.txt");
+    std::fs::write(&file_path, "I am a file").unwrap();
+
+    // When / Then — StartSession rejects the file-as-repo_path with INVALID_ARGUMENT
+    let err = service
+        .start_session(Request::new(peer_cursor_cli_request(
+            file_path.to_str().unwrap(),
+            "orchestrator-file-repo-path",
+        )))
+        .await
+        .expect_err("cursor-cli StartSession with a non-directory repo_path must fail");
+    assert_eq!(
+        err.code,
+        Code::InvalidArgument,
+        "a non-directory repo_path must yield INVALID_ARGUMENT"
+    );
+    assert!(
+        err.message.to_ascii_lowercase().contains("not a directory"),
+        "error message must explain the repo_path is not a directory, got: {}",
+        err.message
+    );
+}
+
+#[tokio::test]
+async fn cursor_cli_peer_spawn_rejects_a_missing_repo_path() {
+    // Given — a registered project repo and a repo_path that does not exist
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+    let (_cfg_dir, config) = write_config_with_cursor_cli_binary("/bin/cat");
+    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+
+    let missing_path = sessions_tmp.path().join("does-not-exist");
+
+    // When / Then — StartSession rejects the missing repo_path with INVALID_ARGUMENT
+    let err = service
+        .start_session(Request::new(peer_cursor_cli_request(
+            missing_path.to_str().unwrap(),
+            "orchestrator-missing-repo-path",
+        )))
+        .await
+        .expect_err("cursor-cli StartSession with a missing repo_path must fail");
+    assert_eq!(
+        err.code,
+        Code::InvalidArgument,
+        "a missing repo_path must yield INVALID_ARGUMENT"
+    );
+    assert!(
+        err.message.to_ascii_lowercase().contains("not accessible"),
+        "error message must explain the repo_path is not accessible, got: {}",
+        err.message
+    );
 }
