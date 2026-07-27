@@ -4629,6 +4629,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 None
             };
             if req.sandbox {
+                // TODO: sandboxed cursor-cli path does not yet honor repo_path/stack_parent (mirror of the non-sandboxed fix); tracked separately.
                 return self
                     .start_sandboxed_cursor_cli_session(
                         os_user,
@@ -4662,6 +4663,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 req.new_branch_name.trim(),
                 req.selected_integration_base_ref.trim(),
                 req.selected_branch_to_work_on.trim(),
+                req.repo_path.trim(),
+                Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
                 req.initial_prompt.trim(),
                 req.managed_codebase,
                 &req.specialized_agents,
