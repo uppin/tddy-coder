@@ -1,13 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
-import type { AgentInfo, ConnectionService, ProjectEntry, SessionAttachment, SessionEntry, SubagentInfo, ToolInfo } from "../../gen/connection_pb";
+import type { AgentInfo, ConnectionService, ProjectEntry, SessionEntry, SubagentInfo, ToolInfo } from "../../gen/connection_pb";
 import { localBranchName } from "../../lib/branchNames";
 import { prStackOrchestrators } from "../../utils/stackParents";
 import { useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useAgentModels } from "../../rpc/useAgentModels";
 import { Button } from "../ui/button";
-import { StartSessionAttachmentsField } from "./StartSessionAttachmentsField";
 
 /** Pseudo-agent key used to fetch the claude-cli session type's model catalog. */
 const CLAUDE_CLI_AGENT = "claude-cli";
@@ -154,7 +153,6 @@ export function CreateSessionPane({
   const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [attachments, setAttachments] = useState<SessionAttachment[]>([]);
 
   // The model catalog is enumerated per selected backend: the chosen agent for tool sessions, and
   // the "claude-cli" pseudo-agent for the Claude CLI session type.
@@ -338,7 +336,6 @@ export function CreateSessionPane({
           permissionMode: "",
           initialPrompt: "",
           sandbox: false,
-          attachments: [],
         });
       } else if (sessionType === "cursor-cli") {
         res = await client.startSession({
@@ -355,7 +352,6 @@ export function CreateSessionPane({
           managedCodebase,
           specializedAgents: managedCodebase ? selectedSubagents : [],
           semanticIndex: managedCodebase ? semanticIndex : false,
-          attachments,
         });
       } else {
         res = await client.startSession({
@@ -375,7 +371,6 @@ export function CreateSessionPane({
           // so a selection made before unchecking the toggle must not leak into the request.
           specializedAgents: managedCodebase ? selectedSubagents : [],
           semanticIndex: managedCodebase ? semanticIndex : false,
-          attachments,
         });
       }
       onCreated(res.sessionId);
@@ -921,16 +916,6 @@ export function CreateSessionPane({
             </div>
           )}
         </>
-      )}
-
-      {(sessionType === "claude-cli" || sessionType === "cursor-cli") && (
-        <StartSessionAttachmentsField
-          sessionToken={sessionToken}
-          daemonInstanceId={effectiveDaemonInstanceId}
-          attachments={attachments}
-          onChange={setAttachments}
-          disabled={submitting}
-        />
       )}
 
       {/* Error */}

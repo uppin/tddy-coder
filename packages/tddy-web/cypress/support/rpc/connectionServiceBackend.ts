@@ -28,9 +28,7 @@ import {
   ResumeSessionResponseSchema,
   SessionEntrySchema,
   StartSessionResponseSchema,
-  StagedAttachmentEntrySchema,
   ToolInfoSchema,
-  type StartSessionRequest,
   ClaimTerminalControlResponseSchema,
   ExecuteToolResponseSchema,
   HostStatsEventSchema,
@@ -264,8 +262,6 @@ export interface ConnectionServiceBackend extends InMemoryRpcBackend {
   readonly worktreeStatsRecalculateAllFlags: boolean[];
   /** Every `worktree_path` passed to `CalculateWorktreeSize`, in call order. */
   readonly calculatedWorktreePaths: string[];
-  /** Every `StartSession` request body, in call order. */
-  readonly startSessionCalls: StartSessionRequest[];
 }
 
 // ---------------------------------------------------------------------------
@@ -297,7 +293,6 @@ export function aConnectionServiceBackend(
   let worktreeStatsStreamOpens = 0;
   const worktreeStatsRecalculateAllFlags: boolean[] = [];
   const calculatedWorktreePaths: string[] = [];
-  const startSessionCalls: StartSessionRequest[] = [];
 
   // Live bash-terminal list — mutated by Start/Stop so ListTerminalSessions stays consistent.
   const liveTerminals: { terminalId: string; kind: string; pid: number }[] = (
@@ -376,7 +371,6 @@ export function aConnectionServiceBackend(
         });
       },
       startSession: async (req) => {
-        startSessionCalls.push(req);
         const overrides =
           typeof scenario.startSession === "function"
             ? scenario.startSession({ name: req.name, gitUrl: req.gitUrl })
@@ -388,19 +382,6 @@ export function aConnectionServiceBackend(
           livekitServerIdentity: "server",
           ...overrides,
         });
-      },
-      uploadStagedAttachmentChunk: async (req) => {
-        const entry = req.last
-          ? create(StagedAttachmentEntrySchema, {
-              daemonInstanceId: req.daemonInstanceId || "local",
-              stagingId: req.stagingId,
-              fileName: req.fileName,
-              hostPath: `/srv/staged/${req.stagingId}/${req.fileName}`,
-              sizeBytes: BigInt(req.data.length),
-              stagedAtMs: 1_700_000_000_000n,
-            })
-          : undefined;
-        return { entry };
       },
       signalSession: async (req) => {
         if (scenario.signalSessionError) {
@@ -566,7 +547,6 @@ export function aConnectionServiceBackend(
     worktreeStatsStreamCount: () => worktreeStatsStreamOpens,
     worktreeStatsRecalculateAllFlags,
     calculatedWorktreePaths,
-    startSessionCalls,
   });
 }
 
