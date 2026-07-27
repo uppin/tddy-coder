@@ -466,4 +466,21 @@ export const sessionsDrawerPage = {
       `${TEST_IDS.sessionsDrawerItemSessionMeta}-${sessionId}`,
       { timeout: 5000, ...options },
     ),
+
+  // ---------------------------------------------------------------------------
+  // Create-session pane (shared by the drawer's "new session" flow and the
+  // session-detail "Add agent" peer-spawn flow)
+  // ---------------------------------------------------------------------------
+
+  /** The shared session-creation pane (rendered inline or in a dialog). */
+  createSessionPane: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionPane, { timeout: 5000, ...options }),
+
+  /** The shared session-creation dialog wrapper (when rendered as a modal). */
+  createSessionDialog: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionDialog, { timeout: 5000, ...options }),
+
+  /** The submit button on the shared session-creation pane. */
+  createSessionSubmitBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionSubmitBtn, { timeout: 5000, ...options }),
 };

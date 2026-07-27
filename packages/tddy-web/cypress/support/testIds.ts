@@ -238,6 +238,18 @@ export const TEST_IDS = {
   createSessionSubmitBtn: "create-session-submit-btn",
   createSessionError: "create-session-error",
 
+  // Session agents — peer agent sessions section in SessionMainPane
+  /** The "Add agent" button in the session-detail header (spawns a peer child session). */
+  sessionAgentsAddBtn: "session-agents-add-btn",
+  /** The collapsible "Session agents" section listing the current session's peers. */
+  sessionAgentsSection: "session-agents-section",
+  /** Empty-state message shown when the current session has no peers. */
+  sessionAgentsEmpty: "session-agents-empty",
+  /** One row per peer, keyed by the peer's session id. */
+  sessionAgentsRow: "session-agents-row",
+  /** The "switch" action on a peer row — focuses that peer's runtime. */
+  sessionAgentsSwitchBtn: "session-agents-switch-btn",
+
   // Shell navigation
   shellMenuButton: "shell-menu-button",
   shellMenuSessions: "shell-menu-sessions",
@@ -606,6 +618,14 @@ export const sessionsChildTab = (sessionId: string) => `sessions-child-tab-${ses
 /** `[data-testid="sessions-child-pane-<sessionId>"]` — the mounted runtime pane for a spawned
  *  child conversation, shown when its tab is selected. */
 export const sessionsChildPane = (sessionId: string) => `sessions-child-pane-${sessionId}`;
+
+/** `[data-testid="session-agents-row-<sessionId>"]` — one row in the Session agents section, keyed
+ *  by the peer's session id. */
+export const sessionAgentsRow = (sessionId: string) => `session-agents-row-${sessionId}`;
+
+/** `[data-testid="session-agents-switch-btn-<sessionId>"]` — the switch action on a peer row. */
+export const sessionAgentsSwitchBtn = (sessionId: string) =>
+  `session-agents-switch-btn-${sessionId}`;
 
 // ---------------------------------------------------------------------------
 // Tasks drawer screen dynamic helpers
