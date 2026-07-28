@@ -119,9 +119,7 @@ fn validate_remote_segment(remote: &str) -> Result<(), String> {
 /// [`FORBIDDEN_REF_CHARS`].
 fn validate_branch_segment(segment: &str) -> Result<(), String> {
     if segment.is_empty() {
-        return Err(
-            "integration base ref must not contain empty path segments".to_string(),
-        );
+        return Err("integration base ref must not contain empty path segments".to_string());
     }
     if segment.chars().any(|c| c.is_whitespace()) {
         return Err("integration base ref must not contain whitespace".to_string());
@@ -217,9 +215,7 @@ fn fetch_chain_pr_integration_base(
             "fetch_chain_pr_integration_base: git fetch failed stderr={}",
             stderr.trim()
         );
-        return Err(format!(
-            "git fetch {remote} {branch_path} failed: {stderr}"
-        ));
+        return Err(format!("git fetch {remote} {branch_path} failed: {stderr}"));
     }
     log::debug!(
         "fetch_chain_pr_integration_base: fetch completed for {}",
@@ -2031,10 +2027,7 @@ mod remote_agnostic_tests {
         fs::write(repo.join("f"), "x").unwrap();
         git(repo, &["add", "f"]);
         git(repo, &["commit", "-m", "initial"]);
-        git(
-            repo,
-            &["remote", "add", remote, repo.to_str().unwrap()],
-        );
+        git(repo, &["remote", "add", remote, repo.to_str().unwrap()]);
         git(repo, &["push", "-u", remote, "master"]);
     }
 
@@ -2194,7 +2187,10 @@ mod remote_agnostic_tests {
         fs::write(repo.join("f"), "x").unwrap();
         git(&repo, &["add", "f"]);
         git(&repo, &["commit", "-m", "initial"]);
-        git(&repo, &["remote", "add", "upstream", repo.to_str().unwrap()]);
+        git(
+            &repo,
+            &["remote", "add", "upstream", repo.to_str().unwrap()],
+        );
         git(&repo, &["push", "-u", "upstream", "main"]);
 
         // When
@@ -2229,7 +2225,10 @@ mod remote_agnostic_tests {
         git(&repo, &["commit", "-m", "initial"]);
         git(&repo, &["remote", "add", "origin", repo.to_str().unwrap()]);
         git(&repo, &["push", "-u", "origin", "master"]);
-        git(&repo, &["remote", "add", "upstream", repo.to_str().unwrap()]);
+        git(
+            &repo,
+            &["remote", "add", "upstream", repo.to_str().unwrap()],
+        );
         git(&repo, &["checkout", "-b", "feature/up-only"]);
         fs::write(repo.join("g"), "y").unwrap();
         git(&repo, &["add", "g"]);

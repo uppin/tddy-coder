@@ -2,6 +2,12 @@
 
 Release note history for the Coder product area.
 
+## 2026-07-28 — Start-session attachment materialization
+
+- `StartSession` now materializes both attachment sources — `StagedAttachmentRef` (uploaded ahead of time) and `HostDocumentRef` (a document already on a connected host) — into `{session_dir}/artifacts/attachments/<basename>` **before** the agent launches, across every session type. Duplicate basenames within one request are rejected up front; a `StagedAttachmentRef` naming a foreign host is a request error (no cross-host fetch, no silent empty attachment); a partial-materialization failure cleans up so no half-materialized session reaches the agent.
+- The three staging RPCs (`UploadStagedAttachmentChunk` / `ListStagedAttachments` / `DeleteStagedAttachment`) are live on a per-OS-user staging root `{tddy_data_dir}/staging/{os_user}/{staging_id}/{file_name}`, and a new unary `ReadHostDocument` fetches a `HostDocumentRef`'s bytes from the owning daemon under its own `os_user` mapping. Both route by `daemon_instance_id` and forward across hosts over the LiveKit common room (the fetch is unary because streaming RPCs return `unimplemented` for `PeerRoute::Forward`); a document over `MAX_HOST_DOCUMENT_BYTES` (4 MiB) is refused, not truncated.
+- See [session-attachments.md § Start-session materialization](session-attachments.md#start-session-materialization).
+
 ## 2026-07-27 — Unified worktree base resolution (cursor-cli PR-stack fix)
 
 - Chain base resolution is unified in **tddy-core::session_chain**. `resolve_chain_base_ref` and its helpers (`parent_is_pr_stack_orchestrator`, `pr_stack_node_for_spawn`) move out of the daemon into core, and a new `resolve_chain_base_for_session_spawn` encodes the spawn-time precedence: a runtime `stack_parent` wins over a persisted `worktree_integration_base_ref`, which wins over the default base.

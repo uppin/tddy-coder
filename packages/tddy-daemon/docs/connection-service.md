@@ -36,11 +36,11 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 | `DeleteSessionUpload` | Removes one uploaded file addressed by `upload_id` + `file_name`. Both untrusted segments are basename-validated and confirmed to resolve inside the trusted `{session_dir}/uploads` root via the shared **`session_file_upload::contained_canonical_dir`** guard (unsafe segment → `INVALID_ARGUMENT`, removing nothing); a missing file → `NOT_FOUND`; the emptied `upload_id` folder is pruned. |
 | `UploadStagedAttachmentChunk` / `ListStagedAttachments` / `DeleteStagedAttachment` | **Wire contract only — all three return `UNIMPLEMENTED`.** Pre-session staging for [start-session attachments](#start-session-attachments-wire-contract-only); see that section for the intended semantics and what still has to be built. |
 
-## Start-session attachments (wire contract only)
+## Start-session attachments
 
-`StartSessionRequest.attachments` (field 29, `repeated SessionAttachment`) lets a client attach documents to a session **at start time**, before the session directory exists. The proto contract is pinned so `tddy-web` and the daemon can be built against it independently; **no part of it is implemented yet.**
+`StartSessionRequest.attachments` (field 29, `repeated SessionAttachment`) lets a client attach documents to a session **at start time**, before the session directory exists. The daemon materializes every attachment into `{session_dir}/artifacts/attachments/<basename>` **before** the agent launches, so the agent sees a plain local file regardless of which source produced it.
 
-> ⚠️ **Status: not implemented.** The three staging RPCs return `UNIMPLEMENTED` (stubs in `connection_service.rs`, marked `TODO(start-session-attachments)`), and `start_session` **ignores** `attachments` entirely — a request carrying them starts a session with no attachments and no error. Do not build product behavior on this until the items below land.
+> ✅ **Status: implemented (host side).** The three staging RPCs (`UploadStagedAttachmentChunk` / `ListStagedAttachments` / `DeleteStagedAttachment`) operate on a per-host, per-caller staging root at `{tddy_data_dir}/staging/{os_user}/{staging_id}/{file_name}`; the unary `ReadHostDocument` fetches a `HostDocumentRef`'s bytes from the owning daemon (forwardable over the LiveKit common room — streaming RPCs return `unimplemented` for `PeerRoute::Forward`, so the fetch is unary); and `start_session` materializes both sources before spawn across every session type. The web picker and browser are still pending.
 
 **Two attachment sources**, both naming the host authority that owns the bytes:
 
@@ -60,17 +60,16 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 
 Adding a source of documents means adding a scope — that is the point, so each new root is reviewed rather than reachable by construction.
 
-`SessionAttachment.basename` is separate from the source locator, so the UI can rename an attachment without touching the stored file. Duplicate basenames within one request are to be rejected rather than silently renamed, and the intended materialization target is `{session_dir}/attachments/<basename>` before the agent launches — so the agent sees a plain local file regardless of which source produced it.
+`SessionAttachment.basename` is separate from the source locator, so the UI can rename an attachment without touching the stored file. Duplicate basenames within one request are rejected with `INVALID_ARGUMENT` before any attachment is written (no silent renaming), and the materialization target is `{session_dir}/artifacts/attachments/<basename>` before the agent launches — so the agent sees a plain local file regardless of which source produced it. A `StagedAttachmentRef` whose `daemon_instance_id` names a host other than the one running the session is a request **error** (no cross-host fetch of staged bytes); only `HostDocumentRef` performs a cross-host fetch (via `ReadHostDocument`). A staged file is materialized only once its upload is **complete** — the writer marks a staged file with a `.staged-complete` sentinel on the final chunk, and `StartSession` refuses an in-progress or aborted upload with `FAILED_PRECONDITION` rather than copying truncated bytes. A `HostDocumentRef` file over `MAX_HOST_DOCUMENT_BYTES` (4 MiB) is refused with `INVALID_ARGUMENT` rather than truncated — larger documents must be staged (chunked, no single-message limit). On any materialization failure the partial `artifacts/attachments/` writes for the request are cleaned up before `StartSession` returns the error.
 
 The staging upload mirrors the terminal **"Attach"** flow (`UploadSessionFileChunk`) with `session_id` replaced by `daemon_instance_id` and `upload_id` by `staging_id`: same client-side 48 KiB chunking, one unary per chunk, `last` on the final one, and the completed `StagedAttachmentEntry` returned on the last response. That keeps `tddy-web`'s `lib/fileUploadChunks.ts` reusable unchanged and each chunk inside a single LiveKit data packet — see [terminal-file-upload.md](../../tddy-web/docs/terminal-file-upload.md).
 
-**Known limitations / still to build** (host side, then web):
+**Known limitations / still to build** (web + follow-ups):
 
-- Staging root + chunked writer (per-caller, basename-validated), and staging GC — consumed batches plus a TTL for batches abandoned when a form is never submitted.
-- Materializing `attachments` into `{session_dir}/attachments/` before spawn, including the cross-host refusal for a foreign `StagedAttachmentRef` and duplicate-basename rejection.
-- `HostDocumentRef` scope resolution and the cross-host fetch by `daemon_instance_id` (note the existing streaming RPCs return `unimplemented` for `PeerRoute::Forward`; a fetch path has to be unary).
-- `tddy-web`: the Start-Session attachment picker and a browser for referencing existing docs on connected hosts.
-- A product PRD under `docs/ft/web/` and acceptance tests. No tests cover the new RPCs beyond the fact that they compile.
+- Staging GC — consumed-batch cleanup after a `StartSession` consumes a batch, plus a TTL for batches abandoned when a Start-Session form is never submitted.
+- A streaming `ReadHostDocument` for documents over `MAX_HOST_DOCUMENT_BYTES` (the unary path refuses them) — needs a forwardable streaming design, since today's streaming RPCs return `unimplemented` for `PeerRoute::Forward`.
+- `tddy-web`: the Start-Session attachment picker and a browser for referencing existing docs on connected hosts (the wire contract is now implementable).
+- A product PRD under `docs/ft/web/` and web acceptance tests.
 
 ## ListSessions workflow fields
 

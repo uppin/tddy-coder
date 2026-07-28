@@ -146,6 +146,14 @@ service ConnectionService {
   rpc UploadStagedAttachmentChunk(UploadStagedAttachmentChunkRequest) returns (UploadStagedAttachmentChunkResponse);
   rpc ListStagedAttachments(ListStagedAttachmentsRequest) returns (ListStagedAttachmentsResponse);
   rpc DeleteStagedAttachment(DeleteStagedAttachmentRequest) returns (DeleteStagedAttachmentResponse);
+  // Fetch the bytes of a document that already exists on a connected host, for materializing a
+  // `HostDocumentRef` during `StartSession`. Unary (not streaming) so it is forwardable over the
+  // LiveKit common room — streaming RPCs return `unimplemented` for `PeerRoute::Forward`. The
+  // owning daemon resolves the scope root under its own os_user mapping and refuses a path that
+  // escapes; binary (attachments may be images), so it does not reuse the UTF-8 readers. See
+  // docs/ft/coder/session-attachments.md and packages/tddy-daemon/docs/connection-service.md
+  // § Start-session attachments.
+  rpc ReadHostDocument(ReadHostDocumentRequest) returns (ReadHostDocumentResponse);
 }
 
 message ListToolsRequest {}
@@ -1324,4 +1332,28 @@ enum HostDocumentScope {
   HOST_DOCUMENT_SCOPE_SESSION_WORKTREE = 3;
   // The project's main checkout (ProjectEntry.main_repo_path) — e.g. a checked-in docs/ft/*.md.
   HOST_DOCUMENT_SCOPE_PROJECT_REPO = 4;
+}
+
+// Request to fetch one host document's bytes. Mirrors `HostDocumentRef` plus the caller's
+// `session_token` (re-resolved to an os_user by the owning daemon, so the referencing client's
+// host grants no access). Routes by `daemon_instance_id` like the staging RPCs: empty / matching
+// the local instance = read locally; otherwise forwarded to the peer daemon.
+message ReadHostDocumentRequest {
+  string session_token = 1;
+  string daemon_instance_id = 2;
+  HostDocumentScope scope = 3;
+  // Owning session for the SESSION_* scopes; ignored otherwise.
+  string session_id = 4;
+  // Owning project for HOST_DOCUMENT_SCOPE_PROJECT_REPO; ignored otherwise.
+  string project_id = 5;
+  // Path relative to the resolved root: POSIX separators, no "." / ".." segments, not absolute.
+  string relative_path = 6;
+}
+
+// The document's bytes. `byte_size` equals `data.len()` — a file over `MAX_HOST_DOCUMENT_BYTES`
+// is refused with INVALID_ARGUMENT (not truncated, since a truncated attachment is useless; the
+// caller should stage larger docs, since staging is chunked with no single-message limit).
+message ReadHostDocumentResponse {
+  bytes data = 1;
+  uint64 byte_size = 2;
 }

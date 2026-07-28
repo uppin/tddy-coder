@@ -163,6 +163,47 @@ pub fn copy_attachment_into_session(
     Ok(target)
 }
 
+/// Writes `data` into `artifacts/attachments/<basename>`, returning the written path.
+///
+/// Same containment and basename guards as [`copy_attachment_into_session`]; refuses to overwrite
+/// an existing attachment with [`Status::failed_precondition`].
+pub(crate) fn write_attachment_bytes(
+    session_dir: &Path,
+    basename: &str,
+    data: &[u8],
+) -> Result<PathBuf, Status> {
+    let safe_basename = validate_segment(basename)?;
+
+    let attachments_dir = session_attachments_root(session_dir);
+    std::fs::create_dir_all(&attachments_dir).map_err(|e| {
+        log::error!(
+            "write_attachment_bytes: create_dir_all {} failed: {e}",
+            attachments_dir.display()
+        );
+        Status::internal(format!("failed to create attachments dir: {e}"))
+    })?;
+
+    let artifacts_root = session_artifacts_root(session_dir);
+    let _canonical_attachments_dir = contained_canonical_dir(&artifacts_root, &attachments_dir)?;
+
+    let target = canonical_attachment_write_path(session_dir, safe_basename);
+    if target.exists() {
+        return Err(Status::failed_precondition(
+            "an attachment with this name already exists",
+        ));
+    }
+
+    std::fs::write(&target, data).map_err(|e| {
+        log::error!(
+            "write_attachment_bytes: write {} failed: {e}",
+            target.display()
+        );
+        Status::internal(format!("failed to store attachment: {e}"))
+    })?;
+
+    Ok(target)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{copy_attachment_into_session, list_session_attachments, SessionAttachmentFile};

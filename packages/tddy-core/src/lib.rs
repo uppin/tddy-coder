@@ -128,6 +128,8 @@ pub use workflow::{
     session::{workflow_engine_storage_dir, WORKFLOW_ENGINE_STORAGE_SUBDIR},
     GoalOptions,
 };
+#[allow(deprecated)]
+pub use worktree::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF;
 pub use worktree::{
     create_worktree, detect_default_remote_name, fetch_integration_base, fetch_origin_master,
     list_recent_remote_branches, list_recent_remote_branches_skip, list_worktrees,
@@ -140,8 +142,6 @@ pub use worktree::{
     validate_integration_base_ref, worktree_dir, worktree_path_for_branch, WorktreeInfo,
     FALLBACK_DEFAULT_INTEGRATION_BASE_REF,
 };
-#[allow(deprecated)]
-pub use worktree::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF;
 
 #[cfg(test)]
 mod workflow_decouple_acceptance {

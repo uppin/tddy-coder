@@ -79,9 +79,12 @@ use livekit::DisconnectReason;
 use prost::Message;
 use serde::Deserialize;
 use tddy_service::proto::connection::{
-    AddProjectToHostRequest, AddProjectToHostResponse, ListProjectsRequest, ListProjectsResponse,
-    ProjectEntry as ProtoProjectEntry, SetProjectDefaultBranchRequest,
+    AddProjectToHostRequest, AddProjectToHostResponse, DeleteStagedAttachmentRequest,
+    DeleteStagedAttachmentResponse, ListProjectsRequest, ListProjectsResponse,
+    ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, ProjectEntry as ProtoProjectEntry,
+    ReadHostDocumentRequest, ReadHostDocumentResponse, SetProjectDefaultBranchRequest,
     SetProjectDefaultBranchResponse, StartSessionRequest, StartSessionResponse,
+    UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
 };
 
 use crate::config::DaemonConfig;
@@ -1141,6 +1144,88 @@ pub async fn forward_set_project_default_branch_via_livekit(
     SetProjectDefaultBranchResponse::decode(out.as_slice()).map_err(|e| {
         tddy_rpc::Status::internal(format!("decode SetProjectDefaultBranchResponse: {e}"))
     })
+}
+
+/// Forward **UploadStagedAttachmentChunk** to another daemon in the common room via LiveKit
+/// data-channel RPC.
+pub async fn forward_upload_staged_attachment_chunk_via_livekit(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &UploadStagedAttachmentChunkRequest,
+) -> Result<UploadStagedAttachmentChunkResponse, tddy_rpc::Status> {
+    let body = request.encode_to_vec();
+    let out = forward_to_peer(
+        room_slot,
+        peer_instance_id,
+        "connection.ConnectionService",
+        "UploadStagedAttachmentChunk",
+        body,
+    )
+    .await?;
+    UploadStagedAttachmentChunkResponse::decode(out.as_slice()).map_err(|e| {
+        tddy_rpc::Status::internal(format!("decode UploadStagedAttachmentChunkResponse: {e}"))
+    })
+}
+
+/// Forward **ListStagedAttachments** to another daemon in the common room via LiveKit
+/// data-channel RPC.
+pub async fn forward_list_staged_attachments_via_livekit(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &ListStagedAttachmentsRequest,
+) -> Result<ListStagedAttachmentsResponse, tddy_rpc::Status> {
+    let body = request.encode_to_vec();
+    let out = forward_to_peer(
+        room_slot,
+        peer_instance_id,
+        "connection.ConnectionService",
+        "ListStagedAttachments",
+        body,
+    )
+    .await?;
+    ListStagedAttachmentsResponse::decode(out.as_slice()).map_err(|e| {
+        tddy_rpc::Status::internal(format!("decode ListStagedAttachmentsResponse: {e}"))
+    })
+}
+
+/// Forward **DeleteStagedAttachment** to another daemon in the common room via LiveKit
+/// data-channel RPC.
+pub async fn forward_delete_staged_attachment_via_livekit(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &DeleteStagedAttachmentRequest,
+) -> Result<DeleteStagedAttachmentResponse, tddy_rpc::Status> {
+    let body = request.encode_to_vec();
+    let out = forward_to_peer(
+        room_slot,
+        peer_instance_id,
+        "connection.ConnectionService",
+        "DeleteStagedAttachment",
+        body,
+    )
+    .await?;
+    DeleteStagedAttachmentResponse::decode(out.as_slice()).map_err(|e| {
+        tddy_rpc::Status::internal(format!("decode DeleteStagedAttachmentResponse: {e}"))
+    })
+}
+
+/// Forward **ReadHostDocument** to another daemon in the common room via LiveKit data-channel RPC.
+pub async fn forward_read_host_document_via_livekit(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &ReadHostDocumentRequest,
+) -> Result<ReadHostDocumentResponse, tddy_rpc::Status> {
+    let body = request.encode_to_vec();
+    let out = forward_to_peer(
+        room_slot,
+        peer_instance_id,
+        "connection.ConnectionService",
+        "ReadHostDocument",
+        body,
+    )
+    .await?;
+    ReadHostDocumentResponse::decode(out.as_slice())
+        .map_err(|e| tddy_rpc::Status::internal(format!("decode ReadHostDocumentResponse: {e}")))
 }
 
 #[cfg(test)]
