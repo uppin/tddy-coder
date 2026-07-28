@@ -1,8 +1,9 @@
 /**
- * Fluent component driver for GhosttyTerminalGrpc progressive forward-fill scroll-up history.
+ * Fluent component driver for GhosttyTerminalGrpc overlay double-buffer scroll-up history.
  *
- * Wraps mount → push frames → activate affordance → assert on the live/older buffers and fetcher
- * calls, so test bodies stay free of raw selectors, fake-stream wiring, and promise plumbing.
+ * Wraps mount → push frames → activate affordance → assert on the live/page buffers, fetcher
+ * calls, foreground pane, loading indicator, and swap actions, so test bodies stay free of raw
+ * selectors, fake-stream wiring, and promise plumbing.
  *
  * PRD: docs/ft/web/terminal-replay-lazy-scroll.md
  */
@@ -144,15 +145,84 @@ export function aGhosttyTerminalGrpcLazyHistory() {
       return this;
     },
 
-    /** Activate the "Load earlier output" affordance. */
+    /** Activate the "Load earlier output" affordance (first-time fill trigger). */
     activateLoadEarlier() {
       byTestId(TEST_IDS.loadEarlierHistory).click();
       return this;
     },
 
-    /** Simulate a scroll-up-at-top gesture (wheel up while pinned to the bottom). */
+    /** Activate the "View history" affordance (instant swap after the first fill). */
+    activateViewHistory() {
+      byTestId(TEST_IDS.viewHistory).click();
+      return this;
+    },
+
+    /** Activate the "Back to live" affordance on the page pane. */
+    activateBackToLive() {
+      byTestId(TEST_IDS.backToLive).click();
+      return this;
+    },
+
+    /** Simulate a scroll-up-at-top gesture (wheel up while pinned to the bottom) on the live pane. */
     scrollUpAtTop() {
-      byTestId(TEST_IDS.ghosttyTerminal).trigger("wheel", { deltaY: -120, clientX: 100, clientY: 50 });
+      byTestId(TEST_IDS.terminalLivePane).trigger("wheel", {
+        deltaY: -120,
+        clientX: 100,
+        clientY: 50,
+      });
+      return this;
+    },
+
+    /** Simulate a scroll-down-at-bottom gesture (wheel down while pinned) on the page pane. */
+    scrollDownAtBottom() {
+      byTestId(TEST_IDS.terminalPagePane).trigger("wheel", {
+        deltaY: 120,
+        clientX: 100,
+        clientY: 50,
+      });
+      return this;
+    },
+
+    /**
+     * Drive the foreground terminal's viewport up by `lines` via its imperative handle so the
+     * onScroll sync path fires deterministically (real wheel events on the canvas are not reliably
+     * delivered to ghostty-web under Cypress). Resolves after the viewportY mirror updates.
+     */
+    scrollForegroundUp(lines: number) {
+      cy.window().then((win) => {
+        // The foreground terminal is the one whose pane has data-foreground="true". Reach the
+        // imperative handle through the live/page pane's underlying GhosttyTerminal by dispatching
+        // a CustomEvent the component listens for — but the component has no such channel. Instead
+        // we use the public viewport mirror: we cannot call the handle from here, so we trigger a
+        // keyboard PageUp-equivalent via the canvas focus path is also unreliable. Therefore we
+        // expose the scroll by calling the handle through a test-only window hook (see component).
+        const hook = (win as unknown as { __tddyScrollForegroundUp?: (n: number) => void })
+          .__tddyScrollForegroundUp;
+        expect(hook, "test-only scroll hook registered").to.exist;
+        hook!(lines);
+      });
+      return this;
+    },
+
+    /** Assert the live terminal's mirrored viewportY equals the given value. */
+    expectLiveViewportY(expected: number) {
+      byTestId(TEST_IDS.terminalLiveViewportY).should(($el) => {
+        expect(
+          Number($el[0].textContent ?? "NaN"),
+          "live terminal viewportY",
+        ).to.equal(expected);
+      });
+      return this;
+    },
+
+    /** Assert the page terminal's mirrored viewportY equals the given value. */
+    expectPageViewportY(expected: number) {
+      byTestId(TEST_IDS.terminalPageViewportY).should(($el) => {
+        expect(
+          Number($el[0].textContent ?? "NaN"),
+          "page terminal viewportY",
+        ).to.equal(expected);
+      });
       return this;
     },
 
@@ -212,9 +282,47 @@ export function aGhosttyTerminalGrpcLazyHistory() {
       return this;
     },
 
+    /** Assert the loading indicator is visible (background page terminal is being filled). */
+    expectLoadingVisible() {
+      byTestId(TEST_IDS.terminalHistoryLoading).should("exist").and("be.visible");
+      return this;
+    },
+
+    /** Assert the loading indicator is absent. */
+    expectLoadingAbsent() {
+      byTestId(TEST_IDS.terminalHistoryLoading).should("not.exist");
+      return this;
+    },
+
+    /** Assert the live pane is the foreground (visible, interactive). */
+    expectLiveForeground() {
+      byTestId(TEST_IDS.terminalLivePane).should("have.attr", "data-foreground", "true");
+      byTestId(TEST_IDS.terminalPagePane).should("have.attr", "data-foreground", "false");
+      return this;
+    },
+
+    /** Assert the page pane is the foreground (visible, interactive) and the live pane is hidden. */
+    expectPageForeground() {
+      byTestId(TEST_IDS.terminalPagePane).should("have.attr", "data-foreground", "true");
+      byTestId(TEST_IDS.terminalLivePane).should("have.attr", "data-foreground", "false");
+      return this;
+    },
+
+    /** Assert the "Back to live" affordance is visible on the page pane. */
+    expectBackToLiveVisible() {
+      byTestId(TEST_IDS.backToLive).should("exist").and("be.visible");
+      return this;
+    },
+
+    /** Assert the "View history" affordance is visible on the live pane (after the first fill). */
+    expectViewHistoryVisible() {
+      byTestId(TEST_IDS.viewHistory).should("exist").and("be.visible");
+      return this;
+    },
+
     /**
      * Assert the LIVE terminal buffer contains the given texts in order. Reads the hidden
-     * `terminal-buffer-text` mirror (the live terminal only — scrollback stays 0).
+     * `terminal-buffer-text` mirror (the live terminal — now scrollback > 0 so it can be synced).
      */
     expectLiveBufferContainsInOrder(...texts: string[]) {
       byTestId("terminal-buffer-text").should(($el) => {
@@ -230,8 +338,8 @@ export function aGhosttyTerminalGrpcLazyHistory() {
     },
 
     /**
-     * Assert the OLDER-history terminal buffer contains the given texts in order. Reads the hidden
-     * `terminal-older-buffer-text` mirror (the forward-filled older terminal).
+     * Assert the OLDER-history page terminal buffer contains the given texts in order. Reads the
+     * hidden `terminal-older-buffer-text` mirror (the forward-filled page terminal).
      */
     expectOlderBufferContainsInOrder(...texts: string[]) {
       byTestId(TEST_IDS.terminalOlderBufferText).should(($el) => {

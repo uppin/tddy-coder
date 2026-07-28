@@ -219,20 +219,26 @@ chunk at a time, until the capture ring's anchor is reached.
 1. On connect, the client receives the initial replay frame carrying `end_offset` (the anchor) and
    `at_oldest`.
 2. When the user activates "Load earlier output" (or scrolls up on the live terminal) and `at_oldest`
-   is false, the client reveals a second, read-only older-history terminal and calls
+   is false, the client shows a loading indicator, forward-fills a second, read-only older-history
+   "page" terminal **in the background**, and calls
    `GetTerminalHistory(from_offset = 0, until_offset = end_offset)`, appending the returned chunk's
-   bytes to the older terminal.
+   bytes to the page terminal.
 3. The next call uses `from_offset = <previous chunk's end_offset>`, advancing forward toward the
    anchor.
 4. A chunk with `at_end = true` (or an empty/null chunk) terminates the forward fill — the client
-   stops issuing further calls and the affordance disappears.
+   stops issuing further calls, the loading indicator disappears, and the page terminal **swaps to
+   the foreground** (the live terminal stays mounted underneath and current). "Back to live" (or a
+   scroll-down-at-bottom gesture on the page terminal) swaps back instantly.
 
 The web client's forward-fill state machine lives in
 `packages/tddy-web/src/lib/terminalHistoryLoader.ts` (`TerminalHistoryForwardLoader`);
-`GhosttyTerminalGrpc` owns the scroll-up flow end-to-end: it captures the anchor from the initial
-frame, renders the stacked older-history terminal, and drives the progressive forward fill via a
-`historyFetcher` prop built by `GrpcSessionTerminal`. (The live terminal stays at `scrollback: 0`
-to preserve the no-duplicate-pane fix; the older terminal carries `scrollback > 0`. The
+`GhosttyTerminalGrpc` owns the overlay double-buffer paging end-to-end: it captures the anchor from
+the initial frame, renders two interchangeable overlaid terminals (live `scrollback: 0` always
+mounted & streaming; page `scrollback > 0`), shows a loading indicator while forward-filling the
+page terminal in the background, swaps it to the foreground on `at_end`, and swaps back on
+"Back to live" / scroll-down-at-bottom — all via a `historyFetcher` prop built by
+`GrpcSessionTerminal`. (The live terminal stays at `scrollback: 0` to preserve the
+no-duplicate-pane fix; the page terminal carries `scrollback > 0`. The
 `onRegisterLoadOlderHistory` indirection is removed.)
 
 ### Unified PTY-over-RPC bridge

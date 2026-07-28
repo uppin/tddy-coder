@@ -87,6 +87,12 @@ export interface GhosttyTerminalProps {
   onBell?: () => void;
   onTitleChange?: (title: string) => void;
   onReady?: () => void;
+  /**
+   * Fires with the new viewportY (lines scrolled up from the bottom; 0 = pinned to latest)
+   * whenever the viewport moves — wheel, touch, keyboard, or programmatic scroll. Used by
+   * GhosttyTerminalGrpc to mirror scroll position across the two overlay terminals.
+   */
+  onScroll?: (viewportY: number) => void;
   /** When true, log write/onData and lifecycle to console. */
   debugLogging?: boolean;
   /** When true, prevent terminal from receiving focus on pointer/touch events (e.g. mobile when keyboard closed). */
@@ -107,9 +113,10 @@ export interface GhosttyTerminalProps {
    */
   fixedViewportGrid?: { cols: number; rows: number };
   /**
-   * Lines of scrollback to retain above the viewport (0 = none, the default for the live terminal
-   * so periodic TUI re-paints do not accumulate as duplicate panes). A non-zero value is used by the
-   * older-history terminal so the user can scroll through forward-filled history.
+   * Lines of scrollback to retain above the viewport. 0 = none. A non-zero value is used by BOTH the
+   * live and the older-history terminals in the overlay pair so their viewports can be synced (scrolling
+   * one mirrors onto the other). Tradeoff: a scrollback > 0 live terminal accumulates duplicate panes
+   * from periodic TUI re-paints — ghostty-web has no prepend/suppress API to avoid it.
    */
   scrollback?: number;
   /** `data-testid` for the terminal container. Defaults to `ghostty-terminal`; the older-history
@@ -137,6 +144,17 @@ export interface GhosttyTerminalHandle {
   getViewportScrollOffset?(): number;
   /** Scroll the viewport to the top of the scrollback (no-op when scrollback is 0). */
   scrollToTop?(): void;
+  /** Scroll the viewport to the bottom (latest output) — used after a page swap to land seamlessly. */
+  scrollToBottom?(): void;
+  /**
+   * Scroll to an absolute line in the combined buffer (0 = top of scrollback,
+   * scrollbackLength = bottom). Ghostty-web's primary "full control" viewport API.
+   */
+  scrollToLine?(line: number): void;
+  /** Relative scroll by `amount` lines (positive = down, negative = up). */
+  scrollLines?(amount: number): void;
+  /** Number of scrollback (history) lines, excluding the active screen. */
+  getScrollbackLength?(): number;
   /** True when the viewport is pinned to the latest output (not scrolled up into scrollback). */
   isPinnedToBottom?(): boolean;
 }
@@ -157,6 +175,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       onBell,
       onTitleChange,
       onReady,
+      onScroll,
       debugLogging = false,
       preventFocusOnTap = false,
       sessionActive = true,
@@ -194,6 +213,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const wheelPinchAccumRef = useRef(0);
     const onDataRef = useRef(onData);
     onDataRef.current = onData;
+    const onScrollRef = useRef(onScroll);
+    onScrollRef.current = onScroll;
 
     const applyFontSizePx = useCallback(
       (px: number, bounds?: { min: number; max: number }) => {
@@ -281,6 +302,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         if (onTitleChange) {
           disposables.push(term.onTitleChange(onTitleChange));
         }
+        disposables.push(
+          term.onScroll((vy) => {
+            onScrollRef.current?.(vy);
+          })
+        );
         disposablesRef.current = disposables;
 
         term.open(containerRef.current);
@@ -926,6 +952,41 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           // forward-filled history. No-op when scrollback is 0 (nothing to scroll through).
           const t = termRef.current as unknown as { scrollToTop?: () => void } | null;
           t?.scrollToTop?.();
+        },
+        scrollToBottom() {
+          // Scroll the viewport to the bottom (latest output). Used after a page swap so the user
+          // lands on the newest line of the just-populated older page (seamless continuation).
+          const t = termRef.current as unknown as {
+            getViewportY?: () => number;
+            scrollLines?: (n: number) => void;
+            scrollToBottom?: () => void;
+          } | null;
+          if (!t) return;
+          if (t.scrollToBottom) {
+            t.scrollToBottom();
+            return;
+          }
+          // Fallback: scroll back to the bottom by negating the current viewport offset.
+          const vy = t.getViewportY?.() ?? 0;
+          if (vy !== 0 && t.scrollLines) {
+            t.scrollLines(-vy);
+          }
+        },
+        scrollToLine(line: number) {
+          // Absolute viewport set: 0 = top of scrollback, scrollbackLength = bottom.
+          // The primary "full control" API for positioning the viewport at an exact line.
+          const t = termRef.current as unknown as { scrollToLine?: (n: number) => void } | null;
+          t?.scrollToLine?.(line);
+        },
+        scrollLines(amount: number) {
+          // Relative scroll: positive = down toward latest, negative = up into scrollback.
+          const t = termRef.current as unknown as { scrollLines?: (n: number) => void } | null;
+          t?.scrollLines?.(amount);
+        },
+        getScrollbackLength() {
+          // History lines excluding the active screen — used to compute absolute line from viewportY.
+          const t = termRef.current as unknown as { getScrollbackLength?: () => number } | null;
+          return t?.getScrollbackLength?.() ?? 0;
         },
         isPinnedToBottom() {
           // True when the viewport is at the latest output (not scrolled up into scrollback).

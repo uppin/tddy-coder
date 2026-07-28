@@ -1,5 +1,5 @@
 /**
- * Acceptance test: GrpcSessionTerminal progressive forward-fill history wiring.
+ * Acceptance test: GrpcSessionTerminal overlay double-buffer history wiring.
  *
  * PRD: docs/ft/web/terminal-replay-lazy-scroll.md
  *
@@ -7,7 +7,10 @@
  * frame, builds a forward `historyFetcher`, and passes it (plus full frames carrying the offset
  * metadata) to `GhosttyTerminalGrpc`. When the user activates "Load earlier output",
  * `GetTerminalHistory` is called forward from offset 0 bounded by the anchor; a second call chains
- * forward from the previous chunk's `end_offset` until `at_end`.
+ * forward from the previous chunk's `end_offset` until `at_end`. The shared component overlays the
+ * page terminal behind the live one, shows a loading indicator while filling, then swaps it to the
+ * foreground once `at_end` is reached. This test verifies the wiring (RPC offsets + buffer content);
+ * the paging UX is covered by GhosttyTerminalGrpcLazyHistory.cy.tsx.
  */
 
 import React, { useMemo } from "react";

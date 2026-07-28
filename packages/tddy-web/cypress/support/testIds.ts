@@ -57,8 +57,21 @@ export const TEST_IDS = {
   uploadProgressError: "upload-progress-error",
   // Lazy scroll-up history (docs/ft/web/terminal-replay-lazy-scroll.md)
   loadEarlierHistory: "load-earlier-history",
-  terminalOlderPane: "terminal-older-pane",
+  /** "View history" affordance — shown on the live pane after the first fill, swaps to the page pane. */
+  viewHistory: "view-history",
+  /** "Back to live" affordance — shown on the page pane, swaps back to the live pane. */
+  backToLive: "back-to-live",
+  /** Loading indicator shown while the background page terminal is being forward-filled. */
+  terminalHistoryLoading: "terminal-history-loading",
+  /** The overlay layer holding the live (streaming) terminal. Scrollable (scrollback > 0) so its viewport can be synced with the page terminal. */
+  terminalLivePane: "terminal-live-pane",
+  /** The overlay layer holding the older-history (scrollback>0) page terminal. */
+  terminalPagePane: "terminal-page-pane",
   terminalOlderBufferText: "terminal-older-buffer-text",
+  /** Hidden mirror of the live terminal's viewportY (lines scrolled up from the bottom). */
+  terminalLiveViewportY: "terminal-live-viewport-y",
+  /** Hidden mirror of the page terminal's viewportY (lines scrolled up from the bottom). */
+  terminalPageViewportY: "terminal-page-viewport-y",
   // Enqueued input overlay (docs/ft/web/enqueued-input-overlay.md)
   enqueuedInputOverlay: "enqueued-input-overlay",
   enqueuedInputText: "enqueued-input-text",
