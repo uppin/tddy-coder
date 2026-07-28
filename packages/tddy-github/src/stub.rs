@@ -93,6 +93,12 @@ impl GitHubOAuthProvider for StubGitHubProvider {
         let access_token = format!("stub-access-token-{}", Uuid::new_v4());
         Ok((access_token, user))
     }
+
+    fn issues_usable_access_token(&self) -> bool {
+        // The token above is synthetic — GitHub would reject it. A stub/demo login therefore holds
+        // no credential at all, and PR lookups for it must short-circuit to "no PRs" (D12).
+        false
+    }
 }
 
 #[cfg(test)]

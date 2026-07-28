@@ -334,9 +334,9 @@ export function interceptStartSession(sessionId: string): void {
   ).as("startSession");
 }
 
-/** Intercept ListProjectBranches and reply with the given branch names. */
-export function interceptListProjectBranches(branches: string[] = []): void {
-  const body = toArrayBuffer(listProjectBranches(branches));
+/** Intercept ListProjectBranches and reply with the given branch names (default remote `origin`). */
+export function interceptListProjectBranches(branches: string[] = [], defaultRemote = "origin"): void {
+  const body = toArrayBuffer(listProjectBranches(branches, defaultRemote));
   cy.intercept("POST", "**/rpc/connection.ConnectionService/ListProjectBranches", (req) => {
     req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body });
   }).as("listProjectBranches");

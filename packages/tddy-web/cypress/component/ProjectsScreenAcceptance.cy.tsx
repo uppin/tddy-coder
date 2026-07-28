@@ -44,23 +44,28 @@ function aProject(overrides: Partial<ProjectEntry>): ProjectEntry {
     mainRepoPath: "/home/dev/repos/alpha",
     daemonInstanceId: LOCAL_HOST,
     mainBranchRef: "",
+    defaultRemote: "",
     ...overrides,
   } as ProjectEntry;
 }
 
 /** No-op branch loader for presentational tests that don't exercise the default-branch dropdown. */
-const noBranches = () => Promise.resolve<string[]>([]);
+const noBranches = () => Promise.resolve<{ branches: string[]; defaultRemote: string }>({ branches: [], defaultRemote: "" });
 
 /**
  * In-memory backend pre-seeded with the RPCs `ProjectsAppPage` calls on startup. `branches` seeds
  * the default-branch dropdown; `setProjectDefaultBranch` mutates the local project state so a
  * refreshed list reflects the new default.
  */
-function aProjectsBackend(projects: ProjectEntry[], branches: string[] = []): InMemoryRpcBackend {
+function aProjectsBackend(
+  projects: ProjectEntry[],
+  branches: string[] = [],
+  defaultRemote = "origin",
+): InMemoryRpcBackend {
   const state = [...projects];
   return anInMemoryRpcBackend()
     .onUnary(ConnectionService.method.listProjects, () => ({ projects: state }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches }))
+    .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches, defaultRemote }))
     .onUnary(ConnectionService.method.createProject, (req) => {
       const project = aProject({
         projectId: "proj-new",
@@ -285,7 +290,7 @@ it("shows the project's stored default branch as the selected branch", () => {
       onAddProjectToHost={cy.stub()}
       onSetDefaultBranch={cy.stub()}
       loadProjectBranches={() =>
-        Promise.resolve(["origin/master", "origin/main", "origin/dev"])
+        Promise.resolve({ branches: ["origin/master", "origin/main", "origin/dev"], defaultRemote: "origin" })
       }
     />,
   );
@@ -304,7 +309,7 @@ it("pre-selects origin/master when a project has no stored default and master ex
       onAddProjectToHost={cy.stub()}
       onSetDefaultBranch={cy.stub()}
       loadProjectBranches={() =>
-        Promise.resolve(["origin/main", "origin/master", "origin/dev"])
+        Promise.resolve({ branches: ["origin/main", "origin/master", "origin/dev"], defaultRemote: "origin" })
       }
     />,
   );
@@ -322,7 +327,7 @@ it("pre-selects origin/main when a project has no stored default and no master e
       onCreateProject={cy.stub()}
       onAddProjectToHost={cy.stub()}
       onSetDefaultBranch={cy.stub()}
-      loadProjectBranches={() => Promise.resolve(["origin/dev", "origin/main"])}
+      loadProjectBranches={() => Promise.resolve({ branches: ["origin/dev", "origin/main"], defaultRemote: "origin" })}
     />,
   );
 
@@ -340,7 +345,7 @@ it("offers every remote branch, including slash-containing names, as a selectabl
       onAddProjectToHost={cy.stub()}
       onSetDefaultBranch={cy.stub()}
       loadProjectBranches={() =>
-        Promise.resolve(["origin/main", "origin/master", "origin/release/2025"])
+        Promise.resolve({ branches: ["origin/main", "origin/master", "origin/release/2025"], defaultRemote: "origin" })
       }
     />,
   );
@@ -370,4 +375,24 @@ it("sets the project default branch to the chosen remote branch", () => {
     expect(calls[0].mainBranchRef).to.equal("origin/dev");
   });
   projectsScreenPage.defaultBranchValue("proj-alpha").should("equal", "origin/dev");
+});
+
+it("pre-selects <remote>/master for a project whose default remote is not origin", () => {
+  // Given a project whose daemon-resolved default remote is `upstream` (no stored default), so the
+  // picker offers `upstream/*` names and the heuristic must use that remote, not `origin`
+  cy.mount(
+    <ProjectsScreen
+      projects={[aProject({ projectId: "proj-alpha", mainBranchRef: "" })]}
+      daemons={DAEMON_HOSTS}
+      onCreateProject={cy.stub()}
+      onAddProjectToHost={cy.stub()}
+      onSetDefaultBranch={cy.stub()}
+      loadProjectBranches={() =>
+        Promise.resolve({ branches: ["upstream/main", "upstream/master", "upstream/dev"], defaultRemote: "upstream" })
+      }
+    />,
+  );
+
+  // Then — the dropdown pre-selects upstream/master (the live-resolution first choice for that remote)
+  projectsScreenPage.defaultBranchValue("proj-alpha").should("equal", "upstream/master");
 });

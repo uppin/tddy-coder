@@ -26,7 +26,10 @@ use uuid::Uuid;
 use crate::active_elicitation::{ActiveElicitationCoordinator, SharedActiveElicitationCoordinator};
 use crate::config::DaemonConfig;
 use crate::presenter_intent_client;
-use crate::project_storage::{self, effective_integration_base_ref_for_project, ProjectData};
+use crate::project_storage::{
+    self, effective_integration_base_ref_for_project, effective_remote_name_for_project,
+    ProjectData,
+};
 use crate::session_list_enrichment::SessionListStatusDisplay;
 use crate::spawn_worker;
 use crate::spawner::{self, SpawnOptions};
@@ -1482,18 +1485,24 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         if !repo_path.exists() {
             anyhow::bail!("project main repo path does not exist");
         }
-        let page_peek =
-            match list_recent_remote_branches_skip(repo_path, list_offset, BRANCH_PAGE_SIZE + 1) {
-                Ok(b) => b,
-                Err(e) => {
-                    log::warn!(
-                        target: "tddy_daemon::telegram_session_control",
-                        "list_recent_remote_branches_skip: {}",
-                        e
-                    );
-                    Vec::new()
-                }
-            };
+        let remote =
+            effective_remote_name_for_project(&projects_dir, &project.project_id, repo_path)?;
+        let page_peek = match list_recent_remote_branches_skip(
+            repo_path,
+            &remote,
+            list_offset,
+            BRANCH_PAGE_SIZE + 1,
+        ) {
+            Ok(b) => b,
+            Err(e) => {
+                log::warn!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "list_recent_remote_branches_skip: {}",
+                    e
+                );
+                Vec::new()
+            }
+        };
         let has_more = page_peek.len() > BRANCH_PAGE_SIZE;
         let branches: Vec<String> = page_peek.into_iter().take(BRANCH_PAGE_SIZE).collect();
         let short_default = default_ref
@@ -1614,6 +1623,8 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         };
         let intent = cs.workflow.as_ref().and_then(|w| w.branch_worktree_intent);
         let projects_dir = projects_dir_for_telegram_workflow_spawn(deps)?;
+        let remote =
+            effective_remote_name_for_project(&projects_dir, &project.project_id, repo_path)?;
         // Read routing snapshot before modifying cs — we need session_type to set new_branch_name
         // for claude-cli sessions (NewBranchFromBase requires new_branch_name to be set before
         // setup_worktree_for_session_with_optional_chain_base is called).
@@ -1659,7 +1670,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 .checked_add(branch_idx)
                 .and_then(|n| n.checked_sub(1))
                 .ok_or_else(|| anyhow::anyhow!("invalid branch index"))?;
-            let picked = list_recent_remote_branches_skip(repo_path, global_idx, 1)
+            let picked = list_recent_remote_branches_skip(repo_path, &remote, global_idx, 1)
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             let chain = picked
                 .first()
@@ -2715,7 +2726,20 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
 
         // The changeset on disk already has the correct branch intent (written by the branch
         // callback) and model (raw-merged by persist_changeset_model).
-        // setup_worktree_for_session_with_optional_chain_base reads it from session_dir directly.
+        let cs = tddy_core::read_changeset(&session_dir)?;
+        let new_branch_name = cs
+            .workflow
+            .as_ref()
+            .and_then(|w| w.new_branch_name.as_deref())
+            .unwrap_or("");
+        let chain_base = tddy_core::resolve_chain_base_for_session_spawn(
+            &self.sessions_base,
+            None,
+            repo_root,
+            new_branch_name,
+            cs.worktree_integration_base_ref.as_deref(),
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
         // Setup the worktree (blocking: involves git fetch + git worktree add).
         let repo_root_owned = repo_root.to_path_buf();
@@ -2724,7 +2748,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             tddy_core::setup_worktree_for_session_with_optional_chain_base(
                 &repo_root_owned,
                 &session_dir_clone,
-                None,
+                chain_base.as_deref(),
             )
             .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
         })
@@ -2895,13 +2919,28 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             );
         }
 
+        let cs = tddy_core::read_changeset(&session_dir)?;
+        let new_branch_name = cs
+            .workflow
+            .as_ref()
+            .and_then(|w| w.new_branch_name.as_deref())
+            .unwrap_or("");
+        let chain_base = tddy_core::resolve_chain_base_for_session_spawn(
+            &self.sessions_base,
+            None,
+            repo_root,
+            new_branch_name,
+            cs.worktree_integration_base_ref.as_deref(),
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
         let repo_root_owned = repo_root.to_path_buf();
         let session_dir_clone = session_dir.clone();
         let worktree_path: std::path::PathBuf = tokio::task::spawn_blocking(move || {
             tddy_core::setup_worktree_for_session_with_optional_chain_base(
                 &repo_root_owned,
                 &session_dir_clone,
-                None,
+                chain_base.as_deref(),
             )
             .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
         })

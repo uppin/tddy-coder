@@ -158,8 +158,12 @@ pub(crate) fn ensure_worktree_for_session(
     }
 
     let repo_root = find_git_root(&output_dir);
-    let chain_opt = cs.worktree_integration_base_ref.as_deref();
-    match setup_worktree_for_session_with_optional_chain_base(&repo_root, session_dir, chain_opt) {
+    // No stack_parent in the workflow-recipe path: the chain base is the operator-selected
+    // persisted field (or the default base when unset). Routing through
+    // resolve_chain_base_for_session_spawn would require a real sessions_base (two levels above
+    // session_dir); the direct read is correct and avoids a misleading unused argument.
+    let chain_base = cs.worktree_integration_base_ref.as_deref();
+    match setup_worktree_for_session_with_optional_chain_base(&repo_root, session_dir, chain_base) {
         Ok(worktree_path) => {
             context.set_sync("worktree_dir", worktree_path.clone());
             if let Some(tx) = event_tx {

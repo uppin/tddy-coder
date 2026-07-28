@@ -5,6 +5,9 @@
 //! PR's base — the same primitives `bridge::execute_stack_repoint` uses, applied to one node so
 //! the web Repoint control and the agent repoint converge.
 //!
+//! These cases pass `target_base_branch = None`, which selects that original drop-merged-parents rule.
+//! The explicit-target rule is covered by `pr_stack_repoint_dead_end_acceptance.rs`.
+//!
 //! PRD: docs/ft/coder/pr-stack-live-status.md § capability 4.
 
 use std::path::Path;
@@ -13,7 +16,9 @@ use std::sync::Mutex;
 use tddy_core::changeset::{
     read_changeset, write_changeset, Changeset, GithubPrStatus, Stack, StackNode,
 };
-use tddy_workflow_recipes::orchestrate_pr_stack::github::{GithubPrApi, PrRef, PrState, PrView};
+use tddy_workflow_recipes::orchestrate_pr_stack::github::{
+    GithubPrApi, PrLookupOutcome, PrRef, PrState, PrView,
+};
 use tddy_workflow_recipes::pr_stack::repoint_planned_pr_node;
 
 // --- a fake GitHub PR API that records base re-targeting ---------------------
@@ -39,15 +44,12 @@ impl GithubPrApi for FakeGithub {
             url: "https://github.com/acme/repo/pull/42".to_string(),
         }))
     }
-    fn get_pr_by_head(
-        &self,
-        _head_branch: &str,
-    ) -> Result<Option<PrView>, tddy_core::WorkflowError> {
-        Ok(Some(PrView {
+    fn get_pr_by_head(&self, _head_branch: &str) -> PrLookupOutcome {
+        PrLookupOutcome::Found(PrView {
             number: 42,
             url: "https://github.com/acme/repo/pull/42".to_string(),
             state: PrState::Open,
-        }))
+        })
     }
     fn merge_pr(&self, _number: u64) -> Result<String, tddy_core::WorkflowError> {
         Ok("merge-sha".to_string())
@@ -135,7 +137,7 @@ fn repoint_planned_pr_node_drops_a_merged_parent_from_the_node_parents() {
     let gh = FakeGithub::new();
 
     // When
-    repoint_planned_pr_node(dir, dir, "n2", "master", &gh).expect("repoint should succeed");
+    repoint_planned_pr_node(dir, dir, "n2", "master", None, &gh).expect("repoint should succeed");
 
     // Then — the merged parent n1 is gone; the open parent n3 remains
     let loaded = read_changeset(dir).unwrap().stack.unwrap();
@@ -157,7 +159,7 @@ fn repoint_planned_pr_node_retargets_the_open_pr_base_to_the_effective_base() {
     let gh = FakeGithub::new();
 
     // When
-    repoint_planned_pr_node(dir, dir, "n2", "master", &gh).expect("repoint should succeed");
+    repoint_planned_pr_node(dir, dir, "n2", "master", None, &gh).expect("repoint should succeed");
 
     // Then — the open PR (#42) is re-based onto the stack default branch on GitHub
     assert_eq!(

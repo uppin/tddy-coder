@@ -10,11 +10,19 @@ use std::sync::OnceLock;
 use crate::branch_worktree_intent;
 use crate::changeset::{read_changeset, write_changeset, BranchWorktreeIntent};
 
-/// Default remote-tracking ref used for integration worktrees when a project does not specify
-/// `main_branch_ref` in the daemon project registry (legacy YAML rows).
+/// Last-resort remote-tracking ref used for integration worktrees when no remote can be detected
+/// from the main worktree's upstream and the project registry does not specify `remote_name` or
+/// `main_branch_ref`.
 ///
-/// This matches the historical hardcoded contract (`origin/master`) before per-project base refs.
-pub const DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF: &str = "origin/master";
+/// `origin/master` preserves the historical hardcoded contract for the worst case (no upstream, no
+/// project config). Every other path resolves the remote name from the main worktree's upstream
+/// tracking branch or the project's stored `remote_name` before falling back here.
+pub const FALLBACK_DEFAULT_INTEGRATION_BASE_REF: &str = "origin/master";
+
+/// Legacy alias for [`FALLBACK_DEFAULT_INTEGRATION_BASE_REF`]; kept for callers that documented the
+/// old name.
+#[deprecated(note = "use FALLBACK_DEFAULT_INTEGRATION_BASE_REF")]
+pub const DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF: &str = FALLBACK_DEFAULT_INTEGRATION_BASE_REF;
 
 /// Optional `GIT_SSH_COMMAND` applied to git subprocesses that contact a remote. Set once at daemon
 /// startup from `DaemonConfig::git.ssh_command`. `None` (the default) inherits the ambient
@@ -43,100 +51,163 @@ fn git_remote_command(repo_root: &Path) -> Command {
     cmd
 }
 
-/// Validates a per-project integration base ref: a single remote-tracking ref `origin/<branch>` with
-/// no shell metacharacters or extra git arguments.
-pub fn validate_integration_base_ref(s: &str) -> Result<(), String> {
-    let s = s.trim();
-    if s.is_empty() {
-        return Err("integration base ref must not be empty".to_string());
+/// The local branch name behind a branch reference offered by a remote-branch picker.
+///
+/// Branch *pickers* deal in remote-tracking names — [`list_recent_remote_branches`] reads
+/// `refs/remotes/<remote>`, so `ListProjectBranches` (and the Telegram branch picker) offer
+/// `<remote>/<branch>`. Everything that operates on a branch needs the local name instead:
+/// `git worktree add <path> <remote>/feature/x` succeeds with a **detached HEAD**, so a session
+/// started that way looks healthy while every commit it makes is unreachable, whereas the
+/// unprefixed name makes git create or reuse the local branch that tracks `<remote>/feature/x`.
+///
+/// This legacy helper strips one leading `origin/` and is retained for the `origin` last-resort
+/// fallback path. Code that has resolved the actual default remote should call
+/// [`local_branch_name_for_remote`] instead so a non-`origin` remote is normalized correctly.
+///
+/// Exactly one leading prefix is stripped: a repository may legitimately hold
+/// `refs/heads/origin/foo`, and stripping repeatedly would rename it.
+#[must_use]
+pub fn local_branch_name(reference: &str) -> &str {
+    local_branch_name_for_remote(reference, "origin")
+}
+
+/// The local branch name behind a `<remote>/<branch>` reference: strips one leading
+/// `<remote>/` when present, and leaves any other name (already local, or carrying a different
+/// remote prefix) unchanged.
+///
+/// Exactly one leading `<remote>/` is stripped: a repository may legitimately hold a local branch
+/// whose name starts with `<remote>/`, and stripping repeatedly would rename it.
+#[must_use]
+pub fn local_branch_name_for_remote<'a>(reference: &'a str, remote: &str) -> &'a str {
+    let reference = reference.trim();
+    let prefix = format!("{remote}/");
+    reference.strip_prefix(&prefix).unwrap_or(reference)
+}
+
+/// Characters that must never appear in a remote name or branch path segment passed to a `git`
+/// invocation — they could widen a single `git fetch <remote> <path>` into something else.
+const FORBIDDEN_REF_CHARS: [char; 7] = [';', '|', '&', '$', '`', '\n', '\r'];
+
+/// Validates a remote name segment (the part before the first `/` in a remote-tracking ref):
+/// non-empty, no whitespace, no `..`, no `--`, and none of [`FORBIDDEN_REF_CHARS`]. Pure string
+/// rules — no git probe, so the remote is not required to exist in any particular repository.
+fn validate_remote_segment(remote: &str) -> Result<(), String> {
+    if remote.is_empty() {
+        return Err("integration base ref must be <remote>/<branch>: remote is empty".to_string());
     }
-    let rest = s
-        .strip_prefix("origin/")
-        .ok_or_else(|| "integration base ref must start with origin/".to_string())?;
-    if rest.is_empty() {
-        return Err("integration base ref must be origin/<branch-name>".to_string());
+    if remote.chars().any(|c| c.is_whitespace()) {
+        return Err("integration base ref remote must not contain whitespace".to_string());
     }
-    if rest.contains('/') {
-        return Err(
-            "integration base ref must be a single remote branch segment: origin/<branch-name>"
-                .to_string(),
-        );
+    if remote.contains("..") {
+        return Err("integration base ref remote must not contain `..`".to_string());
     }
-    if rest.chars().any(|c| c.is_whitespace()) {
+    if remote.contains("--") {
+        return Err("integration base ref remote must not contain `--`".to_string());
+    }
+    for forbidden in FORBIDDEN_REF_CHARS {
+        if remote.contains(forbidden) {
+            return Err(format!(
+                "integration base ref remote contains forbidden character: {:?}",
+                forbidden
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Validates a single branch path segment: non-empty, no whitespace, no `..`, no `--`, no
+/// [`FORBIDDEN_REF_CHARS`].
+fn validate_branch_segment(segment: &str) -> Result<(), String> {
+    if segment.is_empty() {
+        return Err("integration base ref must not contain empty path segments".to_string());
+    }
+    if segment.chars().any(|c| c.is_whitespace()) {
         return Err("integration base ref must not contain whitespace".to_string());
     }
-    for forbidden in [';', '|', '&', '$', '`', '\n', '\r'] {
-        if rest.contains(forbidden) {
+    if segment.contains("..") {
+        return Err("integration base ref must not contain `..`".to_string());
+    }
+    if segment.contains("--") {
+        return Err("integration base ref must not contain `--`".to_string());
+    }
+    for forbidden in FORBIDDEN_REF_CHARS {
+        if segment.contains(forbidden) {
             return Err(format!(
                 "integration base ref contains forbidden character: {:?}",
                 forbidden
             ));
         }
     }
-    if rest.contains("--") {
-        return Err("integration base ref must not contain `--`".to_string());
-    }
     Ok(())
 }
 
-/// Validates a chain-PR integration base ref: `origin/<branch-path>` where `<branch-path>` may
-/// contain `/` (e.g. `origin/feature/foo`). Rejects empty strings, shell metacharacters, and `..`.
-pub fn validate_chain_pr_integration_base_ref(s: &str) -> Result<(), String> {
+/// Splits a remote-tracking ref into `(remote, branch_path)` after validating the remote segment.
+/// Returns `Err` when there is no `/` (no remote segment) or the remote segment is unsafe.
+fn split_remote_ref(s: &str) -> Result<(&str, &str), String> {
     let s = s.trim();
     if s.is_empty() {
-        return Err("chain PR integration base ref must not be empty".to_string());
+        return Err("integration base ref must not be empty".to_string());
     }
-    let rest = s
-        .strip_prefix("origin/")
-        .ok_or_else(|| "chain PR integration base ref must start with origin/".to_string())?;
+    let Some((remote, rest)) = s.split_once('/') else {
+        return Err("integration base ref must be <remote>/<branch-name>".to_string());
+    };
+    validate_remote_segment(remote)?;
+    Ok((remote, rest))
+}
+
+/// Validates a per-project integration base ref: a single remote-tracking ref
+/// `<remote>/<branch>` with no shell metacharacters or extra git arguments. The remote is not
+/// required to be `origin` — any safe remote name is accepted (pure string rules, no git probe).
+pub fn validate_integration_base_ref(s: &str) -> Result<(), String> {
+    let (remote, rest) = split_remote_ref(s)?;
     if rest.is_empty() {
-        return Err("chain PR integration base ref must be origin/<branch-path>".to_string());
+        return Err("integration base ref must be <remote>/<branch-name>".to_string());
     }
-    if rest.contains("..") {
-        return Err("chain PR integration base ref must not contain `..`".to_string());
+    if rest.contains('/') {
+        return Err(
+            "integration base ref must be a single remote branch segment: <remote>/<branch-name>"
+                .to_string(),
+        );
     }
-    if rest.contains("--") {
-        return Err("chain PR integration base ref must not contain `--`".to_string());
-    }
-    if rest.chars().any(|c| c.is_whitespace()) {
-        return Err("chain PR integration base ref must not contain whitespace".to_string());
-    }
-    for forbidden in [';', '|', '&', '$', '`', '\n', '\r'] {
-        if rest.contains(forbidden) {
-            return Err(format!(
-                "chain PR integration base ref contains forbidden character: {:?}",
-                forbidden
-            ));
-        }
-    }
-    for segment in rest.split('/') {
-        if segment.is_empty() {
-            return Err(
-                "chain PR integration base ref must not contain empty path segments".to_string(),
-            );
-        }
-    }
+    validate_branch_segment(rest)?;
+    let _ = remote;
     Ok(())
 }
 
-/// Fetches a remote-tracking ref for chain PRs (multi-segment `origin/...` allowed).
+/// Validates a chain-PR integration base ref: `<remote>/<branch-path>` where `<branch-path>` may
+/// contain `/` (e.g. `upstream/feature/foo`). Rejects empty strings, shell metacharacters, and
+/// `..`. The remote is not required to be `origin` — any safe remote name is accepted (pure string
+/// rules, no git probe).
+pub fn validate_chain_pr_integration_base_ref(s: &str) -> Result<(), String> {
+    let (remote, rest) = split_remote_ref(s)?;
+    if rest.is_empty() {
+        return Err("chain PR integration base ref must be <remote>/<branch-path>".to_string());
+    }
+    for segment in rest.split('/') {
+        validate_branch_segment(segment)?;
+    }
+    let _ = remote;
+    Ok(())
+}
+
+/// Fetches a remote-tracking ref for chain PRs (multi-segment `<remote>/<path>` allowed).
 fn fetch_chain_pr_integration_base(
     repo_root: &Path,
     integration_base_ref: &str,
 ) -> Result<(), String> {
     validate_chain_pr_integration_base_ref(integration_base_ref)?;
-    let branch_path = integration_base_ref
-        .strip_prefix("origin/")
-        .expect("validate_chain_pr_integration_base_ref ensures origin/ prefix");
+    let (remote, branch_path) = integration_base_ref
+        .split_once('/')
+        .expect("validate_chain_pr_integration_base_ref ensures <remote>/<path> form");
     log::info!(
         "fetch_chain_pr_integration_base: repo={} integration_base_ref={}",
         repo_root.display(),
         integration_base_ref
     );
     let output = git_remote_command(repo_root)
-        .args(["fetch", "origin", branch_path])
+        .args(["fetch", remote, branch_path])
         .output()
-        .map_err(|e| format!("git fetch origin {}: {}", branch_path, e))?;
+        .map_err(|e| format!("git fetch {remote} {branch_path}: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -144,10 +215,7 @@ fn fetch_chain_pr_integration_base(
             "fetch_chain_pr_integration_base: git fetch failed stderr={}",
             stderr.trim()
         );
-        return Err(format!(
-            "git fetch origin {} failed: {}",
-            branch_path, stderr
-        ));
+        return Err(format!("git fetch {remote} {branch_path} failed: {stderr}"));
     }
     log::debug!(
         "fetch_chain_pr_integration_base: fetch completed for {}",
@@ -180,27 +248,28 @@ pub fn worktree_dir(repo_root: &Path) -> PathBuf {
     repo_root.join(".worktrees")
 }
 
-/// Fetch origin/master. Must succeed before creating worktree from origin/master.
+/// Fetch the last-resort default integration base ([`FALLBACK_DEFAULT_INTEGRATION_BASE_REF`]).
+/// Must succeed before creating a worktree from that ref.
 pub fn fetch_origin_master(repo_root: &Path) -> Result<(), String> {
     log::debug!("fetch_origin_master: repo_root={}", repo_root.display());
-    fetch_integration_base(repo_root, DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF)
+    fetch_integration_base(repo_root, FALLBACK_DEFAULT_INTEGRATION_BASE_REF)
 }
 
-/// Fetches the given remote-tracking integration base ref (e.g. `origin/main`).
+/// Fetches the given remote-tracking integration base ref (e.g. `origin/main`, `upstream/main`).
 pub fn fetch_integration_base(repo_root: &Path, integration_base_ref: &str) -> Result<(), String> {
     validate_integration_base_ref(integration_base_ref)?;
-    let branch = integration_base_ref
-        .strip_prefix("origin/")
-        .expect("validate_integration_base_ref ensures origin/ prefix");
+    let (remote, branch) = integration_base_ref
+        .split_once('/')
+        .expect("validate_integration_base_ref ensures <remote>/<branch> form");
     log::info!(
         "fetch_integration_base: repo={} integration_base_ref={}",
         repo_root.display(),
         integration_base_ref
     );
     let output = git_remote_command(repo_root)
-        .args(["fetch", "origin", branch])
+        .args(["fetch", remote, branch])
         .output()
-        .map_err(|e| format!("git fetch origin {}: {}", branch, e))?;
+        .map_err(|e| format!("git fetch {remote} {branch}: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -208,7 +277,7 @@ pub fn fetch_integration_base(repo_root: &Path, integration_base_ref: &str) -> R
             "fetch_integration_base: git fetch failed stderr={}",
             stderr.trim()
         );
-        return Err(format!("git fetch origin {} failed: {}", branch, stderr));
+        return Err(format!("git fetch {remote} {branch} failed: {stderr}"));
     }
     log::debug!(
         "fetch_integration_base: fetch completed for {}",
@@ -481,30 +550,41 @@ pub fn find_existing_worktree_for_branch_ref(
     Ok(None)
 }
 
-/// Pushes a local branch to `origin` and sets it as the upstream (`git push -u origin <branch>`),
+/// Pushes a local branch to `remote` and sets it as the upstream (`git push -u <remote> <branch>`),
 /// run inside `worktree_dir`. Uses [`git_remote_command`] so any configured `GIT_SSH_COMMAND`
 /// applies and interactive prompts fail fast. Returns a descriptive `Err` on a non-zero exit — no
 /// silent success, no fallback.
-pub fn push_new_branch_to_origin(worktree_dir: &Path, branch: &str) -> Result<(), String> {
+pub fn push_new_branch_to_remote(
+    worktree_dir: &Path,
+    branch: &str,
+    remote: &str,
+) -> Result<(), String> {
     log::info!(
-        "push_new_branch_to_origin: worktree={} branch={}",
+        "push_new_branch_to_remote: worktree={} branch={} remote={}",
         worktree_dir.display(),
-        branch
+        branch,
+        remote
     );
     let output = git_remote_command(worktree_dir)
-        .args(["push", "-u", "origin", branch])
+        .args(["push", "-u", remote, branch])
         .output()
-        .map_err(|e| format!("git push -u origin {}: {}", branch, e))?;
+        .map_err(|e| format!("git push -u {remote} {branch}: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(
-            "git push -u origin {} failed: {}",
-            branch,
+            "git push -u {remote} {branch} failed: {}",
             stderr.trim()
         ));
     }
     Ok(())
+}
+
+/// Legacy push helper: pushes to `origin` specifically. Retained for callers that have not yet
+/// threaded the resolved default remote; new callers should use [`push_new_branch_to_remote`] with
+/// the remote resolved via [`detect_default_remote_name`] or the project registry.
+pub fn push_new_branch_to_origin(worktree_dir: &Path, branch: &str) -> Result<(), String> {
+    push_new_branch_to_remote(worktree_dir, branch, "origin")
 }
 
 /// Public, non-erroring wrapper over [`try_find_existing_worktree_for_branch_ref`]: returns the
@@ -736,17 +816,28 @@ pub fn setup_worktree_for_session_with_integration_base(
                     return Ok(worktree_path);
                 }
                 BranchWorktreeIntent::WorkOnSelectedBranch => {
-                    let branch_name = wf.selected_branch_to_work_on.clone().ok_or_else(|| {
-                        "workflow.selected_branch_to_work_on required for work_on_selected_branch"
-                            .to_string()
-                    })?;
+                    // The request may name the branch the way a remote-branch picker does
+                    // (`origin/<branch>`); the worktree has to be put on the *local* branch.
+                    let branch_name = wf
+                        .selected_branch_to_work_on
+                        .as_deref()
+                        .map(|b| local_branch_name(b).to_string())
+                        .filter(|b| !b.is_empty())
+                        .ok_or_else(|| {
+                            "workflow.selected_branch_to_work_on required for work_on_selected_branch"
+                                .to_string()
+                        })?;
                     log::info!(
                         "setup_worktree_for_session_with_integration_base: intent=work_on_selected_branch branch={}",
                         branch_name
                     );
                     fetch_integration_base(repo_root, integration_base_ref)?;
+                    // A branch that exists only on `origin` — the state after the session that created
+                    // it was deleted, or when it was pushed from another host — has no worktree here
+                    // yet. That is not an error: `git worktree add` below creates the local tracking
+                    // branch.
                     if let Some(existing) =
-                        find_existing_worktree_for_branch_ref(repo_root, &branch_name)?
+                        try_find_existing_worktree_for_branch_ref(repo_root, &branch_name)?
                     {
                         log::info!(
                             "setup_worktree_for_session_with_integration_base: reusing existing worktree {} for {} (no new git worktree add)",
@@ -827,42 +918,87 @@ pub fn setup_worktree_for_session_with_integration_base(
     Ok(worktree_path)
 }
 
-/// Resolves which remote-tracking ref to use when no per-project override is supplied.
+/// Detects the default remote name from the main worktree's upstream tracking branch.
 ///
-/// Runs `git fetch origin`, then prefers `origin/master` when present (legacy default contract),
-/// otherwise `origin/main` if present, otherwise follows `refs/remotes/origin/HEAD`.
-pub fn resolve_default_integration_base_ref(repo_root: &Path) -> Result<String, String> {
+/// Runs `git rev-parse --abbrev-ref @{upstream}` in `repo_root`; on success the result has the form
+/// `<remote>/<branch>` and the segment before the first `/` is the remote. Returns `None` on a
+/// detached HEAD, a branch with no upstream, a non-repository path, a missing `git`, or any non-zero
+/// exit — this probe never errors the caller. `origin` is **not** assumed here; callers add it as the
+/// last-resort fallback via [`resolve_default_integration_base_ref_with_remote`].
+#[must_use]
+pub fn detect_default_remote_name(repo_root: &Path) -> Option<String> {
+    let out = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "@{upstream}"])
+        .current_dir(repo_root)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() || s == "HEAD" {
+        return None;
+    }
+    let remote = s.split_once('/').map(|(r, _)| r).unwrap_or(&s);
+    if remote.is_empty() {
+        return None;
+    }
+    Some(remote.to_string())
+}
+
+/// Resolves which remote-tracking ref to use when no per-project override is supplied, using an
+/// explicit preferred remote when the caller has one (e.g. from `ProjectData::remote_name`).
+///
+/// Remote selection order:
+/// 1. `preferred_remote` when `Some` (caller-supplied, e.g. project config).
+/// 2. [`detect_default_remote_name`] (main worktree's upstream).
+/// 3. `"origin"` last resort.
+///
+/// Then `git fetch <remote>` and probe `<remote>/master` → `<remote>/main` →
+/// `refs/remotes/<remote>/HEAD`.
+pub fn resolve_default_integration_base_ref_with_remote(
+    repo_root: &Path,
+    preferred_remote: Option<&str>,
+) -> Result<String, String> {
+    let remote = preferred_remote
+        .map(str::to_string)
+        .or_else(|| detect_default_remote_name(repo_root))
+        .unwrap_or_else(|| "origin".to_string());
     log::info!(
-        "resolve_default_integration_base_ref: fetching origin repo={}",
+        "resolve_default_integration_base_ref_with_remote: fetching {} repo={}",
+        remote,
         repo_root.display()
     );
     let fetch_out = git_remote_command(repo_root)
-        .args(["fetch", "origin"])
+        .args(["fetch", &remote])
         .output()
-        .map_err(|e| format!("git fetch origin: {}", e))?;
+        .map_err(|e| format!("git fetch {remote}: {e}"))?;
     if !fetch_out.status.success() {
         let stderr = String::from_utf8_lossy(&fetch_out.stderr);
-        return Err(format!("git fetch origin failed: {}", stderr));
+        return Err(format!("git fetch {remote} failed: {stderr}"));
     }
 
-    if remote_ref_exists(repo_root, "origin/master")? {
-        log::debug!("resolve_default_integration_base_ref: chose origin/master");
-        return Ok("origin/master".to_string());
+    let master_ref = format!("{remote}/master");
+    if remote_ref_exists(repo_root, &master_ref)? {
+        log::debug!("resolve_default_integration_base_ref_with_remote: chose {master_ref}");
+        return Ok(master_ref);
     }
-    if remote_ref_exists(repo_root, "origin/main")? {
-        log::debug!("resolve_default_integration_base_ref: chose origin/main");
-        return Ok("origin/main".to_string());
+    let main_ref = format!("{remote}/main");
+    if remote_ref_exists(repo_root, &main_ref)? {
+        log::debug!("resolve_default_integration_base_ref_with_remote: chose {main_ref}");
+        return Ok(main_ref);
     }
 
+    let head_symref = format!("refs/remotes/{remote}/HEAD");
     let sym = Command::new("git")
-        .args(["symbolic-ref", "-q", "refs/remotes/origin/HEAD"])
+        .args(["symbolic-ref", "-q", &head_symref])
         .current_dir(repo_root)
         .output()
-        .map_err(|e| format!("git symbolic-ref: {}", e))?;
+        .map_err(|e| format!("git symbolic-ref: {e}"))?;
     if sym.status.success() {
         let sym_ref = String::from_utf8_lossy(&sym.stdout).trim().to_string();
         log::debug!(
-            "resolve_default_integration_base_ref: origin/HEAD -> {}",
+            "resolve_default_integration_base_ref_with_remote: {head_symref} -> {}",
             sym_ref
         );
         if let Some(rest) = sym_ref.strip_prefix("refs/remotes/") {
@@ -871,10 +1007,18 @@ pub fn resolve_default_integration_base_ref(repo_root: &Path) -> Result<String, 
         }
     }
 
-    Err(
-        "could not resolve integration base ref: no origin/master, origin/main, or origin/HEAD"
-            .to_string(),
-    )
+    Err(format!(
+        "could not resolve integration base ref: no {remote}/master, {remote}/main, or {remote}/HEAD"
+    ))
+}
+
+/// Resolves which remote-tracking ref to use when no per-project override is supplied.
+///
+/// Delegates to [`resolve_default_integration_base_ref_with_remote`] with no preferred remote, so
+/// the remote is detected from the main worktree's upstream and falls back to `origin` only when
+/// detection fails.
+pub fn resolve_default_integration_base_ref(repo_root: &Path) -> Result<String, String> {
+    resolve_default_integration_base_ref_with_remote(repo_root, None)
 }
 
 fn remote_ref_exists(repo_root: &Path, rev: &str) -> Result<bool, String> {
@@ -884,6 +1028,44 @@ fn remote_ref_exists(repo_root: &Path, rev: &str) -> Result<bool, String> {
         .output()
         .map_err(|e| format!("git rev-parse: {}", e))?;
     Ok(out.status.success())
+}
+
+/// Commit sha of `<remote>/<branch>` in `repo_root`, or `None` when the branch has no
+/// remote-tracking ref there (never pushed, deleted, or `repo_root` is not a git repository).
+///
+/// The remote is resolved via [`detect_default_remote_name`] (main worktree upstream), falling back
+/// to `origin` only when detection fails. Resolves the *remote-tracking* ref, so it is only as fresh
+/// as the last fetch: conservative by construction, since a PR-stack child worktree is created from
+/// `<remote>/<base>` and a stale-missing answer delays a spawn rather than permitting one that would
+/// fail inside `git fetch`.
+///
+/// Runs on a polled display path (`QueryBranch`), so every failure — a bad path, a missing git, a
+/// non-repository — degrades to `None` rather than failing the enclosing call.
+#[must_use]
+pub fn remote_branch_ref_sha(repo_root: &Path, branch: &str) -> Option<String> {
+    let branch = branch.trim();
+    if branch.is_empty() {
+        return None;
+    }
+    let remote = detect_default_remote_name(repo_root).unwrap_or_else(|| "origin".to_string());
+    let out = Command::new("git")
+        .args([
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/remotes/{remote}/{branch}"),
+        ])
+        .current_dir(repo_root)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if sha.is_empty() {
+        return None;
+    }
+    Some(sha)
 }
 
 /// Create worktree for a session. Fetches the resolved integration base, then creates,
@@ -987,10 +1169,17 @@ pub fn setup_worktree_for_session_with_optional_chain_base(
                     return Ok(worktree_path);
                 }
                 BranchWorktreeIntent::WorkOnSelectedBranch => {
-                    let branch_name = wf.selected_branch_to_work_on.clone().ok_or_else(|| {
-                        "workflow.selected_branch_to_work_on required for work_on_selected_branch"
-                            .to_string()
-                    })?;
+                    // The request may name the branch the way a remote-branch picker does
+                    // (`origin/<branch>`); the worktree has to be put on the *local* branch.
+                    let branch_name = wf
+                        .selected_branch_to_work_on
+                        .as_deref()
+                        .map(|b| local_branch_name(b).to_string())
+                        .filter(|b| !b.is_empty())
+                        .ok_or_else(|| {
+                            "workflow.selected_branch_to_work_on required for work_on_selected_branch"
+                                .to_string()
+                        })?;
                     log::info!(
                         "setup_worktree_for_session_with_optional_chain_base: intent=work_on_selected_branch branch={}",
                         branch_name
@@ -1000,8 +1189,12 @@ pub fn setup_worktree_for_session_with_optional_chain_base(
                     } else {
                         fetch_integration_base(repo_root, &integration_base_ref)?;
                     }
+                    // A branch that exists only on `origin` — the state after the session that created
+                    // it was deleted, or when it was pushed from another host — has no worktree here
+                    // yet. That is not an error: `git worktree add` below creates the local tracking
+                    // branch.
                     if let Some(existing) =
-                        find_existing_worktree_for_branch_ref(repo_root, &branch_name)?
+                        try_find_existing_worktree_for_branch_ref(repo_root, &branch_name)?
                     {
                         log::info!(
                             "setup_worktree_for_session_with_optional_chain_base: reusing existing worktree {} for {} (no new git worktree add)",
@@ -1173,24 +1366,30 @@ fn slugify_for_branch(name: &str) -> String {
         .join("-")
 }
 
-/// Lists remote-tracking branches under `origin/`, most recent commit first, up to `limit` entries.
-///
-/// Uses `git branch -r --sort=-committerdate`. Excludes `origin/HEAD` and any ref that is not under
-/// `origin/`. Entries that fail [`validate_chain_pr_integration_base_ref`] are skipped.
-pub fn list_recent_remote_branches(repo_root: &Path, limit: usize) -> Result<Vec<String>, String> {
-    list_recent_remote_branches_skip(repo_root, 0, limit)
+/// Lists remote-tracking branches under `<remote>/`, most recent commit first, up to `limit`
+/// entries. Uses `git branch -r --sort=-committerdate`. Excludes `<remote>/HEAD` and any ref that is
+/// not under `<remote>/`. Entries that fail [`validate_chain_pr_integration_base_ref`] are skipped.
+pub fn list_recent_remote_branches(
+    repo_root: &Path,
+    remote: &str,
+    limit: usize,
+) -> Result<Vec<String>, String> {
+    list_recent_remote_branches_skip(repo_root, remote, 0, limit)
 }
 
 /// Like [`list_recent_remote_branches`], but skips the first `skip` qualifying remote branches
 /// (same ordering and filtering), then returns up to `limit` entries.
 pub fn list_recent_remote_branches_skip(
     repo_root: &Path,
+    remote: &str,
     skip: usize,
     limit: usize,
 ) -> Result<Vec<String>, String> {
     if limit == 0 {
         return Ok(Vec::new());
     }
+    let remote_prefix = format!("{remote}/");
+    let head_ref = format!("{remote}/HEAD");
     let output = Command::new("git")
         .args([
             "branch",
@@ -1216,10 +1415,10 @@ pub fn list_recent_remote_branches_skip(
         if line.is_empty() {
             continue;
         }
-        if line == "origin/HEAD" {
+        if line == head_ref {
             continue;
         }
-        if !line.starts_with("origin/") {
+        if !line.starts_with(&remote_prefix) {
             continue;
         }
         if validate_chain_pr_integration_base_ref(line).is_err() {
@@ -1418,6 +1617,48 @@ mod integration_base_red_tests {
     }
 }
 
+/// The local branch name behind a reference offered by a remote-branch picker.
+#[cfg(test)]
+mod local_branch_name_tests {
+    use super::*;
+
+    #[test]
+    fn strips_the_remote_prefix_from_a_remote_tracking_name() {
+        // Given / When — the form `ListProjectBranches` offers
+        let branch = local_branch_name("origin/feature/attach-docs/attach-store");
+
+        // Then
+        assert_eq!(branch, "feature/attach-docs/attach-store");
+    }
+
+    #[test]
+    fn leaves_a_name_that_is_already_local_unchanged() {
+        // Given / When
+        let branch = local_branch_name("feature/attach-docs/attach-store");
+
+        // Then
+        assert_eq!(branch, "feature/attach-docs/attach-store");
+    }
+
+    #[test]
+    fn strips_only_one_remote_prefix_so_a_local_origin_branch_keeps_its_name() {
+        // Given / When — `refs/heads/origin/legacy` is a legal local branch; stripping twice renames it
+        let branch = local_branch_name("origin/origin/legacy");
+
+        // Then
+        assert_eq!(branch, "origin/legacy");
+    }
+
+    #[test]
+    fn trims_surrounding_whitespace() {
+        // Given / When
+        let branch = local_branch_name("  origin/master\n");
+
+        // Then
+        assert_eq!(branch, "master");
+    }
+}
+
 /// RED: chain-PR validation and resume helpers (must fail until Green implements behavior).
 #[cfg(test)]
 mod chain_pr_red_tests {
@@ -1558,7 +1799,7 @@ mod list_recent_remote_branches_tests {
             .output()
             .unwrap();
 
-        let list = list_recent_remote_branches(&repo, 10).unwrap();
+        let list = list_recent_remote_branches(&repo, "origin", 10).unwrap();
         assert!(
             list.iter()
                 .any(|r| r == "origin/main" || r == "origin/feature/a"),
@@ -1643,8 +1884,8 @@ mod list_recent_remote_branches_tests {
                 .unwrap();
         }
 
-        let first = list_recent_remote_branches_skip(&repo, 0, 1).unwrap();
-        let second = list_recent_remote_branches_skip(&repo, 1, 1).unwrap();
+        let first = list_recent_remote_branches_skip(&repo, "origin", 0, 1).unwrap();
+        let second = list_recent_remote_branches_skip(&repo, "origin", 1, 1).unwrap();
         assert_eq!(first.len(), 1);
         assert_eq!(second.len(), 1);
         assert_ne!(
@@ -1751,6 +1992,263 @@ mod list_recent_remote_branches_tests {
             String::from_utf8_lossy(&upstream.stdout).trim(),
             "origin/feature/x",
             "expected feature/x to track origin/feature/x"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+}
+
+/// Remote-agnostic validation, detection, and resolution: the `origin` assumption is gone.
+#[cfg(test)]
+mod remote_agnostic_tests {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+
+    fn git(cwd: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn repo_with_remote_master(repo: &Path, remote: &str) {
+        fs::create_dir_all(repo).unwrap();
+        git(repo, &["init", "--initial-branch=master"]);
+        git(repo, &["config", "user.email", "t@t.com"]);
+        git(repo, &["config", "user.name", "T"]);
+        fs::write(repo.join("f"), "x").unwrap();
+        git(repo, &["add", "f"]);
+        git(repo, &["commit", "-m", "initial"]);
+        git(repo, &["remote", "add", remote, repo.to_str().unwrap()]);
+        git(repo, &["push", "-u", remote, "master"]);
+    }
+
+    /// The single-segment validator accepts a non-`origin` remote.
+    #[test]
+    fn validate_integration_base_ref_accepts_a_non_origin_remote() {
+        // Given / When
+        let r = validate_integration_base_ref("upstream/main");
+
+        // Then
+        assert!(
+            r.is_ok(),
+            "validate_integration_base_ref must accept any safe <remote>/<branch>; got {:?}",
+            r
+        );
+    }
+
+    /// The chain-PR validator accepts a multi-segment ref under a non-`origin` remote.
+    #[test]
+    fn validate_chain_pr_integration_base_ref_accepts_a_non_origin_multi_segment_ref() {
+        // Given / When
+        let r = validate_chain_pr_integration_base_ref("upstream/feature/foo");
+
+        // Then
+        assert!(
+            r.is_ok(),
+            "validate_chain_pr_integration_base_ref must accept any safe <remote>/<path>; got {:?}",
+            r
+        );
+    }
+
+    /// A ref with no `/` (no remote segment) is rejected — the remote is mandatory.
+    #[test]
+    fn validate_integration_base_ref_rejects_a_ref_with_no_remote_segment() {
+        // Given / When
+        let r = validate_integration_base_ref("refs/heads/main");
+
+        // Then
+        assert!(
+            r.is_err(),
+            "a ref with no <remote>/<branch> form must be rejected; got {:?}",
+            r
+        );
+    }
+
+    /// `local_branch_name_for_remote` strips one leading `<remote>/` and leaves other names alone.
+    #[test]
+    fn local_branch_name_for_remote_strips_the_given_remote_once() {
+        // Given / When
+        let branch = local_branch_name_for_remote("upstream/feature/attach-docs", "upstream");
+
+        // Then
+        assert_eq!(branch, "feature/attach-docs");
+    }
+
+    /// A different remote prefix is left intact so the caller can detect the mismatch.
+    #[test]
+    fn local_branch_name_for_remote_leaves_a_foreign_remote_prefix_unchanged() {
+        // Given / When
+        let branch = local_branch_name_for_remote("origin/feature/x", "upstream");
+
+        // Then
+        assert_eq!(branch, "origin/feature/x");
+    }
+
+    /// `detect_default_remote_name` returns the remote the main worktree's branch tracks.
+    #[test]
+    fn detect_default_remote_name_returns_the_tracked_remote() {
+        // Given — a repo whose `master` tracks `upstream/master`
+        let base = std::env::temp_dir().join(format!(
+            "tddy-core-detect-remote-tracked-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        let repo = base.join("repo");
+        repo_with_remote_master(&repo, "upstream");
+
+        // When
+        let remote = detect_default_remote_name(&repo);
+
+        // Then
+        assert_eq!(
+            remote.as_deref(),
+            Some("upstream"),
+            "the main worktree's upstream remote must be detected"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// `detect_default_remote_name` returns `None` on a detached HEAD (no upstream to read).
+    #[test]
+    fn detect_default_remote_name_returns_none_on_detached_head() {
+        // Given
+        let base = std::env::temp_dir().join(format!(
+            "tddy-core-detect-remote-detached-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        let repo = base.join("repo");
+        repo_with_remote_master(&repo, "origin");
+        git(&repo, &["checkout", "--detach", "master"]);
+
+        // When
+        let remote = detect_default_remote_name(&repo);
+
+        // Then
+        assert!(
+            remote.is_none(),
+            "a detached HEAD has no upstream; got {:?}",
+            remote
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// `resolve_default_integration_base_ref_with_remote` probes `<remote>/master` first.
+    #[test]
+    fn resolve_with_remote_chooses_remote_master_when_present() {
+        // Given
+        let base = std::env::temp_dir().join(format!(
+            "tddy-core-resolve-with-remote-master-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        let repo = base.join("repo");
+        repo_with_remote_master(&repo, "upstream");
+
+        // When
+        let resolved = resolve_default_integration_base_ref_with_remote(&repo, Some("upstream"));
+
+        // Then
+        assert_eq!(
+            resolved.as_deref(),
+            Ok("upstream/master"),
+            "must probe <remote>/master for a non-origin remote"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// `resolve_default_integration_base_ref_with_remote` falls through to `<remote>/main` when
+    /// `master` is absent.
+    #[test]
+    fn resolve_with_remote_chooses_remote_main_when_master_absent() {
+        // Given — a repo whose only mainline branch is `main`, pushed under `upstream`
+        let base = std::env::temp_dir().join(format!(
+            "tddy-core-resolve-with-remote-main-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        let repo = base.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "--initial-branch=main"]);
+        git(&repo, &["config", "user.email", "t@t.com"]);
+        git(&repo, &["config", "user.name", "T"]);
+        fs::write(repo.join("f"), "x").unwrap();
+        git(&repo, &["add", "f"]);
+        git(&repo, &["commit", "-m", "initial"]);
+        git(
+            &repo,
+            &["remote", "add", "upstream", repo.to_str().unwrap()],
+        );
+        git(&repo, &["push", "-u", "upstream", "main"]);
+
+        // When
+        let resolved = resolve_default_integration_base_ref_with_remote(&repo, Some("upstream"));
+
+        // Then
+        assert_eq!(
+            resolved.as_deref(),
+            Ok("upstream/main"),
+            "must fall through to <remote>/main when <remote>/master is absent"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// `list_recent_remote_branches` filters under the requested remote, not hardcoded `origin`.
+    #[test]
+    fn list_recent_remote_branches_filters_under_the_requested_remote() {
+        // Given — a repo with two remotes: `origin` and `upstream`, each carrying a distinct branch
+        let base = std::env::temp_dir().join(format!(
+            "tddy-core-list-recent-remote-multi-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base);
+        let repo = base.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "--initial-branch=master"]);
+        git(&repo, &["config", "user.email", "t@t.com"]);
+        git(&repo, &["config", "user.name", "T"]);
+        fs::write(repo.join("f"), "x").unwrap();
+        git(&repo, &["add", "f"]);
+        git(&repo, &["commit", "-m", "initial"]);
+        git(&repo, &["remote", "add", "origin", repo.to_str().unwrap()]);
+        git(&repo, &["push", "-u", "origin", "master"]);
+        git(
+            &repo,
+            &["remote", "add", "upstream", repo.to_str().unwrap()],
+        );
+        git(&repo, &["checkout", "-b", "feature/up-only"]);
+        fs::write(repo.join("g"), "y").unwrap();
+        git(&repo, &["add", "g"]);
+        git(&repo, &["commit", "-m", "up-only"]);
+        git(&repo, &["push", "-u", "upstream", "feature/up-only"]);
+        git(&repo, &["checkout", "master"]);
+
+        // When
+        let list = list_recent_remote_branches(&repo, "upstream", 10).unwrap();
+
+        // Then
+        assert!(
+            list.iter().any(|r| r == "upstream/feature/up-only"),
+            "expected upstream/feature/up-only in {:?}",
+            list
+        );
+        assert!(
+            !list.iter().any(|r| r.starts_with("origin/")),
+            "origin/* must not appear when filtering for upstream: {:?}",
+            list
         );
 
         let _ = fs::remove_dir_all(&base);

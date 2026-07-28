@@ -10,8 +10,10 @@ import { SessionInspectorDrawer } from "./SessionInspectorDrawer";
 import { isInspectorDocked } from "./inspectorState";
 import { AgentActivityOverlay } from "./AgentActivityOverlay";
 import { Button } from "../ui/button";
-import { CreateSessionPane } from "./CreateSessionPane";
+import { CreateSessionPane, type CreateSessionInitialValues } from "./CreateSessionPane";
+import { SessionAgentsSection } from "./SessionAgentsSection";
 import { SessionRuntime } from "./SessionRuntime";
+import { sessionPeers } from "../../utils/sessionPeers";
 import { resolveWorkflowView } from "./workflowViews";
 import { WorktreeCodePane } from "../session/WorktreeCodePane";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
@@ -52,6 +54,9 @@ interface SessionMainPaneProps {
     orchestratorSessionId: string;
     projectId: string;
   }) => void;
+  /** Fired when the operator clicks a peer's "Switch" button in the Session agents section — the
+   *  parent selects that peer session in the drawer (focuses its runtime). No transport of its own. */
+  onSwitchPeer?: (sessionId: string) => void;
   /** Inspector I/O traffic (req 5 dual source): live runtime counters for active sessions,
    *  daemon-sourced `SessionEntry` fields for inactive / non-LiveKit sessions. */
   traffic?: { bytesIn: number; bytesOut: number; lastDataReceivedAt: number | null } | null;
@@ -106,6 +111,7 @@ export function SessionMainPane({
   room = null,
   mobileShortcuts,
   onChildSessionStarted,
+  onSwitchPeer,
   traffic,
   projects = [],
   runtimes = [],
@@ -133,6 +139,12 @@ export function SessionMainPane({
   const [codeOpen, setCodeOpen] = React.useState(false);
   const codePaneEnabled = Boolean(client && selectedSession);
 
+  // The selected session's peers — child sessions whose `orchestratorSessionId` is this session.
+  const peers = React.useMemo(
+    () => (selectedSession ? sessionPeers([...sessions], selectedSession.sessionId) : []),
+    [sessions, selectedSession],
+  );
+
   // The worktree RPCs require a non-empty `project_id`. Scoped sessions carry their own; unscoped
   // sessions (empty `projectId`) resolve to the registered project whose main repo is the longest
   // prefix of the session's `repoPath`.
@@ -142,12 +154,115 @@ export function SessionMainPane({
     return projectForUnscopedSession(selectedSession, [...projects])?.projectId ?? "";
   }, [selectedSession, projects]);
 
+  // Peer-agent spawn mode: when set, the pane renders `CreateSessionPane` in peer mode, pre-filled
+  // to spawn a peer child session that runs on the SAME worktree as the selected session
+  // (via `repo_path`). Branch selection is hidden in that mode (irrelevant when `repo_path` is set).
+  // The initialValues capture the orchestrator at "Add agent" click time so a later drawer selection
+  // change can't desync the spawned peer's `stackParent`/`repoPath`/`projectId` from the optimistic
+  // overlay's `orchestratorSessionId`.
+  const [peerCreateInitialValues, setPeerCreateInitialValues] =
+    React.useState<CreateSessionInitialValues | null>(null);
+  const isPeerCreating = peerCreateInitialValues !== null;
+  // Ref mirror of `peerCreateInitialValues` that survives the selection-change clear below. A peer
+  // `StartSession` is async: if the drawer selection changes between submit and `onCreated`, the
+  // effect that drops peer mode clears the state (so the pane unmounts) but `handlePeerCreated`
+  // still runs from the in-flight promise and must read the capture that was actually submitted —
+  // otherwise the optimistic overlay is skipped and the new peer never appears in the drawer.
+  const peerCreateCaptureRef = React.useRef<CreateSessionInitialValues | null>(null);
+
+  const handleAddAgent = () => {
+    if (!selectedSession) return;
+    const values: CreateSessionInitialValues = {
+      stackParent: selectedSession.sessionId,
+      // Use the resolved project so unscoped sessions (empty `projectId`) can still submit — the
+      // pane requires a non-empty `projectId` to enable Create.
+      projectId: resolvedProjectId || selectedSession.projectId,
+      daemonInstanceId: selectedSession.daemonInstanceId,
+      repoPath: selectedSession.repoPath,
+    };
+    peerCreateCaptureRef.current = values;
+    setPeerCreateInitialValues(values);
+  };
+  const handleCancelPeerCreate = () => {
+    peerCreateCaptureRef.current = null;
+    setPeerCreateInitialValues(null);
+  };
+  // A spawned peer is a child session — surface it via the optimistic overlay (same path the
+  // PR-stack orchestrator uses) so it appears in the drawer immediately, then drop out of peer
+  // mode. We deliberately do NOT call `onSessionCreated` (that would switch away from the current
+  // session); the operator stays put and switches to the peer from the Session agents section.
+  // The overlay's `orchestratorSessionId`/`projectId` come from the captured initialValues (not the
+  // live `selectedSession`) so they always match the `stackParent`/`projectId` sent in StartSession.
+  const handlePeerCreated = (sessionId: string) => {
+    // Read from the ref (not the state) so a mid-flight drawer selection change — which clears the
+    // state and unmounts the pane — can't strip the capture before the optimistic overlay fires.
+    const captured = peerCreateCaptureRef.current;
+    if (captured) {
+      onChildSessionStarted?.({
+        sessionId,
+        recipe: "",
+        // `handleAddAgent` always sets these; the `?? ""` only narrows the Partial type.
+        orchestratorSessionId: captured.stackParent ?? "",
+        projectId: captured.projectId ?? "",
+      });
+    }
+    peerCreateCaptureRef.current = null;
+    setPeerCreateInitialValues(null);
+  };
+
+  // Drop out of peer-create mode if the operator navigates away (the drawer selection changes) or
+  // opens the standalone "new session" flow (`isCreating`). Without this, a stale peer pane could
+  // outlive its orchestrator and/or block the standalone create path from taking over.
+  React.useEffect(() => {
+    setPeerCreateInitialValues((prev) => (prev && isCreating ? null : prev));
+  }, [isCreating]);
+  const selectedSessionId = selectedSession?.sessionId;
+  React.useEffect(() => {
+    setPeerCreateInitialValues((prev) =>
+      prev && prev.stackParent !== selectedSessionId ? null : prev,
+    );
+  }, [selectedSessionId]);
+
+  // Standalone "new session" (`isCreating`) takes precedence over peer-create mode so the drawer's
+  // new-session flow always wins when both are active (the effect above also clears peer mode when
+  // `isCreating` flips on; this guards the one-render gap).
+  const activePeerMode = isPeerCreating && !isCreating;
+  const createPaneCancel = activePeerMode
+    ? handleCancelPeerCreate
+    : (onCancelCreate ?? (() => undefined));
+  const createPaneCreated = activePeerMode
+    ? handlePeerCreated
+    : (onSessionCreated ?? (() => undefined));
+  const createPaneInitialValues = activePeerMode ? peerCreateInitialValues ?? undefined : undefined;
+
+  // The selected session's project default branch, read from the registry the drawer already loaded
+  // rather than an RPC or a git probe (D20). Empty when the project is not in the list or stores no
+  // `main_branch_ref` (a legacy project): the PR-Stack view then labels the base "default branch" and
+  // the daemon resolves the real ref when it is asked to act.
+  const projectForSession = React.useMemo(
+    () => projects.find((p) => p.projectId === resolvedProjectId),
+    [projects, resolvedProjectId],
+  );
+  const defaultBranch = React.useMemo(
+    () => projectForSession?.mainBranchRef ?? "",
+    [projectForSession],
+  );
+  // The project's resolved default remote (`origin`, `upstream`, ...). Empty for a legacy project that
+  // stored none — the PR-Stack view falls back to `origin` (the daemon's own last resort) when lifting
+  // a stack node's local branch name into the `<remote>/<branch>` ref the daemon fetches.
+  const defaultRemote = React.useMemo(
+    () => projectForSession?.defaultRemote ?? "",
+    [projectForSession],
+  );
+
   const customView = !isCreating
     ? resolveWorkflowView(selectedSession, {
         client,
         sessionToken,
         attachment,
         sessions: [...sessions],
+        defaultBranch,
+        defaultRemote,
         onChildSessionStarted,
       })
     : null;
@@ -215,16 +330,23 @@ export function SessionMainPane({
       data-testid="sessions-detail-pane"
       className="flex-1 min-w-0 flex flex-col h-full overflow-hidden relative"
     >
-      {isCreating && client && (
+      {(isCreating || isPeerCreating) && client && (
         <CreateSessionPane
+          // A mode switch (peer → standalone when the drawer opens its new-session flow mid-peer)
+          // must reset the pane's internal state — otherwise a standalone submit would carry the
+          // peer pre-fill's `stackParent` and spawn an unintended child. The key forces a remount
+          // with the new mode's `initialValues` (standalone ⇒ none ⇒ `stackParent=""`).
+          key={activePeerMode ? "peer" : "standalone"}
           client={client}
           sessionToken={sessionToken}
-          onCancel={onCancelCreate ?? (() => undefined)}
-          onCreated={onSessionCreated ?? (() => undefined)}
+          onCancel={createPaneCancel}
+          onCreated={createPaneCreated}
+          initialValues={createPaneInitialValues}
+          peerMode={activePeerMode}
         />
       )}
 
-      {!isCreating && (
+      {!isCreating && !isPeerCreating && (
         <>
           {/* Header toggles — always visible when a session is selected */}
           {selectedSession && (
@@ -235,6 +357,16 @@ export function SessionMainPane({
                 sessionType={selectedSession.sessionType}
                 client={buildSessionClient?.() ?? client}
               />
+              <Button
+                data-testid="session-agents-add-btn"
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={handleAddAgent}
+                title="Spawn a peer agent session on this session's worktree"
+              >
+                Add agent
+              </Button>
               <Button
                 data-testid="sessions-code-toggle"
                 variant="ghost"
@@ -256,6 +388,16 @@ export function SessionMainPane({
                 Inspector
               </Button>
             </div>
+          )}
+
+          {/* Session agents section — lists the selected session's peers (children via
+              orchestratorSessionId). Always mounted when a session is selected so the empty state
+              is consistent; the section itself renders an empty-state message when there are none. */}
+          {selectedSession && (
+            <SessionAgentsSection
+              peers={peers}
+              onSwitchPeer={(sessionId) => onSwitchPeer?.(sessionId)}
+            />
           )}
 
           {!selectedSession ? (

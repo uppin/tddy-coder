@@ -78,3 +78,10 @@ changeset.yaml
 tmp
 local.bun.lock
 
+
+# Cursor MCP config is generated per checkout and embeds an absolute target/ path.
+**/.cursor/mcp.json
+
+# Cursor hooks config is generated per session by install_cursor_hooks_in_worktree and
+# embeds a per-session hook_token (a secret used to authenticate session-hook RPCs).
+**/.cursor/hooks.json

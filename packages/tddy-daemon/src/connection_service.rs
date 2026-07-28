@@ -19,13 +19,15 @@ use tddy_service::proto::connection::{
     CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
     ConnectionService as ConnectionServiceTrait, CreateProjectRequest, CreateProjectResponse,
     DeleteSessionRequest, DeleteSessionResponse, DeleteSessionUploadRequest,
-    DeleteSessionUploadResponse, EligibleDaemonEntry, ListAgentModelsRequest,
-    ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
-    ListEligibleDaemonsResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
-    ListProjectsRequest, ListProjectsResponse, ListSessionUploadsRequest,
-    ListSessionUploadsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
-    ListSessionsRequest, ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse,
-    ListTerminalSessionsRequest, ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
+    DeleteSessionUploadResponse, DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse,
+    EligibleDaemonEntry, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
+    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
+    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
+    ListProjectsResponse, ListSessionUploadsRequest, ListSessionUploadsResponse,
+    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
+    ListSessionsResponse, ListStagedAttachmentsRequest, ListStagedAttachmentsResponse,
+    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
+    ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse, ModelInfo,
     ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
@@ -39,8 +41,9 @@ use tddy_service::proto::connection::{
     StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
     StopTerminalSessionResponse, StreamTerminalOutputRequest, StreamWorktreeStatsRequest,
     SubagentInfo, TerminalControlEvent, TerminalSessionInfo, ToolInfo,
-    UploadSessionFileChunkRequest, UploadSessionFileChunkResponse, WatchTerminalControlRequest,
-    WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
+    UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
+    UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
+    WatchTerminalControlRequest, WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
     WorktreeSizeStatus as ProtoWorktreeSizeStatus, WorktreeStatsEvent,
 };
 use uuid::Uuid;
@@ -110,9 +113,11 @@ pub(crate) async fn spawn_blocking_with_timeout<T: Send + 'static>(
 }
 
 /// After a `new_branch_from_base` worktree is created, optionally push the freshly created branch to
-/// `origin`. Reads the actual created branch from the session's changeset (it may carry a collision
-/// suffix), runs `git push -u origin <branch>` from the worktree, and records
-/// `Changeset.remote_pushed = true`. A push failure fails the session start — no silent fallback.
+/// its remote. Reads the actual created branch from the session's changeset (it may carry a
+/// collision suffix), resolves the remote from the persisted integration base ref
+/// (`<remote>/<branch>`) — falling back to main-worktree detection then `origin` — runs
+/// `git push -u <remote> <branch>` from the worktree, and records `Changeset.remote_pushed = true`.
+/// A push failure fails the session start — no silent fallback.
 pub(crate) async fn push_new_branch_to_origin_if_requested(
     create_remote_branch: bool,
     intent: BranchWorktreeIntent,
@@ -127,7 +132,7 @@ pub(crate) async fn push_new_branch_to_origin_if_requested(
     let worktree_path = worktree_path.to_path_buf();
     spawn_blocking_with_timeout(
         timeout,
-        "StartSession: push new branch to origin",
+        "StartSession: push new branch to remote",
         move || {
             let mut cs = tddy_core::read_changeset(&session_dir)
                 .map_err(|e| anyhow::anyhow!("read changeset for remote push: {e}"))?;
@@ -135,7 +140,15 @@ pub(crate) async fn push_new_branch_to_origin_if_requested(
                 .branch
                 .clone()
                 .ok_or_else(|| anyhow::anyhow!("no branch recorded after worktree setup"))?;
-            tddy_core::worktree::push_new_branch_to_origin(&worktree_path, &branch)
+            // Resolve the remote from the persisted integration base ref (`<remote>/<branch>`),
+            // falling back to main-worktree detection then `origin` as the last resort.
+            let remote = cs
+                .effective_worktree_integration_base_ref
+                .as_deref()
+                .and_then(|r| r.split_once('/').map(|(remote, _)| remote.to_string()))
+                .or_else(|| tddy_core::worktree::detect_default_remote_name(&worktree_path))
+                .unwrap_or_else(|| "origin".to_string());
+            tddy_core::worktree::push_new_branch_to_remote(&worktree_path, &branch, &remote)
                 .map_err(|e| anyhow::anyhow!(e))?;
             cs.remote_pushed = true;
             tddy_core::write_changeset(&session_dir, &cs)
@@ -730,6 +743,10 @@ pub struct ConnectionServiceImpl {
     /// PostToolUse pending-call pairing state. Shared with the sandbox tool handler so both the
     /// hook path and the in-jail tool path publish through the same channel.
     agent_activity_hub: Arc<AgentActivityHub>,
+    /// GitHub access tokens retained at web login, keyed by GitHub login — the credential the
+    /// PR-status reads act with. `None` (no `auth_storage` configured) means a real login's PR
+    /// status reads as *unavailable*, never as "no PR".
+    github_token_store: Option<Arc<dyn tddy_github::token_store::GitHubTokenStore>>,
 }
 
 /// A live reverse stdio endpoint to one spawned tddy-coder session. Holding it keeps the pipe's
@@ -808,7 +825,18 @@ impl ConnectionServiceImpl {
             demo_vm_state,
             session_stdio,
             agent_activity_hub: Arc::new(AgentActivityHub::default()),
+            github_token_store: None,
         }
+    }
+
+    /// Act on the operator's own GitHub credential for PR-status reads (builder). The store is the
+    /// one the auth service writes to at login; without it, PR status reports itself unavailable.
+    pub fn with_github_token_store(
+        mut self,
+        store: Arc<dyn tddy_github::token_store::GitHubTokenStore>,
+    ) -> Self {
+        self.github_token_store = Some(store);
+        self
     }
 
     /// Shared agent-activity hub, so the sandbox tool path can publish through the same channel the
@@ -887,94 +915,95 @@ impl ConnectionServiceImpl {
         }
     }
 
-    fn resolve_chain_base_ref(
+    /// PR status for one branch, resolved with the calling operator's own GitHub credential.
+    ///
+    /// `repo_root` is `None` when no file in the session directory records a checkout (see
+    /// [`tddy_core::repo_root_for_session`]) — an unknown repository, not a repository without PRs.
+    ///
+    /// Never fails: a lookup that cannot be performed degrades this one field to *unavailable* (D8),
+    /// and stub/demo authentication resolves to an empty result (D12) — so the enclosing RPC keeps
+    /// returning its other legs instead of collapsing into an error the web discards wholesale.
+    async fn pr_status_for_caller(
+        &self,
+        github_login: &str,
+        repo_root: Option<&std::path::Path>,
+        branch: &str,
+    ) -> tddy_service::proto::connection::PrStatusView {
+        use crate::github_pr_credentials::{pr_lookup_for_caller, PrLookup};
+        use tddy_service::proto::connection::PrStatusView;
+        use tddy_workflow_recipes::orchestrate_pr_stack::github::PrLookupOutcome;
+
+        // Both ways of failing to name a GitHub repository leave the lookup un-performable, so they
+        // are *unavailable* with a reason — reporting `exists = false` would claim the branch has no
+        // PR when in fact nothing was ever asked (D8).
+        let Some(repo_root) = repo_root else {
+            return pr_status_unavailable(
+                branch,
+                "no checkout is recorded for this session, so its GitHub repository is unknown"
+                    .to_string(),
+            );
+        };
+        let Some(owner_repo) = owner_repo_from_repo_root(repo_root) else {
+            return pr_status_unavailable(
+                branch,
+                format!(
+                    "no GitHub repository could be resolved from the origin remote of {}",
+                    repo_root.display()
+                ),
+            );
+        };
+        let stub_mode = self
+            .config
+            .github
+            .as_ref()
+            .and_then(|g| g.stub)
+            .unwrap_or(false);
+        let stored = self
+            .github_token_store
+            .as_ref()
+            .and_then(|store| store.get(github_login));
+        let token = match pr_lookup_for_caller(stub_mode, stored.as_deref()) {
+            PrLookup::Empty => return PrStatusView::default(),
+            PrLookup::Unavailable(reason) => return pr_status_unavailable(branch, reason),
+            PrLookup::Perform(token) => token,
+        };
+
+        let head_branch = branch.to_string();
+        let outcome = tokio::task::spawn_blocking(move || {
+            use tddy_workflow_recipes::orchestrate_pr_stack::github::GithubPrApi;
+            tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::with_token(
+                owner_repo, token,
+            )
+            .get_pr_by_head(&head_branch)
+        })
+        .await;
+
+        match outcome {
+            Ok(PrLookupOutcome::Found(pr)) => PrStatusView {
+                exists: true,
+                number: pr.number,
+                url: pr.url,
+                state: pr_state_label(pr.state).to_string(),
+                unavailable: false,
+                unavailable_reason: String::new(),
+            },
+            Ok(PrLookupOutcome::NotFound) => PrStatusView::default(),
+            Ok(PrLookupOutcome::Unavailable(reason)) => pr_status_unavailable(branch, reason),
+            Err(join_error) => pr_status_unavailable(
+                branch,
+                format!("the PR lookup did not complete: {join_error}"),
+            ),
+        }
+    }
+
+    fn resolve_chain_base_ref_status(
         sessions_base: &std::path::Path,
         stack_parent: Option<&str>,
         repo_root: &std::path::Path,
         new_branch_name: &str,
     ) -> Result<Option<String>, Status> {
-        let Some(sp) = stack_parent else {
-            return Ok(None);
-        };
-        // A pr-stack orchestrator is a planning session with no branch of its own. The child being
-        // spawned owns a planned node, identified by the branch it is about to create: base it off
-        // that node's effective base (its nearest non-merged ancestor branch, skipping merged
-        // ones), enforcing bottom-up ordering. When the branch matches no node — or the parent
-        // carries no stack — fall back to the stack/default branch (`Ok(None)`), not an error. A
-        // branchless *code* session still errors below, per the session-chaining PRD.
-        if Self::parent_is_pr_stack_orchestrator(sessions_base, sp) {
-            let Some((_, stack, node_id)) =
-                Self::pr_stack_node_for_spawn(sessions_base, sp, new_branch_name)
-            else {
-                return Ok(None);
-            };
-            let default_base =
-                tddy_core::resolve_default_integration_base_ref(repo_root).map_err(|e| {
-                    Status::failed_precondition(format!(
-                        "could not resolve default branch for pr-stack node: {e}"
-                    ))
-                })?;
-            let base = stack
-                .base_ref_for_spawn(&node_id, &default_base)
-                .map_err(|e| Status::failed_precondition(e.to_string()))?;
-            return Ok(Some(base));
-        }
-        tddy_core::resolve_chain_integration_base_ref_from_parent_session(
-            sessions_base,
-            sp,
-            repo_root,
-        )
-        .map(Some)
-        .map_err(|e| {
-            Status::failed_precondition(format!("could not resolve stack parent branch: {e}"))
-        })
-    }
-
-    /// Locate the planned stack node a child spawn belongs to: the node in `stack_parent`'s stack
-    /// that owns the branch the child is about to create. Returns the orchestrator's session dir,
-    /// its stack, and the matched node id.
-    ///
-    /// A planned node carries only a `branch_suggestion` until a child materializes it, so both are
-    /// matched — the recorded `branch` first, so a node materialized on a branch other than the one
-    /// suggested still resolves to itself rather than to whichever sibling still suggests that name.
-    ///
-    /// `None` means "this spawn is not materializing a planned node" — the parent is not a pr-stack
-    /// orchestrator, carries no stack, the branch is blank, or no node claims that branch. Callers
-    /// treat that as the non-chaining default, never as an error.
-    ///
-    /// Single matching rule shared by base resolution and child linking, so the node a child bases
-    /// itself off is exactly the node that records it.
-    fn pr_stack_node_for_spawn(
-        sessions_base: &std::path::Path,
-        stack_parent: &str,
-        new_branch_name: &str,
-    ) -> Option<(PathBuf, tddy_core::changeset::Stack, String)> {
-        if !Self::parent_is_pr_stack_orchestrator(sessions_base, stack_parent) {
-            return None;
-        }
-        let branch = new_branch_name.trim();
-        if branch.is_empty() {
-            return None;
-        }
-        let parent_dir = unified_session_dir_path(sessions_base, stack_parent);
-        // Hydrated, so a node whose branch was only ever recorded by its child session still
-        // resolves to that branch here — both for matching below and for the base a descendant
-        // is given. The hydrated copy is read-only; the forward link writes through `parent_dir`.
-        let stack =
-            tddy_core::changeset::read_stack_with_resolved_branches(sessions_base, stack_parent)
-                .ok()??;
-        let node_id = stack
-            .nodes
-            .iter()
-            .find(|n| n.branch.as_deref() == Some(branch))
-            .or_else(|| {
-                stack
-                    .nodes
-                    .iter()
-                    .find(|n| n.branch.is_none() && n.branch_suggestion.as_deref() == Some(branch))
-            })
-            .map(|n| n.node_id.clone())?;
-        Some((parent_dir, stack, node_id))
+        tddy_core::resolve_chain_base_ref(sessions_base, stack_parent, repo_root, new_branch_name)
+            .map_err(Status::failed_precondition)
     }
 
     /// Record on a pr-stack orchestrator's planned node the branch a child spawn just created, plus
@@ -1000,7 +1029,7 @@ impl ConnectionServiceImpl {
             return Ok(());
         };
         let Some((parent_dir, _stack, node_id)) =
-            Self::pr_stack_node_for_spawn(sessions_base, sp, new_branch_name)
+            tddy_core::pr_stack_node_for_spawn(sessions_base, sp, new_branch_name)
         else {
             return Ok(());
         };
@@ -1024,22 +1053,6 @@ impl ConnectionServiceImpl {
             child_session_id
         );
         Ok(())
-    }
-
-    /// True when the parent session is a pr-stack orchestrator — a planning session carrying a
-    /// planned `stack` (or the `pr-stack` recipe) and therefore no git branch of its own. Such a
-    /// parent is a valid chain target that resolves to the stack/default branch, unlike a branchless
-    /// code session (which is an error). A missing/unreadable parent changeset returns `false` so
-    /// the caller's normal resolution/validation still runs.
-    fn parent_is_pr_stack_orchestrator(
-        sessions_base: &std::path::Path,
-        parent_session_id: &str,
-    ) -> bool {
-        let parent_dir = unified_session_dir_path(sessions_base, parent_session_id);
-        match tddy_core::read_changeset(&parent_dir) {
-            Ok(cs) => cs.recipe.as_deref() == Some("pr-stack") || cs.stack.is_some(),
-            Err(_) => false,
-        }
     }
 
     /// Handle `StartSession` for `session_type = "claude-cli"` sessions.
@@ -1297,6 +1310,119 @@ pub fn resolve_start_session_claude_binary(config: &DaemonConfig) -> String {
     crate::config::resolve_claude_binary_path(config)
 }
 
+/// The branch a spawn actually operates on: the branch it creates, or — under
+/// `work_on_selected_branch` — the existing branch it resumes.
+///
+/// A PR-stack node's link is keyed on this rather than on `new_branch_name`, which is **empty** for a
+/// resume. Recovering a planned PR whose child session was deleted means resuming the branch the node
+/// already owns (it exists, is pushed, has a worktree), and without the effective branch
+/// `pr_stack_node_for_spawn` matches nothing: the node would never re-link, so the row would stay
+/// recovered and every click would spawn another unlinked session.
+///
+/// A blank intent defaults to `new_branch_from_base` (`StartSessionRequest.branch_worktree_intent`),
+/// and a resume ignores any leftover `new_branch_name` the dialog carried — keying on a branch the
+/// spawn never touches would link the node to the wrong branch.
+///
+/// A resumed branch is reduced to its local name: the dialog's picker is fed by
+/// `ListProjectBranches`, which offers remote-tracking names (`<remote>/<branch>`), while a stack
+/// node records the local one. Keying on the prefixed form matches no node, which is the same
+/// silent non-link this function exists to prevent. The `remote` argument is the project's resolved
+/// default remote so a non-`origin` prefix is stripped correctly.
+#[must_use]
+pub fn effective_spawn_branch<'a>(
+    branch_worktree_intent: &str,
+    new_branch_name: &'a str,
+    selected_branch_to_work_on: &'a str,
+    remote: &str,
+) -> &'a str {
+    match branch_worktree_intent.trim() {
+        "work_on_selected_branch" => {
+            tddy_core::worktree::local_branch_name_for_remote(selected_branch_to_work_on, remote)
+        }
+        _ => new_branch_name.trim(),
+    }
+}
+
+/// Resolves the default remote name for a registered project, degrading to an empty string when the
+/// resolver itself errors (e.g. unreadable `projects.yaml`) so a list RPC never fails on a single
+/// bad row. The resolver already falls back to `origin` as the last resort, so the empty case is the
+/// rare "registry unreadable" path — clients apply their own `origin` fallback then.
+fn resolve_default_remote_or_empty(
+    projects_dir: &Path,
+    project_id: &str,
+    repo_root: &Path,
+) -> String {
+    project_storage::effective_remote_name_for_project(projects_dir, project_id, repo_root)
+        .unwrap_or_default()
+}
+
+/// Builds a proto [`ProjectEntry`] from a stored [`project_storage::ProjectData`] plus the resolved
+/// `default_remote`. Centralizing the mapping keeps every response (ListProjects, CreateProject,
+/// AddProjectToHost, SetProjectDefaultBranch) consistent as fields are added.
+fn project_entry_from(
+    p: &project_storage::ProjectData,
+    daemon_instance_id: String,
+    default_remote: String,
+) -> ProtoProjectEntry {
+    ProtoProjectEntry {
+        project_id: p.project_id.clone(),
+        name: p.name.clone(),
+        git_url: p.git_url.clone(),
+        main_repo_path: p.main_repo_path.clone(),
+        daemon_instance_id,
+        main_branch_ref: p.main_branch_ref.clone().unwrap_or_default(),
+        default_remote,
+    }
+}
+
+/// The repoint target a client may act on: `Ok(None)` for "no target named", `Ok(Some(target))`
+/// for an accepted one, `Err(reason)` for a target the daemon refuses.
+///
+/// `RepointPlannedPrRequest.target_base_branch` is applied by `repoint_planned_pr_node` as a
+/// **retain** rule — the parents that own that branch stay and the rest are dropped — so a target
+/// no parent owns *is* the instruction to detach the node onto the default branch. Validation is
+/// therefore not politeness: a stale label, a typo, or a client that has drifted from the daemon's
+/// view of the repo would each read as "detach this node" and silently rewrite the plan. An
+/// accepted target must name either the resolved default branch or one of the node's parents'
+/// branches; nothing else is a meaningful thing to be based onto.
+///
+/// An empty or whitespace-only target is not a rejection: it names no target at all and selects the
+/// original drop-merged-parents rule (`None`).
+///
+/// The default branch is compared with the remote prefix stripped from both sides.
+/// `tddy_core::resolve_default_integration_base_ref` returns a remote-tracking ref
+/// (`<remote>/<branch>`), while a node's `branch` and a GitHub PR base are plain names, so the label
+/// a client renders can legitimately carry either form. The remote is parsed off `default_branch`
+/// (the segment before its first `/`) so a non-`origin` default is normalized correctly. The
+/// accepted value returned is the caller's own trimmed input, not the normalized form, so the
+/// recipe matches parent branches as recorded.
+pub fn validate_repoint_target(
+    target_base_branch: &str,
+    default_branch: &str,
+    parent_branches: &[&str],
+) -> Result<Option<String>, String> {
+    let target = target_base_branch.trim();
+    if target.is_empty() {
+        return Ok(None);
+    }
+
+    let remote = default_branch
+        .split_once('/')
+        .map(|(r, _)| r)
+        .unwrap_or("origin");
+    let names_default = tddy_core::worktree::local_branch_name_for_remote(target, remote)
+        == tddy_core::worktree::local_branch_name_for_remote(default_branch, remote);
+    let names_parent = parent_branches.contains(&target);
+
+    if names_default || names_parent {
+        Ok(Some(target.to_string()))
+    } else {
+        Err(format!(
+            "target_base_branch '{target}' names neither the default branch '{default_branch}' nor any parent's branch"
+        ))
+    }
+}
+
 /// Resolve the `claude` binary for a ResumeSession relaunch through the same host resolver as
 /// StartSession, so an explicitly configured path is honored and a bare name is resolved to a host
 /// path instead of being spawned against the daemon's minimal systemd PATH.
@@ -1437,12 +1563,14 @@ async fn spawn_claude_cli_session_inner(
     tddy_core::write_changeset(&session_dir, &cs)
         .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
-    let chain_base_ref = ConnectionServiceImpl::resolve_chain_base_ref(
+    let chain_base_ref = ConnectionServiceImpl::resolve_chain_base_ref_status(
         &sessions_base,
         stack_parent,
         &repo_root,
         new_branch_name,
     )?;
+    let worktree_base_ref =
+        tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
 
     // Create the real git worktree (blocking: involves git fetch + git worktree add).
     let repo_root_clone = repo_root.clone();
@@ -1455,7 +1583,7 @@ async fn spawn_claude_cli_session_inner(
             tddy_core::setup_worktree_for_session_with_optional_chain_base(
                 &repo_root_clone,
                 &session_dir_clone,
-                chain_base_ref.as_deref(),
+                worktree_base_ref.as_deref(),
             )
             .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
         },
@@ -1473,11 +1601,20 @@ async fn spawn_claude_cli_session_inner(
 
     // The child's branch now exists (and, when requested, is on origin), so a pr-stack
     // orchestrator's planned node can record it — which is what lets this node's descendants be
-    // spawned at all, since they base onto `origin/<branch>`.
+    // spawned at all, since they base onto `<remote>/<branch>`. Keyed on the effective branch, so a
+    // session resuming the branch a node already owns re-links to that node.
+    let remote =
+        project_storage::effective_remote_name_for_project(&projects_dir, project_id, &repo_root)
+            .map_err(|e| Status::internal(e.to_string()))?;
     ConnectionServiceImpl::link_stack_node_to_spawned_branch(
         &sessions_base,
         stack_parent,
-        new_branch_name,
+        effective_spawn_branch(
+            branch_worktree_intent,
+            new_branch_name,
+            selected_branch_to_work_on,
+            &remote,
+        ),
         session_id,
     )?;
 
@@ -2073,12 +2210,16 @@ impl ConnectionServiceImpl {
                         "project main repo path does not exist",
                     ));
                 }
-                let chain_base_ref = Self::resolve_chain_base_ref(
+                let chain_base_ref = Self::resolve_chain_base_ref_status(
                     &sessions_base,
                     stack_parent,
                     &repo_root,
                     new_branch_name,
                 )?;
+                let worktree_base_ref = tddy_core::select_worktree_base_ref(
+                    selected_integration_base_ref,
+                    chain_base_ref,
+                );
                 let repo_root_clone = repo_root.clone();
                 let session_dir_clone = session_dir.clone();
                 let timeout = self.config.spawn_worker_request_timeout();
@@ -2089,7 +2230,7 @@ impl ConnectionServiceImpl {
                         tddy_core::setup_worktree_for_session_with_optional_chain_base(
                             &repo_root_clone,
                             &session_dir_clone,
-                            chain_base_ref.as_deref(),
+                            worktree_base_ref.as_deref(),
                         )
                         .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
                     },
@@ -2103,13 +2244,25 @@ impl ConnectionServiceImpl {
                     timeout,
                 )
                 .await?;
-                // Branch exists now — record it on the orchestrator's planned node (see
-                // `link_stack_node_to_spawned_branch`). Only this arm creates a branch; a
+                // The branch this spawn works on now exists — record it on the orchestrator's planned
+                // node (see `link_stack_node_to_spawned_branch`), keyed on the effective branch so a
+                // resumed branch re-links its node. Only this arm resolves a project worktree; a
                 // client-supplied `repo_path` materializes no planned node.
+                let remote = project_storage::effective_remote_name_for_project(
+                    &projects_dir,
+                    &pid,
+                    &repo_root,
+                )
+                .map_err(|e| Status::internal(e.to_string()))?;
                 Self::link_stack_node_to_spawned_branch(
                     &sessions_base,
                     stack_parent,
-                    new_branch_name,
+                    effective_spawn_branch(
+                        branch_worktree_intent,
+                        new_branch_name,
+                        selected_branch_to_work_on,
+                        &remote,
+                    ),
                     session_id,
                 )?;
                 wt
@@ -2464,6 +2617,7 @@ impl ConnectionServiceImpl {
         new_branch_name: &str,
         selected_integration_base_ref: &str,
         selected_branch_to_work_on: &str,
+        stack_parent: Option<&str>,
         initial_prompt: &str,
         _managed_codebase: bool,
         specialized_agents: &[String],
@@ -2565,6 +2719,7 @@ impl ConnectionServiceImpl {
         };
         let mut cs = Changeset {
             workflow: Some(cs_workflow),
+            orchestrator_session_id: stack_parent.map(str::to_string),
             recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
             ..Changeset::default()
         };
@@ -2577,6 +2732,14 @@ impl ConnectionServiceImpl {
         tddy_core::write_changeset(&session_dir, &cs)
             .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
+        let chain_base_ref = Self::resolve_chain_base_ref_status(
+            &sessions_base,
+            stack_parent,
+            &repo_root,
+            new_branch_name,
+        )?;
+        let worktree_base_ref =
+            tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
         let repo_root_clone = repo_root.clone();
         let session_dir_clone = session_dir.clone();
         let timeout = self.config.spawn_worker_request_timeout();
@@ -2587,7 +2750,7 @@ impl ConnectionServiceImpl {
                 tddy_core::setup_worktree_for_session_with_optional_chain_base(
                     &repo_root_clone,
                     &session_dir_clone,
-                    None,
+                    worktree_base_ref.as_deref(),
                 )
                 .map_err(|e| anyhow::anyhow!("worktree setup failed: {e}"))
             },
@@ -2753,7 +2916,7 @@ impl ConnectionServiceImpl {
             semantic_index_env_pair = Some(crate::semantic_index::semantic_index_env(&session_dir));
         }
 
-        let mut env = crate::sandbox_session::build_sandbox_runner_env(
+        let mut env = crate::sandbox_session::build_sandboxed_cursor_runner_env(
             &scratch_home,
             &scratch_tmp,
             session_id,
@@ -3863,13 +4026,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let local_daemon_id = local_instance_id_for_config(&self.config);
         let entries: Vec<ProtoProjectEntry> = projects
             .into_iter()
-            .map(|p| ProtoProjectEntry {
-                project_id: p.project_id,
-                name: p.name,
-                git_url: p.git_url,
-                main_repo_path: p.main_repo_path,
-                daemon_instance_id: local_daemon_id.clone(),
-                main_branch_ref: p.main_branch_ref.unwrap_or_default(),
+            .map(|p| {
+                let repo_root = PathBuf::from(&p.main_repo_path);
+                let default_remote =
+                    resolve_default_remote_or_empty(&projects_dir, &p.project_id, &repo_root);
+                project_entry_from(&p, local_daemon_id.clone(), default_remote)
             })
             .collect();
         log::debug!(
@@ -3960,16 +4121,17 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             git_url: git_url.to_string(),
             main_repo_path,
             main_branch_ref: None,
+            remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
         };
-        let entry = ProtoProjectEntry {
-            project_id: project.project_id.clone(),
-            name: project.name.clone(),
-            git_url: project.git_url.clone(),
-            main_repo_path: project.main_repo_path.clone(),
-            daemon_instance_id: local_instance_id_for_config(&self.config),
-            main_branch_ref: project.main_branch_ref.clone().unwrap_or_default(),
-        };
+        let repo_root = PathBuf::from(&project.main_repo_path);
+        let default_remote =
+            resolve_default_remote_or_empty(&projects_dir, &project.project_id, &repo_root);
+        let entry = project_entry_from(
+            &project,
+            local_instance_id_for_config(&self.config),
+            default_remote,
+        );
         project_storage::add_project(&projects_dir, project)
             .map_err(|e| Status::internal(e.to_string()))?;
 
@@ -4055,15 +4217,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 "AddProjectToHost: project_id={} already present on this host, returning existing row",
                 project_id
             );
+            let repo_root = PathBuf::from(&existing.main_repo_path);
+            let default_remote =
+                resolve_default_remote_or_empty(&projects_dir, &existing.project_id, &repo_root);
             return Ok(Response::new(AddProjectToHostResponse {
-                project: Some(ProtoProjectEntry {
-                    project_id: existing.project_id,
-                    name: existing.name,
-                    git_url: existing.git_url,
-                    main_repo_path: existing.main_repo_path,
-                    daemon_instance_id: local_id,
-                    main_branch_ref: existing.main_branch_ref.unwrap_or_default(),
-                }),
+                project: Some(project_entry_from(&existing, local_id, default_remote)),
             }));
         }
 
@@ -4111,20 +4269,17 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             git_url: git_url.to_string(),
             main_repo_path,
             main_branch_ref,
+            remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
         };
         let (stored, _created) = project_storage::add_or_get_project(&projects_dir, project)
             .map_err(|e| Status::internal(e.to_string()))?;
 
+        let repo_root = PathBuf::from(&stored.main_repo_path);
+        let default_remote =
+            resolve_default_remote_or_empty(&projects_dir, &stored.project_id, &repo_root);
         Ok(Response::new(AddProjectToHostResponse {
-            project: Some(ProtoProjectEntry {
-                project_id: stored.project_id,
-                name: stored.name,
-                git_url: stored.git_url,
-                main_repo_path: stored.main_repo_path,
-                daemon_instance_id: local_id,
-                main_branch_ref: stored.main_branch_ref.unwrap_or_default(),
-            }),
+            project: Some(project_entry_from(&stored, local_id, default_remote)),
         }))
     }
 
@@ -4213,15 +4368,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             project_id,
             stored.main_branch_ref.as_deref().unwrap_or_default()
         );
+        let repo_root = PathBuf::from(&stored.main_repo_path);
+        let default_remote =
+            resolve_default_remote_or_empty(&projects_dir, &stored.project_id, &repo_root);
         Ok(Response::new(SetProjectDefaultBranchResponse {
-            project: Some(ProtoProjectEntry {
-                project_id: stored.project_id,
-                name: stored.name,
-                git_url: stored.git_url,
-                main_repo_path: stored.main_repo_path,
-                daemon_instance_id: local_id,
-                main_branch_ref: stored.main_branch_ref.unwrap_or_default(),
-            }),
+            project: Some(project_entry_from(&stored, local_id, default_remote)),
         }))
     }
 
@@ -4458,6 +4609,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         req.new_branch_name.trim(),
                         req.selected_integration_base_ref.trim(),
                         req.selected_branch_to_work_on.trim(),
+                        Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
                         req.initial_prompt.trim(),
                         req.managed_codebase,
                         &req.specialized_agents,
@@ -4480,6 +4632,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 req.new_branch_name.trim(),
                 req.selected_integration_base_ref.trim(),
                 req.selected_branch_to_work_on.trim(),
+                req.repo_path.trim(),
+                Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
                 req.initial_prompt.trim(),
                 req.managed_codebase,
                 &req.specialized_agents,
@@ -5974,12 +6128,23 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         }
 
         let timeout = self.config.spawn_worker_request_timeout();
+        let remote = project_storage::effective_remote_name_for_project(
+            &projects_dir,
+            project_id,
+            &repo_root,
+        )
+        .map_err(|e| Status::internal(e.to_string()))?;
+        let remote_for_closure = remote.clone();
         let branches = spawn_blocking_with_timeout(
             timeout,
             "ListProjectBranches: git remote refs",
             move || {
-                tddy_core::list_recent_remote_branches(&repo_root, BRANCH_LIST_LIMIT)
-                    .map_err(|e| anyhow::anyhow!("list_recent_remote_branches failed: {}", e))
+                tddy_core::list_recent_remote_branches(
+                    &repo_root,
+                    &remote_for_closure,
+                    BRANCH_LIST_LIMIT,
+                )
+                .map_err(|e| anyhow::anyhow!("list_recent_remote_branches failed: {}", e))
             },
         )
         .await?;
@@ -5991,7 +6156,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             branches.len()
         );
 
-        Ok(Response::new(ListProjectBranchesResponse { branches }))
+        Ok(Response::new(ListProjectBranchesResponse {
+            branches,
+            default_remote: remote,
+        }))
     }
 
     async fn execute_tool(
@@ -7090,8 +7258,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         &self,
         request: Request<GetPrStatusRequest>,
     ) -> Result<Response<GetPrStatusResponse>, Status> {
-        use tddy_service::proto::connection::PrStatusView;
-
         let req = request.into_inner();
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
@@ -7110,43 +7276,15 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
         require_pr_stack_orchestrator(&session_dir)?;
 
-        // Resolve `owner/repo` from the orchestrator session's repo remote (its `repo_path` is a
-        // filesystem path, not the GitHub namespace). When it can't be resolved, there is no PR to
-        // report — treat it the same as a token-less query: `exists = false`, not an error.
-        let changeset =
-            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        let repo_root = changeset
-            .repo_path
-            .clone()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| session_dir.clone());
-        let Some(owner_repo) = owner_repo_from_repo_root(&repo_root) else {
-            return Ok(Response::new(GetPrStatusResponse {
-                status: Some(PrStatusView::default()),
-            }));
-        };
+        // An orchestrator never gets a worktree, so its `changeset.yaml` records no checkout and only
+        // `.session.yaml` names the one it plans over. `pr_status_for_caller` resolves the GitHub
+        // namespace from that checkout's remote and reports a lookup it cannot perform — including
+        // one over an unknown checkout — as unavailable rather than failing this call.
+        let repo_root = tddy_core::repo_root_for_session(&session_dir);
 
-        let branch = req.branch.trim().to_string();
-        let view = tokio::task::spawn_blocking(move || {
-            use tddy_workflow_recipes::orchestrate_pr_stack::github::GithubPrApi;
-            let gh = tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::new(
-                owner_repo,
-            );
-            gh.get_pr_by_head(&branch)
-        })
-        .await
-        .map_err(|e| Status::internal(format!("get_pr_status join error: {e}")))?
-        .map_err(|e| Status::internal(e.to_string()))?;
-
-        let status = match view {
-            Some(pr) => PrStatusView {
-                exists: true,
-                number: pr.number,
-                url: pr.url,
-                state: pr_state_label(pr.state).to_string(),
-            },
-            None => PrStatusView::default(),
-        };
+        let status = self
+            .pr_status_for_caller(&github_user, repo_root.as_deref(), req.branch.trim())
+            .await;
         Ok(Response::new(GetPrStatusResponse {
             status: Some(status),
         }))
@@ -7157,7 +7295,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         request: Request<QueryBranchRequest>,
     ) -> Result<Response<QueryBranchResponse>, Status> {
         use tddy_service::proto::connection::{
-            BranchResolution, BranchSession, BranchWorktree, PrStatusView,
+            BranchRemote, BranchResolution, BranchSession, BranchWorktree,
         };
 
         let req = request.into_inner();
@@ -7178,13 +7316,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
         require_pr_stack_orchestrator(&session_dir)?;
 
-        let changeset =
-            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        let repo_root = changeset
-            .repo_path
-            .clone()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| session_dir.clone());
+        // `None` when nothing in the session directory names a checkout: every repo-derived leg below
+        // then reads as absent or unavailable, never as a confident answer about a repo we don't know.
+        let repo_root = tddy_core::repo_root_for_session(&session_dir);
         let branch = req.branch.trim().to_string();
 
         // Session — scan sessions under the user's root for one whose Changeset.branch matches,
@@ -7238,7 +7372,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         };
 
         // Worktree — the on-disk worktree checked out for the branch (non-erroring).
-        let worktree = match tddy_core::worktree::worktree_path_for_branch(&repo_root, &branch) {
+        let worktree = match repo_root
+            .as_deref()
+            .and_then(|root| tddy_core::worktree::worktree_path_for_branch(root, &branch))
+        {
             Some(path) => BranchWorktree {
                 exists: true,
                 path: path.to_string_lossy().into_owned(),
@@ -7246,33 +7383,22 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             None => BranchWorktree::default(),
         };
 
-        // PR — same path as get_pr_status; an unresolvable repo/token yields exists = false.
-        let pr = match owner_repo_from_repo_root(&repo_root) {
-            Some(owner_repo) => {
-                let branch_for_pr = branch.clone();
-                let view = tokio::task::spawn_blocking(move || {
-                    use tddy_workflow_recipes::orchestrate_pr_stack::github::GithubPrApi;
-                    let gh =
-                        tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::new(
-                            owner_repo,
-                        );
-                    gh.get_pr_by_head(&branch_for_pr)
-                })
-                .await
-                .map_err(|e| Status::internal(format!("query_branch join error: {e}")))?
-                .map_err(|e| Status::internal(e.to_string()))?;
-                match view {
-                    Some(pr) => PrStatusView {
-                        exists: true,
-                        number: pr.number,
-                        url: pr.url,
-                        state: pr_state_label(pr.state).to_string(),
-                    },
-                    None => PrStatusView::default(),
-                }
-            }
-            None => PrStatusView::default(),
+        // Remote — `origin/<branch>` in the orchestrator's repo, which is what a descendant's
+        // worktree is created from. Only as fresh as the last fetch, so it can delay a spawn but
+        // never permit one that would fail inside `git fetch`.
+        let remote = match repo_root
+            .as_deref()
+            .and_then(|root| tddy_core::worktree::remote_branch_ref_sha(root, &branch))
+        {
+            Some(sha) => BranchRemote { exists: true, sha },
+            None => BranchRemote::default(),
         };
+
+        // PR — same path as get_pr_status. A lookup that cannot be performed degrades this leg
+        // alone; the session, worktree and remote legs above stay usable.
+        let pr = self
+            .pr_status_for_caller(&github_user, repo_root.as_deref(), &branch)
+            .await;
 
         Ok(Response::new(QueryBranchResponse {
             resolution: Some(BranchResolution {
@@ -7280,6 +7406,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 session: Some(session),
                 worktree: Some(worktree),
                 pr: Some(pr),
+                remote: Some(remote),
             }),
         }))
     }
@@ -7306,13 +7433,13 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
         require_pr_stack_orchestrator(&session_dir)?;
 
-        let changeset =
-            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
-        let repo_root = changeset
-            .repo_path
-            .clone()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| session_dir.clone());
+        // A repoint rebases a local branch and re-targets a PR base, so it needs the real checkout:
+        // an unknown one is a precondition failure, not a repoint attempted in the session directory.
+        let repo_root = tddy_core::repo_root_for_session(&session_dir).ok_or_else(|| {
+            Status::failed_precondition(
+                "no checkout is recorded for this session, so its repository could not be resolved",
+            )
+        })?;
         let owner_repo = owner_repo_from_repo_root(&repo_root).unwrap_or_default();
         let default_branch =
             tddy_core::resolve_default_integration_base_ref(&repo_root).map_err(|e| {
@@ -7320,6 +7447,48 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             })?;
 
         let node_id = req.node_id.trim().to_string();
+
+        // On the wire, an unnamed target means "the project's default branch" — the daemon's own
+        // resolved ref, substituted here.
+        //
+        // A client cannot always name it: `ProjectEntry.main_branch_ref` is empty for a project that
+        // stores no default, and the web then renders "Repoint to default branch". Forwarding that
+        // empty string would instead select the recipe's drop-merged-parents rule, which in the very
+        // case this feature exists for — a predecessor whose PR merged but whose plan still records
+        // `open` — drops nothing at all and returns success against an unchanged plan. The operator
+        // would see no error and no change.
+        //
+        // The recipe's `None` mode is therefore in-process only; it is never reachable from here.
+        let requested_target = if req.target_base_branch.trim().is_empty() {
+            default_branch.as_str()
+        } else {
+            req.target_base_branch.as_str()
+        };
+
+        // The named target must be a branch this node can be based onto: the repoint retains only
+        // the parents that own it, so an unvalidated target is a silent plan rewrite.
+        let changeset =
+            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
+        let stack = changeset.stack.unwrap_or_default();
+        let parent_branches: Vec<String> = stack
+            .node(&node_id)
+            .map(|node| {
+                node.parents
+                    .iter()
+                    .filter_map(|parent_id| stack.node(parent_id)?.branch.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let target_base_branch = validate_repoint_target(
+            requested_target,
+            &default_branch,
+            &parent_branches
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<&str>>(),
+        )
+        .map_err(Status::invalid_argument)?;
+
         let session_dir_for_op = session_dir.clone();
         tokio::task::spawn_blocking(move || {
             let gh = tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::new(
@@ -7330,6 +7499,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 &repo_root,
                 &node_id,
                 &default_branch,
+                target_base_branch.as_deref(),
                 &gh,
             )
         })
@@ -7724,6 +7894,39 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         )?;
         Ok(Response::new(DeleteSessionUploadResponse {}))
     }
+
+    // TODO(start-session-attachments): the three pre-session staging RPCs below are wire-only
+    // stubs — the proto contract is pinned so the web can be generated against it, but no staging
+    // area is written or read yet, and `StartSessionRequest.attachments` is ignored by
+    // `start_session`. Implement the host side (staging root under the caller's sessions base,
+    // basename validation, cross-host routing by `daemon_instance_id`) in the follow-up changeset.
+
+    async fn upload_staged_attachment_chunk(
+        &self,
+        _request: Request<UploadStagedAttachmentChunkRequest>,
+    ) -> Result<Response<UploadStagedAttachmentChunkResponse>, Status> {
+        Err(Status::unimplemented(
+            "UploadStagedAttachmentChunk is not implemented yet",
+        ))
+    }
+
+    async fn list_staged_attachments(
+        &self,
+        _request: Request<ListStagedAttachmentsRequest>,
+    ) -> Result<Response<ListStagedAttachmentsResponse>, Status> {
+        Err(Status::unimplemented(
+            "ListStagedAttachments is not implemented yet",
+        ))
+    }
+
+    async fn delete_staged_attachment(
+        &self,
+        _request: Request<DeleteStagedAttachmentRequest>,
+    ) -> Result<Response<DeleteStagedAttachmentResponse>, Status> {
+        Err(Status::unimplemented(
+            "DeleteStagedAttachment is not implemented yet",
+        ))
+    }
 }
 
 /// Resolve the daemon's default project directory — the filesystem the Host Stats Footer reports
@@ -7773,6 +7976,21 @@ fn owner_repo_from_repo_root(repo_root: &std::path::Path) -> Option<String> {
     }
     let remote_url = String::from_utf8_lossy(&out.stdout).trim().to_string();
     tddy_workflow_recipes::orchestrate_pr_stack::github::owner_repo_from_remote_url(&remote_url)
+}
+
+/// A PR status the daemon could not look up: *unavailable* with an operator-facing `reason`, never
+/// `exists = false` (D8). Logged, because a lookup that never happened is otherwise invisible — the
+/// daemon log carried no PR line at all for an orchestrator polled hundreds of times.
+fn pr_status_unavailable(
+    branch: &str,
+    reason: String,
+) -> tddy_service::proto::connection::PrStatusView {
+    log::warn!("PR status unavailable for branch {branch}: {reason}");
+    tddy_service::proto::connection::PrStatusView {
+        unavailable: true,
+        unavailable_reason: reason,
+        ..Default::default()
+    }
 }
 
 /// GitHub PR state → the lowercase label carried on the `PrStatusView.state` wire field.
@@ -9900,86 +10118,6 @@ mod add_planned_pr_unit_tests {
     }
 }
 
-#[cfg(test)]
-mod chain_base_resolution_tests {
-    use super::*;
-    use tddy_core::changeset::Stack;
-    use tddy_core::session_lifecycle::unified_session_dir_path;
-    use tddy_core::{write_changeset, Changeset};
-
-    /// Persist `changeset.yaml` for a parent session under `sessions_base`.
-    fn write_parent_changeset(sessions_base: &std::path::Path, session_id: &str, cs: Changeset) {
-        let dir = unified_session_dir_path(sessions_base, session_id);
-        std::fs::create_dir_all(&dir).expect("create parent session dir");
-        write_changeset(&dir, &cs).expect("write parent changeset");
-    }
-
-    #[test]
-    fn resolve_chain_base_ref_returns_none_for_a_branchless_pr_stack_orchestrator_parent() {
-        // Given — a pr-stack orchestrator parent session: it has a planned stack but no branch of
-        // its own (planning sessions never own a code branch).
-        let tmp = tempfile::tempdir().expect("temp dir");
-        let sessions_base = tmp.path();
-        write_parent_changeset(
-            sessions_base,
-            "orchestrator-1",
-            Changeset {
-                recipe: Some("pr-stack".to_string()),
-                stack: Some(Stack {
-                    version: 1,
-                    nodes: vec![],
-                }),
-                branch: None,
-                ..Changeset::default()
-            },
-        );
-
-        // When — a child chains onto that orchestrator with a branch that matches no planned node
-        let result = ConnectionServiceImpl::resolve_chain_base_ref(
-            sessions_base,
-            Some("orchestrator-1"),
-            tmp.path(),
-            "feature/x/unmatched",
-        );
-
-        // Then — no chaining; the child bases off the stack/default branch (Ok(None)), not an error
-        assert_eq!(
-            result.expect("branchless orchestrator parent must resolve, not error"),
-            None,
-            "a pr-stack orchestrator parent with no matching node must yield no chain base (default branch), not failed_precondition"
-        );
-    }
-
-    #[test]
-    fn resolve_chain_base_ref_errors_for_a_branchless_code_session_parent() {
-        // Given — a regular code-session parent with no branch and no stack (not an orchestrator).
-        let tmp = tempfile::tempdir().expect("temp dir");
-        let sessions_base = tmp.path();
-        write_parent_changeset(
-            sessions_base,
-            "code-session-1",
-            Changeset {
-                recipe: Some("tdd".to_string()),
-                stack: None,
-                branch: None,
-                ..Changeset::default()
-            },
-        );
-
-        // When
-        let result = ConnectionServiceImpl::resolve_chain_base_ref(
-            sessions_base,
-            Some("code-session-1"),
-            tmp.path(),
-            "feature/some-branch",
-        );
-
-        // Then — the session-chaining PRD still applies: a branchless code parent cannot be chained
-        let err = result.expect_err("a branchless code-session parent must error");
-        assert_eq!(err.code, tddy_rpc::Code::FailedPrecondition);
-    }
-}
-
 /// A spawned child must record its **branch** on the planned node it materializes. Without that
 /// forward link the orchestrator's stack still reads "no branch anywhere", so `base_ref_for_spawn`
 /// refuses every descendant — a stack wedged at its bottom node. The child session id is recorded
@@ -10054,6 +10192,36 @@ mod stack_child_link_tests {
         dir
     }
 
+    /// The same stack, except `bottom` was worked on and then lost its session: it owns
+    /// `feature/bottom`, but the session recorded against it no longer exists. This is the state
+    /// `DeleteSession` leaves behind, and the one the operator recovers from.
+    fn an_orchestrator_whose_bottom_node_lost_its_child_session(
+        sessions_base: &std::path::Path,
+    ) -> PathBuf {
+        let dir = unified_session_dir_path(sessions_base, "orchestrator-1");
+        std::fs::create_dir_all(&dir).expect("create orchestrator session dir");
+        write_changeset(
+            &dir,
+            &Changeset {
+                recipe: Some("pr-stack".to_string()),
+                stack: Some(Stack {
+                    version: 1,
+                    nodes: vec![
+                        StackNode {
+                            branch: Some("feature/bottom".to_string()),
+                            session_id: Some("deleted-child".to_string()),
+                            ..a_planned_node("bottom", "feature/bottom", &[])
+                        },
+                        a_planned_node("top", "feature/top", &["bottom"]),
+                    ],
+                }),
+                ..Changeset::default()
+            },
+        )
+        .expect("write orchestrator changeset");
+        dir
+    }
+
     /// The same stack, except `bottom` never recorded its branch — only the child session that
     /// created it knows the name. Models a link written before the branch was known.
     fn an_orchestrator_whose_bottom_branch_only_its_session_knows(
@@ -10100,12 +10268,9 @@ mod stack_child_link_tests {
         an_orchestrator_whose_bottom_branch_only_its_session_knows(tmp.path());
 
         // When — `top` is spawned and the daemon resolves the node it materializes
-        let (_dir, stack, node_id) = ConnectionServiceImpl::pr_stack_node_for_spawn(
-            tmp.path(),
-            "orchestrator-1",
-            "feature/top",
-        )
-        .expect("the planned node for the spawned branch must resolve");
+        let (_dir, stack, node_id) =
+            tddy_core::pr_stack_node_for_spawn(tmp.path(), "orchestrator-1", "feature/top")
+                .expect("the planned node for the spawned branch must resolve");
 
         // Then — the session fallback supplies the parent's branch, so `top` is not blocked
         assert_eq!(node_id, "top");
@@ -10273,6 +10438,67 @@ mod stack_child_link_tests {
     }
 
     #[test]
+    fn a_spawn_resuming_an_existing_branch_relinks_the_node_that_owns_it() {
+        // Given — `bottom` owns a pushed branch whose session was deleted; the operator restarts it
+        // with `work_on_selected_branch`, so no new branch is created and `new_branch_name` is empty
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let orchestrator_dir = an_orchestrator_whose_bottom_node_lost_its_child_session(tmp.path());
+
+        // When — the spawn links its node on the branch it actually operates on
+        ConnectionServiceImpl::link_stack_node_to_spawned_branch(
+            tmp.path(),
+            Some("orchestrator-1"),
+            effective_spawn_branch("work_on_selected_branch", "", "feature/bottom", "origin"),
+            "child-2",
+        )
+        .expect("a resumed branch must link its planned node");
+
+        // Then — the recovery sticks: the node points at the live session instead of the deleted one,
+        // so the row leaves its recovered state and a second click cannot spawn another orphan
+        let stack = stack_of(&orchestrator_dir);
+        assert_eq!(
+            (
+                stack.node("bottom").and_then(|n| n.session_id.as_deref()),
+                stack.node("bottom").and_then(|n| n.branch.as_deref())
+            ),
+            (Some("child-2"), Some("feature/bottom"))
+        );
+    }
+
+    #[test]
+    fn a_spawn_resuming_a_remote_tracking_branch_relinks_the_node_that_owns_it() {
+        // Given — the same recovery, driven from the web: the dialog's branch picker is fed by
+        // `ListProjectBranches`, which offers `origin/<branch>` names, so that is what the spawn carries
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let orchestrator_dir = an_orchestrator_whose_bottom_node_lost_its_child_session(tmp.path());
+
+        // When
+        ConnectionServiceImpl::link_stack_node_to_spawned_branch(
+            tmp.path(),
+            Some("orchestrator-1"),
+            effective_spawn_branch(
+                "work_on_selected_branch",
+                "",
+                "origin/feature/bottom",
+                "origin",
+            ),
+            "child-2",
+        )
+        .expect("a resumed remote-tracking branch must link its planned node");
+
+        // Then — nodes record local branch names, so a prefixed key would match nothing and leave the
+        // node orphaned forever
+        let stack = stack_of(&orchestrator_dir);
+        assert_eq!(
+            (
+                stack.node("bottom").and_then(|n| n.session_id.as_deref()),
+                stack.node("bottom").and_then(|n| n.branch.as_deref())
+            ),
+            (Some("child-2"), Some("feature/bottom"))
+        );
+    }
+
+    #[test]
     fn linking_matches_a_node_by_the_branch_it_recorded_rather_than_its_suggestion() {
         // Given — `bottom` was materialized on a branch other than the one the planner suggested
         let tmp = tempfile::tempdir().expect("temp dir");
@@ -10336,6 +10562,7 @@ mod cross_daemon_session_token_acceptance_tests {
         data_dir: std::path::PathBuf,
     ) -> ConnectionServiceImpl {
         let resolver = crate::auth::build_auth_entries(&config, "127.0.0.1", 0)
+            .expect("auth wiring should build")
             .user_resolver
             .expect("auth wiring should produce a session resolver");
         let base = data_dir.clone();

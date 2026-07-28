@@ -168,6 +168,7 @@ async fn add_project_to_host_is_idempotent_when_the_project_id_already_exists_on
             git_url: "https://example.com/alpha.git".to_string(),
             main_repo_path: "/home/dev/repos/alpha".to_string(),
             main_branch_ref: None,
+            remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
         },
     )

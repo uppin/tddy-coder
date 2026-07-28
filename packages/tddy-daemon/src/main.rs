@@ -167,7 +167,7 @@ fn main() -> anyhow::Result<()> {
             })
             .collect();
 
-    let auth_result = tddy_daemon::auth::build_auth_entries(&config, host.as_str(), port);
+    let auth_result = tddy_daemon::auth::build_auth_entries(&config, host.as_str(), port)?;
     let mut rpc_entries = auth_result.entries;
 
     if let Some(ref lk) = config.livekit {
@@ -292,6 +292,9 @@ fn main() -> anyhow::Result<()> {
         };
 
     let user_resolver_for_connection = auth_result.user_resolver.clone();
+    // The GitHub token each web login granted, shared with ConnectionService so PR-status reads act
+    // with the calling operator's own credential.
+    let github_token_store_for_connection = auth_result.github_token_store.clone();
 
     // In relay mode, wire up the idle-timeout tracker + monitor task + external shutdown channel.
     let relay_idle_timeout: Option<std::time::Duration> = if args.relay {
@@ -441,6 +444,9 @@ fn main() -> anyhow::Result<()> {
             );
             if let Some(ref tracker) = idle_tracker_opt {
                 connection_impl = connection_impl.with_idle_tracker(tracker.clone());
+            }
+            if let Some(store) = github_token_store_for_connection.clone() {
+                connection_impl = connection_impl.with_github_token_store(store);
             }
             // Share one instance across transports: the LiveKit/HTTP RpcService server and the
             // local Unix-domain-socket tonic server both reference the same Arc, so a session

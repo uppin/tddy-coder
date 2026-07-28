@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use tddy_core::changeset::{read_changeset, write_changeset, BranchWorktreeIntent, Changeset};
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF;
+use tddy_core::FALLBACK_DEFAULT_INTEGRATION_BASE_REF;
 use tddy_daemon::config::{AllowedAgent, DaemonConfig};
 use tddy_daemon::project_storage::{self, ProjectData};
 use tddy_daemon::telegram_notifier::InMemoryTelegramSender;
@@ -871,6 +871,7 @@ async fn telegram_intent_then_project_pick_continues_flow() {
             git_url: "https://example.invalid/a.git".to_string(),
             main_repo_path: repo_path.to_string_lossy().to_string(),
             main_branch_ref: None,
+            remote_name: None,
             host_repo_paths: HashMap::new(),
         }],
     )
@@ -935,6 +936,7 @@ async fn telegram_branch_pick_shows_more_when_more_than_ten_remote_branches() {
             git_url: "https://example.invalid/a.git".to_string(),
             main_repo_path: clone.to_string_lossy().to_string(),
             main_branch_ref: None,
+            remote_name: None,
             host_repo_paths: HashMap::new(),
         }],
     )
@@ -998,6 +1000,7 @@ async fn telegram_branch_pick_no_more_when_at_most_ten_remote_branches() {
             git_url: "https://example.invalid/a.git".to_string(),
             main_repo_path: clone.to_string_lossy().to_string(),
             main_branch_ref: None,
+            remote_name: None,
             host_repo_paths: HashMap::new(),
         }],
     )
@@ -1252,6 +1255,7 @@ async fn telegram_branch_callback_work_on_selected_sets_selected_branch_to_work_
             git_url: "https://example.invalid/a.git".to_string(),
             main_repo_path: clone.to_string_lossy().to_string(),
             main_branch_ref: None,
+            remote_name: None,
             host_repo_paths: HashMap::new(),
         }],
     )
@@ -1341,6 +1345,7 @@ async fn telegram_branch_callback_new_branch_from_base_sets_selected_integration
             git_url: "https://example.invalid/a.git".to_string(),
             main_repo_path: clone.to_string_lossy().to_string(),
             main_branch_ref: None,
+            remote_name: None,
             host_repo_paths: HashMap::new(),
         }],
     )
@@ -1387,7 +1392,7 @@ async fn telegram_branch_callback_new_branch_from_base_sets_selected_integration
     let wf = cs.workflow.as_ref().expect("workflow block");
     assert_eq!(
         wf.selected_integration_base_ref.as_deref(),
-        Some(DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF),
+        Some(FALLBACK_DEFAULT_INTEGRATION_BASE_REF),
         "default branch row must persist project integration base ref"
     );
     assert!(

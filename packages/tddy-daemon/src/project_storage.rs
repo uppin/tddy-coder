@@ -12,11 +12,16 @@ pub struct ProjectData {
     pub name: String,
     pub git_url: String,
     pub main_repo_path: String,
-    /// Remote-tracking ref used as the integration base for worktrees (`origin/main`, etc.).
-    /// A stored ref is authoritative; absent (legacy) rows resolve their default live from the
+    /// Remote-tracking ref used as the integration base for worktrees (`origin/main`, `upstream/main`,
+    /// etc.). A stored ref is authoritative; absent (legacy) rows resolve their default live from the
     /// repository — see [`effective_integration_base_ref_for_project`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub main_branch_ref: Option<String>,
+    /// Default remote name for the project (`origin`, `upstream`, ...). When unset, the remote is
+    /// detected from the main worktree's upstream tracking branch, falling back to `origin` only as
+    /// the last resort. See [`effective_remote_name_for_project`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_name: Option<String>,
     /// Per-host (or per-daemon-instance) checkout paths for the same logical `project_id`.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub host_repo_paths: HashMap<String, String>,
@@ -99,12 +104,62 @@ pub fn find_project(projects_dir: &Path, project_id: &str) -> anyhow::Result<Opt
     Ok(projects.into_iter().find(|p| p.project_id == project_id))
 }
 
+/// Resolves the default remote name for a registered project.
+///
+/// Resolution order (no remote is assumed — `origin` is the last resort only):
+/// 1. **Main worktree upstream** — `tddy_core::worktree::detect_default_remote_name(repo_root)`
+///    reads `git rev-parse --abbrev-ref @{upstream}` and takes the segment before the first `/`.
+///    This is the developer's actual remote and the most authoritative signal.
+/// 2. **Project config** — [`ProjectData::remote_name`] when the main worktree has no upstream
+///    (detached HEAD, fresh repo without upstream set).
+/// 3. **`origin`** — last-resort fallback when neither signal is available.
+pub fn effective_remote_name_for_project(
+    projects_dir: &Path,
+    project_id: &str,
+    repo_root: &Path,
+) -> anyhow::Result<String> {
+    log::debug!(
+        "effective_remote_name_for_project: project_id={} repo_root={}",
+        project_id,
+        repo_root.display()
+    );
+    if let Some(detected) = tddy_core::worktree::detect_default_remote_name(repo_root) {
+        log::debug!(
+            "effective_remote_name_for_project: project_id={} detected remote={}",
+            project_id,
+            detected
+        );
+        return Ok(detected);
+    }
+    let project = find_project(projects_dir, project_id)?
+        .ok_or_else(|| anyhow::anyhow!("unknown project: {}", project_id))?;
+    if let Some(configured) = project
+        .remote_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        log::debug!(
+            "effective_remote_name_for_project: project_id={} configured remote={}",
+            project_id,
+            configured
+        );
+        return Ok(configured.to_string());
+    }
+    log::debug!(
+        "effective_remote_name_for_project: project_id={} falling back to origin",
+        project_id
+    );
+    Ok("origin".to_string())
+}
+
 /// Resolves the git integration base ref for worktree setup for a registered project.
 ///
 /// A stored [`ProjectData::main_branch_ref`] is authoritative (validated, no probe). Legacy rows
 /// without a stored ref resolve their default **live** from the repository via
-/// [`tddy_core::resolve_default_integration_base_ref`] (`origin/master` → `origin/main` →
-/// `origin/HEAD`); the probe is legacy-only and loses effect once a default is stored.
+/// [`tddy_core::resolve_default_integration_base_ref_with_remote`], using the remote resolved by
+/// [`effective_remote_name_for_project`] (main worktree → project config → `origin`). The probe is
+/// legacy-only and loses effect once a default is stored.
 pub fn effective_integration_base_ref_for_project(
     projects_dir: &Path,
     project_id: &str,
@@ -131,16 +186,16 @@ pub fn effective_integration_base_ref_for_project(
                 "effective_integration_base_ref_for_project: project_id={} resolving live from repository",
                 project_id
             );
-            tddy_core::resolve_default_integration_base_ref(std::path::Path::new(
-                &project.main_repo_path,
-            ))
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "resolve default integration base ref for project {}: {}",
-                    project_id,
-                    e
-                )
-            })
+            let repo_root = std::path::Path::new(&project.main_repo_path);
+            let remote = effective_remote_name_for_project(projects_dir, project_id, repo_root)?;
+            tddy_core::resolve_default_integration_base_ref_with_remote(repo_root, Some(&remote))
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "resolve default integration base ref for project {}: {}",
+                        project_id,
+                        e
+                    )
+                })
         }
     }
 }
@@ -220,6 +275,7 @@ mod per_host_path_unit_tests {
             git_url: "https://example.com/r.git".to_string(),
             main_repo_path: "/legacy".to_string(),
             main_branch_ref: None,
+            remote_name: None,
             host_repo_paths,
         };
         write_projects(&projects_dir, &[project]).unwrap();
@@ -287,9 +343,159 @@ mod project_integration_base_acceptance_tests {
         assert_eq!(eff, "origin/main");
     }
 
-    /// Invalid `main_branch_ref` values must be rejected before YAML mutation.
+    /// `effective_remote_name_for_project` resolves the remote from the main worktree's upstream
+    /// tracking branch first — so a clone whose `master` tracks `upstream/master` returns `upstream`,
+    /// not `origin`.
     #[test]
-    fn invalid_base_ref_rejected_at_boundary() {
+    fn effective_remote_name_prefers_the_main_worktree_upstream() {
+        fn git(cwd: &Path, args: &[&str]) {
+            let st = std::process::Command::new("git")
+                .current_dir(cwd)
+                .args(args)
+                .status()
+                .unwrap_or_else(|e| panic!("git {args:?} in {cwd:?}: {e}"));
+            assert!(st.success(), "git {args:?} failed in {cwd:?}");
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("src");
+        fs::create_dir_all(&source).unwrap();
+        git(&source, &["init", "-b", "master"]);
+        git(&source, &["config", "user.email", "t@e.st"]);
+        git(&source, &["config", "user.name", "t"]);
+        fs::write(source.join("README.md"), "x\n").unwrap();
+        git(&source, &["add", "README.md"]);
+        git(&source, &["commit", "-m", "init"]);
+        let clone = temp.path().join("clone");
+        git(
+            temp.path(),
+            &["clone", source.to_str().unwrap(), clone.to_str().unwrap()],
+        );
+        // Retrack `master` onto a remote named `upstream` (a second remote pointing at the source).
+        git(&clone, &["remote", "rename", "origin", "upstream"]);
+        git(
+            &clone,
+            &["branch", "--set-upstream-to=upstream/master", "master"],
+        );
+
+        let projects_dir = temp.path().join("projects");
+        fs::create_dir_all(&projects_dir).unwrap();
+        let yaml = format!(
+            "projects:\n- project_id: \"p-up\"\n  name: \"n\"\n  git_url: \"{}\"\n  main_repo_path: \"{}\"\n  remote_name: \"fork\"\n",
+            source.to_str().unwrap(),
+            clone.to_str().unwrap()
+        );
+        fs::write(projects_file_path(&projects_dir), yaml).unwrap();
+
+        // Given — main worktree upstream is `upstream`, project config says `fork`
+        // When
+        let remote = effective_remote_name_for_project(&projects_dir, "p-up", &clone).unwrap();
+
+        // Then — the main worktree upstream wins over the project config
+        assert_eq!(remote, "upstream");
+    }
+
+    /// With no main-worktree upstream (detached HEAD), `effective_remote_name_for_project` falls
+    /// back to the project config's `remote_name`.
+    #[test]
+    fn effective_remote_name_falls_back_to_project_config_when_no_upstream() {
+        fn git(cwd: &Path, args: &[&str]) {
+            let st = std::process::Command::new("git")
+                .current_dir(cwd)
+                .args(args)
+                .status()
+                .unwrap_or_else(|e| panic!("git {args:?} in {cwd:?}: {e}"));
+            assert!(st.success(), "git {args:?} failed in {cwd:?}");
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("src");
+        fs::create_dir_all(&source).unwrap();
+        git(&source, &["init", "-b", "main"]);
+        git(&source, &["config", "user.email", "t@e.st"]);
+        git(&source, &["config", "user.name", "t"]);
+        fs::write(source.join("README.md"), "x\n").unwrap();
+        git(&source, &["add", "README.md"]);
+        git(&source, &["commit", "-m", "init"]);
+        let clone = temp.path().join("clone");
+        git(
+            temp.path(),
+            &["clone", source.to_str().unwrap(), clone.to_str().unwrap()],
+        );
+        // Detach HEAD so `@{upstream}` is unreadable — config must take over.
+        git(&clone, &["checkout", "--detach", "main"]);
+
+        let projects_dir = temp.path().join("projects");
+        fs::create_dir_all(&projects_dir).unwrap();
+        let yaml = format!(
+            "projects:\n- project_id: \"p-cfg\"\n  name: \"n\"\n  git_url: \"{}\"\n  main_repo_path: \"{}\"\n  remote_name: \"fork\"\n",
+            source.to_str().unwrap(),
+            clone.to_str().unwrap()
+        );
+        fs::write(projects_file_path(&projects_dir), yaml).unwrap();
+
+        // Given — no upstream; project config names `fork`
+        // When
+        let remote = effective_remote_name_for_project(&projects_dir, "p-cfg", &clone).unwrap();
+
+        // Then — the project config supplies the remote
+        assert_eq!(remote, "fork");
+    }
+
+    /// With neither a main-worktree upstream nor a project config `remote_name`,
+    /// `effective_remote_name_for_project` falls back to `origin` as the last resort.
+    #[test]
+    fn effective_remote_name_falls_back_to_origin_when_neither_signal_present() {
+        fn git(cwd: &Path, args: &[&str]) {
+            let st = std::process::Command::new("git")
+                .current_dir(cwd)
+                .args(args)
+                .status()
+                .unwrap_or_else(|e| panic!("git {args:?} in {cwd:?}: {e}"));
+            assert!(st.success(), "git {args:?} failed in {cwd:?}");
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("src");
+        fs::create_dir_all(&source).unwrap();
+        git(&source, &["init", "-b", "main"]);
+        git(&source, &["config", "user.email", "t@e.st"]);
+        git(&source, &["config", "user.name", "t"]);
+        fs::write(source.join("README.md"), "x\n").unwrap();
+        git(&source, &["add", "README.md"]);
+        git(&source, &["commit", "-m", "init"]);
+        let clone = temp.path().join("clone");
+        git(
+            temp.path(),
+            &["clone", source.to_str().unwrap(), clone.to_str().unwrap()],
+        );
+        git(&clone, &["checkout", "--detach", "main"]);
+
+        let projects_dir = temp.path().join("projects");
+        fs::create_dir_all(&projects_dir).unwrap();
+        let yaml = format!(
+            "projects:\n- project_id: \"p-fb\"\n  name: \"n\"\n  git_url: \"{}\"\n  main_repo_path: \"{}\"\n",
+            source.to_str().unwrap(),
+            clone.to_str().unwrap()
+        );
+        fs::write(projects_file_path(&projects_dir), yaml).unwrap();
+
+        // Given — no upstream and no `remote_name` in config
+        // When
+        let remote = effective_remote_name_for_project(&projects_dir, "p-fb", &clone).unwrap();
+
+        // Then — `origin` is the last-resort fallback
+        assert_eq!(remote, "origin");
+    }
+
+    /// Unsafe `main_branch_ref` values (shell metacharacters) must be rejected before YAML mutation.
+    ///
+    /// Note: under the remote-agnostic contract the validator no longer enforces a specific remote
+    /// name, so a syntactically valid `<remote>/<path>` whose remote does not exist (e.g.
+    /// `refs/heads/main`) is **accepted** at the boundary and rejected later by `git fetch`. The
+    /// boundary guard rejects only unsafe strings — forbidden characters, `..`, `--`, whitespace.
+    #[test]
+    fn unsafe_base_ref_rejected_at_boundary() {
         let temp = tempfile::tempdir().unwrap();
         let projects_dir = temp.path().join("projects");
         fs::create_dir_all(&projects_dir).unwrap();
@@ -298,18 +504,46 @@ mod project_integration_base_acceptance_tests {
             name: "n".to_string(),
             git_url: "https://example.com/r.git".to_string(),
             main_repo_path: "/tmp/r".to_string(),
-            main_branch_ref: Some("refs/heads/main".to_string()),
+            main_branch_ref: Some("upstream/main;rm -rf /".to_string()),
+            remote_name: None,
             host_repo_paths: HashMap::new(),
         };
         let r = add_project(&projects_dir, project);
         assert!(
             r.is_err(),
-            "invalid integration base ref must be rejected before persistence: {:?}",
+            "unsafe integration base ref must be rejected before persistence: {:?}",
             r
         );
         assert!(
             read_projects(&projects_dir).unwrap().is_empty(),
             "projects.yaml must not be written when validation fails"
+        );
+    }
+
+    /// A syntactically valid `<remote>/<path>` whose remote does not exist is accepted at the
+    /// boundary (no git probe) — the guardrail is `git fetch` at session time, not the validator.
+    #[test]
+    fn non_origin_remote_ref_accepted_at_boundary() {
+        let temp = tempfile::tempdir().unwrap();
+        let projects_dir = temp.path().join("projects");
+        fs::create_dir_all(&projects_dir).unwrap();
+        let project = ProjectData {
+            project_id: "non-origin".to_string(),
+            name: "n".to_string(),
+            git_url: "https://example.com/r.git".to_string(),
+            main_repo_path: "/tmp/r".to_string(),
+            main_branch_ref: Some("upstream/release/2025".to_string()),
+            remote_name: None,
+            host_repo_paths: HashMap::new(),
+        };
+        add_project(&projects_dir, project).expect(
+            "a safe <remote>/<path> must be accepted at the boundary regardless of the remote name",
+        );
+        let stored = find_project(&projects_dir, "non-origin").unwrap().unwrap();
+        assert_eq!(
+            stored.main_branch_ref.as_deref(),
+            Some("upstream/release/2025"),
+            "the non-origin remote-tracking ref must persist verbatim"
         );
     }
 }
@@ -335,6 +569,7 @@ mod set_project_default_branch_unit_tests {
                 git_url: "https://example.com/a.git".to_string(),
                 main_repo_path: "/tmp/a".to_string(),
                 main_branch_ref: main_branch_ref.map(str::to_string),
+                remote_name: None,
                 host_repo_paths: HashMap::new(),
             },
         )

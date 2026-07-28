@@ -21,6 +21,12 @@ import {
   prStackRepointBtn,
   prStackWorktree,
   prStackSession,
+  prStackBranch,
+  prStackPlannedBranch,
+  prStackBaseBranch,
+  prStackStartWarning,
+  prStackRepointError,
+  prStackPrUnavailable,
   TEST_IDS,
 } from "../testIds";
 
@@ -90,9 +96,81 @@ export const prStackScreenPage = {
   sessionRef: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(prStackSession(nodeId), { timeout: 5000, ...options }),
 
+  /** The branch a row's planned PR owns — a branch that exists. */
+  branchName: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackBranch(nodeId), { timeout: 5000, ...options }),
+
+  /** The row's planned branch name (`branch_suggestion`), rendered distinctly from an owned branch. */
+  plannedBranchName: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackPlannedBranch(nodeId), { timeout: 5000, ...options }),
+
+  /** The base branch a row's child worktree would be branched from. */
+  baseBranch: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackBaseBranch(nodeId), { timeout: 5000, ...options }),
+
+  /** The warning listing every reason a row cannot be started — shown beside its disabled CTA. */
+  startWarning: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackStartWarning(nodeId), { timeout: 5000, ...options }),
+
+  /** The inline error shown on a row whose repoint the daemon refused. */
+  repointError: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackRepointError(nodeId), { timeout: 5000, ...options }),
+
+  /** The "PR status unavailable" indicator — the lookup could not be performed. */
+  prUnavailable: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackPrUnavailable(nodeId), { timeout: 5000, ...options }),
+
   /** Click the Repoint control for a row. */
   clickRepoint(nodeId: string) {
     byTestId(prStackRepointBtn(nodeId)).click();
+  },
+
+  // ---------------------------------------------------------------------------
+  // "Planned PRs" panel (right-side dock on desktop, full-screen overlay on mobile)
+  // ---------------------------------------------------------------------------
+
+  /** The Planned-PRs panel. Always mounted; read `data-state` for open/closed. */
+  plannedPrPanel: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackPlannedPrPanel, { timeout: 5000, ...options }),
+
+  /** The header control that opens/closes the Planned-PRs panel. */
+  plannedPrPanelToggle: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackPlannedPrPanelToggle, { timeout: 5000, ...options }),
+
+  /** The Planned-PRs panel's own close control. */
+  plannedPrPanelClose: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackPlannedPrPanelClose, { timeout: 5000, ...options }),
+
+  /** The planned-PR list as rendered *inside* the panel. */
+  panelPlannedPrList: () =>
+    prStackScreenPage.plannedPrPanel().find(`[data-testid="${TEST_IDS.prStackPlannedPrList}"]`),
+
+  /** Open or close the Planned-PRs panel via its header control. */
+  togglePlannedPrPanel() {
+    byTestId(TEST_IDS.prStackPlannedPrPanelToggle).click();
+  },
+
+  /** Assert the panel spans the full width of the PR-Stack screen (the mobile overlay layout). */
+  expectPanelSpansScreenWidth() {
+    prStackScreenPage
+      .screen()
+      .invoke("outerWidth")
+      .then((screenWidth) => {
+        prStackScreenPage.plannedPrPanel().invoke("outerWidth").should("equal", screenWidth);
+      });
+  },
+
+  /** Assert the panel is a narrower docked column beside the chat (the desktop layout). */
+  expectPanelNarrowerThanScreen() {
+    prStackScreenPage
+      .screen()
+      .invoke("outerWidth")
+      .then((screenWidth) => {
+        prStackScreenPage
+          .plannedPrPanel()
+          .invoke("outerWidth")
+          .should("be.lessThan", screenWidth as number);
+      });
   },
 
   // ---------------------------------------------------------------------------
@@ -280,6 +358,16 @@ export const prStackScreenPage = {
   /** The dialog's branch-mode select — its "New branch from base: <name>" option carries the base. */
   dialogBranchIntentSelect: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionBranchIntentSelect, { timeout: 5000, ...options }),
+
+  /** The dialog's existing-branch select, shown in "Work on existing branch" mode. */
+  dialogBranchToWorkOnSelect: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionBranchToWorkOnSelect, { timeout: 5000, ...options }),
+
+  /** The dialog's base-branch <select> for a planned-PR child session — lists the node's direct
+   *  dependency branches first (ordered by dependency depth), then the stack's other materialized
+   *  branches. The selected value is sent as `selected_integration_base_ref`. */
+  dialogBaseBranchSelect: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionBaseBranchSelect, { timeout: 5000, ...options }),
 
   /** The dialog's pre-checked "Create Remote Branch" toggle. */
   dialogCreateRemoteBranchToggle: (options?: Parameters<typeof cy.get>[1]) =>

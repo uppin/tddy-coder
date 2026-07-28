@@ -120,7 +120,7 @@ When `managed_codebase = true`, the daemon seeds `changeset.yaml`, writes orches
 
 ## Known follow-ups
 
-- **Jail authentication:** interactive `agent` in a Seatbelt jail may fail to store tokens in macOS Keychain (exit 155). Hosts that store credentials only in Keychain need `AGENT_CLI_CREDENTIAL_STORE=file` (writes `~/.cursor/auth.json`) or `CURSOR_API_KEY` for headless runs — not yet wired into the sandbox env overlay.
+- **Jail authentication:** a sandboxed `agent` cannot reach macOS Keychain — the host (`tddy-daemon` / `tddy-sandbox-app`) is an unsigned Rust binary with no `keychain-access-group` entitlement, so `securityd` rejects `SecItem*` calls with `errSecMissingEntitlement` (-34018) and the CLI hangs/times out ("Failed to store authentication tokens: Security command failed: Security process exited with code: 36"). The sandbox env overlay (`cursor_runner_env_overlay`, applied via `build_sandboxed_cursor_runner_env`) sets `CURSOR_SKIP_KEYCHAIN=1` + `CI=true` (Cursor's own CI convention) so the agent never probes Keychain. The caller must still supply `CURSOR_API_KEY` (User API key from the Cursor dashboard — admin keys are rejected) or pre-seed `~/.cursor/auth.json` via `seed_cursor_credentials`. True Keychain *access* from the jail would require codesigning the host with `keychain-access-group` and a TCC grant — recorded as a follow-up, not pursued; the current stance is fail-closed with `CURSOR_API_KEY`/seeded `auth.json`.
 - **`resume_sandboxed_cursor_cli_session`:** sandboxed cursor-cli resume relaunch is not implemented; non-sandbox resume works via `CliSessionManager`.
 
 ## Out of scope (v1)

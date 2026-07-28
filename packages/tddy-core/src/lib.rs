@@ -97,8 +97,10 @@ pub use session_activity::{
     activity_status_from_hook, parse_hook_event, HookEvent, SessionActivityStatus,
 };
 pub use session_chain::{
-    integrate_chain_base_into_session_worktree_bootstrap,
-    resolve_chain_integration_base_ref_from_parent_session, spawn_chain_child_worktree,
+    integrate_chain_base_into_session_worktree_bootstrap, parent_is_pr_stack_orchestrator,
+    pr_stack_node_for_spawn, resolve_chain_base_for_session_spawn, resolve_chain_base_ref,
+    resolve_chain_integration_base_ref_from_parent_session, select_worktree_base_ref,
+    spawn_chain_child_worktree,
 };
 pub use session_lifecycle::{
     materialize_unified_session_directory, resolve_effective_session_id, unified_session_dir_path,
@@ -106,9 +108,9 @@ pub use session_lifecycle::{
     UnifiedSessionTreeBootstrap,
 };
 pub use session_metadata::{
-    read_session_metadata, update_activity_status, write_initial_tool_session_metadata,
-    write_session_metadata, InitialToolSessionMetadataOpts, SessionMetadata,
-    SESSION_METADATA_FILENAME,
+    read_session_metadata, repo_root_for_session, update_activity_status,
+    write_initial_tool_session_metadata, write_session_metadata, InitialToolSessionMetadataOpts,
+    SessionMetadata, SESSION_METADATA_FILENAME,
 };
 pub use source_path::{classify_rust_source_path, RustSourcePathKind};
 pub use stream::ProgressEvent;
@@ -126,15 +128,19 @@ pub use workflow::{
     session::{workflow_engine_storage_dir, WORKFLOW_ENGINE_STORAGE_SUBDIR},
     GoalOptions,
 };
+#[allow(deprecated)]
+pub use worktree::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF;
 pub use worktree::{
-    create_worktree, fetch_integration_base, fetch_origin_master, list_recent_remote_branches,
-    list_recent_remote_branches_skip, list_worktrees, push_new_branch_to_origin, remove_worktree,
-    resolve_default_integration_base_ref, resolve_persisted_worktree_integration_base_for_session,
-    set_git_ssh_command, setup_worktree_for_session,
-    setup_worktree_for_session_with_integration_base,
+    create_worktree, detect_default_remote_name, fetch_integration_base, fetch_origin_master,
+    list_recent_remote_branches, list_recent_remote_branches_skip, list_worktrees,
+    local_branch_name, local_branch_name_for_remote, push_new_branch_to_origin,
+    push_new_branch_to_remote, remove_worktree, resolve_default_integration_base_ref,
+    resolve_default_integration_base_ref_with_remote,
+    resolve_persisted_worktree_integration_base_for_session, set_git_ssh_command,
+    setup_worktree_for_session, setup_worktree_for_session_with_integration_base,
     setup_worktree_for_session_with_optional_chain_base, validate_chain_pr_integration_base_ref,
     validate_integration_base_ref, worktree_dir, worktree_path_for_branch, WorktreeInfo,
-    DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF,
+    FALLBACK_DEFAULT_INTEGRATION_BASE_REF,
 };
 
 #[cfg(test)]

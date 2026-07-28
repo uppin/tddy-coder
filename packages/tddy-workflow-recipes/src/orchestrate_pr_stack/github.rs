@@ -19,11 +19,46 @@ pub enum PrState {
 }
 
 /// A PR (open, merged, or closed) resolved by head branch, with its derived state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrView {
     pub number: u64,
     pub url: String,
     pub state: PrState,
+}
+
+/// Outcome of resolving a PR by head branch.
+///
+/// The distinction between [`Self::NotFound`] and [`Self::Unavailable`] is the point: a lookup that
+/// could not be performed (no credential, rate limit, transport error) must never read as "this
+/// branch has no PR" — that silent conflation is why a live open PR stayed invisible on the
+/// PR-Stack screen. Because every outcome is a value, a lookup can never fail the caller's RPC.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrLookupOutcome {
+    /// A PR (open, merged, or closed) exists for the head branch.
+    Found(PrView),
+    /// GitHub was queried and reported no PR for the head branch.
+    NotFound,
+    /// The lookup could not be performed; carries an operator-facing reason.
+    Unavailable(String),
+}
+
+/// Qualify a head branch as GitHub's `head` filter requires: `owner:branch`.
+///
+/// `GET /repos/{owner}/{repo}/pulls?head=…` **ignores** an unqualified value rather than rejecting
+/// it, returning the repository's whole PR list — so an unqualified head makes `arr.first()` an
+/// arbitrary, unrelated PR. `repo` is `owner/name`; only the owner segment prefixes the head.
+///
+/// An already-qualified head is returned unchanged (qualifying twice matches nothing), and a `repo`
+/// with no owner segment yields the bare branch — inventing an owner would query another repository.
+#[must_use]
+pub fn qualified_head(repo: &str, branch: &str) -> String {
+    if branch.contains(':') {
+        return branch.to_string();
+    }
+    match repo.split_once('/') {
+        Some((owner, _)) if !owner.is_empty() => format!("{owner}:{branch}"),
+        _ => branch.to_string(),
+    }
 }
 
 /// Derive the displayed `PrState` from GitHub's PR fields.
@@ -45,9 +80,12 @@ pub trait GithubPrApi: Send + Sync {
     fn get_open_pr(&self, head_branch: &str) -> Result<Option<PrRef>, tddy_core::WorkflowError>;
 
     /// Find the PR (open, merged, or closed) whose head matches `head_branch`, with its derived
-    /// state. Returns `Ok(None)` when no PR exists (or no GitHub token is configured).
-    fn get_pr_by_head(&self, head_branch: &str)
-        -> Result<Option<PrView>, tddy_core::WorkflowError>;
+    /// state. `head_branch` may be a bare branch — implementations qualify it (see
+    /// [`qualified_head`]).
+    ///
+    /// Every outcome is a value, including "could not look up" ([`PrLookupOutcome::Unavailable`]),
+    /// so a display-path caller can degrade the PR field without failing its own call.
+    fn get_pr_by_head(&self, head_branch: &str) -> PrLookupOutcome;
 
     /// Merge PR by number; returns the merge commit SHA.
     fn merge_pr(&self, number: u64) -> Result<String, tddy_core::WorkflowError>;
@@ -71,15 +109,57 @@ pub trait GithubPrApi: Send + Sync {
     fn close_pr(&self, number: u64) -> Result<(), tddy_core::WorkflowError>;
 }
 
+/// Where a [`RealGithubPrApi`] gets its credential. Explicit never falls back to the environment:
+/// a caller acting for a specific operator must not silently authenticate as the host's ambient
+/// token.
+enum TokenSource {
+    /// `GITHUB_TOKEN` / `GH_TOKEN` of the running process — correct for the recipe and CLI callers,
+    /// which run as the operator.
+    ProcessEnv,
+    /// A token supplied by the caller (e.g. the daemon, acting for a logged-in web operator).
+    Explicit(String),
+}
+
 /// Real implementation using GitHub REST API via `curl`.
 /// `repo` is `owner/repo` (e.g. `"acme/myrepo"`).
 pub struct RealGithubPrApi {
     pub repo: String,
+    token: TokenSource,
 }
 
 impl RealGithubPrApi {
+    /// Authenticate with the process environment (`GITHUB_TOKEN` / `GH_TOKEN`) — the recipe and CLI
+    /// callers, which run as the operator.
     pub fn new(repo: impl Into<String>) -> Self {
-        Self { repo: repo.into() }
+        Self {
+            repo: repo.into(),
+            token: TokenSource::ProcessEnv,
+        }
+    }
+
+    /// Authenticate with an explicitly supplied token — a server acting for one operator, whose own
+    /// credential must be used instead of the host's ambient environment.
+    pub fn with_token(repo: impl Into<String>, token: impl Into<String>) -> Self {
+        Self {
+            repo: repo.into(),
+            token: TokenSource::Explicit(token.into()),
+        }
+    }
+
+    /// Resolve the credential for one call, or an operator-facing reason why there is none.
+    fn resolve_token(&self) -> Result<String, String> {
+        match &self.token {
+            TokenSource::ProcessEnv => crate::github_rest_common::github_token_from_env()
+                .ok_or_else(|| "no GitHub token set (GITHUB_TOKEN / GH_TOKEN)".to_string()),
+            TokenSource::Explicit(t) if !t.trim().is_empty() => Ok(t.clone()),
+            TokenSource::Explicit(_) => Err("the supplied GitHub token is blank".to_string()),
+        }
+    }
+
+    /// [`Self::resolve_token`] as a `WorkflowError`, for the operations that fail closed.
+    fn require_token(&self, op: &str) -> Result<String, tddy_core::WorkflowError> {
+        self.resolve_token()
+            .map_err(|reason| tddy_core::WorkflowError::WriteFailed(format!("{op}: {reason}")))
     }
 }
 
@@ -118,15 +198,12 @@ mod tests {
                 url: "https://github.com/example/repo/pull/42".to_string(),
             }))
         }
-        fn get_pr_by_head(
-            &self,
-            _head_branch: &str,
-        ) -> Result<Option<PrView>, tddy_core::WorkflowError> {
-            Ok(Some(PrView {
+        fn get_pr_by_head(&self, _head_branch: &str) -> PrLookupOutcome {
+            PrLookupOutcome::Found(PrView {
                 number: 42,
                 url: "https://github.com/example/repo/pull/42".to_string(),
                 state: PrState::Open,
-            }))
+            })
         }
         fn merge_pr(&self, _number: u64) -> Result<String, tddy_core::WorkflowError> {
             Ok("merge-sha-abc".to_string())
@@ -288,16 +365,15 @@ mod real_impl_tests {
 
 impl GithubPrApi for RealGithubPrApi {
     fn get_open_pr(&self, head_branch: &str) -> Result<Option<PrRef>, tddy_core::WorkflowError> {
-        crate::github_rest_common::github_token_from_env().ok_or_else(|| {
-            tddy_core::WorkflowError::WriteFailed(
-                "RealGithubPrApi::get_open_pr: no GitHub token set (GITHUB_TOKEN / GH_TOKEN)"
-                    .to_string(),
-            )
-        })?;
-        let body = crate::github_rest_common::curl_github_get_json(
+        let token = self.require_token("RealGithubPrApi::get_open_pr")?;
+        // Unqualified, GitHub ignores the filter and returns every open PR — `arr.first()` below
+        // would then repoint or merge an arbitrary PR.
+        let head = qualified_head(&self.repo, head_branch);
+        let body = crate::github_rest_common::curl_github_get_json_with_token(
             &self.repo,
             "pulls",
-            &[("state", "open"), ("head", head_branch)],
+            &[("state", "open"), ("head", head.as_str())],
+            &token,
         )?;
         let items: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
             tddy_core::WorkflowError::WriteFailed(format!("get_open_pr: JSON parse error: {e}"))
@@ -336,32 +412,41 @@ impl GithubPrApi for RealGithubPrApi {
         }))
     }
 
-    fn get_pr_by_head(
-        &self,
-        head_branch: &str,
-    ) -> Result<Option<PrView>, tddy_core::WorkflowError> {
-        if crate::github_rest_common::github_token_from_env().is_none() {
-            return Ok(None);
-        }
-        let body = crate::github_rest_common::curl_github_get_json(
+    fn get_pr_by_head(&self, head_branch: &str) -> PrLookupOutcome {
+        let token = match self.resolve_token() {
+            Ok(t) => t,
+            Err(reason) => return PrLookupOutcome::Unavailable(reason),
+        };
+        // Unqualified, GitHub ignores the filter and returns the whole PR list.
+        let head = qualified_head(&self.repo, head_branch);
+        let body = match crate::github_rest_common::curl_github_get_json_with_token(
             &self.repo,
             "pulls",
-            &[("state", "all"), ("head", head_branch)],
-        )?;
-        let items: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
-            tddy_core::WorkflowError::WriteFailed(format!("get_pr_by_head: JSON parse error: {e}"))
-        })?;
-        let arr = items.as_array().ok_or_else(|| {
-            tddy_core::WorkflowError::WriteFailed(format!(
-                "get_pr_by_head: expected array, got: {body}"
-            ))
-        })?;
-        let Some(pr) = arr.first() else {
-            return Ok(None);
+            &[("state", "all"), ("head", head.as_str())],
+            &token,
+        ) {
+            Ok(b) => b,
+            Err(e) => return PrLookupOutcome::Unavailable(e.to_string()),
         };
-        let number = pr.get("number").and_then(|n| n.as_u64()).ok_or_else(|| {
-            tddy_core::WorkflowError::WriteFailed(format!("get_pr_by_head: missing number in {pr}"))
-        })?;
+        let items: serde_json::Value = match serde_json::from_str(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                return PrLookupOutcome::Unavailable(format!(
+                    "GitHub returned an unparseable PR list: {e}"
+                ));
+            }
+        };
+        let Some(arr) = items.as_array() else {
+            return PrLookupOutcome::Unavailable(format!(
+                "GitHub returned a PR list that is not an array: {body}"
+            ));
+        };
+        let Some(pr) = arr.first() else {
+            return PrLookupOutcome::NotFound;
+        };
+        let Some(number) = pr.get("number").and_then(|n| n.as_u64()) else {
+            return PrLookupOutcome::Unavailable(format!("GitHub PR entry has no number: {pr}"));
+        };
         let url = pr
             .get("html_url")
             .and_then(|s| s.as_str())
@@ -370,18 +455,20 @@ impl GithubPrApi for RealGithubPrApi {
         let state = pr.get("state").and_then(|s| s.as_str()).unwrap_or("open");
         let merged_at = pr.get("merged_at").and_then(|s| s.as_str());
         let draft = pr.get("draft").and_then(|d| d.as_bool()).unwrap_or(false);
-        Ok(Some(PrView {
+        PrLookupOutcome::Found(PrView {
             number,
             url,
             state: pr_state_from_github(state, merged_at, draft),
-        }))
+        })
     }
 
     fn merge_pr(&self, number: u64) -> Result<String, tddy_core::WorkflowError> {
-        let body = crate::github_rest_common::curl_github_put_json(
+        let token = self.require_token("RealGithubPrApi::merge_pr")?;
+        let body = crate::github_rest_common::curl_github_put_json_with_token(
             &self.repo,
             &format!("pulls/{number}/merge"),
             r#"{"merge_method":"merge"}"#,
+            &token,
         )?;
         let v: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
             tddy_core::WorkflowError::WriteFailed(format!("merge_pr: JSON parse: {e}"))
@@ -393,11 +480,13 @@ impl GithubPrApi for RealGithubPrApi {
     }
 
     fn patch_pr_base(&self, number: u64, new_base: &str) -> Result<(), tddy_core::WorkflowError> {
+        let token = self.require_token("RealGithubPrApi::patch_pr_base")?;
         let body = serde_json::json!({ "base": new_base }).to_string();
-        crate::github_rest_common::curl_github_patch_json(
+        crate::github_rest_common::curl_github_patch_json_with_token(
             &self.repo,
             &format!("pulls/{number}"),
             &body,
+            &token,
         )?;
         Ok(())
     }
@@ -416,7 +505,10 @@ impl GithubPrApi for RealGithubPrApi {
             "body": body,
         })
         .to_string();
-        let resp = crate::github_rest_common::curl_github_post_json(&self.repo, "pulls", &payload)?;
+        let token = self.require_token("RealGithubPrApi::create_pr")?;
+        let resp = crate::github_rest_common::curl_github_post_json_with_token(
+            &self.repo, "pulls", &payload, &token,
+        )?;
         let v: serde_json::Value = serde_json::from_str(&resp).map_err(|e| {
             tddy_core::WorkflowError::WriteFailed(format!("create_pr: JSON parse: {e}"))
         })?;
@@ -432,21 +524,25 @@ impl GithubPrApi for RealGithubPrApi {
         // use the GraphQL mutation disablePullRequestAutoMerge — but for simplicity we patch
         // the PR to set auto_merge off via the REST API.
         // If the endpoint is unavailable, we best-effort ignore the error.
+        let token = self.require_token("RealGithubPrApi::disable_auto_merge")?;
         let body = serde_json::json!({ "auto_merge": null }).to_string();
-        let _ = crate::github_rest_common::curl_github_patch_json(
+        let _ = crate::github_rest_common::curl_github_patch_json_with_token(
             &self.repo,
             &format!("pulls/{number}"),
             &body,
+            &token,
         );
         Ok(())
     }
 
     fn close_pr(&self, number: u64) -> Result<(), tddy_core::WorkflowError> {
+        let token = self.require_token("RealGithubPrApi::close_pr")?;
         let body = serde_json::json!({ "state": "closed" }).to_string();
-        crate::github_rest_common::curl_github_patch_json(
+        crate::github_rest_common::curl_github_patch_json_with_token(
             &self.repo,
             &format!("pulls/{number}"),
             &body,
+            &token,
         )?;
         Ok(())
     }

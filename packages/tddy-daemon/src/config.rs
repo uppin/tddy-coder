@@ -112,6 +112,10 @@ pub struct DaemonConfig {
     pub livekit: Option<LiveKitConfig>,
     #[serde(default)]
     pub github: Option<GitHubConfig>,
+    /// Directory holding server-side auth state: the GitHub access token each web login granted
+    /// (`github-tokens.json`, mode `0600`), which is the credential PR-status reads act with. Unset
+    /// means no token is retained, so PR status reports itself *unavailable* for a real login.
+    /// Session tokens are stateless and are never stored here.
     #[serde(default)]
     pub auth_storage: Option<PathBuf>,
     #[serde(default)]

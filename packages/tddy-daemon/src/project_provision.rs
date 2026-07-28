@@ -69,6 +69,7 @@ where
             git_url,
             main_repo_path: dest.to_string_lossy().to_string(),
             main_branch_ref: None,
+            remote_name: None,
             host_repo_paths: HashMap::new(),
         },
     )
@@ -127,6 +128,7 @@ mod tests {
             git_url: git_url.to_string(),
             main_repo_path: main_repo_path.to_string_lossy().to_string(),
             main_branch_ref: None,
+            remote_name: None,
             host_repo_paths: HashMap::new(),
         }
     }

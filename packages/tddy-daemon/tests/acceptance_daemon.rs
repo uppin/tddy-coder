@@ -176,6 +176,7 @@ fn acceptance_project_storage_roundtrip() {
         git_url: "https://github.com/org/repo.git".to_string(),
         main_repo_path: "/home/u/repos/my-app".to_string(),
         main_branch_ref: None,
+        remote_name: None,
         host_repo_paths: std::collections::HashMap::new(),
     };
 

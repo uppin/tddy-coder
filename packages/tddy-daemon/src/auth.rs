@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use tddy_github::token_store::GitHubTokenStore;
 use tddy_github::{
     AuthServiceImpl, GitHubOAuthProvider, RealGitHubProvider, SessionTokenSigner,
     StubGitHubProvider, TokenKind,
@@ -12,10 +13,14 @@ use tddy_service::AuthServiceServer;
 use crate::config::DaemonConfig;
 use crate::connection_service::SessionUserResolver;
 
-/// Result of building auth: RPC entries and a resolver for session token -> GitHub login.
+/// Result of building auth: RPC entries, a resolver for session token -> GitHub login, and the
+/// GitHub access tokens logins granted (the credential `ConnectionService` reads PRs with).
 pub struct AuthBuildResult {
     pub entries: Vec<ServiceEntry>,
     pub user_resolver: Option<SessionUserResolver>,
+    /// `Some` when `auth_storage` is configured. Shared with `ConnectionServiceImpl`, which reads
+    /// the caller's token from it; `None` leaves PR status *unavailable* for a real login.
+    pub github_token_store: Option<Arc<dyn GitHubTokenStore>>,
 }
 
 /// Build RPC entries for AuthService when GitHub is configured.
@@ -27,14 +32,24 @@ pub struct AuthBuildResult {
 /// non-functional: minting fails and the resolver rejects every token.
 ///
 /// Signed tokens are stateless, so no session state is persisted — hence no data-dir argument.
-pub fn build_auth_entries(config: &DaemonConfig, web_host: &str, web_port: u16) -> AuthBuildResult {
+///
+/// Fails when a configured `auth_storage` cannot hold a token file. Retention is a hard login
+/// dependency now (a failed `put` fails the exchange, PRD D13), so an unwritable path breaks *every*
+/// login rather than merely degrading PR status — and `install` only creates and chowns the parent
+/// `/var/lib/tddy` on the root/systemd path, so it is a reachable misconfiguration.
+pub fn build_auth_entries(
+    config: &DaemonConfig,
+    web_host: &str,
+    web_port: u16,
+) -> anyhow::Result<AuthBuildResult> {
     let github = match &config.github {
         Some(g) => g,
         None => {
-            return AuthBuildResult {
+            return Ok(AuthBuildResult {
                 entries: vec![],
                 user_resolver: None,
-            };
+                github_token_store: None,
+            });
         }
     };
 
@@ -43,6 +58,31 @@ pub fn build_auth_entries(config: &DaemonConfig, web_host: &str, web_port: u16) 
     let signer = signing_secret
         .as_deref()
         .map(|s| SessionTokenSigner::new(s.as_bytes()));
+
+    // Where a real login's GitHub access token is retained, so the daemon can later read that
+    // operator's PRs. No `auth_storage` means no retention — PR status then reads as *unavailable*
+    // rather than as "no PR" (PR-stack UX recovery, D7/D8).
+    //
+    // A configured path is probed before it is trusted: created, written to, and the probe removed.
+    // Starting anyway and letting the store fail later is not an option — every login would then
+    // fail with an internal error, one operator at a time, for a fault that is entirely visible at
+    // boot. The probe runs for a stub provider too: a stub retains nothing, but the path the
+    // operator configured is unusable either way, and skipping the check for one provider kind is
+    // exactly the sort of quiet degradation this replaces.
+    let github_token_store: Option<Arc<dyn GitHubTokenStore>> = match config.auth_storage.as_ref() {
+        Some(dir) => {
+            let store = crate::github_token_store::FileGitHubTokenStore::new(dir);
+            store.probe_writable().map_err(|e| {
+                anyhow::anyhow!(
+                    "config.auth_storage ({}) cannot hold GitHub access tokens: {e}. \
+                     Every GitHub login fails until it is writable by the daemon user.",
+                    dir.display()
+                )
+            })?;
+            Some(Arc::new(store) as Arc<dyn GitHubTokenStore>)
+        }
+        None => None,
+    };
 
     let auth_entry = if github.stub.unwrap_or(false) {
         let client_id = github.client_id.as_deref().unwrap_or("stub-client-id");
@@ -54,19 +94,20 @@ pub fn build_auth_entries(config: &DaemonConfig, web_host: &str, web_port: u16) 
         if let Some(ref codes) = github.stub_codes {
             register_stub_codes(&stub, codes);
         }
-        auth_service_entry(stub, signer.clone())
+        auth_service_entry(stub, signer.clone(), github_token_store.clone())
     } else if let (Some(id), Some(secret)) = (&github.client_id, &github.client_secret) {
         let redirect_uri = github
             .redirect_uri
             .clone()
             .unwrap_or_else(|| format!("http://{}:{}/auth/callback", web_host, web_port));
         let real = RealGitHubProvider::new(id, secret, &redirect_uri);
-        auth_service_entry(real, signer.clone())
+        auth_service_entry(real, signer.clone(), github_token_store.clone())
     } else {
-        return AuthBuildResult {
+        return Ok(AuthBuildResult {
             entries: vec![],
             user_resolver: None,
-        };
+            github_token_store: None,
+        });
     };
 
     // Verify the token's signature/expiry and extract the login. Only access-kind tokens
@@ -84,10 +125,11 @@ pub fn build_auth_entries(config: &DaemonConfig, web_host: &str, web_port: u16) 
         None => Arc::new(|_: &str| None),
     };
 
-    AuthBuildResult {
+    Ok(AuthBuildResult {
         entries: vec![auth_entry],
         user_resolver: Some(user_resolver),
-    }
+        github_token_store,
+    })
 }
 
 /// Register `code:login` mappings (from `github.stub_codes`, comma-separated) on the stub provider
@@ -112,13 +154,23 @@ fn register_stub_codes(stub: &StubGitHubProvider, codes: &str) {
 
 /// Wrap an OAuth provider in an `auth.AuthService` RPC entry. When a signer is present, tokens are
 /// stateless HMAC-signed tokens; otherwise the service cannot mint and every token is rejected.
+///
+/// `token_store`, when present, retains each real login's GitHub access token. A stub provider
+/// stores nothing regardless — its token is synthetic (PRD D12).
 fn auth_service_entry<P: GitHubOAuthProvider>(
     provider: P,
     signer: Option<SessionTokenSigner>,
+    token_store: Option<Arc<dyn GitHubTokenStore>>,
 ) -> ServiceEntry {
+    let with_store = |service: AuthServiceImpl<P>| match token_store {
+        Some(store) => service.with_token_store(store),
+        None => service,
+    };
     let server = match signer {
-        Some(signer) => AuthServiceServer::new(AuthServiceImpl::new_signed(provider, signer)),
-        None => AuthServiceServer::new(AuthServiceImpl::new(provider)),
+        Some(signer) => {
+            AuthServiceServer::new(with_store(AuthServiceImpl::new_signed(provider, signer)))
+        }
+        None => AuthServiceServer::new(with_store(AuthServiceImpl::new(provider))),
     };
     ServiceEntry {
         name: "auth.AuthService",
@@ -146,6 +198,21 @@ mod tests {
         (DaemonConfig::load(&path).unwrap(), dir)
     }
 
+    /// A daemon config whose `auth_storage` — where a login's GitHub access token is retained —
+    /// points at `auth_storage`.
+    fn a_config_storing_tokens_in(
+        auth_storage: &std::path::Path,
+    ) -> (DaemonConfig, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = format!(
+            "users:\n  - github_user: \"u\"\n    os_user: \"u\"\ngithub:\n  stub: true\nlivekit:\n  api_secret: \"shared-secret\"\nauth_storage: \"{}\"\n",
+            auth_storage.display()
+        );
+        let path = dir.path().join("config.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        (DaemonConfig::load(&path).unwrap(), dir)
+    }
+
     fn a_github_user(login: &str) -> tddy_github::GitHubUser {
         tddy_github::GitHubUser {
             id: 1,
@@ -160,6 +227,7 @@ mod tests {
         // Given auth wired with a shared signing secret
         let (config, _dir) = a_config(Some("shared-secret"));
         let resolver = build_auth_entries(&config, "127.0.0.1", 0)
+            .expect("auth should build")
             .user_resolver
             .expect("auth should produce a resolver");
         // and a token minted with that same secret
@@ -178,6 +246,7 @@ mod tests {
         // Given auth wired with one signing secret
         let (config, _dir) = a_config(Some("this-daemons-secret"));
         let resolver = build_auth_entries(&config, "127.0.0.1", 0)
+            .expect("auth should build")
             .user_resolver
             .expect("auth should produce a resolver");
         // and a token minted with a different secret
@@ -196,6 +265,7 @@ mod tests {
         // Given auth wired with a shared signing secret
         let (config, _dir) = a_config(Some("shared-secret"));
         let resolver = build_auth_entries(&config, "127.0.0.1", 0)
+            .expect("auth should build")
             .user_resolver
             .expect("auth should produce a resolver");
         // and an access-kind token minted with that secret
@@ -214,6 +284,7 @@ mod tests {
         // Given auth wired with a shared signing secret
         let (config, _dir) = a_config(Some("shared-secret"));
         let resolver = build_auth_entries(&config, "127.0.0.1", 0)
+            .expect("auth should build")
             .user_resolver
             .expect("auth should produce a resolver");
         // and a *refresh*-kind token minted with that same secret
@@ -235,6 +306,7 @@ mod tests {
         // Given auth wired without a signing secret
         let (config, _dir) = a_config(None);
         let resolver = build_auth_entries(&config, "127.0.0.1", 0)
+            .expect("auth should build")
             .user_resolver
             .expect("auth should produce a resolver");
         // and any signed token
@@ -246,5 +318,52 @@ mod tests {
 
         // Then no token can be authenticated — there is no secret to verify against
         assert_eq!(login, None);
+    }
+
+    // -------------------------------------------------------------------------
+    // `auth_storage` boot probe — retention is a hard login dependency, so an unusable path is a
+    // startup failure rather than something the first operator to sign in discovers.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn retains_tokens_in_the_configured_auth_storage_once_it_probes_writable() {
+        // Given `auth_storage` at a path the daemon may create
+        let storage = tempfile::tempdir().unwrap();
+        let (config, _dir) = a_config_storing_tokens_in(&storage.path().join("auth"));
+
+        // When auth is wired
+        let store = build_auth_entries(&config, "127.0.0.1", 0)
+            .expect("a writable auth_storage should let the daemon start")
+            .github_token_store
+            .expect("a configured auth_storage should produce a token store");
+        store.put("operator", "gho_granted").unwrap();
+
+        // Then the credential a login grants is retained where the operator configured it
+        assert_eq!(store.get("operator").as_deref(), Some("gho_granted"));
+    }
+
+    #[test]
+    fn refuses_to_start_when_the_configured_auth_storage_cannot_be_written() {
+        // Given `auth_storage` under an existing *file*, so no directory can be created there —
+        // the shape of the misconfiguration `install` leaves when the daemon user cannot write
+        // /var/lib/tddy
+        let dir = tempfile::tempdir().unwrap();
+        let occupied = dir.path().join("not-a-directory");
+        std::fs::write(&occupied, "").unwrap();
+        let (config, _config_dir) = a_config_storing_tokens_in(&occupied.join("auth"));
+
+        // When auth is wired
+        let failure = build_auth_entries(&config, "127.0.0.1", 0)
+            .err()
+            .map(|e| e.to_string());
+
+        // Then startup fails naming the setting at fault, rather than the daemon serving an auth
+        // surface on which every login would fail one operator at a time
+        assert!(
+            failure
+                .as_deref()
+                .is_some_and(|m| m.contains("config.auth_storage")),
+            "expected a startup failure naming config.auth_storage, got: {failure:?}"
+        );
     }
 }

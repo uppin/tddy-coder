@@ -1371,6 +1371,7 @@ mod tests {
             main_repo_path: "/repo".to_string(),
             daemon_instance_id: String::new(),
             main_branch_ref: String::new(),
+            default_remote: String::new(),
         }
     }
 

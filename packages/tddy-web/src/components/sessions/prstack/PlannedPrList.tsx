@@ -1,7 +1,9 @@
 import React from "react";
-import type { BranchResolution, PrStatusView, SessionEntry } from "../../../gen/connection_pb";
+import type { BranchResolution, SessionEntry } from "../../../gen/connection_pb";
 import { resolveNodeSession } from "../../../utils/resolveNodeSession";
 import { PlannedPrRow } from "./PlannedPrRow";
+import { resolveStackBase } from "./deriveStackBaseBranch";
+import { resolveRepointTarget, startBlockers } from "./startBlockers";
 import { topoSortStackNodes, type StackNode } from "./stackPlan";
 
 export interface PlannedPrListProps {
@@ -10,12 +12,25 @@ export interface PlannedPrListProps {
   startingNodeId: string | null;
   /** All sessions — used to resolve each node's in-progress child session by branch. */
   sessions?: SessionEntry[];
-  /** Live GitHub PR status keyed by branch (from `usePrStatus`). */
-  prStatusByBranch?: Record<string, PrStatusView>;
-  /** One-call branch resolution (worktree + session + PR) keyed by branch (from `useQueryBranch`). */
+  /**
+   * One-call branch resolution (worktree + session + remote + PR) keyed by branch, from
+   * `useQueryBranch` — the screen's only source of live branch and PR state. Covers each node's own
+   * branch *and* each node's base branch, whose `remote` leg decides whether the node can be started
+   * at all.
+   */
   branchResolutionByBranch?: Record<string, BranchResolution>;
-  /** Repoint a node whose predecessor merged (drops the merged parent, rebases, re-targets the PR). */
+  /** Repoint a node onto the target its control names (drops the parents that do not own it). */
   onRepoint?: (nodeId: string) => void;
+  /**
+   * The project's default branch (`ProjectEntry.main_branch_ref`) — the base of a root node and the
+   * repoint target when no parent can serve as a base. Empty for a legacy project that stores none,
+   * which degrades the label only: the daemon resolves the real ref at click time (D20).
+   */
+  defaultBranch?: string;
+  /** The daemon's reason per node whose last repoint was refused or failed, keyed by node id. */
+  repointErrorByNodeId?: Record<string, string>;
+  /** Nodes whose repoint is in flight — their control is disabled so it cannot be started twice. */
+  repointingNodeIds?: ReadonlySet<string>;
 }
 
 /** Renders one row per planned `StackNode`, roots before their dependents. */
@@ -24,9 +39,11 @@ export function PlannedPrList({
   onStartSession,
   startingNodeId,
   sessions = [],
-  prStatusByBranch = {},
   branchResolutionByBranch = {},
   onRepoint,
+  defaultBranch = "",
+  repointErrorByNodeId = {},
+  repointingNodeIds = new Set<string>(),
 }: PlannedPrListProps) {
   const ordered = topoSortStackNodes(nodes);
   const nodeById = new Map(nodes.map((n) => [n.nodeId, n]));
@@ -40,13 +57,30 @@ export function PlannedPrList({
           // In progress when a live session owns the node's branch.
           const owner = resolveNodeSession(node, sessions);
           const inProgress = Boolean(owner?.isActive);
-          const prStatus = node.branch ? prStatusByBranch[node.branch] : undefined;
           const resolution = node.branch ? branchResolutionByBranch[node.branch] : undefined;
-          // Repoint is offered once at least one parent PR has merged (the node needs re-basing
-          // onto the new effective base).
-          const canRepoint = node.parents.some(
-            (parentId) => nodeById.get(parentId)?.prStatus?.phase === "merged",
-          );
+          // Every reason this node cannot be started right now — see `startBlockers` for the rules.
+          const blockers = startBlockers(node, nodes, branchResolutionByBranch);
+          // Repoint is offered for the original merged-predecessor case *and* whenever the base
+          // cannot be resolved right now, for any cause (D17). The plan's own `pr_status` is written
+          // by the orchestrator agent and is stale in exactly the dead-end case — a merged
+          // predecessor whose branch was deleted — so gating on it alone left that node unrecoverable.
+          const canRepoint =
+            blockers.length > 0 ||
+            node.parents.some((parentId) => nodeById.get(parentId)?.prStatus?.phase === "merged");
+
+          // The base branch as the row states it. `resolveStackBase` distinguishes the three cases a
+          // plain name cannot: a concrete ancestor ref, the project default (a root or an all-merged
+          // chain), and a chain whose ancestors own no ref at all — which is named in words rather
+          // than with the blocked ancestor's *planned* branch, since that branch does not exist and
+          // would read as a base the child could be created from.
+          const base = resolveStackBase(node, nodes);
+          const baseBranchLabel =
+            base.kind === "ancestor-branch"
+              ? base.branch
+              : base.kind === "default-branch"
+                ? // Empty for a legacy project with no stored `main_branch_ref` (D20).
+                  defaultBranch || "default branch"
+                : "no predecessor branch yet";
 
           return (
             <PlannedPrRow
@@ -55,10 +89,19 @@ export function PlannedPrList({
               onStartSession={onStartSession}
               starting={startingNodeId === node.nodeId}
               inProgress={inProgress}
-              prStatus={prStatus}
               resolution={resolution}
               canRepoint={canRepoint}
               onRepoint={onRepoint}
+              repointTarget={resolveRepointTarget(
+                node,
+                nodes,
+                branchResolutionByBranch,
+                defaultBranch,
+              )}
+              repointError={repointErrorByNodeId[node.nodeId]}
+              repointing={repointingNodeIds.has(node.nodeId)}
+              blockers={blockers}
+              baseBranchLabel={baseBranchLabel}
             />
           );
         })

@@ -2,6 +2,14 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-26 — GitHub access tokens are retained per login (BREAKING: re-login + writable `auth_storage`)
+
+- **The daemon now keeps each real login's GitHub access token** (`auth_storage/github-tokens.json`, mode `0600`, published via temp-file + `rename`) so it can read PRs as that operator instead of falling back to a `GITHUB_TOKEN` the systemd unit never had. `auth_storage` finally has a reader. See [session-auth.md § GitHub access-token retention](session-auth.md#github-access-token-retention-added-2026-07-26).
+- **BREAKING — every already-signed-in operator must log out and log in again:** the OAuth authorize scope widened from `read:user` to `read:user repo`, and an existing grant cannot be widened in place. Until then, GitHub-backed reads report themselves *unavailable* with a reason.
+- **BREAKING — a configured `auth_storage` must be writable by the daemon user or the daemon refuses to start** (boot probe: create dir, write, remove). Retention is a hard login dependency, so an unwritable path would otherwise fail every login one operator at a time. Leaving `auth_storage` unset remains allowed (logins work; PR reads are *unavailable*). `./install` creates only the parent `/var/lib/tddy`.
+- A login whose token cannot be retained **fails** rather than minting a half-login that looks signed in while every GitHub read is unavailable; the client-visible error names only the login, with the file path logged server-side. A stub/demo login retains nothing and is never a failure.
+- `QueryBranch` gains a `remote` leg (`origin/<branch>` existence + sha) and its `pr` leg gains `unavailable` / `unavailable_reason`; a failed PR lookup degrades only that leg and never fails the RPC. `GetPrStatus` is unchanged and still served, but no longer called by the web.
+
 ## 2026-07-26 — Telegram model keyboards read the shared model catalog
 
 - The Telegram **Claude** and **Cursor** model keyboards no longer carry their own copies of the model lists — they render `tddy_core::backend::claude_cli_models()` / `cursor_cli_models()`, so a catalog change reaches Telegram, the web dropdowns, and the CLI defaults at once. This also corrects the Claude keyboard's stale labels and grows the Cursor keyboard from 3 entries to the catalog's 5. See [telegram-session-control.md](telegram-session-control.md).

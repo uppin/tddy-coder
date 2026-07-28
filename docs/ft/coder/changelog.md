@@ -7,6 +7,40 @@ Release note history for the Coder product area.
 - Sessions store **user-attached documents** at `{session_dir}/artifacts/attachments/<basename>` (flat, basename-only) via the daemon **`session_attachments`** store; layout helpers live in **`tddy-workflow`** ([session-attachments.md](session-attachments.md), [session-layout.md](session-layout.md)).
 - `SessionEntry.context_docs` carries **`kind`** (`MANIFEST` / `ATTACHMENT`) and **`size_bytes`**; attachment rows follow recipe-manifest docs and still list when the recipe is blank or unknown. The UTF-8 context-doc reader stays manifest-only (attachments may be binary).
 - No RPC accepts an attachment yet — start-session materialization and a type-aware content fetch are follow-ups.
+## 2026-07-27 — Unified worktree base resolution (cursor-cli PR-stack fix)
+
+- Chain base resolution is unified in **tddy-core::session_chain**. `resolve_chain_base_ref` and its helpers (`parent_is_pr_stack_orchestrator`, `pr_stack_node_for_spawn`) move out of the daemon into core, and a new `resolve_chain_base_for_session_spawn` encodes the spawn-time precedence: a runtime `stack_parent` wins over a persisted `worktree_integration_base_ref`, which wins over the default base.
+- A **Cursor CLI** session spawned with a PR-stack orchestrator parent no longer falls back to `origin/master`: the sandboxed and non-sandboxed spawn paths thread `stack_parent` through, record `Changeset.orchestrator_session_id`, and base the child off its planned node's effective base via `Stack::base_ref_for_spawn`.
+- **Claude CLI** and **Telegram** spawn paths route through the same resolver; Telegram now honors the persisted `worktree_integration_base_ref` the branch callback wrote (the prior `None` pass ignored it and always used the default base).
+- See [git-integration-base-ref.md § Session chaining](git-integration-base-ref.md#session-chaining-parent-session--originbranch).
+
+## 2026-07-26 — PR-Stack repoint for a dead-end planned PR
+
+- A planned PR whose predecessor's PR merged and whose branch was then deleted on `origin` is no longer a dead end: the row offers **"Repoint to `<branch>`"**, naming where the node will land before you click.
+- Repoint is offered for **any** base that cannot be resolved right now, not only a predecessor the plan records as merged — that field is written by the orchestrator agent and reads `open` if you merged on GitHub without running an assess pass.
+- A blocked row no longer replaces itself with an error. It keeps its title, description, planned branch and the new **base branch** line, with **Start session** disabled and a warning naming each blocking issue.
+- Repointing **collapses the node onto a single predecessor** — the one owning the target — or detaches it onto the default branch when none survives. A node that was never started is repointed as a plan-only edit.
+- A refused or failed repoint now shows the daemon's reason on the row and leaves it blocked, instead of appearing to do nothing.
+- A **root** node's Start-session dialog finally names its base branch instead of reading "New branch from base:" with no name.
+
+## 2026-07-26 — PR-Stack UX recovery: no dead-end planned PRs, honest branch & PR state
+
+- **Bug fix — deleting a child session no longer wedges its planned PR forever.** A node whose recorded child session no longer resolves is now **orphaned**: it offers **Start session** again, pre-filled to *resume the branch it already owns* rather than create a new one, and the restarted session re-links to the node so the recovery is durable ([pr-stack-live-status.md](pr-stack-live-status.md#orphaned-node-recovery-added-2026-07-26)).
+- **Bug fix — startability is shown, not discovered on failure.** A node whose base branch is absent from `origin` shows a blocked **"Missing branch: `<base>`"** indicator *in place of* the Start-session button, naming the branch it waits for; previously the spawn was accepted and only failed inside `git fetch`, after the session directory and changeset had been written ([pr-stack-live-status.md](pr-stack-live-status.md#startability-before-the-spawn-added-2026-07-26)).
+- **Bug fix — a planned PR's branch and PR number are finally visible.** Every row renders its branch name, or its planned branch name explicitly marked as *planned*; a live PR that the daemon could not see (PR #351 on `feature/session-attach-docs/attach-proto`) now appears.
+- **Bug fix — PR status is authenticated with the operator's own GitHub token**, retained daemon-side at login, and a lookup that cannot be performed reads **"PR status unavailable"** with a reason instead of silently claiming no PR exists. **Operators must log out and log in again** (the OAuth scope widened to `read:user repo`) and `auth_storage` must be writable — see [daemon § GitHub access-token retention](../daemon/session-auth.md#github-access-token-retention-added-2026-07-26).
+- **Bug fix — GitHub's `head` filter is now qualified `owner:branch`.** An unqualified `head` is *ignored* by GitHub (verified: 30 PRs returned instead of 1), so the orchestrator's repoint/merge path could have re-targeted or merged an arbitrary unrelated PR.
+- A spawn that **resumes** an existing branch now links its planned node, so recovery sticks instead of spawning a new unlinked session on every click ([pr-stacking.md](pr-stacking.md#effective-spawn-branch-added-2026-07-26)).
+- A stub/demo login (`github.stub: true`) stays a first-class state: rows show no PR, every RPC succeeds, and no error surface appears.
+- The PR-Stack view makes **one** GitHub lookup per branch per 5s tick instead of two — `GetPrStatus` polling is gone from the web (the daemon still serves it), which previously exhausted a 5000/hour GitHub limit within the hour on a five-node stack.
+## 2026-07-26 — PR-Stack planning: every planned PR is self-contained
+
+- **The planning agent no longer plans layer-split stacks.** It had no guidance on PR size or self-containment — dependency order, parallelism and branch naming were the only rules — so "node 1: declare the API / node 2: implement it" was a legitimate plan, and the resulting PR shipped surface with no behavior: nothing to review for correctness, nothing to test beyond compiling, and a contract in the tree that misrepresented the system. Planning now requires the API/schema change, its implementation and its tests in **one** node ([pr-stacking.md § PR boundary contract](pr-stacking.md#pr-boundary-contract-every-node-is-self-contained)).
+- Splitting a schema from its behavior, an endpoint from its handler, a model from its persistence, or a signature from its body is explicitly named as one node, never two.
+- **An oversized slice now has somewhere to go:** split by *capability* — one source variant, one enum case, one screen, happy path before edge cases — each part still end-to-end, so the prohibition does not push the agent back into layer splits.
+- Two narrow exceptions may omit implementation: a mechanical rename/move with no behavior change, or regenerating already-committed generated code. A debatable third case goes in the node's `description` for a human to decide instead of being invented silently.
+- **Refining a plan by chat keeps the rule.** The refinement turn re-runs `write-stack-plan`, whose prompt restates the scoping rules and states that a refinement request must not talk the agent into a layer split.
+- The rule is **guidance to the planning model, not a validated gate** — `validate_stack_plan` never sees the diff a node will produce, so it still checks only graph shape and branch naming. A layer-split plan remains possible; the node `description` is what surfaces it to a reviewer.
 
 ## 2026-07-26 — PR-Stack: a stack progresses on branches, not on child sessions
 

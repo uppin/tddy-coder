@@ -46,8 +46,11 @@ impl GitHubOAuthProvider for RealGitHubProvider {
     fn authorize_url(&self) -> (String, String) {
         let state = Uuid::new_v4().to_string();
         self.pending_states.lock().unwrap().insert(state.clone());
+        // `read:user` identifies the operator; `repo` is what lets the granted token read (and later
+        // repoint/merge) pull requests on a private repository — `read:user` alone cannot.
+        // Space-separated per OAuth, URL-encoded as `%20`.
         let url = format!(
-            "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&state={}&scope=read:user",
+            "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&state={}&scope=read:user%20repo",
             self.client_id, self.redirect_uri, state
         );
         (url, state)
@@ -118,5 +121,9 @@ impl GitHubOAuthProvider for RealGitHubProvider {
         };
 
         Ok((token_data.access_token, user))
+    }
+
+    fn issues_usable_access_token(&self) -> bool {
+        true
     }
 }

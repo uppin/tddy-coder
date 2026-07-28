@@ -35,7 +35,7 @@ function aBackendForCursorCliSession() {
     .onUnary(ConnectionService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
-    .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches: ["origin/main"] }))
+    .onUnary(ConnectionService.method.listProjectBranches, () => ({ branches: ["origin/main"], defaultRemote: "origin" }))
     .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "cursor-cli-sess-1" }))
     .onUnary(ConnectionService.method.listAgentModels, (req) => {
       if (req.agent === "cursor-cli") {

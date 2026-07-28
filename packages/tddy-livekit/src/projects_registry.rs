@@ -16,6 +16,8 @@ pub(crate) struct ProjectData {
     pub main_repo_path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub main_branch_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_name: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub host_repo_paths: HashMap<String, String>,
 }

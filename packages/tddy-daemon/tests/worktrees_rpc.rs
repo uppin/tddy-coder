@@ -183,6 +183,7 @@ async fn list_worktrees_refresh_returns_git_worktree_rows() {
         git_url: "https://example.com/r.git".to_string(),
         main_repo_path: main_repo_path.display().to_string(),
         main_branch_ref: None,
+        remote_name: None,
         host_repo_paths: std::collections::HashMap::new(),
     };
 
@@ -286,6 +287,7 @@ async fn clean_worktree_primary_is_failed_precondition() {
             git_url: "https://example.com/r.git".to_string(),
             main_repo_path: main_repo_path.display().to_string(),
             main_branch_ref: None,
+            remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
         },
     )
@@ -355,6 +357,7 @@ async fn clean_worktree_clears_secondary_and_invalidates_cache() {
             git_url: "https://example.com/r.git".to_string(),
             main_repo_path: main_repo_path.display().to_string(),
             main_branch_ref: None,
+            remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
         },
     )
@@ -463,6 +466,7 @@ async fn restore_session_worktree_recreates_worktree_from_changeset() {
             git_url: "https://example.com/r.git".to_string(),
             main_repo_path: main_repo_path.display().to_string(),
             main_branch_ref: None,
+            remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
         },
     )

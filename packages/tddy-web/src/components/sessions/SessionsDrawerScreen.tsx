@@ -689,6 +689,7 @@ export function SessionsDrawerScreen({
               room={room}
               mobileShortcuts={mobileShortcuts}
               onChildSessionStarted={handleChildSessionStarted}
+              onSwitchPeer={handleSelectSession}
               traffic={selectedTraffic}
               projects={projects}
               runtimes={runtimes}

@@ -37,7 +37,7 @@ Each node in the DAG is a `StackNode`:
 | `description` | Longer description for the PR body. |
 | `branch_suggestion` | Planner's suggested branch name — a *planned* name, set at planning time. It names no ref and never satisfies the spawn gate; it is the name the child worktree is asked to create. |
 | `branch` | Actual branch name once the child worktree has created it — "a branch that exists". Planning leaves this `None`. **This is the spawn gate and the durable link key.** |
-| `session_id` | Child session id once the node is materialised. A *fallback* route to resolving `branch` only; the stack does not depend on it, and a closed or cleaned-up session never blocks the nodes below. |
+| `session_id` | Child session id once the node is materialised. A *fallback* route to resolving `branch` only; the stack does not depend on it, and a closed or cleaned-up session never blocks the nodes below. A deleted session leaves the id in place — the node is then **orphaned** and offers "Start session" again (see [PR-Stack live status § Orphaned-node recovery](pr-stack-live-status.md#orphaned-node-recovery-added-2026-07-26)). |
 | `parents` | List of parent `node_id` values. Empty list = root node (branches off the stack base). More than one entry = DAG node that integrates multiple unmerged parents. |
 | `pr_status` | Mirrors `GithubPrStatus` (`phase` one of `planned`, `open`, `merged`, `closed`, `error`). Reflects **GitHub reality**. |
 | `child_state` | Coarse mirror of the child session's `WorkflowState`. |
@@ -46,6 +46,29 @@ Each node in the DAG is a `StackNode`:
 **Derived, never persisted:** effective base refs are computed on demand, not stored. The predicate `StackNode::is_skipped()` returns true when `pr_status.phase == "merged"`. Base-ref derivation climbs the `parents` list, skipping merged ancestors, and returns the nearest non-skipped ancestor **branches** as `origin/<branch>` refs; when all ancestors are merged the node's effective base collapses to the stack bottom (i.e. `origin/main` or equivalent). A non-merged ancestor that owns no branch contributes nothing — it is never given a synthesized `origin/<node_id>` ref, because nothing ever created that ref.
 
 **Helpers on `Stack`:** `topo_order` (Kahn sort; cycle → error), `effective_base_refs(node_id, stack_bottom_base) -> Vec<String>`, `base_ref_for_spawn(node_id, stack_bottom_base) -> Result<String, WorkflowError>` (the spawn base; refuses when a non-merged parent owns no branch), `node(node_id)`.
+
+### Effective spawn branch *(added 2026-07-26)*
+
+Both the node link and chain-base resolution used to key on the spawn request's `new_branch_name`, which
+is **empty** when the operator resumes an existing branch (`work_on_selected_branch`). A resumed spawn
+therefore never re-linked to its node — `pr_stack_node_for_spawn` returns `None` for a blank branch — so
+each click produced another unlinked session and the row stayed stuck in its recovered state.
+
+The linking key is now the spawn's **effective branch** (`connection_service::effective_spawn_branch`):
+
+- `new_branch_name` (trimmed) when a branch is being created;
+- otherwise `selected_branch_to_work_on`, normalised through `tddy_core::worktree::local_branch_name`
+  so an `origin/`-prefixed selection resolves to the local branch name;
+- a new-branch spawn ignores `selected_branch_to_work_on` entirely — the dialog sends that field
+  unconditionally, so "prefer whichever field is non-empty" would pick the wrong one.
+
+Applied at the **node-link** sites in both spawn paths that take a `stack_parent`
+(`spawn_claude_cli_session_inner`, `start_sandboxed_claude_cli_session`), so **a resumed spawn re-links
+its node** and the recovery sticks. `resolve_chain_base_ref` deliberately keeps keying on
+`new_branch_name`: under `work_on_selected_branch` a resolved chain base would make worktree setup run a
+real `fetch_chain_pr_integration_base` — a fetch that can fail, and that is pointless for a resume which
+creates no branch. `start_sandboxed_cursor_cli_session` takes no `stack_parent` at all and is unaffected
+(tracked in `docs/dev/TODO.md`).
 
 **Branch resolution helpers** (free functions in `changeset.rs`): `resolve_stack_node_branch(sessions_root, node) -> Option<String>` — the node's own `branch`, else the `branch` in its child session's changeset (a missing session directory resolves to `None`, never an error) — and `read_stack_with_resolved_branches(sessions_root, orchestrator_session_id)`, the orchestrator's stack with every node's `branch` hydrated through that resolver. The hydrated copy is read-only; persisting it would write a fallback-derived branch onto a node that never recorded one.
 
@@ -81,7 +104,7 @@ Every child session carries:
 - **`uses_primary_session_document`:** `false` (no PRD-style document approval gate).
 - **One session, whole lifecycle:** the same session that analyzes the feature and writes the plan also operates it to master — there is no second "orchestrate" session seeded from the first.
 - **Pipeline:** `analyze-stack` → `write-stack-plan` → `orchestrate` (terminal interactive loop)
-  - `analyze-stack` — read-only, `PermissionHint::ReadOnly`, no structured submit. The agent studies the feature description and plans how to split it into a PR stack or DAG.
+  - `analyze-stack` — read-only, `PermissionHint::ReadOnly`, no structured submit. The agent studies the feature description and plans how to split it into a PR stack or DAG, subject to the [PR boundary contract](#pr-boundary-contract-every-node-is-self-contained).
   - `write-stack-plan` — the agent emits both plan artifacts via `tddy-tools submit`. No structured JSON goal schema is shared with TDD; the submit carries the YAML plan payload. Seeding `Changeset.stack` from the written plan happens here / on entry to `orchestrate` (idempotent — same guard as the old `seed_orchestrator_stack_from_plan`).
   - `orchestrate` — the **free-prompting operator loop**. A single `BackendInvokeTask` goal with **no `end` edge**: `FlowRunner` hits "no successor" and pauses as `WaitingForInput`, keeping the session `Running` for multi-turn chat (identical mechanism to the `free-prompting` recipe). `PermissionHint::AcceptEdits` (the agent edits files during conflict resolution), and its allowed tools are the [PR-management tools](#pr-management-tools) plus `Agent`. There is **no** automatic `assess → spawn / merge / repoint` cycle; the developer prompts the agent, which calls the tools explicitly. Each `orchestrate` turn's prompt is preceded by the `<context-reminder>` header (`before_task` → `prepend_context_header`) listing the manifest docs that exist on disk — so the planning knowledge in `artifacts/exploration.md` (and the other stack artifacts) is advertised to the operator agent; when no such file exists no header is injected.
 - **Removed:** the `begin-orchestrate` host bridge task and the `assess` / `spawn` / `merge` / `repoint` graph nodes and edges. The underlying helpers (`assemble_views`, `effective_base_ref`, `execute_stack_merge`, `execute_stack_repoint`, `RealGithubPrApi`, conflict detection) are **kept** — they are now called by the PR-management tools rather than by graph tasks.
@@ -90,6 +113,29 @@ Every child session carries:
 - **Parser types** in `plan_pr_stack/mod.rs` (reused as-is by the unified recipe): `StackPlanOutput { version, exploration: Option<String>, prs: Vec<PlannedPr> }`, `PlannedPr { node_id, title, description, branch_suggestion, parents, child_recipe }`, and `planned_prs_into_stack_nodes(prs) -> Vec<StackNode>`. Validation (`validate_stack_plan`): unique `node_id`s, all referenced `parents` resolve, no cycle detected via `Stack::topo_order`, and every `branch_suggestion` is present, in `feature/<stack>/<node>` form, and shares one `feature/<stack>/` namespace.
 - **State table:** `Init | AnalyzeStack → analyze-stack`; `WriteStackPlan → write-stack-plan`; `StackPlanned → orchestrate` (drops into the interactive loop — **not** a terminal "Completed" state); `orchestrate → orchestrate` (pauses for input each turn); `failed → None`. `next_goal_for_state_with_changeset` still disambiguates a legacy `"Init"` with a populated `Changeset.stack` by resuming into `orchestrate` (previously `assess`). `status_for_state`: `StackPlanned | orchestrate → "Active"`, `failed → "Failed"`, else `"Active"`.
 - **Refining the plan via chat:** `plan_refinement_goal()` returns `write-stack-plan` — the same goal used to author the plan. After the plan exists (state `StackPlanned`), the operator can keep chatting; each refinement turn re-runs `write-stack-plan` on the **same session**, the agent re-emits `stack-plan.yaml`, and the host re-validates and re-seeds `Changeset.stack` (`reseed_stack_from_plan_if_unspawned`) — overwriting `version` + `nodes` wholesale as long as no node has been materialised yet. Once a node owns a **`branch` or** a `session_id`, further refinement is refused: the branch is real work that outlives the session that created it, so overwriting the node would orphan the branch as well as any in-progress child session. An invalid refinement (cycle, dangling parent) is rejected and the previously-persisted stack is left untouched. On resume/continue, `StackPlanned` moves on into `assess` — refinement is an operator-initiated side path, not the default resume target.
+
+### PR boundary contract: every node is self-contained
+
+A planned PR must be **independently reviewable and independently mergeable**: the API/schema change, the code implementing it, and its tests land in **one** node. A reviewer can judge it without waiting for a later node in the stack.
+
+**Splitting by layer is forbidden.** These pairs are one node, never two:
+
+| ✗ Layer split (invalid) | ✓ One self-contained node |
+|---|---|
+| `n1` add proto RPCs → `n2` implement them | `n1` attachment staging: proto + daemon handler + tests |
+| `n1` add an endpoint → `n2` add its handler | `n1` the endpoint, serving real responses |
+| `n1` add a data model → `n2` persist it | `n1` the model with its persistence |
+| `n1` change a signature → `n2` fill in the body | `n1` the working function |
+
+A node that ships only **surface** — RPCs returning `unimplemented`, a field nothing reads, a trait with stub impls — is not a valid PR. It cannot be reviewed for correctness (there is no behavior to check), it cannot be tested beyond compiling, and it leaves a contract in the tree that misrepresents what the system does.
+
+**When a vertical slice is too large, split by capability, not by layer.** Cut along user-visible increments where each part is still end-to-end: one source variant rather than all of them, one scope/enum case rather than the full set, one screen or entry point, the happy path before the edge cases. Each such PR carries its own contract *plus* behavior *plus* tests, and the next node extends it.
+
+**Two narrow exceptions** — a node may omit implementation when it is a purely mechanical rename/move/extraction with no behavior change, or a regeneration of already-committed generated code exposing no new surface. Anything else goes in the node's `description` for a human to decide; the agent is told not to invent a third exception.
+
+This contract is **advisory, not machine-enforced.** It is carried by the `analyze-stack` and `write-stack-plan` system prompts (`pr_stack/hooks.rs`), and appears in **both** deliberately: `write-stack-plan` is the goal `plan_refinement_goal()` returns, so it re-runs on every chat-driven refinement — a rule present only in `analyze-stack` would be silently dropped the first time an operator refined the plan. That copy also tells the agent a refinement request must not talk it into a layer-split stack. Pinned by `pr_boundary_scoping_rule_tests` in `hooks.rs`, which drives the real `before_task` seam rather than asserting on the string constants.
+
+**Why there is no validator for it.** `validate_stack_plan` sees only `node_id`, `title`, `description`, `branch_suggestion`, and `parents` — never the diff a node will eventually produce — so it cannot distinguish a vertical slice from a layer split. Any check reduces to a keyword heuristic over `description` ("reject plans mentioning *proto only*"), which is trivially reworded around and would reject legitimate plans. Enforcement was considered and rejected on those grounds; the guidance is prompt-carried instead, and the node `description` is the escape hatch that surfaces a debatable boundary to a human reviewer. Being guidance to a model, it shapes planning without guaranteeing it: if layer-split stacks keep appearing in practice, the next step is a **plan-review gate** before `orchestrate`, not a regex in the validator.
 
 ### Loop shape (free-prompting)
 
@@ -185,6 +231,21 @@ GitHub PRs have a single base ref, so a node that depends on multiple unmerged p
 - As parents merge to the main branch, `effective_base_refs` shrinks. The integration ref is refreshed when the effective parent set changes.
 - A multi-parent node's PR is only offered for merge once **all** its parents are merged (so its effective base collapses to the main branch, matching step 2 of the `assess` algorithm).
 
+### Operator-selectable base branch for a diamond node *(added 2026-07-27)*
+
+A planned PR with multiple non-merged parents (a diamond / merge node) used to base its child worktree off whichever parent the resolver walked **first** — `Stack::base_ref_for_spawn` / the web `resolveStackBase` iterate `node.parents` in list order and return the first non-merged ancestor's `origin/<branch>`. Every parent is a legitimate base ref, but the operator had no control to pick a different one, and the dialog's `baseBranchLabel` was display-only (never sent to the daemon).
+
+The Start-session dialog opened from a planned-PR row now renders a **"Base branch"** `<select>` (test id `create-session-base-branch-select`), shown when `initialValues.stackParent` is set, `peerMode` is false, and the option list is non-empty. The option list is computed by a pure helper **`prioritiseBaseBranchOptions(node, nodes): string[]`** (`packages/tddy-web/src/components/sessions/prstack/`):
+
+1. **Direct dependency branches** — walk `node.parents` in order; for each parent that is **not merged** and **owns a `branch`**, include that branch. Order the result by the dependency's own depth in the stack DAG (longest path from a root, deepest first), ties broken by the order in `node.parents` (stable). A merged parent contributes nothing (its ref may be gone and `effective_base_refs` collapses past it); a branchless parent contributes nothing (no ref to offer — the spawn gate would refuse it anyway).
+2. **Other materialized stack branches** — every node with a `branch`, excluding the node itself, its descendants (basing onto a descendant would create a cycle), merged nodes, and any branch already listed in step 1. Appended in stack node order. De-duplicated by branch name (first-seen wins).
+
+The selected value defaults to the first option (the highest-priority direct dependency) and is sent on the existing **`StartSessionRequest.selected_integration_base_ref`** field. When the list is empty (a root node with no other materialized branches) the selector is hidden and the field is sent empty — preserving the root → default-branch behavior. Peer-mode spawn (which reuses the orchestrator's worktree via `repo_path`) hides the selector and sends an empty field regardless.
+
+**Ordering rationale — depth, not distance.** For a diamond where `PR3` depends on `[PR2, PR1]` and `PR2` depends on `PR1`: both direct parents are at distance 1, but `PR2` sits **deeper** in the DAG (itself depends on `PR1`). Basing onto `PR2` gives the operator `PR1`'s changes too, so `PR2` is the more specific, more complete base and is listed first. Depth is the longest path from a root to the dependency; ties (two roots, as in the `attach-start` case) break by `node.parents` order.
+
+The daemon honors the explicit choice at the spawn seam — see [Git integration base ref — Operator-chosen base at the spawn seam](git-integration-base-ref.md#operator-chosen-base-at-the-spawn-seam-added-2026-07-27). The existing `baseBranchLabel` (the branch-intent caption, from `deriveStackBaseBranch`) is unchanged and independent of the selector.
+
 ## Resumability and crash safety
 
 **Loop resumability** is free: `assess` is idempotent, and every non-terminal state maps to `assess`. Restarting the orchestrator session re-enters `assess` exactly as if the previous tick completed.
@@ -224,7 +285,7 @@ The session's **context documents** are surfaced to the web via `SessionEntry` p
 
 ### Per-workflow session views: the PR-Stack Chat Screen
 
-Once a `pr-stack` session is selected in the session drawer, the main pane opens a dedicated **PR-Stack Chat Screen** instead of the terminal — a chat window backed by a remote Presenter (over the existing `TddyRemote.Stream` RPC) alongside a live list of the planned PRs with a **"Start session"** CTA per unspawned node. This chat *is* the `orchestrate` free-prompting loop: the developer types instructions ("merge n1", "repoint the dependents", "what needs action?") and the agent responds and calls the [PR-management tools](#pr-management-tools). Full UI spec: [Session drawer § Per-Workflow Session Views](../web/session-drawer.md#per-workflow-session-views).
+Once a `pr-stack` session is selected in the session drawer, the main pane opens a dedicated **PR-Stack Chat Screen** instead of the terminal — a full-width chat window backed by a remote Presenter (over the existing `TddyRemote.Stream` RPC) plus a dismissible **Planned PRs panel** on the right listing the planned PRs, with a **"Start session"** CTA per startable node (*since 2026-07-26*; it was a fixed half-width left pane before). The CTA opens the Start-session dialog, which for a diamond / multi-parent node renders a **"Base branch"** selector so the operator can choose which parent branch the child worktree bases off — see [Operator-selectable base branch for a diamond node](#operator-selectable-base-branch-for-a-diamond-node-added-2026-07-27). This chat *is* the `orchestrate` free-prompting loop: the developer types instructions ("merge n1", "repoint the dependents", "what needs action?") and the agent responds and calls the [PR-management tools](#pr-management-tools). Full UI spec: [Session drawer § Per-Workflow Session Views](../web/session-drawer.md#per-workflow-session-views).
 
 Each planned-PR row (`PlannedPrRow.tsx`) renders an **internal-status badge** next to the existing phase chip, colored by `internal_status.kind` (e.g. amber `needs-repoint`, red `has-conflicts`, green `ready-to-merge`), with `internal_status.note` as hover text. The badge is parsed from the `internal_status` field carried inside `SessionEntry.stack_plan_json` (`stackPlan.ts::parseStackPlan`).
 

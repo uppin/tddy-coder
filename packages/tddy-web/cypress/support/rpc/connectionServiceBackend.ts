@@ -343,7 +343,7 @@ export function aConnectionServiceBackend(
       listProjects: async () => ({
         projects: projectsOverride.map((p) => aProjectEntry(p)),
       }),
-      listProjectBranches: async () => ({ branches: scenario.projectBranches ?? [] }),
+      listProjectBranches: async () => ({ branches: scenario.projectBranches ?? [], defaultRemote: "origin" }),
       connectSession: async (req) => {
         connectedSessionIds.push(req.sessionId);
         const overrides =

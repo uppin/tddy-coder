@@ -3,6 +3,7 @@ pub mod provider;
 pub mod real;
 pub mod session_token;
 pub mod stub;
+pub mod token_store;
 
 pub use auth_service::AuthServiceImpl;
 pub use provider::{GitHubOAuthProvider, GitHubUser};
@@ -12,3 +13,4 @@ pub use session_token::{
     SESSION_TOKEN_TTL,
 };
 pub use stub::StubGitHubProvider;
+pub use token_store::GitHubTokenStore;

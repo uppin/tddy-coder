@@ -234,9 +234,26 @@ export const TEST_IDS = {
   createSessionBranchToWorkOnSelect: "create-session-branch-to-work-on-select",
   /** "Create Remote Branch" checkbox — pre-checked; pushes the new branch to origin at session start. */
   createSessionCreateRemoteBranchToggle: "create-session-create-remote-branch-toggle",
+  /** Base-branch <select> for a planned-PR child session — lists the node's direct dependency branches
+   *  first (ordered by dependency depth, deepest first, ties by `node.parents` order), then the stack's
+   *  other materialized branches. Shown only when `initialValues.stackParent` is set and not peer mode.
+   *  The selected value is sent as `StartSessionRequest.selected_integration_base_ref`. */
+  createSessionBaseBranchSelect: "create-session-base-branch-select",
   createSessionCancelBtn: "create-session-cancel-btn",
   createSessionSubmitBtn: "create-session-submit-btn",
   createSessionError: "create-session-error",
+
+  // Session agents — peer agent sessions section in SessionMainPane
+  /** The "Add agent" button in the session-detail header (spawns a peer child session). */
+  sessionAgentsAddBtn: "session-agents-add-btn",
+  /** The collapsible "Session agents" section listing the current session's peers. */
+  sessionAgentsSection: "session-agents-section",
+  /** Empty-state message shown when the current session has no peers. */
+  sessionAgentsEmpty: "session-agents-empty",
+  /** One row per peer, keyed by the peer's session id. */
+  sessionAgentsRow: "session-agents-row",
+  /** The "switch" action on a peer row — focuses that peer's runtime. */
+  sessionAgentsSwitchBtn: "session-agents-switch-btn",
 
   // Shell navigation
   shellMenuButton: "shell-menu-button",
@@ -368,6 +385,13 @@ export const TEST_IDS = {
   // PR-Stack Chat Screen (per-workflow session view for the "pr-stack" recipe)
   prStackScreen: "pr-stack-screen",
   prStackPlannedPrList: "pr-stack-planned-pr-list",
+
+  // PR-Stack "Planned PRs" panel — right-side dock on desktop, full-screen overlay on mobile.
+  // Always mounted; `data-state` ∈ {closed, open} drives visibility (same contract as the
+  // Session Inspector drawer).
+  prStackPlannedPrPanel: "pr-stack-planned-pr-panel",
+  prStackPlannedPrPanelToggle: "pr-stack-planned-pr-panel-toggle",
+  prStackPlannedPrPanelClose: "pr-stack-planned-pr-panel-close",
 
   // Full-screen Workflow Chat Screen (per-workflow session view for every non-"pr-stack" tool recipe)
   workflowChatScreen: "workflow-chat-screen",
@@ -600,6 +624,14 @@ export const sessionsChildTab = (sessionId: string) => `sessions-child-tab-${ses
  *  child conversation, shown when its tab is selected. */
 export const sessionsChildPane = (sessionId: string) => `sessions-child-pane-${sessionId}`;
 
+/** `[data-testid="session-agents-row-<sessionId>"]` — one row in the Session agents section, keyed
+ *  by the peer's session id. */
+export const sessionAgentsRow = (sessionId: string) => `session-agents-row-${sessionId}`;
+
+/** `[data-testid="session-agents-switch-btn-<sessionId>"]` — the switch action on a peer row. */
+export const sessionAgentsSwitchBtn = (sessionId: string) =>
+  `session-agents-switch-btn-${sessionId}`;
+
 // ---------------------------------------------------------------------------
 // Tasks drawer screen dynamic helpers
 // ---------------------------------------------------------------------------
@@ -729,6 +761,30 @@ export const prStackWorktree = (nodeId: string) => `pr-stack-worktree-${nodeId}`
 
 /** `[data-testid="pr-stack-session-<nodeId>"]` — the resolved in-progress session reference (QueryBranch) */
 export const prStackSession = (nodeId: string) => `pr-stack-session-${nodeId}`;
+
+/** `[data-testid="pr-stack-branch-<nodeId>"]` — the branch this planned PR owns (a branch that exists) */
+export const prStackBranch = (nodeId: string) => `pr-stack-branch-${nodeId}`;
+
+/** `[data-testid="pr-stack-planned-branch-<nodeId>"]` — the planned branch *name* (`branch_suggestion`),
+ *  rendered distinctly from an owned branch because a suggestion names no ref yet */
+export const prStackPlannedBranch = (nodeId: string) => `pr-stack-planned-branch-${nodeId}`;
+
+/** `[data-testid="pr-stack-base-branch-<nodeId>"]` — the branch this planned PR's child worktree would
+ *  be based onto (its nearest usable ancestor's branch, or the project default) */
+export const prStackBaseBranch = (nodeId: string) => `pr-stack-base-branch-${nodeId}`;
+
+/** `[data-testid="pr-stack-start-warning-<nodeId>"]` — the warning listing every reason the node cannot
+ *  be started. The row's information and its (disabled) Start-session CTA stay put beside it */
+export const prStackStartWarning = (nodeId: string) => `pr-stack-start-warning-${nodeId}`;
+
+/** `[data-testid="pr-stack-repoint-error-<nodeId>"]` — the daemon's reason for refusing a repoint. The
+ *  RPC can reject (a stale target names no acceptable base), so failing silently would leave the row
+ *  looking untouched with no explanation — the dead end this feature exists to remove */
+export const prStackRepointError = (nodeId: string) => `pr-stack-repoint-error-${nodeId}`;
+
+/** `[data-testid="pr-stack-pr-unavailable-<nodeId>"]` — shown when the GitHub PR lookup could not be
+ *  performed (no credential, rate limit, transport error) — distinct from "this branch has no PR" */
+export const prStackPrUnavailable = (nodeId: string) => `pr-stack-pr-unavailable-${nodeId}`;
 
 /** `[data-testid="agent-chat-message-<index>"]` — a single rendered chat bubble (reusable AgentChat) */
 export const agentChatMessage = (index: number) => `agent-chat-message-${index}`;

@@ -2,7 +2,7 @@
 //!
 //! Stored as `.session.yaml` in each session directory.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -168,6 +168,29 @@ pub fn read_session_metadata(session_dir: &Path) -> Result<SessionMetadata, crat
     let contents = std::fs::read_to_string(&path)
         .map_err(|e| crate::WorkflowError::WriteFailed(e.to_string()))?;
     serde_yaml::from_str(&contents).map_err(|e| crate::WorkflowError::WriteFailed(e.to_string()))
+}
+
+/// The checkout a session directory names as its repo root, or `None` when nothing names one.
+///
+/// Two files can record it, and they are written at different moments:
+///
+/// - `changeset.yaml` gains `repo_path` only when the session is given a worktree of its own,
+/// - `.session.yaml` records the checkout the session was started over, for **every** session.
+///
+/// A pr-stack orchestrator is a planning session that never creates a worktree, so its changeset
+/// names no repo at all and the metadata is the only record. A missing or unreadable
+/// `changeset.yaml` is likewise not an answer about the repo, so it falls through the same way.
+///
+/// `None` means *the repo is unknown*, and callers must report it as unknown: substituting the
+/// session directory points git at a path that is not a repository, which is how a merged PR came to
+/// read as "no PR exists" (PRD: docs/ft/coder/pr-stack-live-status.md, C3/D8).
+#[must_use]
+pub fn repo_root_for_session(session_dir: &Path) -> Option<PathBuf> {
+    crate::read_changeset(session_dir)
+        .ok()
+        .and_then(|changeset| changeset.repo_path)
+        .or_else(|| read_session_metadata(session_dir).ok()?.repo_path)
+        .map(PathBuf::from)
 }
 
 #[cfg(test)]

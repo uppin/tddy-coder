@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
 import type { AgentInfo, ConnectionService, ProjectEntry, SessionEntry, SubagentInfo, ToolInfo } from "../../gen/connection_pb";
+import { localBranchName } from "../../lib/branchNames";
 import { prStackOrchestrators } from "../../utils/stackParents";
 import { useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useAgentModels } from "../../rpc/useAgentModels";
@@ -46,12 +47,32 @@ export type CreateSessionInitialValues = Partial<{
   stackParent: string;
   branchIntent: BranchIntent;
   newBranchName: string;
+  /**
+   * Existing branch to pre-select in "Work on existing branch" mode — e.g. the branch a planned PR
+   * already owns, which is resumed rather than re-created. Survives the async `ListProjectBranches`
+   * load, which would otherwise auto-select the project's first branch.
+   *
+   * Named the way the rest of the domain names a branch (`feature/x`); the picker's own options are
+   * remote-tracking refs (`origin/feature/x`) and are matched on the local name behind them.
+   */
+  selectedBranch: string;
   /** Pre-check state for the "Create Remote Branch" toggle (new-branch mode). Defaults to checked. */
   createRemoteBranch: boolean;
   /** Concrete base branch shown in the new-branch option: "New branch from base: <baseBranchLabel>". */
   baseBranchLabel: string;
+  /** Ordered base-branch options for the "Base branch" selector (planned-PR child sessions). */
+  baseBranchOptions: string[];
+  /** Pre-selected base branch in the "Base branch" selector (defaults to the first option). */
+  selectedBaseBranch: string;
   initialPrompt: string;
   daemonInstanceId: string;
+  /**
+   * Absolute path to a local git checkout to reuse as the session worktree (sets
+   * `StartSession.repo_path`). Used by the peer-agent spawn flow so a peer runs on the SAME worktree
+   * as the orchestrating session — no new git worktree is created and no branch is checked out, so
+   * branch selection is irrelevant in that flow (see `CreateSessionPaneProps.peerMode`).
+   */
+  repoPath: string;
 }>;
 
 export interface CreateSessionPaneProps {
@@ -60,6 +81,13 @@ export interface CreateSessionPaneProps {
   onCancel: () => void;
   onCreated: (sessionId: string) => void;
   initialValues?: CreateSessionInitialValues;
+  /**
+   * Peer-agent spawn mode: the new session runs on the SAME worktree as an orchestrating session
+   * (via `initialValues.repoPath`), so branch selection (`branchIntent` / `newBranchName` /
+   * `selectedBranch` / `createRemoteBranch`) is hidden — those controls have no effect when
+   * `repo_path` is set. The submit still sends `stackParent` (from `initialValues`) and `repoPath`.
+   */
+  peerMode?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +109,7 @@ export function CreateSessionPane({
   onCancel,
   onCreated,
   initialValues,
+  peerMode = false,
 }: CreateSessionPaneProps) {
   const daemons = useDaemons();
   const { selectedInstanceId } = useSelectedDaemon();
@@ -105,7 +134,14 @@ export function CreateSessionPane({
   const [createRemoteBranch, setCreateRemoteBranch] = useState(
     initialValues?.createRemoteBranch ?? true,
   );
-  const [selectedBranchToWorkOn, setSelectedBranchToWorkOn] = useState("");
+  const [baseBranchOptions] = useState<string[]>(initialValues?.baseBranchOptions ?? []);
+  const [selectedBaseBranch, setSelectedBaseBranch] = useState<string>(
+    initialValues?.selectedBaseBranch ?? "",
+  );
+  // Read out of `initialValues` once: the branch load effect below needs it as a dependency, and
+  // `initialValues` itself is a fresh object on every render of the caller.
+  const preFilledBranchToWorkOn = initialValues?.selectedBranch ?? "";
+  const [selectedBranchToWorkOn, setSelectedBranchToWorkOn] = useState(preFilledBranchToWorkOn);
   // Which daemon/host runs the session. Defaults to the pre-filled host, else the selected daemon,
   // else empty (which the daemon treats as "run locally on the connected daemon"). An empty
   // pre-filled host falls through to the selected daemon so the Host <select>'s displayed option
@@ -227,7 +263,20 @@ export function CreateSessionPane({
         if (!cancelled) {
           setRemoteBranches(resp.branches);
           if (resp.branches.length > 0) {
-            setSelectedBranchToWorkOn(resp.branches[0]!);
+            // A pre-filled branch wins over the default first entry, but only while the project
+            // actually offers it — otherwise the <select> would hold a value none of its options
+            // match, and submit would send a branch this project does not have.
+            //
+            // Matched on the *local* branch name behind each option, because `ListProjectBranches`
+            // lists remote-tracking refs (`<remote>/<branch>`) while callers name the branch the way
+            // the rest of the domain does. Comparing the raw strings never matches, and the
+            // pre-fill then degrades silently into an unrelated branch — the operator resumes the
+            // wrong branch with no warning. The remote is the daemon-resolved default
+            // (`resp.defaultRemote`), so a non-`origin` project strips the right prefix.
+            const remote = resp.defaultRemote || "origin";
+            const wanted = localBranchName(preFilledBranchToWorkOn, remote);
+            const offered = resp.branches.find((b) => localBranchName(b, remote) === wanted);
+            setSelectedBranchToWorkOn(offered ?? resp.branches[0]!);
           }
         }
       })
@@ -239,16 +288,25 @@ export function CreateSessionPane({
     return () => {
       cancelled = true;
     };
-  }, [client, sessionToken, projectId, branchIntent, daemonInstanceId]);
+  }, [client, sessionToken, projectId, branchIntent, daemonInstanceId, preFilledBranchToWorkOn]);
+
+  // In peer mode the project and host are locked to the orchestrating session (the pane reuses its
+  // worktree via `repo_path`), so the Project/Host selectors are hidden and submit must send the
+  // frozen `initialValues` values — not the live form state, which the mount-time auto-select could
+  // have overridden with a different single project.
+  const effectiveProjectId = peerMode ? (initialValues?.projectId ?? "") : projectId;
+  const effectiveDaemonInstanceId = peerMode
+    ? (initialValues?.daemonInstanceId ?? "")
+    : daemonInstanceId;
 
   const isSubmitEnabled = (() => {
     if (submitting) return false;
     // A model is always required and comes from the daemon-advertised catalog; a failed/loading
     // probe leaves `model` empty, which disables Create (no fallback).
     if (sessionType === "tool") {
-      return Boolean(projectId && agent && toolPath && model);
+      return Boolean(effectiveProjectId && agent && toolPath && model);
     }
-    return Boolean(projectId && model);
+    return Boolean(effectiveProjectId && model);
   })();
 
   const handleSubmit = async () => {
@@ -260,15 +318,20 @@ export function CreateSessionPane({
       setError(null);
     });
     try {
+      // In peer mode the new session runs on the SAME worktree as the orchestrating session
+      // (via repo_path), so no git worktree is created and no branch is checked out — branch fields
+      // are irrelevant and kept empty.
+      const peerRepoPath = peerMode ? (initialValues?.repoPath ?? "") : "";
       const commonParams = {
         sessionToken,
-        projectId,
-        branchWorktreeIntent: branchIntent,
-        newBranchName,
-        createRemoteBranch,
-        selectedIntegrationBaseRef: "",
-        selectedBranchToWorkOn,
-        daemonInstanceId,
+        projectId: effectiveProjectId,
+        branchWorktreeIntent: peerMode ? "" : branchIntent,
+        newBranchName: peerMode ? "" : newBranchName,
+        createRemoteBranch: peerMode ? false : createRemoteBranch,
+        selectedIntegrationBaseRef: peerMode ? "" : selectedBaseBranch,
+        selectedBranchToWorkOn: peerMode ? "" : selectedBranchToWorkOn,
+        daemonInstanceId: effectiveDaemonInstanceId,
+        repoPath: peerRepoPath,
       };
       let res: { sessionId: string };
       if (sessionType === "tool") {
@@ -290,7 +353,7 @@ export function CreateSessionPane({
           toolPath: "",
           agent: "",
           recipe: managedCodebase ? recipe : "",
-          stackParent: "",
+          stackParent,
           sessionType: "cursor-cli",
           model,
           permissionMode: "",
@@ -413,8 +476,9 @@ export function CreateSessionPane({
         </button>
       </div>
 
-      {/* Host — which daemon runs the session. Only shown when the common room advertises daemons. */}
-      {daemons.length > 0 && (
+      {/* Host — which daemon runs the session. Only shown when the common room advertises daemons.
+          Hidden in peer mode: the peer runs on the orchestrator's host (locked via initialValues). */}
+      {daemons.length > 0 && !peerMode && (
         <div>
           <label className={labelClass} htmlFor="create-session-host">
             Host
@@ -435,28 +499,31 @@ export function CreateSessionPane({
         </div>
       )}
 
-      {/* Project */}
-      <div>
-        <label className={labelClass} htmlFor="create-session-project">
-          Project
-        </label>
-        <select
-          id="create-session-project"
-          data-testid="create-session-project-select"
-          className={inputClass}
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-        >
-          <option value="" disabled>
-            {projects.length === 0 ? "No projects available" : "Select a project…"}
-          </option>
-          {projects.map((p) => (
-            <option key={p.projectId} value={p.projectId}>
-              {p.name || p.projectId}
+      {/* Project — hidden in peer mode: the peer runs on the orchestrator's worktree, so its project
+          is locked to the orchestrator's (frozen via initialValues, sent as `effectiveProjectId`). */}
+      {!peerMode && (
+        <div>
+          <label className={labelClass} htmlFor="create-session-project">
+            Project
+          </label>
+          <select
+            id="create-session-project"
+            data-testid="create-session-project-select"
+            className={inputClass}
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+          >
+            <option value="" disabled>
+              {projects.length === 0 ? "No projects available" : "Select a project…"}
             </option>
-          ))}
-        </select>
-      </div>
+            {projects.map((p) => (
+              <option key={p.projectId} value={p.projectId}>
+                {p.name || p.projectId}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Tool session fields */}
       {sessionType === "tool" && (
@@ -758,8 +825,9 @@ export function CreateSessionPane({
         </>
       )}
 
-      {/* PR stack parent picker — shown for both session types when orchestrators are available */}
-      {sessions.length > 0 && (
+      {/* PR stack parent picker — shown for both session types when orchestrators are available.
+          Hidden in peer mode: the peer's parent is locked to the orchestrating session. */}
+      {sessions.length > 0 && !peerMode && (
         <div>
           <label className={labelClass} htmlFor="create-session-stack-parent">
             PR stack parent
@@ -781,78 +849,104 @@ export function CreateSessionPane({
         </div>
       )}
 
-      {/* Branch intent */}
-      <div>
-        <label className={labelClass} htmlFor="create-session-branch-intent">
-          Branch mode
-        </label>
-        <select
-          id="create-session-branch-intent"
-          data-testid="create-session-branch-intent-select"
-          className={inputClass}
-          value={branchIntent}
-          onChange={(e) => setBranchIntent(e.target.value as BranchIntent)}
-        >
-          <option value="new_branch_from_base">
-            {`New branch from base${
-              initialValues?.baseBranchLabel ? `: ${initialValues.baseBranchLabel}` : ""
-            }`}
-          </option>
-          <option value="work_on_selected_branch">Work on existing branch</option>
-        </select>
-      </div>
-
-      {branchIntent === "new_branch_from_base" && (
-        <div>
-          <label className={labelClass} htmlFor="create-session-new-branch-name">
-            New branch name
-          </label>
-          <input
-            id="create-session-new-branch-name"
-            data-testid="create-session-new-branch-name-input"
-            type="text"
-            className={inputClass}
-            value={newBranchName}
-            onChange={(e) => setNewBranchName(e.target.value)}
-            placeholder="e.g. feature/my-work"
-          />
-          {/* Only the claude-cli / cursor-cli spawn paths create the worktree in-daemon and can push
-              it; a "tool" session spawns tddy-coder, which owns its own worktree — so we don't offer
-              the toggle there rather than show a checked box that silently does nothing. */}
-          {(sessionType === "claude-cli" || sessionType === "cursor-cli") && (
-            <label className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-              <input
-                data-testid="create-session-create-remote-branch-toggle"
-                type="checkbox"
-                className="h-4 w-4"
-                checked={createRemoteBranch}
-                onChange={(e) => setCreateRemoteBranch(e.target.checked)}
-              />
-              Create Remote Branch
+      {/* Branch intent — hidden in peer mode: the peer runs on the orchestrator's worktree via
+          repo_path, so no git worktree is created and no branch is checked out. */}
+      {!peerMode && (
+        <>
+          <div>
+            <label className={labelClass} htmlFor="create-session-branch-intent">
+              Branch mode
             </label>
-          )}
-        </div>
-      )}
-
-      {branchIntent === "work_on_selected_branch" && (
-        <div>
-          <label className={labelClass} htmlFor="create-session-branch-to-work-on">
-            Branch to work on
-          </label>
-          <select
-            id="create-session-branch-to-work-on"
-            data-testid="create-session-branch-to-work-on-select"
-            className={inputClass}
-            value={selectedBranchToWorkOn}
-            onChange={(e) => setSelectedBranchToWorkOn(e.target.value)}
-          >
-            {remoteBranches.map((b) => (
-              <option key={b} value={b}>
-                {b}
+            <select
+              id="create-session-branch-intent"
+              data-testid="create-session-branch-intent-select"
+              className={inputClass}
+              value={branchIntent}
+              onChange={(e) => setBranchIntent(e.target.value as BranchIntent)}
+            >
+              <option value="new_branch_from_base">
+                {`New branch from base${
+                  initialValues?.baseBranchLabel ? `: ${initialValues.baseBranchLabel}` : ""
+                }`}
               </option>
-            ))}
-          </select>
-        </div>
+              <option value="work_on_selected_branch">Work on existing branch</option>
+            </select>
+          </div>
+
+          {!peerMode && initialValues?.stackParent && baseBranchOptions.length > 0 && (
+            <div>
+              <label className={labelClass} htmlFor="create-session-base-branch">
+                Base branch
+              </label>
+              <select
+                id="create-session-base-branch"
+                data-testid="create-session-base-branch-select"
+                className={inputClass}
+                value={selectedBaseBranch}
+                onChange={(e) => setSelectedBaseBranch(e.target.value)}
+              >
+                {baseBranchOptions.map((branch) => (
+                  <option key={branch} value={branch}>
+                    {branch}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {branchIntent === "new_branch_from_base" && (
+            <div>
+              <label className={labelClass} htmlFor="create-session-new-branch-name">
+                New branch name
+              </label>
+              <input
+                id="create-session-new-branch-name"
+                data-testid="create-session-new-branch-name-input"
+                type="text"
+                className={inputClass}
+                value={newBranchName}
+                onChange={(e) => setNewBranchName(e.target.value)}
+                placeholder="e.g. feature/my-work"
+              />
+              {/* Only the claude-cli / cursor-cli spawn paths create the worktree in-daemon and can push
+                  it; a "tool" session spawns tddy-coder, which owns its own worktree — so we don't offer
+                  the toggle there rather than show a checked box that silently does nothing. */}
+              {(sessionType === "claude-cli" || sessionType === "cursor-cli") && (
+                <label className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    data-testid="create-session-create-remote-branch-toggle"
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={createRemoteBranch}
+                    onChange={(e) => setCreateRemoteBranch(e.target.checked)}
+                  />
+                  Create Remote Branch
+                </label>
+              )}
+            </div>
+          )}
+
+          {branchIntent === "work_on_selected_branch" && (
+            <div>
+              <label className={labelClass} htmlFor="create-session-branch-to-work-on">
+                Branch to work on
+              </label>
+              <select
+                id="create-session-branch-to-work-on"
+                data-testid="create-session-branch-to-work-on-select"
+                className={inputClass}
+                value={selectedBranchToWorkOn}
+                onChange={(e) => setSelectedBranchToWorkOn(e.target.value)}
+              >
+                {remoteBranches.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </>
       )}
 
       {/* Error */}
