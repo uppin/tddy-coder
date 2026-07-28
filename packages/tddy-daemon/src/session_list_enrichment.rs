@@ -1359,6 +1359,7 @@ recipe: pr-stack
     // ---------------------------------------------------------------------------
 
     use crate::session_attachments::copy_attachment_into_session;
+    use crate::session_context_docs::ATTACHMENT_DOC_DESCRIPTION;
     use tddy_service::proto::connection::{
         SessionContextDoc as ProtoContextDoc, SessionContextDocKind,
     };
@@ -1498,7 +1499,7 @@ state:
         fn assert_path(&self, expected: &Path) -> &Self;
         fn assert_size_bytes(&self, expected: u64) -> &Self;
         fn assert_exists(&self, expected: bool) -> &Self;
-        fn assert_has_description(&self) -> &Self;
+        fn assert_description(&self, expected: &str) -> &Self;
     }
 
     impl ProtoContextDocAssertions for ProtoContextDoc {
@@ -1530,12 +1531,10 @@ state:
             self
         }
 
-        // The exact wording is a copy decision; the contract here is that every row the web renders
-        // carries a non-empty human description.
-        fn assert_has_description(&self) -> &Self {
-            assert!(
-                !self.description.trim().is_empty(),
-                "context doc {:?} must carry a non-empty description",
+        fn assert_description(&self, expected: &str) -> &Self {
+            assert_eq!(
+                self.description, expected,
+                "context doc {:?} description",
                 self.basename
             );
             self
@@ -1556,7 +1555,7 @@ state:
             .assert_path(&session_attachments_root(session.path()).join("requirements.md"))
             .assert_size_bytes("# Requirements\n".len() as u64)
             .assert_exists(true)
-            .assert_has_description();
+            .assert_description(ATTACHMENT_DOC_DESCRIPTION);
     }
 
     #[test]
@@ -1622,6 +1621,23 @@ state:
     fn a_session_with_no_recipe_still_surfaces_its_attachments_on_the_proto_entry() {
         // Given — a session whose changeset names no recipe, with one attached document
         let session = a_session_without_a_recipe().with_attachment("spec.pdf", "%PDF-1.4\n");
+
+        // When
+        let entry = session.enriched_entry();
+
+        // Then — the manifest half is empty, and the attachment is listed regardless
+        assert_eq!(
+            context_doc_kinds_and_basenames(&entry),
+            vec![(SessionContextDocKind::Attachment, "spec.pdf".to_string())],
+            "attachments must not depend on recipe resolution"
+        );
+    }
+
+    #[test]
+    fn a_session_with_an_unknown_recipe_still_surfaces_its_attachments_on_the_proto_entry() {
+        // Given — a session whose changeset names an unknown recipe, with one attached document
+        let session =
+            a_session_with_recipe("not-a-real-recipe").with_attachment("spec.pdf", "%PDF-1.4\n");
 
         // When
         let entry = session.enriched_entry();

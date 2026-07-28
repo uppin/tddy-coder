@@ -8,12 +8,12 @@
 //! inside the canonical `artifacts/` root before writing. Product contract:
 //! `docs/ft/coder/session-attachments.md`.
 
+use std::fs::{File, OpenOptions};
+use std::io;
 use std::path::{Path, PathBuf};
 
 use tddy_rpc::Status;
-use tddy_workflow::{
-    canonical_attachment_write_path, session_artifacts_root, session_attachments_root,
-};
+use tddy_workflow::{session_artifacts_root, session_attachments_root};
 
 use crate::session_file_upload::{contained_canonical_dir, validate_segment};
 
@@ -75,6 +75,125 @@ pub fn list_session_attachments(session_dir: &Path) -> Vec<SessionAttachmentFile
     files
 }
 
+/// Confirms `source` is an existing regular file.
+fn validate_attachment_source(source: &Path) -> Result<(), Status> {
+    let source_metadata = std::fs::metadata(source).map_err(|e| {
+        log::warn!(
+            "copy_attachment_into_session: source {} is not accessible: {e}",
+            source.display()
+        );
+        Status::invalid_argument("attachment source file does not exist")
+    })?;
+    if !source_metadata.is_file() {
+        log::warn!(
+            "copy_attachment_into_session: source {} is not a regular file",
+            source.display()
+        );
+        return Err(Status::invalid_argument(
+            "attachment source must be a regular file",
+        ));
+    }
+    Ok(())
+}
+
+/// Creates the attachments directory on demand and confirms it resolves inside the canonical
+/// `artifacts/` root.
+fn ensure_contained_attachments_dir(session_dir: &Path) -> Result<PathBuf, Status> {
+    let attachments_dir = session_attachments_root(session_dir);
+    std::fs::create_dir_all(&attachments_dir).map_err(|e| {
+        log::error!(
+            "copy_attachment_into_session: create_dir_all {} failed: {e}",
+            attachments_dir.display()
+        );
+        Status::internal(format!("failed to create attachments dir: {e}"))
+    })?;
+
+    // The artifacts root holds no untrusted component, so it is the trusted base the attachments
+    // directory must stay within — this catches an `attachments` symlink pointing outside the
+    // session tree.
+    let artifacts_root = session_artifacts_root(session_dir);
+    let canonical_attachments_dir = contained_canonical_dir(&artifacts_root, &attachments_dir)?;
+    log::debug!(
+        "copy_attachment_into_session: attachments dir {} is contained in {}",
+        canonical_attachments_dir.display(),
+        artifacts_root.display()
+    );
+    Ok(canonical_attachments_dir)
+}
+
+/// Best-effort removal of a partial attachment file after a failed exclusive create or copy.
+fn remove_partial_attachment(target: &Path) {
+    if let Err(e) = std::fs::remove_file(target) {
+        log::warn!(
+            "copy_attachment_into_session: failed to remove partial attachment {}: {e}",
+            target.display()
+        );
+    }
+}
+
+/// Atomically creates `canonical_dir/<safe_basename>` and streams `source` into it.
+///
+/// On failure opening the source or during `io::copy`, the partial target is removed so a retry is
+/// not blocked by an empty file left behind by `create_new`.
+fn store_attachment_bytes_exclusively(
+    canonical_dir: &Path,
+    safe_basename: &str,
+    source: &Path,
+) -> Result<PathBuf, Status> {
+    let target = canonical_dir.join(safe_basename);
+
+    let mut dest = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target)
+        .map_err(|e| {
+            if e.kind() == io::ErrorKind::AlreadyExists {
+                log::warn!(
+                    "copy_attachment_into_session: refusing to overwrite existing attachment {}",
+                    target.display()
+                );
+                Status::failed_precondition("an attachment with this name already exists")
+            } else {
+                log::error!(
+                    "copy_attachment_into_session: create {} failed: {e}",
+                    target.display()
+                );
+                Status::internal(format!("failed to store attachment: {e}"))
+            }
+        })?;
+
+    let mut source_file = match File::open(source) {
+        Ok(file) => file,
+        Err(e) => {
+            log::error!(
+                "copy_attachment_into_session: open source {} failed: {e}",
+                source.display()
+            );
+            remove_partial_attachment(&target);
+            return Err(Status::internal(format!("failed to store attachment: {e}")));
+        }
+    };
+
+    let bytes_copied = match io::copy(&mut source_file, &mut dest) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            log::error!(
+                "copy_attachment_into_session: copy {} -> {} failed: {e}",
+                source.display(),
+                target.display()
+            );
+            remove_partial_attachment(&target);
+            return Err(Status::internal(format!("failed to store attachment: {e}")));
+        }
+    };
+
+    log::info!(
+        "copy_attachment_into_session: stored {} ({bytes_copied} byte(s))",
+        target.display()
+    );
+    Ok(target)
+}
+
 /// Copies `source` into `artifacts/attachments/<basename>`, returning the written path.
 ///
 /// `basename` must be a single safe path segment (the uploads path's `validate_segment` guard) and
@@ -99,68 +218,9 @@ pub fn copy_attachment_into_session(
     // attachments directory.
     let safe_basename = validate_segment(basename)?;
 
-    let source_metadata = std::fs::metadata(source).map_err(|e| {
-        log::warn!(
-            "copy_attachment_into_session: source {} is not accessible: {e}",
-            source.display()
-        );
-        Status::invalid_argument("attachment source file does not exist")
-    })?;
-    if !source_metadata.is_file() {
-        log::warn!(
-            "copy_attachment_into_session: source {} is not a regular file",
-            source.display()
-        );
-        return Err(Status::invalid_argument(
-            "attachment source must be a regular file",
-        ));
-    }
-
-    let attachments_dir = session_attachments_root(session_dir);
-    std::fs::create_dir_all(&attachments_dir).map_err(|e| {
-        log::error!(
-            "copy_attachment_into_session: create_dir_all {} failed: {e}",
-            attachments_dir.display()
-        );
-        Status::internal(format!("failed to create attachments dir: {e}"))
-    })?;
-
-    // The artifacts root holds no untrusted component, so it is the trusted base the attachments
-    // directory must stay within — this catches an `attachments` symlink pointing outside the
-    // session tree.
-    let artifacts_root = session_artifacts_root(session_dir);
-    let canonical_attachments_dir = contained_canonical_dir(&artifacts_root, &attachments_dir)?;
-    log::debug!(
-        "copy_attachment_into_session: attachments dir {} is contained in {}",
-        canonical_attachments_dir.display(),
-        artifacts_root.display()
-    );
-
-    let target = canonical_attachment_write_path(session_dir, safe_basename);
-    if target.exists() {
-        log::warn!(
-            "copy_attachment_into_session: refusing to overwrite existing attachment {}",
-            target.display()
-        );
-        return Err(Status::failed_precondition(
-            "an attachment with this name already exists",
-        ));
-    }
-
-    let bytes_copied = std::fs::copy(source, &target).map_err(|e| {
-        log::error!(
-            "copy_attachment_into_session: copy {} -> {} failed: {e}",
-            source.display(),
-            target.display()
-        );
-        Status::internal(format!("failed to store attachment: {e}"))
-    })?;
-
-    log::info!(
-        "copy_attachment_into_session: stored {} ({bytes_copied} byte(s))",
-        target.display()
-    );
-    Ok(target)
+    validate_attachment_source(source)?;
+    let canonical_attachments_dir = ensure_contained_attachments_dir(session_dir)?;
+    store_attachment_bytes_exclusively(&canonical_attachments_dir, safe_basename, source)
 }
 
 #[cfg(test)]
@@ -266,6 +326,14 @@ mod tests {
         assert_eq!(got, expected, "stored bytes at {path:?}");
     }
 
+    fn assert_no_attachments_written(session: &SessionUnderTest) {
+        assert_eq!(
+            basenames_and_sizes(&session.attachments()),
+            Vec::<(String, u64)>::new(),
+            "a rejected copy must not write under attachments"
+        );
+    }
+
     // ---- copying in -----------------------------------------------------------------------
 
     #[test]
@@ -359,6 +427,35 @@ mod tests {
 
         // Then
         assert_refused_with(result, Code::InvalidArgument);
+        assert_no_attachments_written(&session);
+    }
+
+    #[test]
+    fn copying_with_a_dot_basename_is_rejected_as_invalid_argument() {
+        // Given — a session and a valid source
+        let session = a_session();
+        let source = session.a_source_file("payload.md", b"payload\n");
+
+        // When — the target basename is a single dot
+        let result = session.attach(&source, ".");
+
+        // Then
+        assert_refused_with(result, Code::InvalidArgument);
+        assert_no_attachments_written(&session);
+    }
+
+    #[test]
+    fn copying_with_a_dotdot_basename_is_rejected_as_invalid_argument() {
+        // Given — a session and a valid source
+        let session = a_session();
+        let source = session.a_source_file("payload.md", b"payload\n");
+
+        // When — the target basename is parent-directory traversal
+        let result = session.attach(&source, "..");
+
+        // Then
+        assert_refused_with(result, Code::InvalidArgument);
+        assert_no_attachments_written(&session);
     }
 
     #[test]
