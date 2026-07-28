@@ -27,7 +27,8 @@ use crate::active_elicitation::{ActiveElicitationCoordinator, SharedActiveElicit
 use crate::config::DaemonConfig;
 use crate::presenter_intent_client;
 use crate::project_storage::{
-    self, effective_integration_base_ref_for_project, effective_remote_name_for_project, ProjectData,
+    self, effective_integration_base_ref_for_project, effective_remote_name_for_project,
+    ProjectData,
 };
 use crate::session_list_enrichment::SessionListStatusDisplay;
 use crate::spawn_worker;
@@ -1484,19 +1485,24 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         if !repo_path.exists() {
             anyhow::bail!("project main repo path does not exist");
         }
-        let remote = effective_remote_name_for_project(&projects_dir, &project.project_id, repo_path)?;
-        let page_peek =
-            match list_recent_remote_branches_skip(repo_path, &remote, list_offset, BRANCH_PAGE_SIZE + 1) {
-                Ok(b) => b,
-                Err(e) => {
-                    log::warn!(
-                        target: "tddy_daemon::telegram_session_control",
-                        "list_recent_remote_branches_skip: {}",
-                        e
-                    );
-                    Vec::new()
-                }
-            };
+        let remote =
+            effective_remote_name_for_project(&projects_dir, &project.project_id, repo_path)?;
+        let page_peek = match list_recent_remote_branches_skip(
+            repo_path,
+            &remote,
+            list_offset,
+            BRANCH_PAGE_SIZE + 1,
+        ) {
+            Ok(b) => b,
+            Err(e) => {
+                log::warn!(
+                    target: "tddy_daemon::telegram_session_control",
+                    "list_recent_remote_branches_skip: {}",
+                    e
+                );
+                Vec::new()
+            }
+        };
         let has_more = page_peek.len() > BRANCH_PAGE_SIZE;
         let branches: Vec<String> = page_peek.into_iter().take(BRANCH_PAGE_SIZE).collect();
         let short_default = default_ref
@@ -1617,7 +1623,8 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         };
         let intent = cs.workflow.as_ref().and_then(|w| w.branch_worktree_intent);
         let projects_dir = projects_dir_for_telegram_workflow_spawn(deps)?;
-        let remote = effective_remote_name_for_project(&projects_dir, &project.project_id, repo_path)?;
+        let remote =
+            effective_remote_name_for_project(&projects_dir, &project.project_id, repo_path)?;
         // Read routing snapshot before modifying cs — we need session_type to set new_branch_name
         // for claude-cli sessions (NewBranchFromBase requires new_branch_name to be set before
         // setup_worktree_for_session_with_optional_chain_base is called).

@@ -79,7 +79,8 @@ pub fn resolve_chain_integration_base_ref_from_parent_session(
     // The remote is the child project's default — detected from the main worktree's upstream, with
     // `origin` only as the last-resort fallback. The parent's persisted branch name is local (no
     // remote prefix), so the remote-tracking ref the child bases off is `<remote>/<trimmed>`.
-    let remote = detect_default_remote_name(child_project_repo).unwrap_or_else(|| "origin".to_string());
+    let remote =
+        detect_default_remote_name(child_project_repo).unwrap_or_else(|| "origin".to_string());
     let origin_ref = format!("{remote}/{trimmed}");
     validate_chain_pr_integration_base_ref(&origin_ref).map_err(WorkflowError::PlanDirInvalid)?;
 

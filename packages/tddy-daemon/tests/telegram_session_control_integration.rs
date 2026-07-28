@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use tddy_core::changeset::{read_changeset, write_changeset, BranchWorktreeIntent, Changeset};
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF;
+use tddy_core::FALLBACK_DEFAULT_INTEGRATION_BASE_REF;
 use tddy_daemon::config::{AllowedAgent, DaemonConfig};
 use tddy_daemon::project_storage::{self, ProjectData};
 use tddy_daemon::telegram_notifier::InMemoryTelegramSender;
@@ -1392,7 +1392,7 @@ async fn telegram_branch_callback_new_branch_from_base_sets_selected_integration
     let wf = cs.workflow.as_ref().expect("workflow block");
     assert_eq!(
         wf.selected_integration_base_ref.as_deref(),
-        Some(DOCUMENTED_DEFAULT_INTEGRATION_BASE_REF),
+        Some(FALLBACK_DEFAULT_INTEGRATION_BASE_REF),
         "default branch row must persist project integration base ref"
     );
     assert!(

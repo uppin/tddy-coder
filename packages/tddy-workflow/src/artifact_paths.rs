@@ -27,6 +27,33 @@ pub fn canonical_artifact_write_path(session_dir: &Path, basename: &str) -> Path
     p
 }
 
+/// Subdirectory of `artifacts/` holding user-attached documents.
+pub const SESSION_ATTACHMENTS_SUBDIR: &str = "attachments";
+
+/// Subdirectory of the artifacts root for user-attached documents: `session_dir/artifacts/attachments/`.
+#[inline]
+pub fn session_attachments_root(session_dir: &Path) -> PathBuf {
+    let root = session_artifacts_root(session_dir).join(SESSION_ATTACHMENTS_SUBDIR);
+    log::debug!(
+        "[tddy_workflow] session_attachments_root session_dir={:?} -> {:?}",
+        session_dir,
+        root
+    );
+    root
+}
+
+/// Canonical path for a new attachment write: `session_dir/artifacts/attachments/<basename>`.
+#[inline]
+pub fn canonical_attachment_write_path(session_dir: &Path, basename: &str) -> PathBuf {
+    let p = session_attachments_root(session_dir).join(basename);
+    log::debug!(
+        "[tddy_workflow] canonical_attachment_write_path basename={:?} -> {:?}",
+        basename,
+        p
+    );
+    p
+}
+
 /// When `session_dir` is nested under `.../sessions/<uuid>/...`, returns `<uuid>/<basename>` if that file exists (legacy layout).
 fn artifact_at_sessions_uuid_root(session_dir: &Path, basename: &str) -> Option<PathBuf> {
     let mut current = session_dir.to_path_buf();
@@ -217,6 +244,56 @@ mod tests {
 
         // Then the artifacts/ copy takes priority
         assert_eq!(fs::read_to_string(&path).unwrap(), "in-artifacts\n");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ---- attachments layout ---------------------------------------------------------------
+    // `session_attachments_root` / `canonical_attachment_write_path` are defined by these tests;
+    // see docs/ft/coder/session-attachments.md.
+
+    #[test]
+    fn session_attachments_root_is_the_attachments_subdir_of_the_artifacts_root() {
+        // Given a session directory
+        let dir =
+            std::env::temp_dir().join(format!("tddy-wf-attachments-root-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        // When computing the attachments root
+        let root = session_attachments_root(&dir);
+
+        // Then it sits inside artifacts/, so one artifact root covers recipe docs and attachments
+        assert_eq!(
+            root,
+            session_artifacts_root(&dir).join(SESSION_ATTACHMENTS_SUBDIR),
+            "session_attachments_root must return session_dir/artifacts/attachments/"
+        );
+        assert_eq!(
+            root,
+            dir.join("artifacts").join("attachments"),
+            "the attachments subdirectory is named 'attachments'"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn canonical_attachment_write_path_joins_the_basename_under_the_attachments_root() {
+        // Given a session directory
+        let dir =
+            std::env::temp_dir().join(format!("tddy-wf-attachment-write-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        // When computing the write path for an attached document
+        let path = canonical_attachment_write_path(&dir, "requirements.pdf");
+
+        // Then it is session_dir/artifacts/attachments/<basename>
+        assert_eq!(
+            path,
+            dir.join("artifacts")
+                .join("attachments")
+                .join("requirements.pdf")
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

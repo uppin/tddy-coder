@@ -1406,7 +1406,10 @@ pub fn validate_repoint_target(
         return Ok(None);
     }
 
-    let remote = default_branch.split_once('/').map(|(r, _)| r).unwrap_or("origin");
+    let remote = default_branch
+        .split_once('/')
+        .map(|(r, _)| r)
+        .unwrap_or("origin");
     let names_default = tddy_core::worktree::local_branch_name_for_remote(target, remote)
         == tddy_core::worktree::local_branch_name_for_remote(default_branch, remote);
     let names_parent = parent_branches.contains(&target);
@@ -1600,8 +1603,9 @@ async fn spawn_claude_cli_session_inner(
     // orchestrator's planned node can record it — which is what lets this node's descendants be
     // spawned at all, since they base onto `<remote>/<branch>`. Keyed on the effective branch, so a
     // session resuming the branch a node already owns re-links to that node.
-    let remote = project_storage::effective_remote_name_for_project(&projects_dir, project_id, &repo_root)
-        .map_err(|e| Status::internal(e.to_string()))?;
+    let remote =
+        project_storage::effective_remote_name_for_project(&projects_dir, project_id, &repo_root)
+            .map_err(|e| Status::internal(e.to_string()))?;
     ConnectionServiceImpl::link_stack_node_to_spawned_branch(
         &sessions_base,
         stack_parent,
@@ -4024,7 +4028,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .into_iter()
             .map(|p| {
                 let repo_root = PathBuf::from(&p.main_repo_path);
-                let default_remote = resolve_default_remote_or_empty(&projects_dir, &p.project_id, &repo_root);
+                let default_remote =
+                    resolve_default_remote_or_empty(&projects_dir, &p.project_id, &repo_root);
                 project_entry_from(&p, local_daemon_id.clone(), default_remote)
             })
             .collect();
@@ -4120,8 +4125,13 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             host_repo_paths: std::collections::HashMap::new(),
         };
         let repo_root = PathBuf::from(&project.main_repo_path);
-        let default_remote = resolve_default_remote_or_empty(&projects_dir, &project.project_id, &repo_root);
-        let entry = project_entry_from(&project, local_instance_id_for_config(&self.config), default_remote);
+        let default_remote =
+            resolve_default_remote_or_empty(&projects_dir, &project.project_id, &repo_root);
+        let entry = project_entry_from(
+            &project,
+            local_instance_id_for_config(&self.config),
+            default_remote,
+        );
         project_storage::add_project(&projects_dir, project)
             .map_err(|e| Status::internal(e.to_string()))?;
 
@@ -4208,7 +4218,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 project_id
             );
             let repo_root = PathBuf::from(&existing.main_repo_path);
-            let default_remote = resolve_default_remote_or_empty(&projects_dir, &existing.project_id, &repo_root);
+            let default_remote =
+                resolve_default_remote_or_empty(&projects_dir, &existing.project_id, &repo_root);
             return Ok(Response::new(AddProjectToHostResponse {
                 project: Some(project_entry_from(&existing, local_id, default_remote)),
             }));
@@ -4265,7 +4276,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .map_err(|e| Status::internal(e.to_string()))?;
 
         let repo_root = PathBuf::from(&stored.main_repo_path);
-        let default_remote = resolve_default_remote_or_empty(&projects_dir, &stored.project_id, &repo_root);
+        let default_remote =
+            resolve_default_remote_or_empty(&projects_dir, &stored.project_id, &repo_root);
         Ok(Response::new(AddProjectToHostResponse {
             project: Some(project_entry_from(&stored, local_id, default_remote)),
         }))
@@ -4357,7 +4369,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             stored.main_branch_ref.as_deref().unwrap_or_default()
         );
         let repo_root = PathBuf::from(&stored.main_repo_path);
-        let default_remote = resolve_default_remote_or_empty(&projects_dir, &stored.project_id, &repo_root);
+        let default_remote =
+            resolve_default_remote_or_empty(&projects_dir, &stored.project_id, &repo_root);
         Ok(Response::new(SetProjectDefaultBranchResponse {
             project: Some(project_entry_from(&stored, local_id, default_remote)),
         }))
@@ -6126,8 +6139,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             timeout,
             "ListProjectBranches: git remote refs",
             move || {
-                tddy_core::list_recent_remote_branches(&repo_root, &remote_for_closure, BRANCH_LIST_LIMIT)
-                    .map_err(|e| anyhow::anyhow!("list_recent_remote_branches failed: {}", e))
+                tddy_core::list_recent_remote_branches(
+                    &repo_root,
+                    &remote_for_closure,
+                    BRANCH_LIST_LIMIT,
+                )
+                .map_err(|e| anyhow::anyhow!("list_recent_remote_branches failed: {}", e))
             },
         )
         .await?;
@@ -10459,7 +10476,12 @@ mod stack_child_link_tests {
         ConnectionServiceImpl::link_stack_node_to_spawned_branch(
             tmp.path(),
             Some("orchestrator-1"),
-            effective_spawn_branch("work_on_selected_branch", "", "origin/feature/bottom", "origin"),
+            effective_spawn_branch(
+                "work_on_selected_branch",
+                "",
+                "origin/feature/bottom",
+                "origin",
+            ),
             "child-2",
         )
         .expect("a resumed remote-tracking branch must link its planned node");
