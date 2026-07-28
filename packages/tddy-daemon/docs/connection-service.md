@@ -60,14 +60,14 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 
 Adding a source of documents means adding a scope — that is the point, so each new root is reviewed rather than reachable by construction.
 
-`SessionAttachment.basename` is separate from the source locator, so the UI can rename an attachment without touching the stored file. Duplicate basenames within one request are to be rejected rather than silently renamed, and the intended materialization target is `{session_dir}/attachments/<basename>` before the agent launches — so the agent sees a plain local file regardless of which source produced it.
+`SessionAttachment.basename` is separate from the source locator, so the UI can rename an attachment without touching the stored file. Duplicate basenames within one request are to be rejected rather than silently renamed, and the intended materialization target is `{session_dir}/artifacts/attachments/<basename>` before the agent launches (the canonical attachment layout — see [session-attachments.md](../../../docs/ft/coder/session-attachments.md) and the `session_attachments` store) — so the agent sees a plain local file regardless of which source produced it.
 
 The staging upload mirrors the terminal **"Attach"** flow (`UploadSessionFileChunk`) with `session_id` replaced by `daemon_instance_id` and `upload_id` by `staging_id`: same client-side 48 KiB chunking, one unary per chunk, `last` on the final one, and the completed `StagedAttachmentEntry` returned on the last response. That keeps `tddy-web`'s `lib/fileUploadChunks.ts` reusable unchanged and each chunk inside a single LiveKit data packet — see [terminal-file-upload.md](../../tddy-web/docs/terminal-file-upload.md).
 
 **Known limitations / still to build** (host side, then web):
 
 - Staging root + chunked writer (per-caller, basename-validated), and staging GC — consumed batches plus a TTL for batches abandoned when a form is never submitted.
-- Materializing `attachments` into `{session_dir}/attachments/` before spawn, including the cross-host refusal for a foreign `StagedAttachmentRef` and duplicate-basename rejection.
+- Materializing `attachments` into `{session_dir}/artifacts/attachments/` before spawn (reusing `copy_attachment_into_session`), including the cross-host refusal for a foreign `StagedAttachmentRef` and duplicate-basename rejection.
 - `HostDocumentRef` scope resolution and the cross-host fetch by `daemon_instance_id` (note the existing streaming RPCs return `unimplemented` for `PeerRoute::Forward`; a fetch path has to be unary).
 - `tddy-web`: the Start-Session attachment picker and a browser for referencing existing docs on connected hosts.
 - A product PRD under `docs/ft/web/` and acceptance tests. No tests cover the new RPCs beyond the fact that they compile.
@@ -83,6 +83,8 @@ For each session directory, the daemon merges **`.session.yaml`** with optional 
 - **`elapsed_display`**: Compact duration from **`tddy_core::format_elapsed_compact`**, using wall time since the last **`state.history`** entry whose state matches **`state.current`**, or **`state.updated_at`** when no matching history entry exists.
 
 If the changeset is missing, unreadable, or has no matching session row, the corresponding fields use **placeholders** (em dash) or partial data as implemented in **`session_list_enrichment`**.
+
+**`context_docs`** (proto field 27): enrichment also fills `SessionEntry.context_docs` from **`session_context_docs::context_docs_for_session`** — recipe-manifest planning docs (`kind = MANIFEST`) followed by files under **`artifacts/attachments/`** (`kind = ATTACHMENT`), each with `size_bytes`. Attachments are listed even when the recipe is blank or unknown. Host-side store: **`session_attachments`** (`list_session_attachments`, `copy_attachment_into_session`); path helpers live in **`tddy-workflow`**. Product contract: [session-attachments.md](../../../docs/ft/coder/session-attachments.md).
 
 The directory listing and enrichment execute inside **`spawn_blocking_with_timeout`** so the async RPC handler does not block the Tokio runtime on disk I/O.
 

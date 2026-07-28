@@ -133,7 +133,12 @@ pub fn effective_remote_name_for_project(
     }
     let project = find_project(projects_dir, project_id)?
         .ok_or_else(|| anyhow::anyhow!("unknown project: {}", project_id))?;
-    if let Some(configured) = project.remote_name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(configured) = project
+        .remote_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         log::debug!(
             "effective_remote_name_for_project: project_id={} configured remote={}",
             project_id,
@@ -368,7 +373,10 @@ mod project_integration_base_acceptance_tests {
         );
         // Retrack `master` onto a remote named `upstream` (a second remote pointing at the source).
         git(&clone, &["remote", "rename", "origin", "upstream"]);
-        git(&clone, &["branch", "--set-upstream-to=upstream/master", "master"]);
+        git(
+            &clone,
+            &["branch", "--set-upstream-to=upstream/master", "master"],
+        );
 
         let projects_dir = temp.path().join("projects");
         fs::create_dir_all(&projects_dir).unwrap();

@@ -1,10 +1,15 @@
-//! Recipe-manifest–derived context documents for a session: the *list* of relevant planning
-//! docs (surfaced on `SessionEntry` and to child "Start session" prompts) and an allowlisted,
+//! Context documents for a session: the *list* of relevant planning docs (surfaced on
+//! `SessionEntry` and to child "Start session" prompts) and an allowlisted,
 //! canonicalize-and-contained reader for their *contents*, rooted at `session_artifacts_root`.
 //!
-//! The allowlist is the recipe's [`SessionArtifactManifest::known_artifacts`] — nothing else under
-//! the session directory is readable through this surface (mirrors the guard shape in
-//! [`crate::session_workflow_files`]). Contents live under `session_dir/artifacts/`.
+//! The list has two kinds (see `docs/ft/coder/session-attachments.md`): the recipe manifest's own
+//! artifacts under `session_dir/artifacts/`, followed by the user-attached documents under
+//! `artifacts/attachments/` that [`crate::session_attachments`] stores. Attachments are
+//! recipe-independent — a session with a blank or unknown recipe still lists them.
+//!
+//! The *reader* covers manifest docs only: its allowlist is the recipe's
+//! [`SessionArtifactManifest::known_artifacts`], and nothing else under the session directory is
+//! readable through this surface (mirrors the guard shape in [`crate::session_workflow_files`]).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,9 +18,22 @@ use tddy_rpc::Status;
 use tddy_workflow::session_artifacts_root;
 use tddy_workflow_recipes::{workflow_recipe_and_manifest_from_cli_name, SessionArtifactManifest};
 
-/// One recipe-manifest–derived planning document for a session: its manifest `key`, on-disk
-/// `basename`, absolute artifacts/ `path` (not canonicalized — the file may not exist), a human
-/// `description`, and whether it currently `exists` on disk.
+use crate::session_attachments::list_session_attachments;
+
+/// Whether a context doc is recipe-owned (from the session's recipe manifest) or user-attached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextDocKind {
+    Manifest,
+    Attachment,
+}
+
+/// Human description carried by every attachment row (attachments have no recipe-authored copy).
+pub const ATTACHMENT_DOC_DESCRIPTION: &str = "Attached document";
+
+/// One planning document for a session: its `key` (manifest key for a manifest doc, basename for an
+/// attachment), on-disk `basename`, absolute `path` (not canonicalized — a manifest doc's file may
+/// not exist), a human `description`, whether it currently `exists` on disk, its `kind`, and its
+/// on-disk size in bytes (`0` when it does not exist).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextDoc {
     pub key: String,
@@ -23,6 +41,8 @@ pub struct ContextDoc {
     pub path: PathBuf,
     pub description: String,
     pub exists: bool,
+    pub kind: ContextDocKind,
+    pub size_bytes: u64,
 }
 
 /// Resolve a recipe's [`SessionArtifactManifest`], or `None` for a blank or unknown recipe.
@@ -43,38 +63,56 @@ fn manifest_for_recipe(recipe_name: &str) -> Option<Arc<dyn SessionArtifactManif
     }
 }
 
-/// Enumerate the recipe manifest's context docs for a session, resolving each to an absolute
-/// `artifacts/` path and reporting its on-disk existence and human description.
+/// Enumerate a session's context docs: the recipe manifest's artifacts (in manifest order, each
+/// resolved to an absolute `artifacts/` path with its on-disk existence, size and human
+/// description), followed by the session's attachments in basename order.
 ///
-/// Returns an empty `Vec` for a blank or unknown recipe (docs are surfaced only when the recipe is
-/// known).
+/// The manifest half is empty for a blank or unknown recipe (manifest docs are surfaced only when
+/// the recipe is known); attachments are listed either way.
 pub fn context_docs_for_session(recipe_name: &str, session_dir: &Path) -> Vec<ContextDoc> {
-    let Some(manifest) = manifest_for_recipe(recipe_name) else {
-        return Vec::new();
-    };
+    let mut docs: Vec<ContextDoc> = Vec::new();
 
-    let artifacts_root = session_artifacts_root(session_dir);
-    let descriptions = manifest.artifact_doc_descriptions();
+    if let Some(manifest) = manifest_for_recipe(recipe_name) {
+        let artifacts_root = session_artifacts_root(session_dir);
+        let descriptions = manifest.artifact_doc_descriptions();
 
-    let docs: Vec<ContextDoc> = manifest
-        .known_artifacts()
-        .iter()
-        .map(|(key, basename)| {
+        docs.extend(manifest.known_artifacts().iter().map(|(key, basename)| {
             let path = artifacts_root.join(basename);
-            let exists = path.is_file();
+            // One stat call answers both "is it there" and "how big is it".
+            let file_metadata = std::fs::metadata(&path).ok().filter(|m| m.is_file());
             ContextDoc {
                 key: (*key).to_string(),
                 basename: (*basename).to_string(),
                 path,
                 description: descriptions.get(key).copied().unwrap_or("").to_string(),
-                exists,
+                exists: file_metadata.is_some(),
+                kind: ContextDocKind::Manifest,
+                size_bytes: file_metadata.map_or(0, |m| m.len()),
             }
-        })
-        .collect();
+        }));
+    }
+
+    let manifest_doc_count = docs.len();
+
+    docs.extend(
+        list_session_attachments(session_dir)
+            .into_iter()
+            .map(|file| ContextDoc {
+                key: file.basename.clone(),
+                basename: file.basename,
+                path: file.path,
+                description: ATTACHMENT_DOC_DESCRIPTION.to_string(),
+                // A listed attachment is on disk by construction.
+                exists: true,
+                kind: ContextDocKind::Attachment,
+                size_bytes: file.size_bytes,
+            }),
+    );
 
     log::debug!(
-        "context_docs_for_session: recipe={recipe_name:?} listed {} doc(s) for {}",
-        docs.len(),
+        "context_docs_for_session: recipe={recipe_name:?} listed {} manifest doc(s) and {} attachment(s) for {}",
+        manifest_doc_count,
+        docs.len() - manifest_doc_count,
         session_dir.display()
     );
     docs
@@ -86,6 +124,12 @@ pub fn context_docs_for_session(recipe_name: &str, session_dir: &Path) -> Vec<Co
 /// A basename outside the allowlist, or one containing traversal/separator segments, is refused
 /// with [`Status::permission_denied`]; the resolved path must remain under the canonical artifacts
 /// root.
+///
+/// Attachments are deliberately **not** readable here, even though
+/// [`context_docs_for_session`] lists them: an attachment may be an image or another binary, so a
+/// UTF-8 reader is the wrong shape for it. An attachment basename is therefore refused like any
+/// other non-manifest name; clients render attachments from the listing (name, size, path) until a
+/// type-aware content fetch exists.
 pub fn read_session_context_doc_utf8(
     recipe_name: &str,
     session_dir: &Path,
@@ -163,15 +207,17 @@ pub fn read_session_context_doc_utf8(
 
 #[cfg(test)]
 mod tests {
-    // The production API these tests define. Until `/green` implements it, these imports are
-    // unresolved and the crate's test build fails — the accepted red signal for a not-yet-written
-    // module (mirrors the pr-stack `exploration` field red in tddy-workflow-recipes).
-    use super::{context_docs_for_session, read_session_context_doc_utf8, ContextDoc};
+    use super::{
+        context_docs_for_session, read_session_context_doc_utf8, ContextDoc, ContextDocKind,
+        ATTACHMENT_DOC_DESCRIPTION,
+    };
+    use crate::session_attachments::copy_attachment_into_session;
 
     use std::fs;
     use std::path::{Path, PathBuf};
 
     use tddy_rpc::{Code, Status};
+    use tddy_workflow::session_attachments_root;
 
     // ---- fluent helpers -------------------------------------------------------------------
 
@@ -190,11 +236,44 @@ mod tests {
         })
     }
 
+    /// Attaches a document to the session through the production store.
+    fn attach_document(session_dir: &Path, basename: &str, contents: &str) {
+        let sources = tempfile::tempdir().expect("create sources dir");
+        let source = sources.path().join(basename);
+        fs::write(&source, contents).expect("write source file");
+        copy_attachment_into_session(session_dir, &source, basename)
+            .expect("attaching a document must succeed");
+    }
+
+    /// Finds the context doc of a given `kind` with the given `key`.
+    fn find_doc_of_kind<'a>(
+        docs: &'a [ContextDoc],
+        kind: ContextDocKind,
+        key: &str,
+    ) -> &'a ContextDoc {
+        docs.iter()
+            .find(|d| d.kind == kind && d.key == key)
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected a {kind:?} context doc with key {key:?}, got {:?}",
+                    kinds_and_basenames(docs)
+                )
+            })
+    }
+
+    /// `(kind, basename)` per doc, in listing order.
+    fn kinds_and_basenames(docs: &[ContextDoc]) -> Vec<(ContextDocKind, String)> {
+        docs.iter().map(|d| (d.kind, d.basename.clone())).collect()
+    }
+
     trait ContextDocAssertions {
         fn assert_basename(&self, expected: &str) -> &Self;
         fn assert_path(&self, expected: &Path) -> &Self;
         fn assert_exists(&self, expected: bool) -> &Self;
         fn assert_has_description(&self) -> &Self;
+        fn assert_description(&self, expected: &str) -> &Self;
+        fn assert_kind(&self, expected: ContextDocKind) -> &Self;
+        fn assert_size_bytes(&self, expected: u64) -> &Self;
     }
 
     impl ContextDocAssertions for ContextDoc {
@@ -227,6 +306,29 @@ mod tests {
             assert!(
                 !self.description.trim().is_empty(),
                 "context doc {:?} must carry a non-empty description",
+                self.key
+            );
+            self
+        }
+
+        fn assert_description(&self, expected: &str) -> &Self {
+            assert_eq!(
+                self.description, expected,
+                "context doc {:?} description",
+                self.key
+            );
+            self
+        }
+
+        fn assert_kind(&self, expected: ContextDocKind) -> &Self {
+            assert_eq!(self.kind, expected, "context doc {:?} kind", self.key);
+            self
+        }
+
+        fn assert_size_bytes(&self, expected: u64) -> &Self {
+            assert_eq!(
+                self.size_bytes, expected,
+                "context doc {:?} size_bytes",
                 self.key
             );
             self
@@ -328,6 +430,131 @@ mod tests {
         let result = read_session_context_doc_utf8("pr-stack", session.path(), "../../secret");
 
         // Then — the read is refused
+        assert_permission_denied(result);
+    }
+
+    // ---- attachments ----------------------------------------------------------------------
+
+    #[test]
+    fn context_docs_list_the_manifest_docs_first_then_the_attachments() {
+        // Given — a pr-stack session with one attached document
+        let session = tempfile::tempdir().unwrap();
+        artifacts_dir_in(session.path());
+        attach_document(session.path(), "notes.md", "meeting notes\n");
+
+        // When
+        let docs = context_docs_for_session("pr-stack", session.path());
+
+        // Then — the recipe's manifest docs keep their order and precede the attachment
+        assert_eq!(
+            kinds_and_basenames(&docs),
+            vec![
+                (ContextDocKind::Manifest, "stack-plan.yaml".to_string()),
+                (ContextDocKind::Manifest, "pr-stack-plan.md".to_string()),
+                (ContextDocKind::Manifest, "stack-status.md".to_string()),
+                (ContextDocKind::Manifest, "stack-status.json".to_string()),
+                (ContextDocKind::Manifest, "exploration.md".to_string()),
+                (ContextDocKind::Attachment, "notes.md".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_attachment_context_doc_carries_its_basename_as_key_with_a_size_and_a_description() {
+        // Given — a pr-stack session with one attached document
+        let session = tempfile::tempdir().unwrap();
+        artifacts_dir_in(session.path());
+        attach_document(session.path(), "notes.md", "meeting notes\n");
+
+        // When
+        let docs = context_docs_for_session("pr-stack", session.path());
+
+        // Then — the attachment is keyed by its basename and describes a file that is on disk
+        find_doc_of_kind(&docs, ContextDocKind::Attachment, "notes.md")
+            .assert_kind(ContextDocKind::Attachment)
+            .assert_basename("notes.md")
+            .assert_path(&session_attachments_root(session.path()).join("notes.md"))
+            .assert_exists(true)
+            .assert_size_bytes("meeting notes\n".len() as u64)
+            .assert_description(ATTACHMENT_DOC_DESCRIPTION);
+    }
+
+    #[test]
+    fn context_docs_for_a_blank_recipe_list_only_the_attachments() {
+        // Given — a session with no recipe, holding one attached document
+        let session = tempfile::tempdir().unwrap();
+        artifacts_dir_in(session.path());
+        attach_document(session.path(), "spec.md", "# Spec\n");
+
+        // When
+        let docs = context_docs_for_session("", session.path());
+
+        // Then — no manifest docs, but the attachment is still surfaced
+        assert_eq!(
+            kinds_and_basenames(&docs),
+            vec![(ContextDocKind::Attachment, "spec.md".to_string())]
+        );
+    }
+
+    #[test]
+    fn context_docs_for_an_unknown_recipe_list_only_the_attachments() {
+        // Given — a session whose recipe name does not resolve, holding one attached document
+        let session = tempfile::tempdir().unwrap();
+        artifacts_dir_in(session.path());
+        attach_document(session.path(), "spec.md", "# Spec\n");
+
+        // When
+        let docs = context_docs_for_session("not-a-real-recipe", session.path());
+
+        // Then — no manifest docs, but the attachment is still surfaced
+        assert_eq!(
+            kinds_and_basenames(&docs),
+            vec![(ContextDocKind::Attachment, "spec.md".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_present_manifest_context_doc_reports_its_on_disk_size() {
+        // Given — a pr-stack session whose artifacts/ holds exploration.md
+        let session = tempfile::tempdir().unwrap();
+        let artifacts = artifacts_dir_in(session.path());
+        fs::write(artifacts.join("exploration.md"), "# Exploration\n").unwrap();
+
+        // When
+        let docs = context_docs_for_session("pr-stack", session.path());
+
+        // Then — the present doc reports its byte size
+        find_doc_of_kind(&docs, ContextDocKind::Manifest, "exploration")
+            .assert_exists(true)
+            .assert_size_bytes("# Exploration\n".len() as u64);
+    }
+
+    #[test]
+    fn an_absent_manifest_context_doc_reports_zero_size_bytes() {
+        // Given — a pr-stack session whose artifacts/ does not hold stack-plan.yaml
+        let session = tempfile::tempdir().unwrap();
+        artifacts_dir_in(session.path());
+
+        // When
+        let docs = context_docs_for_session("pr-stack", session.path());
+
+        // Then — the missing doc reports zero size
+        find_doc_of_kind(&docs, ContextDocKind::Manifest, "stack_plan")
+            .assert_exists(false)
+            .assert_size_bytes(0);
+    }
+
+    #[test]
+    fn reading_an_attachment_basename_through_the_context_doc_reader_is_permission_denied() {
+        // Given — a pr-stack session with an attached document
+        let session = tempfile::tempdir().unwrap();
+        artifacts_dir_in(session.path());
+        attach_document(session.path(), "notes.md", "meeting notes\n");
+
+        // When — the manifest-only reader is asked for it
+        let result = read_session_context_doc_utf8("pr-stack", session.path(), "notes.md");
+
+        // Then — refused: attachments may be binary, so they are listed but not read here
         assert_permission_denied(result);
     }
 }
