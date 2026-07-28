@@ -2,6 +2,12 @@
 
 Release note history for the Coder product area.
 
+## 2026-07-27 — Session attachments under artifacts/attachments/
+
+- Sessions store **user-attached documents** at `{session_dir}/artifacts/attachments/<basename>` (flat, basename-only) via the daemon **`session_attachments`** store; layout helpers live in **`tddy-workflow`** ([session-attachments.md](session-attachments.md), [session-layout.md](session-layout.md)).
+- `SessionEntry.context_docs` carries **`kind`** (`MANIFEST` / `ATTACHMENT`) and **`size_bytes`**; attachment rows follow recipe-manifest docs and still list when the recipe is blank or unknown. The UTF-8 context-doc reader stays manifest-only (attachments may be binary).
+- No RPC accepts an attachment yet — start-session materialization and a type-aware content fetch are follow-ups.
+
 ## 2026-07-26 — PR-Stack: a stack progresses on branches, not on child sessions
 
 - **Bug fix — a closed child session no longer wedges the stack below it.** Starting a planned node was gated on its parent node having a *session* ("non-merged parent '<id>' has not been started yet"), so a session that was closed, cleaned up, or never linked blocked every descendant even though the parent's branch existed and was a fine base. The gate is now the parent's **branch** ([pr-stack-live-status.md](pr-stack-live-status.md), [pr-stacking.md](pr-stacking.md)).
