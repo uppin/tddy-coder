@@ -30,9 +30,8 @@
 
 use anyhow::Result;
 use clap::Args;
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // CLI args
@@ -165,90 +164,16 @@ pub async fn run_pty_relay(args: PtyRelayArgs) -> Result<()> {
               LiveKit session:        pty-relay --daemon-identity ID --project-id ID [--livekit-url ws://...]"
         );
     }
-    tokio::task::spawn_blocking(move || run_local_pty(args)).await?
+    run_local_pty(args).await
 }
 
 // ---------------------------------------------------------------------------
-// Local PTY mode  (blocking — runs inside spawn_blocking)
+// Local PTY mode  (delegates to tddy-terminal-rpc's shared PTY runtime)
 // ---------------------------------------------------------------------------
 
-fn run_local_pty(args: PtyRelayArgs) -> Result<()> {
+async fn run_local_pty(args: PtyRelayArgs) -> Result<()> {
     let cwd = args.dir.canonicalize().unwrap_or(args.dir);
-    let (rows, cols) = terminal_size_or_default();
-
-    let pty_system = native_pty_system();
-    let pair = pty_system
-        .openpty(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| anyhow::anyhow!("openpty: {}", e))?;
-
-    let mut cmd = CommandBuilder::new(&args.cmd[0]);
-    for arg in &args.cmd[1..] {
-        cmd.arg(arg);
-    }
-    cmd.cwd(&cwd);
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-
-    let mut child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| anyhow::anyhow!("spawn: {}", e))?;
-    drop(pair.slave);
-
-    let master = Arc::new(Mutex::new(pair.master));
-    let _raw = RawMode::enable();
-
-    let master_reader = Arc::clone(&master);
-    let reader_thread = std::thread::spawn(move || {
-        let reader = master_reader.lock().unwrap().try_clone_reader();
-        match reader {
-            Err(e) => log::warn!(target: "tddy_tools::pty_relay", "clone reader: {}", e),
-            Ok(mut r) => {
-                let mut buf = [0u8; 4096];
-                let mut stdout = std::io::stdout();
-                loop {
-                    match r.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => {
-                            let _ = stdout.write_all(&buf[..n]);
-                            let _ = stdout.flush();
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-    let master_writer = Arc::clone(&master);
-    let _writer_thread = std::thread::spawn(move || {
-        let writer = master_writer.lock().unwrap().take_writer();
-        match writer {
-            Err(e) => log::warn!(target: "tddy_tools::pty_relay", "take writer: {}", e),
-            Ok(mut w) => {
-                let mut buf = [0u8; 256];
-                let mut stdin = std::io::stdin();
-                loop {
-                    match stdin.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => {
-                            if w.write_all(&buf[..n]).is_err() {
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-    let _ = child.wait();
-    let _ = reader_thread.join();
-    Ok(())
+    tddy_terminal_rpc::local_pty_relay::run(args.cmd, cwd, Vec::new()).await
 }
 
 // ---------------------------------------------------------------------------

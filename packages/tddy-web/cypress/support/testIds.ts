@@ -55,6 +55,10 @@ export const TEST_IDS = {
   terminalUploadButton: "terminal-upload-button",
   uploadProgressIndicator: "upload-progress-indicator",
   uploadProgressError: "upload-progress-error",
+  // Lazy scroll-up history (docs/ft/web/terminal-replay-lazy-scroll.md)
+  loadEarlierHistory: "load-earlier-history",
+  terminalOlderPane: "terminal-older-pane",
+  terminalOlderBufferText: "terminal-older-buffer-text",
   // Enqueued input overlay (docs/ft/web/enqueued-input-overlay.md)
   enqueuedInputOverlay: "enqueued-input-overlay",
   enqueuedInputText: "enqueued-input-text",

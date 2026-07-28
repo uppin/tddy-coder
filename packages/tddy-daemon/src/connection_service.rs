@@ -40,7 +40,7 @@ use tddy_service::proto::connection::{
     SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
     StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
     StopTerminalSessionResponse, StreamTerminalOutputRequest, StreamWorktreeStatsRequest,
-    SubagentInfo, TerminalControlEvent, TerminalSessionInfo, ToolInfo,
+    SubagentInfo, TerminalControlEvent, TerminalHistoryChunk, TerminalSessionInfo, ToolInfo,
     UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
     UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
     WatchTerminalControlRequest, WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
@@ -74,7 +74,8 @@ use tddy_service::proto::connection::{
     AcpReplayFrame, AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState,
     ExecuteToolRequest, ExecuteToolResponse, GetAcpToolCallDetailRequest,
     GetAcpToolCallDetailResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
-    GetPrStatusRequest, GetPrStatusResponse, HostCpuStats, HostDiskStats, HostStatsEvent,
+    GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest, HostCpuStats,
+    HostDiskStats, HostStatsEvent,
     ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
     ListSessionToolCallsResponse, QueryBranchRequest, QueryBranchResponse, RepointPlannedPrRequest,
     RepointPlannedPrResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
@@ -244,6 +245,7 @@ impl Stream for TerminalOutputStream {
                     return std::task::Poll::Ready(Some(Ok(SessionTerminalOutput {
                         data: chunk.to_vec(),
                         acked_input_offset: 0,
+                        ..Default::default()
                     })));
                 }
                 Err(TryRecvError::Lagged(_)) => {
@@ -302,18 +304,30 @@ fn terminal_data_frame(data: Vec<u8>) -> SessionTerminalOutput {
     SessionTerminalOutput {
         data,
         acked_input_offset: 0,
-    }
-}
-
-/// An input-offset ACK frame (empty data).
-fn terminal_ack_frame(acked_input_offset: u64) -> SessionTerminalOutput {
-    SessionTerminalOutput {
-        data: Vec::new(),
-        acked_input_offset,
+        ..Default::default()
     }
 }
 
 impl Unpin for MpscTerminalOutputStream {}
+
+/// Stream adapter backed by an unbounded mpsc channel carrying `Result<T, Status>` items — used for
+/// server-streaming RPCs (e.g. `GetTerminalHistory`) whose frames may carry a mid-stream status.
+pub struct MpscResultStream<T> {
+    rx: tokio::sync::mpsc::UnboundedReceiver<Result<T, Status>>,
+}
+
+impl<T> Stream for MpscResultStream<T> {
+    type Item = Result<T, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.rx.poll_recv(cx)
+    }
+}
+
+impl<T> Unpin for MpscResultStream<T> {}
 
 /// Stream adapter backed by an mpsc channel for [`TerminalControlEvent`] server-streaming.
 pub struct MpscControlEventStream {
@@ -5476,6 +5490,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     /// Associated output stream type for [`stream_terminal_output`].
     type StreamTerminalOutputStream = MpscTerminalOutputStream;
 
+    /// Associated output stream type for [`get_terminal_history`].
+    type GetTerminalHistoryStream = MpscResultStream<TerminalHistoryChunk>;
+
     /// Server-streaming output — browser-compatible alternative to the bidi `StreamSessionTerminalIO`.
     /// connect-web's Fetch transport cannot send streaming request bodies, so bidi streaming never
     /// reaches the daemon from a browser. This RPC provides the output half; input goes via the
@@ -5532,185 +5549,55 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Ok(Response::new(MpscTerminalOutputStream { rx }));
         }
 
-        let handle = self
-            .claude_cli_manager
-            .get_terminal(&session_id, &terminal_id)
-            .await
-            .ok_or_else(|| {
-                log::warn!(
-                    target: "tddy_daemon::connection_service",
-                    "stream_terminal_output: session {} terminal {} not found in registry",
-                    session_id,
-                    terminal_id
-                );
-                Status::not_found("terminal not found or not running")
-            })?;
+        let store = crate::terminal_session_adapter::DaemonTerminalSessionStore::new(Arc::clone(
+            &self.claude_cli_manager,
+        ));
+        // Delegate the claude-cli terminal stream to the unified bridge in `tddy-terminal-rpc`, which
+        // sends the mode prologue + current last frame first (tagged with absolute offsets), resizes
+        // and drains on client dimensions, emits the current ACK up front, then bridges live
+        // broadcast output interleaved with ACKs until the child exits. Older history is fetched on
+        // demand via `get_terminal_history` as the user scrolls up. The bridge resolves an empty
+        // `terminal_id` to the reserved main terminal, matching the daemon's `resolved_terminal_id`.
+        let bridge_req = tddy_terminal_rpc::proto::terminal_session::StreamTerminalOutputRequest {
+            session_token: req.session_token.clone(),
+            session_id: req.session_id.clone(),
+            terminal_id: req.terminal_id.clone(),
+            initial_cols: req.initial_cols,
+            initial_rows: req.initial_rows,
+        };
+        let bridge_rx = tddy_terminal_rpc::serve_stream_terminal_output_with(
+            &store,
+            bridge_req,
+            tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
+        )
+        .await?;
 
-        // If the client supplied terminal dimensions, resize the PTY before replay so that
-        // the TUI redraws at the browser's actual width rather than the PTY's spawn-time default.
-        let has_initial_dims = req.initial_cols > 0 && req.initial_rows > 0;
-        if has_initial_dims {
-            handle.resize(req.initial_rows as u16, req.initial_cols as u16);
-            log::debug!(
-                target: "tddy_daemon::connection_service",
-                "stream_terminal_output: resized PTY to {}×{} for session {} before replay",
-                req.initial_cols,
-                req.initial_rows,
-                session_id
-            );
-        } else {
-            log::debug!(
-                target: "tddy_daemon::connection_service",
-                "stream_terminal_output: no initial dimensions from client for session {} (cols={} rows={}) — replay will use PTY default size",
-                session_id, req.initial_cols, req.initial_rows
-            );
-        }
-
-        // Subscribe to broadcast BEFORE reading the capture buffer so there is no gap:
-        // bytes produced between the capture snapshot and the first bridge recv() are
-        // covered by the broadcast subscription.
-        let (mpsc_tx, mpsc_rx) = tokio::sync::mpsc::unbounded_channel::<SessionTerminalOutput>();
-        let mut broadcast_rx = handle.stdout_tx.subscribe();
-
-        // Re-issue the mouse-tracking modes the application has enabled as the very first frame,
-        // independent of the capture replay below. A client's VT only reports clicks, drags and
-        // scrolls once it has seen the DECSET itself, and neither the SIGWINCH redraw nor a capture
-        // ring that has trimmed past the startup bytes carries them.
-        let prologue = handle
-            .capture
-            .lock()
-            .map(|cap| cap.mode_prologue())
-            .unwrap_or_default();
-        if !prologue.is_empty() {
-            log::debug!(
-                target: "tddy_daemon::connection_service",
-                "stream_terminal_output: re-issuing {} byte(s) of terminal mode prologue for session {}",
-                prologue.len(),
-                session_id
-            );
-            let _ = mpsc_tx.send(terminal_data_frame(prologue));
-        }
-
-        // Replay capture buffer only when the client did NOT supply terminal dimensions.
-        //
-        // When dimensions are provided we already sent SIGWINCH (above), which will make the
-        // TUI redraw at the correct size. Replaying the capture buffer here would send
-        // pre-resize content (drawn at the PTY's old width) to the browser before the
-        // post-SIGWINCH redraw arrives via broadcast — producing garbled output. Skipping
-        // the replay means the client sees a clean fresh frame once the TUI redraws.
-        //
-        // When no dimensions are provided (legacy / fallback path) the replay is still the
-        // only way to see historical content, so we keep it.
-        let replay_capture = !has_initial_dims;
-        if replay_capture {
-            let frames = handle
-                .capture
-                .lock()
-                .map(|cap| {
-                    chunk_terminal_output(cap.buffered_bytes(), TERMINAL_OUTPUT_FRAME_MAX_BYTES)
-                })
-                .unwrap_or_default();
-            if !frames.is_empty() {
-                let total_bytes: usize = frames.iter().map(|f| f.len()).sum();
-                log::debug!(
-                    target: "tddy_daemon::connection_service",
-                    "stream_terminal_output: replaying {} capture bytes in {} frame(s) for session {}",
-                    total_bytes,
-                    frames.len(),
-                    session_id
-                );
-                for frame in frames {
-                    let _ = mpsc_tx.send(terminal_data_frame(frame.to_vec()));
-                }
-            }
-        } else {
-            log::debug!(
-                target: "tddy_daemon::connection_service",
-                "stream_terminal_output: skipping capture replay for session {} (dimensions {}×{} provided; relying on SIGWINCH redraw via broadcast)",
-                session_id, req.initial_cols, req.initial_rows
-            );
-        }
-
-        // Trigger a redraw before draining: this queues a second SIGWINCH so the TUI will
-        // produce a fresh frame at the correct size. The drain below discards any pre-resize
-        // output already buffered in the broadcast receiver, so the bridge task (started after
-        // the drain) only forwards the post-SIGWINCH fresh frame to the browser.
-        handle.trigger_redraw();
-
-        // When the client supplied terminal dimensions we already resized the PTY (above).
-        // Drain any messages that arrived in the broadcast receiver between subscribe() and
-        // now — those were produced at the old PTY width (220 cols) and would cause garbled
-        // output if forwarded. The trigger_redraw() above guarantees a fresh post-resize
-        // frame will be produced, so discarding the stale buffer is safe.
-        if has_initial_dims {
-            use tokio::sync::broadcast::error::TryRecvError;
-            let mut drained = 0usize;
-            loop {
-                match broadcast_rx.try_recv() {
-                    Ok(_) => drained += 1,
-                    Err(TryRecvError::Lagged(_)) => continue,
-                    Err(TryRecvError::Empty) | Err(TryRecvError::Closed) => break,
-                }
-            }
-            if drained > 0 {
-                log::debug!(
-                    target: "tddy_daemon::connection_service",
-                    "stream_terminal_output: drained {} stale pre-resize broadcast message(s) for session {}",
-                    drained, session_id
-                );
-            }
-        }
-
-        // Input-offset ACKs ride the same output stream (docs/ft/web/enqueued-input-overlay.md):
-        // whenever the applied input offset advances, emit an empty-data frame carrying it. Emit the
-        // current applied offset up front so a stream that opens after some input was already
-        // applied (e.g. a reconnect) learns the acknowledged position immediately.
-        let mut acked_rx = handle.subscribe_acked_offset();
-        let initial_acked = *acked_rx.borrow_and_update();
-        if initial_acked > 0 {
-            let _ = mpsc_tx.send(terminal_ack_frame(initial_acked));
-        }
-
-        // Bridge broadcast → mpsc for all future output, interleaving ACK frames.
-        // Also breaks when pty_done fires so the HTTP stream ends when the process exits.
-        let mpsc_tx_bridge = mpsc_tx.clone();
-        let mut pty_done = handle.pty_done.clone();
+        // Convert the bridge's `terminal_session::SessionTerminalOutput` frames (which carry the
+        // offset metadata) into the daemon's `connection::SessionTerminalOutput` and forward them
+        // through the mpsc-backed stream the tonic/RpcService trait drains. The bridge only ever
+        // emits `Ok` frames after opening (open errors are surfaced via the `await?` above), so an
+        // `Err` here just ends the stream.
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SessionTerminalOutput>();
         tokio::spawn(async move {
-            use tokio::sync::broadcast::error::RecvError;
-            // Disabled once the ACK sender drops, so a closed watch never busy-spins the select.
-            let mut ack_open = true;
-            loop {
-                tokio::select! {
-                    result = broadcast_rx.recv() => {
-                        match result {
-                            Ok(chunk) => {
-                                if mpsc_tx_bridge.send(terminal_data_frame(chunk.to_vec())).is_err() {
-                                    break; // receiver dropped (stream closed)
-                                }
-                            }
-                            Err(RecvError::Closed) => break,
-                            Err(RecvError::Lagged(_)) => continue, // skip lagged; resume from latest
-                        }
-                    }
-                    changed = acked_rx.changed(), if ack_open => {
-                        match changed {
-                            Ok(()) => {
-                                let offset = *acked_rx.borrow_and_update();
-                                if mpsc_tx_bridge.send(terminal_ack_frame(offset)).is_err() {
-                                    break; // receiver dropped (stream closed)
-                                }
-                            }
-                            // ACK sender dropped (terminal gone) — stop watching acks; the output
-                            // bridge runs on until pty_done / broadcast close drive the exit.
-                            Err(_) => ack_open = false,
-                        }
-                    }
-                    _ = pty_done.changed() => break,
+            let mut bridge_rx = bridge_rx;
+            while let Some(frame) = bridge_rx.recv().await {
+                let mapped = match frame {
+                    Ok(out) => SessionTerminalOutput {
+                        data: out.data,
+                        acked_input_offset: out.acked_input_offset,
+                        start_offset: out.start_offset,
+                        end_offset: out.end_offset,
+                        at_oldest: out.at_oldest,
+                    },
+                    Err(_) => break,
+                };
+                if tx.send(mapped).is_err() {
+                    break;
                 }
             }
         });
 
-        Ok(Response::new(MpscTerminalOutputStream { rx: mpsc_rx }))
+        Ok(Response::new(MpscTerminalOutputStream { rx }))
     }
 
     /// Unary input — browser-compatible alternative to the client-streaming half of `StreamSessionTerminalIO`.
@@ -5768,6 +5655,64 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             handle.send_input(bytes::Bytes::from(req.data), input_offset);
         }
         Ok(Response::new(SendTerminalInputResponse {}))
+    }
+
+    /// `GetTerminalHistory`: lazy scroll-up — one chunk of older output ending just before the
+    /// request's `before_offset`, then the stream closes. Delegates to the unified bridge in
+    /// `tddy-terminal-rpc` over a [`DaemonTerminalSessionStore`]. Sandbox sessions have no capture
+    /// ring wired here, so they report `not_found` (the sandbox path streams its own replay).
+    async fn get_terminal_history(
+        &self,
+        request: Request<GetTerminalHistoryRequest>,
+    ) -> Result<Response<Self::GetTerminalHistoryStream>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let session_id = req.session_id.trim().to_string();
+        if self.sandbox_manager.get(&session_id).await.is_some() {
+            return Err(Status::not_found("terminal not found or not running"));
+        }
+
+        let store = crate::terminal_session_adapter::DaemonTerminalSessionStore::new(Arc::clone(
+            &self.claude_cli_manager,
+        ));
+        let bridge_req = tddy_terminal_rpc::proto::terminal_session::GetTerminalHistoryRequest {
+            session_token: req.session_token.clone(),
+            session_id: req.session_id.clone(),
+            terminal_id: req.terminal_id.clone(),
+            from_offset: req.from_offset,
+            until_offset: req.until_offset,
+            max_bytes: req.max_bytes,
+        };
+        let bridge_rx = tddy_terminal_rpc::serve_get_terminal_history_with(
+            &store,
+            bridge_req,
+            tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
+        )
+        .await?;
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<TerminalHistoryChunk, Status>>();
+        tokio::spawn(async move {
+            let mut bridge_rx = bridge_rx;
+            while let Some(frame) = bridge_rx.recv().await {
+                let mapped = frame.map(|chunk| TerminalHistoryChunk {
+                    data: chunk.data,
+                    start_offset: chunk.start_offset,
+                    end_offset: chunk.end_offset,
+                    at_oldest: chunk.at_oldest,
+                    at_end: chunk.at_end,
+                });
+                if tx.send(mapped).is_err() {
+                    break;
+                }
+            }
+        });
+        Ok(Response::new(MpscResultStream { rx }))
     }
 
     async fn start_terminal_session(

@@ -53,6 +53,13 @@ service ConnectionService {
   // (connect-web fetch transport cannot send streaming request bodies required for bidi streaming.)
   rpc StreamTerminalOutput(StreamTerminalOutputRequest) returns (stream SessionTerminalOutput);
   rpc SendTerminalInput(SessionTerminalInput) returns (SendTerminalInputResponse);
+  // Lazy history loading (scroll-up): one forward chunk of older output starting at the request's
+  // `from_offset`, bounded above by `until_offset` (the anchor `end_offset` from
+  // StreamTerminalOutput's initial replay frame), then the stream closes. The client advances
+  // `from_offset` to the previous chunk's `end_offset` and calls again — a progressive, append-only
+  // forward fill — until an `at_end` chunk terminates the fill. See docs/ft/daemon/terminal-sessions.md
+  // § Lazy replay.
+  rpc GetTerminalHistory(GetTerminalHistoryRequest) returns (stream TerminalHistoryChunk);
   // Multiple terminals per session — start/stop/list login-shell terminals attached to a session.
   // Every terminal is identified; the main `claude` terminal is the reserved id "main".
   rpc StartTerminalSession(StartTerminalSessionRequest) returns (StartTerminalSessionResponse);
@@ -704,6 +711,19 @@ message SessionTerminalOutput {
   // acknowledged offset. Monotonic: never regresses. The client uses it to collapse its
   // enqueued-input overlay as the server confirms applied bytes.
   uint64 acked_input_offset = 2;
+  // Absolute offset of the first byte in `data` within the terminal's cumulative output stream.
+  // Populated on the initial replay frame (the "current last frame"); 0 on live tail frames (which
+  // are contiguous with the stream and carry no offset metadata). Older history is fetched on
+  // demand via GetTerminalHistory as the user scrolls up, forward-filled from offset 0 toward
+  // `end_offset` (the anchor).
+  uint64 start_offset = 3;
+  // Absolute offset after the last byte in `data`. Populated on the initial replay frame; 0 on
+  // live tail frames.
+  uint64 end_offset = 4;
+  // True on the initial replay frame when the chunk reaches the capture ring's oldest retained
+  // byte — i.e. no older history exists to load by scrolling up. The client uses it to stop the
+  // infinite-loading spinner once the bottom of the retained history is reached.
+  bool at_oldest = 5;
 }
 
 // Used by StreamTerminalOutput (browser-compatible server-streaming variant).
@@ -721,6 +741,36 @@ message StreamTerminalOutputRequest {
 
 // Empty response for SendTerminalInput.
 message SendTerminalInputResponse {}
+
+// --- Lazy history loading (scroll-up) ---
+
+message GetTerminalHistoryRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  string terminal_id   = 3;
+  // Inclusive lower bound of the chunk to return. The first call uses 0 (the server clamps it to
+  // the capture ring's `start_offset` if older bytes have been evicted); subsequent calls use the
+  // previous chunk's `end_offset` to resume a progressive, append-only forward fill.
+  uint64 from_offset = 4;
+  // Exclusive upper bound (the anchor `end_offset` learned from `StreamTerminalOutput`'s initial
+  // frame). The fill stops when a chunk's `end_offset` reaches `until_offset`. Zero means "until
+  // the capture tip" (live).
+  uint64 until_offset = 5;
+  uint32 max_bytes = 6;
+}
+
+message TerminalHistoryChunk {
+  bytes data = 1;
+  // Absolute offset of the first byte in `data`. 0 when `data` is empty.
+  uint64 start_offset = 2;
+  // Absolute offset after the last byte in `data`.
+  uint64 end_offset = 3;
+  // True when the chunk reaches the capture ring's oldest retained byte — i.e. no older history
+  // exists below it.
+  bool at_oldest = 4;
+  // True when this chunk reaches `until_offset` (or the capture tip) — terminates the forward fill.
+  bool at_end = 5;
+}
 
 // --- Multiple terminals per session ---
 

@@ -40,6 +40,7 @@ import {
   SessionTerminalOutputSchema,
   StartTerminalSessionResponseSchema,
   StopTerminalSessionResponseSchema,
+  TerminalHistoryChunkSchema,
   TerminalSessionInfoSchema,
   ToolDefSchema,
   WorktreeRowSchema,
@@ -221,6 +222,15 @@ export interface ConnectionServiceScenario {
   worktreeStatsSnapshot?: WorktreeStatsRowInput[];
   /** Optional second `StreamWorktreeStats` frame — one worktree whose size finished (Calculating → Cached). */
   worktreeStatsUpdate?: WorktreeStatsRowInput;
+  /** Absolute `endOffset` carried by the initial `StreamTerminalOutput` replay frame — the anchor
+   *  for lazy scroll-up history. When set (> 0n), the backend's `streamTerminalOutput` emits its
+   *  identifying frame tagged with this offset (and `atOldest`), mirroring the daemon's lazy
+   *  replay. Default: 0n (no offset metadata — legacy shape). */
+  terminalReplayEndOffset?: bigint;
+  /** Older history chunks returned by `GetTerminalHistory`, in the order they should be yielded
+   *  across successive calls (one chunk per call). Each chunk's `startOffset`/`endOffset`/`atOldest`
+   *  is used verbatim. The backend pops one chunk per `getTerminalHistory` call. */
+  terminalHistory?: Array<{ data: Uint8Array; startOffset: bigint; endOffset: bigint; atOldest: boolean }>;
 }
 
 export interface ConnectionServiceBackend extends InMemoryRpcBackend {
@@ -245,6 +255,8 @@ export interface ConnectionServiceBackend extends InMemoryRpcBackend {
   readonly sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[];
   /** Every `{ sessionId, terminalId }` an output stream was opened for, in call order. */
   readonly streamedTerminals: { sessionId: string; terminalId: string }[];
+  /** Every `{ sessionId, terminalId, beforeOffset }` passed to `GetTerminalHistory`, in call order. */
+  readonly getTerminalHistoryCalls: { sessionId: string; terminalId: string; beforeOffset: bigint }[];
   /** Number of times `StreamHostStats` was subscribed — lets a test assert the footer opens the
    *  single host-stats stream exactly once. */
   readonly hostStatsStreamCount: () => number;
@@ -285,6 +297,7 @@ export function aConnectionServiceBackend(
   const stoppedTerminals: { sessionId: string; terminalId: string }[] = [];
   const sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[] = [];
   const streamedTerminals: { sessionId: string; terminalId: string }[] = [];
+  const getTerminalHistoryCalls: { sessionId: string; terminalId: string; beforeOffset: bigint }[] = [];
   let hostStatsStreamOpens = 0;
   let listWorktreesRefreshCalls = 0;
   const cleanedWorktreePaths: string[] = [];
@@ -519,12 +532,29 @@ export function aConnectionServiceBackend(
       },
       // Server-streaming output — record the opened stream, emit one identifying frame, then stay
       // open (a terminal stream that *completes* would signal disconnect and evict the runtime).
+      // When `scenario.terminalReplayEndOffset` is set, the frame is tagged with the absolute
+      // `endOffset` + `atOldest` so the lazy scroll-up loader can anchor older-history fetches.
       streamTerminalOutput: async function* (req) {
         streamedTerminals.push({ sessionId: req.sessionId, terminalId: req.terminalId });
         yield create(SessionTerminalOutputSchema, {
           data: new TextEncoder().encode(`term:${req.terminalId || "main"}\r\n`),
+          endOffset: scenario.terminalReplayEndOffset ?? 0n,
+          atOldest: (scenario.terminalHistory ?? []).length === 0,
         });
         await new Promise<never>(() => undefined);
+      },
+      // Lazy scroll-up history — yield one chunk per call from `scenario.terminalHistory` (popped
+      // in order), so a test can assert the loader chains anchors across successive calls.
+      getTerminalHistory: async function* (req) {
+        getTerminalHistoryCalls.push({
+          sessionId: req.sessionId,
+          terminalId: req.terminalId,
+          beforeOffset: req.beforeOffset,
+        });
+        const chunk = (scenario.terminalHistory ?? []).shift();
+        if (chunk) {
+          yield create(TerminalHistoryChunkSchema, chunk);
+        }
       },
     });
 
@@ -539,6 +569,7 @@ export function aConnectionServiceBackend(
     stoppedTerminals,
     sentTerminalInput,
     streamedTerminals,
+    getTerminalHistoryCalls,
     hostStatsStreamCount: () => hostStatsStreamOpens,
     listWorktreesRefreshCount: () => listWorktreesRefreshCalls,
     cleanedWorktreePaths,

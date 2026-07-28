@@ -24,6 +24,12 @@ const MOUSE_TRACKING_MODES: [u16; 6] = [1000, 1002, 1003, 1006, 1015, 1016];
 pub struct TerminalCapture {
     /// Retained output, trimmed from the front, never longer than [`Self::CAPTURE_LIMIT_BYTES`].
     buffer: Vec<u8>,
+    /// Absolute byte offset of `buffer[0]` within the cumulative output stream. Rises monotonically
+    /// as eviction drains the oldest retained bytes; never exceeds `end_offset`.
+    start_offset: u64,
+    /// Absolute byte offset just past `buffer[len-1]` — the total bytes ever appended. Rises
+    /// monotonically with every `append`; the live tip a late subscriber attaches to.
+    end_offset: u64,
     /// Mouse-tracking modes the application has enabled and not turned back off.
     enabled_mouse_modes: BTreeSet<u16>,
     /// Parses the appended stream to observe DECSET/DECRST across arbitrary chunk boundaries.
@@ -47,16 +53,31 @@ impl TerminalCapture {
     pub fn new() -> Self {
         Self {
             buffer: Vec::new(),
+            start_offset: 0,
+            end_offset: 0,
             enabled_mouse_modes: BTreeSet::new(),
             sniffer: EscapeParser::new(),
             evicted: EscapeParser::new(),
         }
     }
 
+    /// Absolute byte offset of the oldest retained byte in the ring. Rises as eviction drains
+    /// the front of the buffer; the lower bound for lazy history requests.
+    pub fn start_offset(&self) -> u64 {
+        self.start_offset
+    }
+
+    /// Absolute byte offset just past the newest retained byte — the total bytes ever appended,
+    /// and the live tip a reconnecting subscriber attaches to.
+    pub fn end_offset(&self) -> u64 {
+        self.end_offset
+    }
+
     /// Record freshly produced output, updating the mode state and evicting the oldest bytes.
     pub fn append(&mut self, data: &[u8]) {
         self.sniff_mouse_modes(data);
         self.buffer.extend_from_slice(data);
+        self.end_offset = self.end_offset.saturating_add(data.len() as u64);
         self.evict_to_limit();
     }
 
@@ -118,7 +139,123 @@ impl TerminalCapture {
             evict += 1;
         }
         self.buffer.drain(..evict);
+        self.start_offset = self.start_offset.saturating_add(evict as u64);
     }
+
+    /// The most recent `min(max_bytes, buffered_len)` bytes of output, with their absolute offsets
+    /// and whether the chunk reaches the ring's oldest retained byte (no older history to load).
+    ///
+    /// This is the "current last frame" a reconnecting subscriber sees first; older bytes are
+    /// fetched on demand via [`Self::replay_from`] (forward fill) as the user scrolls up.
+    pub fn replay_last(&self, max_bytes: usize) -> CaptureChunk {
+        let buffered_len = self.buffer.len();
+        let take = max_bytes.min(buffered_len);
+        let start = buffered_len - take;
+        let data = self.buffer[start..].to_vec();
+        let chunk_start = self.start_offset + start as u64;
+        let chunk_end = self.end_offset;
+        CaptureChunk {
+            data,
+            start_offset: chunk_start,
+            end_offset: chunk_end,
+            at_oldest: start == 0,
+            // The last frame always reaches the capture tip, so it terminates a forward fill.
+            at_end: true,
+        }
+    }
+
+    /// Up to `max_bytes` of output ending just before `before_offset`, clamped to the ring's
+    /// [`Self::start_offset`]. `before_offset = 0` means "from the live tip" (uses `end_offset`).
+    ///
+    /// Returns an empty `at_oldest` chunk when no older bytes are retained below `before_offset`
+    /// — the signal that terminates an infinite-scroll-up. `at_end` is `false` on backward chunks
+    /// (they never terminate a forward fill); the forward-fill path uses [`Self::replay_from`].
+    pub fn replay_before(&self, before_offset: u64, max_bytes: usize) -> CaptureChunk {
+        let upper = before_offset.min(self.end_offset);
+        if upper <= self.start_offset {
+            return CaptureChunk {
+                data: Vec::new(),
+                start_offset: self.start_offset,
+                end_offset: self.start_offset,
+                at_oldest: true,
+                at_end: false,
+            };
+        }
+        let chunk_end = upper;
+        let chunk_start = chunk_start_clamped(self.start_offset, chunk_end, max_bytes);
+        let buffer_start = (chunk_start - self.start_offset) as usize;
+        let buffer_end = (chunk_end - self.start_offset) as usize;
+        CaptureChunk {
+            data: self.buffer[buffer_start..buffer_end].to_vec(),
+            start_offset: chunk_start,
+            end_offset: chunk_end,
+            at_oldest: chunk_start == self.start_offset,
+            at_end: false,
+        }
+    }
+
+    /// Up to `max_bytes` of output starting at `from_offset` and going FORWARD, bounded above by
+    /// `until_offset` (the anchor learned from the initial replay frame; 0 means "until the capture
+    /// tip"). `from_offset` is clamped UP to the ring's [`Self::start_offset`] when older bytes have
+    /// been evicted.
+    ///
+    /// This serves the progressive, append-only forward fill of older history: the client advances
+    /// `from_offset` to the previous chunk's `end_offset` and calls again until a chunk arrives with
+    /// `at_end = true` (its `end_offset` reached `until_offset` or the capture tip). `at_oldest` is
+    /// `true` on a chunk whose start sits at the ring's oldest retained byte (no bytes below it).
+    pub fn replay_from(&self, from_offset: u64, until_offset: u64, max_bytes: usize) -> CaptureChunk {
+        let chunk_start = from_offset.max(self.start_offset);
+        let cap = if until_offset == 0 {
+            self.end_offset
+        } else {
+            until_offset.min(self.end_offset)
+        };
+        // Nothing to return once the fill has reached the upper bound.
+        if chunk_start >= cap {
+            return CaptureChunk {
+                data: Vec::new(),
+                start_offset: chunk_start,
+                end_offset: chunk_start,
+                at_oldest: chunk_start == self.start_offset,
+                at_end: true,
+            };
+        }
+        let chunk_end = (chunk_start.saturating_add(max_bytes as u64)).min(cap);
+        let buffer_start = (chunk_start - self.start_offset) as usize;
+        let buffer_end = (chunk_end - self.start_offset) as usize;
+        CaptureChunk {
+            data: self.buffer[buffer_start..buffer_end].to_vec(),
+            start_offset: chunk_start,
+            end_offset: chunk_end,
+            at_oldest: chunk_start == self.start_offset,
+            at_end: chunk_end >= cap,
+        }
+    }
+}
+
+/// A contiguous slice of the capture ring returned by [`TerminalCapture::replay_last`],
+/// [`TerminalCapture::replay_before`], or [`TerminalCapture::replay_from`], tagged with its
+/// absolute offsets in the cumulative output stream and whether it reaches the oldest retained
+/// byte / the forward-fill upper bound.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaptureChunk {
+    /// The retained output bytes for this slice.
+    pub data: Vec<u8>,
+    /// Absolute byte offset of `data[0]` in the cumulative output stream.
+    pub start_offset: u64,
+    /// Absolute byte offset just past `data[len-1]`.
+    pub end_offset: u64,
+    /// True when no older retained bytes exist below this chunk — terminates lazy scroll-up.
+    pub at_oldest: bool,
+    /// True when this chunk reaches `until_offset` (or the capture tip) — terminates a forward fill.
+    pub at_end: bool,
+}
+
+/// The absolute offset of the first byte in a `replay_before` chunk: as far back as `max_bytes`
+/// allows, but never below the ring's `start_offset`.
+fn chunk_start_clamped(start_offset: u64, chunk_end: u64, max_bytes: usize) -> u64 {
+    let desired = chunk_end.saturating_sub(max_bytes as u64);
+    desired.max(start_offset)
 }
 
 impl Default for TerminalCapture {

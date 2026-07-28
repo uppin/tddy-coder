@@ -28,6 +28,7 @@ path = "tests/fixtures/execute_tool_fixture.rs"
 [dependencies]
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-stdio = { path = "../tddy-stdio" }
+tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
 async-trait = "0.1"
 tddy-core = { path = "../tddy-core" }
 tddy-discovery = { path = "../tddy-discovery" }
@@ -52,7 +53,6 @@ tempfile = "3"
 rmcp = { version = "1", features = ["server", "transport-io", "schemars", "macros"] }
 schemars = "1"
 tokio = { version = "1", features = ["full"] }
-portable-pty = "0.9"
 bytes = "1"
 # daemon-rpc: Connect-protocol RPC client used by session-hook (default-on).
 tddy-service = { path = "../tddy-service" }

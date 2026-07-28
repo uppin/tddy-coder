@@ -9935,6 +9935,7 @@ dependencies = [
  "tddy-service",
  "tddy-stdio",
  "tddy-task",
+ "tddy-terminal-rpc",
  "tddy-testing-commons",
  "tddy-tool-engine",
  "tddy-tui",
@@ -10067,6 +10068,7 @@ dependencies = [
  "tddy-service",
  "tddy-stdio",
  "tddy-task",
+ "tddy-terminal-rpc",
  "tddy-testing-commons",
  "tddy-tool-engine",
  "tddy-tools",
@@ -10640,6 +10642,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-terminal-rpc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "libc",
+ "log",
+ "portable-pty 0.9.0",
+ "pretty_assertions",
+ "prost 0.13.5",
+ "prost-build 0.13.5",
+ "rstest 0.24.0",
+ "tddy-codegen",
+ "tddy-pty",
+ "tddy-rpc",
+ "tddy-task",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.12.3",
+ "tonic-build",
+]
+
+[[package]]
 name = "tddy-testing-commons"
 version = "0.1.0"
 dependencies = [
@@ -10693,7 +10720,6 @@ dependencies = [
  "livekit",
  "livekit-api",
  "log",
- "portable-pty 0.9.0",
  "predicates",
  "pretty_assertions",
  "prost 0.13.5",
@@ -10717,6 +10743,7 @@ dependencies = [
  "tddy-sandbox",
  "tddy-service",
  "tddy-stdio",
+ "tddy-terminal-rpc",
  "tddy-testing-commons",
  "tddy-workflow-recipes",
  "tempfile",

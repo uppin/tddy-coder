@@ -10,6 +10,7 @@ pub mod acp_transcript;
 pub mod connection_service_participant;
 pub mod metadata_publisher;
 pub mod terminal_manager;
+pub mod terminal_session_adapter;
 
 pub use acp_transcript::{append_frames_for_event, frame_for_event, spawn_acp_transcript_writer};
 pub use connection_service_participant::{
@@ -30,12 +31,13 @@ use tddy_rpc::{RpcMessage, RpcResult, RpcService, ServiceEntry, Status};
 use tddy_service::proto::connection::{
     AcpReplayFrame, ClaimTerminalControlRequest, ClaimTerminalControlResponse, ExecuteToolRequest,
     ExecuteToolResponse, GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse,
-    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse, ListTerminalSessionsRequest, ListTerminalSessionsResponse,
-    SendTerminalInputResponse, SessionTerminalInput, SessionTerminalOutput,
-    StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
-    StopTerminalSessionResponse, StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
-    StreamTerminalOutputRequest, TerminalSessionInfo, ToolCallInfo, ToolDef as ProtoToolDef,
+    GetTerminalHistoryRequest, ListExecToolsRequest, ListExecToolsResponse,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ListTerminalSessionsRequest,
+    ListTerminalSessionsResponse, SendTerminalInputResponse, SessionTerminalInput,
+    SessionTerminalOutput, StartTerminalSessionRequest, StartTerminalSessionResponse,
+    StopTerminalSessionRequest, StopTerminalSessionResponse, StreamAcpReplayRequest, StreamMode,
+    StreamSessionActivityRequest, StreamTerminalOutputRequest, TerminalHistoryChunk,
+    TerminalSessionInfo, ToolCallInfo, ToolDef as ProtoToolDef,
 };
 
 use terminal_manager::MAIN_TERMINAL_ID;
@@ -349,100 +351,118 @@ impl RpcService for SessionConnectionServiceRpc {
                         ))))
                     }
                 };
-                let terminal_id = resolved_terminal_id(&req.terminal_id).to_string();
-                let handle = match self.svc.terminal_manager.get_terminal(&terminal_id).await {
-                    Some(h) => h,
-                    None => {
-                        return RpcResult::ServerStream(Err(Status::not_found(
-                            "terminal not found or not running",
-                        )))
+
+                // Delegate to the unified streaming bridge in `tddy-terminal-rpc`: mode prologue +
+                // current last frame first (tagged with absolute offsets), resize/drain on client
+                // dimensions, current ACK up front, then live broadcast interleaved with ACKs until
+                // the shell exits. Older history is fetched on demand via `GetTerminalHistory`.
+                let store =
+                    crate::session_participant::terminal_session_adapter::CoderTerminalSessionStore::new(
+                        Arc::clone(&self.svc.terminal_manager),
+                    );
+                let bridge_req = tddy_terminal_rpc::proto::terminal_session::StreamTerminalOutputRequest {
+                    session_token: req.session_token.clone(),
+                    session_id: req.session_id.clone(),
+                    terminal_id: req.terminal_id.clone(),
+                    initial_cols: req.initial_cols,
+                    initial_rows: req.initial_rows,
+                };
+                let bridge_rx = match tddy_terminal_rpc::serve_stream_terminal_output_with(
+                    &store,
+                    bridge_req,
+                    tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
+                )
+                .await
+                {
+                    Ok(rx) => rx,
+                    Err(status) => return RpcResult::ServerStream(Err(status)),
+                };
+
+                let (tx, rx) =
+                    tokio::sync::mpsc::channel::<Result<Vec<u8>, Status>>(
+                        TERMINAL_OUTPUT_CHANNEL_CAPACITY,
+                    );
+                tokio::spawn(async move {
+                    let mut bridge_rx = bridge_rx;
+                    while let Some(frame) = bridge_rx.recv().await {
+                        let mapped = match frame {
+                            Ok(out) => SessionTerminalOutput {
+                                data: out.data,
+                                acked_input_offset: out.acked_input_offset,
+                                start_offset: out.start_offset,
+                                end_offset: out.end_offset,
+                                at_oldest: out.at_oldest,
+                            }
+                            .encode_to_vec(),
+                            Err(status) => {
+                                let _ = tx.send(Err(status)).await;
+                                break;
+                            }
+                        };
+                        if tx.send(Ok(mapped)).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+
+                RpcResult::ServerStream(Ok(rx))
+            }
+            "GetTerminalHistory" => {
+                let req = match GetTerminalHistoryRequest::decode(&message.payload[..]) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return RpcResult::ServerStream(Err(Status::invalid_argument(format!(
+                            "decode GetTerminalHistoryRequest: {e}"
+                        ))))
                     }
                 };
 
-                // Resize the PTY to the client's dimensions before replay so the shell redraws at
-                // the browser's actual width rather than the PTY's spawn-time default.
-                if req.initial_cols > 0 && req.initial_rows > 0 {
-                    handle
-                        .resize(req.initial_rows as u16, req.initial_cols as u16)
-                        .await;
-                }
+                let store =
+                    crate::session_participant::terminal_session_adapter::CoderTerminalSessionStore::new(
+                        Arc::clone(&self.svc.terminal_manager),
+                    );
+                let bridge_req = tddy_terminal_rpc::proto::terminal_session::GetTerminalHistoryRequest {
+                    session_token: req.session_token.clone(),
+                    session_id: req.session_id.clone(),
+                    terminal_id: req.terminal_id.clone(),
+                    from_offset: req.from_offset,
+                    until_offset: req.until_offset,
+                    max_bytes: req.max_bytes,
+                };
+                let bridge_rx = match tddy_terminal_rpc::serve_get_terminal_history_with(
+                    &store,
+                    bridge_req,
+                    tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
+                )
+                .await
+                {
+                    Ok(rx) => rx,
+                    Err(status) => return RpcResult::ServerStream(Err(status)),
+                };
 
-                let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, Status>>(
-                    TERMINAL_OUTPUT_CHANNEL_CAPACITY,
-                );
-
-                // Subscribe BEFORE snapshotting the capture buffer so bytes produced between the
-                // snapshot and the first bridge recv() are still delivered via the broadcast.
-                let mut stdout_rx = handle.stdout_tx.subscribe();
-                let replay = handle
-                    .capture
-                    .lock()
-                    .map(|cap| cap.replay())
-                    .unwrap_or_default();
-                if !replay.is_empty() {
-                    let frame = SessionTerminalOutput {
-                        data: replay,
-                        acked_input_offset: 0,
-                    }
-                    .encode_to_vec();
-                    let _ = tx.try_send(Ok(frame));
-                }
-
-                // Input-offset ACKs ride the same output stream (docs/ft/web/enqueued-input-overlay.md):
-                // when the applied input offset advances, emit an empty-data frame carrying it. Emit
-                // the current offset up front so a stream opened after some input was already applied
-                // learns the acknowledged position immediately.
-                let mut acked_rx = handle.subscribe_acked_offset();
-                let initial_acked = *acked_rx.borrow_and_update();
-                if initial_acked > 0 {
-                    let frame = SessionTerminalOutput {
-                        data: Vec::new(),
-                        acked_input_offset: initial_acked,
-                    }
-                    .encode_to_vec();
-                    let _ = tx.try_send(Ok(frame));
-                }
-
-                // Bridge live PTY output → the server stream, interleaving ACK frames, ending when
-                // the shell exits.
-                let mut pty_done = handle.pty_done.clone();
+                let (tx, rx) =
+                    tokio::sync::mpsc::channel::<Result<Vec<u8>, Status>>(
+                        TERMINAL_OUTPUT_CHANNEL_CAPACITY,
+                    );
                 tokio::spawn(async move {
-                    use tokio::sync::broadcast::error::RecvError;
-                    // Disabled once the ACK sender drops, so a closed watch never busy-spins.
-                    let mut ack_open = true;
-                    loop {
-                        tokio::select! {
-                            result = stdout_rx.recv() => match result {
-                                Ok(bytes) => {
-                                    let frame = SessionTerminalOutput {
-                                        data: bytes.to_vec(),
-                                        acked_input_offset: 0,
-                                    }
-                                    .encode_to_vec();
-                                    if tx.send(Ok(frame)).await.is_err() {
-                                        break;
-                                    }
-                                }
-                                Err(RecvError::Closed) => break,
-                                Err(RecvError::Lagged(_)) => continue,
-                            },
-                            changed = acked_rx.changed(), if ack_open => {
-                                match changed {
-                                    Ok(()) => {
-                                        let offset = *acked_rx.borrow_and_update();
-                                        let frame = SessionTerminalOutput {
-                                            data: Vec::new(),
-                                            acked_input_offset: offset,
-                                        }
-                                        .encode_to_vec();
-                                        if tx.send(Ok(frame)).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                    Err(_) => ack_open = false,
-                                }
-                            },
-                            _ = pty_done.changed() => break,
+                    let mut bridge_rx = bridge_rx;
+                    while let Some(frame) = bridge_rx.recv().await {
+                        let mapped = match frame {
+                            Ok(chunk) => TerminalHistoryChunk {
+                                data: chunk.data,
+                                start_offset: chunk.start_offset,
+                                end_offset: chunk.end_offset,
+                                at_oldest: chunk.at_oldest,
+                                at_end: chunk.at_end,
+                            }
+                            .encode_to_vec(),
+                            Err(status) => {
+                                let _ = tx.send(Err(status)).await;
+                                break;
+                            }
+                        };
+                        if tx.send(Ok(mapped)).await.is_err() {
+                            break;
                         }
                     }
                 });

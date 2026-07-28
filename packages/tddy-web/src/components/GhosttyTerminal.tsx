@@ -106,6 +106,15 @@ export interface GhosttyTerminalProps {
    * Keep an exact col×row grid; font size follows container size (resize the pane to scale). Disables FitAddon fitting and user font zoom shortcuts.
    */
   fixedViewportGrid?: { cols: number; rows: number };
+  /**
+   * Lines of scrollback to retain above the viewport (0 = none, the default for the live terminal
+   * so periodic TUI re-paints do not accumulate as duplicate panes). A non-zero value is used by the
+   * older-history terminal so the user can scroll through forward-filled history.
+   */
+  scrollback?: number;
+  /** `data-testid` for the terminal container. Defaults to `ghostty-terminal`; the older-history
+   *  terminal passes `ghostty-terminal-older` so tests can target each instance separately. */
+  testId?: string;
 }
 
 export interface BufferLineInfo {
@@ -126,6 +135,10 @@ export interface GhosttyTerminalHandle {
   setTerminalFontSize?(px: number): void;
   /** Lines the viewport is scrolled up from the bottom (0 = pinned to latest output). */
   getViewportScrollOffset?(): number;
+  /** Scroll the viewport to the top of the scrollback (no-op when scrollback is 0). */
+  scrollToTop?(): void;
+  /** True when the viewport is pinned to the latest output (not scrolled up into scrollback). */
+  isPinnedToBottom?(): boolean;
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
@@ -150,6 +163,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       pinchZoomFont = true,
       containerMinHeightPx,
       fixedViewportGrid,
+      scrollback = 0,
+      testId = "ghostty-terminal",
     },
     ref
   ) {
@@ -237,7 +252,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             background: "#1a1b26",
             foreground: "#a9b1d6",
           },
-          scrollback: 0,
+          scrollback,
         });
 
         termRef.current = term;
@@ -906,6 +921,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           const t = termRef.current as unknown as { getViewportY?: () => number } | null;
           return t?.getViewportY?.() ?? 0;
         },
+        scrollToTop() {
+          // Scroll the viewport to the top of the scrollback so the user lands on the oldest
+          // forward-filled history. No-op when scrollback is 0 (nothing to scroll through).
+          const t = termRef.current as unknown as { scrollToTop?: () => void } | null;
+          t?.scrollToTop?.();
+        },
+        isPinnedToBottom() {
+          // True when the viewport is at the latest output (not scrolled up into scrollback).
+          const t = termRef.current as unknown as { getViewportY?: () => number } | null;
+          return (t?.getViewportY?.() ?? 0) === 0;
+        },
         setTerminalFontSize(px: number) {
           if (!Number.isFinite(px)) return;
           if (zoomVerbose) {
@@ -988,7 +1014,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
     return (
       <div
-        data-testid="ghostty-terminal"
+        data-testid={testId}
         data-terminal-font-size={String(displayFontSize)}
         data-session-active={sessionActive ? "true" : "false"}
         aria-disabled={sessionActive ? undefined : true}

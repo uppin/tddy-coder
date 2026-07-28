@@ -1,13 +1,14 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionTerminalOutput } from "../../gen/connection_pb";
-import { GhosttyTerminalGrpc, type GrpcStream } from "../GhosttyTerminalGrpc";
+import { GhosttyTerminalGrpc, type GrpcFrame, type GrpcStream, type HistoryFetcher } from "../GhosttyTerminalGrpc";
 import type { ConnectedSession } from "./useTerminalControl";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import { tddyDebug } from "../../lib/debugMask";
 import { measureTerminalGridFromRect } from "../../lib/terminalGridMeasure";
 import { useEnqueuedInput } from "./useEnqueuedInput";
 import { EnqueuedInputOverlay } from "../connection/EnqueuedInputOverlay";
+import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
 
 const dGrpc = tddyDebug("tddy:term:grpc");
 const dResize = tddyDebug("tddy:term:resize");
@@ -106,14 +107,14 @@ export function GrpcSessionTerminal({
   );
 
   useEffect(() => {
-    const outputListeners: Array<(data: Uint8Array) => void> = [];
+    const outputListeners: Array<(frame: GrpcFrame) => void> = [];
     let closed = false;
 
     const grpcStream: GrpcStream = {
       send(data: Uint8Array) {
         sendInputRequest(data);
       },
-      onMessage(fn: (data: Uint8Array) => void) {
+      onMessage(fn: (frame: GrpcFrame) => void) {
         outputListeners.push(fn);
       },
       close() {
@@ -157,8 +158,16 @@ export function GrpcSessionTerminal({
           if (output.ackedInputOffset > 0n) {
             ack(Number(output.ackedInputOffset));
           }
-          if (output.data.length > 0) {
-            outputListeners.forEach((fn) => fn(output.data));
+          // Forward the full frame (data + offset metadata) to the shared terminal, which captures
+          // the lazy-history anchor from the initial replay frame and drives the forward fill of
+          // the older-history terminal on demand.
+          if (output.data.length > 0 || output.endOffset > 0n) {
+            const frame: GrpcFrame = {
+              data: output.data,
+              endOffset: output.endOffset,
+              atOldest: output.atOldest,
+            };
+            outputListeners.forEach((fn) => fn(frame));
           }
         }
         if (!closed) emitDisconnect();
@@ -195,6 +204,11 @@ export function GrpcSessionTerminal({
 
   // Always render the outer div so containerRef.current is available when the
   // effect above runs (before stream is set). Terminal renders once stream is ready.
+  const historyFetcher = useMemo<HistoryFetcher>(
+    () => createForwardHistoryFetcher(client, { sessionToken, sessionId, terminalId }),
+    [client, sessionToken, sessionId, terminalId],
+  );
+
   return (
     <div ref={containerRef} style={{ width: "100%", height: "100%", position: "relative" }}>
       {stream && (
@@ -204,6 +218,7 @@ export function GrpcSessionTerminal({
           stream={stream}
           mobileShortcuts={mobileShortcuts}
           onRegisterInsertInput={onRegisterInsertInput}
+          historyFetcher={historyFetcher}
         />
       )}
       <EnqueuedInputOverlay model={enqueuedModel} visible={enqueuedVisible} />
