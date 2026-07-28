@@ -27,15 +27,11 @@ function hexPreview(data: Uint8Array, n = 24): string {
   return Array.from(data.slice(0, n), (b) => b.toString(16).padStart(2, "0")).join(" ");
 }
 
-/** Scrollback lines retained by the older-history page terminal (large enough to hold a full session). */
+/** Scrollback lines retained by the older-history page terminal (large enough to hold a full session).
+ *  The LIVE terminal stays at scrollback 0 (the GhosttyTerminal default): a scrollback > 0 live
+ *  terminal accumulates duplicate panes from periodic TUI full-screen re-paints (ghostty-web has no
+ *  prepend/suppress API), which the repo's ghostty-fullscreen-no-duplicate e2e test guards against. */
 const PAGE_SCROLLBACK = 50000;
-/**
- * Scrollback retained by the LIVE terminal. Both terminals are scrollable so their viewports can be
- * synced (mirroring viewportY across the overlay pair keeps a swap from jumping in scroll position).
- * Tradeoff accepted by design: a scrollback>0 live terminal accumulates duplicate panes from periodic
- * TUI full-screen re-paints — ghostty-web has no prepend/suppress API to avoid it.
- */
-const LIVE_SCROLLBACK = PAGE_SCROLLBACK;
 
 /**
  * One frame from `StreamTerminalOutput`: the raw output bytes plus the offset metadata carried on
@@ -109,10 +105,9 @@ export function GhosttyTerminalGrpc({
   const outputBufferRef = useRef<Uint8Array[]>([]);
   const [bufferText, setBufferText] = useState("");
   const [olderBufferText, setOlderBufferText] = useState("");
-  // Viewport position mirrors for testability: each terminal's viewportY (lines up from the
-  // bottom) is polled and surfaced through a hidden element so component tests can assert that
-  // scrolling the foreground terminal mirrors onto the background terminal (the sync contract).
-  const [liveViewportY, setLiveViewportY] = useState(0);
+  // Viewport position mirror for the page terminal (lines up from the bottom). Surfaced through a
+  // hidden element so component tests can assert scrollToLine gives full control of the viewport.
+  // The live terminal stays at scrollback 0 (always pinned), so it has no viewportY to mirror.
   const [pageViewportY, setPageViewportY] = useState(0);
   const isMobile = useIsMobile();
   const { isKeyboardOpen } = useVisualViewport();
@@ -181,7 +176,6 @@ export function GhosttyTerminalGrpc({
       setBufferText(text);
       const olderText = olderTermRef.current?.getBufferText?.() ?? "";
       setOlderBufferText(olderText);
-      setLiveViewportY(termRef.current?.getViewportScrollOffset?.() ?? 0);
       setPageViewportY(olderTermRef.current?.getViewportScrollOffset?.() ?? 0);
     }, 200);
     return () => clearInterval(interval);
@@ -247,48 +241,19 @@ export function GhosttyTerminalGrpc({
     olderTermRef.current?.scrollToBottom?.();
   };
 
-  // Viewport sync across the overlay pair. Both terminals are scrollable; when the FOREGROUND
-  // terminal is scrolled by the user, mirror its viewportY (lines up from the bottom) onto the
-  // background terminal by a relative scrollLines delta (current viewportY → target viewportY).
-  // Relative mirroring avoids the absolute-line coordinate ambiguity of scrollToLine and is robust
-  // to differing buffer lengths. Because the background pane is hidden (pointer-events none,
-  // visibility hidden) the user cannot scroll it, so any onScroll it fires is from our own
-  // programmatic scrollLines — the foreground-only guard below absorbs that and prevents a
-  // feedback loop without needing a re-entrancy flag. The two buffers differ in content
-  // (live = recent output, page = older history), so this syncs the scroll OFFSET, not the content;
-  // at the seam (viewportY 0) the two are contiguous by construction, so a swap there is seamless.
-  const mirrorViewport = (source: "live" | "page", vy: number) => {
-    const target = source === "live" ? olderTermRef.current : termRef.current;
-    if (!target) return;
-    const cur = target.getViewportScrollOffset?.() ?? 0;
-    const delta = vy - cur;
-    if (delta !== 0) target.scrollLines?.(-delta);
-  };
-  const onLiveScroll = (vy: number) => {
-    if (view === "live") mirrorViewport("live", vy);
-  };
-  const onPageScroll = (vy: number) => {
-    if (view === "page") mirrorViewport("page", vy);
-  };
-
-  // Test-only hook: scroll the FOREGROUND terminal up by `n` lines via its imperative handle. Real
-  // wheel events don't reach ghostty-web reliably under Cypress, so component tests drive the
-  // viewport through this hook to exercise the onScroll→scrollToLine sync path deterministically.
-  // The foreground is selected by `view`. Marked FIXME: test-only — must not be relied on in prod.
+  // Test-only hook: scroll the page terminal's viewport up by `n` lines via scrollLines — the
+  // relative "full control of what position is in the viewport" API. Real wheel events don't
+  // reach ghostty-web reliably under Cypress, so component tests drive the viewport through this hook.
+  // FIXME: test-only hook; remove if a real wheel-driver becomes available in Cypress.
   useEffect(() => {
-    // FIXME: test-only hook; remove if a real wheel-driver becomes available in Cypress.
-    const win = window as unknown as { __tddyScrollForegroundUp?: (n: number) => void };
-    win.__tddyScrollForegroundUp = (n: number) => {
-      if (view === "live") {
-        termRef.current?.scrollLines?.(-n);
-      } else {
-        olderTermRef.current?.scrollLines?.(-n);
-      }
+    const win = window as unknown as { __tddyPageScrollUp?: (n: number) => void };
+    win.__tddyPageScrollUp = (n: number) => {
+      olderTermRef.current?.scrollLines?.(-n);
     };
     return () => {
-      delete win.__tddyScrollForegroundUp;
+      delete win.__tddyPageScrollUp;
     };
-  }, [view]);
+  }, []);
 
   // Scroll-up-at-top gesture on the LIVE terminal: the live terminal has scrollback 0 (always pinned
   // to bottom), so a wheel-up attempt is interpreted as "show older history". On the first activation
@@ -344,8 +309,6 @@ export function GhosttyTerminalGrpc({
       fontSize={fontSize}
       minFontSize={minFontSize}
       maxFontSize={maxFontSize}
-      scrollback={LIVE_SCROLLBACK}
-      onScroll={onLiveScroll}
       preventFocusOnTap={isMobile && !isKeyboardOpen}
       onReady={() => {
         termReadyRef.current = true;
@@ -381,7 +344,6 @@ export function GhosttyTerminalGrpc({
       minFontSize={minFontSize}
       maxFontSize={maxFontSize}
       scrollback={PAGE_SCROLLBACK}
-      onScroll={onPageScroll}
       testId="ghostty-terminal-older"
       preventFocusOnTap
       onReady={() => {
@@ -436,9 +398,9 @@ export function GhosttyTerminalGrpc({
         </TerminalConnectionStatusBar>
       ) : null}
       <div style={{ flex: 1, minHeight: 0, minWidth: 0, width: "100%", position: "relative" }}>
-        {/* Live pane: scrollback > 0 (synced with the page terminal), always mounted, always
-            receives the stream. Foreground at the live tip; stays mounted underneath (hidden)
-            while browsing history so it stays current. */}
+        {/* Live pane: scrollback 0 (avoids duplicate-pane accumulation from TUI re-paints),
+            always mounted, always receives the stream. Foreground at the live tip; stays mounted
+            underneath (hidden) while browsing history so it stays current. */}
         <div
           ref={liveContainerRef}
           data-testid="terminal-live-pane"
@@ -552,9 +514,6 @@ export function GhosttyTerminalGrpc({
       </div>
       <div data-testid="terminal-older-buffer-text" style={{ display: "none" }} aria-hidden>
         {olderBufferText}
-      </div>
-      <div data-testid="terminal-live-viewport-y" style={{ display: "none" }} aria-hidden>
-        {liveViewportY}
       </div>
       <div data-testid="terminal-page-viewport-y" style={{ display: "none" }} aria-hidden>
         {pageViewportY}

@@ -113,10 +113,9 @@ export interface GhosttyTerminalProps {
    */
   fixedViewportGrid?: { cols: number; rows: number };
   /**
-   * Lines of scrollback to retain above the viewport. 0 = none. A non-zero value is used by BOTH the
-   * live and the older-history terminals in the overlay pair so their viewports can be synced (scrolling
-   * one mirrors onto the other). Tradeoff: a scrollback > 0 live terminal accumulates duplicate panes
-   * from periodic TUI re-paints — ghostty-web has no prepend/suppress API to avoid it.
+   * Lines of scrollback to retain above the viewport. 0 = none (the default, used by the live
+   * terminal so periodic TUI re-paints do not accumulate as duplicate panes). A non-zero value is
+   * used by the older-history page terminal so the user can scroll through forward-filled history.
    */
   scrollback?: number;
   /** `data-testid` for the terminal container. Defaults to `ghostty-terminal`; the older-history

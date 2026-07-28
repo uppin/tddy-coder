@@ -63,13 +63,11 @@ export const TEST_IDS = {
   backToLive: "back-to-live",
   /** Loading indicator shown while the background page terminal is being forward-filled. */
   terminalHistoryLoading: "terminal-history-loading",
-  /** The overlay layer holding the live (streaming) terminal. Scrollable (scrollback > 0) so its viewport can be synced with the page terminal. */
+  /** The overlay layer holding the live (scrollback=0, streaming) terminal. */
   terminalLivePane: "terminal-live-pane",
   /** The overlay layer holding the older-history (scrollback>0) page terminal. */
   terminalPagePane: "terminal-page-pane",
   terminalOlderBufferText: "terminal-older-buffer-text",
-  /** Hidden mirror of the live terminal's viewportY (lines scrolled up from the bottom). */
-  terminalLiveViewportY: "terminal-live-viewport-y",
   /** Hidden mirror of the page terminal's viewportY (lines scrolled up from the bottom). */
   terminalPageViewportY: "terminal-page-viewport-y",
   // Enqueued input overlay (docs/ft/web/enqueued-input-overlay.md)

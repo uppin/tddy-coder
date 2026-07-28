@@ -4,13 +4,13 @@
  * PRD: docs/ft/web/terminal-replay-lazy-scroll.md
  *
  * The Ghostty shared component owns the paging flow with two interchangeable, overlayed ghostty-web
- * terminals sharing one rect. Both terminals are scrollable (scrollback > 0) so their viewports can be
- * synced: scrolling the foreground terminal mirrors its viewportY onto the background terminal, so a
- * swap preserves the scroll offset (no jump). The live terminal always stays mounted and keeps
- * receiving the stream. On a scroll-up-at-top gesture (or the "Load earlier output" affordance) the
- * background page terminal is forward-filled from offset 0 toward the anchor while a loading
- * indicator is shown; once the fill completes the two terminals switch places (the page terminal
- * becomes foreground, scrollable through history). "Back to live" (or a scroll-down-at-bottom
+ * terminals sharing one rect. The live terminal (scrollback 0) always stays mounted and keeps
+ * receiving the stream — scrollback 0 avoids the duplicate-pane accumulation from periodic TUI
+ * full-screen re-paints (guarded by the ghostty-fullscreen-no-duplicate e2e test). On a scroll-up-at-top
+ * gesture (or the "Load earlier output" affordance) the background page terminal (scrollback > 0) is
+ * forward-filled from offset 0 toward the anchor while a loading indicator is shown; once the fill
+ * completes the two terminals switch places (the page terminal becomes foreground, scrollable
+ * through history with full viewport control via scrollToLine). "Back to live" (or a scroll-down-at-bottom
  * gesture on the page terminal) swaps back. All paging logic is encapsulated inside the component.
  */
 
@@ -48,12 +48,8 @@ const OLDER_CHUNK_FINAL: HistoryChunk = {
   atEnd: true,
 };
 
-/** A 30-line block of plain live output — enough to give the live terminal real scrollback (>rows)
- *  so a foreground scroll can be mirrored onto it by the viewport-sync path. */
-const LIVE_LINES_BLOCK = enc(Array.from({ length: 30 }, (_, i) => `live-line-${i}\n`).join(""));
-
 /** A 30-line older-history chunk delivered in one atEnd chunk — gives the page terminal real
- *  scrollback so scrolling its viewport up by a few lines is possible. */
+ *  scrollback so scrollToLine can position the viewport within it. */
 const OLDER_CHUNK_DEEP: HistoryChunk = {
   data: enc(Array.from({ length: 30 }, (_, i) => `older-line-${i}\n`).join("")),
   startOffset: 0n,
@@ -271,15 +267,14 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
     terminal.expectPageForeground().expectNoFurtherHistoryFetch();
   });
 
-  it("mirrors the foreground terminal's viewportY onto the background terminal when scrolled (synced viewing position)", () => {
-    // Given — both terminals have enough scrollback to scroll: the live terminal has received a
-    // 30-line block (scrollback > rows), and the page terminal has been forward-filled with a
-    // 30-line older-history chunk. The page pane is foreground.
+  it("positions the page terminal viewport via scrollLines (full control of the viewport position)", () => {
+    // Given — the page terminal has been forward-filled with a 30-line older-history chunk
+    // (scrollback > rows), so scrollLines has real history to scroll through. The page pane is
+    // foreground and pinned to the bottom (viewportY 0) at the seam.
     const terminal = aGhosttyTerminalGrpcLazyHistory()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME)
-      .pushOutput(LIVE_LINES_BLOCK)
       .expectAffordanceVisible()
       .activateLoadEarlier()
       .expectLoadingVisible()
@@ -287,14 +282,19 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
       .resolveHistoryChunk(OLDER_CHUNK_DEEP)
       .expectPageForeground();
 
-    // Sanity — both viewports start pinned to the bottom (viewportY 0) at the seam.
-    terminal.expectLiveViewportY(0).expectPageViewportY(0);
+    // Sanity — landed at the bottom (the seam) after the fill.
+    terminal.expectPageViewportY(0);
 
-    // When — the user scrolls the foreground (page) terminal up by 5 lines
-    terminal.scrollForegroundUp(5);
+    // When — scroll the page viewport up by 5 lines via the imperative scrollLines handle.
+    terminal.scrollPageUp(5);
 
-    // Then — the page terminal's viewportY becomes 5, and the live (background) terminal's
-    // viewportY is mirrored to 5 via onScroll→scrollToLine, so a swap preserves the scroll offset.
-    terminal.expectPageViewportY(5).expectLiveViewportY(5);
+    // Then — the viewport is positioned exactly 5 lines up from the bottom (full control).
+    terminal.expectPageViewportY(5);
+
+    // When — scroll back down by 5 lines (positive = down toward the bottom).
+    terminal.scrollPageUp(-5);
+
+    // Then — the viewport is pinned back to the bottom (viewportY 0).
+    terminal.expectPageViewportY(0);
   });
 });

@@ -184,33 +184,17 @@ export function aGhosttyTerminalGrpcLazyHistory() {
     },
 
     /**
-     * Drive the foreground terminal's viewport up by `lines` via its imperative handle so the
-     * onScroll sync path fires deterministically (real wheel events on the canvas are not reliably
-     * delivered to ghostty-web under Cypress). Resolves after the viewportY mirror updates.
+     * Drive the page terminal's viewport up by `lines` via its imperative scrollLines handle
+     * (negative = up into scrollback). Real wheel events don't reach ghostty-web reliably under
+     * Cypress, so component tests exercise the "full control of what position is in the viewport"
+     * API through this hook deterministically.
      */
-    scrollForegroundUp(lines: number) {
+    scrollPageUp(lines: number) {
       cy.window().then((win) => {
-        // The foreground terminal is the one whose pane has data-foreground="true". Reach the
-        // imperative handle through the live/page pane's underlying GhosttyTerminal by dispatching
-        // a CustomEvent the component listens for — but the component has no such channel. Instead
-        // we use the public viewport mirror: we cannot call the handle from here, so we trigger a
-        // keyboard PageUp-equivalent via the canvas focus path is also unreliable. Therefore we
-        // expose the scroll by calling the handle through a test-only window hook (see component).
-        const hook = (win as unknown as { __tddyScrollForegroundUp?: (n: number) => void })
-          .__tddyScrollForegroundUp;
-        expect(hook, "test-only scroll hook registered").to.exist;
+        const hook = (win as unknown as { __tddyPageScrollUp?: (n: number) => void })
+          .__tddyPageScrollUp;
+        expect(hook, "test-only page scrollUp hook registered").to.exist;
         hook!(lines);
-      });
-      return this;
-    },
-
-    /** Assert the live terminal's mirrored viewportY equals the given value. */
-    expectLiveViewportY(expected: number) {
-      byTestId(TEST_IDS.terminalLiveViewportY).should(($el) => {
-        expect(
-          Number($el[0].textContent ?? "NaN"),
-          "live terminal viewportY",
-        ).to.equal(expected);
       });
       return this;
     },
@@ -322,7 +306,7 @@ export function aGhosttyTerminalGrpcLazyHistory() {
 
     /**
      * Assert the LIVE terminal buffer contains the given texts in order. Reads the hidden
-     * `terminal-buffer-text` mirror (the live terminal — now scrollback > 0 so it can be synced).
+     * `terminal-buffer-text` mirror (the live terminal — scrollback stays 0).
      */
     expectLiveBufferContainsInOrder(...texts: string[]) {
       byTestId("terminal-buffer-text").should(($el) => {
