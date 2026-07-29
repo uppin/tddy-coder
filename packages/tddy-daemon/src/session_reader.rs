@@ -112,6 +112,7 @@ mod tests {
             previous_session_id: Some("prev-session-000".to_string()),
             session_type: Some("tool".to_string()),
             model: None,
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: None,
             sandbox: None,

@@ -282,14 +282,24 @@ impl CliSessionManager {
 
     /// Build the argv for the Cursor Agent CLI process.
     ///
-    /// Arg order: `[binary, "--model", model, prompt?]`. `model` is omitted when empty.
-    /// `initial_prompt` is appended as a positional arg when non-empty (trimmed).
+    /// Arg order: `[binary, "--resume", chat_id, "--model", model, prompt?]`. `model` is omitted
+    /// when empty. `initial_prompt` is appended as a positional arg when non-empty (trimmed).
+    ///
+    /// `chat_id` is the Cursor chat the session owns (`cursor-agent create-chat`); passing it keeps
+    /// every spawn — first start and each resume — in the same chat. The `--resume` pair is emitted
+    /// only when a non-empty id is given: `--resume` takes an *optional* argument, so a bare flag
+    /// drops the CLI into an interactive chat picker that would wedge the PTY.
     pub fn build_cursor_argv(
         binary_path: &str,
         model: &str,
+        chat_id: Option<&str>,
         initial_prompt: Option<&str>,
     ) -> Vec<String> {
         let mut argv = vec![binary_path.to_string()];
+        if let Some(chat_id) = chat_id.map(str::trim).filter(|id| !id.is_empty()) {
+            argv.push("--resume".to_string());
+            argv.push(chat_id.to_string());
+        }
         if !model.is_empty() {
             argv.push("--model".to_string());
             argv.push(model.to_string());
@@ -304,17 +314,21 @@ impl CliSessionManager {
     }
 
     /// Spawn a new Cursor Agent CLI process for `session_id` in `worktree_path`.
+    ///
+    /// `chat_id` — the Cursor chat the session owns, launched into via `--resume <chat_id>`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn start_cursor(
         &self,
         session_id: &str,
         worktree_path: PathBuf,
         model: &str,
         binary_path: &str,
+        chat_id: Option<&str>,
         initial_prompt: Option<&str>,
         // Extra per-session env pairs applied to the cursor process (e.g. `TDDY_SEMANTIC_INDEX_DB`).
         env: Vec<(String, String)>,
     ) -> anyhow::Result<Arc<PtyHandle>> {
-        let argv = Self::build_cursor_argv(binary_path, model, initial_prompt);
+        let argv = Self::build_cursor_argv(binary_path, model, chat_id, initial_prompt);
         self.spawn_tool(
             session_id,
             MAIN_TERMINAL_ID,
@@ -328,19 +342,21 @@ impl CliSessionManager {
         .await
     }
 
-    /// Resume a Cursor CLI session (never replays the initial prompt).
+    /// Resume a Cursor CLI session into `chat_id` (never replays the initial prompt).
     pub async fn resume_cursor(
         &self,
         session_id: &str,
         worktree_path: PathBuf,
         model: &str,
         binary_path: &str,
+        chat_id: Option<&str>,
     ) -> anyhow::Result<Arc<PtyHandle>> {
         self.start_cursor(
             session_id,
             worktree_path,
             model,
             binary_path,
+            chat_id,
             None,
             Vec::new(),
         )

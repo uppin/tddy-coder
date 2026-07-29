@@ -35,6 +35,11 @@ pub struct SessionMetadata {
     /// Model id for claude-cli sessions (e.g. "opus", "claude-opus-5"). Absent in legacy files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Cursor chat id (`cursor-agent create-chat`) this cursor-cli session talks to. Every spawn
+    /// for the session passes `--resume <id>`, so a resume continues the same chat instead of
+    /// opening a new one. Absent for non-cursor sessions and legacy files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor_chat_id: Option<String>,
     /// Granular activity status reported by per-worktree claude-cli hooks (e.g. "Running",
     /// "WaitingForInput"). Absent for tool sessions and legacy files. Set by `ReportSessionStatus`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -123,6 +128,7 @@ pub fn write_initial_tool_session_metadata(
         previous_session_id: opts.previous_session_id,
         session_type: opts.session_type,
         model: opts.model,
+        cursor_chat_id: None,
         activity_status: opts.activity_status,
         hook_token: opts.hook_token,
         sandbox: opts.sandbox,
@@ -560,6 +566,7 @@ previous_session_id: {prev}
             previous_session_id: None,
             session_type: Some("claude-cli".to_string()),
             model: Some("claude-sonnet-4-6".to_string()),
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: None,
             sandbox: Some(true),

@@ -471,6 +471,7 @@ fn create_fake_sessions(base: &std::path::Path, count: usize) -> Vec<String> {
             previous_session_id: None,
             session_type: None,
             model: None,
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: None,
             sandbox: None,

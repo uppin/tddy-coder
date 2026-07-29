@@ -1846,6 +1846,7 @@ async fn spawn_claude_cli_session_inner(
         previous_session_id: None,
         session_type: Some("claude-cli".to_string()),
         model: Some(model.to_string()),
+        cursor_chat_id: None,
         activity_status: None,
         hook_token: Some(hook_token),
         sandbox: None,
@@ -2655,6 +2656,7 @@ impl ConnectionServiceImpl {
             previous_session_id: None,
             session_type: Some("claude-cli".to_string()),
             model: Some(model.to_string()),
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: None,
             sandbox: Some(true),
@@ -2967,6 +2969,14 @@ impl ConnectionServiceImpl {
             runner_argv.push(prompt.to_string());
         }
 
+        // TODO: pin a Cursor chat for sandboxed cursor sessions too (`--agent-arg --resume
+        // --agent-arg <id>`), the way the unsandboxed path does in `spawn_cursor_cli_session_inner`.
+        // Not done here because the jail runs against its own persistent cursor home
+        // (`prepare_persistent_cursor_home`), so a chat minted by the host `cursor-agent
+        // create-chat` is not necessarily resolvable inside the jail — that needs verifying before
+        // an id is pinned. Until then a sandboxed session records no `cursor_chat_id`, and its
+        // first resume adopts a fresh chat (see `resume_cursor_cli_session`).
+
         // Semantic index: index the worktree into the session dir before spawning the jail
         // (blocking; a missing embedder or a failed index aborts the start — no unindexed
         // fallback), and inject `TDDY_SEMANTIC_INDEX_DB` into the jail env so the in-jail
@@ -3086,6 +3096,7 @@ impl ConnectionServiceImpl {
             previous_session_id: None,
             session_type: Some("cursor-cli".to_string()),
             model: Some(model.to_string()),
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: Some(hook_token),
             sandbox: Some(true),
@@ -8241,6 +8252,7 @@ mod signal_session_unit_tests {
             previous_session_id: None,
             session_type: None,
             model: None,
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: None,
             sandbox: None,
@@ -8665,6 +8677,7 @@ mod list_sessions_unit_tests {
             previous_session_id: Some("ancestor-session".to_string()),
             session_type: Some("tool".to_string()),
             model: None,
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: None,
             sandbox: None,
@@ -8759,6 +8772,7 @@ mod report_session_status_unit_tests {
             previous_session_id: None,
             session_type: Some("claude-cli".to_string()),
             model: Some("claude-sonnet-4-6".to_string()),
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: Some(hook_token.to_string()),
             sandbox: None,
@@ -8858,6 +8872,7 @@ mod report_session_status_unit_tests {
             previous_session_id: None,
             session_type: None,
             model: None,
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: None,
             sandbox: None,
@@ -8977,6 +8992,7 @@ mod agent_activity_unit_tests {
             previous_session_id: None,
             session_type: Some("claude-cli".to_string()),
             model: Some("claude-sonnet-4-6".to_string()),
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: Some(hook_token.to_string()),
             sandbox: None,

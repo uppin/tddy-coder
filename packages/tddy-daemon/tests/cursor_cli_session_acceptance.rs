@@ -19,8 +19,16 @@ const VALID_TOKEN: &str = "valid-token";
 const TEST_MODEL: &str = "claude-4.6-sonnet-medium-thinking";
 const TEST_PROJECT_ID: &str = "test-project";
 
+/// The chat id the stub `cursor-agent` mints for `create-chat`.
+const STUB_CHAT_ID: &str = "f8db82db-e154-41d0-ae72-312bdf6d4d80";
+
 fn write_config_with_cursor_cli_binary(stub_binary: &str) -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
+    let config = load_cursor_cli_config(dir.path(), stub_binary);
+    (dir, config)
+}
+
+fn load_cursor_cli_config(dir: &std::path::Path, stub_binary: &str) -> DaemonConfig {
     let yaml = format!(
         r#"
 users:
@@ -33,9 +41,37 @@ cursor_cli:
   binary_path: {stub_binary}
 "#
     );
-    let config_path = dir.path().join("daemon.yaml");
+    let config_path = dir.join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
-    let config = DaemonConfig::load(&config_path).expect("config must parse");
+    DaemonConfig::load(&config_path).expect("config must parse")
+}
+
+/// Write a stub `cursor-agent` that mints [`STUB_CHAT_ID`] and otherwise idles on stdin.
+fn write_stub_cursor_agent(dir: &std::path::Path) -> std::path::PathBuf {
+    let script_path = dir.join("stub_cursor_agent.sh");
+    std::fs::write(
+        &script_path,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"create-chat\" ]; then echo \"{STUB_CHAT_ID}\"; exit 0; fi\ncat\n"
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    script_path
+}
+
+/// A daemon config whose cursor binary is a stub that can mint a chat id.
+///
+/// A cursor-cli start now runs `cursor-agent create-chat` before launching the agent, so a plain
+/// `/bin/cat` no longer stands in: it exits non-zero on `create-chat` and the start fails.
+fn write_config_with_stub_cursor_agent() -> (tempfile::TempDir, DaemonConfig) {
+    let dir = tempfile::tempdir().unwrap();
+    let stub = write_stub_cursor_agent(dir.path());
+    let config = load_cursor_cli_config(dir.path(), stub.to_str().unwrap());
     (dir, config)
 }
 
@@ -85,9 +121,16 @@ fn create_test_repo_with_origin(dir: &std::path::Path) {
     run(&["push", "-u", "origin", "main"], &[]);
 }
 
+/// A stub agent that echoes its argv, and mints [`STUB_CHAT_ID`] when asked for a chat.
 fn write_echo_argv_script(dir: &std::path::Path) -> std::path::PathBuf {
     let script_path = dir.join("stub_agent.sh");
-    std::fs::write(&script_path, "#!/bin/sh\necho \"ARGV: $@\"\ncat\n").unwrap();
+    std::fs::write(
+        &script_path,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"create-chat\" ]; then echo \"{STUB_CHAT_ID}\"; exit 0; fi\necho \"ARGV: $@\"\ncat\n"
+        ),
+    )
+    .unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -131,16 +174,22 @@ fn start_cursor_cli_request() -> StartSessionRequest {
 }
 
 #[test]
-fn build_cursor_argv_includes_model_and_optional_prompt() {
+fn build_cursor_argv_includes_chat_model_and_optional_prompt() {
+    // Given / When
     let argv = CliSessionManager::build_cursor_argv(
         "/usr/bin/agent",
         "gpt-5.3-codex",
+        Some("f8db82db-e154-41d0-ae72-312bdf6d4d80"),
         Some("fix the bug"),
     );
+
+    // Then
     assert_eq!(
         argv,
         vec![
             "/usr/bin/agent".to_string(),
+            "--resume".to_string(),
+            "f8db82db-e154-41d0-ae72-312bdf6d4d80".to_string(),
             "--model".to_string(),
             "gpt-5.3-codex".to_string(),
             "fix the bug".to_string(),
@@ -154,7 +203,7 @@ async fn cursor_cli_start_with_empty_branch_name_uses_default_branch() {
     create_test_repo_with_origin(repo_dir.path());
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_cursor_cli_binary("/bin/cat");
+    let (_cfg_dir, config) = write_config_with_stub_cursor_agent();
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let mut req = start_cursor_cli_request();
@@ -183,7 +232,7 @@ async fn cursor_cli_session_metadata_fields_persisted() {
     create_test_repo_with_origin(repo_dir.path());
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_cursor_cli_binary("/bin/cat");
+    let (_cfg_dir, config) = write_config_with_stub_cursor_agent();
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let resp = service
@@ -210,7 +259,7 @@ async fn cursor_cli_session_writes_hooks_json() {
     create_test_repo_with_origin(repo_dir.path());
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_cursor_cli_binary("/bin/cat");
+    let (_cfg_dir, config) = write_config_with_stub_cursor_agent();
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let resp = service
@@ -284,6 +333,7 @@ async fn cursor_cli_session_enrichment_reads_from_metadata() {
         previous_session_id: None,
         session_type: Some("cursor-cli".to_string()),
         model: Some(TEST_MODEL.to_string()),
+        cursor_chat_id: None,
         activity_status: None,
         hook_token: None,
         sandbox: None,
@@ -293,7 +343,7 @@ async fn cursor_cli_session_enrichment_reads_from_metadata() {
     };
     tddy_core::write_session_metadata(&session_dir, &meta).unwrap();
 
-    let (_cfg_dir, config) = write_config_with_cursor_cli_binary("/bin/cat");
+    let (_cfg_dir, config) = write_config_with_stub_cursor_agent();
     let sessions_base = sessions_tmp.path().join("testuser");
     let service = minimal_service(config, sessions_base);
 
@@ -365,7 +415,7 @@ async fn cursor_cli_peer_spawn_reuses_the_orchestrator_worktree_when_repo_path_i
     create_test_repo_with_origin(repo_dir.path());
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_cursor_cli_binary("/bin/cat");
+    let (_cfg_dir, config) = write_config_with_stub_cursor_agent();
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let orchestrator_worktree = tempfile::tempdir().unwrap();
@@ -421,7 +471,7 @@ async fn cursor_cli_peer_spawn_records_the_orchestrator_link_even_without_repo_p
     create_test_repo_with_origin(repo_dir.path());
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_cursor_cli_binary("/bin/cat");
+    let (_cfg_dir, config) = write_config_with_stub_cursor_agent();
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let orchestrator_session_id = "019f9dd5-716d-7071-96ac-464ff7b98c2a";
@@ -454,7 +504,7 @@ async fn cursor_cli_peer_spawn_with_repo_path_creates_no_new_branch_in_the_proje
     create_test_repo_with_origin(repo_dir.path());
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_cursor_cli_binary("/bin/cat");
+    let (_cfg_dir, config) = write_config_with_stub_cursor_agent();
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let orchestrator_worktree = tempfile::tempdir().unwrap();
@@ -485,7 +535,7 @@ async fn cursor_cli_peer_spawn_rejects_a_repo_path_that_is_not_a_directory() {
     create_test_repo_with_origin(repo_dir.path());
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_cursor_cli_binary("/bin/cat");
+    let (_cfg_dir, config) = write_config_with_stub_cursor_agent();
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let file_dir = tempfile::tempdir().unwrap();
@@ -519,7 +569,7 @@ async fn cursor_cli_peer_spawn_rejects_a_missing_repo_path() {
     create_test_repo_with_origin(repo_dir.path());
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_cursor_cli_binary("/bin/cat");
+    let (_cfg_dir, config) = write_config_with_stub_cursor_agent();
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let missing_path = sessions_tmp.path().join("does-not-exist");
