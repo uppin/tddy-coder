@@ -313,11 +313,11 @@ export function SessionRuntime({
               Terminal connected to {runtime.livekitRoom}
             </div>
           )}
-          {runtime.status === "connected-grpc" && client && (
+          {runtime.status === "connected-grpc" && (
             <GrpcSessionTerminal
               sessionId={runtime.sessionId}
               sessionToken={sessionToken}
-              client={client}
+              client={client ?? null}
               connected={connected}
               onDisconnect={() => onSessionDisconnect?.(runtime.sessionId)}
               mobileShortcuts={focused && activeTerminalId === AGENT_TERMINAL_ID ? mobileShortcuts : undefined}

@@ -19,16 +19,15 @@ pub mod proto {
     }
 }
 
-pub mod session;
 pub mod bridge;
 pub mod local_pty_relay;
+pub mod session;
 
 pub use bridge::{
     history_into_tonic_stream, into_tonic_stream, serve_get_terminal_history,
-    serve_get_terminal_history_with, serve_send_terminal_input, serve_stream_terminal_output,
+    serve_get_terminal_history_with, serve_send_terminal_input,
+    serve_stream_session_terminal_io_with, serve_stream_terminal_output,
     serve_stream_terminal_output_with,
 };
-pub use proto::terminal_session::{
-    GetTerminalHistoryRequest, TerminalHistoryChunk,
-};
+pub use proto::terminal_session::{GetTerminalHistoryRequest, TerminalHistoryChunk};
 pub use session::{TerminalSession, TerminalSessionStore};

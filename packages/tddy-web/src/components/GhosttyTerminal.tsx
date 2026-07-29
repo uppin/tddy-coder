@@ -28,6 +28,7 @@ import {
 import { TERMINAL_OVERLAY_FIXED_GRID_CHAR_WIDTH_EM } from "./connection/config";
 import { clientPointToTerminalCell } from "../lib/terminalMouseCellCoords";
 import { tddyDebug } from "../lib/debugMask";
+import { computeScrollbar } from "../lib/terminalScrollbar";
 
 // Namespaced `[tddy]` diagnostics enabled by the DEBUG mask (daemon `debug:` / localStorage.debug).
 // Scoped to the data flow behind terminal garbling / misalignment.
@@ -113,9 +114,9 @@ export interface GhosttyTerminalProps {
    */
   fixedViewportGrid?: { cols: number; rows: number };
   /**
-   * Lines of scrollback to retain above the viewport. 0 = none (the default, used by the live
-   * terminal so periodic TUI re-paints do not accumulate as duplicate panes). A non-zero value is
-   * used by the older-history page terminal so the user can scroll through forward-filled history.
+   * Lines of scrollback to retain above the viewport. 0 = none (e.g. alternate buffer).
+   * Non-zero enables native primary-screen scrollback; used by both the live terminal
+   * (post-connect history) and the older-history page terminal (forward-filled pre-connect history).
    */
   scrollback?: number;
   /** `data-testid` for the terminal container. Defaults to `ghostty-terminal`; the older-history
@@ -156,6 +157,18 @@ export interface GhosttyTerminalHandle {
   getScrollbackLength?(): number;
   /** True when the viewport is pinned to the latest output (not scrolled up into scrollback). */
   isPinnedToBottom?(): boolean;
+  /**
+   * Native Scrollbar { total, offset, len } — single source of truth for viewport position,
+   * same coordinate space as scrollToLine.
+   */
+  getScrollbar?(): { total: number; offset: number; len: number };
+  /** True when the TUI has enabled mouse tracking (DEC 1006 / 1002). */
+  hasMouseTracking?(): boolean;
+  /**
+   * Simulate a keystroke: scroll to bottom first (native scroll-to-bottom.keystroke=true),
+   * then forward via onData.
+   */
+  sendKeystroke?(data: string): void;
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
@@ -283,6 +296,20 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           disposables.push(
             term.onData((data) => {
               logData("onData %d chars %s", data.length, JSON.stringify(data.slice(0, 30)));
+              // Native scroll-to-bottom.keystroke=true: any keystroke scrolls to the bottom first.
+              const t = term as unknown as {
+                scrollToBottom?: () => void;
+                getViewportY?: () => number;
+                scrollLines?: (n: number) => void;
+              };
+              if (t.scrollToBottom) {
+                t.scrollToBottom();
+              } else {
+                const vy = t.getViewportY?.() ?? 0;
+                if (vy !== 0 && t.scrollLines) {
+                  t.scrollLines(-vy);
+                }
+              }
               onData(data);
             })
           );
@@ -972,10 +999,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           }
         },
         scrollToLine(line: number) {
-          // Absolute viewport set: 0 = top of scrollback, scrollbackLength = bottom.
-          // The primary "full control" API for positioning the viewport at an exact line.
-          const t = termRef.current as unknown as { scrollToLine?: (n: number) => void } | null;
-          t?.scrollToLine?.(line);
+          // Native scrollToLine uses Scrollbar offset space (0 = top of scrollback).
+          // ghostty-web's scrollToLine sets viewportY directly (0 = bottom), so translate:
+          // viewportY = scrollbackLength - line.
+          const t = termRef.current as unknown as {
+            scrollToLine?: (n: number) => void;
+            getScrollbackLength?: () => number;
+          } | null;
+          if (!t?.scrollToLine) return;
+          const scrollbackLength = t.getScrollbackLength?.() ?? 0;
+          const viewportY = Math.max(0, Math.min(scrollbackLength, scrollbackLength - line));
+          t.scrollToLine(viewportY);
         },
         scrollLines(amount: number) {
           // Relative scroll: positive = down toward latest, negative = up into scrollback.
@@ -991,6 +1025,36 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           // True when the viewport is at the latest output (not scrolled up into scrollback).
           const t = termRef.current as unknown as { getViewportY?: () => number } | null;
           return (t?.getViewportY?.() ?? 0) === 0;
+        },
+        getScrollbar() {
+          const t = termRef.current;
+          if (!t) return { total: rows, offset: 0, len: rows };
+          const scrollbackLength = (t as unknown as { getScrollbackLength?: () => number })
+            .getScrollbackLength?.() ?? 0;
+          const viewportY = (t as unknown as { getViewportY?: () => number }).getViewportY?.() ?? 0;
+          return computeScrollbar({ scrollbackLength, viewportY, rows: t.rows });
+        },
+        hasMouseTracking() {
+          const t = termRef.current as unknown as { hasMouseTracking?: () => boolean } | null;
+          return t?.hasMouseTracking?.() ?? false;
+        },
+        sendKeystroke(data: string) {
+          const t = termRef.current as unknown as {
+            scrollToBottom?: () => void;
+            getViewportY?: () => number;
+            scrollLines?: (n: number) => void;
+          } | null;
+          if (t) {
+            if (t.scrollToBottom) {
+              t.scrollToBottom();
+            } else {
+              const vy = t.getViewportY?.() ?? 0;
+              if (vy !== 0 && t.scrollLines) {
+                t.scrollLines(-vy);
+              }
+            }
+          }
+          onDataRef.current?.(data);
         },
         setTerminalFontSize(px: number) {
           if (!Number.isFinite(px)) return;

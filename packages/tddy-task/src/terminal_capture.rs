@@ -203,7 +203,12 @@ impl TerminalCapture {
     /// `from_offset` to the previous chunk's `end_offset` and calls again until a chunk arrives with
     /// `at_end = true` (its `end_offset` reached `until_offset` or the capture tip). `at_oldest` is
     /// `true` on a chunk whose start sits at the ring's oldest retained byte (no bytes below it).
-    pub fn replay_from(&self, from_offset: u64, until_offset: u64, max_bytes: usize) -> CaptureChunk {
+    pub fn replay_from(
+        &self,
+        from_offset: u64,
+        until_offset: u64,
+        max_bytes: usize,
+    ) -> CaptureChunk {
         let chunk_start = from_offset.max(self.start_offset);
         let cap = if until_offset == 0 {
             self.end_offset

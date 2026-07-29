@@ -53,6 +53,8 @@ export interface FetcherDouble {
   resolveChunk: (chunk: HistoryChunk) => void;
   /** Resolve the in-flight fetch with null (no older bytes). */
   resolveNull: () => void;
+  /** Reject the in-flight fetch (simulates an RPC error, e.g. `getTerminalHistory` not_found). */
+  rejectFetch: (err: unknown) => void;
   /** True when a fetch is awaiting resolution. */
   hasPending: () => boolean;
 }
@@ -60,11 +62,17 @@ export interface FetcherDouble {
 function aFetcherDouble(): FetcherDouble {
   const calls: FetchCall[] = [];
   let pending: ((chunk: HistoryChunk | null) => void) | null = null;
+  let pendingReject: ((err: unknown) => void) | null = null;
   const fetch = (fromOffset: bigint, untilOffset: bigint): Promise<HistoryChunk | null> => {
     calls.push({ from: fromOffset, until: untilOffset });
-    return new Promise<HistoryChunk | null>((resolve) => {
+    return new Promise<HistoryChunk | null>((resolve, reject) => {
       pending = resolve;
+      pendingReject = reject;
     });
+  };
+  const clear = () => {
+    pending = null;
+    pendingReject = null;
   };
   return {
     fetch,
@@ -72,14 +80,20 @@ function aFetcherDouble(): FetcherDouble {
     resolveChunk(chunk) {
       if (!pending) throw new Error("no pending historyFetcher call to resolve");
       const resolve = pending;
-      pending = null;
+      clear();
       resolve(chunk);
     },
     resolveNull() {
       if (!pending) throw new Error("no pending historyFetcher call to resolve");
       const resolve = pending;
-      pending = null;
+      clear();
       resolve(null);
+    },
+    rejectFetch(err) {
+      if (!pendingReject) throw new Error("no pending historyFetcher call to reject");
+      const reject = pendingReject;
+      clear();
+      reject(err);
     },
     hasPending: () => pending !== null,
   };
@@ -199,6 +213,105 @@ export function aGhosttyTerminalGrpcLazyHistory() {
       return this;
     },
 
+    /**
+     * Drive the page terminal's viewport to an absolute line via scrollToLine (0 = top of
+     * scrollback, scrollbackLength = bottom). The native "full control" viewport API.
+     */
+    scrollPageToLine(line: number) {
+      cy.window().then((win) => {
+        const hook = (win as unknown as { __tddyPageScrollToLine?: (n: number) => void })
+          .__tddyPageScrollToLine;
+        expect(hook, "test-only page scrollToLine hook registered").to.exist;
+        hook!(line);
+      });
+      return this;
+    },
+
+    /**
+     * Toggle mouse tracking (DEC 1006) on the live terminal. When tracking is on, the wheel is
+     * reported to the TUI (SGR button 64/65) and does NOT scroll the viewport.
+     */
+    enableLiveMouseTracking(on = true) {
+      cy.window().then((win) => {
+        const hook = (win as unknown as { __tddyLiveMouseTracking?: (on: boolean) => void })
+          .__tddyLiveMouseTracking;
+        expect(hook, "test-only live mouse-tracking hook registered").to.exist;
+        hook!(on);
+      });
+      return this;
+    },
+
+    /** Assert the LIVE terminal's mirrored viewportY equals the given value. */
+    expectLiveViewportY(expected: number) {
+      byTestId(TEST_IDS.terminalLiveViewportY).should(($el) => {
+        expect(
+          Number($el[0].textContent ?? "NaN"),
+          "live terminal viewportY",
+        ).to.equal(expected);
+      });
+      return this;
+    },
+
+    /** Assert the LIVE terminal's mirrored scrollback length equals the given value. */
+    expectLiveScrollbackLength(expected: number) {
+      byTestId(TEST_IDS.terminalLiveScrollbackLength).should(($el) => {
+        expect(
+          Number($el[0].textContent ?? "NaN"),
+          "live terminal scrollback length",
+        ).to.equal(expected);
+      });
+      return this;
+    },
+
+    /** Capture the LIVE terminal's scrollback length for later comparison (returns a Chainable). */
+    captureLiveScrollbackLength(): Cypress.Chainable<number> {
+      return byTestId(TEST_IDS.terminalLiveScrollbackLength).then(($el) =>
+        Number($el[0].textContent ?? "NaN"),
+      );
+    },
+
+    /** Capture the PAGE terminal's native Scrollbar {total, offset, len} for later comparison. */
+    capturePageScrollbar(): Cypress.Chainable<{ total: number; offset: number; len: number }> {
+      return byTestId(TEST_IDS.terminalPageScrollbar)
+        .should(($el) => {
+          const parts = ($el[0].textContent ?? "").split(",").map((s) => Number(s));
+          expect(parts.length, "page scrollbar mirror parts").to.equal(3);
+          expect(parts[0], "page scrollbar total").to.be.greaterThan(0);
+        })
+        .then(($el) => {
+          const parts = ($el[0].textContent ?? "").split(",").map((s) => Number(s));
+          return { total: parts[0] ?? 0, offset: parts[1] ?? 0, len: parts[2] ?? 0 };
+        });
+    },
+
+    /**
+     * Assert the PAGE terminal's native Scrollbar mirror carries {total, offset, len} with the
+     * given values (the single source of truth for viewport position, same coordinate space as
+     * scrollToLine).
+     */
+    expectPageScrollbar(expected: { total: number; offset: number; len: number }) {
+      byTestId(TEST_IDS.terminalPageScrollbar).should(($el) => {
+        const raw = ($el[0].textContent ?? "").split(",").map((s) => Number(s));
+        expect(raw.length, "page scrollbar mirror parts").to.equal(3);
+        expect(raw[0], "page scrollbar total").to.equal(expected.total);
+        expect(raw[1], "page scrollbar offset").to.equal(expected.offset);
+        expect(raw[2], "page scrollbar len").to.equal(expected.len);
+      });
+      return this;
+    },
+
+    /** Assert the LIVE terminal's native Scrollbar mirror carries {total, offset, len}. */
+    expectLiveScrollbar(expected: { total: number; offset: number; len: number }) {
+      byTestId(TEST_IDS.terminalLiveScrollbar).should(($el) => {
+        const raw = ($el[0].textContent ?? "").split(",").map((s) => Number(s));
+        expect(raw.length, "live scrollbar mirror parts").to.equal(3);
+        expect(raw[0], "live scrollbar total").to.equal(expected.total);
+        expect(raw[1], "live scrollbar offset").to.equal(expected.offset);
+        expect(raw[2], "live scrollbar len").to.equal(expected.len);
+      });
+      return this;
+    },
+
     /** Assert the page terminal's mirrored viewportY equals the given value. */
     expectPageViewportY(expected: number) {
       byTestId(TEST_IDS.terminalPageViewportY).should(($el) => {
@@ -222,6 +335,14 @@ export function aGhosttyTerminalGrpcLazyHistory() {
     resolveHistoryNull() {
       cy.then(() => {
         fetcher.resolveNull();
+      });
+      return this;
+    },
+
+    /** Reject the in-flight history fetch (simulates an RPC error, e.g. `getTerminalHistory` not_found). */
+    rejectHistoryFetch(err: unknown) {
+      cy.then(() => {
+        fetcher.rejectFetch(err);
       });
       return this;
     },
@@ -306,7 +427,7 @@ export function aGhosttyTerminalGrpcLazyHistory() {
 
     /**
      * Assert the LIVE terminal buffer contains the given texts in order. Reads the hidden
-     * `terminal-buffer-text` mirror (the live terminal — scrollback stays 0).
+     * `terminal-buffer-text` mirror (the live terminal — scrollback 0, current screen only).
      */
     expectLiveBufferContainsInOrder(...texts: string[]) {
       byTestId("terminal-buffer-text").should(($el) => {

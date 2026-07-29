@@ -10,14 +10,16 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use tddy_task::TerminalCapture;
 use tddy_terminal_rpc::proto::terminal_session::{
-    GetTerminalHistoryRequest, SessionTerminalInput, SessionTerminalOutput, StreamTerminalOutputRequest,
+    GetTerminalHistoryRequest, SessionTerminalInput, SessionTerminalOutput, StreamReplayMode,
+    StreamTerminalOutputRequest,
 };
 use tddy_terminal_rpc::session::{TerminalSession, TerminalSessionStore};
 use tddy_terminal_rpc::{
-    serve_get_terminal_history_with, serve_send_terminal_input, serve_stream_terminal_output_with,
+    serve_get_terminal_history_with, serve_send_terminal_input,
+    serve_stream_session_terminal_io_with, serve_stream_terminal_output_with,
 };
-use tddy_task::TerminalCapture;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::timeout;
 
@@ -100,7 +102,12 @@ impl StubStore {
     /// Wrap a terminal in the store, returning the store and a shared handle the test drives.
     fn with(terminal: StubTerminal) -> (Self, std::sync::Arc<StubTerminal>) {
         let arc = std::sync::Arc::new(terminal);
-        (StubStore { terminal: Some(arc.clone()) }, arc)
+        (
+            StubStore {
+                terminal: Some(arc.clone()),
+            },
+            arc,
+        )
     }
 
     /// An empty store that exposes no terminal.
@@ -141,6 +148,25 @@ fn req(session_id: &str, terminal_id: &str, cols: u32, rows: u32) -> StreamTermi
         terminal_id: terminal_id.into(),
         initial_cols: cols,
         initial_rows: rows,
+        mode: StreamReplayMode::Tail as i32,
+        from_offset: 0,
+    }
+}
+
+/// Build a `StreamTerminalOutputRequest` in `FROM_OFFSET` mode resuming from `from_offset`.
+fn req_from_offset(
+    session_id: &str,
+    terminal_id: &str,
+    from_offset: u64,
+) -> StreamTerminalOutputRequest {
+    StreamTerminalOutputRequest {
+        session_token: String::new(),
+        session_id: session_id.into(),
+        terminal_id: terminal_id.into(),
+        initial_cols: 0,
+        initial_rows: 0,
+        mode: StreamReplayMode::FromOffset as i32,
+        from_offset,
     }
 }
 
@@ -149,7 +175,8 @@ fn req(session_id: &str, terminal_id: &str, cols: u32, rows: u32) -> StreamTermi
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn serve_stream_terminal_output_emits_the_last_screen_chunk_with_offsets_as_the_first_frame() {
+async fn serve_stream_terminal_output_emits_the_last_screen_chunk_with_offsets_as_the_first_frame()
+{
     // Given a terminal that has produced 10 bytes
     let terminal = StubTerminal::new();
     terminal.write(b"0123456789");
@@ -170,7 +197,8 @@ async fn serve_stream_terminal_output_emits_the_last_screen_chunk_with_offsets_a
 }
 
 #[tokio::test]
-async fn serve_stream_terminal_output_marks_at_oldest_when_the_initial_frame_reaches_the_ring_start() {
+async fn serve_stream_terminal_output_marks_at_oldest_when_the_initial_frame_reaches_the_ring_start(
+) {
     // Given a terminal that has produced only 3 bytes
     let terminal = StubTerminal::new();
     terminal.write(b"abc");
@@ -391,6 +419,10 @@ async fn serve_send_terminal_input_forwards_the_bytes_and_the_cumulative_offset(
             terminal_id: String::new(),
             control_token: String::new(),
             input_offset: 3,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
+            initial_cols: 0,
+            initial_rows: 0,
         },
     )
     .await
@@ -399,4 +431,306 @@ async fn serve_send_terminal_input_forwards_the_bytes_and_the_cumulative_offset(
     // Then the bytes and the offset were forwarded to the PTY
     let inputs = handle.inputs.lock().unwrap().clone();
     assert_eq!(inputs, vec![(Bytes::from_static(b"hi!"), 3)]);
+}
+
+// ---------------------------------------------------------------------------
+// StreamTerminalOutput: FROM_OFFSET catch-up (reconnect resume)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn serve_stream_terminal_output_from_offset_replays_only_the_gap_from_offset_to_tip() {
+    // Given a terminal that has produced 10 bytes
+    let terminal = StubTerminal::new();
+    terminal.write(b"0123456789");
+    let (store, handle) = StubStore::with(terminal);
+
+    // When the client reconnects with FROM_OFFSET at 3 (it already holds bytes 0..3)
+    let rx = serve_stream_terminal_output_with(&store, req_from_offset("s1", "", 3), 4)
+        .await
+        .expect("stream opened");
+    handle.end();
+    let frames = drain(rx).await;
+
+    // Then the catch-up is chunked from offset 3 to the tip (10), no tail chunk, each frame tagged
+    // with its absolute offsets — the client advances its currentOffset to 10 with no duplicates.
+    assert_eq!(frames.len(), 2, "two catch-up chunks: 3..7 and 7..10");
+    assert_eq!(frames[0].data, b"3456");
+    assert_eq!(frames[0].start_offset, 3);
+    assert_eq!(frames[0].end_offset, 7);
+    assert!(!frames[0].at_oldest);
+    assert_eq!(frames[1].data, b"789");
+    assert_eq!(frames[1].start_offset, 7);
+    assert_eq!(frames[1].end_offset, 10);
+    assert!(!frames[1].at_oldest);
+}
+
+#[tokio::test]
+async fn serve_stream_terminal_output_from_offset_at_the_tip_emits_no_catch_up() {
+    // Given a terminal that has produced 10 bytes
+    let terminal = StubTerminal::new();
+    terminal.write(b"0123456789");
+    let (store, handle) = StubStore::with(terminal);
+
+    // When the client reconnects with FROM_OFFSET already at the tip (10)
+    let rx = serve_stream_terminal_output_with(&store, req_from_offset("s1", "", 10), 4)
+        .await
+        .expect("stream opened");
+    handle.end();
+    let frames = drain(rx).await;
+
+    // Then no catch-up frame is emitted (the gap is empty); the stream goes straight to live and
+    // ends on pty_done.
+    assert!(
+        frames.is_empty(),
+        "no catch-up when from_offset == end_offset"
+    );
+}
+
+#[tokio::test]
+async fn serve_stream_terminal_output_from_offset_zero_replays_the_full_retained_buffer() {
+    // Given a terminal that has produced 10 bytes (nothing evicted; start_offset == 0)
+    let terminal = StubTerminal::new();
+    terminal.write(b"0123456789");
+    let (store, handle) = StubStore::with(terminal);
+
+    // When the client reconnects with FROM_OFFSET 0 and a large frame budget
+    let rx = serve_stream_terminal_output_with(&store, req_from_offset("s1", "", 0), 64)
+        .await
+        .expect("stream opened");
+    handle.end();
+    let frames = drain(rx).await;
+
+    // Then a single catch-up frame returns the whole retained buffer, reaching the oldest byte.
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0].data, b"0123456789");
+    assert_eq!(frames[0].start_offset, 0);
+    assert_eq!(frames[0].end_offset, 10);
+    assert!(frames[0].at_oldest);
+}
+
+#[tokio::test]
+async fn serve_stream_terminal_output_from_offset_clamps_below_start_offset_to_the_ring_start() {
+    // Given a terminal that has evicted its earliest 10 bytes (start_offset == 10)
+    let terminal = StubTerminal::new();
+    terminal.write(&vec![b'x'; tddy_task::TerminalCapture::CAPTURE_LIMIT_BYTES]);
+    terminal.write(b"0123456789");
+    let (store, handle) = StubStore::with(terminal);
+
+    // When the client reconnects with FROM_OFFSET 0 (older than the retained start_offset of 10)
+    let rx = serve_stream_terminal_output_with(&store, req_from_offset("s1", "", 0), 64 * 1024)
+        .await
+        .expect("stream opened");
+    handle.end();
+    let frames = drain(rx).await;
+
+    // Then the catch-up is clamped up to start_offset (10): the first frame starts at 10 and reaches
+    // the oldest retained byte (at_oldest) — the evicted bytes 0..10 are not replayed.
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0].start_offset, 10);
+    assert_eq!(
+        frames[0].end_offset,
+        tddy_task::TerminalCapture::CAPTURE_LIMIT_BYTES as u64 + 10
+    );
+    assert!(frames[0].at_oldest);
+}
+
+#[tokio::test]
+async fn serve_stream_terminal_output_from_offset_skips_resize_and_drain_unlike_tail() {
+    // Given a terminal with stale pre-resize bytes already broadcast
+    let terminal = StubTerminal::new();
+    terminal.write(b"stale");
+    let (store, handle) = StubStore::with(terminal);
+
+    // When the client reconnects with FROM_OFFSET 0 and explicit dimensions
+    let rx = serve_stream_terminal_output_with(
+        &store,
+        StreamTerminalOutputRequest {
+            session_token: String::new(),
+            session_id: "s1".into(),
+            terminal_id: String::new(),
+            initial_cols: 120,
+            initial_rows: 40,
+            mode: StreamReplayMode::FromOffset as i32,
+            from_offset: 0,
+        },
+        64,
+    )
+    .await
+    .expect("stream opened");
+    handle.end();
+    let frames = drain(rx).await;
+
+    // Then FROM_OFFSET does NOT resize the PTY (the terminal already holds the right dimensions) and
+    // does NOT drain the broadcast (no stale pre-resize bytes were forwarded anyway on reconnect).
+    assert!(
+        handle.resizes.lock().unwrap().is_empty(),
+        "FROM_OFFSET must not resize"
+    );
+    assert_eq!(frames[0].data, b"stale");
+    assert!(frames[0].at_oldest);
+}
+
+// ---------------------------------------------------------------------------
+// StreamSessionTerminalIO (bidi): replay-once / resume-by-offset + input forward
+// ---------------------------------------------------------------------------
+
+/// An input stream for the bidi helper: a fixed sequence of `SessionTerminalInput` chunks drained by
+/// the bridge's spawned forwarder. `tokio_stream::iter` yields the items then ends, so the
+/// forwarder task exits after the last chunk.
+fn input_stream(
+    msgs: Vec<SessionTerminalInput>,
+) -> impl tokio_stream::Stream<Item = Result<SessionTerminalInput, tddy_rpc::Status>> + Send + Unpin
+{
+    tokio_stream::iter(msgs.into_iter().map(Ok))
+}
+
+/// A `verify_control` closure that always approves (tests do not exercise control-token theft).
+fn always_allow_control() -> impl Fn(&str, &str) -> std::future::Ready<bool> + Send + Sync {
+    move |_sid, _tok| std::future::ready(true)
+}
+
+#[tokio::test]
+async fn serve_stream_session_terminal_io_tail_emits_the_last_frame_then_forwards_input() {
+    // Given a terminal that has produced 10 bytes
+    let terminal = StubTerminal::new();
+    terminal.write(b"0123456789");
+    let (store, handle) = StubStore::with(terminal);
+    let session = store.terminal.clone().expect("terminal registered");
+    let session: std::sync::Arc<dyn TerminalSession> = session;
+
+    // When a bidi client opens with TAIL and sends an open-frame chunk plus two follow-up chunks
+    let first = SessionTerminalInput {
+        session_token: String::new(),
+        session_id: "s1".into(),
+        data: b"first".to_vec(),
+        terminal_id: String::new(),
+        control_token: String::new(),
+        input_offset: 0,
+        mode: StreamReplayMode::Tail as i32,
+        from_offset: 0,
+        initial_cols: 0,
+        initial_rows: 0,
+    };
+    let followups = vec![
+        SessionTerminalInput {
+            session_token: String::new(),
+            session_id: "s1".into(),
+            data: b"second".to_vec(),
+            terminal_id: String::new(),
+            control_token: String::new(),
+            input_offset: 5,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
+            initial_cols: 0,
+            initial_rows: 0,
+        },
+        SessionTerminalInput {
+            session_token: String::new(),
+            session_id: "s1".into(),
+            data: b"third".to_vec(),
+            terminal_id: String::new(),
+            control_token: String::new(),
+            input_offset: 11,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
+            initial_cols: 0,
+            initial_rows: 0,
+        },
+    ];
+    let mut rx = serve_stream_session_terminal_io_with(
+        session,
+        "s1".into(),
+        first,
+        input_stream(followups),
+        always_allow_control(),
+        4,
+    )
+    .await
+    .expect("bidi stream opened");
+    handle.end();
+
+    // Then the output side emits the TAIL last frame (6789, tagged 6..10) before going live.
+    let mut saw_last_frame = false;
+    for _ in 0..16 {
+        let frame = match timeout(RECV_TIMEOUT, rx.recv()).await {
+            Ok(Some(Ok(f))) => f,
+            Ok(Some(Err(_))) | Ok(None) => break,
+            Err(_) => break,
+        };
+        if frame.data == b"6789" && frame.start_offset == 6 && frame.end_offset == 10 {
+            saw_last_frame = true;
+            break;
+        }
+    }
+    assert!(
+        saw_last_frame,
+        "bidi TAIL emits the last frame with offsets"
+    );
+
+    // And the input side forwarded the open-frame data plus both follow-up chunks to the PTY, in order
+    // with their cumulative offsets. The forwarder is a spawned task that drains the input stream
+    // asynchronously, so poll the recorded inputs until all three arrive (or the timeout fires).
+    let inputs = {
+        let mut inputs = handle.inputs.lock().unwrap().clone();
+        let deadline = std::time::Instant::now() + RECV_TIMEOUT;
+        while inputs.len() < 3 && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            inputs = handle.inputs.lock().unwrap().clone();
+        }
+        inputs
+    };
+    assert_eq!(
+        inputs,
+        vec![
+            (Bytes::from_static(b"first"), 0),
+            (Bytes::from_static(b"second"), 5),
+            (Bytes::from_static(b"third"), 11),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn serve_stream_session_terminal_io_from_offset_emits_only_the_catch_up_gap() {
+    // Given a terminal that has produced 10 bytes
+    let terminal = StubTerminal::new();
+    terminal.write(b"0123456789");
+    let (store, handle) = StubStore::with(terminal);
+    let session = store.terminal.clone().expect("terminal registered");
+    let session: std::sync::Arc<dyn TerminalSession> = session;
+
+    // When a bidi client reconnects with FROM_OFFSET at 3 (it already holds bytes 0..3)
+    let first = SessionTerminalInput {
+        session_token: String::new(),
+        session_id: "s1".into(),
+        data: Vec::new(),
+        terminal_id: String::new(),
+        control_token: String::new(),
+        input_offset: 0,
+        mode: StreamReplayMode::FromOffset as i32,
+        from_offset: 3,
+        initial_cols: 0,
+        initial_rows: 0,
+    };
+    let rx = serve_stream_session_terminal_io_with(
+        session,
+        "s1".into(),
+        first,
+        input_stream(Vec::new()),
+        always_allow_control(),
+        4,
+    )
+    .await
+    .expect("bidi stream opened");
+    handle.end();
+    let frames = drain(rx).await;
+
+    // Then the bidi output carries only the catch-up gap (3..7, 7..10), no tail chunk — matching the
+    // server-streaming FROM_OFFSET path so a bidi reconnect also resumes without duplicates.
+    assert_eq!(frames.len(), 2);
+    assert_eq!(frames[0].data, b"3456");
+    assert_eq!(frames[0].start_offset, 3);
+    assert_eq!(frames[0].end_offset, 7);
+    assert_eq!(frames[1].data, b"789");
+    assert_eq!(frames[1].start_offset, 7);
+    assert_eq!(frames[1].end_offset, 10);
 }

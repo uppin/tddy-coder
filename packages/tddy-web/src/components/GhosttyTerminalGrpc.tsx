@@ -27,10 +27,7 @@ function hexPreview(data: Uint8Array, n = 24): string {
   return Array.from(data.slice(0, n), (b) => b.toString(16).padStart(2, "0")).join(" ");
 }
 
-/** Scrollback lines retained by the older-history page terminal (large enough to hold a full session).
- *  The LIVE terminal stays at scrollback 0 (the GhosttyTerminal default): a scrollback > 0 live
- *  terminal accumulates duplicate panes from periodic TUI full-screen re-paints (ghostty-web has no
- *  prepend/suppress API), which the repo's ghostty-fullscreen-no-duplicate e2e test guards against. */
+/** Scrollback lines retained by the older-history page terminal (large enough to hold a full session). */
 const PAGE_SCROLLBACK = 50000;
 
 /**
@@ -80,6 +77,12 @@ export interface GhosttyTerminalGrpcProps {
    *  mounted underneath and keeps receiving the stream). "Back to live" (or a scroll-down-at-bottom
    *  gesture on the page terminal) swaps back. All paging logic is encapsulated here. */
   historyFetcher?: HistoryFetcher;
+  /** Called per output frame with the cumulative byte offset the client has now received up to.
+   *  On a replay / catch-up frame (`endOffset > 0`) the offset is the frame's absolute `endOffset`;
+   *  on a live tail frame (`endOffset === 0`) the offset advances by the frame's byte length. The
+   *  parent uses this to track `currentOffset` so a reconnect can resume with `FROM_OFFSET` instead
+   *  of re-replaying (no duplicates). */
+  onOffsetUpdate?: (offset: bigint) => void;
 }
 
 export function GhosttyTerminalGrpc({
@@ -94,6 +97,7 @@ export function GhosttyTerminalGrpc({
   mobileShortcuts,
   onRegisterInsertInput,
   historyFetcher,
+  onOffsetUpdate,
 }: GhosttyTerminalGrpcProps) {
   const termRef = useRef<GhosttyTerminalHandle>(null);
   const olderTermRef = useRef<GhosttyTerminalHandle>(null);
@@ -107,16 +111,20 @@ export function GhosttyTerminalGrpc({
   const [olderBufferText, setOlderBufferText] = useState("");
   // Viewport position mirror for the page terminal (lines up from the bottom). Surfaced through a
   // hidden element so component tests can assert scrollToLine gives full control of the viewport.
-  // The live terminal stays at scrollback 0 (always pinned), so it has no viewportY to mirror.
   const [pageViewportY, setPageViewportY] = useState(0);
+  const [liveViewportY, setLiveViewportY] = useState(0);
+  const [liveScrollbackLength, setLiveScrollbackLength] = useState(0);
+  const [pageScrollbar, setPageScrollbar] = useState("");
+  const [liveScrollbar, setLiveScrollbar] = useState("");
   const isMobile = useIsMobile();
   const { isKeyboardOpen } = useVisualViewport();
 
   // Overlay double-buffer paging state. Two ghostty-web terminals share the same rect; `view`
-  // decides which is foreground (visible, interactive). The live terminal (scrollback 0) always
-  // stays mounted and keeps receiving the stream, so swapping back to "live" is instant and current.
-  // `loading` shows the loading indicator while the background page terminal is forward-filled;
-  // `filled` records that the page terminal has been populated (enables instant re-swap to history).
+  // decides which is foreground (visible, interactive). The live terminal (scrollback 0, always
+  // pinned to the live tip) always stays mounted and keeps receiving the stream, so swapping back
+  // to "live" is instant. `loading` shows the loading indicator while the background page terminal
+  // is forward-filled; `filled` records that the page terminal has been populated (enables instant
+  // re-swap to history).
   const loaderRef = useRef<TerminalHistoryForwardLoader | null>(null);
   const anchorRef = useRef<{ endOffset: bigint; atOldest: boolean } | null>(null);
   const [anchor, setAnchor] = useState<{ endOffset: bigint; atOldest: boolean } | null>(null);
@@ -126,6 +134,24 @@ export function GhosttyTerminalGrpc({
   const [filled, setFilled] = useState(false);
   const historyFetcherRef = useRef(historyFetcher);
   historyFetcherRef.current = historyFetcher;
+
+  // Cumulative output offset the client has received up to. On a replay / catch-up frame
+  // (`endOffset > 0`) it snaps to that absolute offset; on a live tail frame it advances by the
+  // frame's byte length. Surfaced to the parent via `onOffsetUpdate` so a reconnect can resume with
+  // `FROM_OFFSET` instead of re-replaying (no duplicates).
+  const currentOffsetRef = useRef(0n);
+  const onOffsetUpdateRef = useRef(onOffsetUpdate);
+  onOffsetUpdateRef.current = onOffsetUpdate;
+
+  const refreshMirrors = () => {
+    setPageViewportY(olderTermRef.current?.getViewportScrollOffset?.() ?? 0);
+    setLiveViewportY(termRef.current?.getViewportScrollOffset?.() ?? 0);
+    setLiveScrollbackLength(termRef.current?.getScrollbackLength?.() ?? 0);
+    const pageSb = olderTermRef.current?.getScrollbar?.();
+    setPageScrollbar(pageSb ? `${pageSb.total},${pageSb.offset},${pageSb.len}` : "");
+    const liveSb = termRef.current?.getScrollbar?.();
+    setLiveScrollbar(liveSb ? `${liveSb.total},${liveSb.offset},${liveSb.len}` : "");
+  };
 
   const sendInput = (data: string | Uint8Array) =>
     stream.send(typeof data === "string" ? new TextEncoder().encode(data) : data);
@@ -155,6 +181,14 @@ export function GhosttyTerminalGrpc({
           sessionId,
         );
       }
+      // Advance the cumulative output offset: a replay / catch-up frame snaps to its absolute
+      // `endOffset`; a live tail frame advances by its byte length. Surface to the parent so a
+      // reconnect resumes with `FROM_OFFSET` (no duplicate replay).
+      currentOffsetRef.current =
+        frame.endOffset > 0n
+          ? frame.endOffset
+          : currentOffsetRef.current + BigInt(data.length);
+      onOffsetUpdateRef.current?.(currentOffsetRef.current);
       const ready = termReadyRef.current && !!termRef.current;
       if (dGrpc.enabled) {
         dGrpc("recv %d bytes ready=%o %s", data.length, ready, hexPreview(data));
@@ -176,7 +210,7 @@ export function GhosttyTerminalGrpc({
       setBufferText(text);
       const olderText = olderTermRef.current?.getBufferText?.() ?? "";
       setOlderBufferText(olderText);
-      setPageViewportY(olderTermRef.current?.getViewportScrollOffset?.() ?? 0);
+      refreshMirrors();
     }, 200);
     return () => clearInterval(interval);
   }, []);
@@ -190,18 +224,30 @@ export function GhosttyTerminalGrpc({
     if (fillingRef.current || filled) return;
     const fetcher = historyFetcherRef.current;
     const a = anchorRef.current;
-    if (!fetcher || !a || a.atOldest || a.endOffset <= 0n) return;
+    // `a.atOldest` (captured from the initial replay frame) gates the affordance: if the ring was
+    // already at its oldest at open time, there is no older history to load. The forward-fill upper
+    // bound, though, is the CURRENT live tip (`currentOffset`), NOT the stale anchor `endOffset`:
+    // the capture ring may have evicted the original tip, in which case `replay_from(0, anchor)` is
+    // an empty range and the page would swap to blank. Bounding by the current tip yields
+    // `[start_offset, tip]` — the full retained history at fill time — which is always non-empty
+    // while any history is retained (and the affordance is hidden when none is).
+    if (!fetcher || !a || a.atOldest) return;
+    const untilOffset = currentOffsetRef.current;
+    if (untilOffset <= 0n) return;
     fillingRef.current = true;
     setLoading(true);
     if (loaderRef.current === null) {
-      loaderRef.current = new TerminalHistoryForwardLoader(a.endOffset, a.atOldest);
+      loaderRef.current = new TerminalHistoryForwardLoader(untilOffset, a.atOldest);
     }
     const loader = loaderRef.current;
+    let wroteAny = false;
+    let failed = false;
     try {
       while (!loader.done) {
         const chunk = await loader.loadNext(fetcher);
         if (chunk === null) break;
         if (chunk.data.length > 0) {
+          wroteAny = true;
           const older = olderTermRef.current;
           if (olderReadyRef.current && older) {
             older.write(chunk.data);
@@ -217,15 +263,29 @@ export function GhosttyTerminalGrpc({
           );
         }
       }
+    } catch (err) {
+      // A failed fetch (e.g. `getTerminalHistory` not supported for this session type, or a transport
+      // error) must NOT swap to a blank page — stay on the live pane so the user keeps their terminal.
+      failed = true;
+      dHistory(
+        "forward-fill failed (staying on live): %s",
+        err instanceof Error ? err.message : String(err),
+      );
     } finally {
       fillingRef.current = false;
       setLoading(false);
-      setFilled(true);
-      // Swap the page terminal to the foreground and land at its bottom (newest pre-anchor line).
-      // Synchronous (not rAF-deferred) so a subsequent programmatic scroll can't race with a pending
-      // landing scroll and get clobbered back to the bottom.
-      setView("page");
-      olderTermRef.current?.scrollToBottom?.();
+      // Only swap to the history page when the fill actually produced history. A failed fetch or an
+      // empty retained range leaves the user on the live pane (the affordance stays available so the
+      // fill can be retried once history is available) instead of swapping to a blank page.
+      if (!failed && wroteAny) {
+        setFilled(true);
+        // Swap the page terminal to the foreground and land at its bottom (newest pre-anchor line).
+        // Synchronous (not rAF-deferred) so a subsequent programmatic scroll can't race with a pending
+        // landing scroll and get clobbered back to the bottom.
+        setView("page");
+        olderTermRef.current?.scrollToBottom?.();
+      }
+      refreshMirrors();
     }
   };
 
@@ -241,35 +301,49 @@ export function GhosttyTerminalGrpc({
     olderTermRef.current?.scrollToBottom?.();
   };
 
-  // Test-only hook: scroll the page terminal's viewport up by `n` lines via scrollLines — the
-  // relative "full control of what position is in the viewport" API. Real wheel events don't
-  // reach ghostty-web reliably under Cypress, so component tests drive the viewport through this hook.
-  // FIXME: test-only hook; remove if a real wheel-driver becomes available in Cypress.
+  // FIXME: test-only hooks; remove if real wheel/keystroke drivers become available in Cypress.
   useEffect(() => {
-    const win = window as unknown as { __tddyPageScrollUp?: (n: number) => void };
+    const win = window as unknown as {
+      __tddyPageScrollUp?: (n: number) => void;
+      __tddyPageScrollToLine?: (n: number) => void;
+      __tddyLiveMouseTracking?: (on: boolean) => void;
+    };
     win.__tddyPageScrollUp = (n: number) => {
       olderTermRef.current?.scrollLines?.(-n);
     };
+    win.__tddyPageScrollToLine = (n: number) => {
+      olderTermRef.current?.scrollToLine?.(n);
+    };
+    win.__tddyLiveMouseTracking = (on: boolean) => {
+      if (on) {
+        termRef.current?.write("\x1b[?1006h\x1b[?1002h");
+      } else {
+        termRef.current?.write("\x1b[?1002l\x1b[?1006l");
+      }
+    };
     return () => {
       delete win.__tddyPageScrollUp;
+      delete win.__tddyPageScrollToLine;
+      delete win.__tddyLiveMouseTracking;
     };
   }, []);
 
-  // Scroll-up-at-top gesture on the LIVE terminal: the live terminal has scrollback 0 (always pinned
-  // to bottom), so a wheel-up attempt is interpreted as "show older history". On the first activation
-  // it starts the forward fill; once the page terminal is filled, the same gesture swaps to it
-  // instantly. The listener is attached in the CAPTURE phase so it fires before ghostty-web's own
-  // wheel handler (which may stop propagation); a React `onWheel` (bubble phase) would never see it.
+  // Scroll-up-on-live gesture: the live terminal has scrollback 0 (always pinned to the bottom), so a
+  // wheel-up while pinned (and not in a mouse-tracked TUI) starts the forward fill (or swaps to the
+  // page pane instantly if already filled). Capture phase so we run before ghostty-web's wheel
+  // handler. Mouse tracking (DEC 1006) gates the wheel to the TUI — no forward-fill then.
   useEffect(() => {
     const el = liveContainerRef.current;
     if (!el || !historyFetcher) return;
     const handler = (e: WheelEvent) => {
       if (e.deltaY >= 0) return;
+      if (termRef.current?.hasMouseTracking?.()) return;
       if (filled) {
         setView("page");
         olderTermRef.current?.scrollToBottom?.();
         return;
       }
+      // scrollback 0 ⇒ always pinned to the bottom ⇒ any wheel-up requests older history.
       if (termRef.current?.isPinnedToBottom?.() ?? true) {
         void startForwardFill();
       }
@@ -356,6 +430,10 @@ export function GhosttyTerminalGrpc({
             term.write(chunk);
           }
         }
+        refreshMirrors();
+      }}
+      onScroll={() => {
+        refreshMirrors();
       }}
     />
   );
@@ -398,9 +476,8 @@ export function GhosttyTerminalGrpc({
         </TerminalConnectionStatusBar>
       ) : null}
       <div style={{ flex: 1, minHeight: 0, minWidth: 0, width: "100%", position: "relative" }}>
-        {/* Live pane: scrollback 0 (avoids duplicate-pane accumulation from TUI re-paints),
-            always mounted, always receives the stream. Foreground at the live tip; stays mounted
-            underneath (hidden) while browsing history so it stays current. */}
+        {/* Live pane: scrollback 0 (always pinned to the live tip), always mounted, always receives
+            the stream. Foreground at the tip; stays mounted underneath while browsing history. */}
         <div
           ref={liveContainerRef}
           data-testid="terminal-live-pane"
@@ -517,6 +594,18 @@ export function GhosttyTerminalGrpc({
       </div>
       <div data-testid="terminal-page-viewport-y" style={{ display: "none" }} aria-hidden>
         {pageViewportY}
+      </div>
+      <div data-testid="terminal-live-viewport-y" style={{ display: "none" }} aria-hidden>
+        {liveViewportY}
+      </div>
+      <div data-testid="terminal-live-scrollback-length" style={{ display: "none" }} aria-hidden>
+        {liveScrollbackLength}
+      </div>
+      <div data-testid="terminal-page-scrollbar" style={{ display: "none" }} aria-hidden>
+        {pageScrollbar}
+      </div>
+      <div data-testid="terminal-live-scrollbar" style={{ display: "none" }} aria-hidden>
+        {liveScrollbar}
       </div>
     </div>
   );

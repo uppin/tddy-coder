@@ -1,17 +1,20 @@
 /**
  * Acceptance tests: GhosttyTerminalGrpc overlay double-buffer scroll-up history.
  *
- * PRD: docs/ft/web/terminal-replay-lazy-scroll.md
+ * PRD: docs/ft/web/terminal-replay-lazy-scroll.md (amended — terminal-native-scrolling)
  *
  * The Ghostty shared component owns the paging flow with two interchangeable, overlayed ghostty-web
- * terminals sharing one rect. The live terminal (scrollback 0) always stays mounted and keeps
- * receiving the stream — scrollback 0 avoids the duplicate-pane accumulation from periodic TUI
- * full-screen re-paints (guarded by the ghostty-fullscreen-no-duplicate e2e test). On a scroll-up-at-top
- * gesture (or the "Load earlier output" affordance) the background page terminal (scrollback > 0) is
- * forward-filled from offset 0 toward the anchor while a loading indicator is shown; once the fill
- * completes the two terminals switch places (the page terminal becomes foreground, scrollable
- * through history with full viewport control via scrollToLine). "Back to live" (or a scroll-down-at-bottom
- * gesture on the page terminal) swaps back. All paging logic is encapsulated inside the component.
+ * terminals sharing one rect. The LIVE terminal carries native scrollback > 0 (native primary-screen
+ * behavior) and accumulates post-connect output; ghostty-web's alternate buffer (DEC 1049) has no
+ * scrollback, so a proper TUI that switches to the alternate screen never accumulates duplicate panes
+ * — exactly as native ghostty does. The PAGE terminal (scrollback > 0) holds the forward-filled older
+ * history and exposes a native Scrollbar {total, offset, len} as the single source of truth for
+ * viewport position (same coordinate space as scrollToLine). On a scroll-up-at-top-of-live gesture
+ * (or the "Load earlier output" affordance) the page terminal is forward-filled from offset 0 toward
+ * the anchor while a loading indicator is shown; once the fill completes the two terminals switch
+ * places. "Back to live" (or a scroll-down-at-bottom gesture on the page terminal) swaps back. The
+ * scroll-to-bottom policy matches native defaults: keystroke = yes, output = no. Mouse tracking (DEC
+ * 1006) gates the wheel to the TUI instead of the viewport. All paging logic is encapsulated here.
  */
 
 import {
@@ -296,5 +299,199 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
 
     // Then — the viewport is pinned back to the bottom (viewportY 0).
     terminal.expectPageViewportY(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // Scrollback-0 model (live terminal pinned to the tip; first scroll-up loads history)
+  // -------------------------------------------------------------------------
+
+  it("live terminal has no native scrollback — overflow output does not accumulate, and a scroll-up gesture triggers the page forward-fill immediately", () => {
+    // Given — the live terminal carries scrollback 0 (always pinned to the live tip).
+    const terminal = aGhosttyTerminalGrpcLazyHistory()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME);
+
+    // When — push ~40 lines of output (rows is 24, so a native-scrollback terminal would accumulate
+    // ~16 scrollback lines above the active screen).
+    const lines = Array.from({ length: 40 }, (_, i) => `live-line-${i}\n`).join("");
+    const liveBytes = BigInt(enc(lines).length);
+    terminal.pushOutput(enc(lines));
+
+    // Then — the live terminal accumulated NO native scrollback (scrollback 0 ⇒ always pinned to
+    // the tip) and the viewport stayed at the bottom (viewportY 0).
+    terminal.expectLiveScrollbackLength(0).expectLiveViewportY(0);
+
+    // When — the user performs a scroll-up wheel gesture on the live pane (pinned to the bottom)
+    terminal.scrollUpAtTop();
+
+    // Then — the loading indicator is shown and a forward fetch is pending immediately (no
+    // intermediate "scroll through live scrollback" step with scrollback 0). The fetch is bounded by
+    // the CURRENT live tip (anchor + post-connect bytes), not the stale anchor — so the page fills
+    // with the full retained history rather than an evicted-empty range.
+    terminal
+      .expectLoadingVisible()
+      .expectHistoryFetchPending()
+      .expectHistoryFetchCalledWith(0n, ANCHOR + liveBytes);
+  });
+
+  it("after a reconnect that advances the tip past the original anchor, a scroll-up fills the page with the retained history (no blank page)", () => {
+    // Given — the live terminal opened at anchor 1000, then reconnected: a FROM_OFFSET catch-up
+    // frame snaps currentOffset to a NEW tip (2000) past the original anchor, simulating the ring
+    // evicting the original anchor. The page forward-fill must be bounded by the CURRENT tip, not
+    // the stale anchor — otherwise `replay_from(0, 1000)` is an evicted-empty range and the page
+    // would swap to blank.
+    const terminal = aGhosttyTerminalGrpcLazyHistory()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME) // anchor captured at 1000
+      .pushFrame(aReplayFrame(enc("CATCHUP\r\n"), 2000n, /* atOldest */ false)); // reconnect catch-up → tip 2000
+
+    // When — the user scrolls up on the live pane (pinned to the bottom).
+    terminal.scrollUpAtTop();
+
+    // Then — the forward fetch is bounded by the CURRENT tip (2000), NOT the stale anchor (1000),
+    // so the daemon returns the retained history `[start_offset, 2000]` instead of an empty range.
+    terminal
+      .expectLoadingVisible()
+      .expectHistoryFetchPending()
+      .expectHistoryFetchCalledWith(0n, 2000n);
+
+    // When — the daemon resolves with the retained history chunk (start_offset 1500 → tip 2000,
+    // i.e. the original anchor 1000 has been evicted; only [1500, 2000] is retained).
+    terminal.resolveHistoryChunk({
+      data: enc("retained-line-0\r\nretained-line-1\r\n"),
+      startOffset: 1500n,
+      endOffset: 2000n,
+      atOldest: true,
+      atEnd: true,
+    });
+
+    // Then — the page terminal swaps to the foreground and SHOWS the retained history (not a blank
+    // page). The live pane stays mounted underneath.
+    terminal
+      .expectPageForeground()
+      .expectOlderBufferContainsInOrder("retained-line-0", "retained-line-1")
+      .expectNoFurtherHistoryFetch();
+  });
+
+  it("a forward fill that resolves with no retained bytes (empty range) stays on the live pane — no blank page", () => {
+    // Given — the live terminal opened at anchor 1000 with older history available.
+    const terminal = aGhosttyTerminalGrpcLazyHistory()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME);
+
+    // When — the user scrolls up and the daemon yields no chunk (the requested range is empty /
+    // evicted below the ring's start_offset).
+    terminal.scrollUpAtTop().expectHistoryFetchPending().resolveHistoryNull();
+
+    // Then — the loading indicator is gone, the live pane stays foreground (NOT a blank page),
+    // and the fill is not marked complete so the affordance remains available for a later retry.
+    terminal
+      .expectLoadingAbsent()
+      .expectLiveForeground()
+      .expectAffordanceVisible()
+      .expectNoFurtherHistoryFetch();
+  });
+
+  it("a forward fill whose fetch errors (e.g. getTerminalHistory not_found) stays on the live pane — no blank page", () => {
+    // Given — the live terminal opened at anchor 1000 with older history available.
+    const terminal = aGhosttyTerminalGrpcLazyHistory()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME);
+
+    // When — the user scrolls up and the fetch rejects (RPC error, e.g. a session type whose
+    // `getTerminalHistory` is not supported).
+    terminal
+      .scrollUpAtTop()
+      .expectHistoryFetchPending()
+      .rejectHistoryFetch(new Error("not found: terminal not found or not running"));
+
+    // Then — the loading indicator is gone, the live pane stays foreground (NOT a blank page),
+    // and the affordance remains available.
+    terminal
+      .expectLoadingAbsent()
+      .expectLiveForeground()
+      .expectAffordanceVisible()
+      .expectNoFurtherHistoryFetch();
+  });
+
+  it("live terminal stays at scrollback 0 across primary and alternate screen (DEC 1049) — no native scrollback to duplicate", () => {
+    // Given — the live terminal carries scrollback 0 (always pinned to the live tip); push enough
+    // output that a native-scrollback terminal would have accumulated history.
+    const terminal = aGhosttyTerminalGrpcLazyHistory()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME);
+    const baseline = Array.from({ length: 30 }, (_, i) => `base-line-${i}\n`).join("");
+    terminal.pushOutput(enc(baseline));
+
+    // When — capture the live scrollback length, then enter the alternate screen (DEC 1049),
+    // repaint the full screen, and exit back to the primary screen.
+    terminal.captureLiveScrollbackLength().then((before) => {
+      expect(before, "live scrollback is 0 (no native scrollback)").to.equal(0);
+      const altRepaint =
+        "\x1b[?1049h" + // enter alternate screen
+        Array.from({ length: 24 }, (_, i) => `\x1b[${i + 1};1Halt-row-${i}`).join("\r\n") +
+        "\x1b[?1049l"; // exit alternate screen
+      terminal.pushOutput(enc(altRepaint));
+
+      // Then — the live scrollback is still 0: with scrollback 0 there is no native retention at
+      // all (primary or alternate), so a TUI repaint cannot leave duplicate panes behind.
+      terminal.expectLiveScrollbackLength(0);
+    });
+  });
+
+  it("page terminal exposes the native Scrollbar {total, offset, len} as the single source of truth and scrollToLine sets the absolute offset", () => {
+    // Given — the page terminal has been forward-filled with a 30-line older-history chunk
+    // (scrollback > rows), so the native Scrollbar has real history to report.
+    const terminal = aGhosttyTerminalGrpcLazyHistory()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME)
+      .expectAffordanceVisible()
+      .activateLoadEarlier()
+      .expectLoadingVisible()
+      .expectHistoryFetchPending()
+      .resolveHistoryChunk(OLDER_CHUNK_DEEP)
+      .expectPageForeground();
+
+    // Sanity — landed at the bottom (the seam) after the fill: offset = total - len.
+    terminal.capturePageScrollbar().then((atBottom) => {
+      expect(atBottom.total, "page scrollbar total").to.be.greaterThan(0);
+      expect(atBottom.offset, "page scrollbar offset at bottom").to.equal(atBottom.total - atBottom.len);
+
+      // When — scroll the page viewport to an absolute line at the top via scrollToLine.
+      terminal.scrollPageToLine(0);
+
+      // Then — the native Scrollbar offset is now 0 (top of scrollback), total and len unchanged.
+      terminal.expectPageScrollbar({
+        total: atBottom.total,
+        offset: 0,
+        len: atBottom.len,
+      });
+    });
+  });
+
+  it("mouse tracking on (DEC 1006) routes the wheel to the TUI, not the viewport (no forward-fill, viewport stays pinned)", () => {
+    // Given — the live terminal has scrollback 0 (always pinned to the live tip); enable mouse
+    // tracking (DEC 1006) so the wheel is reported to the TUI instead of triggering forward-fill.
+    const terminal = aGhosttyTerminalGrpcLazyHistory()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME);
+    const lines = Array.from({ length: 40 }, (_, i) => `live-line-${i}\n`).join("");
+    terminal.pushOutput(enc(lines));
+    terminal.expectLiveViewportY(0); // scrollback 0 ⇒ always pinned to the bottom
+    terminal.enableLiveMouseTracking(true);
+
+    // When — wheel up on the live pane while mouse tracking is on.
+    terminal.scrollUpAtTop();
+
+    // Then — the live viewport is still 0 (scrollback 0, pinned) and NO forward-fill fired: the
+    // wheel was routed to the TUI, so the lazy-history gesture is suppressed.
+    terminal.expectLiveViewportY(0).expectNoFurtherHistoryFetch();
   });
 });

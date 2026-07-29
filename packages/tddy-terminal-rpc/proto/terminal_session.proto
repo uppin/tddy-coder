@@ -47,6 +47,18 @@ message SessionTerminalInput {
   // server acks the highest applied offset on StreamTerminalOutput (see acked_input_offset), so the
   // client can render an overlay of un-acknowledged input on slow links. Zero = unset (legacy).
   uint64 input_offset  = 6;
+  // --- Bidi open-frame params (read only from the FIRST message of a StreamSessionTerminalIO
+  // stream; ignored on subsequent input chunks). Carry the same replay selection as
+  // StreamTerminalOutputRequest so a bidi client can replay-once-at-init / resume-by-offset on the
+  // same connection that carries its input.
+  StreamReplayMode mode         = 7;
+  // Resume offset (FROM_OFFSET only); clamped to the capture ring's `start_offset`. 0 = from the
+  // beginning. Ignored when `mode = STREAM_REPLAY_MODE_TAIL`.
+  uint64           from_offset   = 8;
+  // Terminal dimensions measured by the client before opening the stream. When non-zero, the
+  // server resizes the PTY before sending the initial replay frame (TAIL only).
+  uint32           initial_cols  = 9;
+  uint32           initial_rows  = 10;
 }
 
 message SessionTerminalOutput {
@@ -80,6 +92,26 @@ message StreamTerminalOutputRequest {
   // replay frame, so the TUI redraws at the correct width.
   uint32 initial_cols  = 4;
   uint32 initial_rows  = 5;
+  // Replay selection. TAIL (default) sends the current last-frame tail chunk (first connect /
+  // fresh terminal). FROM_OFFSET skips the tail chunk and sends a catch-up from `from_offset` to
+  // the capture tip, then live — used on reconnect so a terminal that already holds state up to
+  // `from_offset` receives only the bytes it missed, with no duplicate replay.
+  StreamReplayMode mode       = 6;
+  // Resume offset (FROM_OFFSET only); clamped to the capture ring's `start_offset` when older
+  // bytes have been evicted. 0 = from the beginning (full replay from the oldest retained byte).
+  // Ignored when `mode = STREAM_REPLAY_MODE_TAIL`.
+  uint64          from_offset = 7;
+}
+
+// Selects the replay behavior of StreamTerminalOutput (and the bidi open frame).
+enum StreamReplayMode {
+  // Default: server sends the mode prologue + the current last-frame tail chunk, then live output.
+  // Used on first connect (fresh terminal with no prior state).
+  STREAM_REPLAY_MODE_TAIL = 0;
+  // Resume: server sends the mode prologue + catch-up chunk(s) from `from_offset` to the capture
+  // tip, then live output. No tail chunk, no PTY resize/drain. Used on reconnect so a terminal
+  // that already holds state up to `from_offset` receives only the missed bytes — no duplicates.
+  STREAM_REPLAY_MODE_FROM_OFFSET = 1;
 }
 
 // Empty response for SendTerminalInput.

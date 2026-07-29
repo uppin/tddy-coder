@@ -12,6 +12,7 @@
 
 import React from "react";
 import { GhosttyTerminalGrpc, type GrpcStream } from "../../src/components/GhosttyTerminalGrpc";
+import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { byTestId, TEST_IDS, shortcutButton } from "../support/testIds";
 
 const TYPED_CHAR = "x";
@@ -35,12 +36,14 @@ function mountSessionsTerminalOnMobile(
   cy.viewport(375, 667);
   cy.mount(
     <div style={{ width: 375, height: 500, position: "relative" }}>
-      <GhosttyTerminalGrpc
-        sessionToken="test-token"
-        sessionId="test-session"
-        stream={stream}
-        mobileShortcuts={mobileShortcuts}
-      />
+      <UploadProgressProvider>
+        <GhosttyTerminalGrpc
+          sessionToken="test-token"
+          sessionId="test-session"
+          stream={stream}
+          mobileShortcuts={mobileShortcuts}
+        />
+      </UploadProgressProvider>
     </div>,
   );
 }

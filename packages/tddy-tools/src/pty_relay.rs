@@ -592,7 +592,7 @@ async fn run_grpc_terminal(
     use prost::Message as _;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tddy_service::proto::connection::{
-        SessionTerminalInput, SessionTerminalOutput, StreamTerminalOutputRequest,
+        SessionTerminalInput, SessionTerminalOutput, StreamReplayMode, StreamTerminalOutputRequest,
     };
 
     let http_client = reqwest::Client::new();
@@ -606,6 +606,8 @@ async fn run_grpc_terminal(
         terminal_id: String::new(),
         initial_cols: cols as u32,
         initial_rows: rows as u32,
+        mode: StreamReplayMode::Tail as i32,
+        from_offset: 0,
     };
     let mut resp = connectrpc_post_streaming(
         &http_client,
@@ -634,6 +636,10 @@ async fn run_grpc_terminal(
                 terminal_id: String::new(),
                 control_token: String::new(),
                 input_offset: 0,
+                mode: StreamReplayMode::Tail as i32,
+                from_offset: 0,
+                initial_cols: 0,
+                initial_rows: 0,
             };
             let _ = connectrpc_post(
                 &input_client,
@@ -655,6 +661,10 @@ async fn run_grpc_terminal(
                 terminal_id: String::new(),
                 control_token: String::new(),
                 input_offset: 0,
+                mode: StreamReplayMode::Tail as i32,
+                from_offset: 0,
+                initial_cols: 0,
+                initial_rows: 0,
             };
             let _ = connectrpc_post(
                 &input_client,

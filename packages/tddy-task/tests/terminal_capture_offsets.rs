@@ -63,11 +63,7 @@ trait CaptureChunkAssertions {
 
 impl CaptureChunkAssertions for CaptureChunk {
     fn assert_data_is_entirely(&self, byte: u8) -> &Self {
-        let stray = self
-            .data
-            .iter()
-            .enumerate()
-            .find(|(_, b)| **b != byte);
+        let stray = self.data.iter().enumerate().find(|(_, b)| **b != byte);
         assert_eq!(
             stray.map(|(i, b)| format!("'{}' at offset {i}", *b as char)),
             None,
@@ -89,7 +85,10 @@ impl CaptureChunkAssertions for CaptureChunk {
     }
 
     fn assert_at_oldest(&self) -> &Self {
-        assert!(self.at_oldest, "expected chunk to be at the ring's oldest byte");
+        assert!(
+            self.at_oldest,
+            "expected chunk to be at the ring's oldest byte"
+        );
         self
     }
 
@@ -102,7 +101,11 @@ impl CaptureChunkAssertions for CaptureChunk {
     }
 
     fn assert_empty(&self) -> &Self {
-        assert!(self.data.is_empty(), "expected an empty chunk, got {} bytes", self.data.len());
+        assert!(
+            self.data.is_empty(),
+            "expected an empty chunk, got {} bytes",
+            self.data.len()
+        );
         self
     }
 }
@@ -294,8 +297,14 @@ fn replay_before_walks_backwards_through_the_ring_in_successive_chunks() {
     let third = capture.replay_before(second.start_offset, 64);
 
     // Then the chunks tile the buffer back-to-back and the final one reaches the oldest byte
-    first.assert_data_is(b"6789").assert_offsets(6, 10).assert_not_at_oldest();
-    second.assert_data_is(b"2345").assert_offsets(2, 6).assert_not_at_oldest();
+    first
+        .assert_data_is(b"6789")
+        .assert_offsets(6, 10)
+        .assert_not_at_oldest();
+    second
+        .assert_data_is(b"2345")
+        .assert_offsets(2, 6)
+        .assert_not_at_oldest();
     third
         .assert_data_is(b"01")
         .assert_offsets(0, 2)

@@ -53,7 +53,6 @@ impl TerminalCaptureBuilder {
 // ---------------------------------------------------------------------------
 
 trait CaptureChunkAssertions {
-    fn assert_data_is_entirely(&self, byte: u8) -> &Self;
     fn assert_data_is(&self, expected: &[u8]) -> &Self;
     fn assert_offsets(&self, start: u64, end: u64) -> &Self;
     fn assert_at_oldest(&self) -> &Self;
@@ -64,21 +63,6 @@ trait CaptureChunkAssertions {
 }
 
 impl CaptureChunkAssertions for CaptureChunk {
-    fn assert_data_is_entirely(&self, byte: u8) -> &Self {
-        let stray = self
-            .data
-            .iter()
-            .enumerate()
-            .find(|(_, b)| **b != byte);
-        assert_eq!(
-            stray.map(|(i, b)| format!("'{}' at offset {i}", *b as char)),
-            None,
-            "chunk data must be nothing but '{}'",
-            byte as char
-        );
-        self
-    }
-
     fn assert_data_is(&self, expected: &[u8]) -> &Self {
         assert_eq!(self.data, expected, "chunk data mismatch");
         self
@@ -91,7 +75,10 @@ impl CaptureChunkAssertions for CaptureChunk {
     }
 
     fn assert_at_oldest(&self) -> &Self {
-        assert!(self.at_oldest, "expected chunk to be at the ring's oldest byte");
+        assert!(
+            self.at_oldest,
+            "expected chunk to be at the ring's oldest byte"
+        );
         self
     }
 
@@ -120,7 +107,11 @@ impl CaptureChunkAssertions for CaptureChunk {
     }
 
     fn assert_empty(&self) -> &Self {
-        assert!(self.data.is_empty(), "expected an empty chunk, got {} bytes", self.data.len());
+        assert!(
+            self.data.is_empty(),
+            "expected an empty chunk, got {} bytes",
+            self.data.len()
+        );
         self
     }
 }

@@ -21,7 +21,7 @@ use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::{Request, Status};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, SessionTerminalInput, SessionTerminalOutput,
-    StreamTerminalOutputRequest,
+    StreamReplayMode, StreamTerminalOutputRequest,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -99,6 +99,8 @@ fn a_stream_request() -> StreamTerminalOutputRequest {
         terminal_id: MAIN_TERMINAL_ID.to_string(),
         initial_cols: 80,
         initial_rows: 24,
+        mode: StreamReplayMode::Tail as i32,
+        from_offset: 0,
     }
 }
 
@@ -110,6 +112,10 @@ fn an_input(bytes: &str, input_offset: u64) -> SessionTerminalInput {
         terminal_id: MAIN_TERMINAL_ID.to_string(),
         control_token: String::new(),
         input_offset,
+        mode: StreamReplayMode::Tail as i32,
+        from_offset: 0,
+        initial_cols: 0,
+        initial_rows: 0,
     }
 }
 

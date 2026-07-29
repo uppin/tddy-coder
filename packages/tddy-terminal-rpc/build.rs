@@ -22,10 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_server(true)
         .build_client(true)
         .out_dir(&tonic_dir)
-        .extern_path(
-            ".terminal_session",
-            "crate::proto::terminal_session",
-        )
+        .extern_path(".terminal_session", "crate::proto::terminal_session")
         .compile_protos(&["proto/terminal_session.proto"], &["proto"])?;
 
     Ok(())

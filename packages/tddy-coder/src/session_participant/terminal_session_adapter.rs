@@ -69,12 +69,9 @@ impl tddy_terminal_rpc::session::TerminalSessionStore for CoderTerminalSessionSt
         _session_id: &str,
         terminal_id: &str,
     ) -> Option<Arc<dyn tddy_terminal_rpc::session::TerminalSession>> {
-        self.manager
-            .get_terminal(terminal_id)
-            .await
-            .map(|handle| {
-                Arc::new(CoderTerminalSession::new(handle))
-                    as Arc<dyn tddy_terminal_rpc::session::TerminalSession>
-            })
+        self.manager.get_terminal(terminal_id).await.map(|handle| {
+            Arc::new(CoderTerminalSession::new(handle))
+                as Arc<dyn tddy_terminal_rpc::session::TerminalSession>
+        })
     }
 }

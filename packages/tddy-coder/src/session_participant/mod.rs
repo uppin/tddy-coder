@@ -360,13 +360,16 @@ impl RpcService for SessionConnectionServiceRpc {
                     crate::session_participant::terminal_session_adapter::CoderTerminalSessionStore::new(
                         Arc::clone(&self.svc.terminal_manager),
                     );
-                let bridge_req = tddy_terminal_rpc::proto::terminal_session::StreamTerminalOutputRequest {
-                    session_token: req.session_token.clone(),
-                    session_id: req.session_id.clone(),
-                    terminal_id: req.terminal_id.clone(),
-                    initial_cols: req.initial_cols,
-                    initial_rows: req.initial_rows,
-                };
+                let bridge_req =
+                    tddy_terminal_rpc::proto::terminal_session::StreamTerminalOutputRequest {
+                        session_token: req.session_token.clone(),
+                        session_id: req.session_id.clone(),
+                        terminal_id: req.terminal_id.clone(),
+                        initial_cols: req.initial_cols,
+                        initial_rows: req.initial_rows,
+                        mode: req.mode,
+                        from_offset: req.from_offset,
+                    };
                 let bridge_rx = match tddy_terminal_rpc::serve_stream_terminal_output_with(
                     &store,
                     bridge_req,
@@ -378,10 +381,9 @@ impl RpcService for SessionConnectionServiceRpc {
                     Err(status) => return RpcResult::ServerStream(Err(status)),
                 };
 
-                let (tx, rx) =
-                    tokio::sync::mpsc::channel::<Result<Vec<u8>, Status>>(
-                        TERMINAL_OUTPUT_CHANNEL_CAPACITY,
-                    );
+                let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, Status>>(
+                    TERMINAL_OUTPUT_CHANNEL_CAPACITY,
+                );
                 tokio::spawn(async move {
                     let mut bridge_rx = bridge_rx;
                     while let Some(frame) = bridge_rx.recv().await {
@@ -421,14 +423,15 @@ impl RpcService for SessionConnectionServiceRpc {
                     crate::session_participant::terminal_session_adapter::CoderTerminalSessionStore::new(
                         Arc::clone(&self.svc.terminal_manager),
                     );
-                let bridge_req = tddy_terminal_rpc::proto::terminal_session::GetTerminalHistoryRequest {
-                    session_token: req.session_token.clone(),
-                    session_id: req.session_id.clone(),
-                    terminal_id: req.terminal_id.clone(),
-                    from_offset: req.from_offset,
-                    until_offset: req.until_offset,
-                    max_bytes: req.max_bytes,
-                };
+                let bridge_req =
+                    tddy_terminal_rpc::proto::terminal_session::GetTerminalHistoryRequest {
+                        session_token: req.session_token.clone(),
+                        session_id: req.session_id.clone(),
+                        terminal_id: req.terminal_id.clone(),
+                        from_offset: req.from_offset,
+                        until_offset: req.until_offset,
+                        max_bytes: req.max_bytes,
+                    };
                 let bridge_rx = match tddy_terminal_rpc::serve_get_terminal_history_with(
                     &store,
                     bridge_req,
@@ -440,10 +443,9 @@ impl RpcService for SessionConnectionServiceRpc {
                     Err(status) => return RpcResult::ServerStream(Err(status)),
                 };
 
-                let (tx, rx) =
-                    tokio::sync::mpsc::channel::<Result<Vec<u8>, Status>>(
-                        TERMINAL_OUTPUT_CHANNEL_CAPACITY,
-                    );
+                let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, Status>>(
+                    TERMINAL_OUTPUT_CHANNEL_CAPACITY,
+                );
                 tokio::spawn(async move {
                     let mut bridge_rx = bridge_rx;
                     while let Some(frame) = bridge_rx.recv().await {

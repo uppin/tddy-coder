@@ -21,6 +21,27 @@
 - **Persisted scroll position across reconnects** is out of scope; the forward fill populates the
   page terminal from offset `0` toward the anchor.
 
+### Terminal native scrolling model (source: terminal-native-scrolling changeset, 2026-07-28)
+
+Adopts the native ghostty desktop scrolling model in the web (live `scrollback > 0`, native
+`Scrollbar {total, offset, len}` on the page terminal, native scroll-to-bottom policy,
+mouse-tracking gating) — see `docs/dev/1-WIP/2026-07-28-terminal-native-scrolling.md`. Future
+enhancements beyond that changeset:
+
+- **Persisted scroll position across reconnects** — the live terminal lands at the live tip on
+  reconnect and the page terminal fills from offset `0`; a future option can persist and restore
+  the user's viewport position across sessions. (Also tracked above; kept here as the
+  native-scrolling-scoped reference.)
+- **Daemon-side PageList emulator** — the overlay double-buffer exists only because ghostty-web
+  has no "insert at top of scrollback" API (a single terminal cannot lazily prepend older
+  history). If a future ghostty-web release does not add a prepend API, a daemon-side PageList
+  emulator that holds the terminal state and renders the visible window over RPC would give a
+  true single-terminal surface (no overlay, no second instance).
+- **Paged forward-fill** — the page terminal is filled with the entire retained capture
+  (`0 → anchor`), which transfers all bytes even though the terminal retains only the last
+  `scrollback` lines. Page the forward-fill to fill the scrollback budget only (skipping bytes
+  that would be discarded). (Already noted above; kept as the native-scrolling-scoped reference.)
+
 ### PR-Stack — status polling and stack hygiene (source: pr-stack-ux-recovery changeset, 2026-07-26)
 
 - **Manual verification against the live stack was never done** — orchestrator session
