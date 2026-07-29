@@ -38,6 +38,7 @@ members = [
     "packages/tddy-lsp",
     "packages/tddy-lsp-executor",
     "packages/tddy-pty",
+    "packages/tddy-terminal-rpc",
     "packages/tddy-tool-engine",
     "packages/tddy-semantic-index",
     "packages/tddy-testing-commons",

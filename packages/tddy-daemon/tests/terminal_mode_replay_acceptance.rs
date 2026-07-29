@@ -19,7 +19,7 @@ use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, StreamTerminalOutputRequest,
+    ConnectionService as ConnectionServiceTrait, StreamReplayMode, StreamTerminalOutputRequest,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -168,6 +168,8 @@ async fn first_frame_seen_by_a_browser_client(service: &ConnectionServiceImpl) -
             terminal_id: MAIN_TERMINAL.to_string(),
             initial_cols: BROWSER_COLS,
             initial_rows: BROWSER_ROWS,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
         }))
         .await
         .expect("stream_terminal_output must accept a valid token");

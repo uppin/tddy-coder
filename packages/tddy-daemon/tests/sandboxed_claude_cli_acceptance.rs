@@ -22,7 +22,7 @@ use tddy_rpc::Code;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectSessionRequest, ConnectionService as ConnectionServiceTrait, StartSessionRequest,
-    StreamTerminalOutputRequest,
+    StreamReplayMode, StreamTerminalOutputRequest,
 };
 use tddy_testing_commons::process_is_alive;
 
@@ -340,6 +340,8 @@ async fn sandboxed_claude_cli_terminal_io_round_trips() {
             terminal_id: String::new(),
             initial_cols: 80,
             initial_rows: 24,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
         }))
         .await
         .expect("stream_terminal_output must succeed for sandbox session");
@@ -487,6 +489,8 @@ async fn sandboxed_claude_cli_start_wires_specialized_agents_env_and_metadata() 
             terminal_id: String::new(),
             initial_cols: 80,
             initial_rows: 24,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
         }))
         .await
         .expect("stream_terminal_output must succeed for sandbox session");

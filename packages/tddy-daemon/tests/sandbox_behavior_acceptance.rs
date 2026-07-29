@@ -17,7 +17,8 @@ use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::Request;
 use tddy_sandbox::SANDBOX_SPAWN_MANIFEST;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, StartSessionRequest, StreamTerminalOutputRequest,
+    ConnectionService as ConnectionServiceTrait, StartSessionRequest, StreamReplayMode,
+    StreamTerminalOutputRequest,
 };
 use tddy_testing_commons::{
     process_is_alive, write_egress_probe_claude_script, EGRESS_PROBE_DIRECT_DENIED,
@@ -167,6 +168,8 @@ async fn collect_terminal_text_until(
             terminal_id: "main".to_string(),
             initial_cols: 80,
             initial_rows: 24,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
         }))
         .await
         .expect("StreamTerminalOutput must succeed");

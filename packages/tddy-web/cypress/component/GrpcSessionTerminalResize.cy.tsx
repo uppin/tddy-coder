@@ -24,6 +24,7 @@ import {
   StreamTerminalOutputRequestSchema,
 } from "../../src/gen/connection_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
+import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { decodeConnectStreamRequestBody, toArrayBuffer } from "../support/rpc/protoRpc";
 
 // ---------------------------------------------------------------------------
@@ -43,12 +44,14 @@ function Harness({ containerWidth = 800, containerHeight = 400 }: { containerWid
 
   return (
     <div style={{ width: containerWidth, height: containerHeight, position: "relative" }}>
-      <GrpcSessionTerminal
-        sessionId="resize-test-session-aabbcc"
-        sessionToken="test-token"
-        client={client}
-        connected={null}
-      />
+      <UploadProgressProvider>
+        <GrpcSessionTerminal
+          sessionId="resize-test-session-aabbcc"
+          sessionToken="test-token"
+          client={client}
+          connected={null}
+        />
+      </UploadProgressProvider>
     </div>
   );
 }

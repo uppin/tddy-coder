@@ -1,5 +1,14 @@
 # Multiple Tools per Session (Bash tool)
 
+> **Updated: 2026-07-28** — Lazy replay & scroll-up history. `StreamTerminalOutput` now sends the
+> **current last frame first**, tagged with absolute byte offsets (`start_offset`/`end_offset`/
+> `at_oldest`); older history is fetched on demand via the new `GetTerminalHistory` RPC as the user
+> scrolls up, fetched **forward** from offset `0` toward the anchor, one chunk at a time, until
+> `at_end` terminates the fill. `SessionTerminalOutput` gains `start_offset`/`end_offset`/`at_oldest`
+> fields; `GetTerminalHistory` uses `from_offset`/`until_offset` + `at_end`. The duplicated PTY-
+> over-RPC bridge logic is unified into the shared `tddy-terminal-rpc` crate; the daemon and coder
+> terminal handlers now delegate to it. See § Lazy replay & scroll-up history below.
+>
 > **Updated: 2026-06-29** — PTY tools (claude-cli, bash) are spawned via `PtyRuntime` into the shared
 > `TaskRegistry` and appear in `tasks.TaskService.ListTasks`. `PtyRegistry` holds resize/control
 > handles keyed by `task_id`. Terminal RPCs remain the external contract (compat layer).
@@ -172,6 +181,104 @@ these when no per-session live runtime exists (see
   validated at the daemon for every `DeleteSession` / `SignalSession` (always daemon-direct).
 - claude-cli / cursor-cli / workspace sessions keep their existing daemon-served
   `ConnectionService` path.
+
+---
+
+## Lazy replay & scroll-up history
+
+> **Added: 2026-07-28** — Replaces the eager full-capture replay with a last-frame-first model so a
+> reconnecting/refreshing client sees content immediately, with older history loaded lazily as the
+> user scrolls up. A reconnecting terminal resumes by offset instead of re-replaying the whole
+> retained buffer, and a transient transport blip no longer evicts the runtime.
+
+### Summary
+
+Historically `StreamTerminalOutput` replayed the **entire** retained capture buffer on connect,
+then tailed live output. For large scrollbacks this delayed the first paint and re-sent stale
+pre-resize bytes. The replay model is now **lazy**: the server sends the **current last frame**
+first (the bytes a full-screen client needs to render immediately), tagged with absolute byte
+offsets, then tails live output. Older history is fetched on demand as the user scrolls up via
+the new `GetTerminalHistory` RPC — fetched **forward** from offset `0` toward the anchor, one
+chunk at a time, until the capture ring's anchor is reached.
+
+### Wire contract
+
+- `SessionTerminalOutput` gains three fields, populated **only on the initial replay frame** (live
+  tail frames carry `0`):
+  - `start_offset` — absolute offset of the first byte in `data`.
+  - `end_offset` — absolute offset after the last byte in `data` (the **anchor** for older-history fetches).
+  - `at_oldest` — `true` when the chunk reaches the capture ring's oldest retained byte (no older
+    history exists to load by scrolling up).
+- `GetTerminalHistory(session_token, session_id, terminal_id, from_offset, until_offset, max_bytes)` —
+  server-streaming; yields **one** `TerminalHistoryChunk{data, start_offset, end_offset, at_oldest, at_end}`
+  starting at `from_offset`, bounded by `until_offset` (the anchor), then closes. The client appends
+  the chunk, advances `from_offset` to the chunk's `end_offset`, and calls again until `at_end = true`
+  (reached `until_offset` / the capture tip).
+
+### Reconnect resume by offset (`StreamReplayMode`)
+
+`StreamTerminalOutputRequest` (and the bidi `StreamSessionTerminalIO` open frame) carry a `mode`
+(`StreamReplayMode`) + `from_offset` so a terminal that has already synced its state resumes by
+offset instead of re-replaying the whole retained buffer.
+
+- **`TAIL`** (default, first connect): the server sends the mode prologue + the current last-frame
+  tail chunk (tagged with absolute offsets), resizes the PTY to the client's dimensions, drains the
+  pre-resize broadcast, then bridges live output.
+- **`FROM_OFFSET`** (reconnect): the server sends the mode prologue + chunked catch-up via
+  `replay_from(from_offset, tip, …)` until `at_end`, then live output. No tail chunk, no PTY
+  resize/drain — a terminal that already holds state up to `from_offset` receives only the bytes it
+  missed, with no duplicate content.
+
+The bidi `StreamSessionTerminalIO` open frame carries the same `mode`/`from_offset` so a bidi
+client can replay-once-at-init / resume-by-offset on the same connection that carries its input;
+the params are read only from the first message of the stream.
+
+### Client reconnect & null-client pause
+
+The web client (`GrpcSessionTerminal`) tracks the cumulative output offset and sends `FROM_OFFSET`
+with the tracked offset on reconnect. Its `client` widens to `ConnectionClient | null`: a **null
+client** (a transient transport blip) **pauses** the terminal — it stays mounted (its scrollback and
+the ghostty instance survive), input is queued — and resumes with `FROM_OFFSET` when a non-null
+client returns. Only a stream-end with a **valid** client (a real `pty_done`) evicts the runtime.
+
+### Client scroll-up protocol
+
+1. On connect, the client receives the initial replay frame carrying `end_offset` (the anchor) and
+   `at_oldest`.
+2. When the user activates "Load earlier output" (or scrolls up on the live terminal) and `at_oldest`
+   is false, the client shows a loading indicator, forward-fills a second, read-only older-history
+   "page" terminal **in the background**, and calls
+   `GetTerminalHistory(from_offset = 0, until_offset = end_offset)`, appending the returned chunk's
+   bytes to the page terminal.
+3. The next call uses `from_offset = <previous chunk's end_offset>`, advancing forward toward the
+   anchor.
+4. A chunk with `at_end = true` (or an empty/null chunk) terminates the forward fill — the client
+   stops issuing further calls, the loading indicator disappears, and the page terminal **swaps to
+   the foreground** (the live terminal stays mounted underneath and current). "Back to live" (or a
+   scroll-down-at-bottom gesture on the page terminal) swaps back instantly.
+
+The web client's forward-fill state machine lives in
+`packages/tddy-web/src/lib/terminalHistoryLoader.ts` (`TerminalHistoryForwardLoader`);
+`GhosttyTerminalGrpc` owns the overlay double-buffer paging end-to-end: it captures the anchor from
+the initial frame, renders two interchangeable overlaid terminals (live `scrollback: 0` always
+mounted & streaming; page `scrollback > 0`), shows a loading indicator while forward-filling the
+page terminal in the background, swaps it to the foreground on `at_end`, and swaps back on
+"Back to live" / scroll-down-at-bottom — all via a `historyFetcher` prop built by
+`GrpcSessionTerminal`. (The live terminal stays at `scrollback: 0` to preserve the
+no-duplicate-pane fix; the page terminal carries `scrollback > 0`. The
+`onRegisterLoadOlderHistory` indirection is removed.)
+
+### Unified PTY-over-RPC bridge
+
+The streaming/replay/ACK/resize/input-forwarding logic previously duplicated between `tddy-daemon`
+(`connection_service.rs`) and `tddy-coder` (`session_participant`) now lives in the shared
+`tddy-terminal-rpc` crate (`bridge` module), behind the `TerminalSession` / `TerminalSessionStore`
+async traits. The daemon (`DaemonTerminalSessionStore`) and coder (`CoderTerminalSessionStore`)
+adapt their respective `PtyHandle`s to the traits and delegate `StreamTerminalOutput` /
+`GetTerminalHistory` / `SendTerminalInput` to the unified bridge. The proto additions are
+**additive and backward-compatible**: the terminal RPCs remain on `ConnectionService` (no service
+split), so existing clients keep working; the new offset fields default to `0` and the new RPC is
+opt-in.
 
 ---
 

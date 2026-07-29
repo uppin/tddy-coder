@@ -313,6 +313,10 @@ async fn send_terminal_input_is_accepted_for_a_started_terminal() {
         terminal_id: started.terminal_id.clone(),
         control_token: String::new(),
         input_offset: 0,
+        mode: pb::StreamReplayMode::Tail as i32,
+        from_offset: 0,
+        initial_cols: 0,
+        initial_rows: 0,
     };
     let result = call(&entry, "SendTerminalInput", input.encode_to_vec()).await;
 
@@ -334,6 +338,8 @@ async fn stream_terminal_output_is_server_streaming() {
         terminal_id: "main".to_string(),
         initial_cols: 80,
         initial_rows: 24,
+        mode: pb::StreamReplayMode::Tail as i32,
+        from_offset: 0,
     };
     let result = call(&entry, "StreamTerminalOutput", req.encode_to_vec()).await;
 
@@ -366,6 +372,8 @@ async fn stream_terminal_output_streams_a_started_shell_output() {
         terminal_id: started.terminal_id.clone(),
         initial_cols: 80,
         initial_rows: 24,
+        mode: pb::StreamReplayMode::Tail as i32,
+        from_offset: 0,
     };
     let mut rx = match call(&entry, "StreamTerminalOutput", stream_req.encode_to_vec()).await {
         RpcResult::ServerStream(Ok(rx)) => rx,
@@ -384,6 +392,10 @@ async fn stream_terminal_output_streams_a_started_shell_output() {
         terminal_id: started.terminal_id.clone(),
         control_token: String::new(),
         input_offset: 0,
+        mode: pb::StreamReplayMode::Tail as i32,
+        from_offset: 0,
+        initial_cols: 0,
+        initial_rows: 0,
     };
     unary_ok(call(&entry, "SendTerminalInput", input.encode_to_vec()).await);
 

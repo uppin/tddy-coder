@@ -55,6 +55,29 @@ export const TEST_IDS = {
   terminalUploadButton: "terminal-upload-button",
   uploadProgressIndicator: "upload-progress-indicator",
   uploadProgressError: "upload-progress-error",
+  // Lazy scroll-up history (docs/ft/web/terminal-replay-lazy-scroll.md)
+  loadEarlierHistory: "load-earlier-history",
+  /** "View history" affordance — shown on the live pane after the first fill, swaps to the page pane. */
+  viewHistory: "view-history",
+  /** "Back to live" affordance — shown on the page pane, swaps back to the live pane. */
+  backToLive: "back-to-live",
+  /** Loading indicator shown while the background page terminal is being forward-filled. */
+  terminalHistoryLoading: "terminal-history-loading",
+  /** The overlay layer holding the live (scrollback=0, streaming) terminal. */
+  terminalLivePane: "terminal-live-pane",
+  /** The overlay layer holding the older-history (scrollback>0) page terminal. */
+  terminalPagePane: "terminal-page-pane",
+  terminalOlderBufferText: "terminal-older-buffer-text",
+  /** Hidden mirror of the page terminal's viewportY (lines scrolled up from the bottom). */
+  terminalPageViewportY: "terminal-page-viewport-y",
+  /** Hidden mirror of the LIVE terminal's viewportY (lines scrolled up from the bottom). */
+  terminalLiveViewportY: "terminal-live-viewport-y",
+  /** Hidden mirror of the LIVE terminal's scrollback length (history lines, excluding active screen). */
+  terminalLiveScrollbackLength: "terminal-live-scrollback-length",
+  /** Hidden mirror of the page terminal's native Scrollbar {total,offset,len} — "total,offset,len". */
+  terminalPageScrollbar: "terminal-page-scrollbar",
+  /** Hidden mirror of the LIVE terminal's native Scrollbar {total,offset,len} — "total,offset,len". */
+  terminalLiveScrollbar: "terminal-live-scrollbar",
   // Enqueued input overlay (docs/ft/web/enqueued-input-overlay.md)
   enqueuedInputOverlay: "enqueued-input-overlay",
   enqueuedInputText: "enqueued-input-text",

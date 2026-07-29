@@ -98,8 +98,11 @@ it("names the predecessor stack branch as the base in the dialog's new-branch op
   sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
   prStackScreenPage.startSessionBtn("n2").click();
 
-  // Then — the base branch shown is n2's predecessor (n1's branch), not a static label.
+  // Then — the base branch shown is n2's predecessor (n1's branch), not a static label. The label
+  // is lifted to the project's remote-tracking ref (`<remote>/<branch>`, here `origin/...`) so it
+  // matches the base-branch picker's options and reads the ref the daemon will fetch — see
+  // PrStackScreen.tsx (remoteTrackingName over deriveStackBaseBranch).
   prStackScreenPage
     .dialogBranchIntentSelect()
-    .should("contain.text", `New branch from base: ${PREDECESSOR_BRANCH}`);
+    .should("contain.text", `New branch from base: origin/${PREDECESSOR_BRANCH}`);
 });

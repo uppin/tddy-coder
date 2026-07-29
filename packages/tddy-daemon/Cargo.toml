@@ -57,6 +57,7 @@ tddy-service = { path = "../tddy-service" }
 tddy-actions = { path = "../tddy-actions" }
 tddy-task = { path = "../tddy-task" }
 tddy-pty = { path = "../tddy-pty" }
+tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
 tddy-tool-engine = { path = "../tddy-tool-engine" }
 tddy-semantic-index = { path = "../tddy-semantic-index" }
 tokio-stream = "0.1"

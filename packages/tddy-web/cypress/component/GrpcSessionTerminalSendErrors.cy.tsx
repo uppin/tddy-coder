@@ -36,6 +36,7 @@ import {
   SendTerminalInputResponseSchema,
 } from "../../src/gen/connection_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
+import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import type { ConnectedSession } from "../../src/components/sessions/useTerminalControl";
 import { decodeProtoRequestBody, interceptProtoRpc, toArrayBuffer } from "../support/rpc/protoRpc";
 
@@ -87,12 +88,14 @@ function Harness({ connected }: { connected: ConnectedSession | null }) {
 
   return (
     <div style={{ width: 800, height: 400, position: "relative" }}>
-      <GrpcSessionTerminal
-        sessionId={SESSION_ID}
-        sessionToken={SESSION_TOKEN}
-        client={client}
-        connected={connected}
-      />
+      <UploadProgressProvider>
+        <GrpcSessionTerminal
+          sessionId={SESSION_ID}
+          sessionToken={SESSION_TOKEN}
+          client={client}
+          connected={connected}
+        />
+      </UploadProgressProvider>
     </div>
   );
 }

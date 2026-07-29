@@ -16,4 +16,4 @@ pub use registry::{TaskRegistry, TaskRegistryEvent};
 pub use task::{
     AppliedOffset, ChannelKind, TaskBody, TaskChannel, TaskContext, TaskHandle, TaskId, TaskStatus,
 };
-pub use terminal_capture::TerminalCapture;
+pub use terminal_capture::{CaptureChunk, TerminalCapture};

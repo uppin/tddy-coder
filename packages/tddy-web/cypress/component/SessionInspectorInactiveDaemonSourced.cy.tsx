@@ -74,17 +74,20 @@ describe("SessionInspectorInactiveDaemonSourced — inspector reads bytes/last-r
     sessionsDrawerPage.inspectorBytesOut().should("exist");
     sessionsDrawerPage.inspectorLastDataReceived().should("exist");
 
+    // The inspector renders the daemon-sourced byte counters via `formatBytes` (human-readable —
+    // see `formatTraffic.ts`), so 4096 B → "4.1 kB" and 1024 B → "1.0 kB". The assertion pins the
+    // formatted representation the user actually sees, not the raw BigInt.
     sessionsDrawerPage
       .inspectorBytesIn()
       .invoke("text")
       .should((text) => {
-        expect(text as string).to.include("4096");
+        expect(text as string).to.include("4.1 kB");
       });
     sessionsDrawerPage
       .inspectorBytesOut()
       .invoke("text")
       .should((text) => {
-        expect(text as string).to.include("1024");
+        expect(text as string).to.include("1.0 kB");
       });
     sessionsDrawerPage
       .inspectorLastDataReceived()

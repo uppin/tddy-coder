@@ -169,8 +169,11 @@ describe("GhosttyTerminal", () => {
     }).mount();
     driver.expectExists();
 
-    // When — open mobile keyboard and type
-    driver.focusViaKeyboardButton().type("x");
+    // When — open mobile keyboard and type. Focus is set imperatively by the keyboard button
+    // (preventFocusOnTap blocks click-focus), so the keystroke is sent with `force` to skip
+    // cy.type's click-to-focus actionability (which would otherwise reject the terminal as
+    // "disabled" because the click can't focus it).
+    driver.focusViaKeyboardButton().typeAfterImperativeFocus("x");
 
     // Then
     driver.expectOnDataCalledWith("x");

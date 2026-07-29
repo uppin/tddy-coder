@@ -2,6 +2,13 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-28 — Terminal replay is lazy (last-frame-first) + reconnect resumes by offset, and the PTY-over-RPC bridge is unified
+
+- **`StreamTerminalOutput` sends the current last frame first** (tagged with absolute `start_offset`/`end_offset`/`at_oldest`), then tails live output — older history is fetched on demand as the user scrolls up via the new `GetTerminalHistory` RPC (forward chunking: `from_offset` → `until_offset` → `at_end`). See [terminal-sessions.md § Lazy replay & scroll-up history](terminal-sessions.md#lazy-replay--scroll-up-history).
+- **`StreamTerminalOutputRequest` (and the bidi `StreamSessionTerminalIO` open frame) gain a `mode` (`StreamReplayMode`) + `from_offset`:** `TAIL` (default, first connect) sends the mode prologue + last-frame tail + PTY resize/drain + live; `FROM_OFFSET` (reconnect) sends chunked catch-up via `replay_from(from_offset, tip)` until `at_end` then live — no tail chunk, no resize/drain — so a reconnecting terminal receives only the bytes it missed, with no duplicate content.
+- **The duplicated PTY-over-RPC bridge logic (replay/ACK/resize/drain/input-forward/exit) is unified into the shared `tddy-terminal-rpc` crate** behind `TerminalSession`/`TerminalSessionStore` async traits; the daemon (`DaemonTerminalSessionStore`) and coder (`CoderTerminalSessionStore`) adapt their `PtyHandle`s and delegate `StreamTerminalOutput`/`GetTerminalHistory`/`SendTerminalInput` to it. The proto additions are additive and backward-compatible (terminal RPCs stay on `ConnectionService`; new offset fields default to `0`).
+- **`tddy-task::TerminalCapture` gains absolute byte-offset tracking** + `replay_last`/`replay_from(from_offset, until_offset, max_bytes)` forward replay.
+
 ## 2026-07-26 — GitHub access tokens are retained per login (BREAKING: re-login + writable `auth_storage`)
 
 - **The daemon now keeps each real login's GitHub access token** (`auth_storage/github-tokens.json`, mode `0600`, published via temp-file + `rename`) so it can read PRs as that operator instead of falling back to a `GITHUB_TOKEN` the systemd unit never had. `auth_storage` finally has a reader. See [session-auth.md § GitHub access-token retention](session-auth.md#github-access-token-retention-added-2026-07-26).
