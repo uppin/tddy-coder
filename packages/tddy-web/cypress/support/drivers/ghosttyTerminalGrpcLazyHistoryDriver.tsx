@@ -15,6 +15,9 @@ import type { HistoryChunk } from "../../../src/lib/terminalHistoryLoader";
 import { UploadProgressProvider } from "../../../src/rpc/uploadProgress";
 import { byTestId, TEST_IDS } from "../testIds";
 
+/** UTF-8 encode a string into a Uint8Array (driver-local; the spec has its own `enc`). */
+const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
+
 // ---------------------------------------------------------------------------
 // Frame shape carried by GrpcStream.onMessage (the full SessionTerminalOutput frame)
 // ---------------------------------------------------------------------------
@@ -33,6 +36,19 @@ export function aLiveFrame(data: Uint8Array): GrpcFrame {
 /** Build the initial replay frame tagged with the anchor. */
 export function aReplayFrame(data: Uint8Array, endOffset: bigint, atOldest = false): GrpcFrame {
   return { data, endOffset, atOldest };
+}
+
+/** Concatenate an array of Uint8Array chunks into a single Uint8Array (for decoding sent PTY bytes). */
+function concatUint8(chunks: Uint8Array[]): Uint8Array {
+  let total = 0;
+  for (const c of chunks) total += c.length;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    out.set(c, off);
+    off += c.length;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +199,48 @@ export function aGhosttyTerminalGrpcLazyHistory() {
         deltaY: -120,
         clientX: 100,
         clientY: 50,
+      });
+      return this;
+    },
+
+    /** Simulate a wheel-down gesture on the live pane (deltaY > 0). Used to verify the mouse-tracking
+     *  gate routes wheel-down to the TUI as SGR button 65 (not arrow-down). */
+    scrollDownOnLive() {
+      byTestId(TEST_IDS.terminalLivePane).trigger("wheel", {
+        deltaY: 120,
+        clientX: 100,
+        clientY: 50,
+      });
+      return this;
+    },
+
+    /** Enter the alternate screen (DEC 1049) on the live terminal by writing the real escape sequence.
+     *  ghostty-web processes it and reports isAlternateScreen() === true — no test-only hook required. */
+    enterLiveAltScreen() {
+      this.pushOutput(enc("\x1b[?1049h"));
+      return this;
+    },
+
+    /** Exit the alternate screen (DEC 1049) on the live terminal. */
+    exitLiveAltScreen() {
+      this.pushOutput(enc("\x1b[?1049l"));
+      return this;
+    },
+
+    /** Assert the bytes sent to the PTY (via stream.send) include the given substring. */
+    expectLiveSentIncludes(substr: string) {
+      cy.wrap(null, { timeout: 4000 }).should(() => {
+        const text = new TextDecoder().decode(concatUint8(sentChunks));
+        expect(text, "live PTY sent bytes").to.include(substr);
+      });
+      return this;
+    },
+
+    /** Assert the bytes sent to the PTY (via stream.send) do NOT include the given substring. */
+    expectLiveDidNotSend(substr: string) {
+      cy.wrap(null, { timeout: 4000 }).should(() => {
+        const text = new TextDecoder().decode(concatUint8(sentChunks));
+        expect(text, "live PTY sent bytes").to.not.include(substr);
       });
       return this;
     },
@@ -372,6 +430,18 @@ export function aGhosttyTerminalGrpcLazyHistory() {
           expect(fetcher.calls.length, "no further historyFetcher call").to.equal(before);
         });
       });
+      return this;
+    },
+
+    /** Assert no historyFetcher call has been started at all (the wheel gesture did NOT trigger a
+     *  forward-fill). Stronger than expectNoFurtherHistoryFetch, which only guards against ADDITIONAL
+     *  calls after an earlier one. */
+    expectNoHistoryFetchStarted() {
+      cy.wrap(fetcher.calls, { timeout: 1000 }).should(
+        (calls: FetchCall[]) => {
+          expect(calls.length, "no historyFetcher call started").to.equal(0);
+        },
+      );
       return this;
     },
 

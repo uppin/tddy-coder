@@ -178,6 +178,18 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
       return this;
     },
 
+    /** Type after focus was set imperatively (e.g. via the mobile Keyboard button on a
+     *  `preventFocusOnTap` terminal). `cy.type` normally click-to-focuses its target first, but
+     *  `preventFocusOnTap` blocks click-focus by design — so the click-to-focus leaves
+     *  `document.activeElement` unchanged and `cy.type` rejects the element as "disabled". `force`
+     *  skips that click-to-focus actionability check (focus is already established imperatively)
+     *  and dispatches the keystroke on the terminal host, which is where ghostty-web's key listener
+     *  lives. */
+    typeAfterImperativeFocus(text: string) {
+      terminal().type(text, { force: true });
+      return this;
+    },
+
     /** Synthesise a touch tap on the terminal. */
     simulateTouchTap() {
       terminal().then(($el) => {

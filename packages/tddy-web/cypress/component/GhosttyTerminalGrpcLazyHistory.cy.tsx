@@ -494,4 +494,73 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
     // wheel was routed to the TUI, so the lazy-history gesture is suppressed.
     terminal.expectLiveViewportY(0).expectNoFurtherHistoryFetch();
   });
+
+  // -------------------------------------------------------------------------
+  // Three-way wheel gate: mouse tracking × alternate screen × normal screen
+  // (restores the native ghostty gate that ghostty-web's handleWheel drops —
+  // it checks isAlternateScreen() but NOT hasMouseTracking(), so a mouse-tracked
+  // TUI like Claude CLI gets Up/Down arrows instead of SGR mouse events.)
+  // -------------------------------------------------------------------------
+
+  it("mouse tracking on + alternate screen routes wheel-up to the TUI as an SGR mouse event, not an Up-arrow key (no prompt-history recall)", () => {
+    // Given — the live terminal is in the alternate screen (DEC 1049, like Claude CLI's TUI) and the
+    // TUI has enabled mouse tracking (DEC 1006). ghostty-web's handleWheel unconditionally emits
+    // Up/Down arrows in the alternate screen — but when the TUI opted into mouse tracking, the wheel
+    // must be reported as an SGR mouse event (button 64 = wheel up), never as an arrow key.
+    const terminal = aGhosttyTerminalGrpcLazyHistory()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME);
+    terminal.enterLiveAltScreen();
+    terminal.enableLiveMouseTracking(true);
+
+    // When — wheel up on the live pane.
+    terminal.scrollUpAtTop();
+
+    // Then — the PTY received an SGR wheel-up mouse report and did NOT receive an Up-arrow key
+    // (\x1b[A), and no forward-fill was triggered (the wheel belongs to the TUI, not the lazy history).
+    terminal
+      .expectLiveSentIncludes("\x1b[<64;")
+      .expectLiveDidNotSend("\x1b[A")
+      .expectNoHistoryFetchStarted();
+  });
+
+  it("mouse tracking on + alternate screen routes wheel-down to the TUI as an SGR mouse event, not a Down-arrow key", () => {
+    // Given — alternate screen (DEC 1049) + mouse tracking on (DEC 1006), same as Claude CLI.
+    const terminal = aGhosttyTerminalGrpcLazyHistory()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME);
+    terminal.enterLiveAltScreen();
+    terminal.enableLiveMouseTracking(true);
+
+    // When — wheel down on the live pane.
+    terminal.scrollDownOnLive();
+
+    // Then — the PTY received an SGR wheel-down mouse report (button 65) and did NOT receive a
+    // Down-arrow key (\x1b[B), and no forward-fill was triggered.
+    terminal
+      .expectLiveSentIncludes("\x1b[<65;")
+      .expectLiveDidNotSend("\x1b[B")
+      .expectNoHistoryFetchStarted();
+  });
+
+  it("mouse tracking off + alternate screen does NOT trigger forward-fill on wheel-up (native arrow emulation for pagers like `less` is preserved)", () => {
+    // Given — the live terminal is in the alternate screen (DEC 1049) but the TUI has NOT enabled
+    // mouse tracking (e.g. `less`/`man`). Native terminals emulate Up/Down arrows for the wheel in
+    // this mode so the pager scrolls — our forward-fill must NOT hijack that gesture.
+    const terminal = aGhosttyTerminalGrpcLazyHistory()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME);
+    terminal.enterLiveAltScreen();
+    // mouse tracking stays OFF (default)
+
+    // When — wheel up on the live pane.
+    terminal.scrollUpAtTop();
+
+    // Then — no forward-fill fetch is started (the wheel is left to ghostty-web's native
+    // alternate-screen arrow emulation so the pager scrolls instead of triggering lazy history).
+    terminal.expectNoHistoryFetchStarted();
+  });
 });

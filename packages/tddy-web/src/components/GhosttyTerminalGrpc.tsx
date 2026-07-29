@@ -328,16 +328,31 @@ export function GhosttyTerminalGrpc({
     };
   }, []);
 
-  // Scroll-up-on-live gesture: the live terminal has scrollback 0 (always pinned to the bottom), so a
-  // wheel-up while pinned (and not in a mouse-tracked TUI) starts the forward fill (or swaps to the
-  // page pane instantly if already filled). Capture phase so we run before ghostty-web's wheel
-  // handler. Mouse tracking (DEC 1006) gates the wheel to the TUI — no forward-fill then.
+  // Three-way wheel gate on the live pane (capture phase — runs before ghostty-web's canvas handler):
+  // 1. Mouse tracking ON → SGR wheel report to the TUI; block ghostty-web arrow emulation.
+  // 2. Mouse tracking OFF + alternate screen → no-op here; ghostty-web emits Up/Down for pagers.
+  // 3. Mouse tracking OFF + normal screen → wheel-up triggers forward-fill (or instant page swap).
   useEffect(() => {
     const el = liveContainerRef.current;
     if (!el || !historyFetcher) return;
     const handler = (e: WheelEvent) => {
+      const mouseTracking = termRef.current?.hasMouseTracking?.() ?? false;
+      const alternateScreen = termRef.current?.isAlternateScreen?.() ?? false;
+
+      if (mouseTracking) {
+        if (!e.ctrlKey) {
+          termRef.current?.sendWheelSgr?.(e);
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
+      if (alternateScreen) {
+        return;
+      }
+
       if (e.deltaY >= 0) return;
-      if (termRef.current?.hasMouseTracking?.()) return;
       if (filled) {
         setView("page");
         olderTermRef.current?.scrollToBottom?.();

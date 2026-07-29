@@ -139,13 +139,21 @@ describe("SessionStartResumeStillDaemonRouted — bootstrap RPCs keep targeting 
     sessionsDrawerPage.inspectorTerminateBtn(ACTIVE_SESSION.sessionId).click();
 
     // Then — SignalSession (terminate) reached the backend via the daemon participant identity,
-    // not the session participant identity.
+    // not the session participant identity. `rpcCalls` ties each RPC to the participant identity
+    // its client was built for, so this asserts the *terminate specifically* targeted
+    // `daemon-local` — independent of the session-scoped client (`daemon-local-<sessionId>`) that
+    // the attached terminal legitimately builds for its own session-scoped RPCs (ClaimTerminalControl,
+    // streamTerminalOutput — see docs/ft/web/session-drawer.md § Session-participant RPC routing).
     cy.wrap(backend).should((b) => {
       expect(b.signalCalls.map((c) => c.sessionId)).to.include(ACTIVE_SESSION.sessionId);
     });
     cy.wrap(harness).should((h) => {
-      expect(h.targets).to.include(DAEMON_PARTICIPANT_IDENTITY);
-      expect(h.targets).not.to.include(`daemon-local-${ACTIVE_SESSION.sessionId}`);
+      const terminate = h.rpcCalls.find((c) => c.method === "SignalSession");
+      expect(terminate, "SignalSession (terminate) was issued").to.exist;
+      expect(
+        terminate!.targetIdentity,
+        "terminate routed to the daemon participant, not the session participant",
+      ).to.equal(DAEMON_PARTICIPANT_IDENTITY);
     });
   });
 });

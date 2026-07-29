@@ -226,17 +226,23 @@ export function useAcpSession(
                 });
                 setMessages(messagesRef.current.slice());
               } else if (update?.case === "userMessageChunk") {
-                // A user turn replayed by the agent on resume (locally-sent prompts are echoed by
-                // sendPrompt, so these only arrive when repainting a loaded session's history).
-                const block = update.value.content?.block;
-                if (block?.case === "text") {
-                  messagesRef.current.push({
-                    key: `user-replayed-${replayedUserKeyRef.current++}`,
-                    text: block.value.text,
-                    from: "user",
-                    at: Date.now(),
-                  });
-                  setMessages(messagesRef.current.slice());
+                // A user turn replayed by the agent on resume. `sendPrompt` already echoes a
+                // locally-sent prompt as a "user" bubble, so on the LIVE path the agent's
+                // `user_message_chunk` echo of that same prompt is a duplicate and must be dropped.
+                // The replay, by contrast, arrives BEFORE the operator sends any prompt in this
+                // session (`hasSentRef` is still false), so gate rendering on that: render only the
+                // replayed historical turns, skip the live echo.
+                if (!hasSentRef.current) {
+                  const block = update.value.content?.block;
+                  if (block?.case === "text") {
+                    messagesRef.current.push({
+                      key: `user-replayed-${replayedUserKeyRef.current++}`,
+                      text: block.value.text,
+                      from: "user",
+                      at: Date.now(),
+                    });
+                    setMessages(messagesRef.current.slice());
+                  }
                 }
               }
               // toolCallUpdate / plan carry no additional bubble; ignored on purpose.

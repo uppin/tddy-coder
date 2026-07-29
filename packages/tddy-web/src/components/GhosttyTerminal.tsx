@@ -164,6 +164,10 @@ export interface GhosttyTerminalHandle {
   getScrollbar?(): { total: number; offset: number; len: number };
   /** True when the TUI has enabled mouse tracking (DEC 1006 / 1002). */
   hasMouseTracking?(): boolean;
+  /** True when the terminal is in the alternate screen buffer (DEC 1049). */
+  isAlternateScreen?(): boolean;
+  /** Send an SGR wheel mouse report (buttons 64/65) for the given wheel event via onData. */
+  sendWheelSgr?(e: WheelEvent): void;
   /**
    * Simulate a keystroke: scroll to bottom first (native scroll-to-bottom.keystroke=true),
    * then forward via onData.
@@ -918,7 +922,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return () => {
         container.removeEventListener("pointerdown", preventFocus, { capture: true });
         container.removeEventListener("mousedown", preventFocus, { capture: true });
-        container.removeEventListener("touchstart", preventFocus, { capture: true, passive: false });
+        container.removeEventListener("touchstart", preventFocus, { capture: true });
         container.removeEventListener("click", preventFocus, { capture: true });
       };
     }, [preventFocusOnTap]);
@@ -1037,6 +1041,26 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         hasMouseTracking() {
           const t = termRef.current as unknown as { hasMouseTracking?: () => boolean } | null;
           return t?.hasMouseTracking?.() ?? false;
+        },
+        isAlternateScreen() {
+          const t = termRef.current as unknown as {
+            wasmTerm?: { isAlternateScreen?: () => boolean };
+          } | null;
+          return t?.wasmTerm?.isAlternateScreen?.() ?? false;
+        },
+        sendWheelSgr(e: WheelEvent) {
+          if (e.ctrlKey) return;
+          const t = termRef.current;
+          const send = onDataRef.current;
+          if (!t || !send) return;
+          const canvas = t.element?.querySelector("canvas");
+          if (!canvas) return;
+          const r = canvas.getBoundingClientRect();
+          const grid = { left: r.left, top: r.top, width: r.width, height: r.height };
+          const coords = clientPointToTerminalCell(e.clientX, e.clientY, grid, t.cols, t.rows);
+          if (!coords) return;
+          const pb = e.deltaY < 0 ? 64 : 65;
+          send(`\x1b[<${pb};${coords.col};${coords.row}M`);
         },
         sendKeystroke(data: string) {
           const t = termRef.current as unknown as {
