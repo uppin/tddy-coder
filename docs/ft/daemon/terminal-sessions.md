@@ -188,7 +188,8 @@ these when no per-session live runtime exists (see
 
 > **Added: 2026-07-28** — Replaces the eager full-capture replay with a last-frame-first model so a
 > reconnecting/refreshing client sees content immediately, with older history loaded lazily as the
-> user scrolls up.
+> user scrolls up. A reconnecting terminal resumes by offset instead of re-replaying the whole
+> retained buffer, and a transient transport blip no longer evicts the runtime.
 
 ### Summary
 
@@ -213,6 +214,32 @@ chunk at a time, until the capture ring's anchor is reached.
   starting at `from_offset`, bounded by `until_offset` (the anchor), then closes. The client appends
   the chunk, advances `from_offset` to the chunk's `end_offset`, and calls again until `at_end = true`
   (reached `until_offset` / the capture tip).
+
+### Reconnect resume by offset (`StreamReplayMode`)
+
+`StreamTerminalOutputRequest` (and the bidi `StreamSessionTerminalIO` open frame) carry a `mode`
+(`StreamReplayMode`) + `from_offset` so a terminal that has already synced its state resumes by
+offset instead of re-replaying the whole retained buffer.
+
+- **`TAIL`** (default, first connect): the server sends the mode prologue + the current last-frame
+  tail chunk (tagged with absolute offsets), resizes the PTY to the client's dimensions, drains the
+  pre-resize broadcast, then bridges live output.
+- **`FROM_OFFSET`** (reconnect): the server sends the mode prologue + chunked catch-up via
+  `replay_from(from_offset, tip, …)` until `at_end`, then live output. No tail chunk, no PTY
+  resize/drain — a terminal that already holds state up to `from_offset` receives only the bytes it
+  missed, with no duplicate content.
+
+The bidi `StreamSessionTerminalIO` open frame carries the same `mode`/`from_offset` so a bidi
+client can replay-once-at-init / resume-by-offset on the same connection that carries its input;
+the params are read only from the first message of the stream.
+
+### Client reconnect & null-client pause
+
+The web client (`GrpcSessionTerminal`) tracks the cumulative output offset and sends `FROM_OFFSET`
+with the tracked offset on reconnect. Its `client` widens to `ConnectionClient | null`: a **null
+client** (a transient transport blip) **pauses** the terminal — it stays mounted (its scrollback and
+the ghostty instance survive), input is queued — and resumes with `FROM_OFFSET` when a non-null
+client returns. Only a stream-end with a **valid** client (a real `pty_done`) evicts the runtime.
 
 ### Client scroll-up protocol
 
