@@ -83,6 +83,8 @@ For each session directory, the daemon merges **`.session.yaml`** with optional 
 
 If the changeset is missing, unreadable, or has no matching session row, the corresponding fields use **placeholders** (em dash) or partial data as implemented in **`session_list_enrichment`**.
 
+**`context_docs`** (proto field 27): enrichment also fills `SessionEntry.context_docs` from **`session_context_docs::context_docs_for_session`** — recipe-manifest planning docs (`kind = MANIFEST`) followed by files under **`artifacts/attachments/`** (`kind = ATTACHMENT`), each with `size_bytes`. Attachments are listed even when the recipe is blank or unknown. Host-side store: **`session_attachments`** (`list_session_attachments`, `copy_attachment_into_session`); path helpers live in **`tddy-workflow`**. Product contract: [session-attachments.md](../../../docs/ft/coder/session-attachments.md).
+
 The directory listing and enrichment execute inside **`spawn_blocking_with_timeout`** so the async RPC handler does not block the Tokio runtime on disk I/O.
 
 Session **status** strings in metadata drive workflow display; optional Telegram notifications keyed on status transitions are documented in **[telegram-notifier.md](./telegram-notifier.md)** (product context: **[telegram-notifications.md](../../../docs/ft/daemon/telegram-notifications.md)**).

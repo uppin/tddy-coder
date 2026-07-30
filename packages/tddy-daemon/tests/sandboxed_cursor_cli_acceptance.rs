@@ -13,7 +13,7 @@ use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectSessionRequest, ConnectionService as ConnectionServiceTrait, StartSessionRequest,
-    StreamTerminalOutputRequest,
+    StreamReplayMode, StreamTerminalOutputRequest,
 };
 use tddy_testing_commons::process_is_alive;
 
@@ -100,9 +100,19 @@ fn register_project(projects_dir: &std::path::Path, repo_path: &std::path::Path)
     std::fs::write(projects_dir.join("projects.yaml"), yaml).unwrap();
 }
 
+/// The chat id the stub `cursor-agent` mints for `create-chat`.
+const STUB_CHAT_ID: &str = "f8db82db-e154-41d0-ae72-312bdf6d4d80";
+
+/// A stub agent that echoes its argv, and mints [`STUB_CHAT_ID`] when asked for a chat.
 fn write_echo_argv_script(dir: &std::path::Path) -> std::path::PathBuf {
     let script_path = dir.join("stub_agent.sh");
-    std::fs::write(&script_path, "#!/bin/sh\necho \"ARGV: $@\"\ncat\n").unwrap();
+    std::fs::write(
+        &script_path,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"create-chat\" ]; then echo \"{STUB_CHAT_ID}\"; exit 0; fi\necho \"ARGV: $@\"\ncat\n"
+        ),
+    )
+    .unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -115,7 +125,9 @@ fn write_echo_argv_and_subagent_env_script(dir: &std::path::Path) -> std::path::
     let script_path = dir.join("stub_agent_subagent.sh");
     std::fs::write(
         &script_path,
-        "#!/bin/sh\necho \"ARGV: $@\"\necho \"TDDY_SUBAGENT=$TDDY_SUBAGENT\"\ncat\n",
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"create-chat\" ]; then echo \"{STUB_CHAT_ID}\"; exit 0; fi\necho \"ARGV: $@\"\necho \"TDDY_SUBAGENT=$TDDY_SUBAGENT\"\ncat\n"
+        ),
     )
     .unwrap();
     #[cfg(unix)]
@@ -264,6 +276,8 @@ async fn sandboxed_cursor_cli_terminal_io_round_trips() {
             terminal_id: String::new(),
             initial_cols: 80,
             initial_rows: 24,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
         }))
         .await
         .expect("stream_terminal_output");
@@ -341,6 +355,8 @@ async fn sandboxed_cursor_cli_start_wires_specialized_agents_env_and_metadata() 
             terminal_id: String::new(),
             initial_cols: 80,
             initial_rows: 24,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
         }))
         .await
         .expect("stream_terminal_output");

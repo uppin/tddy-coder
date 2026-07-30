@@ -17,7 +17,7 @@ use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
     ClaimTerminalControlRequest, ConnectionService as ConnectionServiceTrait, SessionTerminalInput,
-    WatchTerminalControlRequest,
+    StreamReplayMode, WatchTerminalControlRequest,
 };
 
 const VALID_TOKEN: &str = "valid-token";
@@ -269,6 +269,10 @@ async fn send_terminal_input_rejected_without_valid_control_token() {
             terminal_id: String::new(), // → "main"
             control_token: "wrong-token".to_string(),
             input_offset: 0,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
+            initial_cols: 0,
+            initial_rows: 0,
         }))
         .await
         .expect_err("SendTerminalInput with invalid control token must be rejected");
@@ -305,6 +309,10 @@ async fn send_terminal_input_succeeds_for_current_controller() {
             terminal_id: String::new(),
             control_token: token,
             input_offset: 0,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
+            initial_cols: 0,
+            initial_rows: 0,
         }))
         .await
         .expect("SendTerminalInput from the current controller must succeed");

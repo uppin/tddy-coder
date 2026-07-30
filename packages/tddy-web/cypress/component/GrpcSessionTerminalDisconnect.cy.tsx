@@ -23,6 +23,7 @@ import {
   SendTerminalInputResponseSchema,
 } from "../../src/gen/connection_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
+import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { toArrayBuffer } from "../support/rpc/protoRpc";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
@@ -85,13 +86,15 @@ function SessionsTerminalHarness({ onDisconnect }: { onDisconnect: () => void })
         switch away
       </button>
       {mounted && (
-        <GrpcSessionTerminal
-          sessionId={SESSION_ID}
-          sessionToken={SESSION_TOKEN}
-          client={client}
-          connected={null}
-          onDisconnect={onDisconnect}
-        />
+        <UploadProgressProvider>
+          <GrpcSessionTerminal
+            sessionId={SESSION_ID}
+            sessionToken={SESSION_TOKEN}
+            client={client}
+            connected={null}
+            onDisconnect={onDisconnect}
+          />
+        </UploadProgressProvider>
       )}
     </div>
   );

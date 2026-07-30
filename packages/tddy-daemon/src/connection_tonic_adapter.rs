@@ -38,13 +38,14 @@ use tddy_service::proto::connection::{
     CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse,
     ExecuteToolRequest, ExecuteToolResponse, GetAcpToolCallDetailRequest,
     GetAcpToolCallDetailResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
-    GetPrStatusRequest, GetPrStatusResponse, HostStatsEvent, ListAgentModelsRequest,
-    ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
-    ListEligibleDaemonsResponse, ListExecToolsRequest, ListExecToolsResponse,
-    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
-    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
-    ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
+    GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest, HostStatsEvent,
+    ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse,
+    ListEligibleDaemonsRequest, ListEligibleDaemonsResponse, ListExecToolsRequest,
+    ListExecToolsResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
+    ListProjectsRequest, ListProjectsResponse, ListSessionToolCallsRequest,
+    ListSessionToolCallsResponse, ListSessionWorkflowFilesRequest,
+    ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse,
+    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse,
@@ -61,8 +62,8 @@ use tddy_service::proto::connection::{
     StopDemoVmRequest, StopDemoVmResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
     StreamAcpReplayRequest, StreamHostStatsRequest, StreamSessionActivityRequest,
     StreamTerminalOutputRequest, StreamWorktreeStatsRequest, TerminalControlEvent,
-    UploadSessionFileChunkRequest, UploadSessionFileChunkResponse, WatchTerminalControlRequest,
-    WorktreeStatsEvent,
+    TerminalHistoryChunk, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
+    WatchTerminalControlRequest, WorktreeStatsEvent,
 };
 use tddy_service::proto::connection::{
     DeleteSessionUploadRequest, DeleteSessionUploadResponse, DeleteStagedAttachmentRequest,
@@ -167,6 +168,7 @@ where
     T: RpcConnectionService,
     T::StreamSessionTerminalIoStream: 'static,
     T::StreamTerminalOutputStream: 'static,
+    T::GetTerminalHistoryStream: 'static,
     T::WatchTerminalControlStream: 'static,
     T::StreamSessionActivityStream: 'static,
     T::StreamAcpReplayStream: 'static,
@@ -482,6 +484,10 @@ where
     type StreamTerminalOutputStream =
         Pin<Box<dyn Stream<Item = Result<SessionTerminalOutput, tonic::Status>> + Send>>;
 
+    /// Server streaming: lazy scroll-up history chunks.
+    type GetTerminalHistoryStream =
+        Pin<Box<dyn Stream<Item = Result<TerminalHistoryChunk, tonic::Status>> + Send>>;
+
     // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
     #[allow(clippy::result_large_err)]
     async fn stream_terminal_output(
@@ -509,6 +515,21 @@ where
         .await
         .map_err(to_tonic_status)?;
         Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    #[allow(clippy::result_large_err)]
+    async fn get_terminal_history(
+        &self,
+        request: tonic::Request<GetTerminalHistoryRequest>,
+    ) -> Result<tonic::Response<Self::GetTerminalHistoryStream>, tonic::Status> {
+        let resp = RpcConnectionService::get_terminal_history(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
+        Ok(tonic::Response::new(Box::pin(outbound)))
     }
 
     async fn start_terminal_session(

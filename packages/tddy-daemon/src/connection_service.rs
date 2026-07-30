@@ -45,12 +45,13 @@ use tddy_service::proto::connection::{
     SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
     StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
     StopTerminalSessionResponse, StreamTerminalOutputRequest, StreamWorktreeStatsRequest,
-    SubagentInfo, TerminalControlEvent, TerminalSessionInfo, ToolInfo,
+    SubagentInfo, TerminalControlEvent, TerminalHistoryChunk, TerminalSessionInfo, ToolInfo,
     UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
     UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
     WatchTerminalControlRequest, WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
     WorktreeSizeStatus as ProtoWorktreeSizeStatus, WorktreeStatsEvent,
 };
+use tddy_terminal_rpc::TerminalSessionStore;
 use uuid::Uuid;
 
 use crate::agent_list_mapping::agent_allowlist_rows;
@@ -62,6 +63,7 @@ use crate::livekit_peer_discovery::{
 };
 use crate::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
 use crate::project_storage::{self, ProjectData};
+use crate::session_attachments::validate_attachment_basename;
 use crate::session_deletion;
 use crate::session_file_upload::{contained_canonical_dir, validate_segment};
 use crate::session_list_enrichment;
@@ -82,12 +84,13 @@ use tddy_service::proto::connection::{
     AcpReplayFrame, AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState,
     ExecuteToolRequest, ExecuteToolResponse, GetAcpToolCallDetailRequest,
     GetAcpToolCallDetailResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
-    GetPrStatusRequest, GetPrStatusResponse, HostCpuStats, HostDiskStats, HostStatsEvent,
-    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse, QueryBranchRequest, QueryBranchResponse, RepointPlannedPrRequest,
-    RepointPlannedPrResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
-    StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
-    StreamAcpReplayRequest, StreamHostStatsRequest, StreamMode, StreamSessionActivityRequest,
+    GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest, HostCpuStats,
+    HostDiskStats, HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse, QueryBranchRequest,
+    QueryBranchResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
+    ReportAgentActivityRequest, ReportAgentActivityResponse, StartDemoVmRequest,
+    StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, StreamAcpReplayRequest,
+    StreamHostStatsRequest, StreamMode, StreamSessionActivityRequest,
     ToolCallInfo as ProtoToolCallInfo,
 };
 use tddy_task::{TaskRegistry, TerminalCapture};
@@ -195,6 +198,10 @@ pub(crate) const TERMINAL_OUTPUT_FRAME_MAX_BYTES: usize = 32 * 1024;
 ///
 /// An empty input yields no frames. Any non-empty input yields `ceil(len / max_frame_bytes)`
 /// frames; concatenating them in order reproduces the input exactly.
+///
+/// Retained for the `sandbox_replay_tests` unit tests (the production sandbox path now uses
+/// `TerminalCapture::replay_from` directly with offset-tagged frames).
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn chunk_terminal_output(data: &[u8], max_frame_bytes: usize) -> Vec<bytes::Bytes> {
     data.chunks(max_frame_bytes)
         .map(bytes::Bytes::copy_from_slice)
@@ -207,6 +214,10 @@ pub(crate) fn chunk_terminal_output(data: &[u8], max_frame_bytes: usize) -> Vec<
 /// Without the prologue a browser attaching to a long-running sandbox session never learns the
 /// application enabled mouse reporting, because the DECSET that enabled it was evicted from the
 /// capture ring long ago and nothing re-emits it.
+///
+/// Retained for the `sandbox_replay_tests` unit tests (the production sandbox path now uses
+/// `TerminalCapture::replay_from` directly with offset-tagged frames).
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn sandbox_replay_frames(
     capture: &TerminalCapture,
     max_frame_bytes: usize,
@@ -252,6 +263,7 @@ impl Stream for TerminalOutputStream {
                     return std::task::Poll::Ready(Some(Ok(SessionTerminalOutput {
                         data: chunk.to_vec(),
                         acked_input_offset: 0,
+                        ..Default::default()
                     })));
                 }
                 Err(TryRecvError::Lagged(_)) => {
@@ -310,18 +322,82 @@ fn terminal_data_frame(data: Vec<u8>) -> SessionTerminalOutput {
     SessionTerminalOutput {
         data,
         acked_input_offset: 0,
+        ..Default::default()
     }
 }
 
-/// An input-offset ACK frame (empty data).
-fn terminal_ack_frame(acked_input_offset: u64) -> SessionTerminalOutput {
+/// A replay / catch-up frame tagged with its absolute byte offsets and whether it reaches the
+/// capture ring's oldest retained byte. Used by the sandbox path so a reconnecting client can
+/// resume by offset (FROM_OFFSET) instead of re-receiving the whole retained buffer.
+fn terminal_replay_frame(
+    data: Vec<u8>,
+    start_offset: u64,
+    end_offset: u64,
+    at_oldest: bool,
+) -> SessionTerminalOutput {
     SessionTerminalOutput {
-        data: Vec::new(),
-        acked_input_offset,
+        data,
+        acked_input_offset: 0,
+        start_offset,
+        end_offset,
+        at_oldest,
+    }
+}
+
+/// Convert a daemon `connection::SessionTerminalInput` (tonic ConnectionService proto) into the
+/// bridge's `terminal_session::SessionTerminalInput` so the bidi handler can route through the
+/// shared bridge helper. The two protos carry identical fields; this is a structural copy.
+fn to_bridge_terminal_input(
+    msg: &SessionTerminalInput,
+) -> tddy_terminal_rpc::proto::terminal_session::SessionTerminalInput {
+    tddy_terminal_rpc::proto::terminal_session::SessionTerminalInput {
+        session_token: msg.session_token.clone(),
+        session_id: msg.session_id.clone(),
+        data: msg.data.clone(),
+        terminal_id: msg.terminal_id.clone(),
+        control_token: msg.control_token.clone(),
+        input_offset: msg.input_offset,
+        mode: msg.mode,
+        from_offset: msg.from_offset,
+        initial_cols: msg.initial_cols,
+        initial_rows: msg.initial_rows,
+    }
+}
+
+/// Convert a bridge `terminal_session::SessionTerminalOutput` (carrying offset metadata) into the
+/// daemon's `connection::SessionTerminalOutput` for the tonic/RpcService stream.
+fn to_connection_output(
+    out: tddy_terminal_rpc::proto::terminal_session::SessionTerminalOutput,
+) -> SessionTerminalOutput {
+    SessionTerminalOutput {
+        data: out.data,
+        acked_input_offset: out.acked_input_offset,
+        start_offset: out.start_offset,
+        end_offset: out.end_offset,
+        at_oldest: out.at_oldest,
     }
 }
 
 impl Unpin for MpscTerminalOutputStream {}
+
+/// Stream adapter backed by an unbounded mpsc channel carrying `Result<T, Status>` items — used for
+/// server-streaming RPCs (e.g. `GetTerminalHistory`) whose frames may carry a mid-stream status.
+pub struct MpscResultStream<T> {
+    rx: tokio::sync::mpsc::UnboundedReceiver<Result<T, Status>>,
+}
+
+impl<T> Stream for MpscResultStream<T> {
+    type Item = Result<T, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.rx.poll_recv(cx)
+    }
+}
+
+impl<T> Unpin for MpscResultStream<T> {}
 
 /// Stream adapter backed by an mpsc channel for [`TerminalControlEvent`] server-streaming.
 pub struct MpscControlEventStream {
@@ -1779,6 +1855,7 @@ async fn spawn_claude_cli_session_inner(
         previous_session_id: None,
         session_type: Some("claude-cli".to_string()),
         model: Some(model.to_string()),
+        cursor_chat_id: None,
         activity_status: None,
         hook_token: Some(hook_token),
         sandbox: None,
@@ -2588,6 +2665,7 @@ impl ConnectionServiceImpl {
             previous_session_id: None,
             session_type: Some("claude-cli".to_string()),
             model: Some(model.to_string()),
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: None,
             sandbox: Some(true),
@@ -2900,6 +2978,14 @@ impl ConnectionServiceImpl {
             runner_argv.push(prompt.to_string());
         }
 
+        // TODO: pin a Cursor chat for sandboxed cursor sessions too (`--agent-arg --resume
+        // --agent-arg <id>`), the way the unsandboxed path does in `spawn_cursor_cli_session_inner`.
+        // Not done here because the jail runs against its own persistent cursor home
+        // (`prepare_persistent_cursor_home`), so a chat minted by the host `cursor-agent
+        // create-chat` is not necessarily resolvable inside the jail — that needs verifying before
+        // an id is pinned. Until then a sandboxed session records no `cursor_chat_id`, and its
+        // first resume adopts a fresh chat (see `resume_cursor_cli_session`).
+
         // Semantic index: index the worktree into the session dir before spawning the jail
         // (blocking; a missing embedder or a failed index aborts the start — no unindexed
         // fallback), and inject `TDDY_SEMANTIC_INDEX_DB` into the jail env so the in-jail
@@ -3019,6 +3105,7 @@ impl ConnectionServiceImpl {
             previous_session_id: None,
             session_type: Some("cursor-cli".to_string()),
             model: Some(model.to_string()),
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: Some(hook_token),
             sandbox: Some(true),
@@ -3872,7 +3959,7 @@ impl ConnectionServiceImpl {
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         let mut seen_basenames = std::collections::HashSet::new();
         for att in attachments {
-            let safe = validate_segment(&att.basename)?;
+            let safe = validate_attachment_basename(&att.basename)?;
             if !seen_basenames.insert(safe.to_string()) {
                 return Err(Status::invalid_argument(
                     "duplicate attachment basename in request",
@@ -3885,7 +3972,7 @@ impl ConnectionServiceImpl {
         let mut written: Vec<String> = Vec::new();
 
         for att in attachments {
-            let basename = validate_segment(&att.basename)?.to_string();
+            let basename = validate_attachment_basename(&att.basename)?.to_string();
             let source = att
                 .source
                 .as_ref()
@@ -5705,7 +5792,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     }
 
     /// Associated output stream type for [`stream_session_terminal_io`].
-    type StreamSessionTerminalIoStream = TerminalOutputStream;
+    type StreamSessionTerminalIoStream = MpscTerminalOutputStream;
 
     async fn stream_session_terminal_io(
         &self,
@@ -5741,10 +5828,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 return Err(Status::not_found("terminal not found or not running"));
             }
             let stdin_tx = sandbox.stdin_tx.clone();
-            let stdout_rx = sandbox.stdout_tx.subscribe();
             if !first.data.is_empty() {
                 let _ = stdin_tx.send(bytes::Bytes::from(first.data));
             }
+            // Sandbox bidi path stays live-only (no capture-ring replay on this surface): forward
+            // subsequent input chunks to stdin, and bridge the sandbox stdout broadcast into the
+            // mpsc-backed stream the tonic/RpcService trait drains.
             let stdin_tx2 = stdin_tx.clone();
             tokio::spawn(async move {
                 while let Some(Ok(msg)) = in_stream.next().await {
@@ -5753,7 +5842,22 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     }
                 }
             });
-            return Ok(Response::new(TerminalOutputStream { rx: stdout_rx }));
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SessionTerminalOutput>();
+            let mut stdout_rx = sandbox.stdout_tx.subscribe();
+            tokio::spawn(async move {
+                loop {
+                    match stdout_rx.recv().await {
+                        Ok(chunk) => {
+                            if tx.send(terminal_data_frame(chunk.to_vec())).is_err() {
+                                break;
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            });
+            return Ok(Response::new(MpscTerminalOutputStream { rx }));
         }
 
         if !self
@@ -5766,8 +5870,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             ));
         }
 
-        let handle = self
-            .claude_cli_manager
+        let store = crate::terminal_session_adapter::DaemonTerminalSessionStore::new(Arc::clone(
+            &self.claude_cli_manager,
+        ));
+        let session = store
             .get_terminal(&session_id, &terminal_id)
             .await
             .ok_or_else(|| {
@@ -5780,41 +5886,61 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 Status::not_found("terminal not found or not running")
             })?;
 
-        let stdin_tx = handle.stdin_tx.clone();
-        let stdout_rx = handle.stdout_tx.subscribe();
+        // Convert the first (open) message and the remaining tonic input stream into the bridge's
+        // `terminal_session` proto types so the bidi handler can route through the shared bridge
+        // helper (same replay-once / resume-by-offset semantics as the split `StreamTerminalOutput`).
+        let first_bridge = to_bridge_terminal_input(&first);
+        let in_stream_mapped = tokio_stream::StreamExt::map(in_stream, |item| match item {
+            Ok(msg) => Ok(to_bridge_terminal_input(&msg)),
+            Err(e) => Err(tddy_rpc::Status::internal(e.to_string())),
+        });
 
-        // Trigger a SIGWINCH so claude redraws its full screen onto the now-subscribed channel.
-        // The initial render happens before the browser's first stream call arrives (network RTT),
-        // so without this the terminal would be blank until the user sends input.
-        handle.trigger_redraw();
+        // Per-chunk control-token verifier (the first message was already verified above). The
+        // bridge bidi helper calls this on each subsequent input chunk and ends the forwarder when
+        // control is lost — matching the daemon's previous per-chunk control-token check.
+        let manager_for_verify = Arc::clone(&self.claude_cli_manager);
+        let verify_control = move |sid: &str, token: &str| {
+            let manager = Arc::clone(&manager_for_verify);
+            let sid = sid.to_string();
+            let token = token.to_string();
+            async move { manager.verify_control(&sid, &token).await }
+        };
 
-        // Forward the first data chunk (if any).
-        if !first.data.is_empty() {
-            let _ = stdin_tx.send(bytes::Bytes::from(first.data));
-        }
+        let bridge_rx = tddy_terminal_rpc::serve_stream_session_terminal_io_with(
+            session,
+            session_id,
+            first_bridge,
+            in_stream_mapped,
+            verify_control,
+            tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
+        )
+        .await?;
 
-        // Spawn a task to forward subsequent input chunks to stdin.
-        let stdin_tx2 = stdin_tx.clone();
-        let manager2 = Arc::clone(&self.claude_cli_manager);
+        // Map the bridge's `terminal_session::SessionTerminalOutput` frames (carrying offset
+        // metadata) into the daemon's `connection::SessionTerminalOutput` and forward them through
+        // the mpsc-backed stream the tonic/RpcService trait drains.
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SessionTerminalOutput>();
         tokio::spawn(async move {
-            while let Some(Ok(msg)) = in_stream.next().await {
-                if !manager2
-                    .verify_control(&session_id, &msg.control_token)
-                    .await
-                {
+            let mut bridge_rx = bridge_rx;
+            while let Some(frame) = bridge_rx.recv().await {
+                let mapped = match frame {
+                    Ok(out) => to_connection_output(out),
+                    Err(_) => break,
+                };
+                if tx.send(mapped).is_err() {
                     break;
-                }
-                if !msg.data.is_empty() {
-                    let _ = stdin_tx2.send(bytes::Bytes::from(msg.data));
                 }
             }
         });
 
-        Ok(Response::new(TerminalOutputStream { rx: stdout_rx }))
+        Ok(Response::new(MpscTerminalOutputStream { rx }))
     }
 
     /// Associated output stream type for [`stream_terminal_output`].
     type StreamTerminalOutputStream = MpscTerminalOutputStream;
+
+    /// Associated output stream type for [`get_terminal_history`].
+    type GetTerminalHistoryStream = MpscResultStream<TerminalHistoryChunk>;
 
     /// Server-streaming output — browser-compatible alternative to the bidi `StreamSessionTerminalIO`.
     /// connect-web's Fetch transport cannot send streaming request bodies, so bidi streaming never
@@ -5846,14 +5972,54 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 return Err(Status::not_found("terminal not found or not running"));
             }
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-            let frames = sandbox
+
+            // Re-issue the mouse-tracking modes still in effect as the very first frame (not part of
+            // the cumulative byte stream, so zeroed offsets), then forward-fill the retained buffer
+            // from the appropriate offset. TAIL (first connect) clamps `from_offset = 0` up to the
+            // ring's `start_offset`, replaying the full retained buffer; FROM_OFFSET (reconnect)
+            // replays only the gap from the client's tracked offset to the tip. Each chunk is tagged
+            // with its absolute offsets so the client advances its `currentOffset` to the tip and can
+            // resume by offset on the next reconnect — no duplicate replay.
+            let is_from_offset =
+                req.mode == tddy_service::proto::connection::StreamReplayMode::FromOffset as i32;
+            let from_offset = if is_from_offset { req.from_offset } else { 0 };
+
+            let prologue = sandbox
                 .capture
                 .lock()
-                .map(|cap| sandbox_replay_frames(&cap, TERMINAL_OUTPUT_FRAME_MAX_BYTES))
+                .map(|cap| cap.mode_prologue())
                 .unwrap_or_default();
-            for frame in frames {
-                let _ = tx.send(terminal_data_frame(frame.to_vec()));
+            if !prologue.is_empty() {
+                let _ = tx.send(terminal_data_frame(prologue));
             }
+
+            let mut cursor = from_offset;
+            loop {
+                let chunk = sandbox
+                    .capture
+                    .lock()
+                    .map(|cap| cap.replay_from(cursor, 0, TERMINAL_OUTPUT_FRAME_MAX_BYTES))
+                    .unwrap_or_else(|_| tddy_task::CaptureChunk {
+                        data: Vec::new(),
+                        start_offset: cursor,
+                        end_offset: cursor,
+                        at_oldest: true,
+                        at_end: true,
+                    });
+                if !chunk.data.is_empty() {
+                    let _ = tx.send(terminal_replay_frame(
+                        chunk.data,
+                        chunk.start_offset,
+                        chunk.end_offset,
+                        chunk.at_oldest,
+                    ));
+                }
+                cursor = chunk.end_offset;
+                if chunk.at_end {
+                    break;
+                }
+            }
+
             let mut stdout_rx = sandbox.stdout_tx.subscribe();
             // Sandbox sessions have no unary input-offset ACK source; data frames only.
             tokio::spawn(async move {
@@ -5872,185 +6038,57 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Ok(Response::new(MpscTerminalOutputStream { rx }));
         }
 
-        let handle = self
-            .claude_cli_manager
-            .get_terminal(&session_id, &terminal_id)
-            .await
-            .ok_or_else(|| {
-                log::warn!(
-                    target: "tddy_daemon::connection_service",
-                    "stream_terminal_output: session {} terminal {} not found in registry",
-                    session_id,
-                    terminal_id
-                );
-                Status::not_found("terminal not found or not running")
-            })?;
+        let store = crate::terminal_session_adapter::DaemonTerminalSessionStore::new(Arc::clone(
+            &self.claude_cli_manager,
+        ));
+        // Delegate the claude-cli terminal stream to the unified bridge in `tddy-terminal-rpc`, which
+        // sends the mode prologue + current last frame first (tagged with absolute offsets), resizes
+        // and drains on client dimensions, emits the current ACK up front, then bridges live
+        // broadcast output interleaved with ACKs until the child exits. Older history is fetched on
+        // demand via `get_terminal_history` as the user scrolls up. The bridge resolves an empty
+        // `terminal_id` to the reserved main terminal, matching the daemon's `resolved_terminal_id`.
+        let bridge_req = tddy_terminal_rpc::proto::terminal_session::StreamTerminalOutputRequest {
+            session_token: req.session_token.clone(),
+            session_id: req.session_id.clone(),
+            terminal_id: req.terminal_id.clone(),
+            initial_cols: req.initial_cols,
+            initial_rows: req.initial_rows,
+            mode: req.mode,
+            from_offset: req.from_offset,
+        };
+        let bridge_rx = tddy_terminal_rpc::serve_stream_terminal_output_with(
+            &store,
+            bridge_req,
+            tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
+        )
+        .await?;
 
-        // If the client supplied terminal dimensions, resize the PTY before replay so that
-        // the TUI redraws at the browser's actual width rather than the PTY's spawn-time default.
-        let has_initial_dims = req.initial_cols > 0 && req.initial_rows > 0;
-        if has_initial_dims {
-            handle.resize(req.initial_rows as u16, req.initial_cols as u16);
-            log::debug!(
-                target: "tddy_daemon::connection_service",
-                "stream_terminal_output: resized PTY to {}×{} for session {} before replay",
-                req.initial_cols,
-                req.initial_rows,
-                session_id
-            );
-        } else {
-            log::debug!(
-                target: "tddy_daemon::connection_service",
-                "stream_terminal_output: no initial dimensions from client for session {} (cols={} rows={}) — replay will use PTY default size",
-                session_id, req.initial_cols, req.initial_rows
-            );
-        }
-
-        // Subscribe to broadcast BEFORE reading the capture buffer so there is no gap:
-        // bytes produced between the capture snapshot and the first bridge recv() are
-        // covered by the broadcast subscription.
-        let (mpsc_tx, mpsc_rx) = tokio::sync::mpsc::unbounded_channel::<SessionTerminalOutput>();
-        let mut broadcast_rx = handle.stdout_tx.subscribe();
-
-        // Re-issue the mouse-tracking modes the application has enabled as the very first frame,
-        // independent of the capture replay below. A client's VT only reports clicks, drags and
-        // scrolls once it has seen the DECSET itself, and neither the SIGWINCH redraw nor a capture
-        // ring that has trimmed past the startup bytes carries them.
-        let prologue = handle
-            .capture
-            .lock()
-            .map(|cap| cap.mode_prologue())
-            .unwrap_or_default();
-        if !prologue.is_empty() {
-            log::debug!(
-                target: "tddy_daemon::connection_service",
-                "stream_terminal_output: re-issuing {} byte(s) of terminal mode prologue for session {}",
-                prologue.len(),
-                session_id
-            );
-            let _ = mpsc_tx.send(terminal_data_frame(prologue));
-        }
-
-        // Replay capture buffer only when the client did NOT supply terminal dimensions.
-        //
-        // When dimensions are provided we already sent SIGWINCH (above), which will make the
-        // TUI redraw at the correct size. Replaying the capture buffer here would send
-        // pre-resize content (drawn at the PTY's old width) to the browser before the
-        // post-SIGWINCH redraw arrives via broadcast — producing garbled output. Skipping
-        // the replay means the client sees a clean fresh frame once the TUI redraws.
-        //
-        // When no dimensions are provided (legacy / fallback path) the replay is still the
-        // only way to see historical content, so we keep it.
-        let replay_capture = !has_initial_dims;
-        if replay_capture {
-            let frames = handle
-                .capture
-                .lock()
-                .map(|cap| {
-                    chunk_terminal_output(cap.buffered_bytes(), TERMINAL_OUTPUT_FRAME_MAX_BYTES)
-                })
-                .unwrap_or_default();
-            if !frames.is_empty() {
-                let total_bytes: usize = frames.iter().map(|f| f.len()).sum();
-                log::debug!(
-                    target: "tddy_daemon::connection_service",
-                    "stream_terminal_output: replaying {} capture bytes in {} frame(s) for session {}",
-                    total_bytes,
-                    frames.len(),
-                    session_id
-                );
-                for frame in frames {
-                    let _ = mpsc_tx.send(terminal_data_frame(frame.to_vec()));
-                }
-            }
-        } else {
-            log::debug!(
-                target: "tddy_daemon::connection_service",
-                "stream_terminal_output: skipping capture replay for session {} (dimensions {}×{} provided; relying on SIGWINCH redraw via broadcast)",
-                session_id, req.initial_cols, req.initial_rows
-            );
-        }
-
-        // Trigger a redraw before draining: this queues a second SIGWINCH so the TUI will
-        // produce a fresh frame at the correct size. The drain below discards any pre-resize
-        // output already buffered in the broadcast receiver, so the bridge task (started after
-        // the drain) only forwards the post-SIGWINCH fresh frame to the browser.
-        handle.trigger_redraw();
-
-        // When the client supplied terminal dimensions we already resized the PTY (above).
-        // Drain any messages that arrived in the broadcast receiver between subscribe() and
-        // now — those were produced at the old PTY width (220 cols) and would cause garbled
-        // output if forwarded. The trigger_redraw() above guarantees a fresh post-resize
-        // frame will be produced, so discarding the stale buffer is safe.
-        if has_initial_dims {
-            use tokio::sync::broadcast::error::TryRecvError;
-            let mut drained = 0usize;
-            loop {
-                match broadcast_rx.try_recv() {
-                    Ok(_) => drained += 1,
-                    Err(TryRecvError::Lagged(_)) => continue,
-                    Err(TryRecvError::Empty) | Err(TryRecvError::Closed) => break,
-                }
-            }
-            if drained > 0 {
-                log::debug!(
-                    target: "tddy_daemon::connection_service",
-                    "stream_terminal_output: drained {} stale pre-resize broadcast message(s) for session {}",
-                    drained, session_id
-                );
-            }
-        }
-
-        // Input-offset ACKs ride the same output stream (docs/ft/web/enqueued-input-overlay.md):
-        // whenever the applied input offset advances, emit an empty-data frame carrying it. Emit the
-        // current applied offset up front so a stream that opens after some input was already
-        // applied (e.g. a reconnect) learns the acknowledged position immediately.
-        let mut acked_rx = handle.subscribe_acked_offset();
-        let initial_acked = *acked_rx.borrow_and_update();
-        if initial_acked > 0 {
-            let _ = mpsc_tx.send(terminal_ack_frame(initial_acked));
-        }
-
-        // Bridge broadcast → mpsc for all future output, interleaving ACK frames.
-        // Also breaks when pty_done fires so the HTTP stream ends when the process exits.
-        let mpsc_tx_bridge = mpsc_tx.clone();
-        let mut pty_done = handle.pty_done.clone();
+        // Convert the bridge's `terminal_session::SessionTerminalOutput` frames (which carry the
+        // offset metadata) into the daemon's `connection::SessionTerminalOutput` and forward them
+        // through the mpsc-backed stream the tonic/RpcService trait drains. The bridge only ever
+        // emits `Ok` frames after opening (open errors are surfaced via the `await?` above), so an
+        // `Err` here just ends the stream.
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SessionTerminalOutput>();
         tokio::spawn(async move {
-            use tokio::sync::broadcast::error::RecvError;
-            // Disabled once the ACK sender drops, so a closed watch never busy-spins the select.
-            let mut ack_open = true;
-            loop {
-                tokio::select! {
-                    result = broadcast_rx.recv() => {
-                        match result {
-                            Ok(chunk) => {
-                                if mpsc_tx_bridge.send(terminal_data_frame(chunk.to_vec())).is_err() {
-                                    break; // receiver dropped (stream closed)
-                                }
-                            }
-                            Err(RecvError::Closed) => break,
-                            Err(RecvError::Lagged(_)) => continue, // skip lagged; resume from latest
-                        }
-                    }
-                    changed = acked_rx.changed(), if ack_open => {
-                        match changed {
-                            Ok(()) => {
-                                let offset = *acked_rx.borrow_and_update();
-                                if mpsc_tx_bridge.send(terminal_ack_frame(offset)).is_err() {
-                                    break; // receiver dropped (stream closed)
-                                }
-                            }
-                            // ACK sender dropped (terminal gone) — stop watching acks; the output
-                            // bridge runs on until pty_done / broadcast close drive the exit.
-                            Err(_) => ack_open = false,
-                        }
-                    }
-                    _ = pty_done.changed() => break,
+            let mut bridge_rx = bridge_rx;
+            while let Some(frame) = bridge_rx.recv().await {
+                let mapped = match frame {
+                    Ok(out) => SessionTerminalOutput {
+                        data: out.data,
+                        acked_input_offset: out.acked_input_offset,
+                        start_offset: out.start_offset,
+                        end_offset: out.end_offset,
+                        at_oldest: out.at_oldest,
+                    },
+                    Err(_) => break,
+                };
+                if tx.send(mapped).is_err() {
+                    break;
                 }
             }
         });
 
-        Ok(Response::new(MpscTerminalOutputStream { rx: mpsc_rx }))
+        Ok(Response::new(MpscTerminalOutputStream { rx }))
     }
 
     /// Unary input — browser-compatible alternative to the client-streaming half of `StreamSessionTerminalIO`.
@@ -6108,6 +6146,65 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             handle.send_input(bytes::Bytes::from(req.data), input_offset);
         }
         Ok(Response::new(SendTerminalInputResponse {}))
+    }
+
+    /// `GetTerminalHistory`: lazy scroll-up — one chunk of older output ending just before the
+    /// request's `before_offset`, then the stream closes. Delegates to the unified bridge in
+    /// `tddy-terminal-rpc` over a [`DaemonTerminalSessionStore`]. Sandbox sessions have no capture
+    /// ring wired here, so they report `not_found` (the sandbox path streams its own replay).
+    async fn get_terminal_history(
+        &self,
+        request: Request<GetTerminalHistoryRequest>,
+    ) -> Result<Response<Self::GetTerminalHistoryStream>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let session_id = req.session_id.trim().to_string();
+        if self.sandbox_manager.get(&session_id).await.is_some() {
+            return Err(Status::not_found("terminal not found or not running"));
+        }
+
+        let store = crate::terminal_session_adapter::DaemonTerminalSessionStore::new(Arc::clone(
+            &self.claude_cli_manager,
+        ));
+        let bridge_req = tddy_terminal_rpc::proto::terminal_session::GetTerminalHistoryRequest {
+            session_token: req.session_token.clone(),
+            session_id: req.session_id.clone(),
+            terminal_id: req.terminal_id.clone(),
+            from_offset: req.from_offset,
+            until_offset: req.until_offset,
+            max_bytes: req.max_bytes,
+        };
+        let bridge_rx = tddy_terminal_rpc::serve_get_terminal_history_with(
+            &store,
+            bridge_req,
+            tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
+        )
+        .await?;
+
+        let (tx, rx) =
+            tokio::sync::mpsc::unbounded_channel::<Result<TerminalHistoryChunk, Status>>();
+        tokio::spawn(async move {
+            let mut bridge_rx = bridge_rx;
+            while let Some(frame) = bridge_rx.recv().await {
+                let mapped = frame.map(|chunk| TerminalHistoryChunk {
+                    data: chunk.data,
+                    start_offset: chunk.start_offset,
+                    end_offset: chunk.end_offset,
+                    at_oldest: chunk.at_oldest,
+                    at_end: chunk.at_end,
+                });
+                if tx.send(mapped).is_err() {
+                    break;
+                }
+            }
+        });
+        Ok(Response::new(MpscResultStream { rx }))
     }
 
     async fn start_terminal_session(
@@ -8619,6 +8716,7 @@ mod signal_session_unit_tests {
             previous_session_id: None,
             session_type: None,
             model: None,
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: None,
             sandbox: None,
@@ -9043,6 +9141,7 @@ mod list_sessions_unit_tests {
             previous_session_id: Some("ancestor-session".to_string()),
             session_type: Some("tool".to_string()),
             model: None,
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: None,
             sandbox: None,
@@ -9137,6 +9236,7 @@ mod report_session_status_unit_tests {
             previous_session_id: None,
             session_type: Some("claude-cli".to_string()),
             model: Some("claude-sonnet-4-6".to_string()),
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: Some(hook_token.to_string()),
             sandbox: None,
@@ -9236,6 +9336,7 @@ mod report_session_status_unit_tests {
             previous_session_id: None,
             session_type: None,
             model: None,
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: None,
             sandbox: None,
@@ -9355,6 +9456,7 @@ mod agent_activity_unit_tests {
             previous_session_id: None,
             session_type: Some("claude-cli".to_string()),
             model: Some("claude-sonnet-4-6".to_string()),
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: Some(hook_token.to_string()),
             sandbox: None,

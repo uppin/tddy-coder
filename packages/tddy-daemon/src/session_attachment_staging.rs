@@ -14,7 +14,7 @@
 //! `lib/fileUploadChunks.ts` stays reusable unchanged.
 //!
 //! Product contract: `docs/ft/coder/session-attachments.md` + the amendment
-//! `docs/ft/coder/amendments/session-attachments-start-materialization.md`.
+//! `docs/ft/coder/session-attachments.md` § Start-session materialization.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write as _;

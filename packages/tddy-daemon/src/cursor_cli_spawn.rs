@@ -59,6 +59,50 @@ pub fn install_cursor_hooks_in_worktree(
     hook_token
 }
 
+/// The chat id printed by `cursor-agent create-chat`, or a description of what came out instead.
+///
+/// `create-chat` prints a **bare** chat id on stdout and exits 0 ("Create a new empty chat and
+/// return its ID" — cursor-agent 2026.07.23). Anything else — no output, a banner, a prompt, an
+/// error message — is not a chat id, and pinning it to the session would send every later resume
+/// into a chat that does not exist.
+pub fn parse_created_chat_id(stdout: &str) -> Result<String, String> {
+    let chat_id = stdout.trim();
+    if chat_id.is_empty() {
+        return Err("printed no chat id on stdout".to_string());
+    }
+    if chat_id.split_whitespace().count() > 1 {
+        return Err(format!(
+            "printed {chat_id:?} on stdout, which is not a bare chat id"
+        ));
+    }
+    Ok(chat_id.to_string())
+}
+
+/// Mint the Cursor chat a session will own by running `<binary_path> create-chat` in `worktree_path`.
+///
+/// Only `create-chat` mints real chat ids, so a failure here is returned to the caller: starting the
+/// agent without one would produce a session no resume can reattach to.
+pub async fn mint_cursor_chat_id(
+    binary_path: &str,
+    worktree_path: &Path,
+) -> Result<String, String> {
+    let output = tokio::process::Command::new(binary_path)
+        .arg("create-chat")
+        .current_dir(worktree_path)
+        .output()
+        .await
+        .map_err(|e| format!("`{binary_path} create-chat` could not be run: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "`{binary_path} create-chat` exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    parse_created_chat_id(&String::from_utf8_lossy(&output.stdout))
+        .map_err(|e| format!("`{binary_path} create-chat` {e}"))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn spawn_cursor_cli_session_inner(
     config: &DaemonConfig,
@@ -279,12 +323,24 @@ pub async fn spawn_cursor_cli_session_inner(
         session_env.push(crate::semantic_index::semantic_index_env(&session_dir));
     }
 
+    // The Cursor chat this session owns for its whole lifetime: minted here, persisted in
+    // `.session.yaml` below, and passed as `--resume <id>` on every later spawn so a resume
+    // continues this chat instead of opening a new one.
+    let cursor_chat_id = mint_cursor_chat_id(&binary_path, &worktree_path)
+        .await
+        .map_err(|e| {
+            Status::internal(format!(
+                "failed to create the Cursor chat for session {session_id}: {e}"
+            ))
+        })?;
+
     let handle = cli_manager
         .start_cursor(
             session_id,
             worktree_path.clone(),
             model,
             &binary_path,
+            Some(&cursor_chat_id),
             initial_prompt_opt.as_deref(),
             session_env,
         )
@@ -307,6 +363,7 @@ pub async fn spawn_cursor_cli_session_inner(
         previous_session_id: None,
         session_type: Some("cursor-cli".to_string()),
         model: Some(model.to_string()),
+        cursor_chat_id: Some(cursor_chat_id),
         activity_status: None,
         hook_token: Some(hook_token),
         sandbox: None,
@@ -355,13 +412,46 @@ pub async fn resume_cursor_cli_session(
     }
 
     let binary_path = resolve_cursor_binary_path(config);
+    // The chat to reattach to. A session started before chat ids were recorded has no way back to
+    // its original chat, so its first resume adopts a fresh one and pins it below — every later
+    // resume then reattaches instead of starting over again.
+    let chat_id = match meta
+        .cursor_chat_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        Some(id) => id.to_string(),
+        None => {
+            let adopted = mint_cursor_chat_id(&binary_path, &worktree_path)
+                .await
+                .map_err(|e| {
+                    Status::internal(format!(
+                        "failed to create the Cursor chat for session {session_id}: {e}"
+                    ))
+                })?;
+            log::info!(
+                target: "tddy_daemon::cursor_cli_spawn",
+                "resume_cursor_cli_session {session_id}: no cursor_chat_id on record; adopted chat {adopted} for this and every later resume"
+            );
+            adopted
+        }
+    };
+
     let handle = cli_manager
-        .resume_cursor(session_id, worktree_path.clone(), &model, &binary_path)
+        .resume_cursor(
+            session_id,
+            worktree_path.clone(),
+            &model,
+            &binary_path,
+            Some(&chat_id),
+        )
         .await
         .map_err(|e| Status::internal(format!("failed to resume cursor-cli: {}", e)))?;
 
     let pid = handle.pid;
     let mut updated = meta;
+    updated.cursor_chat_id = Some(chat_id);
     updated.pid = Some(pid);
     updated.status = "active".to_string();
     updated.updated_at = chrono::Utc::now().to_rfc3339();

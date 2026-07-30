@@ -1,6 +1,6 @@
 # Changeset: Start-session attachment materialization
 
-**PRD (amendment)**: `docs/ft/coder/amendments/session-attachments-start-materialization.md`
+**PRD**: `docs/ft/coder/session-attachments.md` § Start-session materialization
 **Amends**: `docs/ft/coder/session-attachments.md` (the store)
 **Wire contract**: `packages/tddy-daemon/docs/connection-service.md` § *Start-session attachments*
 **Branch**: `feature/session-attach-docs/attach-start-1`
@@ -156,3 +156,44 @@ If any attachment in the request fails to materialize, `StartSession` removes `a
   - **MEDIUM — no cap on forwarded host bytes**: `materialize_host_document_attachment` now re-checks `MAX_HOST_DOCUMENT_BYTES` on the session host before writing forwarded `ReadHostDocument` bytes, so a buggy/older peer cannot push an oversized blob into the session's attachments.
 - **Security review**: ✅ no critical/high issues. One medium finding **fixed before merge**: `materialize_staged_attachment` now requires the staged file's `.staged-complete` marker (written only on the final chunk) before copying, so an in-progress or aborted chunked upload can no longer be materialized as a truncated attachment (regression test `start_session_refuses_a_staged_attachment_whose_upload_is_not_complete`). All other focus areas (path traversal, cross-tenant isolation, symlink escape in staging, cross-host staged-ref refusal, duplicate basenames, over-cap refusal, partial-materialization cleanup, tool-branch `session_dir` pre-creation, `SESSION_WORKTREE` listing gate, peer forwarding re-auth) validated clean.
 - **Production readiness**: no mock code, no `TODO`/`FIXME` left in the new production paths (the old `TODO(start-session-attachments)` stubs were removed when the handlers landed); no test-only branches in production code; no fallbacks added.
+
+## Post-merge validation (master merged in)
+
+The store changeset landed on `master` **after** this branch forked, and it was hardened there
+(`a9e4b5c7`) in ways this branch predates. `master` was merged into the branch; the resolutions that
+change behaviour:
+
+- **`session_attachments.rs` → `master`'s hardened version.** This branch carried the pre-hardening
+  store plus a `write_attachment_bytes` that re-introduced both defects the hardening removed: an
+  `if target.exists()` / `std::fs::write` pair (TOCTOU, and `fs::write` **truncates** an existing
+  attachment) and a discarded canonical dir (it wrote through the re-derived, non-canonical path, so
+  the containment check proved nothing about the path actually written). `write_attachment_bytes` is
+  rewritten on a new shared `create_attachment_file_exclusively` helper, so both entry points —
+  local-file copy and in-memory bytes — go through the same `OpenOptions::create_new(true)` gate and
+  neither is the weaker one.
+- **Attachment-specific refusal message.** Both write paths and the two `materialize_session_attachments`
+  basename checks now call `session_attachments::validate_attachment_basename`, which keeps the uploads
+  path's `validate_segment` rule but replaces its message (`"upload_id and file_name must each be a
+  basename"` — fields that do not exist in the attachment API) with one naming the field the caller
+  actually sent. The staging RPCs keep the original message, where it is accurate.
+- **Doc references repointed.** The amendment file was folded into
+  `docs/ft/coder/session-attachments.md` § Start-session materialization, but five references still
+  pointed at the (never-created) `docs/ft/coder/amendments/…` path; all now point at the merged section.
+  `session-attachments.md`'s "clients list attachments without reading their bytes" line is corrected:
+  `ReadHostDocument` with scope `SESSION_ARTIFACT` and `relative_path = attachments/<basename>` does
+  read them.
+- **`SessionMetadata { cursor_chat_id }`** (added by `master`'s `#367`) is now initialized in
+  `host_documents.rs`'s test fixture — the one compile break the merge produced.
+- **`connection_pb.ts` regenerated** from the merged proto rather than taken from either merge side.
+- The resurrected `docs/dev/1-WIP/changeset-session-attachment-store.md` (the merge-base predates its
+  deletion, so it came back without a conflict) is deleted again.
+
+**Verification on the merged tree**: `cargo build -p tddy-daemon -p tddy-workflow -p tddy-rpc` clean;
+`cargo clippy -p tddy-daemon -p tddy-workflow --all-targets -- -D warnings` clean; `cargo fmt` applied
+(it also reflowed four spots `master` left unformatted). `cargo test -p tddy-daemon -p tddy-workflow
+--no-fail-fast`: all suites pass except
+⚠️ `cursor_cli_session_acceptance::cursor_cli_peer_spawn_records_the_orchestrator_link_even_without_repo_path`,
+which is **pre-existing on `master`** — the test (introduced by `#358`) and every file on its code path
+are byte-identical to `master` here, and it fails on the missing parent session file, nothing this
+changeset touches. The three sandbox stdio failures were the local `tddy-sandbox-runner` binary not
+being built; they pass once it is.

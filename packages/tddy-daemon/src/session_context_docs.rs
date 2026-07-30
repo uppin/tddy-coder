@@ -209,6 +209,7 @@ pub fn read_session_context_doc_utf8(
 mod tests {
     use super::{
         context_docs_for_session, read_session_context_doc_utf8, ContextDoc, ContextDocKind,
+        ATTACHMENT_DOC_DESCRIPTION,
     };
     use crate::session_attachments::copy_attachment_into_session;
 
@@ -270,6 +271,7 @@ mod tests {
         fn assert_path(&self, expected: &Path) -> &Self;
         fn assert_exists(&self, expected: bool) -> &Self;
         fn assert_has_description(&self) -> &Self;
+        fn assert_description(&self, expected: &str) -> &Self;
         fn assert_kind(&self, expected: ContextDocKind) -> &Self;
         fn assert_size_bytes(&self, expected: u64) -> &Self;
     }
@@ -304,6 +306,15 @@ mod tests {
             assert!(
                 !self.description.trim().is_empty(),
                 "context doc {:?} must carry a non-empty description",
+                self.key
+            );
+            self
+        }
+
+        fn assert_description(&self, expected: &str) -> &Self {
+            assert_eq!(
+                self.description, expected,
+                "context doc {:?} description",
                 self.key
             );
             self
@@ -465,7 +476,7 @@ mod tests {
             .assert_path(&session_attachments_root(session.path()).join("notes.md"))
             .assert_exists(true)
             .assert_size_bytes("meeting notes\n".len() as u64)
-            .assert_has_description();
+            .assert_description(ATTACHMENT_DOC_DESCRIPTION);
     }
 
     #[test]
@@ -486,8 +497,25 @@ mod tests {
     }
 
     #[test]
-    fn a_manifest_context_doc_reports_its_on_disk_size_and_zero_when_absent() {
-        // Given — a pr-stack session whose artifacts/ holds exploration.md but not stack-plan.yaml
+    fn context_docs_for_an_unknown_recipe_list_only_the_attachments() {
+        // Given — a session whose recipe name does not resolve, holding one attached document
+        let session = tempfile::tempdir().unwrap();
+        artifacts_dir_in(session.path());
+        attach_document(session.path(), "spec.md", "# Spec\n");
+
+        // When
+        let docs = context_docs_for_session("not-a-real-recipe", session.path());
+
+        // Then — no manifest docs, but the attachment is still surfaced
+        assert_eq!(
+            kinds_and_basenames(&docs),
+            vec![(ContextDocKind::Attachment, "spec.md".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_present_manifest_context_doc_reports_its_on_disk_size() {
+        // Given — a pr-stack session whose artifacts/ holds exploration.md
         let session = tempfile::tempdir().unwrap();
         let artifacts = artifacts_dir_in(session.path());
         fs::write(artifacts.join("exploration.md"), "# Exploration\n").unwrap();
@@ -495,10 +523,22 @@ mod tests {
         // When
         let docs = context_docs_for_session("pr-stack", session.path());
 
-        // Then — a present doc reports its byte size, a missing one reports zero
+        // Then — the present doc reports its byte size
         find_doc_of_kind(&docs, ContextDocKind::Manifest, "exploration")
             .assert_exists(true)
             .assert_size_bytes("# Exploration\n".len() as u64);
+    }
+
+    #[test]
+    fn an_absent_manifest_context_doc_reports_zero_size_bytes() {
+        // Given — a pr-stack session whose artifacts/ does not hold stack-plan.yaml
+        let session = tempfile::tempdir().unwrap();
+        artifacts_dir_in(session.path());
+
+        // When
+        let docs = context_docs_for_session("pr-stack", session.path());
+
+        // Then — the missing doc reports zero size
         find_doc_of_kind(&docs, ContextDocKind::Manifest, "stack_plan")
             .assert_exists(false)
             .assert_size_bytes(0);

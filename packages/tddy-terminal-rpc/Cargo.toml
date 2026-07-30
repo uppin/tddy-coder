@@ -1,0 +1,37 @@
+[package]
+name = "tddy-terminal-rpc"
+version = "0.1.0"
+edition = "2021"
+description = "Unified PTY-over-RPC bridge: TerminalSessionService proto, transport-agnostic streaming bridge, and local PTY relay — shared by tddy-daemon, tddy-coder, and tddy-tools"
+
+[lib]
+name = "tddy_terminal_rpc"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+bytes = "1"
+futures-util = "0.3"
+log = "0.4"
+prost = "0.13"
+tddy-pty = { path = "../tddy-pty" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-task = { path = "../tddy-task" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "io-util", "io-std", "signal"] }
+tokio-stream = "0.1"
+tonic = "0.12"
+portable-pty = "0.9"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[build-dependencies]
+prost-build = "0.13"
+tddy-codegen = { path = "../tddy-codegen", features = ["tonic"] }
+tonic-build = "0.12"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "sync", "time", "test-util"] }
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }

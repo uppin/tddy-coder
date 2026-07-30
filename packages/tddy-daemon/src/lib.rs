@@ -53,6 +53,7 @@ pub mod telegram_notifier;
 pub mod telegram_session_control;
 pub mod telegram_session_subscriber;
 pub mod telegram_tracked_session;
+pub mod terminal_session_adapter;
 pub mod token_provider;
 pub mod tool_call_log;
 pub mod tool_catalog_sync;

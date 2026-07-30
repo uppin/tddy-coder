@@ -158,7 +158,9 @@ keeps treating rows as recipe-owned docs.
 `read_session_context_doc_utf8` is unchanged: its allowlist remains the recipe manifest's basenames,
 and an attachment basename is refused with `PERMISSION_DENIED`. Attachments may be images or other
 binaries, so a UTF-8 reader is the wrong shape for them; a type-aware fetch is a separate surface.
-Until it exists, clients list attachments (name, size, path) without reading their bytes.
+That surface is [`ReadHostDocument`](#readhostdocument--unary-host-document-fetch): an attachment's
+bytes are read with scope `SESSION_ARTIFACT` and `relative_path = attachments/<basename>`, which is
+binary and capped rather than UTF-8 and unbounded.
 
 ## Start-session materialization
 

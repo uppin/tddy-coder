@@ -102,3 +102,31 @@ function deriveAlias(serviceMethod: string): string {
   const method = serviceMethod.split("/").pop() ?? serviceMethod;
   return method.charAt(0).toLowerCase() + method.slice(1);
 }
+
+// ---------------------------------------------------------------------------
+// Connect-stream frame encoding (server-streaming response bodies)
+// ---------------------------------------------------------------------------
+
+/**
+ * Encode one or more proto messages as a ConnectRPC server-streaming response body
+ * (`application/connect+proto`): each message is wrapped in a 5-byte envelope (1 flag byte —
+ * 0x00 = uncompressed, no end-of-stream — plus a 4-byte big-endian length) followed by the payload.
+ * The stream ends when the HTTP response body completes (no explicit end-of-stream frame needed).
+ */
+export function encodeConnectStreamFrames(messages: Uint8Array[]): ArrayBuffer {
+  let total = 0;
+  for (const msg of messages) total += 5 + msg.length;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const msg of messages) {
+    out[off] = 0x00; // flags: uncompressed, not end-of-stream
+    const len = msg.length;
+    out[off + 1] = (len >>> 24) & 0xff;
+    out[off + 2] = (len >>> 16) & 0xff;
+    out[off + 3] = (len >>> 8) & 0xff;
+    out[off + 4] = len & 0xff;
+    out.set(msg, off + 5);
+    off += 5 + msg.length;
+  }
+  return toArrayBuffer(out);
+}

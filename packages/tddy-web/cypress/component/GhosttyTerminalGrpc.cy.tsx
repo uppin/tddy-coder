@@ -10,29 +10,39 @@
 
 import React from "react";
 // FAILS: module does not exist yet — implement at packages/tddy-web/src/components/GhosttyTerminalGrpc.tsx
-import { GhosttyTerminalGrpc } from "../../src/components/GhosttyTerminalGrpc";
+import { GhosttyTerminalGrpc, type GrpcFrame } from "../../src/components/GhosttyTerminalGrpc";
+import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Mount the terminal inside the UploadProgressProvider its `TerminalFileDropZone` requires. */
+function mountTerminal(node: React.ReactElement) {
+  return cy.mount(
+    <div style={{ height: 400, width: 800, position: "relative" }}>
+      <UploadProgressProvider>{node}</UploadProgressProvider>
+    </div>,
+  );
+}
+
 /** A minimal fake gRPC bidi stream matching the StreamSessionTerminalIO shape. */
 function makeFakeGrpcStream() {
   const sentChunks: Uint8Array[] = [];
-  const outputListeners: Array<(data: Uint8Array) => void> = [];
+  const outputListeners: Array<(frame: GrpcFrame) => void> = [];
 
   return {
-    /** Simulate the server pushing bytes to the terminal. */
-    pushOutput(data: Uint8Array) {
-      outputListeners.forEach((fn) => fn(data));
+    /** Simulate the server pushing a frame to the terminal (defaults to a live tail frame). */
+    pushOutput(data: Uint8Array, endOffset: bigint = 0n, atOldest = false) {
+      outputListeners.forEach((fn) => fn({ data, endOffset, atOldest }));
     },
     /** The stream object passed as a prop to GhosttyTerminalGrpc. */
     stream: {
       send(data: Uint8Array) {
         sentChunks.push(data);
       },
-      onMessage(fn: (data: Uint8Array) => void) {
+      onMessage(fn: (frame: GrpcFrame) => void) {
         outputListeners.push(fn);
       },
       close() {},
@@ -51,14 +61,12 @@ describe("GhosttyTerminalGrpc", () => {
     const fake = makeFakeGrpcStream();
 
     // When
-    cy.mount(
-      <div style={{ height: 400, width: 800, position: "relative" }}>
-        <GhosttyTerminalGrpc
-          sessionToken="fake-token"
-          sessionId="01900000-0000-7000-8000-000000000001"
-          stream={fake.stream}
-        />
-      </div>
+    mountTerminal(
+      <GhosttyTerminalGrpc
+        sessionToken="fake-token"
+        sessionId="01900000-0000-7000-8000-000000000001"
+        stream={fake.stream}
+      />,
     );
 
     // Then
@@ -70,14 +78,12 @@ describe("GhosttyTerminalGrpc", () => {
     const fake = makeFakeGrpcStream();
 
     // When
-    cy.mount(
-      <div style={{ height: 400, width: 800, position: "relative" }}>
-        <GhosttyTerminalGrpc
-          sessionToken="fake-token"
-          sessionId="01900000-0000-7000-8000-000000000001"
-          stream={fake.stream}
-        />
-      </div>
+    mountTerminal(
+      <GhosttyTerminalGrpc
+        sessionToken="fake-token"
+        sessionId="01900000-0000-7000-8000-000000000001"
+        stream={fake.stream}
+      />,
     );
     byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
 
@@ -96,14 +102,12 @@ describe("GhosttyTerminalGrpc", () => {
   it("forwards keyboard input as bytes to the gRPC stream", () => {
     // Given
     const fake = makeFakeGrpcStream();
-    cy.mount(
-      <div style={{ height: 400, width: 800, position: "relative" }}>
-        <GhosttyTerminalGrpc
-          sessionToken="fake-token"
-          sessionId="01900000-0000-7000-8000-000000000001"
-          stream={fake.stream}
-        />
-      </div>
+    mountTerminal(
+      <GhosttyTerminalGrpc
+        sessionToken="fake-token"
+        sessionId="01900000-0000-7000-8000-000000000001"
+        stream={fake.stream}
+      />,
     );
     byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
 
@@ -128,11 +132,13 @@ describe("GhosttyTerminalGrpc", () => {
         id="resize-wrapper"
         style={{ height: 400, width: 800, position: "relative" }}
       >
-        <GhosttyTerminalGrpc
-          sessionToken="fake-token"
-          sessionId="01900000-0000-7000-8000-000000000002"
-          stream={fake.stream}
-        />
+        <UploadProgressProvider>
+          <GhosttyTerminalGrpc
+            sessionToken="fake-token"
+            sessionId="01900000-0000-7000-8000-000000000002"
+            stream={fake.stream}
+          />
+        </UploadProgressProvider>
       </div>
     );
     byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
@@ -153,15 +159,13 @@ describe("GhosttyTerminalGrpc", () => {
   it("shows a connection status dot", () => {
     // Given / When
     const fake = makeFakeGrpcStream();
-    cy.mount(
-      <div style={{ height: 400, width: 800, position: "relative" }}>
-        <GhosttyTerminalGrpc
-          sessionToken="fake-token"
-          sessionId="01900000-0000-7000-8000-000000000003"
-          stream={fake.stream}
-          connectionOverlay
-        />
-      </div>
+    mountTerminal(
+      <GhosttyTerminalGrpc
+        sessionToken="fake-token"
+        sessionId="01900000-0000-7000-8000-000000000003"
+        stream={fake.stream}
+        connectionOverlay
+      />,
     );
 
     // Then
@@ -172,16 +176,14 @@ describe("GhosttyTerminalGrpc", () => {
     // Given
     const fake = makeFakeGrpcStream();
     const onDisconnect = cy.stub().as("onDisconnect");
-    cy.mount(
-      <div style={{ height: 400, width: 800, position: "relative" }}>
-        <GhosttyTerminalGrpc
-          sessionToken="fake-token"
-          sessionId="01900000-0000-7000-8000-000000000004"
-          stream={fake.stream}
-          connectionOverlay
-          onDisconnect={onDisconnect}
-        />
-      </div>
+    mountTerminal(
+      <GhosttyTerminalGrpc
+        sessionToken="fake-token"
+        sessionId="01900000-0000-7000-8000-000000000004"
+        stream={fake.stream}
+        connectionOverlay
+        onDisconnect={onDisconnect}
+      />,
     );
 
     // When
@@ -190,5 +192,41 @@ describe("GhosttyTerminalGrpc", () => {
 
     // Then
     cy.get("@onDisconnect").should("have.been.calledOnce");
+  });
+
+  it("surfaces the cumulative output offset via onOffsetUpdate (snap on replay, advance on live)", () => {
+    // Given — a terminal with an offset-update spy
+    const fake = makeFakeGrpcStream();
+    const offsets: bigint[] = [];
+    const onOffsetUpdate = cy.stub().callsFake((offset: bigint) => { offsets.push(offset); }).as("onOffsetUpdate");
+    mountTerminal(
+      <GhosttyTerminalGrpc
+        sessionToken="fake-token"
+        sessionId="01900000-0000-7000-8000-000000000005"
+        stream={fake.stream}
+        onOffsetUpdate={onOffsetUpdate}
+      />,
+    );
+    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+
+    // When — a replay frame arrives tagged with endOffset = 10
+    cy.then(() => {
+      fake.pushOutput(new TextEncoder().encode("replay"), 10n, false);
+    });
+
+    // Then — the offset snaps to the frame's absolute endOffset
+    cy.then(() => {
+      expect(offsets.at(-1)).to.equal(10n, "offset snaps to replay endOffset");
+    });
+
+    // When — a live tail frame of 5 bytes arrives (endOffset = 0)
+    cy.then(() => {
+      fake.pushOutput(new TextEncoder().encode("live!"), 0n, false);
+    });
+
+    // Then — the offset advances by the live frame's byte length (10 + 5 = 15)
+    cy.then(() => {
+      expect(offsets.at(-1)).to.equal(15n, "offset advances by live byte length");
+    });
   });
 });

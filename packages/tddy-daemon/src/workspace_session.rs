@@ -100,6 +100,7 @@ pub async fn start_workspace_session(
         previous_session_id: None,
         session_type: Some("workspace".to_string()),
         model: None,
+        cursor_chat_id: None,
         activity_status: None,
         hook_token: None,
         sandbox: None,

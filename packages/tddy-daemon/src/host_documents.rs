@@ -10,7 +10,7 @@
 //! exists for larger docs (chunked, no single-message limit).
 //!
 //! Product contract: `docs/ft/coder/session-attachments.md` + the amendment
-//! `docs/ft/coder/amendments/session-attachments-start-materialization.md`.
+//! `docs/ft/coder/session-attachments.md` § Start-session materialization.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -300,6 +300,7 @@ mod tests {
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            cursor_chat_id: None,
         };
         tddy_core::write_session_metadata(session_dir, &meta).unwrap();
     }

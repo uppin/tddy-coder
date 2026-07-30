@@ -4,6 +4,14 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-28 — Terminal scroll-up history: overlay double-buffer paging, native Scrollbar, scrollback-0 live pane, reconnect resume by offset
+
+- **The Ghostty shared terminal owns the scroll-up history flow end-to-end:** it renders two interchangeable overlaid ghostty-web terminals sharing one rect — a live terminal (`scrollback: 0`, always mounted & streaming, pinned to the live tip) and an older-history "page" terminal (`scrollback > 0`, read-only). A scroll-up gesture (or the "Load earlier output" affordance) forward-fills the page terminal in the background via `GetTerminalHistory`, then swaps it to the foreground; "Back to live" (or scroll-down-at-bottom) swaps back instantly. See [terminal-replay-lazy-scroll.md](terminal-replay-lazy-scroll.md).
+- **The live terminal stays at `scrollback: 0`** — the deliberate duplicate-pane mitigation: with no live scrollback, neither primary-screen nor alternate-screen (DEC 1049) repaints accumulate. The page terminal exposes a native `Scrollbar { total, offset, len }` as the single source of truth for viewport position (same coordinate space as `scrollToLine`).
+- **Mouse tracking (DEC 1006) gates the wheel to the TUI** (SGR button 64/65) instead of triggering the forward-fill — matching native ghostty's `isMouseReporting` gate.
+- **A forward fill bounded by the current live tip (not the stale anchor)** stays on the live pane when it resolves with no bytes (empty/evicted range) or errors — no blank page swap.
+- **Reconnect resumes by offset:** `GrpcSessionTerminal` tracks the cumulative output offset and sends `FROM_OFFSET` on reconnect (no duplicate replay); a transient transport blip (null client) pauses the terminal (mounted, input queued) instead of evicting — only a real `pty_done` stream-end evicts.
+
 ## 2026-07-27 — Session Agents: spawn peer agent sessions on the same worktree
 
 - **The session detail view gains an "Add agent" entry point** that spawns a **peer agent session sharing the current session's worktree** — e.g. a Cursor session alongside the session's Claude agent. The peer is a normal child session linked via `orchestratorSessionId`; the operator switches between peers from a new **"Session agents"** section. There is no agent-to-agent messaging — agents co-exist on the same checkout and the operator coordinates them.

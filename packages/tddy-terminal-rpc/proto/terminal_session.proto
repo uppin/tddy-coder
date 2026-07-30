@@ -1,0 +1,227 @@
+syntax = "proto3";
+
+package terminal_session;
+
+// TerminalSessionService: the PTY-over-RPC surface shared by tddy-daemon (gRPC / Connect-HTTP,
+// OS-user impersonation) and tddy-coder (LiveKit, no impersonation). Consolidates the terminal
+// streaming bridge logic that was previously duplicated between the two, and adds lazy
+// history loading so a reconnecting client sees the current last frame first and fetches
+// older bytes on demand as the user scrolls up.
+service TerminalSessionService {
+  // Bidi terminal I/O for transports that can send streaming request bodies (tddy-rpc over
+  // LiveKit, stdio). Browsers use StreamTerminalOutput + SendTerminalInput instead.
+  rpc StreamSessionTerminalIO(stream SessionTerminalInput) returns (stream SessionTerminalOutput);
+  // Browser-compatible server-streaming output half. Input goes via SendTerminalInput.
+  rpc StreamTerminalOutput(StreamTerminalOutputRequest) returns (stream SessionTerminalOutput);
+  rpc SendTerminalInput(SessionTerminalInput) returns (SendTerminalInputResponse);
+  // Lazy history: a forward chunk of output starting at `from_offset`, up to `max_bytes`, bounded
+  // above by `until_offset` (the anchor learned from the initial `StreamTerminalOutput` frame). The
+  // client advances `from_offset` to the previous chunk's `end_offset` and calls again — a
+  // progressive, append-only forward fill of older history — until a chunk arrives with
+  // `at_end = true` (reached `until_offset` or the capture tip). See
+  // docs/ft/daemon/terminal-sessions.md § Lazy replay.
+  rpc GetTerminalHistory(GetTerminalHistoryRequest) returns (stream TerminalHistoryChunk);
+  // Multiple terminals per session — start/stop/list login-shell terminals attached to a session.
+  // Every terminal is identified; the main agent terminal is the reserved id "main".
+  rpc StartTerminalSession(StartTerminalSessionRequest) returns (StartTerminalSessionResponse);
+  rpc StopTerminalSession(StopTerminalSessionRequest) returns (StopTerminalSessionResponse);
+  rpc ListTerminalSessions(ListTerminalSessionsRequest) returns (ListTerminalSessionsResponse);
+  // Single-screen terminal control mutex — at most one screen controls a session's terminals at a
+  // time. ClaimTerminalControl issues or steals the exclusive control token; WatchTerminalControl
+  // streams ownership changes so a displaced screen can render the "Claim terminal" CTA.
+  rpc ClaimTerminalControl(ClaimTerminalControlRequest) returns (ClaimTerminalControlResponse);
+  rpc WatchTerminalControl(WatchTerminalControlRequest) returns (stream TerminalControlEvent);
+}
+
+message SessionTerminalInput {
+  string session_token = 1;
+  string session_id    = 2;
+  bytes  data          = 3;
+  // Target terminal; empty resolves to the reserved main ("claude") terminal.
+  string terminal_id   = 4;
+  // Control token from ClaimTerminalControl; must match the current holder token or the input is
+  // rejected with FAILED_PRECONDITION (if the session has an active controller).
+  string control_token = 5;
+  // Cumulative byte offset of this input on the terminal's input stream: the running total number
+  // of input bytes the client has sent through this terminal *including* this chunk's `data`. The
+  // server acks the highest applied offset on StreamTerminalOutput (see acked_input_offset), so the
+  // client can render an overlay of un-acknowledged input on slow links. Zero = unset (legacy).
+  uint64 input_offset  = 6;
+  // --- Bidi open-frame params (read only from the FIRST message of a StreamSessionTerminalIO
+  // stream; ignored on subsequent input chunks). Carry the same replay selection as
+  // StreamTerminalOutputRequest so a bidi client can replay-once-at-init / resume-by-offset on the
+  // same connection that carries its input.
+  StreamReplayMode mode         = 7;
+  // Resume offset (FROM_OFFSET only); clamped to the capture ring's `start_offset`. 0 = from the
+  // beginning. Ignored when `mode = STREAM_REPLAY_MODE_TAIL`.
+  uint64           from_offset   = 8;
+  // Terminal dimensions measured by the client before opening the stream. When non-zero, the
+  // server resizes the PTY before sending the initial replay frame (TAIL only).
+  uint32           initial_cols  = 9;
+  uint32           initial_rows  = 10;
+}
+
+message SessionTerminalOutput {
+  bytes data = 1;
+  // Highest input_offset (see SessionTerminalInput) the server has applied to the PTY. On a normal
+  // output-data frame this is 0 (unset); on an ACK frame `data` is empty and this carries the
+  // acknowledged offset. Monotonic: never regresses. The client uses it to collapse its
+  // enqueued-input overlay as the server confirms applied bytes.
+  uint64 acked_input_offset = 2;
+  // Absolute offset of the first byte in `data` within the terminal's cumulative output stream.
+  // Populated on the initial replay frame (the "current last frame"); 0 on live tail frames (which
+  // are contiguous with the stream and carry no offset metadata).
+  uint64 start_offset = 3;
+  // Absolute offset after the last byte in `data`. Populated on the initial replay frame; 0 on
+  // live tail frames.
+  uint64 end_offset = 4;
+  // True on the initial replay frame when the chunk reaches the capture ring's oldest retained
+  // byte — i.e. no older history exists to load by scrolling up. The client uses it to stop the
+  // infinite-loading spinner once the bottom of the retained history is reached.
+  bool at_oldest = 5;
+}
+
+// Used by StreamTerminalOutput (browser-compatible server-streaming variant).
+message StreamTerminalOutputRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  // Target terminal; empty resolves to the reserved main ("claude") terminal.
+  string terminal_id   = 3;
+  // Terminal dimensions measured by the client before opening the stream.
+  // When non-zero, the server resizes the PTY to these dimensions before sending the initial
+  // replay frame, so the TUI redraws at the correct width.
+  uint32 initial_cols  = 4;
+  uint32 initial_rows  = 5;
+  // Replay selection. TAIL (default) sends the current last-frame tail chunk (first connect /
+  // fresh terminal). FROM_OFFSET skips the tail chunk and sends a catch-up from `from_offset` to
+  // the capture tip, then live — used on reconnect so a terminal that already holds state up to
+  // `from_offset` receives only the bytes it missed, with no duplicate replay.
+  StreamReplayMode mode       = 6;
+  // Resume offset (FROM_OFFSET only); clamped to the capture ring's `start_offset` when older
+  // bytes have been evicted. 0 = from the beginning (full replay from the oldest retained byte).
+  // Ignored when `mode = STREAM_REPLAY_MODE_TAIL`.
+  uint64          from_offset = 7;
+}
+
+// Selects the replay behavior of StreamTerminalOutput (and the bidi open frame).
+enum StreamReplayMode {
+  // Default: server sends the mode prologue + the current last-frame tail chunk, then live output.
+  // Used on first connect (fresh terminal with no prior state).
+  STREAM_REPLAY_MODE_TAIL = 0;
+  // Resume: server sends the mode prologue + catch-up chunk(s) from `from_offset` to the capture
+  // tip, then live output. No tail chunk, no PTY resize/drain. Used on reconnect so a terminal
+  // that already holds state up to `from_offset` receives only the missed bytes — no duplicates.
+  STREAM_REPLAY_MODE_FROM_OFFSET = 1;
+}
+
+// Empty response for SendTerminalInput.
+message SendTerminalInputResponse {}
+
+// --- Lazy history loading (scroll-up) ---
+
+message GetTerminalHistoryRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  string terminal_id   = 3;
+  // Inclusive lower bound of the chunk to return. The first call uses 0 (the server clamps it to
+  // the capture ring's `start_offset` if older bytes have been evicted); subsequent calls use the
+  // previous chunk's `end_offset` to resume a progressive, append-only forward fill.
+  uint64 from_offset = 4;
+  // Exclusive upper bound (the anchor `end_offset` learned from `StreamTerminalOutput`'s initial
+  // frame). The fill stops when a chunk's `end_offset` reaches `until_offset`. Zero means "until
+  // the capture tip" (live).
+  uint64 until_offset = 5;
+  uint32 max_bytes = 6;
+}
+
+message TerminalHistoryChunk {
+  bytes data = 1;
+  // Absolute offset of the first byte in `data`. 0 when `data` is empty.
+  uint64 start_offset = 2;
+  // Absolute offset after the last byte in `data`.
+  uint64 end_offset = 3;
+  // True when this chunk reaches the oldest retained byte (its `start_offset` is at the ring's
+  // `start_offset`) — no older bytes exist below it.
+  bool at_oldest = 4;
+  // True when this chunk reaches `until_offset` (or the capture tip) — terminates the forward fill.
+  bool at_end = 5;
+}
+
+// --- Multiple terminals per session ---
+
+message StartTerminalSessionRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  // Control token; required when the session has an active terminal controller.
+  string control_token = 3;
+}
+
+message StartTerminalSessionResponse {
+  // Fresh identifier for the started login-shell terminal (never "main").
+  string terminal_id = 1;
+}
+
+message StopTerminalSessionRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  string terminal_id   = 3;
+  // Control token; required when the session has an active terminal controller.
+  string control_token = 4;
+}
+
+message StopTerminalSessionResponse {
+  bool   ok      = 1;
+  string message = 2;
+}
+
+message ListTerminalSessionsRequest {
+  string session_token = 1;
+  string session_id    = 2;
+}
+
+message TerminalSessionInfo {
+  string terminal_id = 1;
+  // "claude-cli" for the reserved main tool, "bash" for started Bash (shell) tools.
+  string kind        = 2;
+  uint32 pid         = 3;
+}
+
+message ListTerminalSessionsResponse {
+  repeated TerminalSessionInfo terminals = 1;
+}
+
+// --- Single-screen terminal control mutex ---
+
+message ClaimTerminalControlRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  // Stable per-browser-tab screen identity.
+  string screen_id     = 3;
+  // When false, only grants if the lease is currently unheld or already held by this screen.
+  // When true, always grants — evicts the previous holder and notifies via WatchTerminalControl.
+  bool   steal         = 4;
+}
+
+message ClaimTerminalControlResponse {
+  bool   granted                  = 1;
+  // Set when granted = true; present this token in subsequent control RPCs.
+  string control_token            = 2;
+  // Set when granted = false; identifies the screen currently holding the lease.
+  string current_holder_screen_id = 3;
+}
+
+message WatchTerminalControlRequest {
+  string session_token = 1;
+  string session_id    = 2;
+  // The control token held by this screen (from ClaimTerminalControlResponse). Empty is valid for
+  // a non-controlling observer that wants to watch for when the lease becomes available.
+  string control_token = 3;
+}
+
+// Emitted once on subscribe (snapshot) and again whenever the lease changes.
+message TerminalControlEvent {
+  // Screen id of the current holder; empty when no screen holds the lease.
+  string holder_screen_id   = 1;
+  // True if the subscribing screen is the current controller (its token matches the lease).
+  bool   you_are_controller = 2;
+}

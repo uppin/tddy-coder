@@ -28,6 +28,7 @@ import {
 import { TERMINAL_OVERLAY_FIXED_GRID_CHAR_WIDTH_EM } from "./connection/config";
 import { clientPointToTerminalCell } from "../lib/terminalMouseCellCoords";
 import { tddyDebug } from "../lib/debugMask";
+import { computeScrollbar } from "../lib/terminalScrollbar";
 
 // Namespaced `[tddy]` diagnostics enabled by the DEBUG mask (daemon `debug:` / localStorage.debug).
 // Scoped to the data flow behind terminal garbling / misalignment.
@@ -87,6 +88,12 @@ export interface GhosttyTerminalProps {
   onBell?: () => void;
   onTitleChange?: (title: string) => void;
   onReady?: () => void;
+  /**
+   * Fires with the new viewportY (lines scrolled up from the bottom; 0 = pinned to latest)
+   * whenever the viewport moves — wheel, touch, keyboard, or programmatic scroll. Used by
+   * GhosttyTerminalGrpc to mirror scroll position across the two overlay terminals.
+   */
+  onScroll?: (viewportY: number) => void;
   /** When true, log write/onData and lifecycle to console. */
   debugLogging?: boolean;
   /** When true, prevent terminal from receiving focus on pointer/touch events (e.g. mobile when keyboard closed). */
@@ -106,6 +113,15 @@ export interface GhosttyTerminalProps {
    * Keep an exact col×row grid; font size follows container size (resize the pane to scale). Disables FitAddon fitting and user font zoom shortcuts.
    */
   fixedViewportGrid?: { cols: number; rows: number };
+  /**
+   * Lines of scrollback to retain above the viewport. 0 = none (e.g. alternate buffer).
+   * Non-zero enables native primary-screen scrollback; used by both the live terminal
+   * (post-connect history) and the older-history page terminal (forward-filled pre-connect history).
+   */
+  scrollback?: number;
+  /** `data-testid` for the terminal container. Defaults to `ghostty-terminal`; the older-history
+   *  terminal passes `ghostty-terminal-older` so tests can target each instance separately. */
+  testId?: string;
 }
 
 export interface BufferLineInfo {
@@ -126,6 +142,37 @@ export interface GhosttyTerminalHandle {
   setTerminalFontSize?(px: number): void;
   /** Lines the viewport is scrolled up from the bottom (0 = pinned to latest output). */
   getViewportScrollOffset?(): number;
+  /** Scroll the viewport to the top of the scrollback (no-op when scrollback is 0). */
+  scrollToTop?(): void;
+  /** Scroll the viewport to the bottom (latest output) — used after a page swap to land seamlessly. */
+  scrollToBottom?(): void;
+  /**
+   * Scroll to an absolute line in the combined buffer (0 = top of scrollback,
+   * scrollbackLength = bottom). Ghostty-web's primary "full control" viewport API.
+   */
+  scrollToLine?(line: number): void;
+  /** Relative scroll by `amount` lines (positive = down, negative = up). */
+  scrollLines?(amount: number): void;
+  /** Number of scrollback (history) lines, excluding the active screen. */
+  getScrollbackLength?(): number;
+  /** True when the viewport is pinned to the latest output (not scrolled up into scrollback). */
+  isPinnedToBottom?(): boolean;
+  /**
+   * Native Scrollbar { total, offset, len } — single source of truth for viewport position,
+   * same coordinate space as scrollToLine.
+   */
+  getScrollbar?(): { total: number; offset: number; len: number };
+  /** True when the TUI has enabled mouse tracking (DEC 1006 / 1002). */
+  hasMouseTracking?(): boolean;
+  /** True when the terminal is in the alternate screen buffer (DEC 1049). */
+  isAlternateScreen?(): boolean;
+  /** Send an SGR wheel mouse report (buttons 64/65) for the given wheel event via onData. */
+  sendWheelSgr?(e: WheelEvent): void;
+  /**
+   * Simulate a keystroke: scroll to bottom first (native scroll-to-bottom.keystroke=true),
+   * then forward via onData.
+   */
+  sendKeystroke?(data: string): void;
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
@@ -144,12 +191,15 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       onBell,
       onTitleChange,
       onReady,
+      onScroll,
       debugLogging = false,
       preventFocusOnTap = false,
       sessionActive = true,
       pinchZoomFont = true,
       containerMinHeightPx,
       fixedViewportGrid,
+      scrollback = 0,
+      testId = "ghostty-terminal",
     },
     ref
   ) {
@@ -179,6 +229,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const wheelPinchAccumRef = useRef(0);
     const onDataRef = useRef(onData);
     onDataRef.current = onData;
+    const onScrollRef = useRef(onScroll);
+    onScrollRef.current = onScroll;
 
     const applyFontSizePx = useCallback(
       (px: number, bounds?: { min: number; max: number }) => {
@@ -237,7 +289,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             background: "#1a1b26",
             foreground: "#a9b1d6",
           },
-          scrollback: 0,
+          scrollback,
         });
 
         termRef.current = term;
@@ -248,6 +300,20 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           disposables.push(
             term.onData((data) => {
               logData("onData %d chars %s", data.length, JSON.stringify(data.slice(0, 30)));
+              // Native scroll-to-bottom.keystroke=true: any keystroke scrolls to the bottom first.
+              const t = term as unknown as {
+                scrollToBottom?: () => void;
+                getViewportY?: () => number;
+                scrollLines?: (n: number) => void;
+              };
+              if (t.scrollToBottom) {
+                t.scrollToBottom();
+              } else {
+                const vy = t.getViewportY?.() ?? 0;
+                if (vy !== 0 && t.scrollLines) {
+                  t.scrollLines(-vy);
+                }
+              }
               onData(data);
             })
           );
@@ -266,6 +332,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         if (onTitleChange) {
           disposables.push(term.onTitleChange(onTitleChange));
         }
+        disposables.push(
+          term.onScroll((vy) => {
+            onScrollRef.current?.(vy);
+          })
+        );
         disposablesRef.current = disposables;
 
         term.open(containerRef.current);
@@ -851,7 +922,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return () => {
         container.removeEventListener("pointerdown", preventFocus, { capture: true });
         container.removeEventListener("mousedown", preventFocus, { capture: true });
-        container.removeEventListener("touchstart", preventFocus, { capture: true, passive: false });
+        container.removeEventListener("touchstart", preventFocus, { capture: true });
         container.removeEventListener("click", preventFocus, { capture: true });
       };
     }, [preventFocusOnTap]);
@@ -905,6 +976,109 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           // observe whether a scroll gesture actually moved the viewport.
           const t = termRef.current as unknown as { getViewportY?: () => number } | null;
           return t?.getViewportY?.() ?? 0;
+        },
+        scrollToTop() {
+          // Scroll the viewport to the top of the scrollback so the user lands on the oldest
+          // forward-filled history. No-op when scrollback is 0 (nothing to scroll through).
+          const t = termRef.current as unknown as { scrollToTop?: () => void } | null;
+          t?.scrollToTop?.();
+        },
+        scrollToBottom() {
+          // Scroll the viewport to the bottom (latest output). Used after a page swap so the user
+          // lands on the newest line of the just-populated older page (seamless continuation).
+          const t = termRef.current as unknown as {
+            getViewportY?: () => number;
+            scrollLines?: (n: number) => void;
+            scrollToBottom?: () => void;
+          } | null;
+          if (!t) return;
+          if (t.scrollToBottom) {
+            t.scrollToBottom();
+            return;
+          }
+          // Fallback: scroll back to the bottom by negating the current viewport offset.
+          const vy = t.getViewportY?.() ?? 0;
+          if (vy !== 0 && t.scrollLines) {
+            t.scrollLines(-vy);
+          }
+        },
+        scrollToLine(line: number) {
+          // Native scrollToLine uses Scrollbar offset space (0 = top of scrollback).
+          // ghostty-web's scrollToLine sets viewportY directly (0 = bottom), so translate:
+          // viewportY = scrollbackLength - line.
+          const t = termRef.current as unknown as {
+            scrollToLine?: (n: number) => void;
+            getScrollbackLength?: () => number;
+          } | null;
+          if (!t?.scrollToLine) return;
+          const scrollbackLength = t.getScrollbackLength?.() ?? 0;
+          const viewportY = Math.max(0, Math.min(scrollbackLength, scrollbackLength - line));
+          t.scrollToLine(viewportY);
+        },
+        scrollLines(amount: number) {
+          // Relative scroll: positive = down toward latest, negative = up into scrollback.
+          const t = termRef.current as unknown as { scrollLines?: (n: number) => void } | null;
+          t?.scrollLines?.(amount);
+        },
+        getScrollbackLength() {
+          // History lines excluding the active screen — used to compute absolute line from viewportY.
+          const t = termRef.current as unknown as { getScrollbackLength?: () => number } | null;
+          return t?.getScrollbackLength?.() ?? 0;
+        },
+        isPinnedToBottom() {
+          // True when the viewport is at the latest output (not scrolled up into scrollback).
+          const t = termRef.current as unknown as { getViewportY?: () => number } | null;
+          return (t?.getViewportY?.() ?? 0) === 0;
+        },
+        getScrollbar() {
+          const t = termRef.current;
+          if (!t) return { total: rows, offset: 0, len: rows };
+          const scrollbackLength = (t as unknown as { getScrollbackLength?: () => number })
+            .getScrollbackLength?.() ?? 0;
+          const viewportY = (t as unknown as { getViewportY?: () => number }).getViewportY?.() ?? 0;
+          return computeScrollbar({ scrollbackLength, viewportY, rows: t.rows });
+        },
+        hasMouseTracking() {
+          const t = termRef.current as unknown as { hasMouseTracking?: () => boolean } | null;
+          return t?.hasMouseTracking?.() ?? false;
+        },
+        isAlternateScreen() {
+          const t = termRef.current as unknown as {
+            wasmTerm?: { isAlternateScreen?: () => boolean };
+          } | null;
+          return t?.wasmTerm?.isAlternateScreen?.() ?? false;
+        },
+        sendWheelSgr(e: WheelEvent) {
+          if (e.ctrlKey) return;
+          const t = termRef.current;
+          const send = onDataRef.current;
+          if (!t || !send) return;
+          const canvas = t.element?.querySelector("canvas");
+          if (!canvas) return;
+          const r = canvas.getBoundingClientRect();
+          const grid = { left: r.left, top: r.top, width: r.width, height: r.height };
+          const coords = clientPointToTerminalCell(e.clientX, e.clientY, grid, t.cols, t.rows);
+          if (!coords) return;
+          const pb = e.deltaY < 0 ? 64 : 65;
+          send(`\x1b[<${pb};${coords.col};${coords.row}M`);
+        },
+        sendKeystroke(data: string) {
+          const t = termRef.current as unknown as {
+            scrollToBottom?: () => void;
+            getViewportY?: () => number;
+            scrollLines?: (n: number) => void;
+          } | null;
+          if (t) {
+            if (t.scrollToBottom) {
+              t.scrollToBottom();
+            } else {
+              const vy = t.getViewportY?.() ?? 0;
+              if (vy !== 0 && t.scrollLines) {
+                t.scrollLines(-vy);
+              }
+            }
+          }
+          onDataRef.current?.(data);
         },
         setTerminalFontSize(px: number) {
           if (!Number.isFinite(px)) return;
@@ -988,7 +1162,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
     return (
       <div
-        data-testid="ghostty-terminal"
+        data-testid={testId}
         data-terminal-font-size={String(displayFontSize)}
         data-session-active={sessionActive ? "true" : "false"}
         aria-disabled={sessionActive ? undefined : true}

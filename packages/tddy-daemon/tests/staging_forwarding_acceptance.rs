@@ -1,6 +1,6 @@
 //! Acceptance: multi-host forwarding of the staging + `ReadHostDocument` RPCs.
 //!
-//! PRD: `docs/ft/coder/amendments/session-attachments-start-materialization.md` (AC6, AC8).
+//! PRD: `docs/ft/coder/session-attachments.md` § Start-session materialization (AC6, AC8).
 //!
 //! Two daemons share a LiveKit common room. A staging RPC (or a `ReadHostDocument` triggered
 //! by `StartSession`) addressed to a peer `daemon_instance_id` is forwarded to that peer and

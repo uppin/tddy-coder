@@ -112,6 +112,7 @@ fn write_minimal_running_session(sessions_base: &std::path::Path, session_id: &s
         previous_session_id: None,
         session_type: None,
         model: None,
+        cursor_chat_id: None,
         activity_status: None,
         hook_token: None,
         sandbox: None,

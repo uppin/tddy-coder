@@ -533,6 +533,7 @@ impl SandboxSessionRelay {
                     payload: Some(SessionPayload::TerminalOutput(SessionTerminalOutput {
                         data: chunk.to_vec(),
                         acked_input_offset: 0,
+                        ..Default::default()
                     })),
                 };
                 if out_tx.send(Ok(frame)).is_err() {

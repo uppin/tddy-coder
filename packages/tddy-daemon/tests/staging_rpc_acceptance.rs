@@ -1,6 +1,6 @@
 //! Acceptance: start-session attachment materialization — both sources.
 //!
-//! PRD: `docs/ft/coder/amendments/session-attachments-start-materialization.md`
+//! PRD: `docs/ft/coder/session-attachments.md` § Start-session materialization
 //! (amends `docs/ft/coder/session-attachments.md`).
 //!
 //! These pin the host-side contract end-to-end through `ConnectionServiceImpl`:

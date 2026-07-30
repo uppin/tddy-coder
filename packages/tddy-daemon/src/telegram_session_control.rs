@@ -2800,6 +2800,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             previous_session_id: None,
             session_type: Some("claude-cli".to_string()),
             model: Some(model.clone()),
+            cursor_chat_id: None,
             activity_status: None,
             hook_token: None,
             sandbox: None,
@@ -2956,6 +2957,17 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         );
 
         let binary_path = crate::config::resolve_cursor_binary_path(&deps.config);
+        // The Cursor chat this session owns for its whole lifetime: minted here, persisted in
+        // `.session.yaml` below, and passed as `--resume <id>` on every later spawn so a resume
+        // continues this chat instead of opening a new one.
+        let cursor_chat_id =
+            crate::cursor_cli_spawn::mint_cursor_chat_id(&binary_path, &worktree_path)
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "failed to create the Cursor chat for session {session_id}: {e}"
+                    )
+                })?;
         let manager = Arc::clone(&deps.claude_cli_manager);
         let handle = manager
             .start_cursor(
@@ -2963,6 +2975,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 worktree_path.clone(),
                 &model,
                 &binary_path,
+                Some(&cursor_chat_id),
                 initial_prompt.as_deref(),
                 Vec::new(),
             )
@@ -2985,6 +2998,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             previous_session_id: None,
             session_type: Some("cursor-cli".to_string()),
             model: Some(model.clone()),
+            cursor_chat_id: Some(cursor_chat_id),
             activity_status: None,
             hook_token: Some(hook_token),
             sandbox: None,

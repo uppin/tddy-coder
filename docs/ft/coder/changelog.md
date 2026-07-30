@@ -8,6 +8,11 @@ Release note history for the Coder product area.
 - The three staging RPCs (`UploadStagedAttachmentChunk` / `ListStagedAttachments` / `DeleteStagedAttachment`) are live on a per-OS-user staging root `{tddy_data_dir}/staging/{os_user}/{staging_id}/{file_name}`, and a new unary `ReadHostDocument` fetches a `HostDocumentRef`'s bytes from the owning daemon under its own `os_user` mapping. Both route by `daemon_instance_id` and forward across hosts over the LiveKit common room (the fetch is unary because streaming RPCs return `unimplemented` for `PeerRoute::Forward`); a document over `MAX_HOST_DOCUMENT_BYTES` (4 MiB) is refused, not truncated.
 - See [session-attachments.md § Start-session materialization](session-attachments.md#start-session-materialization).
 
+## 2026-07-27 — Session attachments under artifacts/attachments/
+
+- Sessions store **user-attached documents** at `{session_dir}/artifacts/attachments/<basename>` (flat, basename-only) via the daemon **`session_attachments`** store; layout helpers live in **`tddy-workflow`** ([session-attachments.md](session-attachments.md), [session-layout.md](session-layout.md)).
+- `SessionEntry.context_docs` carries **`kind`** (`MANIFEST` / `ATTACHMENT`) and **`size_bytes`**; attachment rows follow recipe-manifest docs and still list when the recipe is blank or unknown. The UTF-8 context-doc reader stays manifest-only (attachments may be binary).
+- No RPC accepts an attachment yet — start-session materialization and a type-aware content fetch are follow-ups.
 ## 2026-07-27 — Unified worktree base resolution (cursor-cli PR-stack fix)
 
 - Chain base resolution is unified in **tddy-core::session_chain**. `resolve_chain_base_ref` and its helpers (`parent_is_pr_stack_orchestrator`, `pr_stack_node_for_spawn`) move out of the daemon into core, and a new `resolve_chain_base_for_session_spawn` encodes the spawn-time precedence: a runtime `stack_parent` wins over a persisted `worktree_integration_base_ref`, which wins over the default base.

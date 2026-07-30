@@ -18,7 +18,8 @@ use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ListTerminalSessionsRequest, SessionTerminalInput,
-    StartTerminalSessionRequest, StopTerminalSessionRequest, StreamTerminalOutputRequest,
+    StartTerminalSessionRequest, StopTerminalSessionRequest, StreamReplayMode,
+    StreamTerminalOutputRequest,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -542,6 +543,8 @@ async fn stream_terminal_output_routes_by_terminal_id() {
             terminal_id: "no-such-terminal".to_string(),
             initial_cols: 0,
             initial_rows: 0,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
         }))
         .await
         .err()
@@ -560,6 +563,8 @@ async fn stream_terminal_output_routes_by_terminal_id() {
             terminal_id: started.clone(),
             initial_cols: 0,
             initial_rows: 0,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
         }))
         .await;
     assert!(
@@ -600,6 +605,10 @@ async fn send_terminal_input_targets_identified_terminal() {
             terminal_id: started.clone(),
             control_token: String::new(),
             input_offset: 0,
+            mode: StreamReplayMode::Tail as i32,
+            from_offset: 0,
+            initial_cols: 0,
+            initial_rows: 0,
         }))
         .await
         .expect("SendTerminalInput must succeed");
