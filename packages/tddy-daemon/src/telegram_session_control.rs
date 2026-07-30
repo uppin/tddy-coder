@@ -259,6 +259,13 @@ pub const CB_TELEGRAM_CHAIN_PARENT: &str = "tcp:";
 pub const CB_TELEGRAM_CLAUDE_MODEL: &str = "tcm:";
 /// Cursor Agent CLI model picker: `tcur:<model_idx>|p:<proj_idx>|s:<session_id>`.
 pub const CB_TELEGRAM_CURSOR_MODEL: &str = "tcur:";
+/// Branch-conflict prompt: `tbc:<choice>:<proj_idx>:<session_id>`, where `<choice>` is the
+/// [`TelegramBranchConflictChoice`] code.
+///
+/// The contested branch name deliberately does **not** ride in the payload — Telegram caps
+/// `callback_data` at 64 bytes — it is re-derived from the changeset when the callback arrives.
+/// Per `docs/ft/daemon/session-branch-conflict.md` § Telegram.
+pub const CB_TELEGRAM_BRANCH_CONFLICT: &str = "tbc:";
 /// Claude models offered by the Telegram model-picker keyboard, in button order.
 ///
 /// Derived from [`tddy_core::backend::claude_cli_models`] rather than listed again here, so the
@@ -829,6 +836,51 @@ pub fn parse_telegram_branch_callback(
         return None;
     }
     Some((branch_idx, list_offset, proj_idx, session_id))
+}
+
+/// The operator's answer to the branch-conflict prompt — one of the three choices the PRD offers
+/// when the branch a `/start-claude` session derived is already owned by another session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TelegramBranchConflictChoice {
+    /// Enter the owning session; the pending session stays un-spawned.
+    SwitchToOwner,
+    /// Put a second agent on the owned branch (`work_on_selected_branch`, shared worktree).
+    NewAgentOnOwnedBranch,
+    /// Create the first free `<branch>-<n>` instead.
+    UseSuggestedName,
+}
+
+impl TelegramBranchConflictChoice {
+    /// The `<choice>` segment of [`CB_TELEGRAM_BRANCH_CONFLICT`] payloads, so the keyboard and
+    /// [`parse_telegram_branch_conflict_callback`] cannot drift apart.
+    pub fn callback_code(self) -> &'static str {
+        match self {
+            Self::SwitchToOwner => "sw",
+            Self::NewAgentOnOwnedBranch => "na",
+            Self::UseSuggestedName => "sg",
+        }
+    }
+}
+
+/// Decode `tbc:<choice>:<proj_idx>:<session_id>` (branch-conflict prompt).
+pub fn parse_telegram_branch_conflict_callback(
+    callback_data: &str,
+) -> Option<(TelegramBranchConflictChoice, usize, String)> {
+    let rest = callback_data.strip_prefix(CB_TELEGRAM_BRANCH_CONFLICT)?;
+    let (choice_part, after_choice) = rest.split_once(':')?;
+    let choice = match choice_part {
+        "sw" => TelegramBranchConflictChoice::SwitchToOwner,
+        "na" => TelegramBranchConflictChoice::NewAgentOnOwnedBranch,
+        "sg" => TelegramBranchConflictChoice::UseSuggestedName,
+        _ => return None,
+    };
+    let (proj_part, sess_part) = after_choice.split_once(':')?;
+    let proj_idx: usize = proj_part.parse().ok()?;
+    let session_id = sess_part.trim().to_string();
+    if session_id.is_empty() {
+        return None;
+    }
+    Some((choice, proj_idx, session_id))
 }
 
 /// Decode `tbm:<next_list_offset>|p:<proj_idx>|s:<session_id>` (more remote branches).
@@ -1705,6 +1757,30 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             self.persist_changeset_model(&session_dir, m)?;
         }
 
+        // Ask before the model picker when another session already owns the branch this pick just
+        // derived, instead of silently creating `<branch>-1` at spawn time. Telegram never goes
+        // through the `StartSession` guard, so the same check lives here. Only the claude-cli
+        // derivation (`feature/<slug(name)>`) can collide — `cursor-cli/<short-id>` is derived from
+        // the session uuid. Nothing is claimed here: no branch, no worktree.
+        // Per `docs/ft/daemon/session-branch-conflict.md` § Telegram.
+        if is_claude_cli && intent == Some(BranchWorktreeIntent::NewBranchFromBase) {
+            let derived_branch = cs.workflow.as_ref().and_then(|w| w.new_branch_name.clone());
+            if let Some(branch) = derived_branch {
+                if let Some(owner) = self.session_owning_branch(&branch).await? {
+                    return self
+                        .send_branch_conflict_keyboard(
+                            chat_id,
+                            proj_idx,
+                            session_id,
+                            &branch,
+                            &owner.session_id,
+                            repo_path,
+                        )
+                        .await;
+                }
+            }
+        }
+
         // Route to the claude-cli model picker when the session was started via /start-claude.
         if pre_snap.session_type.as_deref() == Some("claude-cli") {
             return self
@@ -1770,6 +1846,154 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             .send_message_with_keyboard(chat_id, "Choose a model for the Claude CLI session:", rows)
             .await?;
         Ok(())
+    }
+
+    /// The session that already owns `branch`, by the one rule every surface shares
+    /// ([`crate::branch_owner::find_session_owning_branch`]). The scan reads changesets from disk,
+    /// so it runs off the reactor.
+    async fn session_owning_branch(
+        &self,
+        branch: &str,
+    ) -> anyhow::Result<Option<crate::session_reader::SessionEntry>> {
+        let sessions_base = self.sessions_base.clone();
+        let branch = branch.to_string();
+        tokio::task::spawn_blocking(move || {
+            crate::branch_owner::find_session_owning_branch(&sessions_base, &branch)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("branch owner scan join: {e}"))?
+    }
+
+    /// Offer the three branch-conflict choices instead of the model picker: switch to the owning
+    /// session, add a second agent to the owned branch, or take the suggested suffixed name.
+    ///
+    /// Claims nothing — the pending session keeps no branch and no worktree while the operator
+    /// decides. Per `docs/ft/daemon/session-branch-conflict.md` § Telegram.
+    async fn send_branch_conflict_keyboard(
+        &self,
+        chat_id: i64,
+        proj_idx: usize,
+        session_id: &str,
+        branch: &str,
+        owner_session_id: &str,
+        repo_root: &Path,
+    ) -> anyhow::Result<()> {
+        let suggested = first_free_suffixed_branch_name_off_reactor(repo_root, branch).await?;
+        let owner_label = telegram_label_for_session_id(owner_session_id);
+        let mut rows: InlineKeyboardRows = Vec::new();
+        for (label, choice) in [
+            (
+                format!("Switch to {owner_label}"),
+                TelegramBranchConflictChoice::SwitchToOwner,
+            ),
+            (
+                format!("New agent on {branch}"),
+                TelegramBranchConflictChoice::NewAgentOnOwnedBranch,
+            ),
+            (
+                format!("Use {suggested}"),
+                TelegramBranchConflictChoice::UseSuggestedName,
+            ),
+        ] {
+            let data = format!(
+                "{CB_TELEGRAM_BRANCH_CONFLICT}{}:{proj_idx}:{session_id}",
+                choice.callback_code()
+            );
+            debug_assert!(
+                data.len() <= 64,
+                "Telegram callback_data exceeds 64 bytes: len={} data={data:?}",
+                data.len()
+            );
+            rows.push(vec![(label, data)]);
+        }
+        let intro = format!(
+            "Branch `{branch}` is already used by session {owner_label}. Choose how to continue:"
+        );
+        self.sender
+            .send_message_with_keyboard(chat_id, &intro, rows)
+            .await?;
+        Ok(())
+    }
+
+    /// Apply the operator's branch-conflict choice (`tbc:<choice>:<proj_idx>:<session_id>`).
+    ///
+    /// The contested branch is re-derived from the pending session's changeset, because it cannot
+    /// fit in a 64-byte `callback_data`. Per `docs/ft/daemon/session-branch-conflict.md` § Telegram.
+    pub async fn handle_telegram_branch_conflict_callback(
+        &self,
+        chat_id: i64,
+        choice: TelegramBranchConflictChoice,
+        proj_idx: usize,
+        session_id: &str,
+    ) -> anyhow::Result<()> {
+        log::info!(
+            target: "tddy_daemon::telegram_session_control",
+            "handle_telegram_branch_conflict_callback: chat_id={} choice={:?} proj_idx={} session_id={}",
+            chat_id,
+            choice,
+            proj_idx,
+            session_id
+        );
+        self.ensure_authorized(chat_id)?;
+        let Some(ref deps) = self.workflow_spawn else {
+            anyhow::bail!("Telegram workflow spawn is not configured");
+        };
+        let projects = sorted_projects_for_workflow_spawn(deps)?;
+        let project = projects
+            .get(proj_idx)
+            .ok_or_else(|| anyhow::anyhow!("invalid project index"))?;
+        let repo_path = Path::new(&project.main_repo_path);
+        if !repo_path.exists() {
+            anyhow::bail!("project main repo path does not exist");
+        }
+        let session_dir = unified_session_dir_path(&self.sessions_base, session_id);
+        let mut cs =
+            read_changeset(&session_dir).map_err(|e| anyhow::anyhow!("read changeset: {e}"))?;
+        let owned_branch = cs
+            .workflow
+            .as_ref()
+            .and_then(|w| w.new_branch_name.clone())
+            .ok_or_else(|| anyhow::anyhow!("no branch name on the pending session"))?;
+
+        match choice {
+            TelegramBranchConflictChoice::SwitchToOwner => {
+                // No spawn: the pending session is left half-configured, exactly as abandoning any
+                // picker mid-flow does today.
+                let owner = self
+                    .session_owning_branch(&owned_branch)
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("no session owns branch {owned_branch}"))?;
+                self.handle_enter_session(chat_id, &owner.session_id)
+                    .await?;
+                return Ok(());
+            }
+            TelegramBranchConflictChoice::NewAgentOnOwnedBranch => {
+                let wf = cs.workflow.get_or_insert_with(Default::default);
+                wf.branch_worktree_intent = Some(BranchWorktreeIntent::WorkOnSelectedBranch);
+                wf.selected_branch_to_work_on = Some(owned_branch);
+                wf.new_branch_name = None;
+            }
+            TelegramBranchConflictChoice::UseSuggestedName => {
+                let suggested =
+                    first_free_suffixed_branch_name_off_reactor(repo_path, &owned_branch).await?;
+                let wf = cs.workflow.get_or_insert_with(Default::default);
+                wf.branch_worktree_intent = Some(BranchWorktreeIntent::NewBranchFromBase);
+                wf.new_branch_name = Some(suggested);
+            }
+        }
+        // `write_changeset` does not know the raw routing markers, so they are re-read first and
+        // re-applied after — same as the branch callback.
+        let pre_snap = read_changeset_routing_snapshot(&session_dir).unwrap_or_default();
+        write_changeset(&session_dir, &cs).map_err(|e| anyhow::anyhow!("write changeset: {e}"))?;
+        if let Some(ref st) = pre_snap.session_type {
+            self.persist_changeset_session_type_marker(&session_dir, st)?;
+        }
+        if let Some(ref m) = pre_snap.model {
+            self.persist_changeset_model(&session_dir, m)?;
+        }
+
+        self.send_claude_model_pick_keyboard(chat_id, proj_idx, session_id)
+            .await
     }
 
     async fn send_cursor_model_pick_keyboard(
@@ -3515,6 +3739,21 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         );
         Ok(None)
     }
+}
+
+/// First free `<branch>-<n>` in `repo_root` — read-only (it creates no branch), and run off the
+/// reactor because it shells out to `git`.
+async fn first_free_suffixed_branch_name_off_reactor(
+    repo_root: &Path,
+    branch: &str,
+) -> anyhow::Result<String> {
+    let repo_root = repo_root.to_path_buf();
+    let branch = branch.to_string();
+    tokio::task::spawn_blocking(move || {
+        tddy_core::worktree::first_free_suffixed_branch_name(&repo_root, &branch)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("suggested branch name join: {e}"))
 }
 
 /// Branch name for cursor-cli Telegram sessions: `cursor-cli/<first-8-chars-of-session-id>`.

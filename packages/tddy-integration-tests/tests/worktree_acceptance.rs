@@ -450,3 +450,96 @@ fn worktree_uses_configured_project_base_ref() {
 
     let _ = fs::remove_dir_all(&base);
 }
+
+// ---------------------------------------------------------------------------
+// first_free_suffixed_branch_name — the read-only naming rule behind the
+// `suggested_branch_name` a refused session creation reports.
+// PRD: docs/ft/daemon/session-branch-conflict.md
+// ---------------------------------------------------------------------------
+
+/// A git repo on `master` with one commit, holding exactly `branches` besides `master`.
+fn a_repo_holding_branches(label: &str, branches: &[&str]) -> PathBuf {
+    let base = temp_dir(label);
+    let repo = base.join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    for args in [
+        vec!["init", "--initial-branch=master"],
+        vec!["config", "user.email", "test@test.com"],
+        vec!["config", "user.name", "Test"],
+        vec!["commit", "--allow-empty", "-m", "initial"],
+    ] {
+        let out = std::process::Command::new("git")
+            .args(&args)
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {} failed", args.join(" "));
+    }
+    for branch in branches {
+        let out = std::process::Command::new("git")
+            .args(["branch", branch])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git branch {branch} failed");
+    }
+    repo
+}
+
+fn local_branches(repo: &std::path::Path) -> Vec<String> {
+    let out = std::process::Command::new("git")
+        .args(["for-each-ref", "--format=%(refname:short)", "refs/heads"])
+        .current_dir(repo)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .collect()
+}
+
+#[test]
+fn first_free_suffixed_branch_name_starts_at_one_when_no_suffix_is_taken() {
+    // Given — only the requested branch itself exists
+    let repo = a_repo_holding_branches("first-free-suffix", &["feat/auth"]);
+
+    // When
+    let suggestion = tddy_core::worktree::first_free_suffixed_branch_name(&repo, "feat/auth");
+
+    // Then — the same name create_worktree_with_retry would reach first
+    assert_eq!(suggestion, "feat/auth-1");
+}
+
+#[test]
+fn first_free_suffixed_branch_name_skips_suffixes_already_taken() {
+    // Given — the first two suffixes are gone, so a suggestion of either would be unusable
+    let repo = a_repo_holding_branches(
+        "skip-taken-suffixes",
+        &["feat/auth", "feat/auth-1", "feat/auth-2"],
+    );
+
+    // When
+    let suggestion = tddy_core::worktree::first_free_suffixed_branch_name(&repo, "feat/auth");
+
+    // Then
+    assert_eq!(suggestion, "feat/auth-3");
+}
+
+#[test]
+fn first_free_suffixed_branch_name_creates_no_branch_or_worktree() {
+    // Given
+    let repo = a_repo_holding_branches("suffix-creates-nothing", &["feat/auth"]);
+
+    // When
+    let _ = tddy_core::worktree::first_free_suffixed_branch_name(&repo, "feat/auth");
+
+    // Then — the suggestion is only a name; claiming it is the caller's next request
+    assert_eq!(
+        local_branches(&repo),
+        vec!["feat/auth".to_string(), "master".to_string()]
+    );
+    assert!(
+        !tddy_core::worktree::worktree_dir(&repo).exists(),
+        "computing a name must not create the worktrees directory"
+    );
+}

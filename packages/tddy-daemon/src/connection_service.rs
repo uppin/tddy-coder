@@ -14,7 +14,7 @@ use tddy_core::{BranchWorktreeIntent, Changeset, ChangesetWorkflow};
 use tddy_rpc::{Request, Response, Status, Streaming};
 use tddy_service::proto::connection::{
     AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest, AddProjectToHostResponse,
-    AgentInfo, CalculateWorktreeSizeRequest, CalculateWorktreeSizeResponse,
+    AgentInfo, BranchConflict, CalculateWorktreeSizeRequest, CalculateWorktreeSizeResponse,
     ClaimTerminalControlRequest, ClaimTerminalControlResponse, CleanWorktreeRequest,
     CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
     ConnectionService as ConnectionServiceTrait, CreateProjectRequest, CreateProjectResponse,
@@ -1192,6 +1192,84 @@ impl ConnectionServiceImpl {
         )
     }
 
+    /// The conflict a `StartSession` request must be answered with instead of creating anything, or
+    /// `None` when creation may proceed.
+    ///
+    /// Fires only for an explicit `new_branch_from_base` with a non-empty `new_branch_name` and
+    /// `on_branch_conflict = "reject"`:
+    /// - a generated branch name (`claude-cli/<short-id>`, `workspace/<short-id>`) is derived from the
+    ///   session uuid and cannot collide, so the empty intent is never checked;
+    /// - `work_on_selected_branch` is the intent that deliberately joins an owned branch;
+    /// - an empty `on_branch_conflict` keeps the suffixing behaviour every existing caller relies on.
+    ///
+    /// The project is resolved only once a conflict is established, so a request that may proceed
+    /// keeps whatever error the session-type dispatch would have produced for its project.
+    ///
+    /// See docs/ft/daemon/session-branch-conflict.md.
+    async fn owned_branch_conflict(
+        &self,
+        os_user: &str,
+        req: &StartSessionRequest,
+    ) -> Result<Option<BranchConflict>, Status> {
+        use tddy_service::proto::connection::BranchSession;
+
+        if req.on_branch_conflict.trim() != "reject"
+            || req.branch_worktree_intent.trim() != "new_branch_from_base"
+        {
+            return Ok(None);
+        }
+        let branch = req.new_branch_name.trim().to_string();
+        if branch.is_empty() {
+            return Ok(None);
+        }
+
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let branch_for_scan = branch.clone();
+        let owner = spawn_blocking_with_timeout(
+            self.config.spawn_worker_request_timeout(),
+            "StartSession: scan sessions by branch",
+            move || {
+                crate::branch_owner::find_session_owning_branch(&sessions_base, &branch_for_scan)
+            },
+        )
+        .await?;
+        let Some(owner) = owner else {
+            return Ok(None);
+        };
+
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        let project = project_storage::find_project(&projects_dir, req.project_id.trim())
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+        let repo_root = PathBuf::from(&project.main_repo_path);
+        let branch_for_suggestion = branch.clone();
+        let suggested_branch_name = spawn_blocking_with_timeout(
+            self.config.spawn_worker_request_timeout(),
+            "StartSession: first free suffixed branch name",
+            move || {
+                Ok(tddy_core::worktree::first_free_suffixed_branch_name(
+                    &repo_root,
+                    &branch_for_suggestion,
+                ))
+            },
+        )
+        .await?;
+
+        Ok(Some(BranchConflict {
+            branch,
+            owner: Some(BranchSession {
+                exists: true,
+                session_id: owner.session_id,
+                is_active: owner.is_active,
+                status: owner.status,
+            }),
+            suggested_branch_name,
+        }))
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn start_claude_cli_session(
         &self,
@@ -1916,6 +1994,7 @@ async fn spawn_claude_cli_session_inner(
         livekit_room: lk_room,
         livekit_url: lk_url,
         livekit_server_identity: lk_server_identity,
+        branch_conflict: None,
     }))
 }
 
@@ -2678,6 +2757,7 @@ impl ConnectionServiceImpl {
             livekit_room: String::new(),
             livekit_url: String::new(),
             livekit_server_identity: String::new(),
+            branch_conflict: None,
         }))
     }
 
@@ -3118,6 +3198,7 @@ impl ConnectionServiceImpl {
             livekit_room: String::new(),
             livekit_url: String::new(),
             livekit_server_identity: String::new(),
+            branch_conflict: None,
         }))
     }
 
@@ -4565,6 +4646,25 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             }
         }
 
+        // A requested new branch another session already owns is refused here, before the
+        // session-type dispatch — so one check covers tool, claude-cli, cursor-cli and workspace, and
+        // so nothing has been created yet when it fires.
+        if let Some(conflict) = self.owned_branch_conflict(os_user, &req).await? {
+            log::info!(
+                "StartSession: refusing branch {:?} owned by session {}",
+                conflict.branch,
+                conflict
+                    .owner
+                    .as_ref()
+                    .map(|o| o.session_id.as_str())
+                    .unwrap_or_default()
+            );
+            return Ok(Response::new(StartSessionResponse {
+                branch_conflict: Some(conflict),
+                ..Default::default()
+            }));
+        }
+
         // --- workspace branch: no LiveKit, no PTY; resolves project, creates a git worktree ---
         if req.session_type.trim() == "workspace" {
             let sessions_base = crate::user_sessions_path::sessions_base_for_user(
@@ -4891,6 +4991,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             livekit_room: result.livekit_room,
             livekit_url: result.livekit_url,
             livekit_server_identity: result.livekit_server_identity,
+            branch_conflict: None,
         }))
     }
 
@@ -7417,43 +7518,18 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let repo_root = tddy_core::repo_root_for_session(&session_dir);
         let branch = req.branch.trim().to_string();
 
-        // Session — scan sessions under the user's root for one whose Changeset.branch matches,
-        // preferring an active session, tie-broken by most-recently-updated.
+        // Session — the session that owns the branch, by the one rule `branch_owner` holds for every
+        // surface that asks (prefer active, then most-recently-updated).
         let branch_for_scan = branch.clone();
         let sessions_base_for_scan = sessions_base.clone();
         let session = spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "QueryBranch: scan sessions by branch",
             move || {
-                let sessions = session_reader::list_sessions_in_dir(&sessions_base_for_scan)
-                    .map_err(|e| anyhow::anyhow!(e))?;
-                let mut best: Option<session_reader::SessionEntry> = None;
-                for s in sessions {
-                    let dir = sessions_base_for_scan
-                        .join(SESSIONS_SUBDIR)
-                        .join(&s.session_id);
-                    let cs = match tddy_core::read_changeset(&dir) {
-                        Ok(cs) => cs,
-                        Err(_) => continue,
-                    };
-                    if cs.branch.as_deref() != Some(branch_for_scan.as_str()) {
-                        continue;
-                    }
-                    best = Some(match best {
-                        None => s,
-                        Some(cur) => {
-                            // Prefer active; then the most-recently-updated.
-                            if (s.is_active, s.updated_at.as_str())
-                                > (cur.is_active, cur.updated_at.as_str())
-                            {
-                                s
-                            } else {
-                                cur
-                            }
-                        }
-                    });
-                }
-                Ok(best)
+                crate::branch_owner::find_session_owning_branch(
+                    &sessions_base_for_scan,
+                    &branch_for_scan,
+                )
             },
         )
         .await?;

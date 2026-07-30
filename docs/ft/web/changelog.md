@@ -4,6 +4,13 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-07-30 — Creating a session on a branch another session owns asks what to do instead of silently renaming the branch
+
+- **A new `BranchConflictDialog`** replaces the silent `<branch>-1` rename: when the daemon reports the requested branch is already owned, the creation form stays put and offers three choices — **switch to the owning session** (named, with whether it is active), **add another agent on that branch** (a second session sharing the owner's worktree), or **use a different branch name** (an editable field pre-filled with the daemon's suggestion, so the suffix is consented rather than applied behind your back). See [session-branch-conflict.md](../daemon/session-branch-conflict.md).
+- **`CreateSessionPane` opts into the guard** (`on_branch_conflict = "reject"`) for every non-peer creation and no longer navigates on a refused response; the form keeps everything you typed, so cancelling returns you to it. Peer-agent spawns do not opt in — they create no branch. See [session-drawer.md § Post-Create](session-drawer.md#post-create).
+- **The prompt is re-entrant:** a renamed branch that is *also* owned re-opens the dialog with a fresh suggestion.
+- **No new request shape was invented** — "add another agent" is the existing `work_on_selected_branch` intent on the owned branch, and "use a different name" is the same `new_branch_from_base` under the name you typed.
+
 ## 2026-07-28 — Terminal scroll-up history: overlay double-buffer paging, native Scrollbar, scrollback-0 live pane, reconnect resume by offset
 
 - **The Ghostty shared terminal owns the scroll-up history flow end-to-end:** it renders two interchangeable overlaid ghostty-web terminals sharing one rect — a live terminal (`scrollback: 0`, always mounted & streaming, pinned to the live tip) and an older-history "page" terminal (`scrollback > 0`, read-only). A scroll-up gesture (or the "Load earlier output" affordance) forward-fills the page terminal in the background via `GetTerminalHistory`, then swaps it to the foreground; "Back to live" (or scroll-down-at-bottom) swaps back instantly. See [terminal-replay-lazy-scroll.md](terminal-replay-lazy-scroll.md).

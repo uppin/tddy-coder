@@ -124,6 +124,7 @@ pub async fn start_workspace_session(
         livekit_room: String::new(),
         livekit_url: String::new(),
         livekit_server_identity: String::new(),
+        branch_conflict: None,
     }))
 }
 

@@ -17,7 +17,7 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 | `ListEligibleDaemons` | Eligible daemon instances for host selection (`instance_id`, `label`, `is_local`); sourced from `EligibleDaemonSource` |
 | `ListSessionWorkflowFiles` | Lists workflow file **basenames** present on disk under `{sessions_base}/sessions/{session_id}/` using a **fixed server allowlist** (`changeset.yaml`, `.session.yaml`, `PRD.md`, `TODO.md`). Requires the same **`session_token`** → user → **`sessions_base`** resolution as **`ListSessions`**; **`session_id`** is validated with **`validate_session_id_segment`** before path construction. Entries whose canonical path falls outside the canonical session directory (e.g. symlink escape) are omitted from the list. |
 | `ReadSessionWorkflowFile` | Returns UTF-8 text for one allowlisted **basename** under the same resolved session directory. Rejects empty, non-allowlisted, or path-segment-unsafe **`basename`** values (`..`, `/`, `\`). Uses canonical path checks so resolved file paths cannot sit outside the session root. |
-| `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id`; optional `daemon_instance_id` selects target instance (local spawn when empty or local; non-local targets are unsupported until cross-daemon routing exists). For a new-branch-from-base worktree with an empty `selected_integration_base_ref`, the base ref is the project's stored **`main_branch_ref`** when set; a legacy project (no stored default) falls through to worktree setup's live default resolution — so the project default applies to web sessions, not only Telegram. When **`allowed_agents`** in config is non-empty, a non-empty **`agent`** on the request must match an entry **`id`** (after trim); otherwise the RPC returns **`INVALID_ARGUMENT`**. When **`allowed_agents`** is empty, **`agent`** is not restricted by this allowlist. When `session_type == "claude-cli"` or `"cursor-cli"`, the tool-spawn path is bypassed — see [Claude Code CLI sessions](#claude-code-cli-sessions) and [Cursor Agent CLI sessions](#cursor-agent-cli-sessions). When **`create_remote_branch`** is set (claude-cli/cursor-cli, new-branch-from-base only), the daemon **`git push -u origin <branch>`** right after worktree setup (**`tddy_core::worktree::push_new_branch_to_origin`**) and sets **`Changeset.remote_pushed`**; a push failure fails the RPC (no fallback). |
+| `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id`; optional `daemon_instance_id` selects target instance (local spawn when empty or local; non-local targets are unsupported until cross-daemon routing exists). For a new-branch-from-base worktree with an empty `selected_integration_base_ref`, the base ref is the project's stored **`main_branch_ref`** when set; a legacy project (no stored default) falls through to worktree setup's live default resolution — so the project default applies to web sessions, not only Telegram. When **`allowed_agents`** in config is non-empty, a non-empty **`agent`** on the request must match an entry **`id`** (after trim); otherwise the RPC returns **`INVALID_ARGUMENT`**. When **`allowed_agents`** is empty, **`agent`** is not restricted by this allowlist. When `session_type == "claude-cli"` or `"cursor-cli"`, the tool-spawn path is bypassed — see [Claude Code CLI sessions](#claude-code-cli-sessions) and [Cursor Agent CLI sessions](#cursor-agent-cli-sessions). When **`create_remote_branch`** is set (claude-cli/cursor-cli, new-branch-from-base only), the daemon **`git push -u origin <branch>`** right after worktree setup (**`tddy_core::worktree::push_new_branch_to_origin`**) and sets **`Changeset.remote_pushed`**; a push failure fails the RPC (no fallback). When **`on_branch_conflict = "reject"`** and a session already owns **`new_branch_name`**, the RPC creates nothing and answers with **`branch_conflict`** instead of a session id — see [Branch-conflict guard](#branch-conflict-guard-on-startsession). |
 | `ConnectSession` / `ResumeSession` | LiveKit / respawn (resume passes `project_id` from metadata); `session_id` is validated as a single path segment before resolving `{sessions_base}/sessions/{session_id}/`. For `session_type == "claude-cli"` or `"cursor-cli"` sessions, `ConnectSession` returns empty LiveKit fields immediately (no token RPC). |
 | `StreamSessionTerminalIO` | Bidi stream for raw terminal I/O with a running CLI child (`claude` or Cursor Agent CLI). First client message must carry `session_token` + `session_id` for auth. Subsequent messages carry raw stdin bytes; the server forwards them to the child process stdin and broadcasts stdout/stderr back as `SessionTerminalOutput` messages. Resize: if the input starts with `\x1b]resize;{cols};{rows}\x07`, the daemon updates the terminal size instead of forwarding to stdin. Session must have `session_type == "claude-cli"` or `"cursor-cli"`; returns `FAILED_PRECONDITION` when no active process is found. Accepts an optional `terminal_id` on the first message (empty ⇒ the reserved `"main"` terminal); an unknown id returns `NOT_FOUND`. |
 | `StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions` | Manage the **tools** running in a session — see [Session tools](#session-tools-multiple-terminals-per-session) below. |
@@ -71,6 +71,64 @@ The staging upload mirrors the terminal **"Attach"** flow (`UploadSessionFileChu
 - `HostDocumentRef` scope resolution and the cross-host fetch by `daemon_instance_id` (note the existing streaming RPCs return `unimplemented` for `PeerRoute::Forward`; a fetch path has to be unary).
 - `tddy-web`: the Start-Session attachment picker and a browser for referencing existing docs on connected hosts.
 - A product PRD under `docs/ft/web/` and acceptance tests. No tests cover the new RPCs beyond the fact that they compile.
+
+## Branch-conflict guard on StartSession
+
+A `new_branch_from_base` request whose `new_branch_name` is **already owned by another session** is
+refused rather than silently turned into `<branch>-1` by the worktree layer's suffixing retry
+(`tddy_core::worktree::create_worktree_with_retry`). Product spec:
+[session-branch-conflict.md](../../../docs/ft/daemon/session-branch-conflict.md).
+
+**Opt-in.** `StartSessionRequest.on_branch_conflict` (field 30) is `""` (suffix — what every existing
+caller gets) or `"reject"`. Only a surface that can prompt an operator asks to be rejected; recipe
+hooks, PR-stack chain spawns and `RestoreSessionWorktree` keep suffixing. `tddy-sandbox-app` and
+`tddy-tools remote start-session` send no `new_branch_name` at all, so their uuid-derived
+`claude-cli/<short-id>` / `workspace/<short-id>` names cannot collide.
+
+**The refusal is a response field, not an error.** `StartSessionResponse.branch_conflict` (field 5,
+`BranchConflict { branch, BranchSession owner, suggested_branch_name }`) with an empty `session_id`.
+`tddy_rpc::Status` carries only a code and a message — `status_to_error_body` hardcodes
+`details: vec![]` — so an `AlreadyExists` error could not carry the owning session id or the suggested
+name, and `StartSession` is additionally forwarded host-to-host over LiveKit, where only the response
+message is guaranteed intact. `owner` reuses `QueryBranch`'s `BranchSession`; `suggested_branch_name`
+is the first free `<branch>-<n>` from the read-only
+`tddy_core::worktree::first_free_suffixed_branch_name`.
+
+**Where it runs.** `owned_branch_conflict` is called from `start_session` **after** peer routing
+(`forward_start_session_via_livekit` returns first, so a cross-host request is checked on the daemon
+that owns the sessions root) and **before** the session-type dispatch — so one check covers `tool`,
+`claude-cli`, `cursor-cli` and `workspace`, and nothing exists yet when it fires: no session
+directory, no `changeset.yaml`, no branch, no worktree, no remote push. It fires only for an explicit
+`new_branch_from_base` intent with a non-empty `new_branch_name`; `work_on_selected_branch` is never
+refused, since that is the intent that deliberately joins an existing branch.
+
+**Scope: session-owned branches only.** A branch that merely exists in git keeps suffixing — there is
+no session to switch to and no second agent to add.
+
+### `branch_owner` — one ownership rule, three callers
+
+`branch_owner::find_session_owning_branch(sessions_base, branch)` is the single answer to "which
+session owns this branch": scan the user's sessions root for a `Changeset.branch` match, prefer an
+**active** session, tie-break on the most recent `updated_at`, skip a session whose changeset cannot
+be read. It is shared by `QueryBranch` (which keeps its `require_pr_stack_orchestrator` gate — only
+the scan is shared), the `StartSession` guard, and the Telegram spawn flow, so the rule cannot drift
+between them. Synchronous (reads changesets and `.session.yaml`); async callers wrap it in
+`spawn_blocking_with_timeout`.
+
+### Telegram
+
+Telegram spawns sessions without going through `StartSession`, so it carries the same check at its
+own call site — in `handle_telegram_branch_callback`, after the base-branch choice resolves
+`new_branch_name` and before the model picker, gated on the claude-cli derivation
+(`feature/<slug(changeset.name)>`; cursor-cli's `cursor-cli/<short-id>` is uuid-derived and cannot
+collide). An owned branch sends a three-button inline keyboard
+(`CB_TELEGRAM_BRANCH_CONFLICT = "tbc:"`, payload `tbc:<choice>:<proj_idx>:<session_id>`, choices
+`sw`/`na`/`sg`) instead of the model keyboard; the branch name is re-derived server-side because
+`callback_data` is capped at 64 bytes. `sw` enters the owning session (`handle_enter_session` binds
+the chat; the pending session is left un-spawned, not deleted), `na` rewrites the changeset to
+`WorkOnSelectedBranch` on the owned branch and clears `new_branch_name`, `sg` keeps
+`NewBranchFromBase` under the suggested suffixed name; `na`/`sg` then continue to the model picker,
+re-applying the `session_type`/`model` routing markers that `write_changeset` does not know about.
 
 ## ListSessions workflow fields
 

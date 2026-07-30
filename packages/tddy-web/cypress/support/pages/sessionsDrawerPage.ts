@@ -472,6 +472,10 @@ export const sessionsDrawerPage = {
   // session-detail "Add agent" peer-spawn flow)
   // ---------------------------------------------------------------------------
 
+  /** The "+ New session" button in the drawer header, which opens the creation pane. */
+  newSessionBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsDrawerNewBtn, { timeout: 5000, ...options }),
+
   /** The shared session-creation pane (rendered inline or in a dialog). */
   createSessionPane: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionPane, { timeout: 5000, ...options }),
