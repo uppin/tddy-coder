@@ -369,6 +369,7 @@ async fn resuming_a_managed_claude_cli_session_re_wires_orchestration_and_socket
         previous_session_id: None,
         session_type: Some("claude-cli".to_string()),
         model: Some(TEST_MODEL.to_string()),
+        cursor_chat_id: None,
         activity_status: None,
         hook_token: None,
         sandbox: None,

@@ -231,6 +231,7 @@ impl SessionMetadataBuilder {
             previous_session_id: self.previous_session_id,
             session_type: self.session_type,
             model: self.model,
+            cursor_chat_id: None,
             activity_status: self.activity_status,
             hook_token: self.hook_token,
             sandbox: self.sandbox,
