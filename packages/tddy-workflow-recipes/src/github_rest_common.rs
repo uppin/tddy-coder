@@ -171,7 +171,30 @@ pub fn curl_github_get_json_with_token(
     query: &[(&str, &str)],
     token: &str,
 ) -> Result<String, tddy_core::WorkflowError> {
-    let url = github_api_url(repo, path);
+    run_curl_get(&github_api_url(repo, path), query, token)
+}
+
+/// HTTP GET against an API path that is **not** under `/repos/{owner}/{repo}/` — `/search/issues`
+/// being the one this exists for.
+///
+/// [`curl_github_get_json_with_token`] can only address a repository sub-resource, and search is
+/// repository-scoped by a `repo:` **query qualifier** rather than by its path. Same curl transport,
+/// same headers, same token handling — only the URL shape differs. `path` is relative to the API
+/// root, e.g. `"search/issues"`.
+pub fn curl_github_get_json_absolute_path(
+    path: &str,
+    query: &[(&str, &str)],
+    token: &str,
+) -> Result<String, tddy_core::WorkflowError> {
+    let url = format!("https://api.github.com/{}", path.trim_start_matches('/'));
+    run_curl_get(&url, query, token)
+}
+
+fn run_curl_get(
+    url: &str,
+    query: &[(&str, &str)],
+    token: &str,
+) -> Result<String, tddy_core::WorkflowError> {
     let out_path = temp_github_path("tddy-gh-get");
 
     let mut cmd = std::process::Command::new("curl");
@@ -182,7 +205,7 @@ pub fn curl_github_get_json_with_token(
         .arg("-w")
         .arg("%{http_code}")
         .arg("-G")
-        .arg(&url);
+        .arg(url);
     for (k, v) in query {
         cmd.arg("--data-urlencode").arg(format!("{k}={v}"));
     }

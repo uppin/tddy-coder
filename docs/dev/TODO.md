@@ -18,6 +18,52 @@
 
 ## Future Enhancements
 
+### PR-Stack — full control follow-ups (source: pr-stack-full-control changeset, 2026-07-30)
+
+- **A testable transport seam for `RealGithubPrApi`** — `github_api_url` (`github_rest_common.rs:36`)
+  hardcodes `https://api.github.com` and the transport is `Command::new("curl")`, so no HTTP mock can
+  intercept it. Every GitHub request/response body in the repo therefore ships with zero automated
+  coverage, and `pr-stack-full-control` adds eight more (`GET /pulls/{n}`, `/files`, `/reviews`,
+  `/comments`, `/issues/{n}/comments`, `/commits/{sha}/check-runs`, `/search/issues`, and a title/body
+  `PATCH`). `wiremock` is already a dev-dependency of both `tddy-tools` and `tddy-workflow-recipes`.
+  Adding a base-URL override plus a real HTTP client would make the request shapes and the JSON parsing
+  testable in one move — deliberately kept out of the feature changeset because it is a transport
+  migration touching every existing call path.
+- **Review-thread resolution state needs GraphQL** — `pr_comments` returns threads without a `resolved`
+  flag because the REST API does not expose one (it is `reviewThreads.isResolved` on the GraphQL v4
+  schema only). No field is emitted rather than guessing. Adding it means the first GraphQL call in the
+  repository.
+- **`pr_search` returns no branch names and does not paginate** — `GET /search/issues` omits a PR's head
+  and base, so `base:` works as a query qualifier but the agent must follow up with `pr_read` to learn
+  the branches; and `search_prs` fetches a single page (limit capped at 100). Following `Link` headers,
+  or resolving each hit through `GET /pulls/{n}`, would close both gaps at a cost in API calls.
+- **No gRPC/web surface for update, delete, set-parents or adopt** — `pr-stack-full-control` is
+  agent-only by decision, so the web keeps `AddPlannedPr` / `RepointPlannedPr` / `GetPrStatus` /
+  `QueryBranch` while the agent now has strictly more. Bringing the four new operations to
+  `connection.proto` and to `PlannedPrRow`'s action set would remove the asymmetry — and `PrStackScreen`
+  is where an operator most naturally wants "delete this row" and "rename this row".
+- **`pr_delete_planned` leaves the branch, the worktree and the child session behind** — deletion is a
+  plan operation by decision; it reports the orphaned `branch` and `session_id` and stops. An opt-in
+  cleanup (close the PR, delete the remote branch, remove the worktree, delete the child session) would
+  make "abandon this node" one step instead of four. Related: *dangling `session_id` links are never
+  scrubbed*, below.
+- **`AddPlannedPrInput.child_recipe` is still inert** — accepted by the Rust struct and present in
+  `connection.proto:1122`, but `StackNode` has no field to carry it, so it is discarded on every path
+  (`pr_stack/mod.rs:377-381`), and the MCP schema does not even expose it. Either give `StackNode` the
+  field and honour it when spawning the child, or delete the parameter from both the struct and the
+  proto. Untouched by `pr-stack-full-control`.
+- **`Stack::topo_order` still treats an unknown parent id as a no-op** — in-degree is counted only over
+  parents that resolve to a node (`changeset.rs:105`), so a dangling parent reference is silently
+  ignored and no validation ever rejects a persisted `Stack` that holds one. Only `validate_stack_plan`
+  rejects dangling parents, and it runs on plan *input*, never on what is on disk.
+  `pr-stack-full-control` works around this by validating the candidate stack in every new writer and by
+  making delete reparent rather than orphan, but the underlying model still cannot represent
+  "this stack is invalid".
+- **`update_stack_atomic` takes no lock** — it is read-modify-write plus an atomic rename, so two
+  concurrent writers are last-writer-wins on the whole changeset. Every writer works around it
+  individually by computing inside the closure. With seven more mutating tools calling it, an advisory
+  file lock (or a single serialized stack-writer) becomes worth the change.
+
 ### Terminal lazy scroll-up — LiveKit transport & unified surface (source: terminal-replay-viewport changeset, 2026-07-28)
 
 - **LiveKit transport does not carry offset metadata.** `GhosttyTerminalGrpc` now owns the

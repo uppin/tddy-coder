@@ -8,6 +8,7 @@ pub mod github;
 mod hooks;
 mod internal_status;
 mod pr_actions;
+pub mod pr_insight;
 pub mod transient;
 
 pub use actions::{MergeTask, RepointTask, SpawnTask};
@@ -15,11 +16,18 @@ pub use assess::{
     assemble_views, decide_next_action, effective_base_ref, AssessTask, ChildPhase, NodeView,
     OrchestratorAction, PrLiveStatus,
 };
-pub use bridge::{execute_stack_merge, execute_stack_repoint, seed_orchestrator_stack_from_plan};
-pub use github::{GithubPrApi, RealGithubPrApi};
+pub use bridge::{
+    execute_stack_merge, execute_stack_repoint, pr_number_from_status_url,
+    seed_orchestrator_stack_from_plan,
+};
+pub use github::{GithubPrApi, GithubPrInsightApi, RealGithubPrApi};
 pub use hooks::OrchestratePrStackHooks;
 pub use internal_status::{derive_internal_status, reconcile_internal_status};
 pub use pr_actions::{pr_close_action, pr_merge_action, pr_resolve_conflicts_action};
+pub use pr_insight::{
+    pull_number_for_node, read_pr, read_pr_comments, search_prs, PrCommentsView, PrReadView,
+    PrReviewThread, PrSearchInput, PrThreadComment, ReviewerState,
+};
 pub use transient::{
     recover_in_flight_stack_op, write_stack_op_journal, MergePhase, StackOpJournal,
 };

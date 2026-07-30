@@ -109,6 +109,156 @@ pub trait GithubPrApi: Send + Sync {
     fn close_pr(&self, number: u64) -> Result<(), tddy_core::WorkflowError>;
 }
 
+/// One pull request in full, as `GET /repos/{repo}/pulls/{number}` reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrDetail {
+    pub number: u64,
+    pub url: String,
+    pub title: String,
+    pub body: String,
+    pub state: PrState,
+    pub base_branch: String,
+    pub head_branch: String,
+    pub head_sha: String,
+    /// GitHub reports `null` while it is still computing mergeability.
+    pub mergeable: Option<bool>,
+    pub mergeable_state: String,
+    pub additions: u64,
+    pub deletions: u64,
+    pub changed_files: u64,
+}
+
+/// One file a PR touches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrFile {
+    pub path: String,
+    /// GitHub's own vocabulary: `added` / `modified` / `removed` / `renamed` / …
+    pub status: String,
+}
+
+/// One check run against a PR's head commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckRun {
+    pub name: String,
+    /// `success` / `failure` / `neutral` / `cancelled` / `timed_out` / `action_required`, or
+    /// empty while the run is still in progress.
+    pub conclusion: String,
+}
+
+/// One submitted review on a PR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrReview {
+    pub author: String,
+    /// `APPROVED` / `CHANGES_REQUESTED` / `COMMENTED` / `DISMISSED`.
+    pub state: String,
+    pub body: String,
+    pub submitted_at: String,
+}
+
+/// One review comment anchored to a diff position.
+///
+/// `id` and `in_reply_to_id` are what make thread reconstruction possible: the REST API returns a
+/// flat list, and a thread is a root comment plus every comment whose `in_reply_to_id` chains back
+/// to it. There is deliberately no `resolved` field — thread resolution is exposed only by the
+/// GraphQL API, and inventing the value here would be a guess.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrReviewComment {
+    pub id: u64,
+    pub in_reply_to_id: Option<u64>,
+    pub author: String,
+    pub body: String,
+    pub path: String,
+    /// `None` for a comment on an outdated diff position.
+    pub line: Option<u64>,
+    pub diff_hunk: String,
+    pub created_at: String,
+}
+
+/// One conversation (issue-level) comment on a PR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrIssueComment {
+    pub author: String,
+    pub body: String,
+    pub created_at: String,
+}
+
+/// A PR search, always scoped to one repository.
+///
+/// `repo` is set by the caller from the orchestrator's own remote, never by the agent — a search is
+/// a read of *this* repository's PRs, not a way to reach another one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrSearchQuery {
+    pub repo: String,
+    /// Free text matched against title and body; `None` matches every PR in scope.
+    pub text: Option<String>,
+    /// `open` / `closed` / `merged` / `all`.
+    pub state: String,
+    pub author: Option<String>,
+    pub base: Option<String>,
+    pub limit: u32,
+}
+
+/// One search hit.
+///
+/// `GET /search/issues` reports no head or base branch, so neither is present here: a caller that
+/// needs the branches follows up with [`GithubPrInsightApi::get_pr`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrSearchHit {
+    pub number: u64,
+    pub title: String,
+    pub state: String,
+    pub draft: bool,
+    pub author: String,
+    pub url: String,
+    pub updated_at: String,
+}
+
+/// Reads that let an operator inspect a pull request, plus the one write that keeps a stack node's
+/// title and body in step with its PR.
+///
+/// A **sibling** of [`GithubPrApi`] rather than more methods on it: the eight hand-written fakes
+/// that implement `GithubPrApi` today care only about lifecycle operations, and widening that trait
+/// would force every one of them to grow stubs for reads it never exercises.
+pub trait GithubPrInsightApi: Send + Sync {
+    /// `GET /repos/{repo}/pulls/{number}`.
+    fn get_pr(&self, number: u64) -> Result<PrDetail, tddy_core::WorkflowError>;
+
+    /// `GET /repos/{repo}/pulls/{number}/files`.
+    fn list_pr_files(&self, number: u64) -> Result<Vec<PrFile>, tddy_core::WorkflowError>;
+
+    /// `GET /repos/{repo}/commits/{head_sha}/check-runs`.
+    fn list_check_runs(&self, head_sha: &str) -> Result<Vec<CheckRun>, tddy_core::WorkflowError>;
+
+    /// `GET /repos/{repo}/pulls/{number}/reviews`.
+    fn list_reviews(&self, number: u64) -> Result<Vec<PrReview>, tddy_core::WorkflowError>;
+
+    /// `GET /repos/{repo}/pulls/{number}/comments` — diff-anchored review comments, flat.
+    fn list_review_comments(
+        &self,
+        number: u64,
+    ) -> Result<Vec<PrReviewComment>, tddy_core::WorkflowError>;
+
+    /// `GET /repos/{repo}/issues/{number}/comments` — conversation comments.
+    fn list_issue_comments(
+        &self,
+        number: u64,
+    ) -> Result<Vec<PrIssueComment>, tddy_core::WorkflowError>;
+
+    /// `GET /search/issues` with `repo:` and `is:pr` qualifiers.
+    fn search_prs(
+        &self,
+        query: &PrSearchQuery,
+    ) -> Result<Vec<PrSearchHit>, tddy_core::WorkflowError>;
+
+    /// `PATCH /repos/{repo}/pulls/{number}` with whichever of title/body is present.
+    fn patch_pr_title_body(
+        &self,
+        number: u64,
+        title: Option<&str>,
+        body: Option<&str>,
+    ) -> Result<(), tddy_core::WorkflowError>;
+}
+
 /// Where a [`RealGithubPrApi`] gets its credential. Explicit never falls back to the environment:
 /// a caller acting for a specific operator must not silently authenticate as the host's ambient
 /// token.
@@ -166,6 +316,7 @@ impl RealGithubPrApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
     use std::sync::Mutex;
 
     struct MockGithubPrApi {
@@ -254,6 +405,208 @@ mod tests {
         assert_eq!(pr_ref.number, 42);
         let calls = mock.get_open_pr_calls.lock().unwrap();
         assert_eq!(calls.as_slice(), &["feature/n1".to_string()]);
+    }
+
+    // -----------------------------------------------------------------------
+    // search_qualifiers — the `q` a PR search is actually run with.
+    //
+    // PRD: docs/ft/coder/1-WIP/PRD-2026-07-30-pr-stack-full-control.md § pr_search.
+    // Changeset: docs/dev/1-WIP/2026-07-30-pr-stack-full-control.md.
+    // -----------------------------------------------------------------------
+
+    /// The op name a caller passes in; it prefixes any rejection.
+    const SEARCH_OP: &str = "RealGithubPrApi::search_prs";
+
+    /// A search of `acme/repo` over every state, with nothing narrowed.
+    fn a_search() -> PrSearchQuery {
+        PrSearchQuery {
+            repo: "acme/repo".to_string(),
+            text: None,
+            state: "all".to_string(),
+            author: None,
+            base: None,
+            limit: 20,
+        }
+    }
+
+    fn qualifiers_of(query: PrSearchQuery) -> String {
+        search_qualifiers(SEARCH_OP, &query).expect("this search should be accepted")
+    }
+
+    #[test]
+    fn every_search_is_scoped_to_one_repositorys_pull_requests() {
+        // Given — a search that narrows nothing at all
+        let query = a_search();
+
+        // When
+        let q = qualifiers_of(query);
+
+        // Then — the repository and the pull-request scope are injected, never optional
+        assert_eq!(q, "repo:acme/repo is:pr");
+    }
+
+    #[rstest]
+    #[case::open("open", "repo:acme/repo is:pr is:open")]
+    #[case::closed("closed", "repo:acme/repo is:pr is:closed")]
+    #[case::merged("merged", "repo:acme/repo is:pr is:merged")]
+    #[case::all("all", "repo:acme/repo is:pr")]
+    fn each_state_maps_to_githubs_own_state_qualifier(#[case] state: &str, #[case] expected: &str) {
+        // Given — one of the four states the tool accepts; "all" narrows nothing
+        let query = PrSearchQuery {
+            state: state.to_string(),
+            ..a_search()
+        };
+
+        // When
+        let q = qualifiers_of(query);
+
+        // Then
+        assert_eq!(q, expected);
+    }
+
+    #[test]
+    fn an_author_and_a_base_each_add_their_own_qualifier() {
+        // Given
+        let query = PrSearchQuery {
+            author: Some("alice".to_string()),
+            base: Some("master".to_string()),
+            ..a_search()
+        };
+
+        // When
+        let q = qualifiers_of(query);
+
+        // Then
+        assert_eq!(q, "repo:acme/repo is:pr author:alice base:master");
+    }
+
+    #[test]
+    fn a_blank_author_adds_no_author_qualifier() {
+        // Given — a caller that sent the field but named nobody
+        let query = PrSearchQuery {
+            author: Some("   ".to_string()),
+            ..a_search()
+        };
+
+        // When
+        let q = qualifiers_of(query);
+
+        // Then — `author:` with nothing after it would match no PR at all
+        assert_eq!(q, "repo:acme/repo is:pr");
+    }
+
+    #[test]
+    fn a_blank_base_adds_no_base_qualifier() {
+        // Given
+        let query = PrSearchQuery {
+            base: Some("".to_string()),
+            ..a_search()
+        };
+
+        // When
+        let q = qualifiers_of(query);
+
+        // Then
+        assert_eq!(q, "repo:acme/repo is:pr");
+    }
+
+    #[test]
+    fn free_text_is_matched_as_written_beside_the_injected_scope() {
+        // Given
+        let query = PrSearchQuery {
+            text: Some("  token store  ".to_string()),
+            ..a_search()
+        };
+
+        // When
+        let q = qualifiers_of(query);
+
+        // Then
+        assert_eq!(q, "repo:acme/repo is:pr token store");
+    }
+
+    #[test]
+    fn an_unknown_state_is_rejected_rather_than_narrowed_to_a_default() {
+        // Given — a state GitHub has no `is:` qualifier for
+        let query = PrSearchQuery {
+            state: "abandoned".to_string(),
+            ..a_search()
+        };
+
+        // When
+        let result = search_qualifiers(SEARCH_OP, &query);
+
+        // Then — answering a different question than the one asked would be worse than refusing
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "artifact write failed: RealGithubPrApi::search_prs: unknown state 'abandoned' \
+             (expected open, closed, merged or all)"
+        );
+    }
+
+    #[rstest]
+    #[case::colon("alice:x")]
+    #[case::second_qualifier("alice repo:someone/private")]
+    fn an_author_that_is_not_a_single_name_is_rejected(#[case] hostile_author: &str) {
+        // Given — a value that would append a qualifier of the caller's choosing to `q`
+        let query = PrSearchQuery {
+            author: Some(hostile_author.to_string()),
+            ..a_search()
+        };
+
+        // When
+        let result = search_qualifiers(SEARCH_OP, &query);
+
+        // Then — the field the free-text refusal points callers at must not itself be a way in
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            format!(
+                "artifact write failed: RealGithubPrApi::search_prs: the author '{hostile_author}' \
+                 is not a single name — a search's repository and pull-request scope are set by this \
+                 tool and cannot be widened by a qualifier"
+            )
+        );
+    }
+
+    #[test]
+    fn a_base_that_is_not_a_single_name_is_rejected() {
+        // Given — a git branch name may contain neither a space nor a colon, so this is not a branch
+        let query = PrSearchQuery {
+            base: Some("master repo:someone/private".to_string()),
+            ..a_search()
+        };
+
+        // When
+        let result = search_qualifiers(SEARCH_OP, &query);
+
+        // Then
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "artifact write failed: RealGithubPrApi::search_prs: the base 'master \
+             repo:someone/private' is not a single name — a search's repository and pull-request \
+             scope are set by this tool and cannot be widened by a qualifier"
+        );
+    }
+
+    #[test]
+    fn free_text_carrying_a_search_qualifier_is_rejected() {
+        // Given — a `repo:` of the caller's own, which GitHub ORs with the injected one
+        let query = PrSearchQuery {
+            text: Some("repo:someone/private token".to_string()),
+            ..a_search()
+        };
+
+        // When
+        let result = search_qualifiers(SEARCH_OP, &query);
+
+        // Then — accepting it would read another repository's PRs with the operator's own credential
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "artifact write failed: RealGithubPrApi::search_prs: the search text 'repo:someone/private \
+             token' contains ':', which GitHub reads as a search qualifier — the repository and the \
+             pull-request scope are set by this tool, so narrow a search with the state, author and \
+             base fields instead"
+        );
     }
 
     #[test]
@@ -546,4 +899,400 @@ impl GithubPrApi for RealGithubPrApi {
         )?;
         Ok(())
     }
+}
+
+/// One page's worth of items on a list endpoint — GitHub's maximum, and all these reads take.
+///
+/// Deliberately un-paginated: a PR with more than a hundred reviews, comments or check runs is
+/// outside what an agent can usefully be handed in one tool result, and a silently truncated second
+/// page would be indistinguishable from there being no second page.
+const PER_PAGE: &str = "100";
+
+fn json_err(op: &str, detail: impl std::fmt::Display) -> tddy_core::WorkflowError {
+    tddy_core::WorkflowError::WriteFailed(format!("{op}: {detail}"))
+}
+
+/// Parse a response body that must be a JSON array.
+fn json_array(op: &str, body: &str) -> Result<Vec<serde_json::Value>, tddy_core::WorkflowError> {
+    let value: serde_json::Value =
+        serde_json::from_str(body).map_err(|e| json_err(op, format!("JSON parse error: {e}")))?;
+    match value {
+        serde_json::Value::Array(items) => Ok(items),
+        other => Err(json_err(op, format!("expected a JSON array, got: {other}"))),
+    }
+}
+
+/// A string field, or `""` when GitHub reports it as `null` (an empty PR body, a check run with no
+/// conclusion yet). Distinguishing "absent" from "empty" would not change any caller's decision.
+fn json_str(item: &serde_json::Value, field: &str) -> String {
+    item.get(field)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// The author login of an item that carries a `user` object; `""` for a comment whose author's
+/// account is gone (GitHub reports `null` there).
+fn json_author(item: &serde_json::Value) -> String {
+    item.pointer("/user/login")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+impl GithubPrInsightApi for RealGithubPrApi {
+    fn get_pr(&self, number: u64) -> Result<PrDetail, tddy_core::WorkflowError> {
+        const OP: &str = "RealGithubPrApi::get_pr";
+        let token = self.require_token(OP)?;
+        let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.repo,
+            &format!("pulls/{number}"),
+            &[],
+            &token,
+        )?;
+        let pr: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| json_err(OP, format!("JSON parse error: {e}")))?;
+
+        let number = pr
+            .get("number")
+            .and_then(|n| n.as_u64())
+            .ok_or_else(|| json_err(OP, format!("missing number in response: {body}")))?;
+        // No default: `state` decides what `pr_read` reports and what phase an adopted node is
+        // created at, so reading a missing field as "open" would present a merged or closed PR as
+        // still in play.
+        let state = pr
+            .get("state")
+            .and_then(|s| s.as_str())
+            .ok_or_else(|| json_err(OP, format!("missing state in response: {body}")))?;
+        let merged_at = pr.get("merged_at").and_then(|s| s.as_str());
+        let draft = pr.get("draft").and_then(|d| d.as_bool()).unwrap_or(false);
+
+        Ok(PrDetail {
+            number,
+            url: json_str(&pr, "html_url"),
+            title: json_str(&pr, "title"),
+            body: json_str(&pr, "body"),
+            state: pr_state_from_github(state, merged_at, draft),
+            base_branch: pr
+                .pointer("/base/ref")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string(),
+            head_branch: pr
+                .pointer("/head/ref")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string(),
+            head_sha: pr
+                .pointer("/head/sha")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string(),
+            // `null` while GitHub is still computing mergeability — kept as `None` rather than
+            // collapsed to `false`, which would read as "conflicted".
+            mergeable: pr.get("mergeable").and_then(|m| m.as_bool()),
+            mergeable_state: json_str(&pr, "mergeable_state"),
+            additions: pr.get("additions").and_then(|n| n.as_u64()).unwrap_or(0),
+            deletions: pr.get("deletions").and_then(|n| n.as_u64()).unwrap_or(0),
+            changed_files: pr
+                .get("changed_files")
+                .and_then(|n| n.as_u64())
+                .unwrap_or(0),
+        })
+    }
+
+    fn list_pr_files(&self, number: u64) -> Result<Vec<PrFile>, tddy_core::WorkflowError> {
+        const OP: &str = "RealGithubPrApi::list_pr_files";
+        let token = self.require_token(OP)?;
+        let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.repo,
+            &format!("pulls/{number}/files"),
+            &[("per_page", PER_PAGE)],
+            &token,
+        )?;
+        Ok(json_array(OP, &body)?
+            .iter()
+            .map(|file| PrFile {
+                path: json_str(file, "filename"),
+                status: json_str(file, "status"),
+            })
+            .collect())
+    }
+
+    fn list_check_runs(&self, head_sha: &str) -> Result<Vec<CheckRun>, tddy_core::WorkflowError> {
+        const OP: &str = "RealGithubPrApi::list_check_runs";
+        let token = self.require_token(OP)?;
+        let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.repo,
+            &format!("commits/{head_sha}/check-runs"),
+            &[("per_page", PER_PAGE)],
+            &token,
+        )?;
+        let response: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| json_err(OP, format!("JSON parse error: {e}")))?;
+        // Unlike the other list endpoints, this one wraps its items in an object.
+        let runs = response
+            .get("check_runs")
+            .and_then(|r| r.as_array())
+            .ok_or_else(|| json_err(OP, format!("missing check_runs array in: {body}")))?;
+        Ok(runs
+            .iter()
+            .map(|run| CheckRun {
+                name: json_str(run, "name"),
+                // `null` while the run is still going: reported as empty, never as a failure.
+                conclusion: json_str(run, "conclusion"),
+            })
+            .collect())
+    }
+
+    fn list_reviews(&self, number: u64) -> Result<Vec<PrReview>, tddy_core::WorkflowError> {
+        const OP: &str = "RealGithubPrApi::list_reviews";
+        let token = self.require_token(OP)?;
+        let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.repo,
+            &format!("pulls/{number}/reviews"),
+            &[("per_page", PER_PAGE)],
+            &token,
+        )?;
+        Ok(json_array(OP, &body)?
+            .iter()
+            .map(|review| PrReview {
+                author: json_author(review),
+                state: json_str(review, "state"),
+                body: json_str(review, "body"),
+                submitted_at: json_str(review, "submitted_at"),
+            })
+            .collect())
+    }
+
+    fn list_review_comments(
+        &self,
+        number: u64,
+    ) -> Result<Vec<PrReviewComment>, tddy_core::WorkflowError> {
+        const OP: &str = "RealGithubPrApi::list_review_comments";
+        let token = self.require_token(OP)?;
+        let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.repo,
+            &format!("pulls/{number}/comments"),
+            &[("per_page", PER_PAGE)],
+            &token,
+        )?;
+        let items = json_array(OP, &body)?;
+        let mut comments = Vec::with_capacity(items.len());
+        for comment in &items {
+            // Without an id, a comment cannot be placed in a thread and no reply could ever be
+            // attached to it — a silently id-less comment would break the grouping it belongs to.
+            let id = comment
+                .get("id")
+                .and_then(|n| n.as_u64())
+                .ok_or_else(|| json_err(OP, format!("review comment has no id: {comment}")))?;
+            comments.push(PrReviewComment {
+                id,
+                in_reply_to_id: comment.get("in_reply_to_id").and_then(|n| n.as_u64()),
+                author: json_author(comment),
+                body: json_str(comment, "body"),
+                path: json_str(comment, "path"),
+                // `null` once the diff position it was anchored to has gone stale.
+                line: comment.get("line").and_then(|n| n.as_u64()),
+                diff_hunk: json_str(comment, "diff_hunk"),
+                created_at: json_str(comment, "created_at"),
+            });
+        }
+        Ok(comments)
+    }
+
+    fn list_issue_comments(
+        &self,
+        number: u64,
+    ) -> Result<Vec<PrIssueComment>, tddy_core::WorkflowError> {
+        const OP: &str = "RealGithubPrApi::list_issue_comments";
+        let token = self.require_token(OP)?;
+        // A PR's conversation comments live on its issue, not on the pull resource.
+        let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.repo,
+            &format!("issues/{number}/comments"),
+            &[("per_page", PER_PAGE)],
+            &token,
+        )?;
+        Ok(json_array(OP, &body)?
+            .iter()
+            .map(|comment| PrIssueComment {
+                author: json_author(comment),
+                body: json_str(comment, "body"),
+                created_at: json_str(comment, "created_at"),
+            })
+            .collect())
+    }
+
+    fn search_prs(
+        &self,
+        query: &PrSearchQuery,
+    ) -> Result<Vec<PrSearchHit>, tddy_core::WorkflowError> {
+        const OP: &str = "RealGithubPrApi::search_prs";
+        let token = self.require_token(OP)?;
+        let q = search_qualifiers(OP, query)?;
+        let per_page = query.limit.to_string();
+        // `/search/issues` is not under `/repos/{owner}/{repo}/` — the repository is a `repo:`
+        // qualifier inside `q`, which is why this call needs the absolute-path helper.
+        let body = crate::github_rest_common::curl_github_get_json_absolute_path(
+            "search/issues",
+            &[("q", q.as_str()), ("per_page", per_page.as_str())],
+            &token,
+        )?;
+        let response: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| json_err(OP, format!("JSON parse error: {e}")))?;
+        let items = response
+            .get("items")
+            .and_then(|i| i.as_array())
+            .ok_or_else(|| json_err(OP, format!("missing items array in: {body}")))?;
+
+        let mut hits = Vec::with_capacity(items.len());
+        for item in items {
+            let number = item
+                .get("number")
+                .and_then(|n| n.as_u64())
+                .ok_or_else(|| json_err(OP, format!("search hit has no number: {item}")))?;
+            hits.push(PrSearchHit {
+                number,
+                title: json_str(item, "title"),
+                state: json_str(item, "state"),
+                draft: item.get("draft").and_then(|d| d.as_bool()).unwrap_or(false),
+                author: json_author(item),
+                url: json_str(item, "html_url"),
+                updated_at: json_str(item, "updated_at"),
+            });
+        }
+        Ok(hits)
+    }
+
+    fn patch_pr_title_body(
+        &self,
+        number: u64,
+        title: Option<&str>,
+        body: Option<&str>,
+    ) -> Result<(), tddy_core::WorkflowError> {
+        const OP: &str = "RealGithubPrApi::patch_pr_title_body";
+        // Only the fields the caller named are sent: restating an unchanged body would overwrite
+        // whatever had been edited on GitHub in the meantime.
+        let mut payload = serde_json::Map::new();
+        if let Some(title) = title {
+            payload.insert("title".to_string(), serde_json::Value::from(title));
+        }
+        if let Some(body) = body {
+            payload.insert("body".to_string(), serde_json::Value::from(body));
+        }
+        if payload.is_empty() {
+            // An empty PATCH would be a request that cannot have been meant; reporting it beats
+            // spending a round trip to change nothing and calling that success.
+            return Err(json_err(
+                OP,
+                format!("neither a title nor a body was given for PR #{number}"),
+            ));
+        }
+        // A named title must carry something: GitHub answers `{"title": ""}` with a 422, because a
+        // pull request cannot be untitled. Refused here rather than trimmed away — dropping the field
+        // would apply half of the call and report the whole of it as success — and refusing before the
+        // round trip names the field instead of leaving the operator to read a 422 from
+        // api.github.com.
+        //
+        // A blank *body* is deliberately allowed. GitHub's `body` is nullable and accepts `""`, so
+        // clearing a stale description is a legitimate edit; refusing it would make this surface the
+        // only one that cannot.
+        if title.is_some_and(|title| title.trim().is_empty()) {
+            return Err(json_err(
+                OP,
+                format!(
+                    "the title given for PR #{number} is blank — name a title, or leave the title \
+                     out of the edit"
+                ),
+            ));
+        }
+
+        let token = self.require_token(OP)?;
+        crate::github_rest_common::curl_github_patch_json_with_token(
+            &self.repo,
+            &format!("pulls/{number}"),
+            &serde_json::Value::Object(payload).to_string(),
+            &token,
+        )?;
+        Ok(())
+    }
+}
+
+/// Build the `q` value for `/search/issues` from a [`PrSearchQuery`].
+///
+/// `repo:` and `is:pr` are always injected, so a search can only ever read this repository's pull
+/// requests — which is also why free text carrying a `:` is rejected: it would be a qualifier of the
+/// caller's own, and a second `repo:` widens the search rather than narrowing it. An unrecognised
+/// `state` is rejected rather than defaulting to one — quietly searching open PRs when the caller
+/// asked for something else would answer a different question than the one it was asked.
+///
+/// `closed` maps to GitHub's `is:closed`, which by its own definition also matches merged PRs; ask
+/// for `merged` when only merged ones are wanted.
+/// One caller-supplied qualifier value, checked to be a single bare word.
+///
+/// `author:` and `base:` values are interpolated into `q` beside the injected `repo:` and `is:pr`,
+/// so a value carrying whitespace or a `:` would append qualifiers of the caller's choosing — and
+/// GitHub *ORs* repeated `repo:` qualifiers, which is how a search scoped to one repository would
+/// come to read another one with the operator's own credential. Neither a GitHub login nor a git
+/// branch name may contain either character, so no legitimate value is refused here.
+fn scoped_value<'v>(
+    op: &str,
+    field: &str,
+    value: &'v str,
+) -> Result<&'v str, tddy_core::WorkflowError> {
+    let value = value.trim();
+    if value.contains(':') || value.split_whitespace().count() > 1 {
+        return Err(json_err(
+            op,
+            format!(
+                "the {field} '{value}' is not a single name — a search's repository and \
+                 pull-request scope are set by this tool and cannot be widened by a qualifier"
+            ),
+        ));
+    }
+    Ok(value)
+}
+
+fn search_qualifiers(op: &str, query: &PrSearchQuery) -> Result<String, tddy_core::WorkflowError> {
+    let mut qualifiers = vec![format!("repo:{}", query.repo), "is:pr".to_string()];
+    match query.state.as_str() {
+        "open" => qualifiers.push("is:open".to_string()),
+        "closed" => qualifiers.push("is:closed".to_string()),
+        "merged" => qualifiers.push("is:merged".to_string()),
+        // Every state — no qualifier narrows it.
+        "all" => {}
+        other => {
+            return Err(json_err(
+                op,
+                format!("unknown state '{other}' (expected open, closed, merged or all)"),
+            ));
+        }
+    }
+    if let Some(author) = query.author.as_deref().filter(|a| !a.trim().is_empty()) {
+        qualifiers.push(format!("author:{}", scoped_value(op, "author", author)?));
+    }
+    if let Some(base) = query.base.as_deref().filter(|b| !b.trim().is_empty()) {
+        qualifiers.push(format!("base:{}", scoped_value(op, "base", base)?));
+    }
+    if let Some(text) = query.text.as_deref().filter(|t| !t.trim().is_empty()) {
+        let text = text.trim();
+        // Free text is joined into `q` beside the injected qualifiers, and GitHub *ORs* repeated
+        // `repo:` qualifiers — so `repo:someone/private token` would return pull requests from a
+        // repository this surface promises it cannot reach, read with the operator's own credential.
+        // Rejected rather than quoted: turning the caller's words into a phrase would silently change
+        // what the search matches.
+        if text.contains(':') {
+            return Err(json_err(
+                op,
+                format!(
+                    "the search text '{text}' contains ':', which GitHub reads as a search \
+                     qualifier — the repository and the pull-request scope are set by this tool, so \
+                     narrow a search with the state, author and base fields instead"
+                ),
+            ));
+        }
+        qualifiers.push(text.to_string());
+    }
+    Ok(qualifiers.join(" "))
 }
