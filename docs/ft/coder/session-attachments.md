@@ -69,7 +69,24 @@ pub fn copy_attachment_into_session(
     source: &Path,
     basename: &str,
 ) -> Result<PathBuf, Status>;
+
+/// The in-memory counterpart, for bytes that have no local file to copy from — a `HostDocumentRef`
+/// fetched from a peer daemon arrives as a byte buffer.
+pub(crate) fn write_attachment_bytes(
+    session_dir: &Path,
+    basename: &str,
+    data: &[u8],
+) -> Result<PathBuf, Status>;
 ```
+
+Both write paths share one `create_attachment_file_exclusively` gate, so neither is weaker than the
+other: `basename` is a single validated segment, the attachments directory must resolve inside the
+canonical `artifacts/` root, and the target is opened with `create_new(true)` — one atomic
+existence-check-plus-create, so an existing attachment (a regular file **or** a symlink planted in the
+directory) is refused with `FAILED_PRECONDITION` rather than followed or truncated. A failed write
+removes the partial file so a retry is not blocked. A bad `basename` is refused with *"attachment
+basename must be a single path segment"* — the uploads path's rule, reused, with a message naming the
+field the caller actually sent.
 
 ### `tddy-daemon` — context docs (`session_context_docs`)
 
