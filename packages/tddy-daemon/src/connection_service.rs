@@ -13,6 +13,11 @@ use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id
 use tddy_core::{BranchWorktreeIntent, Changeset, ChangesetWorkflow};
 use tddy_rpc::{Request, Response, Status, Streaming};
 use tddy_service::proto::connection::{
+    session_attachment::Source as AttachmentSource, HostDocumentRef, HostDocumentScope,
+    ReadHostDocumentRequest, ReadHostDocumentResponse, SessionAttachment, StagedAttachmentEntry,
+    StagedAttachmentRef,
+};
+use tddy_service::proto::connection::{
     AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest, AddProjectToHostResponse,
     AgentInfo, CalculateWorktreeSizeRequest, CalculateWorktreeSizeResponse,
     ClaimTerminalControlRequest, ClaimTerminalControlResponse, CleanWorktreeRequest,
@@ -53,10 +58,14 @@ use crate::agent_list_mapping::agent_allowlist_rows;
 use crate::cli_session_manager::{ClaimOutcome, CliSessionManager, MAIN_TERMINAL_ID};
 use crate::config::DaemonConfig;
 use crate::host_stats::{HostStats, SysinfoHostStats};
-use crate::livekit_peer_discovery::{local_instance_id_for_config, LiveKitDiscoveryHandles};
+use crate::livekit_peer_discovery::{
+    local_instance_id_for_config, LiveKitDiscoveryHandles, PeerRoute,
+};
 use crate::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
 use crate::project_storage::{self, ProjectData};
+use crate::session_attachments::validate_attachment_basename;
 use crate::session_deletion;
+use crate::session_file_upload::{contained_canonical_dir, validate_segment};
 use crate::session_list_enrichment;
 use crate::session_reader;
 use crate::spawn_worker;
@@ -3844,6 +3853,282 @@ fn subagent_replacement_pairs(
         .collect()
 }
 
+fn file_mtime_ms(path: &Path) -> i64 {
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn cleanup_materialized_attachments(session_dir: &Path, written_basenames: &[String]) {
+    let attachments_dir = tddy_workflow::session_attachments_root(session_dir);
+    for basename in written_basenames {
+        let path = attachments_dir.join(basename);
+        if path.is_file() {
+            if let Err(e) = std::fs::remove_file(&path) {
+                log::warn!("cleanup_materialized_attachments: remove {path:?} failed: {e}");
+            }
+        }
+    }
+}
+
+impl ConnectionServiceImpl {
+    fn resolve_os_user(&self, session_token: &str) -> Result<String, Status> {
+        let github_user = (self.user_resolver)(session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        self.config
+            .os_user_for_github(&github_user)
+            .map(|s| s.to_string())
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))
+    }
+
+    fn eligible_instance_ids(&self) -> Vec<String> {
+        self.eligible_daemon_source
+            .list_eligible_daemons()
+            .into_iter()
+            .map(|e| e.instance_id.0)
+            .collect()
+    }
+
+    fn classify_daemon_route(&self, requested_daemon: &str) -> Result<PeerRoute, Status> {
+        let local_id = local_instance_id_for_config(&self.config);
+        crate::livekit_peer_discovery::classify_peer_route(
+            &local_id,
+            requested_daemon,
+            &self.eligible_instance_ids(),
+        )
+        .map_err(|msg| {
+            log::info!("daemon routing rejected: {msg}");
+            Status::failed_precondition(msg)
+        })
+    }
+
+    fn common_room_slot(
+        &self,
+        rpc_name: &str,
+    ) -> Result<&Arc<tokio::sync::RwLock<Option<Arc<Room>>>>, Status> {
+        self.common_room_livekit_room.as_ref().ok_or_else(|| {
+            Status::failed_precondition(format!(
+                "cannot forward {rpc_name}: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)"
+            ))
+        })
+    }
+
+    /// Pre-creates `session_dir` when needed and materializes `attachments` before spawn.
+    async fn prepare_session_attachments(
+        &self,
+        session_token: &str,
+        os_user: &str,
+        sessions_base: &Path,
+        session_id: &str,
+        attachments: &[SessionAttachment],
+    ) -> Result<(), Status> {
+        if attachments.is_empty() {
+            return Ok(());
+        }
+        let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+        std::fs::create_dir_all(&session_dir)
+            .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
+        let local_id = local_instance_id_for_config(&self.config);
+        self.materialize_session_attachments(
+            session_token,
+            os_user,
+            sessions_base,
+            session_id,
+            attachments,
+            &local_id,
+        )
+        .await
+    }
+
+    async fn materialize_session_attachments(
+        &self,
+        session_token: &str,
+        os_user: &str,
+        sessions_base: &Path,
+        session_id: &str,
+        attachments: &[SessionAttachment],
+        local_instance_id: &str,
+    ) -> Result<(), Status> {
+        if attachments.is_empty() {
+            return Ok(());
+        }
+
+        let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+        let mut seen_basenames = std::collections::HashSet::new();
+        for att in attachments {
+            let safe = validate_attachment_basename(&att.basename)?;
+            if !seen_basenames.insert(safe.to_string()) {
+                return Err(Status::invalid_argument(
+                    "duplicate attachment basename in request",
+                ));
+            }
+        }
+
+        let staging_root =
+            crate::session_attachment_staging::staging_root_for(os_user, &self.tddy_data_dir);
+        let mut written: Vec<String> = Vec::new();
+
+        for att in attachments {
+            let basename = validate_attachment_basename(&att.basename)?.to_string();
+            let source = att
+                .source
+                .as_ref()
+                .ok_or_else(|| Status::invalid_argument("attachment source must be set"))?;
+
+            let materialize_result = match source {
+                AttachmentSource::Staged(staged) => self.materialize_staged_attachment(
+                    &staging_root,
+                    &session_dir,
+                    staged,
+                    &basename,
+                    local_instance_id,
+                ),
+                AttachmentSource::HostDocument(host_doc) => {
+                    self.materialize_host_document_attachment(
+                        session_token,
+                        os_user,
+                        &session_dir,
+                        host_doc,
+                        &basename,
+                        local_instance_id,
+                    )
+                    .await
+                }
+            };
+
+            match materialize_result {
+                Ok(()) => written.push(basename),
+                Err(e) => {
+                    cleanup_materialized_attachments(&session_dir, &written);
+                    return Err(e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn materialize_staged_attachment(
+        &self,
+        staging_root: &Path,
+        session_dir: &Path,
+        staged: &StagedAttachmentRef,
+        basename: &str,
+        local_instance_id: &str,
+    ) -> Result<(), Status> {
+        let ref_daemon = staged.daemon_instance_id.trim();
+        if !ref_daemon.is_empty() && ref_daemon != local_instance_id {
+            return Err(Status::invalid_argument(
+                "staged attachment must be on the session host",
+            ));
+        }
+
+        let safe_staging = validate_segment(&staged.staging_id)?;
+        let safe_name = validate_segment(&staged.file_name)?;
+        let batch_dir = staging_root.join(safe_staging);
+        if !batch_dir.exists() {
+            return Err(Status::invalid_argument("staged attachment file not found"));
+        }
+        let canonical_dir = contained_canonical_dir(staging_root, &batch_dir)?;
+        let staged_path = canonical_dir.join(safe_name);
+        if !staged_path.is_file() {
+            return Err(Status::invalid_argument("staged attachment file not found"));
+        }
+        // The writer only marks a staged file complete on its final chunk; refuse an
+        // in-progress or aborted upload so the agent never sees truncated bytes.
+        if !crate::session_attachment_staging::staged_complete_marker(&canonical_dir, safe_name)
+            .exists()
+        {
+            return Err(Status::failed_precondition(
+                "staged attachment upload is not complete",
+            ));
+        }
+
+        crate::session_attachments::copy_attachment_into_session(
+            session_dir,
+            &staged_path,
+            basename,
+        )?;
+        Ok(())
+    }
+
+    async fn materialize_host_document_attachment(
+        &self,
+        session_token: &str,
+        os_user: &str,
+        session_dir: &Path,
+        host_doc: &HostDocumentRef,
+        basename: &str,
+        local_instance_id: &str,
+    ) -> Result<(), Status> {
+        let scope =
+            HostDocumentScope::try_from(host_doc.scope).unwrap_or(HostDocumentScope::Unspecified);
+        let ref_daemon = host_doc.daemon_instance_id.trim();
+
+        let bytes = if ref_daemon.is_empty() || ref_daemon == local_instance_id {
+            crate::host_documents::read_host_document_bytes(
+                os_user,
+                &self.tddy_data_dir,
+                scope,
+                &host_doc.session_id,
+                &host_doc.project_id,
+                &host_doc.relative_path,
+            )?
+        } else {
+            let route = self.classify_daemon_route(ref_daemon)?;
+            match route {
+                PeerRoute::Local => crate::host_documents::read_host_document_bytes(
+                    os_user,
+                    &self.tddy_data_dir,
+                    scope,
+                    &host_doc.session_id,
+                    &host_doc.project_id,
+                    &host_doc.relative_path,
+                )?,
+                PeerRoute::Forward { peer_instance_id } => {
+                    let slot = self.common_room_slot("ReadHostDocument")?;
+                    let read_req = ReadHostDocumentRequest {
+                        session_token: session_token.to_string(),
+                        daemon_instance_id: ref_daemon.to_string(),
+                        scope: host_doc.scope,
+                        session_id: host_doc.session_id.clone(),
+                        project_id: host_doc.project_id.clone(),
+                        relative_path: host_doc.relative_path.clone(),
+                    };
+                    let resp =
+                        crate::livekit_peer_discovery::forward_read_host_document_via_livekit(
+                            slot,
+                            &peer_instance_id,
+                            &read_req,
+                        )
+                        .await?;
+                    crate::host_documents::HostDocumentBytes {
+                        data: resp.data,
+                        byte_size: resp.byte_size,
+                    }
+                }
+            }
+        };
+
+        // Defense in depth: the owning daemon enforces `MAX_HOST_DOCUMENT_BYTES` on a local
+        // read, but a forwarded response is trusted bytes from a peer — re-check the cap on
+        // the session host before writing, so a buggy/older peer cannot push an oversized
+        // blob into the session's attachments.
+        if bytes.data.len() > crate::host_documents::MAX_HOST_DOCUMENT_BYTES {
+            return Err(Status::invalid_argument(format!(
+                "host document exceeds maximum size of {} bytes",
+                crate::host_documents::MAX_HOST_DOCUMENT_BYTES
+            )));
+        }
+
+        crate::session_attachments::write_attachment_bytes(session_dir, basename, &bytes.data)?;
+        Ok(())
+    }
+}
+
 /// Merge local `ListProjects` rows with [`EligibleDaemonSource::peer_project_entries`].
 async fn merge_listed_projects_with_peers(
     eligible: &dyn EligibleDaemonSource,
@@ -4573,6 +4858,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             )
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
             let session_id = Uuid::now_v7().to_string();
+            self.prepare_session_attachments(
+                &req.session_token,
+                os_user,
+                &sessions_base,
+                &session_id,
+                &req.attachments,
+            )
+            .await?;
             let timeout = self.config.spawn_worker_request_timeout();
             return workspace_session::start_workspace_session(
                 os_user,
@@ -4593,6 +4886,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             )
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
             let session_id = Uuid::now_v7().to_string();
+            self.prepare_session_attachments(
+                &req.session_token,
+                os_user,
+                &sessions_base,
+                &session_id,
+                &req.attachments,
+            )
+            .await?;
             let stack_parent_for_claude_cli: Option<String> = {
                 let t = req.stack_parent.trim();
                 if t.is_empty() {
@@ -4672,6 +4973,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             )
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
             let session_id = Uuid::now_v7().to_string();
+            self.prepare_session_attachments(
+                &req.session_token,
+                os_user,
+                &sessions_base,
+                &session_id,
+                &req.attachments,
+            )
+            .await?;
             let managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>> = if req
                 .managed_codebase
                 && !req.recipe.trim().is_empty()
@@ -4804,7 +5113,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .as_deref()
             .map(recipe_enables_conversation_spawn)
             .unwrap_or(false);
-        let (pre_session_id, host_session_socket): (Option<String>, Option<String>) =
+        let (mut pre_session_id, host_session_socket): (Option<String>, Option<String>) =
             if enable_conversation_spawn {
                 let sid = Uuid::now_v7().to_string();
                 let sock = self
@@ -4819,6 +5128,25 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             } else {
                 (None, None)
             };
+        let tool_session_id = pre_session_id
+            .clone()
+            .unwrap_or_else(|| Uuid::now_v7().to_string());
+        if enable_conversation_spawn || !req.attachments.is_empty() {
+            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
+                &os_user,
+                Some(&self.tddy_data_dir),
+            )
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+            self.prepare_session_attachments(
+                &req.session_token,
+                &os_user,
+                &sessions_base,
+                &tool_session_id,
+                &req.attachments,
+            )
+            .await?;
+            pre_session_id = Some(tool_session_id);
+        }
         let result = spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
             log::debug!(
                 "StartSession: spawn_blocking running, using_spawn_worker={}",
@@ -7991,37 +8319,173 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(DeleteSessionUploadResponse {}))
     }
 
-    // TODO(start-session-attachments): the three pre-session staging RPCs below are wire-only
-    // stubs — the proto contract is pinned so the web can be generated against it, but no staging
-    // area is written or read yet, and `StartSessionRequest.attachments` is ignored by
-    // `start_session`. Implement the host side (staging root under the caller's sessions base,
-    // basename validation, cross-host routing by `daemon_instance_id`) in the follow-up changeset.
-
     async fn upload_staged_attachment_chunk(
         &self,
-        _request: Request<UploadStagedAttachmentChunkRequest>,
+        request: Request<UploadStagedAttachmentChunkRequest>,
     ) -> Result<Response<UploadStagedAttachmentChunkResponse>, Status> {
-        Err(Status::unimplemented(
-            "UploadStagedAttachmentChunk is not implemented yet",
-        ))
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let os_user = self.resolve_os_user(&req.session_token)?;
+        let local_id = local_instance_id_for_config(&self.config);
+
+        if let PeerRoute::Forward { peer_instance_id } =
+            self.classify_daemon_route(&req.daemon_instance_id)?
+        {
+            log::info!(
+                "UploadStagedAttachmentChunk: forwarding RPC to remote daemon_instance_id={peer_instance_id}"
+            );
+            let slot = self.common_room_slot("UploadStagedAttachmentChunk")?;
+            let inner =
+                crate::livekit_peer_discovery::forward_upload_staged_attachment_chunk_via_livekit(
+                    slot,
+                    &peer_instance_id,
+                    &req,
+                )
+                .await?;
+            return Ok(Response::new(inner));
+        }
+
+        let staging_root =
+            crate::session_attachment_staging::staging_root_for(&os_user, &self.tddy_data_dir);
+        let host_path = crate::session_attachment_staging::write_staged_chunk(
+            &staging_root,
+            &req.staging_id,
+            &req.file_name,
+            &req.data,
+            req.last,
+        )?;
+        let entry = host_path.map(|path| {
+            let meta = std::fs::metadata(&path).ok();
+            StagedAttachmentEntry {
+                daemon_instance_id: local_id,
+                staging_id: req.staging_id,
+                file_name: req.file_name,
+                host_path: path.to_string_lossy().into_owned(),
+                size_bytes: meta.as_ref().map(std::fs::Metadata::len).unwrap_or(0),
+                staged_at_ms: file_mtime_ms(&path),
+            }
+        });
+        Ok(Response::new(UploadStagedAttachmentChunkResponse { entry }))
     }
 
     async fn list_staged_attachments(
         &self,
-        _request: Request<ListStagedAttachmentsRequest>,
+        request: Request<ListStagedAttachmentsRequest>,
     ) -> Result<Response<ListStagedAttachmentsResponse>, Status> {
-        Err(Status::unimplemented(
-            "ListStagedAttachments is not implemented yet",
-        ))
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let os_user = self.resolve_os_user(&req.session_token)?;
+        let local_id = local_instance_id_for_config(&self.config);
+
+        if let PeerRoute::Forward { peer_instance_id } =
+            self.classify_daemon_route(&req.daemon_instance_id)?
+        {
+            log::info!(
+                "ListStagedAttachments: forwarding RPC to remote daemon_instance_id={peer_instance_id}"
+            );
+            let slot = self.common_room_slot("ListStagedAttachments")?;
+            let inner = crate::livekit_peer_discovery::forward_list_staged_attachments_via_livekit(
+                slot,
+                &peer_instance_id,
+                &req,
+            )
+            .await?;
+            return Ok(Response::new(inner));
+        }
+
+        let staging_root =
+            crate::session_attachment_staging::staging_root_for(&os_user, &self.tddy_data_dir);
+        let files = crate::session_attachment_staging::list_staged_attachments(
+            &staging_root,
+            &req.staging_id,
+        )?;
+        let attachments = files
+            .into_iter()
+            .map(|f| StagedAttachmentEntry {
+                daemon_instance_id: local_id.clone(),
+                staging_id: f.staging_id,
+                file_name: f.file_name,
+                host_path: f.host_path.to_string_lossy().into_owned(),
+                size_bytes: f.size_bytes,
+                staged_at_ms: f.staged_at_ms,
+            })
+            .collect();
+        Ok(Response::new(ListStagedAttachmentsResponse { attachments }))
     }
 
     async fn delete_staged_attachment(
         &self,
-        _request: Request<DeleteStagedAttachmentRequest>,
+        request: Request<DeleteStagedAttachmentRequest>,
     ) -> Result<Response<DeleteStagedAttachmentResponse>, Status> {
-        Err(Status::unimplemented(
-            "DeleteStagedAttachment is not implemented yet",
-        ))
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let os_user = self.resolve_os_user(&req.session_token)?;
+
+        if let PeerRoute::Forward { peer_instance_id } =
+            self.classify_daemon_route(&req.daemon_instance_id)?
+        {
+            log::info!(
+                "DeleteStagedAttachment: forwarding RPC to remote daemon_instance_id={peer_instance_id}"
+            );
+            let slot = self.common_room_slot("DeleteStagedAttachment")?;
+            let inner =
+                crate::livekit_peer_discovery::forward_delete_staged_attachment_via_livekit(
+                    slot,
+                    &peer_instance_id,
+                    &req,
+                )
+                .await?;
+            return Ok(Response::new(inner));
+        }
+
+        let staging_root =
+            crate::session_attachment_staging::staging_root_for(&os_user, &self.tddy_data_dir);
+        crate::session_attachment_staging::delete_staged_attachment(
+            &staging_root,
+            &req.staging_id,
+            &req.file_name,
+        )?;
+        Ok(Response::new(DeleteStagedAttachmentResponse {}))
+    }
+
+    async fn read_host_document(
+        &self,
+        request: Request<ReadHostDocumentRequest>,
+    ) -> Result<Response<ReadHostDocumentResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let os_user = self.resolve_os_user(&req.session_token)?;
+
+        if let PeerRoute::Forward { peer_instance_id } =
+            self.classify_daemon_route(&req.daemon_instance_id)?
+        {
+            log::info!(
+                "ReadHostDocument: forwarding RPC to remote daemon_instance_id={peer_instance_id}"
+            );
+            let slot = self.common_room_slot("ReadHostDocument")?;
+            let inner = crate::livekit_peer_discovery::forward_read_host_document_via_livekit(
+                slot,
+                &peer_instance_id,
+                &req,
+            )
+            .await?;
+            return Ok(Response::new(inner));
+        }
+
+        let scope =
+            HostDocumentScope::try_from(req.scope).unwrap_or(HostDocumentScope::Unspecified);
+        let doc = crate::host_documents::read_host_document_bytes(
+            &os_user,
+            &self.tddy_data_dir,
+            scope,
+            &req.session_id,
+            &req.project_id,
+            &req.relative_path,
+        )?;
+        Ok(Response::new(ReadHostDocumentResponse {
+            data: doc.data,
+            byte_size: doc.byte_size,
+        }))
     }
 }
 

@@ -2964,7 +2964,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             crate::cursor_cli_spawn::mint_cursor_chat_id(&binary_path, &worktree_path)
                 .await
                 .map_err(|e| {
-                    anyhow::anyhow!("failed to create the Cursor chat for session {session_id}: {e}")
+                    anyhow::anyhow!(
+                        "failed to create the Cursor chat for session {session_id}: {e}"
+                    )
                 })?;
         let manager = Arc::clone(&deps.claude_cli_manager);
         let handle = manager

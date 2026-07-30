@@ -244,7 +244,7 @@ fn child_remainder<'a>(path: &'a str, dir_prefix: &str) -> Option<&'a str> {
 /// Runs git in the worktree to list tracked and untracked-but-not-ignored files (NUL-separated),
 /// excluding `.git` and every `.gitignore`'d path. Paths are worktree-root-relative, forward-slash
 /// separated.
-fn git_listed_files(worktree_root: &Path) -> Result<Vec<String>, Status> {
+pub(crate) fn git_listed_files(worktree_root: &Path) -> Result<Vec<String>, Status> {
     let mut args: Vec<OsString> = vec![
         "ls-files".into(),
         "--cached".into(),

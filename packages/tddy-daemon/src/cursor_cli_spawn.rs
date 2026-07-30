@@ -82,7 +82,10 @@ pub fn parse_created_chat_id(stdout: &str) -> Result<String, String> {
 ///
 /// Only `create-chat` mints real chat ids, so a failure here is returned to the caller: starting the
 /// agent without one would produce a session no resume can reattach to.
-pub async fn mint_cursor_chat_id(binary_path: &str, worktree_path: &Path) -> Result<String, String> {
+pub async fn mint_cursor_chat_id(
+    binary_path: &str,
+    worktree_path: &Path,
+) -> Result<String, String> {
     let output = tokio::process::Command::new(binary_path)
         .arg("create-chat")
         .current_dir(worktree_path)

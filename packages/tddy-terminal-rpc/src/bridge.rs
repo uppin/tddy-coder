@@ -262,9 +262,7 @@ fn spawn_live_bridge(
     let mut pty_done = session.subscribe_pty_done();
     let bridge_tx = tx.clone();
     tokio::spawn(async move {
-        if initial_acked > 0
-            && bridge_tx.send(Ok(ack_frame(initial_acked))).await.is_err()
-        {
+        if initial_acked > 0 && bridge_tx.send(Ok(ack_frame(initial_acked))).await.is_err() {
             return;
         }
         use tokio::sync::broadcast::error::RecvError;
