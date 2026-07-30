@@ -436,6 +436,12 @@ For **claude-cli** sessions: the daemon writes `orchestrator_session_id` into th
 On success, `SessionsDrawerScreen` navigates to `/sessions/:newId` and auto-attaches
 (same behaviour as clicking an active session in the drawer).
 
+A creation refused because another session already owns the requested branch does **not** navigate:
+the response carries `branch_conflict`, and the form opens a three-choice prompt (switch to the
+owning session / add a second agent on that branch / name a different branch) instead of silently
+creating a `<branch>-1` suffixed branch. See
+[Session Branch Conflict](../daemon/session-branch-conflict.md).
+
 ### Component
 
 `CreateSessionPane` (`packages/tddy-web/src/components/sessions/CreateSessionPane.tsx`) — props:

@@ -266,6 +266,22 @@ export const TEST_IDS = {
   createSessionSubmitBtn: "create-session-submit-btn",
   createSessionError: "create-session-error",
 
+  // Sessions drawer — branch-conflict prompt. Shown when the daemon refuses the creation because
+  // another session already owns the requested branch (`StartSessionResponse.branch_conflict`).
+  // See docs/ft/daemon/session-branch-conflict.md.
+  branchConflictDialog: "branch-conflict-dialog",
+  /** Names the owning session and whether it is active — what the operator would switch to. */
+  branchConflictOwner: "branch-conflict-owner",
+  /** Attach to the owning session instead of creating anything. */
+  branchConflictSwitchBtn: "branch-conflict-switch-btn",
+  /** Start a second agent on the owned branch, sharing the owning session's worktree. */
+  branchConflictAddAgentBtn: "branch-conflict-add-agent-btn",
+  /** Editable branch name, pre-filled with the daemon's `suggested_branch_name`. */
+  branchConflictRenameInput: "branch-conflict-rename-input",
+  /** Re-submit creation under the name typed into `branchConflictRenameInput`. */
+  branchConflictRenameBtn: "branch-conflict-rename-btn",
+  branchConflictCancelBtn: "branch-conflict-cancel-btn",
+
   // Session agents — peer agent sessions section in SessionMainPane
   /** The "Add agent" button in the session-detail header (spawns a peer child session). */
   sessionAgentsAddBtn: "session-agents-add-btn",

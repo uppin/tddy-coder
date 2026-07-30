@@ -763,6 +763,47 @@ fn create_worktree_with_retry(
     ))
 }
 
+/// The first `<branch>-<n>` (`n` from 1) that no local branch in `repo_root` holds — the name
+/// [`create_worktree_with_retry`] would land on, computed without creating a branch or a worktree.
+///
+/// Used for the `suggested_branch_name` a refused session creation reports, which pre-fills the
+/// operator's rename field, so the answer has to be usable as-is. A repo whose branches cannot be
+/// listed (not a git repository, no `git`) reports no branch as taken and so suggests `<branch>-1`,
+/// the same name the retry loop would try first.
+///
+/// See docs/ft/daemon/session-branch-conflict.md.
+#[must_use]
+pub fn first_free_suffixed_branch_name(repo_root: &Path, branch: &str) -> String {
+    let taken = local_branch_names(repo_root);
+    let mut suffix = 1u32;
+    loop {
+        let candidate = format!("{branch}-{suffix}");
+        if !taken.contains(&candidate) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+/// Every local branch name in `repo_root`, or an empty set when its refs cannot be listed.
+fn local_branch_names(repo_root: &Path) -> HashSet<String> {
+    let Ok(out) = Command::new("git")
+        .args(["for-each-ref", "--format=%(refname)", "refs/heads"])
+        .current_dir(repo_root)
+        .output()
+    else {
+        return HashSet::new();
+    };
+    if !out.status.success() {
+        return HashSet::new();
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("refs/heads/"))
+        .map(str::to_string)
+        .collect()
+}
+
 /// Create worktree for a session using an explicit integration base ref (e.g. `origin/main`).
 pub fn setup_worktree_for_session_with_integration_base(
     repo_root: &Path,

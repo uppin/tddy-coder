@@ -139,6 +139,25 @@ it("creates a peer session on the same worktree when the creation pane is submit
   sessionsDrawerPage.drawerItem(PEER_SESSION_ID).should("exist");
 });
 
+it("does not ask the daemon to reject a branch conflict when spawning a peer agent", () => {
+  // Given
+  const backend = aSessionAgentsBackend();
+
+  // When
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+  sessionsDrawerPage.drawerItem(CURRENT_SESSION_ID).click();
+  sessionAgentsPage.addAgentBtn().click();
+  sessionsDrawerPage.createSessionSubmitBtn().click();
+
+  // Then — a peer creates no branch, so there is nothing to conflict over and nothing to prompt
+  // about. See docs/ft/daemon/session-branch-conflict.md.
+  cy.wrap(backend).should((b) => {
+    const calls = b.callsTo(ConnectionService.method.startSession);
+    expect(calls).to.have.length(1);
+    expect(calls[0].onBranchConflict).to.equal("");
+  });
+});
+
 it("hides branch selection controls in the peer spawn dialog", () => {
   // Given
   const backend = aSessionAgentsBackend();
