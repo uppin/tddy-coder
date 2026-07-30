@@ -805,3 +805,104 @@ async fn serve_stream_session_terminal_io_from_offset_emits_only_the_catch_up_ga
     assert_eq!(frames[1].start_offset, 7);
     assert_eq!(frames[1].end_offset, 10);
 }
+
+// ---------------------------------------------------------------------------
+// StreamTerminalOutput: per-frame terminal identity
+// ---------------------------------------------------------------------------
+
+/// Every frame of a stream, whatever its kind, must name the terminal it came from.
+fn assert_all_frames_stamped(
+    frames: &[SessionTerminalOutput],
+    session_id: &str,
+    terminal_id: &str,
+) {
+    for (index, frame) in frames.iter().enumerate() {
+        assert_eq!(
+            frame.session_id,
+            session_id,
+            "frame {index} (data={:?}) must name its session",
+            String::from_utf8_lossy(&frame.data)
+        );
+        assert_eq!(
+            frame.terminal_id,
+            terminal_id,
+            "frame {index} (data={:?}) must name its terminal",
+            String::from_utf8_lossy(&frame.data)
+        );
+    }
+}
+
+#[tokio::test]
+async fn serve_stream_terminal_output_stamps_the_replay_and_ack_frames_with_the_terminal_identity()
+{
+    // Given a terminal in mouse-tracking mode that has produced 10 bytes and applied 7 bytes of input
+    // — so the open emits a prologue frame, a replay frame and an ACK frame
+    let terminal = StubTerminal::new();
+    terminal.write(b"\x1b[?1002h");
+    terminal.write(b"0123456789");
+    terminal.set_acked(7);
+    let (store, handle) = StubStore::with(terminal);
+
+    // When a client attaches to the reserved main terminal of session "s1"
+    let rx = serve_stream_terminal_output_with(&store, req("s1", "", 0, 0), 64)
+        .await
+        .expect("stream opened");
+    handle.end();
+    let frames = drain(rx).await;
+
+    // Then every frame names its terminal, so a client rendering a different terminal can drop it
+    // instead of silently painting another terminal's bytes.
+    assert_eq!(frames.len(), 3, "prologue, replay and ACK frames");
+    assert_all_frames_stamped(&frames, "s1", "main");
+}
+
+#[tokio::test]
+async fn serve_stream_terminal_output_stamps_frames_with_the_requested_bash_terminal_id() {
+    // Given a bash terminal that has produced 4 bytes
+    let terminal = StubTerminal::new();
+    terminal.write(b"bash");
+    let (store, handle) = StubStore::with(terminal);
+
+    // When a client attaches to the named terminal "bash-1" of session "s2"
+    let rx = serve_stream_terminal_output_with(&store, req("s2", "bash-1", 0, 0), 64)
+        .await
+        .expect("stream opened");
+    handle.end();
+    let frames = drain(rx).await;
+
+    // Then the frames carry that terminal's own id, not the reserved main id
+    assert_eq!(frames.len(), 1, "the replay frame");
+    assert_all_frames_stamped(&frames, "s2", "bash-1");
+}
+
+#[tokio::test]
+async fn serve_stream_terminal_output_stamps_live_output_frames_with_the_terminal_identity() {
+    // Given a client already attached to the main terminal of session "s3"
+    let terminal = StubTerminal::new();
+    let (store, handle) = StubStore::with(terminal);
+    let mut rx = serve_stream_terminal_output_with(&store, req("s3", "", 0, 0), 64)
+        .await
+        .expect("stream opened");
+
+    // When live output arrives after the open. The open itself emits an empty replay frame first, so
+    // read past the open frames to the live one (consumed before the child exits, so the pty_done
+    // branch of the bridge select cannot win the race and drop it).
+    handle.write(b"live");
+    let mut live_frame = None;
+    for _ in 0..16 {
+        let frame = timeout(RECV_TIMEOUT, rx.recv())
+            .await
+            .expect("timed out waiting for the live frame")
+            .expect("stream closed unexpectedly")
+            .expect("status");
+        if frame.data == b"live" {
+            live_frame = Some(frame);
+            break;
+        }
+    }
+    let live_frame = live_frame.expect("the live data frame");
+
+    // Then the live frame is stamped too — the long-lived bridge is exactly where a mis-routed
+    // subscription would go unnoticed, so identity must survive past the open.
+    assert_all_frames_stamped(&[live_frame], "s3", "main");
+}

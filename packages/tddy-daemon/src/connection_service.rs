@@ -247,6 +247,9 @@ pub(crate) fn resume_agent_and_recipe(
 /// [`ConnectionServiceTrait::stream_session_terminal_io`].
 pub struct TerminalOutputStream {
     rx: tokio::sync::broadcast::Receiver<bytes::Bytes>,
+    /// The session and terminal the broadcast belongs to — stamped on every frame this adapter
+    /// yields, since a client cannot tell whose bytes an unidentified frame carries.
+    identity: TerminalFrameIdentity,
 }
 
 impl Stream for TerminalOutputStream {
@@ -260,11 +263,9 @@ impl Stream for TerminalOutputStream {
         loop {
             match self.rx.try_recv() {
                 Ok(chunk) => {
-                    return std::task::Poll::Ready(Some(Ok(SessionTerminalOutput {
-                        data: chunk.to_vec(),
-                        acked_input_offset: 0,
-                        ..Default::default()
-                    })));
+                    return std::task::Poll::Ready(Some(Ok(self
+                        .identity
+                        .data_frame(chunk.to_vec()))));
                 }
                 Err(TryRecvError::Lagged(_)) => {
                     // Skip lagged messages and try again.
@@ -317,30 +318,54 @@ impl Stream for MpscTerminalOutputStream {
     }
 }
 
-/// A terminal output-data frame (no ACK).
-fn terminal_data_frame(data: Vec<u8>) -> SessionTerminalOutput {
-    SessionTerminalOutput {
-        data,
-        acked_input_offset: 0,
-        ..Default::default()
-    }
+/// The session and terminal a stream's frames belong to. Every frame carries it, so a client can
+/// tell its own terminal's bytes from another terminal's and drop what is not its own instead of
+/// silently painting it. `terminal_id` is always the RESOLVED id (an empty request id resolves to
+/// the reserved main terminal), matching `tddy_terminal_rpc::bridge`.
+#[derive(Clone)]
+struct TerminalFrameIdentity {
+    session_id: String,
+    terminal_id: String,
 }
 
-/// A replay / catch-up frame tagged with its absolute byte offsets and whether it reaches the
-/// capture ring's oldest retained byte. Used by the sandbox path so a reconnecting client can
-/// resume by offset (FROM_OFFSET) instead of re-receiving the whole retained buffer.
-fn terminal_replay_frame(
-    data: Vec<u8>,
-    start_offset: u64,
-    end_offset: u64,
-    at_oldest: bool,
-) -> SessionTerminalOutput {
-    SessionTerminalOutput {
-        data,
-        acked_input_offset: 0,
-        start_offset,
-        end_offset,
-        at_oldest,
+impl TerminalFrameIdentity {
+    fn new(session_id: &str, terminal_id: &str) -> Self {
+        Self {
+            session_id: session_id.to_string(),
+            terminal_id: resolved_terminal_id(terminal_id).to_string(),
+        }
+    }
+
+    /// A terminal output-data frame (no ACK).
+    fn data_frame(&self, data: Vec<u8>) -> SessionTerminalOutput {
+        SessionTerminalOutput {
+            data,
+            acked_input_offset: 0,
+            session_id: self.session_id.clone(),
+            terminal_id: self.terminal_id.clone(),
+            ..Default::default()
+        }
+    }
+
+    /// A replay / catch-up frame tagged with its absolute byte offsets and whether it reaches the
+    /// capture ring's oldest retained byte. Used by the sandbox path so a reconnecting client can
+    /// resume by offset (FROM_OFFSET) instead of re-receiving the whole retained buffer.
+    fn replay_frame(
+        &self,
+        data: Vec<u8>,
+        start_offset: u64,
+        end_offset: u64,
+        at_oldest: bool,
+    ) -> SessionTerminalOutput {
+        SessionTerminalOutput {
+            data,
+            acked_input_offset: 0,
+            start_offset,
+            end_offset,
+            at_oldest,
+            session_id: self.session_id.clone(),
+            terminal_id: self.terminal_id.clone(),
+        }
     }
 }
 
@@ -375,6 +400,10 @@ fn to_connection_output(
         start_offset: out.start_offset,
         end_offset: out.end_offset,
         at_oldest: out.at_oldest,
+        // The bridge stamped the frame with the session and resolved terminal it came from; carry
+        // that identity through so the client can drop output that is not its own.
+        session_id: out.session_id,
+        terminal_id: out.terminal_id,
     }
 }
 
@@ -5945,11 +5974,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             });
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<SessionTerminalOutput>();
             let mut stdout_rx = sandbox.stdout_tx.subscribe();
+            let identity = TerminalFrameIdentity::new(&session_id, &terminal_id);
             tokio::spawn(async move {
                 loop {
                     match stdout_rx.recv().await {
                         Ok(chunk) => {
-                            if tx.send(terminal_data_frame(chunk.to_vec())).is_err() {
+                            if tx.send(identity.data_frame(chunk.to_vec())).is_err() {
                                 break;
                             }
                         }
@@ -6073,6 +6103,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 return Err(Status::not_found("terminal not found or not running"));
             }
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            // Every frame this stream emits names the session and terminal it came from, so a client
+            // rendering another terminal drops it instead of painting it.
+            let identity = TerminalFrameIdentity::new(&session_id, &terminal_id);
 
             // Re-issue the mouse-tracking modes still in effect as the very first frame (not part of
             // the cumulative byte stream, so zeroed offsets), then forward-fill the retained buffer
@@ -6091,7 +6124,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 .map(|cap| cap.mode_prologue())
                 .unwrap_or_default();
             if !prologue.is_empty() {
-                let _ = tx.send(terminal_data_frame(prologue));
+                let _ = tx.send(identity.data_frame(prologue));
             }
 
             // `from_offset` is clamped DOWN to the tip: a client whose cumulative counter drifted
@@ -6121,7 +6154,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     });
                 let (end_offset, at_end) = (chunk.end_offset, chunk.at_end);
                 if !chunk.data.is_empty() || !anchored {
-                    let _ = tx.send(terminal_replay_frame(
+                    let _ = tx.send(identity.replay_frame(
                         chunk.data,
                         chunk.start_offset,
                         chunk.end_offset,
@@ -6141,7 +6174,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 loop {
                     match stdout_rx.recv().await {
                         Ok(chunk) => {
-                            if tx.send(terminal_data_frame(chunk.to_vec())).is_err() {
+                            if tx.send(identity.data_frame(chunk.to_vec())).is_err() {
                                 break;
                             }
                         }
@@ -6188,13 +6221,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             let mut bridge_rx = bridge_rx;
             while let Some(frame) = bridge_rx.recv().await {
                 let mapped = match frame {
-                    Ok(out) => SessionTerminalOutput {
-                        data: out.data,
-                        acked_input_offset: out.acked_input_offset,
-                        start_offset: out.start_offset,
-                        end_offset: out.end_offset,
-                        at_oldest: out.at_oldest,
-                    },
+                    Ok(out) => to_connection_output(out),
                     Err(_) => break,
                 };
                 if tx.send(mapped).is_err() {

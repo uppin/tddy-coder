@@ -10,6 +10,7 @@ import type { ConnectedSession } from "./useTerminalControl";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import { tddyDebug } from "../../lib/debugMask";
 import { measureTerminalGridFromRect } from "../../lib/terminalGridMeasure";
+import { isFrameForTerminal } from "../../lib/terminalFrameIdentity";
 import { useEnqueuedInput } from "./useEnqueuedInput";
 import { EnqueuedInputOverlay } from "../connection/EnqueuedInputOverlay";
 import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
@@ -204,6 +205,21 @@ export function GrpcSessionTerminal({
           fromOffset,
         }) as AsyncIterable<SessionTerminalOutput>) {
           if (closed) break;
+          // Identity guard: the daemon stamps every frame with the session and (resolved) terminal
+          // it came from. A frame from anywhere else is dropped here, before it can reach this
+          // pane's terminal — the stream stays open, since a mis-routed frame says nothing about
+          // the frames that follow it.
+          if (!isFrameForTerminal(output, { sessionId, terminalId })) {
+            dGrpc(
+              "dropping foreign terminal frame — frame=%s/%s pane=%s/%s bytes=%d",
+              output.sessionId,
+              output.terminalId,
+              sessionId,
+              terminalId,
+              output.data.length,
+            );
+            continue;
+          }
           // ACK frames (empty data, non-zero offset) collapse the enqueued-input overlay.
           if (output.ackedInputOffset > 0n) {
             ackRef.current(Number(output.ackedInputOffset));
