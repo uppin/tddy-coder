@@ -5993,7 +5993,19 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 let _ = tx.send(terminal_data_frame(prologue));
             }
 
-            let mut cursor = from_offset;
+            // `from_offset` is clamped DOWN to the tip: a client whose cumulative counter drifted
+            // ahead of the stream would otherwise be handed its own bogus offset back and would keep
+            // asking for bytes the capture will never hold. Exactly one offset-anchored frame is
+            // always emitted (an empty one tagged with the tip when there is no gap), so every open
+            // SETS the client's cumulative offset instead of leaving it to be inferred from the
+            // frames that carry none — matching `tddy_terminal_rpc::bridge`.
+            let tip = sandbox
+                .capture
+                .lock()
+                .map(|cap| cap.end_offset())
+                .unwrap_or_default();
+            let mut cursor = from_offset.min(tip);
+            let mut anchored = false;
             loop {
                 let chunk = sandbox
                     .capture
@@ -6006,16 +6018,18 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         at_oldest: true,
                         at_end: true,
                     });
-                if !chunk.data.is_empty() {
+                let (end_offset, at_end) = (chunk.end_offset, chunk.at_end);
+                if !chunk.data.is_empty() || !anchored {
                     let _ = tx.send(terminal_replay_frame(
                         chunk.data,
                         chunk.start_offset,
                         chunk.end_offset,
                         chunk.at_oldest,
                     ));
+                    anchored = true;
                 }
-                cursor = chunk.end_offset;
-                if chunk.at_end {
+                cursor = end_offset;
+                if at_end {
                     break;
                 }
             }

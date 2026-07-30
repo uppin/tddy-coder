@@ -15,6 +15,7 @@ import {
   TerminalHistoryForwardLoader,
   type HistoryChunk,
 } from "../lib/terminalHistoryLoader";
+import { TerminalStreamOffset } from "../lib/terminalStreamOffset";
 
 // `[tddy]` diagnostics for the gRPC terminal byte stream (enabled by the DEBUG mask).
 // The 220-col garbling on reconnect lived here, so log incoming bytes / buffering / resize.
@@ -78,10 +79,12 @@ export interface GhosttyTerminalGrpcProps {
    *  gesture on the page terminal) swaps back. All paging logic is encapsulated here. */
   historyFetcher?: HistoryFetcher;
   /** Called per output frame with the cumulative byte offset the client has now received up to.
-   *  On a replay / catch-up frame (`endOffset > 0`) the offset is the frame's absolute `endOffset`;
-   *  on a live tail frame (`endOffset === 0`) the offset advances by the frame's byte length. The
-   *  parent uses this to track `currentOffset` so a reconnect can resume with `FROM_OFFSET` instead
-   *  of re-replaying (no duplicates). */
+   *  On a replay / catch-up frame (`endOffset > 0`) the offset snaps to the frame's absolute
+   *  `endOffset`; a live tail frame (`endOffset === 0`) that follows it advances the offset by its
+   *  byte length, while frames that PRECEDE it on the same open (the re-issued mode prologue) are
+   *  out-of-band VT state and leave it untouched — see `TerminalStreamOffset`. The parent uses this
+   *  to track `currentOffset` so a reconnect can resume with `FROM_OFFSET` instead of re-replaying
+   *  (no duplicates). */
   onOffsetUpdate?: (offset: bigint) => void;
 }
 
@@ -135,10 +138,11 @@ export function GhosttyTerminalGrpc({
   const historyFetcherRef = useRef(historyFetcher);
   historyFetcherRef.current = historyFetcher;
 
-  // Cumulative output offset the client has received up to. On a replay / catch-up frame
-  // (`endOffset > 0`) it snaps to that absolute offset; on a live tail frame it advances by the
-  // frame's byte length. Surfaced to the parent via `onOffsetUpdate` so a reconnect can resume with
-  // `FROM_OFFSET` instead of re-replaying (no duplicates).
+  // Cumulative output offset the client has received up to, carried across stream opens: each open
+  // gets its own `TerminalStreamOffset` seeded from here (see the accounting rules there), and this
+  // ref holds the latest value for the next open and for the history fill's upper bound. Surfaced to
+  // the parent via `onOffsetUpdate` so a reconnect can resume with `FROM_OFFSET` instead of
+  // re-replaying (no duplicates).
   const currentOffsetRef = useRef(0n);
   const onOffsetUpdateRef = useRef(onOffsetUpdate);
   onOffsetUpdateRef.current = onOffsetUpdate;
@@ -165,6 +169,10 @@ export function GhosttyTerminalGrpc({
   }, [onRegisterInsertInput]);
 
   useEffect(() => {
+    // One accounting instance per stream open, seeded with what the previous stream had received:
+    // frames that precede this open's offset-anchored frame (the re-issued mode prologue) are
+    // replayed VT state, not stream bytes, and must not move the offset.
+    const streamOffset = new TerminalStreamOffset(currentOffsetRef.current);
     stream.onMessage((frame) => {
       const data = frame.data;
       // Capture the lazy-history anchor from the initial replay frame (endOffset > 0). The anchor
@@ -181,13 +189,9 @@ export function GhosttyTerminalGrpc({
           sessionId,
         );
       }
-      // Advance the cumulative output offset: a replay / catch-up frame snaps to its absolute
-      // `endOffset`; a live tail frame advances by its byte length. Surface to the parent so a
-      // reconnect resumes with `FROM_OFFSET` (no duplicate replay).
-      currentOffsetRef.current =
-        frame.endOffset > 0n
-          ? frame.endOffset
-          : currentOffsetRef.current + BigInt(data.length);
+      // Advance the cumulative output offset and surface it to the parent so a reconnect resumes
+      // with `FROM_OFFSET` (no duplicate replay).
+      currentOffsetRef.current = streamOffset.accept(frame);
       onOffsetUpdateRef.current?.(currentOffsetRef.current);
       const ready = termReadyRef.current && !!termRef.current;
       if (dGrpc.enabled) {
