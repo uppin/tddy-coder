@@ -394,6 +394,11 @@ impl RpcService for SessionConnectionServiceRpc {
                                 start_offset: out.start_offset,
                                 end_offset: out.end_offset,
                                 at_oldest: out.at_oldest,
+                                // The bridge stamped the frame with the session and resolved
+                                // terminal it came from; carry that identity through so the client
+                                // can drop output that is not its own.
+                                session_id: out.session_id,
+                                terminal_id: out.terminal_id,
                             }
                             .encode_to_vec(),
                             Err(status) => {

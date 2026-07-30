@@ -45,11 +45,14 @@ const OK_SEND_INPUT = toArrayBuffer(
   toBinary(SendTerminalInputResponseSchema, create(SendTerminalInputResponseSchema, {})),
 );
 
-/** The initial `StreamTerminalOutput` replay frame: last-screen bytes tagged with `endOffset`. */
+/** The initial `StreamTerminalOutput` replay frame: last-screen bytes tagged with `endOffset`, and
+ *  stamped with the session and resolved terminal it came from as the daemon stamps every frame. */
 const REPLAY_FRAME = create(SessionTerminalOutputSchema, {
   data: new TextEncoder().encode("term:main\r\n"),
   endOffset: ANCHOR,
   atOldest: false,
+  sessionId: SESSION_ID,
+  terminalId: "main",
 });
 
 /** First forward chunk (0..600), not at_end — the fill continues. */

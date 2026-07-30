@@ -534,12 +534,17 @@ export function aConnectionServiceBackend(
       // open (a terminal stream that *completes* would signal disconnect and evict the runtime).
       // When `scenario.terminalReplayEndOffset` is set, the frame is tagged with the absolute
       // `endOffset` + `atOldest` so the lazy scroll-up loader can anchor older-history fetches.
+      // The frame carries the session and RESOLVED terminal id it came from, as the daemon stamps
+      // every frame — a pane drops frames that are not its own.
       streamTerminalOutput: async function* (req) {
         streamedTerminals.push({ sessionId: req.sessionId, terminalId: req.terminalId });
+        const terminalId = req.terminalId || "main";
         yield create(SessionTerminalOutputSchema, {
-          data: new TextEncoder().encode(`term:${req.terminalId || "main"}\r\n`),
+          data: new TextEncoder().encode(`term:${terminalId}\r\n`),
           endOffset: scenario.terminalReplayEndOffset ?? 0n,
           atOldest: (scenario.terminalHistory ?? []).length === 0,
+          sessionId: req.sessionId,
+          terminalId,
         });
         await new Promise<never>(() => undefined);
       },
