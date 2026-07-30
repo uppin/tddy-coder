@@ -356,9 +356,8 @@ fn connection_service(
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
-    let user_resolver: UserResolver = Arc::new(|token| {
-        (token == VALID_TOKEN).then(|| "testuser".to_string())
-    });
+    let user_resolver: UserResolver =
+        Arc::new(|token| (token == VALID_TOKEN).then(|| "testuser".to_string()));
     ConnectionServiceImpl::new(
         config,
         sessions_base_resolver,

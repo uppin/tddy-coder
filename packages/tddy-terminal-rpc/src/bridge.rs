@@ -134,7 +134,9 @@ pub async fn serve_stream_terminal_output_with(
 ///   broadcast so the bridge only forwards the fresh post-resize frame.
 /// - [`StreamReplayMode::FromOffset`] (reconnect): chunked catch-up via `replay_from(from_offset,
 ///   tip, initial_frame_bytes)` looped until `at_end`, so a terminal that already holds state up
-///   to `from_offset` receives only the bytes it missed — no tail chunk, no resize/drain.
+///   to `from_offset` receives only the bytes it missed — no tail chunk, no resize/drain. Exactly
+///   one offset-anchored frame is always emitted, even when there is no gap (an empty frame tagged
+///   with the capture tip), so every open re-anchors the client's cumulative offset.
 ///
 /// Then emits the current applied-input offset up front (so a stream opening after some input was
 /// already applied learns the ACK position immediately), and spawns the live broadcast bridge that
@@ -219,14 +221,30 @@ async fn open_replay_ack_live(
             // at a time so an oversized retained history never exceeds the transport's per-message
             // limit. Each frame is tagged with its absolute offsets so the client advances its
             // `currentOffset` to the tip; `at_oldest` signals older history was evicted.
-            let mut cursor = from_offset;
+            //
+            // `from_offset` is clamped DOWN to the tip as well: a client whose cumulative counter
+            // drifted ahead of the stream would otherwise be handed its own bogus offset back, and
+            // would keep asking for bytes the capture will never hold — replaying nothing for the
+            // rest of the session.
+            let tip = session
+                .capture()
+                .lock()
+                .map(|cap| cap.end_offset())
+                .unwrap_or_default();
+            let mut cursor = from_offset.min(tip);
+            // Every open emits exactly one offset-anchored frame before any live byte, so the open
+            // SETS the client's cumulative offset instead of leaving it to be inferred from frames
+            // that carry none (the mode prologue above, live tail frames below). When the catch-up
+            // found no gap the anchor is the empty chunk itself, tagged with the tip.
+            let mut anchored = false;
             loop {
                 let chunk = session
                     .capture()
                     .lock()
                     .map(|cap| cap.replay_from(cursor, 0, initial_frame_bytes))
                     .unwrap_or_else(|_| empty_chunk());
-                if !chunk.data.is_empty() {
+                let (end_offset, at_end) = (chunk.end_offset, chunk.at_end);
+                if !chunk.data.is_empty() || !anchored {
                     let _ = tx
                         .send(Ok(initial_replay_frame(
                             chunk.data,
@@ -235,9 +253,10 @@ async fn open_replay_ack_live(
                             chunk.at_oldest,
                         )))
                         .await;
+                    anchored = true;
                 }
-                cursor = chunk.end_offset;
-                if chunk.at_end {
+                cursor = end_offset;
+                if at_end {
                     break;
                 }
             }
@@ -262,9 +281,7 @@ fn spawn_live_bridge(
     let mut pty_done = session.subscribe_pty_done();
     let bridge_tx = tx.clone();
     tokio::spawn(async move {
-        if initial_acked > 0
-            && bridge_tx.send(Ok(ack_frame(initial_acked))).await.is_err()
-        {
+        if initial_acked > 0 && bridge_tx.send(Ok(ack_frame(initial_acked))).await.is_err() {
             return;
         }
         use tokio::sync::broadcast::error::RecvError;
