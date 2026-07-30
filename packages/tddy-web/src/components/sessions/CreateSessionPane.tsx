@@ -3,6 +3,7 @@ import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
 import type { AgentInfo, BranchConflict, ConnectionService, ProjectEntry, SessionEntry, SubagentInfo, ToolInfo } from "../../gen/connection_pb";
 import { localBranchName } from "../../lib/branchNames";
+import type { BaseBranchOption } from "./prstack/baseBranchChoice";
 import {
   startSessionOverridesFor,
   type BranchConflictResolution,
@@ -67,9 +68,17 @@ export type CreateSessionInitialValues = Partial<{
   createRemoteBranch: boolean;
   /** Concrete base branch shown in the new-branch option: "New branch from base: <baseBranchLabel>". */
   baseBranchLabel: string;
-  /** Ordered base-branch options for the "Base branch" selector (planned-PR child sessions). */
-  baseBranchOptions: string[];
-  /** Pre-selected base branch in the "Base branch" selector (defaults to the first option). */
+  /**
+   * Ordered base-branch options for the "Base branch" selector (planned-PR child sessions). Each
+   * option carries the ref it submits and its caption separately: a legacy project's project default
+   * is the empty ref the daemon resolves itself, which needs a label naming it rather than a blank
+   * option (see `baseBranchChoice`).
+   */
+  baseBranchOptions: BaseBranchOption[];
+  /**
+   * Pre-selected base branch in the "Base branch" selector — the caller's derived base, which is
+   * always one of `baseBranchOptions`.
+   */
   selectedBaseBranch: string;
   initialPrompt: string;
   daemonInstanceId: string;
@@ -141,7 +150,7 @@ export function CreateSessionPane({
   const [createRemoteBranch, setCreateRemoteBranch] = useState(
     initialValues?.createRemoteBranch ?? true,
   );
-  const [baseBranchOptions] = useState<string[]>(initialValues?.baseBranchOptions ?? []);
+  const [baseBranchOptions] = useState<BaseBranchOption[]>(initialValues?.baseBranchOptions ?? []);
   const [selectedBaseBranch, setSelectedBaseBranch] = useState<string>(
     initialValues?.selectedBaseBranch ?? "",
   );
@@ -935,9 +944,9 @@ export function CreateSessionPane({
                 value={selectedBaseBranch}
                 onChange={(e) => setSelectedBaseBranch(e.target.value)}
               >
-                {baseBranchOptions.map((branch) => (
-                  <option key={branch} value={branch}>
-                    {branch}
+                {baseBranchOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
                   </option>
                 ))}
               </select>

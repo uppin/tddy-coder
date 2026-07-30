@@ -369,6 +369,16 @@ export const prStackScreenPage = {
   dialogBaseBranchSelect: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionBaseBranchSelect, { timeout: 5000, ...options }),
 
+  /**
+   * The base-branch `<select>`'s option values in render order — the refs the dialog can submit. Yields
+   * a plain array so a test states the whole offered list, and its order, in one assertion.
+   */
+  dialogBaseBranchOptionValues: (options?: Parameters<typeof cy.get>[1]) =>
+    prStackScreenPage
+      .dialogBaseBranchSelect(options)
+      .find("option")
+      .then(($opts) => [...$opts].map((option) => (option as HTMLOptionElement).value)),
+
   /** The dialog's pre-checked "Create Remote Branch" toggle. */
   dialogCreateRemoteBranchToggle: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionCreateRemoteBranchToggle, { timeout: 5000, ...options }),
