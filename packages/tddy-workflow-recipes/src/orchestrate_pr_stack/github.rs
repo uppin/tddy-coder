@@ -410,8 +410,8 @@ mod tests {
     // -----------------------------------------------------------------------
     // search_qualifiers — the `q` a PR search is actually run with.
     //
-    // PRD: docs/ft/coder/1-WIP/PRD-2026-07-30-pr-stack-full-control.md § pr_search.
-    // Changeset: docs/dev/1-WIP/2026-07-30-pr-stack-full-control.md.
+    // PRD: docs/ft/coder/pr-stacking.md § GitHub API surface.
+    // Changeset: docs/dev/changesets.md (2026-07-30, pr-stack-full-control).
     // -----------------------------------------------------------------------
 
     /// The op name a caller passes in; it prefixes any rejection.
@@ -931,13 +931,19 @@ fn json_str(item: &serde_json::Value, field: &str) -> String {
         .to_string()
 }
 
-/// The author login of an item that carries a `user` object; `""` for a comment whose author's
-/// account is gone (GitHub reports `null` there).
-fn json_author(item: &serde_json::Value) -> String {
-    item.pointer("/user/login")
+/// A nested string field addressed by JSON pointer, with the same "`null` reads as `""`" rule as
+/// [`json_str`].
+fn json_pointer(item: &serde_json::Value, path: &str) -> String {
+    item.pointer(path)
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string()
+}
+
+/// The author login of an item that carries a `user` object; `""` for a comment whose author's
+/// account is gone (GitHub reports `null` there).
+fn json_author(item: &serde_json::Value) -> String {
+    json_pointer(item, "/user/login")
 }
 
 impl GithubPrInsightApi for RealGithubPrApi {
@@ -973,21 +979,9 @@ impl GithubPrInsightApi for RealGithubPrApi {
             title: json_str(&pr, "title"),
             body: json_str(&pr, "body"),
             state: pr_state_from_github(state, merged_at, draft),
-            base_branch: pr
-                .pointer("/base/ref")
-                .and_then(|s| s.as_str())
-                .unwrap_or("")
-                .to_string(),
-            head_branch: pr
-                .pointer("/head/ref")
-                .and_then(|s| s.as_str())
-                .unwrap_or("")
-                .to_string(),
-            head_sha: pr
-                .pointer("/head/sha")
-                .and_then(|s| s.as_str())
-                .unwrap_or("")
-                .to_string(),
+            base_branch: json_pointer(&pr, "/base/ref"),
+            head_branch: json_pointer(&pr, "/head/ref"),
+            head_sha: json_pointer(&pr, "/head/sha"),
             // `null` while GitHub is still computing mergeability — kept as `None` rather than
             // collapsed to `false`, which would read as "conflicted".
             mergeable: pr.get("mergeable").and_then(|m| m.as_bool()),
@@ -1219,16 +1213,6 @@ impl GithubPrInsightApi for RealGithubPrApi {
     }
 }
 
-/// Build the `q` value for `/search/issues` from a [`PrSearchQuery`].
-///
-/// `repo:` and `is:pr` are always injected, so a search can only ever read this repository's pull
-/// requests — which is also why free text carrying a `:` is rejected: it would be a qualifier of the
-/// caller's own, and a second `repo:` widens the search rather than narrowing it. An unrecognised
-/// `state` is rejected rather than defaulting to one — quietly searching open PRs when the caller
-/// asked for something else would answer a different question than the one it was asked.
-///
-/// `closed` maps to GitHub's `is:closed`, which by its own definition also matches merged PRs; ask
-/// for `merged` when only merged ones are wanted.
 /// One caller-supplied qualifier value, checked to be a single bare word.
 ///
 /// `author:` and `base:` values are interpolated into `q` beside the injected `repo:` and `is:pr`,
@@ -1254,6 +1238,16 @@ fn scoped_value<'v>(
     Ok(value)
 }
 
+/// Build the `q` value for `/search/issues` from a [`PrSearchQuery`].
+///
+/// `repo:` and `is:pr` are always injected, so a search can only ever read this repository's pull
+/// requests — which is also why free text carrying a `:` is rejected: it would be a qualifier of the
+/// caller's own, and a second `repo:` widens the search rather than narrowing it. An unrecognised
+/// `state` is rejected rather than defaulting to one — quietly searching open PRs when the caller
+/// asked for something else would answer a different question than the one it was asked.
+///
+/// `closed` maps to GitHub's `is:closed`, which by its own definition also matches merged PRs; ask
+/// for `merged` when only merged ones are wanted.
 fn search_qualifiers(op: &str, query: &PrSearchQuery) -> Result<String, tddy_core::WorkflowError> {
     let mut qualifiers = vec![format!("repo:{}", query.repo), "is:pr".to_string()];
     match query.state.as_str() {

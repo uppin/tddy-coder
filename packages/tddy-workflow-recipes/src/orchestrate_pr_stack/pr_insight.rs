@@ -5,8 +5,8 @@
 //! `tddy-tools` resolve environment and serialize — they hold no shaping logic, the same split
 //! `add_planned_pr_node` / `pr_add_planned` already established.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-07-30-pr-stack-full-control.md`.
-//! Changeset: `docs/dev/1-WIP/2026-07-30-pr-stack-full-control.md`.
+//! PRD: `docs/ft/coder/pr-stacking.md` § Full control over the plan.
+//! Changeset: `docs/dev/changesets.md` (2026-07-30, pr-stack-full-control).
 
 use std::collections::BTreeMap;
 
@@ -244,7 +244,7 @@ fn root_id_of(comment: &PrReviewComment, by_id: &BTreeMap<u64, &PrReviewComment>
 /// `repo` is the caller's, never the agent's: a search is a read of *this* repository's PRs. The
 /// limit is enforced on the way out as well as requested on the way in, so a server that ignores
 /// `per_page` cannot hand the agent more than it asked for.
-pub fn search_prs(
+pub fn search_repository_prs(
     gh: &dyn GithubPrInsightApi,
     repo: &str,
     input: PrSearchInput,

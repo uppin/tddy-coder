@@ -10,8 +10,8 @@
 //! unset for `pr_stack_status` to derive — pinned against the persisted node by the unit tests beside
 //! `adopt_pr_as_stack_node`, which is all `adopt_pr_into_stack` delegates that part to.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-07-30-pr-stack-full-control.md § pr_adopt.
-//! Changeset: docs/dev/1-WIP/2026-07-30-pr-stack-full-control.md.
+//! PRD: docs/ft/coder/pr-stacking.md § Full control over the plan.
+//! Changeset: docs/dev/changesets.md (2026-07-30, pr-stack-full-control).
 
 mod common;
 

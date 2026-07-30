@@ -408,6 +408,63 @@ pub struct AddPlannedPrInput {
     pub child_recipe: Option<String>,
 }
 
+/// Reject a parent list before anything is written: an id that resolves to no node, and — when
+/// `node_id` names an *existing* node being rewritten — that node naming itself, or the same parent
+/// named twice.
+///
+/// `node_id` is `None` for an append. The node does not exist yet, so it has no id for a parent to
+/// collide with, and a repeated id is not rejected there — that is [`add_planned_pr_node`]'s and
+/// [`adopt_pr_as_stack_node`]'s shipped behaviour, kept as it is.
+///
+/// `op` prefixes every message it emits, **except** that an empty `op` emits them bare. That
+/// asymmetry is deliberate, not drift: [`add_planned_pr_node`] shipped `dangling parent ref: n9`
+/// unprefixed and its callers read that exact string, so prefixing it now would change behaviour
+/// already in use.
+fn validate_parents(
+    stack: &tddy_core::changeset::Stack,
+    node_id: Option<&str>,
+    parents: &[String],
+    op: &str,
+) -> Result<(), String> {
+    let prefix = message_prefix(op);
+    let mut seen: Vec<&String> = Vec::with_capacity(parents.len());
+    for parent in parents {
+        if node_id == Some(parent.as_str()) {
+            return Err(format!("{prefix}node '{parent}' cannot be its own parent"));
+        }
+        if !stack.nodes.iter().any(|n| &n.node_id == parent) {
+            return Err(format!("{prefix}dangling parent ref: {parent}"));
+        }
+        if node_id.is_some() && seen.contains(&parent) {
+            return Err(format!("{prefix}parent '{parent}' is named more than once"));
+        }
+        seen.push(parent);
+    }
+    Ok(())
+}
+
+/// Reject the stack a mutation *would* produce when it is no longer a DAG.
+///
+/// Every writer here validates a candidate before touching the file, so a rejected call leaves the
+/// stack on disk exactly as it was. `op` follows the same empty-means-unprefixed rule as
+/// [`validate_parents`], for the same reason.
+fn reject_if_cyclic(candidate: &tddy_core::changeset::Stack, op: &str) -> Result<(), String> {
+    candidate
+        .topo_order()
+        .map_err(|e| format!("{}cycle detected: {e}", message_prefix(op)))?;
+    Ok(())
+}
+
+/// `"{op}: "`, or `""` for an empty `op` — see [`validate_parents`] for why one writer emits its
+/// rejections unprefixed.
+fn message_prefix(op: &str) -> String {
+    if op.is_empty() {
+        String::new()
+    } else {
+        format!("{op}: ")
+    }
+}
+
 /// Append one manually-created planned PR to an orchestrator session's persisted stack,
 /// choosing its ancestors (parent node ids) from the already-planned nodes.
 ///
@@ -429,11 +486,8 @@ pub fn add_planned_pr_node(
         .map_err(|e| format!("add_planned_pr_node: failed to read changeset: {e}"))?;
     let existing = changeset.stack.unwrap_or_default();
 
-    for parent in &input.parents {
-        if !existing.nodes.iter().any(|n| &n.node_id == parent) {
-            return Err(format!("dangling parent ref: {parent}"));
-        }
-    }
+    // No `op` prefix: this rejection shipped bare and is read verbatim by its callers.
+    validate_parents(&existing, None, &input.parents, "")?;
 
     let node_id = next_free_node_id(&existing);
     let new_node = StackNode {
@@ -456,13 +510,13 @@ pub fn add_planned_pr_node(
     // applies to a whole plan, cheaply, rather than special-casing the append path as exempt.
     let mut candidate_nodes = existing.nodes.clone();
     candidate_nodes.push(new_node.clone());
-    let candidate_stack = tddy_core::changeset::Stack {
-        version: existing.version,
-        nodes: candidate_nodes,
-    };
-    candidate_stack
-        .topo_order()
-        .map_err(|e| format!("cycle detected: {e}"))?;
+    reject_if_cyclic(
+        &tddy_core::changeset::Stack {
+            version: existing.version,
+            nodes: candidate_nodes,
+        },
+        "",
+    )?;
 
     tddy_core::changeset::update_stack_atomic(session_dir, |stack| {
         stack.nodes.push(new_node.clone());
@@ -613,7 +667,7 @@ fn realign_node_to_effective_base(
     use crate::orchestrate_pr_stack::git_ops::{
         force_push_with_lease, local_branch_exists, merge_base, rebase_onto,
     };
-    use tddy_core::changeset::{read_changeset, update_stack_atomic, GithubPrStatus};
+    use tddy_core::changeset::read_changeset;
 
     // Effective base after the parent change: strip the `origin/` prefix so it names a branch usable
     // both as a rebase target and a GitHub PR base.
@@ -635,36 +689,23 @@ fn realign_node_to_effective_base(
     if local_branch_exists(repo_root, branch) {
         let old_base = merge_base(repo_root, branch, &effective_base)
             .unwrap_or_else(|_| effective_base.clone());
-        match rebase_onto(repo_root, &effective_base, &old_base, branch) {
-            Ok(()) => {
-                let expected_sha = std::process::Command::new("git")
-                    .current_dir(repo_root)
-                    .args(["rev-parse", branch])
-                    .output()
-                    .ok()
-                    .filter(|o| o.status.success())
-                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                    .unwrap_or_default();
-                if let Err(e) = force_push_with_lease(repo_root, branch, &expected_sha) {
-                    log::warn!("{op}: force-push failed for {branch}: {e}");
-                }
-            }
-            Err(e) => {
-                let err_msg = e.to_string();
-                update_stack_atomic(session_dir, |stack| {
-                    if let Some(node) = stack.nodes.iter_mut().find(|n| n.node_id == node_id) {
-                        node.pr_status = Some(GithubPrStatus {
-                            phase: "error".to_string(),
-                            url: None,
-                            error: Some(err_msg.clone()),
-                        });
-                    }
-                })
-                .map_err(|e| format!("{op}: failed to record error: {e}"))?;
-                return Err(format!(
-                    "{op}: rebase of {branch} onto {effective_base} failed: {err_msg}"
-                ));
-            }
+        if let Err(e) = rebase_onto(repo_root, &effective_base, &old_base, branch) {
+            let err_msg = e.to_string();
+            record_rebase_error(op, session_dir, node_id, &err_msg)?;
+            return Err(format!(
+                "{op}: rebase of {branch} onto {effective_base} failed: {err_msg}"
+            ));
+        }
+        let expected_sha = std::process::Command::new("git")
+            .current_dir(repo_root)
+            .args(["rev-parse", branch])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+        if let Err(e) = force_push_with_lease(repo_root, branch, &expected_sha) {
+            log::warn!("{op}: force-push failed for {branch}: {e}");
         }
     }
 
@@ -677,6 +718,29 @@ fn realign_node_to_effective_base(
             .map_err(|e| format!("{op}: patch_pr_base failed: {e}"))?;
     }
     Ok(())
+}
+
+/// Record a failed rebase on the node as `pr_status.phase = "error"` carrying the git message.
+///
+/// The branch is left mid-conflict for a human to finish, so the node has to say so: the stack is the
+/// only place the operator will see it, and a node that still read `open` would describe a rebase that
+/// succeeded.
+fn record_rebase_error(
+    op: &str,
+    session_dir: &Path,
+    node_id: &str,
+    err_msg: &str,
+) -> Result<(), String> {
+    tddy_core::changeset::update_stack_atomic(session_dir, |stack| {
+        if let Some(node) = stack.nodes.iter_mut().find(|n| n.node_id == node_id) {
+            node.pr_status = Some(tddy_core::changeset::GithubPrStatus {
+                phase: "error".to_string(),
+                url: None,
+                error: Some(err_msg.to_string()),
+            });
+        }
+    })
+    .map_err(|e| format!("{op}: failed to record error: {e}"))
 }
 
 /// Which of a node's metadata fields an update rewrites. A field left `None` is untouched, which is
@@ -854,9 +918,7 @@ pub fn delete_planned_pr_node(session_dir: &Path, node_id: &str) -> Result<Delet
     // describing an edge nothing checks — the reparenting below is what keeps it whole.
     let mut candidate = stack.clone();
     remove_node_reparenting_children(&mut candidate, node_id);
-    candidate
-        .topo_order()
-        .map_err(|e| format!("delete_planned_pr_node: cycle detected: {e}"))?;
+    reject_if_cyclic(&candidate, "delete_planned_pr_node")?;
 
     let mut removed: Option<(StackNode, Vec<String>)> = None;
     update_stack_atomic(session_dir, |stack| {
@@ -952,36 +1014,17 @@ pub fn set_stack_node_parents(
     gh: &dyn crate::orchestrate_pr_stack::github::GithubPrApi,
 ) -> Result<StackNode, String> {
     use tddy_core::changeset::{read_changeset, update_stack_atomic};
+    const OP: &str = "set_stack_node_parents";
 
     let stack = read_changeset(session_dir)
-        .map_err(|e| format!("set_stack_node_parents: failed to read changeset: {e}"))?
+        .map_err(|e| format!("{OP}: failed to read changeset: {e}"))?
         .stack
         .unwrap_or_default();
     if stack.node(node_id).is_none() {
-        return Err(format!(
-            "set_stack_node_parents: node '{node_id}' not found"
-        ));
+        return Err(format!("{OP}: node '{node_id}' not found"));
     }
 
-    let mut seen: Vec<&String> = Vec::with_capacity(parents.len());
-    for parent in parents {
-        if parent == node_id {
-            return Err(format!(
-                "set_stack_node_parents: node '{node_id}' cannot be its own parent"
-            ));
-        }
-        if !stack.nodes.iter().any(|n| &n.node_id == parent) {
-            return Err(format!(
-                "set_stack_node_parents: dangling parent ref: {parent}"
-            ));
-        }
-        if seen.contains(&parent) {
-            return Err(format!(
-                "set_stack_node_parents: parent '{parent}' is named more than once"
-            ));
-        }
-        seen.push(parent);
-    }
+    validate_parents(&stack, Some(node_id), parents, OP)?;
 
     // Same guard `add_planned_pr_node` applies to an append: unlike an append, an arbitrary parent
     // rewrite really can close a cycle, so this one is load-bearing rather than defensive.
@@ -989,38 +1032,22 @@ pub fn set_stack_node_parents(
     if let Some(candidate_node) = candidate.nodes.iter_mut().find(|n| n.node_id == node_id) {
         candidate_node.parents = parents.to_vec();
     }
-    candidate
-        .topo_order()
-        .map_err(|e| format!("set_stack_node_parents: cycle detected: {e}"))?;
+    reject_if_cyclic(&candidate, OP)?;
 
     update_stack_atomic(session_dir, |stack| {
         if let Some(node) = stack.nodes.iter_mut().find(|n| n.node_id == node_id) {
             node.parents = parents.to_vec();
         }
     })
-    .map_err(|e| format!("set_stack_node_parents: failed to write stack: {e}"))?;
+    .map_err(|e| format!("{OP}: failed to write stack: {e}"))?;
 
-    // Whether there is a branch to realign is read from disk *after* the write, for the same reason
-    // [`realign_node_to_effective_base`] re-reads the effective base: `update_stack_atomic` re-reads
-    // before applying its closure, and another writer (`pr_spawn_child`, or the web's start-session
-    // path through `link_stack_node_to_child_session`) can bind a branch to this node between the
-    // snapshot above and this write. Gating on the snapshot's value would persist the new parents and
-    // silently skip the rebase, the force-push and the PR re-target — while reporting success.
-    let moved = read_changeset(session_dir)
-        .map_err(|e| format!("set_stack_node_parents: failed to reload node: {e}"))?
-        .stack
-        .unwrap_or_default()
-        .node(node_id)
-        .cloned()
-        .ok_or_else(|| {
-            format!("set_stack_node_parents: node '{node_id}' vanished after the move")
-        })?;
+    let moved = reload_moved_node(session_dir, node_id)?;
 
     // A node that owns no branch is a plan-only move: there is nothing to rebase and no pull request
     // of its own to re-target, so the persisted parent change is the whole effect.
     if let Some(branch) = moved.branch.as_deref() {
         realign_node_to_effective_base(
-            "set_stack_node_parents",
+            OP,
             session_dir,
             repo_root,
             node_id,
@@ -1031,6 +1058,24 @@ pub fn set_stack_node_parents(
     }
 
     Ok(moved)
+}
+
+/// Re-read the node a move just wrote, so [`set_stack_node_parents`] decides whether to realign from
+/// the stack on disk rather than from its own pre-write snapshot.
+///
+/// `update_stack_atomic` re-reads before applying its closure, and another writer (`pr_spawn_child`,
+/// or the web's start-session path through `link_stack_node_to_child_session`) can bind a branch to
+/// this node in between. Gating on the snapshot's value would persist the new parents and silently
+/// skip the rebase, the force-push and the PR re-target — while reporting success.
+fn reload_moved_node(session_dir: &Path, node_id: &str) -> Result<StackNode, String> {
+    const OP: &str = "set_stack_node_parents";
+    tddy_core::changeset::read_changeset(session_dir)
+        .map_err(|e| format!("{OP}: failed to reload node: {e}"))?
+        .stack
+        .unwrap_or_default()
+        .node(node_id)
+        .cloned()
+        .ok_or_else(|| format!("{OP}: node '{node_id}' vanished after the move"))
 }
 
 /// Append a stack node built from an existing pull request's facts.
@@ -1049,45 +1094,16 @@ pub fn adopt_pr_as_stack_node(
     parents: Vec<String>,
 ) -> Result<StackNode, String> {
     use tddy_core::changeset::{read_changeset, update_stack_atomic, GithubPrStatus};
+    const OP: &str = "adopt_pr_as_stack_node";
 
     let existing = read_changeset(session_dir)
-        .map_err(|e| format!("adopt_pr_as_stack_node: failed to read changeset: {e}"))?
+        .map_err(|e| format!("{OP}: failed to read changeset: {e}"))?
         .stack
         .unwrap_or_default();
 
-    for parent in &parents {
-        if !existing.nodes.iter().any(|n| &n.node_id == parent) {
-            return Err(format!(
-                "adopt_pr_as_stack_node: dangling parent ref: {parent}"
-            ));
-        }
-    }
-    if let Some(bound) = existing
-        .nodes
-        .iter()
-        .find(|n| n.branch.as_deref() == Some(facts.head_branch.as_str()))
-    {
-        return Err(format!(
-            "adopt_pr_as_stack_node: branch '{}' is already bound to node '{}', so PR #{} is \
-             already tracked by this stack",
-            facts.head_branch, bound.node_id, facts.pull_number
-        ));
-    }
-    // The recorded url is the system's only statement of "which pull request is this node" (see
-    // `pr_number_from_status_url`), and a node can record one without ever recording a branch — a
-    // node whose child session never ran, or one adopted before this check existed. Checking the
-    // branch alone would let PR #42 be reached through two nodes, and `pr_merge` / `pr_stack_status`
-    // would then act on it twice.
-    if let Some(tracking) = existing.nodes.iter().find(|n| {
-        crate::orchestrate_pr_stack::pr_number_from_status_url(n.pr_status.as_ref())
-            == Some(facts.pull_number)
-    }) {
-        return Err(format!(
-            "adopt_pr_as_stack_node: PR #{} is already recorded on node '{}', so it is already \
-             tracked by this stack",
-            facts.pull_number, tracking.node_id
-        ));
-    }
+    validate_parents(&existing, None, &parents, OP)?;
+    reject_if_branch_bound(&existing, &facts)?;
+    reject_if_pull_number_tracked(&existing, &facts)?;
 
     let new_node = StackNode {
         node_id: next_free_node_id(&existing),
@@ -1113,20 +1129,65 @@ pub fn adopt_pr_as_stack_node(
 
     let mut candidate_nodes = existing.nodes.clone();
     candidate_nodes.push(new_node.clone());
-    let candidate_stack = tddy_core::changeset::Stack {
-        version: existing.version,
-        nodes: candidate_nodes,
-    };
-    candidate_stack
-        .topo_order()
-        .map_err(|e| format!("adopt_pr_as_stack_node: cycle detected: {e}"))?;
+    reject_if_cyclic(
+        &tddy_core::changeset::Stack {
+            version: existing.version,
+            nodes: candidate_nodes,
+        },
+        OP,
+    )?;
 
     update_stack_atomic(session_dir, |stack| {
         stack.nodes.push(new_node.clone());
     })
-    .map_err(|e| format!("adopt_pr_as_stack_node: failed to write stack: {e}"))?;
+    .map_err(|e| format!("{OP}: failed to write stack: {e}"))?;
 
     Ok(new_node)
+}
+
+/// Refuse to adopt a PR whose head branch some node already owns — that node already *is* this PR in
+/// the stack, and a second one would have `pr_merge` and `pr_stack_status` act on it twice.
+fn reject_if_branch_bound(
+    stack: &tddy_core::changeset::Stack,
+    facts: &AdoptedPrFacts,
+) -> Result<(), String> {
+    const OP: &str = "adopt_pr_as_stack_node";
+    let Some(bound) = stack
+        .nodes
+        .iter()
+        .find(|n| n.branch.as_deref() == Some(facts.head_branch.as_str()))
+    else {
+        return Ok(());
+    };
+    Err(format!(
+        "{OP}: branch '{}' is already bound to node '{}', so PR #{} is already tracked by this \
+         stack",
+        facts.head_branch, bound.node_id, facts.pull_number
+    ))
+}
+
+/// Refuse to adopt a PR some node already records by number.
+///
+/// The recorded url is the system's only statement of "which pull request is this node" (see
+/// `pr_number_from_status_url`), and a node can record one without ever recording a branch — a node
+/// whose child session never ran, or one adopted before this check existed. Checking the branch alone
+/// would let PR #42 be reached through two nodes, and `pr_merge` / `pr_stack_status` would then act on
+/// it twice.
+fn reject_if_pull_number_tracked(
+    stack: &tddy_core::changeset::Stack,
+    facts: &AdoptedPrFacts,
+) -> Result<(), String> {
+    const OP: &str = "adopt_pr_as_stack_node";
+    let Some(tracking) = stack.nodes.iter().find(|n| {
+        crate::orchestrate_pr_stack::pr_number_from_status_url(n.pr_status.as_ref())
+            == Some(facts.pull_number)
+    }) else {
+        return Ok(());
+    };
+    Err(format!(
+        "{OP}: PR #{} is already recorded on node '{}', so it is already tracked by this stack",
+        facts.pull_number, tracking.node_id
+    ))
 }
 
 /// Read a pull request and adopt it as a stack node — [`adopt_pr_as_stack_node`] with the fetch in
@@ -1888,8 +1949,8 @@ mod tests {
     // -----------------------------------------------------------------------
     // shared fixtures for the full-control primitives
     //
-    // PRD: docs/ft/coder/1-WIP/PRD-2026-07-30-pr-stack-full-control.md.
-    // Changeset: docs/dev/1-WIP/2026-07-30-pr-stack-full-control.md.
+    // PRD: docs/ft/coder/pr-stacking.md § Full control over the plan.
+    // Changeset: docs/dev/changesets.md (2026-07-30, pr-stack-full-control).
     // -----------------------------------------------------------------------
 
     /// [`a_node`] plus the things a started node owns: a branch, a child session, and a PR recorded

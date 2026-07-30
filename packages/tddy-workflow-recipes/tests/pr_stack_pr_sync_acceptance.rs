@@ -11,8 +11,8 @@
 //! answers a blank title with a 422. The fake refuses both the same way, so the rejection is catchable
 //! here rather than only against api.github.com.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-07-30-pr-stack-full-control.md § pr_update_planned.
-//! Changeset: docs/dev/1-WIP/2026-07-30-pr-stack-full-control.md.
+//! PRD: docs/ft/coder/pr-stacking.md § Full control over the plan.
+//! Changeset: docs/dev/changesets.md (2026-07-30, pr-stack-full-control).
 
 mod common;
 

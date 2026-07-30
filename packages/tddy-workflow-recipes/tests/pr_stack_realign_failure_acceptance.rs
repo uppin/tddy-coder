@@ -11,8 +11,8 @@
 //! Re-targeting a PR onto a base its branch does not sit on would misdescribe reality to every
 //! reviewer, so the PR is deliberately left pointing where it did and the branch is left for a human.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-07-30-pr-stack-full-control.md § pr_set_parents.
-//! Changeset: docs/dev/1-WIP/2026-07-30-pr-stack-full-control.md.
+//! PRD: docs/ft/coder/pr-stacking.md § Full control over the plan.
+//! Changeset: docs/dev/changesets.md (2026-07-30, pr-stack-full-control).
 
 mod common;
 

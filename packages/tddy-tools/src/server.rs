@@ -20,8 +20,8 @@ use tddy_discovery::subagent::{
     SubagentRegistry, SubagentSession,
 };
 use tddy_workflow_recipes::orchestrate_pr_stack::{
-    github::PrState, pr_close_action, pr_insight, pr_merge_action, pr_resolve_conflicts_action,
-    GithubPrApi,
+    github::{PrSearchHit, PrState},
+    pr_close_action, pr_insight, pr_merge_action, pr_resolve_conflicts_action, GithubPrApi,
 };
 
 /// Unix socket for relaying approval prompts to the tddy-coder TUI. In `cfg(test)` builds this is
@@ -735,10 +735,7 @@ impl PermissionServer {
         description = "List every PR node in the orchestrator's stack with its live GitHub state and computed internal status (needs-repoint / has-conflicts / ready-to-merge / merged / up-to-date). Refreshes and persists derived statuses; agent overrides are preserved."
     )]
     fn pr_stack_status(&self) -> String {
-        match pr_stack_status_impl() {
-            Ok(v) => v.to_string(),
-            Err(e) => serde_json::json!({ "error": e }).to_string(),
-        }
+        to_wire(pr_stack_status_impl())
     }
 
     #[tool(description = "Merge a stack node's PR into its base and mark the node merged.")]
@@ -854,70 +851,49 @@ impl PermissionServer {
         description = "Edit a stack node's title, description and/or branch_suggestion. Title and description are editable at any time, including once the node owns a branch, a child session and an open PR; branch_suggestion only while the node owns no branch. A call naming none of the three is rejected. With sync_pr, the same title/description are also pushed to the node's pull request — rejected, before anything is written, when the node records no PR or when neither a title nor a description was given."
     )]
     fn pr_update_planned(&self, Parameters(p): Parameters<PrUpdatePlannedInput>) -> String {
-        match pr_update_planned_impl(p) {
-            Ok(v) => v.to_string(),
-            Err(e) => serde_json::json!({ "error": e }).to_string(),
-        }
+        to_wire(pr_update_planned_impl(p))
     }
 
     #[tool(
         description = "Remove a node from the plan, reparenting its children onto that node's parents so the DAG stays connected (a deleted root's children become roots). Refuses a node whose PR is open — merge or close it first. The node's branch, worktree and child session are left untouched and reported back as now unowned."
     )]
     fn pr_delete_planned(&self, Parameters(p): Parameters<PrDeletePlannedInput>) -> String {
-        match pr_delete_planned_impl(&p.node_id) {
-            Ok(v) => v.to_string(),
-            Err(e) => serde_json::json!({ "error": e }).to_string(),
-        }
+        to_wire(pr_delete_planned_impl(&p.node_id))
     }
 
     #[tool(
         description = "Move a node in the stack by giving it a whole new parent list. parents is required: pass [] to make the node a root off the stack bottom. Rejects an unknown parent, self-parenthood, a duplicate entry, and any change that would close a cycle, writing nothing. When the node owns a branch, its branch is also rebased onto the new effective base, force-pushed with lease, and its open PR's base repointed. Use this when the plan changed; use pr_repoint when only the PR's base branch drifted."
     )]
     fn pr_set_parents(&self, Parameters(p): Parameters<PrSetParentsInput>) -> String {
-        match pr_set_parents_impl(p) {
-            Ok(v) => v.to_string(),
-            Err(e) => serde_json::json!({ "error": e }).to_string(),
-        }
+        to_wire(pr_set_parents_impl(p))
     }
 
     #[tool(
         description = "Read one pull request in full: title, body, state, base/head, mergeability, size, the latest review state per reviewer, and the head commit's check runs. Address it by exactly one of node_id or pull_number — naming neither or both is rejected, and a node that records no PR url cannot be addressed by node_id. Pass include_files for the changed-file list, which is otherwise neither fetched nor returned."
     )]
     fn pr_read(&self, Parameters(p): Parameters<PrReadInput>) -> String {
-        match pr_read_impl(p) {
-            Ok(v) => v.to_string(),
-            Err(e) => serde_json::json!({ "error": e }).to_string(),
-        }
+        to_wire(pr_read_impl(p))
     }
 
     #[tool(
         description = "Search this repository's pull requests, including ones the stack does not track, by text, state (open/closed/merged/all, default open), author and base branch. The repository is always the orchestrator's own and cannot be chosen. Returns at most limit hits (default 20, hard cap 100), each with number, title, state, draft, author, url and updated_at — GitHub's search reports no head or base branch, so follow up with pr_read when you need them."
     )]
     fn pr_search(&self, Parameters(p): Parameters<PrSearchInput>) -> String {
-        match pr_search_impl(p) {
-            Ok(v) => v.to_string(),
-            Err(e) => serde_json::json!({ "error": e }).to_string(),
-        }
+        to_wire(pr_search_impl(p))
     }
 
     #[tool(
         description = "Read a pull request's review feedback as three separate sections: submitted reviews, diff-anchored comment threads in reply order, and conversation comments. Address it by exactly one of node_id or pull_number — naming neither or both is rejected. A thread's resolved/unresolved state is not available over this API, so no thread reports one: read the replies to judge."
     )]
     fn pr_comments(&self, Parameters(p): Parameters<PrCommentsInput>) -> String {
-        match pr_comments_impl(p) {
-            Ok(v) => v.to_string(),
-            Err(e) => serde_json::json!({ "error": e }).to_string(),
-        }
+        to_wire(pr_comments_impl(p))
     }
 
     #[tool(
         description = "Bring an existing pull request into the stack as a node bound to its head branch and PR reference, carrying the PR's title, body and live phase, choosing which existing nodes it stacks on (empty for a root). Refuses a PR whose head branch is already bound to a node, and an unknown or cycle-forming parent. The adopted node has no child session."
     )]
     fn pr_adopt(&self, Parameters(p): Parameters<PrAdoptInput>) -> String {
-        match pr_adopt_impl(p) {
-            Ok(v) => v.to_string(),
-            Err(e) => serde_json::json!({ "error": e }).to_string(),
-        }
+        to_wire(pr_adopt_impl(p))
     }
 
     #[tool(
@@ -948,6 +924,20 @@ impl PermissionServer {
 // ---------------------------------------------------------------------------
 // PR-stack tool helpers
 // ---------------------------------------------------------------------------
+
+/// The state a `pr_search` that expressed no preference is run with: the PRs still in play.
+const DEFAULT_SEARCH_STATE: &str = "open";
+
+/// Serialize a PR-stack tool's outcome for the wire: the value itself, or `{"error": …}`.
+///
+/// Every `#[tool]` here returns a `String`, so a failure has to reach the agent as JSON rather than
+/// as a transport error — this is the one envelope all of them share.
+fn to_wire(result: Result<serde_json::Value, String>) -> String {
+    match result {
+        Ok(v) => v.to_string(),
+        Err(e) => serde_json::json!({ "error": e }).to_string(),
+    }
+}
 
 /// The orchestrator session directory (holds `changeset.yaml` with the stack).
 fn orchestrator_dir() -> Result<PathBuf, String> {
@@ -1192,7 +1182,17 @@ fn pr_comments_impl(p: PrCommentsInput) -> Result<serde_json::Value, String> {
     let gh = real_gh()?;
     let view =
         pr_insight::read_pr_comments(&gh, number).map_err(|e| format!("read pr comments: {e}"))?;
-    Ok(serde_json::json!({
+    Ok(pr_comments_json(&view))
+}
+
+/// Shape a [`pr_insight::PrCommentsView`] for the wire.
+///
+/// Owned by the tool for the same reason as [`pr_read_json`]: the agent-facing shape is a deliberate
+/// contract rather than whatever field list the Rust types happen to carry. The three sections stay
+/// separate keys because a verdict, a diff-anchored conversation and a PR-wide comment answer
+/// different questions.
+fn pr_comments_json(view: &pr_insight::PrCommentsView) -> serde_json::Value {
+    serde_json::json!({
         "reviews": view.reviews.iter().map(|r| serde_json::json!({
             "author": r.author,
             "state": r.state,
@@ -1216,7 +1216,7 @@ fn pr_comments_impl(p: PrCommentsInput) -> Result<serde_json::Value, String> {
             "body": c.body,
             "created_at": c.created_at,
         })).collect::<Vec<_>>(),
-    }))
+    })
 }
 
 /// Search the orchestrator's own repository for pull requests.
@@ -1228,21 +1228,30 @@ fn pr_search_impl(p: PrSearchInput) -> Result<serde_json::Value, String> {
     // Built from the slug already resolved above rather than through `real_gh()`, which would run
     // `git remote get-url origin` a second time for the same answer.
     let gh = tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi::new(repo.clone());
-    let hits = pr_insight::search_prs(
+    let hits = pr_insight::search_repository_prs(
         &gh,
         &repo,
         pr_insight::PrSearchInput {
             text: p.query,
-            // What a caller that expressed no preference means: the PRs still in play.
-            state: p.state.unwrap_or_else(|| "open".to_string()),
+            state: p.state.unwrap_or_else(|| DEFAULT_SEARCH_STATE.to_string()),
             author: p.author,
             base: p.base,
-            // `0` is "no preference" to `search_prs`, which owns the default and the cap.
+            // `0` is "no preference" to `search_repository_prs`, which owns the default and the cap.
             limit: p.limit,
         },
     )
     .map_err(|e| format!("search prs: {e}"))?;
-    Ok(serde_json::json!({
+    Ok(pr_search_json(&hits))
+}
+
+/// Shape a page of search hits for the wire.
+///
+/// Owned by the tool for the same reason as [`pr_read_json`]: the agent-facing shape is a deliberate
+/// contract rather than whatever field list the Rust types happen to carry. No branch fields —
+/// GitHub's search reports neither head nor base, so a hit that needs them is followed up with
+/// `pr_read`.
+fn pr_search_json(hits: &[PrSearchHit]) -> serde_json::Value {
+    serde_json::json!({
         "hits": hits.iter().map(|h| serde_json::json!({
             "number": h.number,
             "title": h.title,
@@ -1252,7 +1261,7 @@ fn pr_search_impl(p: PrSearchInput) -> Result<serde_json::Value, String> {
             "url": h.url,
             "updated_at": h.updated_at,
         })).collect::<Vec<_>>(),
-    }))
+    })
 }
 
 /// Create a stack node from an existing pull request.
@@ -1937,7 +1946,9 @@ mod tests {
     use rmcp::ServerHandler;
     use rstest::rstest;
     use serial_test::serial;
-    use tddy_workflow_recipes::orchestrate_pr_stack::github::{CheckRun, PrFile};
+    use tddy_workflow_recipes::orchestrate_pr_stack::github::{
+        CheckRun, PrFile, PrIssueComment, PrReview,
+    };
 
     #[test]
     fn mcp_server_get_info_mentions_github_pr_tools() {
@@ -2523,5 +2534,128 @@ mod tests {
 
         // Then — `draft` stays distinct from `open`: the two differ to a reviewer
         assert_eq!(name, expected);
+    }
+
+    #[test]
+    fn pr_comments_puts_reviews_threads_and_conversation_on_the_wire_as_three_sections() {
+        // Given — one verdict, one two-comment thread anchored to a diff line, one PR-wide comment
+        let view = pr_insight::PrCommentsView {
+            reviews: vec![PrReview {
+                author: "alice".to_string(),
+                state: "CHANGES_REQUESTED".to_string(),
+                body: "Name the timeout.".to_string(),
+                submitted_at: "2026-07-30T10:00:00Z".to_string(),
+            }],
+            threads: vec![pr_insight::PrReviewThread {
+                path: "src/token_store.rs".to_string(),
+                line: Some(17),
+                diff_hunk: "@@ -1,3 +1,4 @@".to_string(),
+                comments: vec![
+                    pr_insight::PrThreadComment {
+                        author: "alice".to_string(),
+                        body: "Why 30?".to_string(),
+                        created_at: "2026-07-30T10:01:00Z".to_string(),
+                    },
+                    pr_insight::PrThreadComment {
+                        author: "bob".to_string(),
+                        body: "The provider's own p99.".to_string(),
+                        created_at: "2026-07-30T10:02:00Z".to_string(),
+                    },
+                ],
+            }],
+            conversation: vec![PrIssueComment {
+                author: "carol".to_string(),
+                body: "Rebased onto master.".to_string(),
+                created_at: "2026-07-30T10:03:00Z".to_string(),
+            }],
+        };
+
+        // When
+        let json = pr_comments_json(&view);
+
+        // Then — the whole agent-facing contract, and no `resolved` on the thread: resolution state
+        // exists only on GraphQL's `reviewThreads`, so a guessed value would mislead the agent
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "reviews": [{
+                    "author": "alice",
+                    "state": "CHANGES_REQUESTED",
+                    "body": "Name the timeout.",
+                    "submitted_at": "2026-07-30T10:00:00Z",
+                }],
+                "threads": [{
+                    "path": "src/token_store.rs",
+                    "line": 17,
+                    "diff_hunk": "@@ -1,3 +1,4 @@",
+                    "comments": [
+                        { "author": "alice", "body": "Why 30?", "created_at": "2026-07-30T10:01:00Z" },
+                        { "author": "bob", "body": "The provider's own p99.", "created_at": "2026-07-30T10:02:00Z" },
+                    ],
+                }],
+                "conversation": [{
+                    "author": "carol",
+                    "body": "Rebased onto master.",
+                    "created_at": "2026-07-30T10:03:00Z",
+                }],
+            })
+        );
+        assert_eq!(json["threads"][0].get("resolved"), None);
+    }
+
+    #[test]
+    fn a_pr_search_puts_each_hit_on_the_wire_without_the_branches_github_does_not_report() {
+        // Given — one open PR and one draft, as a search page returns them
+        let hits = vec![
+            PrSearchHit {
+                number: 42,
+                title: "Add the token store".to_string(),
+                state: "open".to_string(),
+                draft: false,
+                author: "alice".to_string(),
+                url: "https://github.com/acme/repo/pull/42".to_string(),
+                updated_at: "2026-07-30T10:00:00Z".to_string(),
+            },
+            PrSearchHit {
+                number: 43,
+                title: "Rotate the signing key".to_string(),
+                state: "open".to_string(),
+                draft: true,
+                author: "bob".to_string(),
+                url: "https://github.com/acme/repo/pull/43".to_string(),
+                updated_at: "2026-07-30T11:00:00Z".to_string(),
+            },
+        ];
+
+        // When
+        let json = pr_search_json(&hits);
+
+        // Then — the whole agent-facing contract, in the order the search returned it; no `base` or
+        // `head`, which GitHub's search does not report — `pr_read` is where those come from
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "hits": [
+                    {
+                        "number": 42,
+                        "title": "Add the token store",
+                        "state": "open",
+                        "draft": false,
+                        "author": "alice",
+                        "url": "https://github.com/acme/repo/pull/42",
+                        "updated_at": "2026-07-30T10:00:00Z",
+                    },
+                    {
+                        "number": 43,
+                        "title": "Rotate the signing key",
+                        "state": "open",
+                        "draft": true,
+                        "author": "bob",
+                        "url": "https://github.com/acme/repo/pull/43",
+                        "updated_at": "2026-07-30T11:00:00Z",
+                    },
+                ],
+            })
+        );
     }
 }

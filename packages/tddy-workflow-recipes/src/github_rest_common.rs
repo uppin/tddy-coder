@@ -33,8 +33,11 @@ pub fn github_env_token_present() -> bool {
     github_token_from_env().is_some()
 }
 
+/// Root of the GitHub REST API every call in this module is built from.
+const GITHUB_API_BASE: &str = "https://api.github.com";
+
 fn github_api_url(repo: &str, path: &str) -> String {
-    format!("https://api.github.com/repos/{repo}/{path}")
+    format!("{GITHUB_API_BASE}/repos/{repo}/{path}")
 }
 
 fn temp_github_path(prefix: &str) -> std::path::PathBuf {
@@ -186,7 +189,7 @@ pub fn curl_github_get_json_absolute_path(
     query: &[(&str, &str)],
     token: &str,
 ) -> Result<String, tddy_core::WorkflowError> {
-    let url = format!("https://api.github.com/{}", path.trim_start_matches('/'));
+    let url = format!("{GITHUB_API_BASE}/{}", path.trim_start_matches('/'));
     run_curl_get(&url, query, token)
 }
 

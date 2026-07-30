@@ -15,8 +15,8 @@
 //! deterministically skipped — the assertions are about `Changeset.stack` and about which GitHub
 //! calls were made.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-07-30-pr-stack-full-control.md § pr_set_parents.
-//! Changeset: docs/dev/1-WIP/2026-07-30-pr-stack-full-control.md.
+//! PRD: docs/ft/coder/pr-stacking.md § Full control over the plan.
+//! Changeset: docs/dev/changesets.md (2026-07-30, pr-stack-full-control).
 
 mod common;
 

@@ -13,8 +13,8 @@
 //! is empty by construction if the allowlist stops looking the way `allowlisted_tool_names` expects —
 //! hence the cardinality guard there, and the count assertion on the dispatch loop.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-07-30-pr-stack-full-control.md § Enabling changes.
-//! Changeset: docs/dev/1-WIP/2026-07-30-pr-stack-full-control.md.
+//! PRD: docs/ft/coder/pr-stacking.md § PR-management tools.
+//! Changeset: docs/dev/changesets.md (2026-07-30, pr-stack-full-control).
 
 use tddy_tools::server::{PermissionServer, UNKNOWN_TOOL_REJECTION};
 use tddy_workflow_recipes::pr_stack::PR_STACK_TOOL_NAMES;

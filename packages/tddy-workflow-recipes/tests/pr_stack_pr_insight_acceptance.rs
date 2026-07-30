@@ -9,8 +9,8 @@
 //! head or base branch (`GET /search/issues` does not report them), and a thread carries no resolved
 //! flag (REST does not expose one — it is GraphQL-only).
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-07-30-pr-stack-full-control.md §§ pr_read, pr_search, pr_comments.
-//! Changeset: docs/dev/1-WIP/2026-07-30-pr-stack-full-control.md.
+//! PRD: docs/ft/coder/pr-stacking.md § Full control over the plan.
+//! Changeset: docs/dev/changesets.md (2026-07-30, pr-stack-full-control).
 
 mod common;
 
@@ -21,8 +21,8 @@ use common::{
 };
 use tddy_workflow_recipes::orchestrate_pr_stack::github::{PrFile, PrSearchQuery, PrState};
 use tddy_workflow_recipes::orchestrate_pr_stack::pr_insight::{
-    pull_number_for_node, read_pr, read_pr_comments, search_prs, PrSearchInput, PrThreadComment,
-    ReviewerState,
+    pull_number_for_node, read_pr, read_pr_comments, search_repository_prs, PrSearchInput,
+    PrThreadComment, ReviewerState,
 };
 
 const BRANCH_N1: &str = "feature/stack/n1";
@@ -292,7 +292,8 @@ fn a_search_asks_github_for_the_callers_repository_and_the_agents_own_text_state
     let gh = an_insight_github();
 
     // When — the agent supplies only free text; the repository is the caller's to set
-    search_prs(&gh, REPO, a_search_for("token store", 20)).expect("searching should succeed");
+    search_repository_prs(&gh, REPO, a_search_for("token store", 20))
+        .expect("searching should succeed");
 
     // Then — exactly one search, carrying every field the caller and the agent named. What keeps a
     // search inside this repository is `search_qualifiers`/`scoped_value`, tested where they live; this
@@ -321,8 +322,8 @@ fn a_search_returns_at_most_the_requested_number_of_hits() {
     ]);
 
     // When
-    let hits =
-        search_prs(&gh, REPO, a_search_for("anything", 2)).expect("searching should succeed");
+    let hits = search_repository_prs(&gh, REPO, a_search_for("anything", 2))
+        .expect("searching should succeed");
 
     // Then — the cap is honoured on the way out, not merely requested on the way in
     assert_eq!(

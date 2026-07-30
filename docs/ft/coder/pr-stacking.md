@@ -1,7 +1,7 @@
 # PR stacking
 
 **Product area:** Coder  
-**Updated:** 2026-07-03
+**Updated:** 2026-07-30
 
 ## Summary
 
@@ -164,14 +164,44 @@ During the `orchestrate` goal the agent has a set of `tddy-tools` MCP tools (nam
 | `pr_close` | Close a PR without merging. | new `close_pr` helper (`PATCH /pulls/{n}` `{state: "closed"}`) |
 | `pr_resolve_conflicts` | Sync a node's branch with its base, detect conflicts (`git ls-files -u`), and return the conflicted paths so the agent resolves them in the worktree; marks the node `has-conflicts`. | `merge_pr/git_ops.rs::sync_feature_with_origin_main`, `ensure_no_unmerged_paths` |
 | `pr_set_status` | Agent override: set a node's internal status `kind` + `note` with `source = "override"`. | `update_stack_atomic` |
-| `pr_add_planned` | Add/amend a planned PR node mid-flow. | `pr_stack::add_planned_pr_node` |
+| `pr_add_planned` | Append a planned PR node mid-flow. Additive only — it never touches an existing node; editing one is `pr_update_planned`. | `pr_stack::add_planned_pr_node` |
 | `pr_spawn_child` | Start a child coding session for a node (with `stack_parent` set) — the same effect as the web "Start session" CTA, driven from chat. | `StartSession` daemon path (via the toolcall relay) |
+| `pr_update_planned` | Edit a node's `title` / `description` (any time, including once it owns a branch, a session and an open PR) and its `branch_suggestion` (only while it owns no branch). Opt-in `sync_pr` also publishes the new title/body to the node's PR. | `pr_stack::{update_planned_pr_node, sync_node_to_github_pr}` |
+| `pr_delete_planned` | Remove a node, reparenting its children onto that node's parents. Refuses a node whose PR is open. Branch, worktree and child session are left alone and reported back as unowned. | `pr_stack::delete_planned_pr_node` |
+| `pr_set_parents` | Give a node a whole new parent list — the plan-level move, and the only reorder primitive (stack order is derived from `parents`). When the node owns a branch it is realigned exactly as a repoint realigns it. | `pr_stack::set_stack_node_parents` |
+| `pr_read` | One PR in full: title, body, state, base/head, mergeability, one latest review state per reviewer, and the head commit's check runs. Changed files only on request. | `pr_insight::read_pr` |
+| `pr_search` | Find PRs in this repository — including ones the stack does not track — by text, state, author or base. | `pr_insight::search_repository_prs` |
+| `pr_comments` | A PR's review feedback: submitted reviews, diff-anchored comment threads, and conversation comments. | `pr_insight::read_pr_comments` |
+| `pr_adopt` | Create a node from an existing PR, bound to its head branch and PR reference. | `pr_stack::adopt_pr_into_stack` |
 
 Merging and repointing keep their prior crash-safety semantics (`StackOpJournal`, idempotent repoint, `--force-with-lease`), only now they are entered when the agent calls `pr_merge` / `pr_repoint`, not by the loop.
 
+### Full control over the plan *(added 2026-07-30)*
+
+The first eight tools could only **grow** the stack. Combined with `reseed_stack_from_plan_if_unspawned` refusing once any node owns a `branch` or a `session_id`, the plan became immutable the moment the stack became real: no way to edit a node, delete one, move one in the DAG, read a PR in any depth, search the repository's PRs, or bring an existing PR in. The seven tools added above close that.
+
+Rules that are not obvious from the table:
+
+- **`pr_repoint` and `pr_set_parents` are different operations.** Repointing answers *"the base branch drifted — retain the parent that owns this target"*; setting parents answers *"the plan changed — this node belongs here now"*, with the caller naming the complete new set (an empty list makes the node a root). They share one git+GitHub tail, `realign_node_to_effective_base`: rebase onto the new effective base, `--force-with-lease` push, re-target the open PR.
+- **Deleting reparents; it never cascades.** Children inherit the removed node's parents, deduplicated, and the removed node's own id is filtered out of what they inherit. This is not politeness: [`Stack::topo_order`](#stack-data-model) counts in-degree only over parents that resolve to a node, so a delete that merely dropped the node would leave the stack quietly describing an edge that no longer exists, and nothing would ever report it.
+- **A rejected mutation writes nothing.** All four writers validate against a candidate `Stack` — existence, self-parenthood, repeated ids, cycles — before calling `update_stack_atomic`.
+- **A node's PR is still identified by `pr_status.url`.** `pr_read` / `pr_comments` / `pr_adopt` resolve a pull number through `pr_number_from_status_url`; `StackNode` gained no PR-number field, so there is one source of truth and no migration. A node that records no URL is not addressable by `node_id` and says so rather than guessing.
+- **Adoption cannot double-track a PR.** It is refused when the PR's head branch is already bound to a node *or* when any node already records that pull number.
+
+Two limitations are part of the contract rather than defects:
+
+- **A search hit carries no head or base branch.** `GET /search/issues` does not report them, so `base:` works as a search qualifier but the branch names are absent; the agent follows up with `pr_read`.
+- **No thread is reported as resolved.** Thread resolution is exposed only by GitHub's GraphQL API, so the REST-backed `pr_comments` emits no `resolved` field rather than guessing one.
+
+A search is always scoped to the orchestrator's own repository: `repo:` and `is:pr` are injected by the tool, and the agent's `text` / `author` / `base` values are refused if they carry a `:` or whitespace — GitHub *ORs* repeated `repo:` qualifiers, so an unguarded value would read another repository with the operator's own credential.
+
 ### GitHub API surface
 
-`GithubPrApi` trait (real implementation + mock transport for tests): `get_open_pr`, `merge_pr(number)`, `patch_pr_base(number, new_base)`, `create_pr(head, base, title, body)`, and the new `close_pr(number)`. Backed by shared curl helpers `curl_github_patch_json`, `curl_github_post_json`, and `curl_github_put_json` in `github_rest_common.rs`.
+`GithubPrApi` trait (real implementation + mock transport for tests): `get_open_pr`, `merge_pr(number)`, `patch_pr_base(number, new_base)`, `create_pr(head, base, title, body)`, and `close_pr(number)`. Backed by shared curl helpers `curl_github_patch_json`, `curl_github_post_json`, and `curl_github_put_json` in `github_rest_common.rs`.
+
+`GithubPrInsightApi` *(added 2026-07-30)* is a **sibling** trait, not more methods on `GithubPrApi`: `get_pr`, `list_pr_files`, `list_check_runs`, `list_reviews`, `list_review_comments`, `list_issue_comments`, `search_prs`, and the one write `patch_pr_title_body`. Kept separate because the eight hand-written fakes implementing `GithubPrApi` care only about lifecycle operations and would otherwise all need stubs for reads they never exercise. `RealGithubPrApi` implements both. `/search/issues` is not under `/repos/{owner}/{repo}/`, so `github_rest_common.rs` gained `curl_github_get_json_absolute_path` alongside the repo-scoped helpers.
+
+Response shaping lives in `orchestrate_pr_stack::pr_insight` (`read_pr`, `read_pr_comments`, `search_repository_prs`, `pull_number_for_node`), so every shape the agent sees is testable against a fake; the `tddy-tools` tool bodies only resolve environment and serialize. The `curl` request bodies themselves have no automated coverage — the transport shells out to `curl` against a hardcoded API base and cannot be intercepted, the same gap the `GithubPrApi` methods have.
 
 ## Internal PR status
 
