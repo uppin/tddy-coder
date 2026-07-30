@@ -12,7 +12,7 @@ import { PrStackChat } from "./PrStackChat";
 import { parseStackPlan, type StackNode } from "./stackPlan";
 import { useQueryBranch } from "./useQueryBranch";
 import { deriveStackBaseBranch, resolveStackBase } from "./deriveStackBaseBranch";
-import { prioritiseBaseBranchOptions } from "./prioritiseBaseBranchOptions";
+import { baseBranchChoice } from "./baseBranchChoice";
 import { resolveRepointTarget } from "./startBlockers";
 import { CreateSessionDialog } from "../CreateSessionDialog";
 import type { CreateSessionInitialValues } from "../CreateSessionPane";
@@ -170,12 +170,18 @@ export function PrStackScreen({
   // its worktree and its remote ref all outlive the session that made them, so `new_branch_from_base`
   // would fail on "branch already exists" — which is exactly the node this recovery path is for.
   const ownedBranch = startSessionNode?.branch ?? "";
-  const baseBranchOptions = startSessionNode
-    ? prioritiseBaseBranchOptions(startSessionNode, stack.nodes).map((b) =>
-        remoteTrackingName(b, remote),
-      )
-    : [];
-  const selectedBaseBranch = baseBranchOptions[0] ?? "";
+  // Options and pre-selection come from one resolver, so the picker cannot contradict the base label
+  // below — both read `deriveStackBaseBranch`. Each option's ref is lifted into remote-tracking form,
+  // and with it any label that IS that branch. A label that differs is prose, not a ref — today only a
+  // legacy project's "project default", which names an empty ref in words — so it is left as written.
+  const choice = startSessionNode
+    ? baseBranchChoice(startSessionNode, stack.nodes, defaultBranch)
+    : { options: [], selected: "" };
+  const baseBranchOptions = choice.options.map((option) => {
+    const ref = remoteTrackingName(option.value, remote);
+    return { value: ref, label: option.label === option.value ? ref : option.label };
+  });
+  const selectedBaseBranch = remoteTrackingName(choice.selected, remote);
   const startSessionInitialValues: CreateSessionInitialValues | undefined = startSessionNode
     ? {
         projectId: session.projectId,
