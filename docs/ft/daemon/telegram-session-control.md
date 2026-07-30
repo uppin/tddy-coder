@@ -127,7 +127,17 @@ The daemon binary runs **long-polling** inbound handling (see above). Durable **
 
 2. **Project callback** (`handle_telegram_project_callback`): shows the **branch keyboard** (unchanged).
 
-3. **Branch callback** (`handle_telegram_branch_callback`): sets `workflow.selected_integration_base_ref`. For `claude-cli` sessions, also sets `workflow.new_branch_name` derived from `changeset.name` via `claude_cli_branch_name_from_changeset` (since `validate_workflow_branch_intent` requires `new_branch_name` when `intent == new_branch_from_base`). Detects `session_type == "claude-cli"` from the routing snapshot and sends the **model keyboard** instead of the agent/tddy-coder keyboard.
+3. **Branch callback** (`handle_telegram_branch_callback`): sets `workflow.selected_integration_base_ref`. For `claude-cli` sessions, also sets `workflow.new_branch_name` derived from `changeset.name` via `claude_cli_branch_name_from_changeset` (since `validate_workflow_branch_intent` requires `new_branch_name` when `intent == new_branch_from_base`). Detects `session_type == "claude-cli"` from the routing snapshot and sends the **model keyboard** instead of the agent/tddy-coder keyboard — unless another session already owns the derived branch, in which case it sends the **branch-conflict keyboard** instead (see below).
+
+3a. **Branch-conflict keyboard** (`tbc:` callbacks) — the derived `feature/<slug(name)>` collides whenever two sessions are named alike, and Telegram spawns worktrees directly rather than through `StartSession`, so it carries its own copy of the [branch-conflict guard](session-branch-conflict.md). Ownership comes from the shared `branch_owner::find_session_owning_branch` (prefer active, then most recently updated). Three buttons, payload `tbc:<choice>:<proj_idx>:<session_id>` — the branch name is re-derived server-side because `callback_data` caps at 64 bytes:
+
+   | Button | Choice | Effect |
+   |--------|--------|--------|
+   | `Switch to <label>` | `sw` | Enters the owning session (binds the chat, as its Enter button does). The half-configured pending session is left un-spawned, exactly as abandoning any picker mid-flow does — it is not deleted. |
+   | `New agent on <branch>` | `na` | Rewrites the changeset to `work_on_selected_branch` on that branch and clears `new_branch_name`, so the new session shares the owner's worktree, then continues to the model keyboard. |
+   | `Use <suggested>` | `sg` | Keeps `new_branch_from_base` under the first free `<branch>-<n>`, then continues to the model keyboard. |
+
+   Nothing is claimed while the operator decides: no worktree, no `Changeset.branch`. The check applies only to the claude-cli derivation — `/start-cursor` derives `cursor-cli/<short-id>` from the session id and cannot collide. Unlike the web dialog, `sg` does not re-check whether the suggested name is itself owned.
 
 4. **Model keyboard** (`tcm:` callbacks). One button per entry of
    `tddy_core::backend::claude_cli_models()` — the same catalog the web dropdown renders, so the

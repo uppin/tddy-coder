@@ -49,6 +49,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **setup_worktree_for_session**: Resolves the default integration base ref, then calls **setup_worktree_for_session_with_integration_base**. Used by TUI and daemon after plan approval when no explicit ref is passed at this API layer.
 - **fetch_origin_master**: Equivalent to **fetch_integration_base** with **FALLBACK_DEFAULT_INTEGRATION_BASE_REF**.
 - **create_worktree**: Creates worktree with optional `start_point` (remote-tracking ref). Worktrees live in `.worktrees/` relative to repo root.
+- **first_free_suffixed_branch_name(repo_root, branch)**: The first `<branch>-<n>` (`n` from 1) no local branch holds — the name the private **create_worktree_with_retry** suffixing loop would land on, computed **without creating** a branch or worktree. Backs the `suggested_branch_name` a refused session creation reports (see [session-branch-conflict.md](../../../docs/ft/daemon/session-branch-conflict.md)); a repo whose refs cannot be listed reports nothing as taken and so suggests `<branch>-1`.
 - **ensure_worktree_for_acceptance_tests**: Uses `output_dir` from context (must be main repo root). When `backend_name == "stub"` (demo), skips worktree creation and uses `output_dir` directly. Otherwise calls `find_git_root(&output_dir)` to locate `.git`; fallback to `output_dir.parent()`. After creation, `cs.repo_path` is overwritten with worktree path; later goals use `worktree_dir`.
 
 **Repo root resolution** (where `output_dir`/`repo_path` comes from):

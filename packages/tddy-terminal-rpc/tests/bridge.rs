@@ -465,7 +465,7 @@ async fn serve_stream_terminal_output_from_offset_replays_only_the_gap_from_offs
 }
 
 #[tokio::test]
-async fn serve_stream_terminal_output_from_offset_at_the_tip_emits_no_catch_up() {
+async fn serve_stream_terminal_output_from_offset_at_the_tip_re_anchors_the_client_to_the_tip() {
     // Given a terminal that has produced 10 bytes
     let terminal = StubTerminal::new();
     terminal.write(b"0123456789");
@@ -478,12 +478,83 @@ async fn serve_stream_terminal_output_from_offset_at_the_tip_emits_no_catch_up()
     handle.end();
     let frames = drain(rx).await;
 
-    // Then no catch-up frame is emitted (the gap is empty); the stream goes straight to live and
-    // ends on pty_done.
-    assert!(
-        frames.is_empty(),
-        "no catch-up when from_offset == end_offset"
+    // Then the open still re-anchors the client: an empty catch-up frame tagged with the tip, so the
+    // client's cumulative offset is SET by the server on every open instead of being inferred from
+    // unanchored frames. Without it a reconnect that finds no gap leaves the client's counter free to
+    // drift, and the drift is never corrected.
+    assert_eq!(
+        frames.len(),
+        1,
+        "an empty tip-anchored catch-up frame re-anchors the client"
     );
+    assert!(
+        frames[0].data.is_empty(),
+        "nothing to replay when the client is already at the tip"
+    );
+    assert_eq!(frames[0].start_offset, 10);
+    assert_eq!(frames[0].end_offset, 10);
+}
+
+#[tokio::test]
+async fn serve_stream_terminal_output_from_offset_past_the_tip_re_anchors_the_client_back_to_the_tip(
+) {
+    // Given a terminal that has produced 10 bytes
+    let terminal = StubTerminal::new();
+    terminal.write(b"0123456789");
+    let (store, handle) = StubStore::with(terminal);
+
+    // When the client reconnects claiming a from_offset 12 bytes PAST the tip — its cumulative
+    // counter drifted ahead (it counted out-of-band bytes, e.g. a re-issued mode prologue, as stream
+    // bytes)
+    let rx = serve_stream_terminal_output_with(&store, req_from_offset("s1", "", 22), 4)
+        .await
+        .expect("stream opened");
+    handle.end();
+    let frames = drain(rx).await;
+
+    // Then the server corrects the drift: the anchored frame reports the REAL tip (10), never the
+    // client's claimed 22. A client left at 22 asks for 22+ on every later reconnect, so the daemon
+    // replays nothing and the missed bytes — including whole redraw sequences — are dropped forever.
+    assert_eq!(
+        frames.len(),
+        1,
+        "an empty tip-anchored catch-up frame re-anchors the drifted client"
+    );
+    assert!(frames[0].data.is_empty());
+    assert_eq!(frames[0].start_offset, 10);
+    assert_eq!(frames[0].end_offset, 10);
+}
+
+#[tokio::test]
+async fn serve_stream_terminal_output_sends_the_mode_prologue_before_the_offset_anchored_frame() {
+    // Given a terminal whose application enabled SGR mouse tracking (8 prologue bytes) and then
+    // painted 6 bytes of screen — a 14-byte cumulative stream
+    let terminal = StubTerminal::new();
+    terminal.write(b"\x1b[?1002h");
+    terminal.write(b"screen");
+    let (store, handle) = StubStore::with(terminal);
+
+    // When the client reconnects with FROM_OFFSET already at the tip (14)
+    let rx = serve_stream_terminal_output_with(&store, req_from_offset("s1", "", 14), 64)
+        .await
+        .expect("stream opened");
+    handle.end();
+    let frames = drain(rx).await;
+
+    // Then the re-issued mode prologue comes first with ZEROED offsets — it is replayed VT state, not
+    // a slice of the cumulative output stream — and is followed by the offset-anchored frame. The
+    // ordering is the client's only way to tell the two apart: everything before the anchor is
+    // out-of-band and must not advance the client's cumulative offset.
+    assert_eq!(
+        frames.len(),
+        2,
+        "the unanchored mode prologue, then the tip-anchored frame"
+    );
+    assert_eq!(frames[0].data, b"\x1b[?1002h");
+    assert_eq!(frames[0].start_offset, 0);
+    assert_eq!(frames[0].end_offset, 0);
+    assert_eq!(frames[1].start_offset, 14);
+    assert_eq!(frames[1].end_offset, 14);
 }
 
 #[tokio::test]
