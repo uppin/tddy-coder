@@ -222,7 +222,14 @@ pub fn execute_stack_repoint(
 
 /// Extract the PR number from a GitHub PR URL stored in `GithubPrStatus`.
 /// Parses `.../pull/{number}` from the URL.
-fn pr_number_from_status_url(status: Option<&tddy_core::changeset::GithubPrStatus>) -> Option<u64> {
+///
+/// This is the system's single mechanism for "which pull request is this node": `StackNode` carries
+/// no PR-number field, so every caller that needs one recovers it from the recorded URL. Public so
+/// the PR-inspection reads resolve a node the same way the merge and repoint paths already do —
+/// a second, differently-derived answer would be a second source of truth.
+pub fn pr_number_from_status_url(
+    status: Option<&tddy_core::changeset::GithubPrStatus>,
+) -> Option<u64> {
     let url = status?.url.as_deref()?;
     url.rsplit('/').next()?.parse::<u64>().ok()
 }
