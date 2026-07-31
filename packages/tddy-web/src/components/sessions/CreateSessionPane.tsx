@@ -1,12 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
-import type { AgentInfo, ConnectionService, ProjectEntry, SessionEntry, SubagentInfo, ToolInfo } from "../../gen/connection_pb";
+import type { AgentInfo, BranchConflict, ConnectionService, ProjectEntry, SessionEntry, SubagentInfo, ToolInfo } from "../../gen/connection_pb";
 import { localBranchName } from "../../lib/branchNames";
+import type { BaseBranchOption } from "./prstack/baseBranchChoice";
+import {
+  startSessionOverridesFor,
+  type BranchConflictResolution,
+  type BranchFieldOverrides,
+  type BranchWorktreeIntent,
+} from "../../lib/branchConflict";
 import { prStackOrchestrators } from "../../utils/stackParents";
 import { useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useAgentModels } from "../../rpc/useAgentModels";
 import { Button } from "../ui/button";
+import { BranchConflictDialog } from "./BranchConflictDialog";
 
 /** Pseudo-agent key used to fetch the claude-cli session type's model catalog. */
 const CLAUDE_CLI_AGENT = "claude-cli";
@@ -30,7 +38,7 @@ const WORKFLOW_RECIPES = [
 type ConnectionClient = Client<typeof ConnectionService>;
 
 type SessionType = "tool" | "claude-cli" | "cursor-cli";
-type BranchIntent = "new_branch_from_base" | "work_on_selected_branch";
+type BranchIntent = BranchWorktreeIntent;
 
 /**
  * Optional pre-fill for the form's fields. Used when the pane is opened from a context that already
@@ -60,9 +68,17 @@ export type CreateSessionInitialValues = Partial<{
   createRemoteBranch: boolean;
   /** Concrete base branch shown in the new-branch option: "New branch from base: <baseBranchLabel>". */
   baseBranchLabel: string;
-  /** Ordered base-branch options for the "Base branch" selector (planned-PR child sessions). */
-  baseBranchOptions: string[];
-  /** Pre-selected base branch in the "Base branch" selector (defaults to the first option). */
+  /**
+   * Ordered base-branch options for the "Base branch" selector (planned-PR child sessions). Each
+   * option carries the ref it submits and its caption separately: a legacy project's project default
+   * is the empty ref the daemon resolves itself, which needs a label naming it rather than a blank
+   * option (see `baseBranchChoice`).
+   */
+  baseBranchOptions: BaseBranchOption[];
+  /**
+   * Pre-selected base branch in the "Base branch" selector — the caller's derived base, which is
+   * always one of `baseBranchOptions`.
+   */
   selectedBaseBranch: string;
   initialPrompt: string;
   daemonInstanceId: string;
@@ -134,7 +150,7 @@ export function CreateSessionPane({
   const [createRemoteBranch, setCreateRemoteBranch] = useState(
     initialValues?.createRemoteBranch ?? true,
   );
-  const [baseBranchOptions] = useState<string[]>(initialValues?.baseBranchOptions ?? []);
+  const [baseBranchOptions] = useState<BaseBranchOption[]>(initialValues?.baseBranchOptions ?? []);
   const [selectedBaseBranch, setSelectedBaseBranch] = useState<string>(
     initialValues?.selectedBaseBranch ?? "",
   );
@@ -161,6 +177,9 @@ export function CreateSessionPane({
   const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set when the daemon refused a creation because another session already owns the requested branch.
+  // The form stays mounted behind the prompt, so cancelling returns to it with its values intact.
+  const [branchConflict, setBranchConflict] = useState<BranchConflict | null>(null);
 
   // The model catalog is enumerated per selected backend: the chosen agent for tool sessions, and
   // the "claude-cli" pseudo-agent for the Claude CLI session type.
@@ -309,7 +328,83 @@ export function CreateSessionPane({
     return Boolean(effectiveProjectId && model);
   })();
 
-  const handleSubmit = async () => {
+  /**
+   * Send one `StartSession` for the current form state, with the branch fields optionally overridden
+   * by a branch-conflict resolution (which re-runs the same creation under different branch fields).
+   */
+  const startSession = (branchOverrides: BranchFieldOverrides | null) => {
+    // In peer mode the new session runs on the SAME worktree as the orchestrating session
+    // (via repo_path), so no git worktree is created and no branch is checked out — branch fields
+    // are irrelevant and kept empty.
+    const peerRepoPath = peerMode ? (initialValues?.repoPath ?? "") : "";
+    const commonParams = {
+      sessionToken,
+      projectId: effectiveProjectId,
+      branchWorktreeIntent: peerMode ? "" : branchIntent,
+      newBranchName: peerMode ? "" : newBranchName,
+      createRemoteBranch: peerMode ? false : createRemoteBranch,
+      selectedIntegrationBaseRef: peerMode ? "" : selectedBaseBranch,
+      selectedBranchToWorkOn: peerMode ? "" : selectedBranchToWorkOn,
+      daemonInstanceId: effectiveDaemonInstanceId,
+      repoPath: peerRepoPath,
+      // Ask to be refused rather than silently given `<branch>-1` when another session owns the
+      // branch: this form has an operator to prompt. A peer creates no branch at all, so there is
+      // nothing to conflict over. See docs/ft/daemon/session-branch-conflict.md.
+      onBranchConflict: peerMode ? "" : "reject",
+      ...branchOverrides,
+    };
+    if (sessionType === "tool") {
+      return client.startSession({
+        ...commonParams,
+        toolPath,
+        agent,
+        recipe,
+        stackParent,
+        sessionType: "",
+        model,
+        permissionMode: "",
+        initialPrompt: "",
+        sandbox: false,
+      });
+    }
+    if (sessionType === "cursor-cli") {
+      return client.startSession({
+        ...commonParams,
+        toolPath: "",
+        agent: "",
+        recipe: managedCodebase ? recipe : "",
+        stackParent,
+        sessionType: "cursor-cli",
+        model,
+        permissionMode: "",
+        initialPrompt,
+        sandbox,
+        managedCodebase,
+        specializedAgents: managedCodebase ? selectedSubagents : [],
+        semanticIndex: managedCodebase ? semanticIndex : false,
+      });
+    }
+    return client.startSession({
+      ...commonParams,
+      toolPath: "",
+      agent: "",
+      recipe: managedCodebase ? recipe : "",
+      stackParent,
+      sessionType: "claude-cli",
+      model,
+      permissionMode,
+      dangerouslySkipPermissions,
+      initialPrompt,
+      sandbox,
+      managedCodebase,
+      // Only send subagents when managed codebase is enabled — the picker is hidden otherwise,
+      // so a selection made before unchecking the toggle must not leak into the request.
+      specializedAgents: managedCodebase ? selectedSubagents : [],
+      semanticIndex: managedCodebase ? semanticIndex : false,
+    });
+  };
+
+  const submitCreation = async (branchOverrides: BranchFieldOverrides | null) => {
     // Use flushSync to commit the submitting state synchronously before the async fetch starts.
     // This ensures the Create button is visibly disabled in the very next render cycle, even
     // if the network response arrives quickly (e.g. in tests with a fast stub).
@@ -318,70 +413,12 @@ export function CreateSessionPane({
       setError(null);
     });
     try {
-      // In peer mode the new session runs on the SAME worktree as the orchestrating session
-      // (via repo_path), so no git worktree is created and no branch is checked out — branch fields
-      // are irrelevant and kept empty.
-      const peerRepoPath = peerMode ? (initialValues?.repoPath ?? "") : "";
-      const commonParams = {
-        sessionToken,
-        projectId: effectiveProjectId,
-        branchWorktreeIntent: peerMode ? "" : branchIntent,
-        newBranchName: peerMode ? "" : newBranchName,
-        createRemoteBranch: peerMode ? false : createRemoteBranch,
-        selectedIntegrationBaseRef: peerMode ? "" : selectedBaseBranch,
-        selectedBranchToWorkOn: peerMode ? "" : selectedBranchToWorkOn,
-        daemonInstanceId: effectiveDaemonInstanceId,
-        repoPath: peerRepoPath,
-      };
-      let res: { sessionId: string };
-      if (sessionType === "tool") {
-        res = await client.startSession({
-          ...commonParams,
-          toolPath,
-          agent,
-          recipe,
-          stackParent,
-          sessionType: "",
-          model,
-          permissionMode: "",
-          initialPrompt: "",
-          sandbox: false,
-        });
-      } else if (sessionType === "cursor-cli") {
-        res = await client.startSession({
-          ...commonParams,
-          toolPath: "",
-          agent: "",
-          recipe: managedCodebase ? recipe : "",
-          stackParent,
-          sessionType: "cursor-cli",
-          model,
-          permissionMode: "",
-          initialPrompt,
-          sandbox,
-          managedCodebase,
-          specializedAgents: managedCodebase ? selectedSubagents : [],
-          semanticIndex: managedCodebase ? semanticIndex : false,
-        });
-      } else {
-        res = await client.startSession({
-          ...commonParams,
-          toolPath: "",
-          agent: "",
-          recipe: managedCodebase ? recipe : "",
-          stackParent,
-          sessionType: "claude-cli",
-          model,
-          permissionMode,
-          dangerouslySkipPermissions,
-          initialPrompt,
-          sandbox,
-          managedCodebase,
-          // Only send subagents when managed codebase is enabled — the picker is hidden otherwise,
-          // so a selection made before unchecking the toggle must not leak into the request.
-          specializedAgents: managedCodebase ? selectedSubagents : [],
-          semanticIndex: managedCodebase ? semanticIndex : false,
-        });
+      const res = await startSession(branchOverrides);
+      if (res.branchConflict) {
+        // Another session owns the branch and nothing was created — ask the operator how to proceed
+        // instead of navigating to a session that does not exist.
+        setBranchConflict(res.branchConflict);
+        return;
       }
       onCreated(res.sessionId);
     } catch (err) {
@@ -390,6 +427,28 @@ export function CreateSessionPane({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleSubmit = () => submitCreation(null);
+
+  /**
+   * Apply the operator's answer to the branch-conflict prompt. "Switch" submits nothing: it hands the
+   * owning session's id to `onCreated`, which is what selects and attaches a session. The other two
+   * choices re-run creation with the branch fields that choice implies.
+   */
+  const resolveBranchConflict = (
+    conflict: BranchConflict,
+    resolution: BranchConflictResolution,
+  ) => {
+    const branchOverrides = startSessionOverridesFor(resolution, conflict);
+    setBranchConflict(null);
+    if (branchOverrides === null) {
+      // `owner` is only optional because proto3 message fields always are in the generated types —
+      // a reported conflict always names the session that holds the branch.
+      onCreated(conflict.owner?.sessionId ?? "");
+      return;
+    }
+    void submitCreation(branchOverrides);
   };
 
   // Model selector — shared by both session types, populated from the daemon-advertised catalog for
@@ -885,9 +944,9 @@ export function CreateSessionPane({
                 value={selectedBaseBranch}
                 onChange={(e) => setSelectedBaseBranch(e.target.value)}
               >
-                {baseBranchOptions.map((branch) => (
-                  <option key={branch} value={branch}>
-                    {branch}
+                {baseBranchOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
                   </option>
                 ))}
               </select>
@@ -976,6 +1035,22 @@ export function CreateSessionPane({
           Create session
         </Button>
       </div>
+
+      {/* Branch-conflict prompt — an overlay over this form, which stays mounted with its values so
+          cancelling returns the operator to what they typed. */}
+      {branchConflict !== null && (
+        <BranchConflictDialog
+          conflict={branchConflict}
+          onSwitchToOwner={() => resolveBranchConflict(branchConflict, { choice: "switch-to-owner" })}
+          onAddAgent={() => resolveBranchConflict(branchConflict, { choice: "add-agent" })}
+          onRename={(branchName) => {
+            // Keep the form's own field in step with the name actually submitted.
+            setNewBranchName(branchName);
+            resolveBranchConflict(branchConflict, { choice: "rename", branchName });
+          }}
+          onCancel={() => setBranchConflict(null)}
+        />
+      )}
     </div>
   );
 }

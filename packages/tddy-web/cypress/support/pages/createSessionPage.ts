@@ -46,6 +46,11 @@ export const createSessionPage = {
     byTestId(TEST_IDS.createSessionBranchIntentSelect).select("work_on_selected_branch");
   },
 
+  /** Name the branch to create in "new branch from base" mode. */
+  typeNewBranchName(branch: string) {
+    byTestId(TEST_IDS.createSessionNewBranchNameInput).clear().type(branch);
+  },
+
   /** Submit the new-session form. */
   submit() {
     byTestId(TEST_IDS.createSessionSubmitBtn).click();

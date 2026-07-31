@@ -17,11 +17,12 @@ use crate::telegram_session_control::{
     parse_recipe_callback_session_dir, parse_session_control_callback, parse_sessions_command,
     parse_start_claude_prompt, parse_start_cursor_prompt, parse_start_workflow_prompt,
     parse_submit_feature_command, parse_telegram_agent_callback, parse_telegram_branch_callback,
-    parse_telegram_branch_more_callback, parse_telegram_chain_parent_callback,
-    parse_telegram_claude_model_callback, parse_telegram_cursor_model_callback,
-    parse_telegram_intent_callback, parse_telegram_project_callback, ChainWorkflowCommand,
-    SessionControlCallback, StartClaudeCommand, StartCursorCommand, StartWorkflowCommand,
-    TelegramCallback, TelegramSessionControlHarness, CB_TELEGRAM_CHAIN_PARENT,
+    parse_telegram_branch_conflict_callback, parse_telegram_branch_more_callback,
+    parse_telegram_chain_parent_callback, parse_telegram_claude_model_callback,
+    parse_telegram_cursor_model_callback, parse_telegram_intent_callback,
+    parse_telegram_project_callback, ChainWorkflowCommand, SessionControlCallback,
+    StartClaudeCommand, StartCursorCommand, StartWorkflowCommand, TelegramCallback,
+    TelegramSessionControlHarness, CB_TELEGRAM_CHAIN_PARENT,
 };
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 
@@ -514,6 +515,28 @@ async fn telegram_callback_handler(bot: Bot, harness: Harness, q: CallbackQuery)
                 proj_idx,
                 &session_id,
             )
+            .await
+        {
+            Ok(()) => {}
+            Err(e) => {
+                bot.send_message(
+                    ChatId(chat_id),
+                    telegram_workflow_error_message(format!("{e:#}")),
+                )
+                .await?;
+            }
+        }
+        return Ok(());
+    }
+
+    if let Some((choice, proj_idx, session_id)) = parse_telegram_branch_conflict_callback(&data) {
+        if workflow_callback_gate_authorized(&bot, &harness, chat_id, qid.clone()).await {
+            return Ok(());
+        }
+        let _ = bot.answer_callback_query(qid.clone()).await;
+        let h = harness.lock().await;
+        match h
+            .handle_telegram_branch_conflict_callback(chat_id, choice, proj_idx, &session_id)
             .await
         {
             Ok(()) => {}

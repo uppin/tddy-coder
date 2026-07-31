@@ -9,6 +9,10 @@
 //! frame (a tail chunk of the capture ring, tagged with its absolute byte offsets) as the first
 //! frames, then bridges live broadcast output until the child exits. Older history is fetched on
 //! demand via [`serve_get_terminal_history`] as the user scrolls up.
+//!
+//! Frame identity: every frame a stream emits — prologue, replay/catch-up, ACK and live tail —
+//! carries the session id and the RESOLVED terminal id it came from, so a client can drop output
+//! belonging to another terminal instead of painting it into the wrong one.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -46,44 +50,83 @@ pub fn resolved_terminal_id(terminal_id: &str) -> &str {
     }
 }
 
-/// A data frame carrying terminal output bytes. `start_offset` / `end_offset` / `at_oldest` are
-/// populated only on the initial replay frame; live tail frames leave them at their zero defaults.
-fn data_frame(data: Vec<u8>) -> SessionTerminalOutput {
-    SessionTerminalOutput {
-        data,
-        acked_input_offset: 0,
-        start_offset: 0,
-        end_offset: 0,
-        at_oldest: false,
+/// The session and terminal a stream's frames belong to. Every frame a stream emits carries it, so
+/// a client can tell its own terminal's bytes from another terminal's and drop what is not its own
+/// instead of silently painting it. Frames are only ever built through this type, so no frame can
+/// leave the bridge unidentified.
+#[derive(Clone)]
+struct FrameIdentity {
+    session_id: String,
+    /// Always the RESOLVED terminal id — see [`resolved_terminal_id`].
+    terminal_id: String,
+}
+
+impl FrameIdentity {
+    fn new(session_id: &str, terminal_id: &str) -> Self {
+        Self {
+            session_id: session_id.to_string(),
+            terminal_id: resolved_terminal_id(terminal_id).to_string(),
+        }
+    }
+
+    /// A data frame carrying terminal output bytes. `start_offset` / `end_offset` / `at_oldest` are
+    /// populated only on the initial replay frame; live tail frames leave them at their zero
+    /// defaults.
+    fn data_frame(&self, data: Vec<u8>) -> SessionTerminalOutput {
+        SessionTerminalOutput {
+            data,
+            acked_input_offset: 0,
+            start_offset: 0,
+            end_offset: 0,
+            at_oldest: false,
+            session_id: self.session_id.clone(),
+            terminal_id: self.terminal_id.clone(),
+        }
+    }
+
+    /// The initial replay frame: the current last frame, tagged with its absolute offsets and
+    /// whether it reaches the ring's oldest retained byte (so the client knows whether older
+    /// history exists).
+    fn initial_replay_frame(
+        &self,
+        data: Vec<u8>,
+        start_offset: u64,
+        end_offset: u64,
+        at_oldest: bool,
+    ) -> SessionTerminalOutput {
+        SessionTerminalOutput {
+            data,
+            acked_input_offset: 0,
+            start_offset,
+            end_offset,
+            at_oldest,
+            session_id: self.session_id.clone(),
+            terminal_id: self.terminal_id.clone(),
+        }
+    }
+
+    /// An ACK frame: empty `data` carrying the applied input offset.
+    fn ack_frame(&self, acked_input_offset: u64) -> SessionTerminalOutput {
+        SessionTerminalOutput {
+            data: Vec::new(),
+            acked_input_offset,
+            start_offset: 0,
+            end_offset: 0,
+            at_oldest: false,
+            session_id: self.session_id.clone(),
+            terminal_id: self.terminal_id.clone(),
+        }
     }
 }
 
-/// The initial replay frame: the current last frame, tagged with its absolute offsets and whether
-/// it reaches the ring's oldest retained byte (so the client knows whether older history exists).
-fn initial_replay_frame(
-    data: Vec<u8>,
-    start_offset: u64,
-    end_offset: u64,
-    at_oldest: bool,
-) -> SessionTerminalOutput {
-    SessionTerminalOutput {
-        data,
-        acked_input_offset: 0,
-        start_offset,
-        end_offset,
-        at_oldest,
-    }
-}
-
-/// An ACK frame: empty `data` carrying the applied input offset.
-fn ack_frame(acked_input_offset: u64) -> SessionTerminalOutput {
-    SessionTerminalOutput {
-        data: Vec::new(),
-        acked_input_offset,
-        start_offset: 0,
-        end_offset: 0,
-        at_oldest: false,
-    }
+/// What an opening client asks the stream to replay: which replay mode, where to resume from, and
+/// the terminal dimensions to resize the PTY to. Carried by both the split
+/// (`StreamTerminalOutput`) and the bidi (`StreamSessionTerminalIO`) open messages.
+struct OpenSelection {
+    mode: StreamReplayMode,
+    from_offset: u64,
+    initial_cols: u32,
+    initial_rows: u32,
 }
 
 /// Serve `StreamTerminalOutput`: the mode prologue + current last frame first, then live broadcast
@@ -115,10 +158,13 @@ pub async fn serve_stream_terminal_output_with(
     open_replay_ack_live(
         session,
         tx,
-        replay_mode_from_i32(req.mode),
-        req.from_offset,
-        req.initial_cols,
-        req.initial_rows,
+        FrameIdentity::new(&req.session_id, &terminal_id),
+        OpenSelection {
+            mode: replay_mode_from_i32(req.mode),
+            from_offset: req.from_offset,
+            initial_cols: req.initial_cols,
+            initial_rows: req.initial_rows,
+        },
         initial_frame_bytes,
     )
     .await;
@@ -134,7 +180,9 @@ pub async fn serve_stream_terminal_output_with(
 ///   broadcast so the bridge only forwards the fresh post-resize frame.
 /// - [`StreamReplayMode::FromOffset`] (reconnect): chunked catch-up via `replay_from(from_offset,
 ///   tip, initial_frame_bytes)` looped until `at_end`, so a terminal that already holds state up
-///   to `from_offset` receives only the bytes it missed — no tail chunk, no resize/drain.
+///   to `from_offset` receives only the bytes it missed — no tail chunk, no resize/drain. Exactly
+///   one offset-anchored frame is always emitted, even when there is no gap (an empty frame tagged
+///   with the capture tip), so every open re-anchors the client's cumulative offset.
 ///
 /// Then emits the current applied-input offset up front (so a stream opening after some input was
 /// already applied learns the ACK position immediately), and spawns the live broadcast bridge that
@@ -142,12 +190,16 @@ pub async fn serve_stream_terminal_output_with(
 async fn open_replay_ack_live(
     session: Arc<dyn TerminalSession>,
     tx: mpsc::Sender<Result<SessionTerminalOutput, Status>>,
-    mode: StreamReplayMode,
-    from_offset: u64,
-    initial_cols: u32,
-    initial_rows: u32,
+    identity: FrameIdentity,
+    open: OpenSelection,
     initial_frame_bytes: usize,
 ) {
+    let OpenSelection {
+        mode,
+        from_offset,
+        initial_cols,
+        initial_rows,
+    } = open;
     // Re-issue the mouse-tracking modes the application enabled as the very first frame, before any
     // replay: a client's VT only reports clicks/drags/scrolls once it has seen the DECSET, and the
     // capture ring may have trimmed past the startup bytes that enabled them.
@@ -157,7 +209,7 @@ async fn open_replay_ack_live(
         .map(|cap| cap.mode_prologue())
         .unwrap_or_default();
     if !prologue.is_empty() {
-        let _ = tx.send(Ok(data_frame(prologue))).await;
+        let _ = tx.send(Ok(identity.data_frame(prologue))).await;
     }
 
     let empty_chunk = || CaptureChunk {
@@ -179,7 +231,7 @@ async fn open_replay_ack_live(
                 .unwrap_or_else(|_| empty_chunk());
             if !last_frame.data.is_empty() || last_frame.at_oldest {
                 let _ = tx
-                    .send(Ok(initial_replay_frame(
+                    .send(Ok(identity.initial_replay_frame(
                         last_frame.data,
                         last_frame.start_offset,
                         last_frame.end_offset,
@@ -211,7 +263,7 @@ async fn open_replay_ack_live(
                     }
                 }
             }
-            spawn_live_bridge(session, tx, stdout_rx);
+            spawn_live_bridge(session, tx, identity, stdout_rx);
         }
         StreamReplayMode::FromOffset => {
             // Chunked catch-up: forward-fill from `from_offset` (clamped up to the ring's
@@ -219,32 +271,49 @@ async fn open_replay_ack_live(
             // at a time so an oversized retained history never exceeds the transport's per-message
             // limit. Each frame is tagged with its absolute offsets so the client advances its
             // `currentOffset` to the tip; `at_oldest` signals older history was evicted.
-            let mut cursor = from_offset;
+            //
+            // `from_offset` is clamped DOWN to the tip as well: a client whose cumulative counter
+            // drifted ahead of the stream would otherwise be handed its own bogus offset back, and
+            // would keep asking for bytes the capture will never hold — replaying nothing for the
+            // rest of the session.
+            let tip = session
+                .capture()
+                .lock()
+                .map(|cap| cap.end_offset())
+                .unwrap_or_default();
+            let mut cursor = from_offset.min(tip);
+            // Every open emits exactly one offset-anchored frame before any live byte, so the open
+            // SETS the client's cumulative offset instead of leaving it to be inferred from frames
+            // that carry none (the mode prologue above, live tail frames below). When the catch-up
+            // found no gap the anchor is the empty chunk itself, tagged with the tip.
+            let mut anchored = false;
             loop {
                 let chunk = session
                     .capture()
                     .lock()
                     .map(|cap| cap.replay_from(cursor, 0, initial_frame_bytes))
                     .unwrap_or_else(|_| empty_chunk());
-                if !chunk.data.is_empty() {
+                let (end_offset, at_end) = (chunk.end_offset, chunk.at_end);
+                if !chunk.data.is_empty() || !anchored {
                     let _ = tx
-                        .send(Ok(initial_replay_frame(
+                        .send(Ok(identity.initial_replay_frame(
                             chunk.data,
                             chunk.start_offset,
                             chunk.end_offset,
                             chunk.at_oldest,
                         )))
                         .await;
+                    anchored = true;
                 }
-                cursor = chunk.end_offset;
-                if chunk.at_end {
+                cursor = end_offset;
+                if at_end {
                     break;
                 }
             }
             // No tail chunk, no resize/drain on reconnect — the terminal already holds the right
             // dimensions and state up to `from_offset`; we only fill the gap then go live.
             let stdout_rx = session.subscribe_stdout();
-            spawn_live_bridge(session, tx, stdout_rx);
+            spawn_live_bridge(session, tx, identity, stdout_rx);
         }
     }
 }
@@ -255,6 +324,7 @@ async fn open_replay_ack_live(
 fn spawn_live_bridge(
     session: Arc<dyn TerminalSession>,
     tx: mpsc::Sender<Result<SessionTerminalOutput, Status>>,
+    identity: FrameIdentity,
     mut stdout_rx: tokio::sync::broadcast::Receiver<Bytes>,
 ) {
     let mut acked_rx = session.subscribe_acked_offset();
@@ -262,7 +332,12 @@ fn spawn_live_bridge(
     let mut pty_done = session.subscribe_pty_done();
     let bridge_tx = tx.clone();
     tokio::spawn(async move {
-        if initial_acked > 0 && bridge_tx.send(Ok(ack_frame(initial_acked))).await.is_err() {
+        if initial_acked > 0
+            && bridge_tx
+                .send(Ok(identity.ack_frame(initial_acked)))
+                .await
+                .is_err()
+        {
             return;
         }
         use tokio::sync::broadcast::error::RecvError;
@@ -271,7 +346,7 @@ fn spawn_live_bridge(
             tokio::select! {
                 result = stdout_rx.recv() => match result {
                     Ok(bytes) => {
-                        let frame = data_frame(bytes.to_vec());
+                        let frame = identity.data_frame(bytes.to_vec());
                         if bridge_tx.send(Ok(frame)).await.is_err() {
                             break;
                         }
@@ -282,7 +357,7 @@ fn spawn_live_bridge(
                 changed = acked_rx.changed(), if ack_open => match changed {
                     Ok(()) => {
                         let offset = *acked_rx.borrow_and_update();
-                        if bridge_tx.send(Ok(ack_frame(offset))).await.is_err() {
+                        if bridge_tx.send(Ok(identity.ack_frame(offset))).await.is_err() {
                             break;
                         }
                     }
@@ -339,14 +414,19 @@ where
 {
     let (tx, rx) = mpsc::channel(TERMINAL_OUTPUT_CHANNEL_CAPACITY);
 
-    // Output side: the shared open/replay/catch-up/ack/live sequence.
+    // Output side: the shared open/replay/catch-up/ack/live sequence. The open frame names the
+    // terminal the caller resolved this `session` from, so its frames carry the same identity as the
+    // split `StreamTerminalOutput` variant's.
     open_replay_ack_live(
         Arc::clone(&session),
         tx.clone(),
-        replay_mode_from_i32(first.mode),
-        first.from_offset,
-        first.initial_cols,
-        first.initial_rows,
+        FrameIdentity::new(&session_id, &first.terminal_id),
+        OpenSelection {
+            mode: replay_mode_from_i32(first.mode),
+            from_offset: first.from_offset,
+            initial_cols: first.initial_cols,
+            initial_rows: first.initial_rows,
+        },
         initial_frame_bytes,
     )
     .await;

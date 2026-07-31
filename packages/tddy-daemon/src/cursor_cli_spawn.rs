@@ -388,6 +388,7 @@ pub async fn spawn_cursor_cli_session_inner(
         livekit_room: String::new(),
         livekit_url: String::new(),
         livekit_server_identity: String::new(),
+        branch_conflict: None,
     }))
 }
 

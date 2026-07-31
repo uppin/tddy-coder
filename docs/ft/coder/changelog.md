@@ -10,6 +10,11 @@ Release note history for the Coder product area.
 - Two documented limitations: a `pr_search` hit carries no head or base branch (GitHub's search does not report them — follow up with `pr_read`), and no comment thread is reported as resolved (that state is GraphQL-only).
 - A search is always scoped to the orchestrator's own repository; the agent's text/author/base values are refused if they could inject a second `repo:` qualifier.
 - See [pr-stacking.md § Full control over the plan](pr-stacking.md#full-control-over-the-plan-added-2026-07-30).
+## 2026-07-30 — A planned PR repointed onto the default branch starts on it
+
+- The Start-session dialog's "Base branch" picker now pre-selects the planned PR's **derived** base — the same branch its "New branch from base:" caption states — instead of whichever stack branch happened to be listed first; a PR repointed onto `master` no longer starts a child based on an unrelated stack branch, silently undoing the repoint.
+- The project's default branch is now offered as a base-branch option (listed last), so a node repointed onto it can show that base and re-pick it; a legacy project storing no default branch offers it as the empty ref labelled *"project default"*.
+- Unchanged: a node with a materialized predecessor still pre-selects that dependency, and a root node with no other materialized stack branches still hides the picker and lets the daemon resolve the default base.
 
 ## 2026-07-30 — One exclusive-create gate for both attachment write paths
 

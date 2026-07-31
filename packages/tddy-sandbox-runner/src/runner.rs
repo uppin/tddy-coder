@@ -32,6 +32,11 @@ use tddy_sandbox::{
 };
 use tddy_sandbox_recipes::{append_claude_mcp_args, claude_scratch_mcp_dir};
 
+/// The terminal id a sandbox session's single PTY is exposed under: the reserved main terminal (the
+/// daemon serves no other `terminal_id` for a sandbox session). Duplicated from
+/// `tddy_terminal_rpc::MAIN_TERMINAL_ID`, which this in-jail crate does not depend on.
+const MAIN_TERMINAL_ID: &str = "main";
+
 /// Hosts `connection.ConnectionService/ExecuteTool` over the tool-IPC socket, using `tddy-rpc`'s
 /// length-prefixed framing instead of the old unframed single-`read()`/`write_all()` JSON
 /// protocol (which silently truncated payloads that didn't arrive in one syscall).
@@ -523,6 +528,10 @@ impl SandboxSessionRelay {
         }
 
         if *self.terminal_subscribed.lock().unwrap() {
+            // Name the terminal these bytes came from, like every other producer of terminal frames:
+            // an unidentified frame cannot be traced back to its terminal, and a client receiving
+            // one has no way to tell it is not another terminal's output.
+            let session_id = session_id_from_env();
             loop {
                 let chunk = self.terminal_backlog.lock().unwrap().pop_front();
                 let Some(chunk) = chunk else { break };
@@ -533,6 +542,8 @@ impl SandboxSessionRelay {
                     payload: Some(SessionPayload::TerminalOutput(SessionTerminalOutput {
                         data: chunk.to_vec(),
                         acked_input_offset: 0,
+                        session_id: session_id.clone(),
+                        terminal_id: MAIN_TERMINAL_ID.to_string(),
                         ..Default::default()
                     })),
                 };

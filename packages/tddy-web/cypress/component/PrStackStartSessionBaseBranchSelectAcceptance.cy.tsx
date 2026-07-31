@@ -4,10 +4,11 @@
  * no longer silently bases off the first parent the resolver walks. The dialog renders a "Base branch"
  * `<select>` listing the node's direct dependency branches first (ordered by the dependency's own
  * depth in the stack DAG, deepest first, ties by `node.parents` order), then the stack's other
- * materialized branches. The selected value is sent as `StartSessionRequest.selected_integration_base_ref`.
+ * materialized branches, then the project default branch — the deliberate escape from the stack, which
+ * a node repointed onto it must be able to show and re-pick (see `baseBranchChoice`). The selected
+ * value is sent as `StartSessionRequest.selected_integration_base_ref`.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-07-27-planned-pr-base-branch-selection.md.
- * Changeset: docs/dev/1-WIP/2026-07-27-planned-pr-base-branch-selection.md.
+ * Feature: docs/ft/coder/pr-stacking.md § Operator-selectable base branch for a diamond node.
  */
 
 import React from "react";
@@ -33,6 +34,8 @@ const CHILD_SESSION_ID = "child-session-basesel-1";
 // daemon fetches. A stack node's `branch` is a local name; the picker's options and the
 // `selected_integration_base_ref` the dialog submits are remote-tracking refs.
 const REMOTE = "origin";
+/** The project's stored default branch — always the picker's last option. */
+const DEFAULT_BRANCH_REF = `${REMOTE}/master`;
 const ATTACH_PROTO_BRANCH = "feature/session-attach-docs/attach-proto";
 const ATTACH_STORE_BRANCH = "feature/session-attach-docs/attach-store";
 const ATTACH_PROTO_REF = `${REMOTE}/${ATTACH_PROTO_BRANCH}`;
@@ -43,7 +46,7 @@ const PROJECT: Partial<ProjectEntry> = {
   name: "pr-stack-project",
   gitUrl: "https://example.com/pr-stack.git",
   mainRepoPath: "/home/dev/pr-stack-project",
-  mainBranchRef: "origin/master",
+  mainBranchRef: DEFAULT_BRANCH_REF,
   defaultRemote: REMOTE,
   daemonInstanceId: "local",
 };
@@ -139,14 +142,13 @@ it("renders the base-branch selector with the diamond node's direct dependency b
   sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
   prStackScreenPage.startSessionBtn("attach-start").click();
 
-  // Then — the selector lists attach-proto first (first in node.parents), then attach-store, each
-  // lifted to its `<remote>/<branch>` remote-tracking ref (the form the daemon fetches).
+  // Then — the selector lists attach-proto first (first in node.parents), then attach-store, then the
+  // project default; each lifted to its `<remote>/<branch>` remote-tracking ref (the form the daemon
+  // fetches).
   prStackScreenPage.dialogBaseBranchSelect().should("be.visible");
   prStackScreenPage
-    .dialogBaseBranchSelect()
-    .find("option")
-    .then(($opts) => [...$opts].map((o) => (o as HTMLOptionElement).value))
-    .should("deep.equal", [ATTACH_PROTO_REF, ATTACH_STORE_REF]);
+    .dialogBaseBranchOptionValues()
+    .should("deep.equal", [ATTACH_PROTO_REF, ATTACH_STORE_REF, DEFAULT_BRANCH_REF]);
 });
 
 it("defaults the selection to the first direct dependency branch for the attach-start diamond", () => {
@@ -205,13 +207,15 @@ it("orders direct dependency branches by the dependency's own depth (deepest fir
   sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
   prStackScreenPage.startSessionBtn("n3").click();
 
-  // Then — n2 (depth 1) precedes n1 (depth 0), even though n1 is first in node.parents. Each option
-  // is lifted to its `<remote>/<branch>` remote-tracking ref.
+  // Then — n2 (depth 1) precedes n1 (depth 0), even though n1 is first in node.parents, and the project
+  // default trails both. Each option is lifted to its `<remote>/<branch>` remote-tracking ref.
   prStackScreenPage
-    .dialogBaseBranchSelect()
-    .find("option")
-    .then(($opts) => [...$opts].map((o) => (o as HTMLOptionElement).value))
-    .should("deep.equal", [`${REMOTE}/feature/stack/n2`, `${REMOTE}/feature/stack/n1`]);
+    .dialogBaseBranchOptionValues()
+    .should("deep.equal", [
+      `${REMOTE}/feature/stack/n2`,
+      `${REMOTE}/feature/stack/n1`,
+      DEFAULT_BRANCH_REF,
+    ]);
 });
 
 it("lists other materialized stack branches after the direct dependencies", () => {
@@ -255,12 +259,15 @@ it("lists other materialized stack branches after the direct dependencies", () =
   sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
   prStackScreenPage.startSessionBtn("n3").click();
 
-  // Then — n1 (direct dep) first, then n2 (other materialized branch), each as a remote-tracking ref.
+  // Then — n1 (direct dep) first, then n2 (other materialized branch), then the project default, each as
+  // a remote-tracking ref.
   prStackScreenPage
-    .dialogBaseBranchSelect()
-    .find("option")
-    .then(($opts) => [...$opts].map((o) => (o as HTMLOptionElement).value))
-    .should("deep.equal", [`${REMOTE}/feature/stack/n1`, `${REMOTE}/feature/stack/n2`]);
+    .dialogBaseBranchOptionValues()
+    .should("deep.equal", [
+      `${REMOTE}/feature/stack/n1`,
+      `${REMOTE}/feature/stack/n2`,
+      DEFAULT_BRANCH_REF,
+    ]);
 });
 
 it("sends the selected base branch as selected_integration_base_ref when the operator picks the non-default parent", () => {

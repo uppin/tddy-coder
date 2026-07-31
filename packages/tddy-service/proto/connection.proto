@@ -431,6 +431,14 @@ message StartSessionRequest {
   // with none, and no error. See packages/tddy-daemon/docs/connection-service.md § Start-session
   // attachments.
   repeated SessionAttachment attachments = 29;
+  // How to handle `new_branch_name` naming a branch another session already owns. Only consulted in
+  // "new_branch_from_base" mode with a non-empty `new_branch_name` — a generated branch name is
+  // derived from the session uuid and cannot collide.
+  //   ""       — create a suffixed branch (`<name>-1`, `-2`, …). What every existing caller gets.
+  //   "reject" — create nothing; report the conflict in StartSessionResponse.branch_conflict.
+  // Opt-in by design: only a surface that can prompt an operator asks to be rejected. See
+  // docs/ft/daemon/session-branch-conflict.md.
+  string on_branch_conflict = 30;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved
@@ -443,6 +451,22 @@ message StartSessionResponse {
   string livekit_room = 2;
   string livekit_url = 3;
   string livekit_server_identity = 4;
+  // Set only when the request asked for on_branch_conflict = "reject" and a session already owns the
+  // requested branch. `session_id` is then empty: no session directory, no branch and no worktree
+  // were created. See docs/ft/daemon/session-branch-conflict.md.
+  BranchConflict branch_conflict = 5;
+}
+
+// A refused session creation: the requested new branch is already owned by another session.
+message BranchConflict {
+  // The requested branch that is already owned.
+  string branch = 1;
+  // The session that owns it — prefers an active session, then the most recently updated.
+  // `exists` is always true here.
+  BranchSession owner = 2;
+  // The first free suffixed name (e.g. "feat/auth-1") — what on_branch_conflict = "" would have
+  // created. Pre-fills the rename field in the operator's prompt.
+  string suggested_branch_name = 3;
 }
 
 message ConnectSessionRequest {
@@ -756,6 +780,14 @@ message SessionTerminalOutput {
   // byte — i.e. no older history exists to load by scrolling up. The client uses it to stop the
   // infinite-loading spinner once the bottom of the retained history is reached.
   bool at_oldest = 5;
+  // The terminal this frame belongs to, stamped on EVERY frame (data, replay, ACK, prologue).
+  // Without it a frame is untraceable to its terminal once it reaches the client, so a pane has no
+  // way to tell its own output from another terminal's and would silently paint foreign bytes.
+  // Clients drop frames whose identity does not match the terminal they are rendering.
+  string session_id = 6;
+  // Always the RESOLVED terminal id — an empty `terminal_id` in the request resolves to the reserved
+  // main ("claude"/Agent) terminal, and the frame carries that resolved value, never the empty one.
+  string terminal_id = 7;
 }
 
 // Used by StreamTerminalOutput (browser-compatible server-streaming variant).

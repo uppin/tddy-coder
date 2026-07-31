@@ -186,6 +186,9 @@ function aResumeTerminal() {
             data: new TextEncoder().encode("initial"),
             endOffset: FIRST_TIP_OFFSET,
             atOldest: false,
+            // Stamped with the session and resolved terminal, as the daemon stamps every frame.
+            sessionId: SESSION_ID,
+            terminalId: "main",
           }),
         );
       });

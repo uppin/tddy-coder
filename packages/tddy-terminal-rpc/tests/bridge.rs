@@ -465,7 +465,7 @@ async fn serve_stream_terminal_output_from_offset_replays_only_the_gap_from_offs
 }
 
 #[tokio::test]
-async fn serve_stream_terminal_output_from_offset_at_the_tip_emits_no_catch_up() {
+async fn serve_stream_terminal_output_from_offset_at_the_tip_re_anchors_the_client_to_the_tip() {
     // Given a terminal that has produced 10 bytes
     let terminal = StubTerminal::new();
     terminal.write(b"0123456789");
@@ -478,12 +478,83 @@ async fn serve_stream_terminal_output_from_offset_at_the_tip_emits_no_catch_up()
     handle.end();
     let frames = drain(rx).await;
 
-    // Then no catch-up frame is emitted (the gap is empty); the stream goes straight to live and
-    // ends on pty_done.
-    assert!(
-        frames.is_empty(),
-        "no catch-up when from_offset == end_offset"
+    // Then the open still re-anchors the client: an empty catch-up frame tagged with the tip, so the
+    // client's cumulative offset is SET by the server on every open instead of being inferred from
+    // unanchored frames. Without it a reconnect that finds no gap leaves the client's counter free to
+    // drift, and the drift is never corrected.
+    assert_eq!(
+        frames.len(),
+        1,
+        "an empty tip-anchored catch-up frame re-anchors the client"
     );
+    assert!(
+        frames[0].data.is_empty(),
+        "nothing to replay when the client is already at the tip"
+    );
+    assert_eq!(frames[0].start_offset, 10);
+    assert_eq!(frames[0].end_offset, 10);
+}
+
+#[tokio::test]
+async fn serve_stream_terminal_output_from_offset_past_the_tip_re_anchors_the_client_back_to_the_tip(
+) {
+    // Given a terminal that has produced 10 bytes
+    let terminal = StubTerminal::new();
+    terminal.write(b"0123456789");
+    let (store, handle) = StubStore::with(terminal);
+
+    // When the client reconnects claiming a from_offset 12 bytes PAST the tip — its cumulative
+    // counter drifted ahead (it counted out-of-band bytes, e.g. a re-issued mode prologue, as stream
+    // bytes)
+    let rx = serve_stream_terminal_output_with(&store, req_from_offset("s1", "", 22), 4)
+        .await
+        .expect("stream opened");
+    handle.end();
+    let frames = drain(rx).await;
+
+    // Then the server corrects the drift: the anchored frame reports the REAL tip (10), never the
+    // client's claimed 22. A client left at 22 asks for 22+ on every later reconnect, so the daemon
+    // replays nothing and the missed bytes — including whole redraw sequences — are dropped forever.
+    assert_eq!(
+        frames.len(),
+        1,
+        "an empty tip-anchored catch-up frame re-anchors the drifted client"
+    );
+    assert!(frames[0].data.is_empty());
+    assert_eq!(frames[0].start_offset, 10);
+    assert_eq!(frames[0].end_offset, 10);
+}
+
+#[tokio::test]
+async fn serve_stream_terminal_output_sends_the_mode_prologue_before_the_offset_anchored_frame() {
+    // Given a terminal whose application enabled SGR mouse tracking (8 prologue bytes) and then
+    // painted 6 bytes of screen — a 14-byte cumulative stream
+    let terminal = StubTerminal::new();
+    terminal.write(b"\x1b[?1002h");
+    terminal.write(b"screen");
+    let (store, handle) = StubStore::with(terminal);
+
+    // When the client reconnects with FROM_OFFSET already at the tip (14)
+    let rx = serve_stream_terminal_output_with(&store, req_from_offset("s1", "", 14), 64)
+        .await
+        .expect("stream opened");
+    handle.end();
+    let frames = drain(rx).await;
+
+    // Then the re-issued mode prologue comes first with ZEROED offsets — it is replayed VT state, not
+    // a slice of the cumulative output stream — and is followed by the offset-anchored frame. The
+    // ordering is the client's only way to tell the two apart: everything before the anchor is
+    // out-of-band and must not advance the client's cumulative offset.
+    assert_eq!(
+        frames.len(),
+        2,
+        "the unanchored mode prologue, then the tip-anchored frame"
+    );
+    assert_eq!(frames[0].data, b"\x1b[?1002h");
+    assert_eq!(frames[0].start_offset, 0);
+    assert_eq!(frames[0].end_offset, 0);
+    assert_eq!(frames[1].start_offset, 14);
+    assert_eq!(frames[1].end_offset, 14);
 }
 
 #[tokio::test]
@@ -733,4 +804,105 @@ async fn serve_stream_session_terminal_io_from_offset_emits_only_the_catch_up_ga
     assert_eq!(frames[1].data, b"789");
     assert_eq!(frames[1].start_offset, 7);
     assert_eq!(frames[1].end_offset, 10);
+}
+
+// ---------------------------------------------------------------------------
+// StreamTerminalOutput: per-frame terminal identity
+// ---------------------------------------------------------------------------
+
+/// Every frame of a stream, whatever its kind, must name the terminal it came from.
+fn assert_all_frames_stamped(
+    frames: &[SessionTerminalOutput],
+    session_id: &str,
+    terminal_id: &str,
+) {
+    for (index, frame) in frames.iter().enumerate() {
+        assert_eq!(
+            frame.session_id,
+            session_id,
+            "frame {index} (data={:?}) must name its session",
+            String::from_utf8_lossy(&frame.data)
+        );
+        assert_eq!(
+            frame.terminal_id,
+            terminal_id,
+            "frame {index} (data={:?}) must name its terminal",
+            String::from_utf8_lossy(&frame.data)
+        );
+    }
+}
+
+#[tokio::test]
+async fn serve_stream_terminal_output_stamps_the_replay_and_ack_frames_with_the_terminal_identity()
+{
+    // Given a terminal in mouse-tracking mode that has produced 10 bytes and applied 7 bytes of input
+    // — so the open emits a prologue frame, a replay frame and an ACK frame
+    let terminal = StubTerminal::new();
+    terminal.write(b"\x1b[?1002h");
+    terminal.write(b"0123456789");
+    terminal.set_acked(7);
+    let (store, handle) = StubStore::with(terminal);
+
+    // When a client attaches to the reserved main terminal of session "s1"
+    let rx = serve_stream_terminal_output_with(&store, req("s1", "", 0, 0), 64)
+        .await
+        .expect("stream opened");
+    handle.end();
+    let frames = drain(rx).await;
+
+    // Then every frame names its terminal, so a client rendering a different terminal can drop it
+    // instead of silently painting another terminal's bytes.
+    assert_eq!(frames.len(), 3, "prologue, replay and ACK frames");
+    assert_all_frames_stamped(&frames, "s1", "main");
+}
+
+#[tokio::test]
+async fn serve_stream_terminal_output_stamps_frames_with_the_requested_bash_terminal_id() {
+    // Given a bash terminal that has produced 4 bytes
+    let terminal = StubTerminal::new();
+    terminal.write(b"bash");
+    let (store, handle) = StubStore::with(terminal);
+
+    // When a client attaches to the named terminal "bash-1" of session "s2"
+    let rx = serve_stream_terminal_output_with(&store, req("s2", "bash-1", 0, 0), 64)
+        .await
+        .expect("stream opened");
+    handle.end();
+    let frames = drain(rx).await;
+
+    // Then the frames carry that terminal's own id, not the reserved main id
+    assert_eq!(frames.len(), 1, "the replay frame");
+    assert_all_frames_stamped(&frames, "s2", "bash-1");
+}
+
+#[tokio::test]
+async fn serve_stream_terminal_output_stamps_live_output_frames_with_the_terminal_identity() {
+    // Given a client already attached to the main terminal of session "s3"
+    let terminal = StubTerminal::new();
+    let (store, handle) = StubStore::with(terminal);
+    let mut rx = serve_stream_terminal_output_with(&store, req("s3", "", 0, 0), 64)
+        .await
+        .expect("stream opened");
+
+    // When live output arrives after the open. The open itself emits an empty replay frame first, so
+    // read past the open frames to the live one (consumed before the child exits, so the pty_done
+    // branch of the bridge select cannot win the race and drop it).
+    handle.write(b"live");
+    let mut live_frame = None;
+    for _ in 0..16 {
+        let frame = timeout(RECV_TIMEOUT, rx.recv())
+            .await
+            .expect("timed out waiting for the live frame")
+            .expect("stream closed unexpectedly")
+            .expect("status");
+        if frame.data == b"live" {
+            live_frame = Some(frame);
+            break;
+        }
+    }
+    let live_frame = live_frame.expect("the live data frame");
+
+    // Then the live frame is stamped too — the long-lived bridge is exactly where a mis-routed
+    // subscription would go unnoticed, so identity must survive past the open.
+    assert_all_frames_stamped(&[live_frame], "s3", "main");
 }

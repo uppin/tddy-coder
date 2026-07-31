@@ -79,6 +79,14 @@ message SessionTerminalOutput {
   // byte — i.e. no older history exists to load by scrolling up. The client uses it to stop the
   // infinite-loading spinner once the bottom of the retained history is reached.
   bool at_oldest = 5;
+  // The terminal this frame belongs to, stamped on EVERY frame (data, replay, ACK, prologue).
+  // Without it a frame is untraceable to its terminal once it reaches the client, so a pane has no
+  // way to tell its own output from another terminal's and would silently paint foreign bytes.
+  // Clients drop frames whose identity does not match the terminal they are rendering.
+  string session_id = 6;
+  // Always the RESOLVED terminal id — an empty `terminal_id` in the request resolves to the reserved
+  // main ("claude"/Agent) terminal, and the frame carries that resolved value, never the empty one.
+  string terminal_id = 7;
 }
 
 // Used by StreamTerminalOutput (browser-compatible server-streaming variant).
