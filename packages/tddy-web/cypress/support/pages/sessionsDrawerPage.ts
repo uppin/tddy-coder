@@ -187,6 +187,7 @@ export const sessionsDrawerPage = {
   inspectorMetadata: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsInspectorMetadata, { timeout: 5000, ...options }),
 
+
   /** The Resume button inside the inspector for the given session. */
   inspectorResumeBtn: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsInspectorResumeBtn(sessionId), { timeout: 5000, ...options }),

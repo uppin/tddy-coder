@@ -16,6 +16,7 @@ import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { workflowChatScreenPage } from "../support/pages/workflowChatScreenPage";
+import { sessionActivitiesPage } from "../support/pages/sessionActivitiesPage";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -80,7 +81,7 @@ it("opens the PR-Stack Chat Screen instead of the terminal for a pr-stack sessio
   sessionsDrawerPage.detailTerminalContainer().should("not.exist");
 });
 
-it("keeps the terminal placeholder for a claude-cli session even when it carries a recipe", () => {
+it("keeps the ordinary base view for a claude-cli session even when it carries a recipe", () => {
   // Given
   const backend = aSessionsDrawerBackend([PR_STACK_SESSION, CLAUDE_CLI_SESSION]);
 
@@ -89,8 +90,9 @@ it("keeps the terminal placeholder for a claude-cli session even when it carries
   sessionsDrawerPage.drawerItem(CLAUDE_CLI_SESSION.sessionId).click();
 
   // Then — neither custom view renders for a claude-cli PTY session (it has no Presenter); the
-  // existing disconnected-terminal placeholder is unaffected by the view registry.
+  // session falls through to its liveness-derived base view, which for this dormant one is its
+  // recorded activities. The view registry does not touch that path.
   prStackScreenPage.screen().should("not.exist");
   workflowChatScreenPage.screen().should("not.exist");
-  sessionsDrawerPage.detailPane().should("contain.text", "Select Resume to reconnect");
+  sessionActivitiesPage.pane().should("exist");
 });

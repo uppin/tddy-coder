@@ -7,7 +7,8 @@ import type { TokenService } from "../../gen/token_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { SessionInspectorDrawer } from "./SessionInspectorDrawer";
-import { isInspectorDocked } from "./inspectorState";
+import { canResumeSession, sessionBaseViewMode } from "./sessionBaseView";
+import { SessionActivitiesPane } from "./SessionActivitiesPane";
 import { PARAM_CODE } from "../../routing/appLocation";
 import { useAppLocation } from "../../routing/useAppLocation";
 import {
@@ -135,11 +136,6 @@ export function SessionMainPane({
 }: SessionMainPaneProps) {
   const isConnected =
     attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
-
-  // When docked (disconnected session) the inspector becomes the full main pane; the focused
-  // runtime's terminal is suppressed so no claim-terminal overlay renders over it, while the
-  // runtime layer stays mounted behind the inspector (background streaming preserved).
-  const docked = isInspectorDocked(selectedSession);
 
   // The worktree Code pane is a split view available for every session type: it never replaces the
   // base view (terminal / chat / PR-Stack), it opens beside it. Its open/closed state lives in the
@@ -285,32 +281,33 @@ export function SessionMainPane({
       })
     : null;
 
-  // The focused runtime's terminal is CSS-visible; backgrounded runtimes are `display:none` but
-  // stay mounted (and subscribed to their LiveKit room) so switching focus back is instant and
-  // background sessions keep streaming. Each runtime owns its own terminal-control lease (see
-  // `SessionRuntime`), so the focused one carries the `sessions-detail-terminal-container` marker
-  // (existing acceptance contract) and the terminal-control mutex overlay.
   const hasRuntimes = runtimes.length > 0;
 
-  // The base view (custom workflow view / mounted terminals / placeholder). Rendered on its own
-  // when the Code pane is closed, or as the left panel of the split when it is open — never
-  // unmounted between the two so terminals stay attached.
-  const baseView = customView ? (
-    // Custom per-workflow view — renders in place of the terminal regardless of attachment
-    // status; the workflow owns its own chrome.
-    customView
-  ) : hasRuntimes ? (
-    // One mounted terminal per attached session (focused visible, others hidden). Each runtime
-    // owns its terminal-control lease — see `SessionRuntime`.
-    <div
-      data-testid="sessions-runtime-layer"
-      className="flex-1 min-h-0 relative overflow-hidden"
-    >
+  // Which surface owns the pane below the top bar, and whether this session can be brought back.
+  // Both are derived from the session's liveness (see `sessionBaseView`), so a session that is
+  // resumed elsewhere corrects its own view on the next list poll — there is no view state to reset.
+  const baseViewMode = sessionBaseViewMode(selectedSession, customView !== null);
+  const dormant = canResumeSession(selectedSession);
+
+  // One mounted terminal per attached session: the focused runtime's terminal is CSS-visible while
+  // backgrounded ones are `display:none` but stay mounted (and subscribed to their LiveKit room), so
+  // switching focus back is instant and background sessions keep streaming. Each runtime owns its
+  // own terminal-control lease (see `SessionRuntime`), so the focused one carries the
+  // `sessions-detail-terminal-container` marker (existing acceptance contract) and the
+  // terminal-control mutex overlay. Extracted into a variable because a dormant session renders the
+  // Activities view *over* this layer rather than instead of it.
+  //
+  // A dormant session never foregrounds a terminal: there is no live process behind it, so
+  // foregrounding one would only put a stale screen (and its claim-terminal CTA) over the view the
+  // operator came to read. That suppression used to key off the inspector being docked, which was
+  // the same predicate by accident; it names its real cause now.
+  const runtimeLayer = (
+    <div data-testid="sessions-runtime-layer" className="flex-1 min-h-0 relative overflow-hidden">
       {runtimes.map((r) => (
         <SessionRuntime
           key={r.sessionId}
           runtime={r}
-          focused={!docked && r.sessionId === focusedRuntimeId}
+          focused={!dormant && r.sessionId === focusedRuntimeId}
           sessionToken={sessionToken}
           client={client}
           tokenClient={tokenClient}
@@ -326,6 +323,31 @@ export function SessionMainPane({
         />
       ))}
     </div>
+  );
+
+  // The base view (custom workflow view / recorded activities / mounted terminals / placeholder).
+  // Rendered on its own when the Code pane is closed, or as the left panel of the split when it is
+  // open — never unmounted between the two so terminals stay attached.
+  const baseView = customView ? (
+    // Custom per-workflow view — renders in place of the terminal regardless of attachment
+    // status; the workflow owns its own chrome.
+    customView
+  ) : baseViewMode === "activities" && selectedSession ? (
+    // Dormant session — its recorded ACP transcript is the pane. A runtime attached earlier stays
+    // mounted behind it (background streaming preserved, a later resume is instant) but unfocused,
+    // so the transcript is what shows.
+    <div className="flex-1 min-h-0 relative overflow-hidden">
+      {hasRuntimes && <div className="absolute inset-0 flex flex-col">{runtimeLayer}</div>}
+      <div className="absolute inset-0 flex flex-col">
+        <SessionActivitiesPane
+          sessionId={selectedSession.sessionId}
+          sessionToken={sessionToken}
+          client={buildSessionClient?.() ?? client}
+        />
+      </div>
+    </div>
+  ) : hasRuntimes ? (
+    runtimeLayer
   ) : isConnected ? (
     // Connected but the runtime hasn't been registered yet (brief window before the attach
     // effect runs) — keep the terminal container marker so existing acceptance contracts hold
@@ -369,12 +391,33 @@ export function SessionMainPane({
           {/* Header toggles — always visible when a session is selected */}
           {selectedSession && (
             <div className="flex items-center justify-end gap-1 px-2 py-1 border-b border-border flex-shrink-0">
-              <AgentActivityOverlay
-                sessionId={selectedSession.sessionId}
-                sessionToken={sessionToken}
-                sessionType={selectedSession.sessionType}
-                client={buildSessionClient?.() ?? client}
-              />
+              {/* One transcript per pane: the overlay replays exactly what the Activities view is
+                  already showing, so it is suppressed there — and only there. It stays the only way
+                  to read the transcript for an active session and for a dormant session whose base
+                  view is a workflow screen. */}
+              {baseViewMode !== "activities" && (
+                <AgentActivityOverlay
+                  sessionId={selectedSession.sessionId}
+                  sessionToken={sessionToken}
+                  sessionType={selectedSession.sessionType}
+                  client={buildSessionClient?.() ?? client}
+                />
+              )}
+              {/* Resume is keyed on liveness alone, so every dormant session offers it from the same
+                  position — including the ones whose base view (PR-Stack, workflow chat) is left
+                  alone. It calls the same handler as the inspector's own Resume. */}
+              {dormant && (
+                <Button
+                  data-testid={`sessions-main-resume-${selectedSession.sessionId}`}
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => onResume(selectedSession.sessionId)}
+                  title="Resume this session"
+                >
+                  Resume
+                </Button>
+              )}
               <Button
                 data-testid="session-agents-add-btn"
                 variant="ghost"
@@ -469,7 +512,6 @@ export function SessionMainPane({
                 key={`inspector-${selectedSession.sessionId}`}
                 state={inspectorState}
                 session={selectedSession}
-                docked={docked}
                 onClose={onInspectorClose}
                 onExpand={onInspectorExpand}
                 onRestore={onInspectorRestore}

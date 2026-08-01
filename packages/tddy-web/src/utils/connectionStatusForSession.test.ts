@@ -36,19 +36,20 @@ describe("connectionStatusForSession — maps session proto fields to a display 
     expect(status).toBe("needs-input");
   });
 
-  it("returns 'needs-input' for an inactive session that has pending elicitation", () => {
-    // Given — elicitation can be pending on an already-dead session (state not cleared)
+  it("returns 'disconnected' for a dead session still carrying a pending elicitation", () => {
+    // Given — `pendingElicitation` is persisted and is not cleared when the agent dies, so a dead
+    // session can still carry it. Nothing is waiting on the operator, so it reads as disconnected.
     const session = anInactiveSession({ isActive: false, pendingElicitation: true });
 
     // When
     const status = connectionStatusForSession(session);
 
     // Then
-    expect(status).toBe("needs-input");
+    expect(status).toBe("disconnected");
   });
 
-  it("pendingElicitation takes precedence over isActive for the needs-input token", () => {
-    // Given — both active variants with pendingElicitation true must yield needs-input
+  it("liveness decides before the elicitation flag refines it", () => {
+    // Given — the same pendingElicitation flag on a live and a dead session
     const activeEliciting = anActiveSession({ isActive: true, pendingElicitation: true });
     const inactiveEliciting = anInactiveSession({ isActive: false, pendingElicitation: true });
 
@@ -56,8 +57,8 @@ describe("connectionStatusForSession — maps session proto fields to a display 
     const statusFromActive = connectionStatusForSession(activeEliciting);
     const statusFromInactive = connectionStatusForSession(inactiveEliciting);
 
-    // Then
+    // Then — only the live one is actually waiting on an answer
     expect(statusFromActive).toBe("needs-input");
-    expect(statusFromInactive).toBe("needs-input");
+    expect(statusFromInactive).toBe("disconnected");
   });
 });

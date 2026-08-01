@@ -161,6 +161,10 @@ export const TEST_IDS = {
   sessionsDetailTerminalContainer: "sessions-detail-terminal-container",
   sessionsDetailMetadata: "sessions-detail-metadata",
 
+  // Session activities view — the inactive session's default main-pane view (recorded ACP transcript)
+  sessionsActivitiesPane: "sessions-activities-pane",
+  sessionsActivitiesEmpty: "sessions-activities-empty",
+
   // Session inspector drawer
   sessionsInspectorDrawer: "sessions-inspector-drawer",
   sessionsInspectorToggle: "sessions-inspector-toggle",
@@ -645,6 +649,11 @@ export const sessionsDetailResumeBtn = (sessionId: string) =>
 /** `[data-testid="sessions-detail-delete-<sessionId>"]` — Delete button in detail pane */
 export const sessionsDetailDeleteBtn = (sessionId: string) =>
   `sessions-detail-delete-${sessionId}`;
+
+/** `[data-testid="sessions-main-resume-<sessionId>"]` — Resume button in the main pane's top bar,
+ *  present for every inactive session regardless of which base view is below it. */
+export const sessionsMainResumeBtn = (sessionId: string) =>
+  `sessions-main-resume-${sessionId}`;
 
 /** `[data-testid="sessions-inspector-resume-<sessionId>"]` — Resume button in inspector */
 export const sessionsInspectorResumeBtn = (sessionId: string) =>

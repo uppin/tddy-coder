@@ -55,6 +55,18 @@ import { resolveShortcutsForSession } from "../../lib/toolShortcuts";
 import { joinQuotedPaths } from "../../lib/shellQuote";
 import { isCliTerminalSession } from "../../constants/claudeCliModels";
 import { PanelLeftOpen } from "lucide-react";
+
+/**
+ * An attach already taken for one session, stamped with the session-list snapshot it was taken
+ * under. The stamp is what lets a dormant reading be judged as evidence or as staleness: a list
+ * snapshot the claim predates has genuinely observed the session die, while the snapshot the claim
+ * was made under simply has not caught up with it yet.
+ */
+interface AttachClaim {
+  readonly sessionId: string;
+  readonly listGeneration: number;
+}
+
 // ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
@@ -114,8 +126,8 @@ export function SessionsDrawerScreen({
 
   /**
    * Write an inspector state into the URL. `replace` for the transitions the screen makes on the
-   * operator's behalf (auto-open on idle, auto-close on connect) so Back does not step through
-   * states nobody chose; a plain push for a click.
+   * operator's behalf (the closed default on selection, the open on an attach error) so Back does
+   * not step through states nobody chose; a plain push for a click.
    */
   const applyInspectorState = useCallback(
     (next: InspectorDrawerState, options?: { replace?: boolean; tab?: InspectorTabName }) => {
@@ -137,9 +149,20 @@ export function SessionsDrawerScreen({
     }
   }, [inspectorTabParam, setParams]);
 
-  // Track whether the inspector was auto-opened (by session select) vs manually opened by the user.
-  // When true, a successful connection should auto-close the inspector.
-  const inspectorAutoOpenRef = useRef(false);
+  // The attach already taken for the selected session's *current live epoch*. Written by the
+  // activation effect (selection), the liveness effect (a selected session that comes alive) and
+  // `handleResume`, so no two of them can fire a `ConnectSession` for the same session.
+  //
+  // "Live epoch" is the load-bearing part: the claim is dropped once a *later* list snapshot reports
+  // the session dormant. A session can die and be resumed repeatedly without the selection ever
+  // changing, and each revival owes a fresh attach — a claim that only reset on selection change
+  // would strand every resume after the first on an empty pane.
+  const attachClaimRef = useRef<AttachClaim | null>(null);
+  // Bumped once per session-list snapshot, so an attach claim can record which snapshot it was taken
+  // under. Without it a resume could not be told apart from a stale dormant reading: `ResumeSession`
+  // returns before the daemon's next `ListSessions`, so the list keeps reporting the session dormant
+  // for up to one poll after the attach is already established.
+  const listGenerationRef = useRef(0);
   // The session id the activation effect below has already run for. Keyed on the id (not a one-shot
   // boolean) so an inbound URL change — Back, a pasted link — activates the newly named session,
   // while a re-render for the same id does not re-connect it.
@@ -311,6 +334,14 @@ export function SessionsDrawerScreen({
     [sortedSessions, selectedSessionId],
   );
 
+  // Count each session-list snapshot as it arrives. Done during render (not in an effect) so a claim
+  // taken from an event handler in the same commit records the snapshot the operator was actually
+  // looking at, rather than one the effect queue has not stamped yet.
+  const listGeneration = useMemo(() => {
+    listGenerationRef.current += 1;
+    return listGenerationRef.current;
+  }, [sortedSessions]);
+
   // A pr-stack orchestrator is itself idle while its children do the work; when a child is live,
   // the orchestrator must stay reachable in the drawer (grouped with its children) rather than
   // collapsing into the disconnected "Remaining" partition mid-flight. Reflect that by treating an
@@ -447,17 +478,12 @@ export function SessionsDrawerScreen({
     }
     setUnknownSession(false);
 
-    // A deep link that asked for a tab keeps it; otherwise the inspector takes its default state
-    // for this session (open for a disconnected one, closed for an active one).
+    // A deep link that asked for a tab keeps it; otherwise the inspector takes its default state,
+    // which is closed whatever the session's liveness: an active session shows its terminal, an
+    // inactive one shows its recorded activities, and neither has the drawer opened for it.
     if (!honourUrlInspector) {
-      const willOpen = nextInspectorState(
-        { open: false, expanded: false },
-        { type: "select", isActive: session.isActive },
-      ).open;
-      inspectorAutoOpenRef.current = willOpen;
-      applyInspectorState(willOpen ? "open" : "closed", { replace: true });
-    } else {
-      inspectorAutoOpenRef.current = false;
+      const selected = nextInspectorState({ open: false, expanded: false }, { type: "select" });
+      applyInspectorState(selected.open ? "open" : "closed", { replace: true });
     }
 
     // Fast path — the session's runtime is already mounted in the registry (it was attached
@@ -465,8 +491,12 @@ export function SessionsDrawerScreen({
     // stored connection params so the screen re-evaluates state for the newly selected session
     // WITHOUT an RPC round-trip: no re-connect, no fresh ClaimTerminalControl, no token race, and
     // the existing terminal stream keeps flowing. The registry effect below re-focuses it.
+    // The claim is taken inside each branch rather than for any registry hit: a registry entry that
+    // is no longer connected restores nothing, so claiming on it would block the resume this dormant
+    // session is about to be given.
     const existing = runtimeRegistry.get(selectedSessionId);
     if (existing?.status === "connected-livekit") {
+      attachClaimRef.current = { sessionId: selectedSessionId, listGeneration };
       restoreAttachment({
         status: "connected-livekit",
         sessionId: selectedSessionId,
@@ -478,6 +508,7 @@ export function SessionsDrawerScreen({
       return;
     }
     if (existing?.status === "connected-grpc") {
+      attachClaimRef.current = { sessionId: selectedSessionId, listGeneration };
       restoreAttachment({
         status: "connected-grpc",
         sessionId: selectedSessionId,
@@ -490,6 +521,12 @@ export function SessionsDrawerScreen({
     // `selectedSession`, which this render may not have caught up to, so build the client for this
     // session's owner directly rather than reading `activeClient` here.
     resetAttachment();
+    // An attach is owed for a live session only; a dormant one has no process to attach to and shows
+    // its recorded activities instead. Recording which id this effect took the attach for is what
+    // keeps the liveness effect below from issuing a second `ConnectSession` for the same session.
+    attachClaimRef.current = session.isActive
+      ? { sessionId: selectedSessionId, listGeneration }
+      : null;
     if (session.isActive) {
       const owningClient = clientForHost(owningHostForSession(session, selectedInstanceId ?? ""));
       if (owningClient) {
@@ -501,37 +538,59 @@ export function SessionsDrawerScreen({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSessionId, sortedSessions]);
 
-  // React to attachment status changes:
-  // - "connected-*" for the selected session → close inspector IF it was auto-opened
-  // - "idle" for an INACTIVE selected session → auto-open inspector
-  // - "error" → open inspector so the user sees the problem
-  // - "connecting" → no change (preserve state during handshake)
+  /**
+   * Track the selected session's liveness across polls: attach it when it comes alive, and release
+   * the attach claim when it dies.
+   *
+   * A session can come alive under the operator — resumed from the pane's top bar, or resumed
+   * elsewhere and observed on the next list poll — and the activation effect above only runs once per
+   * *selection*, so without this the pane would keep showing recorded activities until the session
+   * was re-selected. Attaching here is what lets the base view return to the terminal on its own, as
+   * `docs/ft/web/inactive-session-activities.md` § Resume states.
+   *
+   * Releasing on death matters just as much: the same session can be resumed again without the
+   * selection ever changing, and that resume owes a fresh `ConnectSession`. Holding the claim past
+   * the death would silently swallow every resume after the first.
+   */
+  useEffect(() => {
+    if (!selectedSession) return;
+    const claim = attachClaimRef.current;
+    const claimsThisSession = claim?.sessionId === selectedSession.sessionId;
+    if (!selectedSession.isActive) {
+      // Release only on a snapshot the claim predates. `ResumeSession` returns before the daemon's
+      // next `ListSessions`, so the snapshot the resume was made under still reports the session
+      // dormant — releasing on that reading would hand the duplicate `ConnectSession` straight back.
+      // A *later* snapshot saying the same thing is real evidence the session died.
+      if (claimsThisSession && listGeneration > claim.listGeneration) {
+        attachClaimRef.current = null;
+      }
+      return;
+    }
+    if (claimsThisSession) return;
+    const owningClient = clientForHost(
+      owningHostForSession(selectedSession, selectedInstanceId ?? ""),
+    );
+    if (!owningClient) return;
+    attachClaimRef.current = { sessionId: selectedSession.sessionId, listGeneration };
+    connectSession(selectedSession.sessionId, sessionToken, owningClient).catch((err) => {
+      console.debug("[SessionsDrawerScreen] connectSession error", err);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSession, selectedInstanceId, clientForHost, listGeneration]);
+
+  // React to attachment status changes: an attach **error** opens the inspector so the operator sees
+  // the problem — that is a failure to surface, not a liveness state. Every other status leaves the
+  // drawer alone. A session that simply has nothing to attach to ("idle" for an inactive session) no
+  // longer opens it: that session's pane shows its recorded activities instead.
   useEffect(() => {
     if (!selectedSessionId) return;
-    if (
-      attachment.status === "connected-livekit" ||
-      attachment.status === "connected-grpc"
-    ) {
-      if (
-        attachment.sessionId === selectedSessionId &&
-        inspectorAutoOpenRef.current
-      ) {
-        inspectorAutoOpenRef.current = false;
-        applyInspectorState("closed", { replace: true });
-      }
-    } else if (attachment.status === "idle") {
-      // Only auto-open for inactive sessions; active sessions will connect shortly
-      const session = sortedSessions.find((s) => s.sessionId === selectedSessionId);
-      if (session && !session.isActive && inspectorState !== "expanded") {
-        applyInspectorState("open", { replace: true });
-      }
-    } else if (attachment.status === "error" && inspectorState !== "expanded") {
+    if (attachment.status === "error" && inspectorState !== "expanded") {
       applyInspectorState("open", { replace: true });
     }
   // These transitions are driven by the attachment, not by the URL: re-running them whenever
   // `inspectorState`/`applyInspectorState` change would fight the operator's own toggles.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attachment.status, selectedSessionId, sortedSessions]);
+  }, [attachment.status, selectedSessionId]);
 
   // Selecting a session is a navigation and nothing else — the activation effect above does the
   // inspector and attachment work, so Back and a pasted link get exactly the same treatment.
@@ -543,7 +602,17 @@ export function SessionsDrawerScreen({
 
   const handleResume = (sessionId: string) => {
     if (!activeClient) return;
+    // `ResumeSession` returns the session's LiveKit coordinates and `useSessionAttachment` puts the
+    // screen straight into `connected-livekit` — the attach for this live epoch is already done.
+    // Claiming it here stops the liveness effect from firing a second `ConnectSession` when the next
+    // list poll reports the session alive, which would mint a fresh browser identity and bounce the
+    // terminal through a reconnect and another `ClaimTerminalControl`. The claim is stamped with the
+    // snapshot the operator acted on, so the dormant readings still in flight cannot revoke it.
+    attachClaimRef.current = { sessionId, listGeneration };
     resumeSession(sessionId, sessionToken, activeClient).catch((err) => {
+      // The resume never landed, so no attach was taken after all — release the claim so the liveness
+      // effect can still attach if the session turns out to be alive.
+      attachClaimRef.current = null;
       console.debug("[SessionsDrawerScreen] resumeSession error", err);
     });
   };
@@ -635,8 +704,6 @@ export function SessionsDrawerScreen({
   };
 
   const handleInspectorToggle = () => {
-    // Manual interaction — subsequent connection should not auto-close the inspector
-    inspectorAutoOpenRef.current = false;
     const prevState = { open: inspectorState !== "closed", expanded: inspectorState === "expanded" };
     const next = nextInspectorState(prevState, { type: "toggle" });
     applyInspectorState(next.open ? (next.expanded ? "expanded" : "open") : "closed");

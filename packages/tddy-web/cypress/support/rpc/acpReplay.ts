@@ -126,27 +126,71 @@ export interface ReplayOpens {
  * `opens` tallies how many times each mode was subscribed, so specs can assert the count feed drives
  * the icon without pulling the snapshot, and that the snapshot is pulled lazily and only once.
  */
-export function aReplayBackend(config: {
+export function aReplayBackend(config: AcpReplayScenario) {
+  const opens: ReplayOpens = { count: 0, snapshot: 0 };
+  const backend = anInMemoryRpcBackend().implement(
+    ConnectionService,
+    acpReplayHandlers(config, opens),
+  );
+  return { backend, opens };
+}
+
+/** A fixed transcript to replay: the counts the cheap feed reports, the frames the snapshot feed
+ *  yields, and the tool-call bodies `GetAcpToolCallDetail` resolves. */
+export interface AcpReplayScenario {
   counts: number[];
   snapshot?: AcpAgentMessage[];
   details?: Record<string, ToolDetail>;
-}) {
-  const opens: ReplayOpens = { count: 0, snapshot: 0 };
-  const backend = anInMemoryRpcBackend().implement(ConnectionService, {
+  /** When set, the COUNT feed subscribes but stays silent until this resolves — see
+   *  {@link aHeldCountReplay}. */
+  holdCount?: Promise<void>;
+}
+
+/**
+ * A replay scenario whose **count** feed is subscribed but silent until `releaseCount()` is called.
+ *
+ * Models the window every session opens in: the stream is live but has not answered yet, so the app
+ * knows neither "this session recorded nothing" nor "it recorded something". A surface that renders
+ * that difference must be provably quiet in this window — and since a failed feed never answers
+ * either, the same window stands in for a failed read. Mirrors
+ * {@link aReplayBackendWithHeldSnapshot}, one phase earlier.
+ */
+export function aHeldCountReplay(config: AcpReplayScenario) {
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    scenario: { ...config, holdCount: held } satisfies AcpReplayScenario,
+    releaseCount: () => release(),
+  };
+}
+
+/**
+ * The `StreamAcpReplay` + `GetAcpToolCallDetail` handlers for a fixed transcript, as a spreadable
+ * `ConnectionService` partial. Extracted so the two-phase protocol has ONE implementation shared by
+ * the focused {@link aReplayBackend} and the full-screen `aConnectionServiceBackend` — a spec that
+ * drives `SessionsDrawerScreen` needs both the session list and the replay on one backend, and a
+ * second copy of the mode branching would be free to drift from this one.
+ *
+ * `opens` is tallied in place when supplied, so a caller can assert lazy / once-only subscription.
+ */
+export function acpReplayHandlers(config: AcpReplayScenario, opens?: ReplayOpens) {
+  return {
     async *streamAcpReplay(req: { mode: StreamMode }) {
       if (req.mode === StreamMode.COUNT_THEN_LIVE) {
-        opens.count += 1;
+        if (opens) opens.count += 1;
+        if (config.holdCount) await config.holdCount;
         yield* countFrames(config.counts);
       } else {
-        opens.snapshot += 1;
+        if (opens) opens.snapshot += 1;
         yield* transcriptFrames(config.snapshot ?? []);
       }
       // Keep the stream open so the live-tail consumer stays subscribed.
       await new Promise<void>(() => {});
     },
     getAcpToolCallDetail: (req: { toolCallId: string }) => detailOrNotFound(config.details, req),
-  });
-  return { backend, opens };
+  };
 }
 
 /**

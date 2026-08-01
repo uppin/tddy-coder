@@ -257,15 +257,16 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
   // AC6: Clicking a disconnected session shows Resume + status + controls
   // -------------------------------------------------------------------------
 
-  it("opens the inspector with metadata and controls when a disconnected session is clicked", () => {
+  it("shows metadata and controls in the inspector for a disconnected session", () => {
     // Given
     const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
-    // When
+    // When — the inspector waits to be asked for, whatever the session's liveness
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorToggle().click();
 
-    // Then — inspector opens with metadata and resume button; terminal container absent
+    // Then — inspector shows metadata and resume button; terminal container absent
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
     sessionsDrawerPage.inspectorMetadata().should("be.visible");
     sessionsDrawerPage.inspectorResumeBtn(DISCONNECTED_SESSION.sessionId).should("be.visible");

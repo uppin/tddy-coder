@@ -1,39 +1,12 @@
 import { describe, it, expect } from "bun:test";
-import { defaultInspectorOpen, isInspectorDocked, nextInspectorState } from "./inspectorState";
-import type { SessionEntry } from "../../gen/connection_pb";
-
-const aSession = (fields: Partial<SessionEntry>): SessionEntry =>
-  ({ isActive: false, pendingElicitation: false, ...fields }) as SessionEntry;
+import { defaultInspectorOpen, nextInspectorState } from "./inspectorState";
 
 describe("defaultInspectorOpen", () => {
-  it("returns false for an active session (connected — inspector is hidden by default)", () => {
-    expect(defaultInspectorOpen(true)).toBe(false);
-  });
-
-  it("returns true for an inactive session (disconnected — inspector is open by default)", () => {
-    expect(defaultInspectorOpen(false)).toBe(true);
-  });
-});
-
-describe("isInspectorDocked", () => {
-  it("docks a disconnected session (inactive, no pending elicitation)", () => {
-    expect(isInspectorDocked(aSession({ isActive: false, pendingElicitation: false }))).toBe(true);
-  });
-
-  it("does not dock a connected session (active)", () => {
-    expect(isInspectorDocked(aSession({ isActive: true, pendingElicitation: false }))).toBe(false);
-  });
-
-  it("does not dock a needs-input session (pending elicitation is treated as active)", () => {
-    expect(isInspectorDocked(aSession({ isActive: false, pendingElicitation: true }))).toBe(false);
-  });
-
-  it("does not dock a needs-input session even when it is also active", () => {
-    expect(isInspectorDocked(aSession({ isActive: true, pendingElicitation: true }))).toBe(false);
-  });
-
-  it("does not dock when there is no session", () => {
-    expect(isInspectorDocked(null)).toBe(false);
+  // Selecting a session never opens the inspector for the operator: an active session shows its
+  // terminal, an inactive one shows its recorded activities, and either way the drawer waits to be
+  // asked for. See docs/ft/web/inactive-session-activities.md.
+  it("keeps the inspector closed when a session is selected", () => {
+    expect(defaultInspectorOpen()).toBe(false);
   });
 });
 
@@ -91,23 +64,25 @@ describe("nextInspectorState reducer", () => {
     });
   });
 
-  it("select with isActive=false opens the drawer (disconnected session default)", () => {
-    expect(nextInspectorState(closed, { type: "select", isActive: false })).toEqual({
-      open: true,
-      expanded: false,
-    });
-  });
-
-  it("select with isActive=true closes the drawer (connected session default)", () => {
-    expect(nextInspectorState(open, { type: "select", isActive: true })).toEqual({
+  // Selecting a session no longer depends on its liveness: an active session shows its terminal and
+  // an inactive one shows its recorded activities, so the drawer closes either way.
+  it("select leaves a closed drawer closed", () => {
+    expect(nextInspectorState(closed, { type: "select" })).toEqual({
       open: false,
       expanded: false,
     });
   });
 
-  it("select always resets expanded to false", () => {
-    expect(nextInspectorState(expanded, { type: "select", isActive: false })).toEqual({
-      open: true,
+  it("select closes an open drawer", () => {
+    expect(nextInspectorState(open, { type: "select" })).toEqual({
+      open: false,
+      expanded: false,
+    });
+  });
+
+  it("select collapses an expanded drawer", () => {
+    expect(nextInspectorState(expanded, { type: "select" })).toEqual({
+      open: false,
       expanded: false,
     });
   });

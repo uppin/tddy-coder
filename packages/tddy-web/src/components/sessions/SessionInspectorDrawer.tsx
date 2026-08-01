@@ -31,9 +31,6 @@ export type InspectorDrawerState = "closed" | "open" | "expanded";
 interface SessionInspectorDrawerProps {
   state: InspectorDrawerState;
   session: SessionEntry | null;
-  /** When true, the inspector renders as the full main pane (docked) rather than an overlay
-   *  drawer — used for disconnected sessions. */
-  docked?: boolean;
   onClose: () => void;
   onExpand: () => void;
   onRestore: () => void;
@@ -80,7 +77,6 @@ function MetaRow({ label, value }: { label: string; value: string | number | und
 export function SessionInspectorDrawer({
   state,
   session,
-  docked = false,
   onClose,
   onExpand,
   onRestore,
@@ -114,16 +110,14 @@ export function SessionInspectorDrawer({
     <div
       data-testid="sessions-inspector-drawer"
       data-state={state}
-      data-docked={docked ? "true" : "false"}
+      // Always an overlay drawer: the pane behind it is never empty (an inactive session shows its
+      // recorded activities), so a full-pane inspector would bury the view the operator came for.
       className={cn(
         "flex flex-col h-full border-l border-border bg-background overflow-hidden",
         "absolute top-0 right-0 z-10",
         state === "closed" && "hidden",
-        // Docked (disconnected session): the inspector IS the main pane — full-pane footprint for
-        // both open and expanded, layered opaque over the still-mounted runtime layer behind it.
-        docked && state !== "closed" && "left-0 right-0 w-full",
-        !docked && state === "open" && "w-full md:w-[360px]",
-        !docked && state === "expanded" && "left-0 right-0 w-full",
+        state === "open" && "w-full md:w-[360px]",
+        state === "expanded" && "left-0 right-0 w-full",
       )}
     >
       {/* Header */}
