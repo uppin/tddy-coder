@@ -29,47 +29,31 @@ import { useCommonRoom } from "../hooks/useCommonRoom";
 import { useRoomParticipants } from "../hooks/useRoomParticipants";
 import { daemonHostsFromParticipants, daemonRpcIdentity, type DaemonHost } from "../lib/participantRole";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
+import {
+  readStoredSelectedDaemon,
+  resolveSelectedDaemonInstanceId,
+  writeStoredSelectedDaemon,
+} from "../routing/selectedHost";
+import { PARAM_HOST, screenRootOf, withParams } from "../routing/appLocation";
+import {
+  navigateAppLocation,
+  readAppLocation,
+  setAppLocationParams,
+  useAppLocation,
+} from "../routing/useAppLocation";
 import { useLiveKitClient } from "./transportProvider";
 
 // ---------------------------------------------------------------------------
-// Session-scoped persistence
+// Persistence + resolution
 // ---------------------------------------------------------------------------
 
-const SELECTED_DAEMON_STORAGE_KEY = "tddy_selected_daemon";
-
-/** The selected daemon's instance id, persisted for this browser tab, or `null` if never set. */
-export function readStoredSelectedDaemon(): string | null {
-  return sessionStorage.getItem(SELECTED_DAEMON_STORAGE_KEY);
-}
-
-/** Persist the selected daemon's instance id for this browser tab. */
-export function writeStoredSelectedDaemon(instanceId: string): void {
-  sessionStorage.setItem(SELECTED_DAEMON_STORAGE_KEY, instanceId);
-}
-
-// ---------------------------------------------------------------------------
-// Resolution
-// ---------------------------------------------------------------------------
-
-/**
- * Resolve which daemon should be selected, in precedence order:
- * 1. `storedInstanceId`, if it is still among `daemons`.
- * 2. `servingInstanceId` (the daemon that served this web bundle), if still among `daemons`.
- * 3. The first daemon in `daemons`, if any.
- * 4. `null`, when there are no daemons in the room yet.
- */
-export function resolveSelectedDaemonInstanceId(params: {
-  daemons: DaemonHost[];
-  servingInstanceId?: string;
-  storedInstanceId?: string | null;
-}): string | null {
-  const { daemons, servingInstanceId, storedInstanceId } = params;
-  const presentIds = new Set(daemons.map((d) => d.instanceId));
-  if (storedInstanceId && presentIds.has(storedInstanceId)) return storedInstanceId;
-  if (servingInstanceId && presentIds.has(servingInstanceId)) return servingInstanceId;
-  if (daemons.length > 0) return daemons[0].instanceId;
-  return null;
-}
+// The rules themselves are pure and live in `routing/selectedHost` so they are unit-testable
+// without React's JSX runtime; re-exported here for this module's existing importers.
+export {
+  readStoredSelectedDaemon,
+  writeStoredSelectedDaemon,
+  resolveSelectedDaemonInstanceId,
+} from "../routing/selectedHost";
 
 // ---------------------------------------------------------------------------
 // Context
@@ -159,23 +143,51 @@ function useSelectedDaemonState(
   daemons: DaemonHost[],
   servingInstanceId: string | undefined,
 ): { selectedInstanceId: string | null; selectDaemon: (instanceId: string) => void } {
+  const { location } = useAppLocation();
+  const urlInstanceId = location.params[PARAM_HOST] ?? null;
+
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(() =>
     resolveSelectedDaemonInstanceId({
       daemons,
       servingInstanceId,
       storedInstanceId: readStoredSelectedDaemon(),
+      urlInstanceId,
     }),
   );
 
   useEffect(() => {
     if (daemons.length === 0) return;
     setSelectedInstanceId((current) =>
-      resolveSelectedDaemonInstanceId({ daemons, servingInstanceId, storedInstanceId: current }),
+      resolveSelectedDaemonInstanceId({
+        daemons,
+        servingInstanceId,
+        storedInstanceId: current,
+        urlInstanceId,
+      }),
     );
-  }, [daemons, servingInstanceId]);
+  }, [daemons, servingInstanceId, urlInstanceId]);
 
+  // Record the resolved host so the very first reload — or a copy of the address bar into another
+  // tab, which carries no `sessionStorage` — already names it. `replace`: nobody chose this, it is
+  // the default made explicit.
+  useEffect(() => {
+    if (!selectedInstanceId || urlInstanceId === selectedInstanceId) return;
+    setAppLocationParams({ [PARAM_HOST]: selectedInstanceId }, { replace: true });
+  }, [selectedInstanceId, urlInstanceId]);
+
+  /**
+   * An explicit host change is a navigation: it pushes a history entry, and it drops the
+   * sub-selection, since a session id from the old host names nothing on the new one (the
+   * `key={selectedInstanceId}` remount below invalidates it either way).
+   */
   const selectDaemon = useCallback((instanceId: string) => {
     writeStoredSelectedDaemon(instanceId);
+    const current = readAppLocation();
+    navigateAppLocation(
+      withParams({ path: screenRootOf(current.path), params: current.params }, {
+        [PARAM_HOST]: instanceId,
+      }),
+    );
     setSelectedInstanceId(instanceId);
   }, []);
 

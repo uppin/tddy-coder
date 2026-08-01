@@ -61,6 +61,58 @@ function safeStringify(value: unknown): string {
   return JSON.stringify(value, (_key, v) => (typeof v === "bigint" ? v.toString() : v));
 }
 
+/** Notified when an inbound frame cannot be turned into a response, with a short `context` naming
+ *  what failed and which sender it came from — see {@link LiveKitTransportOptions.onTransportError}. */
+export type TransportErrorHandler = (error: unknown, context: string) => void;
+
+/**
+ * Surface a failure to turn inbound bytes into a response. Such a frame is a real fault, not noise:
+ * a decode failure is how a reassembly bug reaches the app (`refresh error RangeError: premature
+ * EOF`), and swallowing it leaves a call that never settles with nothing to point at. Reported to
+ * the host's handler when it supplied one, otherwise logged — never dropped.
+ */
+function reportTransportError(
+  onTransportError: TransportErrorHandler | undefined,
+  context: string,
+  error: unknown,
+): void {
+  if (onTransportError) {
+    onTransportError(error, context);
+    return;
+  }
+  console.error(`[tddy-rpc] ${context}:`, error);
+}
+
+/**
+ * Inbound chunk reassembly grouped per sender: a `messageId` is only unique within one sender (every
+ * sender's counter starts at 0), so frames from different senders must never land in the same
+ * message. The `undefined` bucket is load-bearing — livekit-client reports no participant whenever
+ * the sender is not (yet) in `room.remoteParticipants`, and those frames must not be able to
+ * complete an identified peer's message.
+ */
+class InboundReassembly {
+  private readonly bySender = new Map<string | undefined, ChunkReassembler>();
+
+  /**
+   * Accept one received frame from `sender`: a raw envelope passes through unchanged, a chunk frame
+   * is buffered in `sender`'s own reassembler until its message completes. Returns `null` while
+   * chunks are outstanding, and throws `ChunkError` on a malformed chunk frame.
+   */
+  accept(payload: Uint8Array, sender?: string): Uint8Array | null {
+    if (!isChunkFrame(payload)) return payload;
+    let reassembler = this.bySender.get(sender);
+    if (!reassembler) {
+      reassembler = new ChunkReassembler();
+      this.bySender.set(sender, reassembler);
+    }
+    return reassembler.accept(payload);
+  }
+
+  clear(): void {
+    this.bySender.clear();
+  }
+}
+
 /**
  * Shared per-room RPC state: one `DataReceived` listener, one request-id counter (scoped to this
  * connection, starting at 1), and the pending-call maps every transport vended for the room uses.
@@ -86,11 +138,12 @@ export class RoomRpcRegistry {
     | null = null;
   // Reassemble chunked responses from *every* peer in the room (a browser may talk to several
   // daemons), so frames are grouped per sender — message ids are only unique within one sender.
-  private readonly reassemblers = new Map<string | undefined, ChunkReassembler>();
+  private readonly reassembly = new InboundReassembly();
 
   constructor(
     private readonly room: Room,
     private readonly debug = false,
+    private readonly onTransportError?: TransportErrorHandler,
   ) {
     this.listener = (
       payload: Uint8Array,
@@ -136,26 +189,20 @@ export class RoomRpcRegistry {
         pending.resolve(response);
       }
     } catch (e) {
-      if (this.debug) {
-        registryLog(`decode error:`, e);
-      }
+      if (this.debug) registryLog(`decode error:`, e);
+      reportTransportError(this.onTransportError, `decode error from sender=${sender}`, e);
     }
   }
 
-  /** Reassemble one frame from `sender`: a raw envelope passes through unchanged; a chunk frame is
-   *  buffered in `sender`'s reassembler until its message completes. Returns `null` while chunks are
-   *  outstanding or when a frame is malformed (logged and dropped). */
+  /** Reassemble one frame from `sender` through that sender's own reassembler. Returns `null` while
+   *  chunks are outstanding, or when the frame is malformed (reported and dropped, so one bad frame
+   *  never tears down the room's listener). */
   private reassemble(payload: Uint8Array, sender?: string): Uint8Array | null {
-    if (!isChunkFrame(payload)) return payload;
-    let reassembler = this.reassemblers.get(sender);
-    if (!reassembler) {
-      reassembler = new ChunkReassembler();
-      this.reassemblers.set(sender, reassembler);
-    }
     try {
-      return reassembler.accept(payload);
+      return this.reassembly.accept(payload, sender);
     } catch (e) {
       if (this.debug) registryLog(`malformed chunk frame:`, e);
+      reportTransportError(this.onTransportError, `malformed chunk frame from sender=${sender}`, e);
       return null;
     }
   }
@@ -167,7 +214,7 @@ export class RoomRpcRegistry {
     }
     this.pendingUnary.clear();
     this.pendingStreams.clear();
-    this.reassemblers.clear();
+    this.reassembly.clear();
   }
 }
 
@@ -212,6 +259,13 @@ export interface LiveKitTransportOptions {
    * counter. Omit for a standalone transport.
    */
   registry?: RoomRpcRegistry;
+  /**
+   * Called with every inbound frame this transport could not turn into a response — a malformed
+   * chunk frame, or bytes that do not decode as an `RpcResponse`. The frame is still dropped and the
+   * listener survives; the handler exists so the host can surface the fault instead of only seeing a
+   * call that never settles. Without a handler the failure is logged to the console.
+   */
+  onTransportError?: TransportErrorHandler;
 }
 
 export class LiveKitTransport implements Transport {
@@ -226,6 +280,7 @@ export class LiveKitTransport implements Transport {
   private listener: ((payload: Uint8Array, participant?: { identity: string }, topic?: string) => void) | null = null;
   private meter: { record(dir: "in" | "out", bytes: number): void } | undefined;
   private registry: RoomRpcRegistry | undefined;
+  private onTransportError: TransportErrorHandler | undefined;
 
   constructor(options: LiveKitTransportOptions) {
     this.room = options.room;
@@ -233,6 +288,7 @@ export class LiveKitTransport implements Transport {
     this.debug = options.debug ?? false;
     this.meter = options.meter;
     this.registry = options.registry;
+    this.onTransportError = options.onTransportError;
 
     // Shared-registry mode: correlation (one listener, one request-id space, one set of pending
     // maps) is owned by the registry and shared with every other transport on the room. Reuse its
@@ -243,9 +299,11 @@ export class LiveKitTransport implements Transport {
       return;
     }
 
-    // This listener accepts frames only from `targetIdentity` (a single sender), so one reassembler
-    // suffices; ordered reliable delivery keeps a message's chunks contiguous.
-    const inboundReassembler = new ChunkReassembler();
+    // Frames are grouped per sender even here: this listener accepts frames whose sender identity is
+    // unknown (livekit-client reports none whenever the sender is missing from
+    // `room.remoteParticipants`), and message ids collide across senders — so an unidentified
+    // sender's chunk must never complete the target peer's message.
+    const inboundReassembly = new InboundReassembly();
     this.listener = (
       payload: Uint8Array,
       participant?: { identity?: string } | null,
@@ -266,19 +324,16 @@ export class LiveKitTransport implements Transport {
 
       this.meter?.record("in", payload.length);
 
-      let full: Uint8Array;
-      if (isChunkFrame(payload)) {
-        try {
-          const result = inboundReassembler.accept(payload);
-          if (result === null) return;
-          full = result;
-        } catch (e) {
-          if (this.debug) transportLog(`malformed chunk frame:`, e);
-          return;
-        }
-      } else {
-        full = payload;
+      const sender = participant?.identity ?? undefined;
+      let full: Uint8Array | null;
+      try {
+        full = inboundReassembly.accept(payload, sender);
+      } catch (e) {
+        if (this.debug) transportLog(`malformed chunk frame:`, e);
+        reportTransportError(this.onTransportError, `malformed chunk frame from sender=${sender}`, e);
+        return;
       }
+      if (full === null) return;
 
       try {
         const response = fromBinary(RpcResponseSchema, full) as RpcResponse;
@@ -320,9 +375,8 @@ export class LiveKitTransport implements Transport {
           }
         }
       } catch (e) {
-        if (this.debug) {
-          transportLog(`decode error:`, e);
-        }
+        if (this.debug) transportLog(`decode error:`, e);
+        reportTransportError(this.onTransportError, `decode error from sender=${sender}`, e);
       }
     };
 
@@ -727,15 +781,25 @@ export class LiveKitTransportFactory {
   private constructor(
     private readonly room: Room,
     private readonly debug: boolean,
+    onTransportError?: TransportErrorHandler,
   ) {
-    this.registry = new RoomRpcRegistry(room, debug);
+    this.registry = new RoomRpcRegistry(room, debug, onTransportError);
   }
 
-  /** The factory for `room`, created once and reused for every later call with the same room. */
-  static forRoom(room: Room, debug = false): LiveKitTransportFactory {
+  /**
+   * The factory for `room`, created once and reused for every later call with the same room. Because
+   * the shared registry owns the room's single inbound listener, `debug` and `onTransportError` are
+   * per-room settings fixed by whoever asks for the factory first; later callers get the existing
+   * factory and their arguments are ignored.
+   */
+  static forRoom(
+    room: Room,
+    debug = false,
+    onTransportError?: TransportErrorHandler,
+  ): LiveKitTransportFactory {
     const existing = LiveKitTransportFactory.byRoom.get(room);
     if (existing) return existing;
-    const created = new LiveKitTransportFactory(room, debug);
+    const created = new LiveKitTransportFactory(room, debug, onTransportError);
     LiveKitTransportFactory.byRoom.set(room, created);
     return created;
   }

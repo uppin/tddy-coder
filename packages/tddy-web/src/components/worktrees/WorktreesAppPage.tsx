@@ -11,6 +11,8 @@ import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { WorktreesScreen, type WorktreesScreenMockRow } from "./WorktreesScreen";
 import { useWorktreeStatsStream } from "../../rpc/useWorktreeStatsStream";
 import { formatLastCalculated, type WorktreeStatsRow } from "../../lib/worktreeSize";
+import { PARAM_PROJECT } from "../../routing/appLocation";
+import { useAppLocation } from "../../routing/useAppLocation";
 
 const selectClassName =
   "box-border min-w-[12rem] max-w-[24rem] rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -49,7 +51,16 @@ export function WorktreesAppPage({
 
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [daemons, setDaemons] = useState<EligibleDaemonEntry[]>([]);
-  const [projectId, setProjectId] = useState("");
+  // The project filter is `?project=` — "the worktrees of project X" is a destination worth
+  // linking to. `daemonId` below stays local state: it is a create-worktree form field, and the
+  // list itself is local-daemon-only (see the note above), so it is not a destination.
+  const { location, setParams } = useAppLocation();
+  const projectId = location.params[PARAM_PROJECT] ?? "";
+  const setProjectId = useCallback(
+    (next: string, options?: { replace?: boolean }) =>
+      setParams({ [PARAM_PROJECT]: next === "" ? null : next }, options),
+    [setParams],
+  );
   const [daemonId, setDaemonId] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -72,16 +83,17 @@ export function WorktreesAppPage({
     loadProjectsAndDaemons();
   }, [sessionToken, isAuthenticated, loadProjectsAndDaemons]);
 
+  // Resolve the filter against the loaded projects and write the answer back: a URL naming a
+  // project that is not registered (or none at all) settles on the first listed one, so the address
+  // bar always names the project actually being shown. `replace` — the app resolved this, not the
+  // operator.
   useEffect(() => {
-    if (projects.length === 0) {
-      if (projectId !== "") setProjectId("");
-      return;
-    }
-    const stillValid = projects.some((p) => p.projectId === projectId);
-    if (!stillValid) {
-      setProjectId(projects[0]?.projectId ?? "");
-    }
-  }, [projects, projectId]);
+    // An empty list is "not loaded yet", never "no projects exist" — clearing the param here would
+    // wipe a deep-linked project during the `ListProjects` round-trip, before it could be matched.
+    if (projects.length === 0) return;
+    if (projects.some((p) => p.projectId === projectId)) return;
+    setProjectId(projects[0]?.projectId ?? "", { replace: true });
+  }, [projects, projectId, setProjectId]);
 
   useEffect(() => {
     const local = daemons.find((d) => d.isLocal);

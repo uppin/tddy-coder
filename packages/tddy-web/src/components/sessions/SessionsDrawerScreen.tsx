@@ -37,7 +37,17 @@ import { SessionMainPane } from "./SessionMainPane";
 import { HostStatsFooter } from "./HostStatsFooter";
 import { useSessionAttachment, type SessionAttachmentState } from "./useSessionAttachment";
 import { nextInspectorState } from "./inspectorState";
-import { sessionsDrawerPathForSession, parseSessionsDrawerSessionId } from "../../routing/appRoutes";
+import {
+  sessionsDrawerPathForSession,
+  parseSessionsDrawerSessionId,
+  isSessionsNewPath,
+  isInspectorTabName,
+  SESSIONS_DRAWER_ROUTE,
+  SESSIONS_NEW_ROUTE,
+  type InspectorTabName,
+} from "../../routing/appRoutes";
+import { PARAM_CODE, PARAM_FULL, PARAM_INSPECTOR } from "../../routing/appLocation";
+import { useAppLocation } from "../../routing/useAppLocation";
 import { Signal } from "../../gen/connection_pb";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { detectIsMobile, useIsMobile } from "../../hooks/useIsMobile";
@@ -84,17 +94,60 @@ export function SessionsDrawerScreen({
     [room, liveKitFactory],
   );
 
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    return parseSessionsDrawerSessionId(window.location.hash.slice(1));
-  });
-  const [inspectorState, setInspectorState] = useState<InspectorDrawerState>("closed");
+  // Selection is derived from the URL, not held in state: that is what makes Back, Forward, a
+  // pasted link and a reload all move the screen through the same code path.
+  const { location, navigate, setParams } = useAppLocation();
+  const selectedSessionId = parseSessionsDrawerSessionId(location.path);
+  const mode: "list" | "creating" = isSessionsNewPath(location.path) ? "creating" : "list";
+
+  // Inspector state, likewise: the tab's presence in the URL *is* "the inspector is open".
+  const inspectorTabParam = location.params[PARAM_INSPECTOR] ?? "";
+  const inspectorTab: InspectorTabName = isInspectorTabName(inspectorTabParam)
+    ? inspectorTabParam
+    : "details";
+  const inspectorState: InspectorDrawerState =
+    inspectorTabParam === ""
+      ? "closed"
+      : location.params[PARAM_FULL] === "1"
+        ? "expanded"
+        : "open";
+
+  /**
+   * Write an inspector state into the URL. `replace` for the transitions the screen makes on the
+   * operator's behalf (auto-open on idle, auto-close on connect) so Back does not step through
+   * states nobody chose; a plain push for a click.
+   */
+  const applyInspectorState = useCallback(
+    (next: InspectorDrawerState, options?: { replace?: boolean; tab?: InspectorTabName }) => {
+      const tab = options?.tab ?? inspectorTab;
+      setParams(
+        next === "closed"
+          ? { [PARAM_INSPECTOR]: null, [PARAM_FULL]: null }
+          : { [PARAM_INSPECTOR]: tab, [PARAM_FULL]: next === "expanded" ? "1" : null },
+        options,
+      );
+    },
+    [inspectorTab, setParams],
+  );
+
+  // A tab name the inspector does not have would render a blank panel — normalise it away.
+  useEffect(() => {
+    if (inspectorTabParam !== "" && !isInspectorTabName(inspectorTabParam)) {
+      setParams({ [PARAM_INSPECTOR]: "details" }, { replace: true });
+    }
+  }, [inspectorTabParam, setParams]);
+
   // Track whether the inspector was auto-opened (by session select) vs manually opened by the user.
   // When true, a successful connection should auto-close the inspector.
   const inspectorAutoOpenRef = useRef(false);
-  // Track whether the URL-seeded selectedSessionId has been activated after the session list loads
-  const deepLinkActivatedRef = useRef(false);
-  const [mode, setMode] = useState<"list" | "creating">("list");
+  // The session id the activation effect below has already run for. Keyed on the id (not a one-shot
+  // boolean) so an inbound URL change — Back, a pasted link — activates the newly named session,
+  // while a re-render for the same id does not re-connect it.
+  const activatedSessionIdRef = useRef<string | null>(null);
+  // Whether the activation effect has run at all. The first activation honours an `?inspector=` the
+  // URL already carried (a deep link asked for that tab); later ones recompute the default for the
+  // newly selected session, as selecting a session in the drawer has always done.
+  const firstActivationPendingRef = useRef(true);
   // A deep link (`#/sessions/:id`) that resolves to no known session after the list loads shows a
   // not-found state instead of silently no-opping. Driven by local state so it dismisses on Home
   // without depending on a hash change.
@@ -357,34 +410,96 @@ export function SessionsDrawerScreen({
     [selectedSession],
   );
 
-  // When the session list loads and a session was pre-selected from the URL hash,
-  // activate it (set inspector state + auto-connect) exactly once.
+  /**
+   * Activate whichever session the URL names, once the list has loaded: set the inspector's default
+   * state and attach the session. One effect serves every way the selection can change — a drawer
+   * click, a deep link on load, Back/Forward, a pasted link — because they all just change the URL.
+   *
+   * Attaching here rather than in the click handler is what makes Back re-attach: `handleSelect`
+   * only navigates.
+   */
   useEffect(() => {
-    if (deepLinkActivatedRef.current) return;
-    if (!selectedSessionId || sortedSessions.length === 0) return;
+    if (!selectedSessionId) {
+      activatedSessionIdRef.current = null;
+      setUnknownSession(false);
+      // `inspector` / `full` / `code` describe a session's panes; with no session selected they
+      // describe nothing. Drop them so "back to sessions" cannot leave a URL claiming an open
+      // inspector over an empty pane. `replace` — this is cleanup, not a destination.
+      if (location.params[PARAM_INSPECTOR] || location.params[PARAM_FULL] || location.params[PARAM_CODE]) {
+        setParams(
+          { [PARAM_INSPECTOR]: null, [PARAM_FULL]: null, [PARAM_CODE]: null },
+          { replace: true },
+        );
+      }
+      return;
+    }
+    if (activatedSessionIdRef.current === selectedSessionId) return;
+    if (sortedSessions.length === 0) return; // list not loaded yet — retry on the next change
     const session = sortedSessions.find((s) => s.sessionId === selectedSessionId);
+    activatedSessionIdRef.current = selectedSessionId;
+    const honourUrlInspector = firstActivationPendingRef.current && inspectorTabParam !== "";
+    firstActivationPendingRef.current = false;
+
     if (!session) {
-      // The deep-linked id is not in the loaded list — surface a not-found state once.
-      deepLinkActivatedRef.current = true;
+      // The URL names an id that is not in the loaded list — surface a not-found state.
       setUnknownSession(true);
       return;
     }
-    deepLinkActivatedRef.current = true;
-    setInspectorState(
-      nextInspectorState(
+    setUnknownSession(false);
+
+    // A deep link that asked for a tab keeps it; otherwise the inspector takes its default state
+    // for this session (open for a disconnected one, closed for an active one).
+    if (!honourUrlInspector) {
+      const willOpen = nextInspectorState(
         { open: false, expanded: false },
         { type: "select", isActive: session.isActive },
-      ).open
-        ? "open"
-        : "closed",
-    );
-    if (session.isActive && activeClient) {
-      connectSession(selectedSessionId, sessionToken, activeClient).catch((err) => {
-        console.debug("[SessionsDrawerScreen] deep-link connectSession error", err);
-      });
+      ).open;
+      inspectorAutoOpenRef.current = willOpen;
+      applyInspectorState(willOpen ? "open" : "closed", { replace: true });
+    } else {
+      inspectorAutoOpenRef.current = false;
+    }
+
+    // Fast path — the session's runtime is already mounted in the registry (it was attached
+    // earlier and stays alive across focus switches). Restore the attachment from the registry's
+    // stored connection params so the screen re-evaluates state for the newly selected session
+    // WITHOUT an RPC round-trip: no re-connect, no fresh ClaimTerminalControl, no token race, and
+    // the existing terminal stream keeps flowing. The registry effect below re-focuses it.
+    const existing = runtimeRegistry.get(selectedSessionId);
+    if (existing?.status === "connected-livekit") {
+      restoreAttachment({
+        status: "connected-livekit",
+        sessionId: selectedSessionId,
+        livekitUrl: existing.livekitUrl ?? "",
+        livekitRoom: existing.livekitRoom ?? "",
+        livekitServerIdentity: existing.livekitServerIdentity ?? "",
+        identity: existing.identity ?? "",
+      } satisfies SessionAttachmentState);
+      return;
+    }
+    if (existing?.status === "connected-grpc") {
+      restoreAttachment({
+        status: "connected-grpc",
+        sessionId: selectedSessionId,
+      } satisfies SessionAttachmentState);
+      return;
+    }
+
+    // Slow path — not yet attached. Reset so the attachment effect re-evaluates state for the new
+    // selection, then connect to this session's owning daemon. `activeClient` is derived from
+    // `selectedSession`, which this render may not have caught up to, so build the client for this
+    // session's owner directly rather than reading `activeClient` here.
+    resetAttachment();
+    if (session.isActive) {
+      const owningClient = clientForHost(owningHostForSession(session, selectedInstanceId ?? ""));
+      if (owningClient) {
+        connectSession(selectedSessionId, sessionToken, owningClient).catch((err) => {
+          console.debug("[SessionsDrawerScreen] connectSession error", err);
+        });
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortedSessions]);
+  }, [selectedSessionId, sortedSessions]);
 
   // React to attachment status changes:
   // - "connected-*" for the selected session → close inspector IF it was auto-opened
@@ -402,70 +517,28 @@ export function SessionsDrawerScreen({
         inspectorAutoOpenRef.current
       ) {
         inspectorAutoOpenRef.current = false;
-        setInspectorState("closed");
+        applyInspectorState("closed", { replace: true });
       }
     } else if (attachment.status === "idle") {
       // Only auto-open for inactive sessions; active sessions will connect shortly
       const session = sortedSessions.find((s) => s.sessionId === selectedSessionId);
-      if (session && !session.isActive) {
-        setInspectorState((prev) => (prev === "expanded" ? "expanded" : "open"));
+      if (session && !session.isActive && inspectorState !== "expanded") {
+        applyInspectorState("open", { replace: true });
       }
-    } else if (attachment.status === "error") {
-      setInspectorState((prev) => (prev === "expanded" ? "expanded" : "open"));
+    } else if (attachment.status === "error" && inspectorState !== "expanded") {
+      applyInspectorState("open", { replace: true });
     }
+  // These transitions are driven by the attachment, not by the URL: re-running them whenever
+  // `inspectorState`/`applyInspectorState` change would fight the operator's own toggles.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attachment.status, selectedSessionId, sortedSessions]);
 
-  // When a session is selected in the drawer, auto-connect if it is active
+  // Selecting a session is a navigation and nothing else — the activation effect above does the
+  // inspector and attachment work, so Back and a pasted link get exactly the same treatment.
   const handleSelectSession = (sessionId: string) => {
-    setSelectedSessionId(sessionId);
     // On mobile the list is a full-screen overlay — close it so the terminal is visible.
     if (isMobile) setSessionListOpen(false);
-    const session = sortedSessions.find((s) => s.sessionId === sessionId);
-    const willOpen = nextInspectorState(
-      { open: false, expanded: false },
-      { type: "select", isActive: session?.isActive ?? false },
-    ).open;
-    // Track auto-open so we know whether a subsequent connect should auto-close
-    inspectorAutoOpenRef.current = willOpen;
-    setInspectorState(willOpen ? "open" : "closed");
-
-    // Fast path — the session's runtime is already mounted in the registry (it was attached
-    // earlier and stays alive across focus switches). Restore the attachment from the registry's
-    // stored connection params so the screen re-evaluates state for the newly selected session
-    // WITHOUT an RPC round-trip: no re-connect, no fresh ClaimTerminalControl, no token race, and
-    // the existing terminal stream keeps flowing. The registry effect below re-focuses it.
-    const existing = runtimeRegistry.get(sessionId);
-    if (existing?.status === "connected-livekit") {
-      restoreAttachment({
-        status: "connected-livekit",
-        sessionId,
-        livekitUrl: existing.livekitUrl ?? "",
-        livekitRoom: existing.livekitRoom ?? "",
-        livekitServerIdentity: existing.livekitServerIdentity ?? "",
-        identity: existing.identity ?? "",
-      } satisfies SessionAttachmentState);
-      return;
-    }
-    if (existing?.status === "connected-grpc") {
-      restoreAttachment({ status: "connected-grpc", sessionId } satisfies SessionAttachmentState);
-      return;
-    }
-
-    // Slow path — not yet attached. Reset so the attachment effect re-evaluates state for the
-    // new selection, then connect to the clicked session's owning daemon. `activeClient` still
-    // reflects the previously selected session at this point (the selection state update is not
-    // yet applied), so build the client for this session's owner directly rather than reading
-    // `activeClient` here.
-    resetAttachment();
-    if (session?.isActive) {
-      const owner = owningHostForSession(session, selectedInstanceId ?? "");
-      const owningClient = clientForHost(owner);
-      if (owningClient) {
-        connectSession(sessionId, sessionToken, owningClient).catch((err) => {
-          console.debug("[SessionsDrawerScreen] connectSession error", err);
-        });
-      }
-    }
+    navigate(sessionsDrawerPathForSession(sessionId));
   };
 
   const handleResume = (sessionId: string) => {
@@ -517,8 +590,7 @@ export function SessionsDrawerScreen({
 
   const handleUnknownHome = () => {
     setUnknownSession(false);
-    setSelectedSessionId(null);
-    onNavigate("/sessions");
+    navigate(SESSIONS_DRAWER_ROUTE);
   };
 
   // A pr-stack orchestrator's "Start session" CTA spawns a child immediately in the
@@ -565,14 +637,12 @@ export function SessionsDrawerScreen({
   const handleInspectorToggle = () => {
     // Manual interaction — subsequent connection should not auto-close the inspector
     inspectorAutoOpenRef.current = false;
-    setInspectorState((prev) => {
-      const prevState = { open: prev !== "closed", expanded: prev === "expanded" };
-      const next = nextInspectorState(prevState, { type: "toggle" });
-      return next.open ? (next.expanded ? "expanded" : "open") : "closed";
-    });
+    const prevState = { open: inspectorState !== "closed", expanded: inspectorState === "expanded" };
+    const next = nextInspectorState(prevState, { type: "toggle" });
+    applyInspectorState(next.open ? (next.expanded ? "expanded" : "open") : "closed");
   };
 
-  const handleInspectorClose = () => setInspectorState("closed");
+  const handleInspectorClose = () => applyInspectorState("closed");
 
   // Insert an uploaded file's host path (Files tab → Insert / tap) into the focused session's
   // terminal, shell-escaped exactly as a native terminal file-drag would type it. The Files tab
@@ -582,17 +652,15 @@ export function SessionsDrawerScreen({
     if (!focusedId) return;
     runtimeRegistry.get(focusedId)?.insertInput?.(joinQuotedPaths([hostPath]));
   };
-  const handleInspectorExpand = () => setInspectorState("expanded");
-  const handleInspectorRestore = () => setInspectorState("open");
+  const handleInspectorExpand = () => applyInspectorState("expanded");
+  const handleInspectorRestore = () => applyInspectorState("open");
 
-  const handleCreateSession = () => setMode("creating");
-  const handleCancelCreate = () => setMode("list");
+  const handleCreateSession = () => navigate(SESSIONS_NEW_ROUTE);
+  const handleCancelCreate = () => navigate(SESSIONS_DRAWER_ROUTE);
   const handleSessionCreated = (sessionId: string) => {
-    setMode("list");
-    setSelectedSessionId(sessionId);
     // Auto-close the sessions drawer so the new session's terminal is unobstructed.
     setSessionListOpen(false);
-    window.location.hash = sessionsDrawerPathForSession(sessionId);
+    navigate(sessionsDrawerPathForSession(sessionId));
     if (!client) return;
     connectSession(sessionId, sessionToken, client).catch((err) => {
       console.debug("[SessionsDrawerScreen] connectSession after create error", err);

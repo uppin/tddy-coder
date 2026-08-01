@@ -12,6 +12,8 @@ import { useAuthContext } from "../hooks/authProvider";
 import { useRoomParticipants } from "../hooks/useRoomParticipants";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
 import { useSelectedDaemon } from "../rpc/selectedDaemon";
+import { PARAM_PARTICIPANT } from "../routing/appLocation";
+import { useAppLocation } from "../routing/useAppLocation";
 import { buildRegistry, findMethod } from "./registry";
 import { invokeRpc, type InvokeResult } from "./invoke";
 import {
@@ -79,18 +81,24 @@ export function RpcPlaygroundAppPage({
   const { room } = useSelectedDaemon();
   const allParticipants = useRoomParticipants(room);
 
-  const [selectedParticipantId, setSelectedParticipantId] = useState<
-    string | null
-  >(null);
+  // The addressed participant is `?participant=`, so a link reproduces which host is being probed.
+  const { location, setParams } = useAppLocation();
+  const selectedParticipantId = location.params[PARAM_PARTICIPANT] ?? null;
+  const setSelectedParticipantId = useCallback(
+    (identityToSelect: string, options?: { replace?: boolean }) =>
+      setParams({ [PARAM_PARTICIPANT]: identityToSelect }, options),
+    [setParams],
+  );
 
-  // Auto-select the first coder participant (active session / daemon RPC server) when the room populates.
+  // Auto-select the first coder participant (active session / daemon RPC server) when the room
+  // populates. `replace` — the app picked this, the operator did not.
   useEffect(() => {
     if (selectedParticipantId) return;
     const target = allParticipants.find(
       (p) => p.role === "coder" && p.identity !== identity,
     );
-    if (target) setSelectedParticipantId(target.identity);
-  }, [allParticipants, identity, selectedParticipantId]);
+    if (target) setSelectedParticipantId(target.identity, { replace: true });
+  }, [allParticipants, identity, selectedParticipantId, setSelectedParticipantId]);
 
   const transport = useLiveKitTransport(room, selectedParticipantId);
 

@@ -135,10 +135,25 @@ struct PendingMessage {
     chunks: HashMap<u32, Vec<u8>>,
 }
 
+impl PendingMessage {
+    fn new(total_chunks: usize) -> Self {
+        Self {
+            total_chunks,
+            chunks: HashMap::new(),
+        }
+    }
+}
+
 /// Stateful reassembler. Feed each received chunk frame (those for which [`is_chunk_frame`] is true)
 /// via [`ChunkReassembler::accept`]; it returns `Some(payload)` once the final frame of a message
 /// arrives, `None` while chunks are still outstanding. Concurrent messages (distinct `message_id`s)
 /// reassemble independently.
+///
+/// One reassembler buffers the frames of exactly one sender: `message_id`s are only unique within a
+/// sender, so a receiver talking to several peers keeps a reassembler per peer. Even within one
+/// sender an id can repeat — [`NEXT_MESSAGE_ID`] restarts at 0 with the process — so a frame whose
+/// `total_chunks` disagrees with the buffered message replaces it rather than merging into it (see
+/// [`ChunkReassembler::accept`]).
 #[derive(Default)]
 pub struct ChunkReassembler {
     pending: HashMap<u32, PendingMessage>,
@@ -147,6 +162,10 @@ pub struct ChunkReassembler {
 impl ChunkReassembler {
     /// Accept one received chunk frame. Returns the completed payload when the final outstanding
     /// chunk of its message arrives, otherwise `None`.
+    ///
+    /// A frame whose `total_chunks` disagrees with the message already buffered under its
+    /// `message_id` starts that message afresh: the id was reused by a restarted sender, and merging
+    /// the two generations would hand the caller a payload stitched from both.
     pub fn accept(&mut self, frame: &[u8]) -> Result<Option<Vec<u8>>, ChunkError> {
         if frame.len() < HEADER_LEN {
             return Err(ChunkError::Malformed(format!(
@@ -169,10 +188,10 @@ impl ChunkReassembler {
         let pending = self
             .pending
             .entry(message_id)
-            .or_insert_with(|| PendingMessage {
-                total_chunks,
-                chunks: HashMap::new(),
-            });
+            .or_insert_with(|| PendingMessage::new(total_chunks));
+        if pending.total_chunks != total_chunks {
+            *pending = PendingMessage::new(total_chunks);
+        }
         pending.chunks.insert(index, data);
 
         if pending.chunks.len() < pending.total_chunks {
@@ -338,6 +357,29 @@ mod tests {
             completed.contains(&second),
             "second message not reassembled"
         );
+    }
+
+    /// The message id two different messages collide on: [`NEXT_MESSAGE_ID`] starts at 0 in every
+    /// process, so a restarted sender hands out ids the receiver may still hold partial chunks for.
+    const REUSED_MESSAGE_ID: u32 = 7;
+
+    #[test]
+    fn starts_a_fresh_message_when_a_reused_message_id_arrives_with_a_different_chunk_count() {
+        // Given a sender that published only the first of three frames before dying (a process
+        // killed mid-publish), leaving a partial message buffered under REUSED_MESSAGE_ID
+        let mut reassembler = ChunkReassembler::default();
+        let abandoned = split_into_frames(REUSED_MESSAGE_ID, &a_payload_of(2_500), 1_000);
+        reassembler.accept(&abandoned[0]).expect("valid frame");
+
+        // When the restarted sender's two-frame message reuses the same id
+        let resent = a_payload_of(1_500);
+        let completed = feed_all(
+            &mut reassembler,
+            &split_into_frames(REUSED_MESSAGE_ID, &resent, 1_000),
+        );
+
+        // Then the reused id yields exactly the new message's bytes — never a mix of the two
+        assert_eq!(completed, vec![resent]);
     }
 
     #[test]

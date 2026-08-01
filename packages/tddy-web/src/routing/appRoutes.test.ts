@@ -13,6 +13,15 @@ import {
   isSessionsDrawerPath,
   sessionsDrawerPathForSession,
   parseSessionsDrawerSessionId,
+  SESSIONS_NEW_ROUTE,
+  isSessionsNewPath,
+  sessionsDrawerAddAgentPath,
+  parseSessionsDrawerAddAgentSessionId,
+  TASKS_ROUTE,
+  isTasksPath,
+  tasksPathForTask,
+  parseTaskId,
+  isInspectorTabName,
 } from "./appRoutes";
 
 describe("appRoutes helpers (canonical path rules)", () => {
@@ -209,5 +218,129 @@ describe("appRoutes — sessions drawer route helpers", () => {
     const result = isSessionsDrawerPath("/sessions/some-session-id");
     // Then
     expect(result).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// URL state routing (docs/ft/web/1-WIP/PRD-2026-08-01-url-state-routing.md)
+// ---------------------------------------------------------------------------
+
+describe("sessions create + add-agent routes", () => {
+  it("recognises /sessions/new as the create-session route", () => {
+    // When
+    const result = isSessionsNewPath(SESSIONS_NEW_ROUTE);
+    // Then
+    expect(result).toBe(true);
+  });
+
+  it("treats 'new' as reserved, not as a session id", () => {
+    // When
+    const result = parseSessionsDrawerSessionId(SESSIONS_NEW_ROUTE);
+    // Then
+    expect(result).toBeNull();
+  });
+
+  it("still routes /sessions/new to the sessions drawer screen", () => {
+    // When
+    const result = isSessionsDrawerPath(SESSIONS_NEW_ROUTE);
+    // Then
+    expect(result).toBe(true);
+  });
+
+  it("builds the add-agent path for a session", () => {
+    // When
+    const result = sessionsDrawerAddAgentPath("abc-123");
+    // Then
+    expect(result).toBe("/sessions/abc-123/add-agent");
+  });
+
+  it("extracts the session id from an add-agent pathname", () => {
+    // When
+    const result = parseSessionsDrawerAddAgentSessionId("/sessions/abc-123/add-agent");
+    // Then
+    expect(result).toBe("abc-123");
+  });
+
+  it("returns null when a /sessions/:id path carries no add-agent segment", () => {
+    // When
+    const result = parseSessionsDrawerAddAgentSessionId("/sessions/abc-123");
+    // Then
+    expect(result).toBeNull();
+  });
+
+  it("extracts the session id from a /sessions/:id/add-agent path as the selected session", () => {
+    // When
+    const result = parseSessionsDrawerSessionId("/sessions/abc-123/add-agent");
+    // Then
+    expect(result).toBe("abc-123");
+  });
+});
+
+describe("tasks routes", () => {
+  it("builds the /tasks/:taskId deep-link path", () => {
+    // When
+    const result = tasksPathForTask("task-9");
+    // Then
+    expect(result).toBe("/tasks/task-9");
+  });
+
+  it("URL-encodes a task id containing a reserved character", () => {
+    // When
+    const result = tasksPathForTask("task/9");
+    // Then
+    expect(result).toBe("/tasks/task%2F9");
+  });
+
+  it("extracts the task id from a /tasks/:taskId pathname", () => {
+    // When
+    const result = parseTaskId("/tasks/task-9");
+    // Then
+    expect(result).toBe("task-9");
+  });
+
+  it("returns null for /tasks (no task id segment)", () => {
+    // When
+    const result = parseTaskId(TASKS_ROUTE);
+    // Then
+    expect(result).toBeNull();
+  });
+
+  it("isTasksPath matches /tasks/:taskId deep links", () => {
+    // When
+    const result = isTasksPath("/tasks/task-9");
+    // Then
+    expect(result).toBe(true);
+  });
+
+  it("isTasksPath does not match a path that merely starts with /tasks", () => {
+    // When
+    const result = isTasksPath("/tasks-archive");
+    // Then
+    expect(result).toBe(false);
+  });
+});
+
+describe("inspector tab param", () => {
+  it("accepts every inspector tab name", () => {
+    // When
+    const result = ["details", "tools", "usage", "worktree", "files", "vnc", "screen-sharing"].map(
+      isInspectorTabName,
+    );
+    // Then
+    expect(result).toEqual([true, true, true, true, true, true, true]);
+  });
+
+  it("rejects a value that is not an inspector tab", () => {
+    // When
+    const result = isInspectorTabName("not-a-tab");
+    // Then
+    expect(result).toBe(false);
+  });
+
+  it("rejects an empty value", () => {
+    // When
+    const result = isInspectorTabName("");
+    // Then
+    expect(result).toBe(false);
   });
 });
