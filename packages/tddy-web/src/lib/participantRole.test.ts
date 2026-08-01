@@ -34,6 +34,32 @@ describe("daemonHostsFromParticipants", () => {
     expect(hosts).toEqual([]);
   });
 
+  it("carries each daemon's advertised attachment cap onto the host it yields", () => {
+    // Given two daemons advertising different attachment caps
+    const participants = [
+      {
+        identity: "udoo",
+        metadata:
+          '{"instance_id":"udoo","label":"udoo (this daemon)","max_attachment_bytes":67108864}',
+      },
+      {
+        identity: "srv2",
+        metadata: '{"instance_id":"srv2","label":"srv2 (this daemon)"}',
+      },
+    ];
+
+    // When
+    const hosts = daemonHostsFromParticipants(participants);
+
+    // Then the cap reaches the host list the Start-Session form selects from — this is the only
+    // path from the common room to `useDaemons()`, so a cap dropped here is a cap the form can
+    // never enforce
+    expect(hosts).toEqual([
+      { instanceId: "udoo", label: "udoo (this daemon)", maxAttachmentBytes: 67108864 },
+      { instanceId: "srv2", label: "srv2 (this daemon)" },
+    ]);
+  });
+
   it("deduplicates daemons by instance id, preserving first-seen order", () => {
     // Given the same daemon advertised twice plus a second daemon
     const participants = [
@@ -70,6 +96,56 @@ describe("parseDaemonAdvertisement", () => {
     const host = parseDaemonAdvertisement(meta);
 
     // Then
+    expect(host).toEqual({ instanceId: "h1", label: "h1 (this daemon)" });
+  });
+
+  it("extracts the advertised attachment size cap as maxAttachmentBytes", () => {
+    // Given a daemon advertising a 64 MiB attachment cap
+    const meta =
+      '{"instance_id":"h1","label":"h1 (this daemon)","max_attachment_bytes":67108864}';
+
+    // When
+    const host = parseDaemonAdvertisement(meta);
+
+    // Then
+    expect(host).toEqual({
+      instanceId: "h1",
+      label: "h1 (this daemon)",
+      maxAttachmentBytes: 67108864,
+    });
+  });
+
+  it("omits maxAttachmentBytes when the advertisement does not carry one", () => {
+    // Given an advertisement from a daemon predating the cap
+    const meta = '{"instance_id":"h1","label":"h1 (this daemon)"}';
+
+    // When
+    const host = parseDaemonAdvertisement(meta);
+
+    // Then — absent rather than zero, so the form can tell "no cap advertised" from "cap of 0"
+    expect(host).toEqual({ instanceId: "h1", label: "h1 (this daemon)" });
+  });
+
+  it("ignores a non-numeric attachment cap rather than trusting it", () => {
+    // Given an advertisement whose cap is not a number
+    const meta =
+      '{"instance_id":"h1","label":"h1 (this daemon)","max_attachment_bytes":"lots"}';
+
+    // When
+    const host = parseDaemonAdvertisement(meta);
+
+    // Then
+    expect(host).toEqual({ instanceId: "h1", label: "h1 (this daemon)" });
+  });
+
+  it("ignores a zero or negative attachment cap, which would refuse every file", () => {
+    // Given an advertisement with a nonsensical cap
+    const meta = '{"instance_id":"h1","label":"h1 (this daemon)","max_attachment_bytes":0}';
+
+    // When
+    const host = parseDaemonAdvertisement(meta);
+
+    // Then — a cap of 0 would make every attachment unpickable; treat it as unadvertised
     expect(host).toEqual({ instanceId: "h1", label: "h1 (this daemon)" });
   });
 });

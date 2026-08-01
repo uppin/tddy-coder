@@ -80,10 +80,10 @@ use prost::Message;
 use serde::Deserialize;
 use tddy_service::proto::connection::{
     AddProjectToHostRequest, AddProjectToHostResponse, DeleteStagedAttachmentRequest,
-    DeleteStagedAttachmentResponse, ListProjectsRequest, ListProjectsResponse,
+    DeleteStagedAttachmentResponse, HostDocumentChunk, ListProjectsRequest, ListProjectsResponse,
     ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, ProjectEntry as ProtoProjectEntry,
     ReadHostDocumentRequest, ReadHostDocumentResponse, SetProjectDefaultBranchRequest,
-    SetProjectDefaultBranchResponse, StartSessionRequest, StartSessionResponse,
+    SetProjectDefaultBranchResponse, StartSessionEvent, StartSessionRequest, StartSessionResponse,
     UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
 };
 
@@ -120,6 +120,16 @@ pub struct DaemonAdvertisement {
     /// the daemon does not advertise one (older daemons / legacy advertisements).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub repos_base_path: String,
+    /// Largest single session attachment this host will serve (`max_attachment_bytes`), surfaced so
+    /// the web Start-Session form can refuse an oversized document at pick time instead of after an
+    /// upload. Zero when the daemon does not advertise one (older daemons / legacy advertisements),
+    /// in which case the key is left off the wire so a reader cannot mistake it for a cap of zero.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub max_attachment_bytes: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 #[derive(Debug, Deserialize)]
@@ -128,6 +138,8 @@ struct DaemonAdvertisementWire {
     label: String,
     #[serde(default)]
     repos_base_path: String,
+    #[serde(default)]
+    max_attachment_bytes: u64,
 }
 
 /// Parse and normalize a daemon advertisement JSON string from the discovery transport.
@@ -150,6 +162,7 @@ pub fn parse_daemon_advertisement_json(input: &str) -> Result<DaemonAdvertisemen
         instance_id,
         label,
         repos_base_path,
+        max_attachment_bytes: w.max_attachment_bytes,
     })
 }
 
@@ -630,6 +643,7 @@ async fn connect_common_room_publish_metadata(
     token: &str,
     local_id: &str,
     repos_base_path: &str,
+    max_attachment_bytes: u64,
 ) -> anyhow::Result<(
     Arc<Room>,
     tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
@@ -650,6 +664,7 @@ async fn connect_common_room_publish_metadata(
         instance_id: local_id.to_string(),
         label: format!("{local_id} (this daemon)"),
         repos_base_path: repos_base_path.to_string(),
+        max_attachment_bytes,
     };
     let meta_json = serde_json::to_string(&adv)?;
     let meta_len = meta_json.len();
@@ -1016,9 +1031,15 @@ async fn common_room_discovery_cycle(
         url.len()
     );
     let repos_base_path = config.repos_base_path_or_default().to_string();
-    let (room, events, event_buffer, daemon_adv_metadata) =
-        connect_common_room_publish_metadata(&room_name, &url, &token, &local_id, &repos_base_path)
-            .await?;
+    let (room, events, event_buffer, daemon_adv_metadata) = connect_common_room_publish_metadata(
+        &room_name,
+        &url,
+        &token,
+        &local_id,
+        &repos_base_path,
+        config.max_attachment_bytes,
+    )
+    .await?;
     {
         let mut g = room_slot.write().await;
         *g = Some(room.clone());
@@ -1042,15 +1063,87 @@ async fn common_room_discovery_cycle(
     Ok(end)
 }
 
+/// The LiveKit identity a daemon **serves** its RPC services on: a fixed `daemon-` prefix over the
+/// instance id, matching what `main.rs` joins the common room with.
+///
+/// A daemon is present in the common room twice: a *discovery* participant under the bare instance
+/// id, which publishes the advertisement and runs no RPC server, and this *RPC* participant. The
+/// eligible-daemon list is built from the discovery identity, so every routing decision yields a
+/// bare id that has to be mapped here before a request is published — addressing the bare id
+/// reaches a participant that never answers.
+///
+/// See `docs/ft/web/daemon-selector-livekit-rpc.md` § The daemon identity subtlety.
+pub fn daemon_rpc_identity(instance_id: &str) -> String {
+    format!("daemon-{}", instance_id.trim())
+}
+
+/// Deadline for one forwarded unary RPC, and for opening a forwarded server stream.
+///
+/// A LiveKit data-channel call has no transport-level timeout: if the peer's RPC participant is
+/// gone (or never answers), the pending call is simply never resolved and the caller waits
+/// forever — the operator sees an action that neither completes nor fails. Generous enough for a
+/// forward carrying a whole attachment's bytes over chunked data frames, short enough that a dead
+/// peer surfaces as an error rather than a hang.
+pub const PEER_FORWARD_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a forwarded server stream may go without a frame before it is terminated as an error.
+///
+/// A stream that stops producing must never look like a stream that ended: the consumer would
+/// write a truncated document as if it were whole (see `docs/ft/coder/rpc-multi-transport.md` —
+/// a single lost chunk frame wedges a call with no error).
+pub const PEER_FORWARD_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn peer_forward_deadline_status(
+    service: &str,
+    method: &str,
+    peer_id: &str,
+    waited: Duration,
+) -> tddy_rpc::Status {
+    tddy_rpc::Status::deadline_exceeded(format!(
+        "forwarding {service}/{method} to daemon {peer_id} timed out after {}s: the peer is in the common room but its RPC participant did not answer",
+        waited.as_secs()
+    ))
+}
+
+/// An RPC client addressed at a peer daemon's [`daemon_rpc_identity`], drawn from the common room's
+/// shared client factory.
+///
+/// The factory keeps **one** request-id registry and **one** response loop per room connection,
+/// regardless of how many peers are forwarded to or how often. Building a client per call (as
+/// `forward_to_peer` once did) leaked a `subscribe()` loop each time.
+async fn peer_client(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_id: &str,
+    service: &str,
+    method: &str,
+    what: &str,
+) -> Result<tddy_livekit::RpcClient, tddy_rpc::Status> {
+    let room_arc = {
+        let g = room_slot.read().await;
+        g.clone()
+    }
+    .ok_or_else(|| {
+        tddy_rpc::Status::failed_precondition(format!(
+            "LiveKit common room is not connected on this daemon; cannot forward {what} to a peer"
+        ))
+    })?;
+    let target = daemon_rpc_identity(peer_id);
+    log::debug!(
+        "peer_client: peer_id={} target_identity={} service={} method={} ({what})",
+        peer_id,
+        target,
+        service,
+        method
+    );
+    Ok(tddy_livekit::LiveKitRpcClientFactory::for_room(room_arc).client(target))
+}
+
 /// Forward a generic RPC to a peer daemon in the common room via LiveKit data-channel RPC.
 ///
 /// This is the generic building block for all peer-forwarding. It:
-/// 1. Reads the room slot (returns `failed_precondition` if no room is connected).
-/// 2. Subscribes to room events and creates an [`tddy_livekit::RpcClient`] background loop.
-/// 3. Calls `{service}/{method}` with the given `body` bytes.
-///
-/// See module docs: each call spawns a [`tddy_livekit::RpcClient`] background task. For hot paths
-/// (e.g. `ExecuteTool`) callers should maintain a per-peer client cache.
+/// 1. Draws a client for the peer's [`daemon_rpc_identity`] ([`peer_client`], which also returns
+///    `failed_precondition` if no room is connected).
+/// 2. Calls `{service}/{method}` with the given `body` bytes, bounded by [`PEER_FORWARD_TIMEOUT`].
 pub async fn forward_to_peer(
     room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
     peer_id: &str,
@@ -1058,27 +1151,83 @@ pub async fn forward_to_peer(
     method: &str,
     body: Vec<u8>,
 ) -> Result<Vec<u8>, tddy_rpc::Status> {
-    let room_arc = {
-        let g = room_slot.read().await;
-        g.clone()
-    }
-    .ok_or_else(|| {
-        tddy_rpc::Status::failed_precondition(
-            "LiveKit common room is not connected on this daemon; cannot forward RPC to a peer",
-        )
-    })?;
-    log::debug!(
-        "forward_to_peer: peer_id={} service={} method={} (shared per-room RpcClient factory)",
-        peer_id,
-        service,
-        method
-    );
-    // Draw the client from the room's shared factory: one request-id registry and one response
-    // loop for the whole common-room connection, regardless of how many peers we forward to or how
-    // often. Building a client per call (as this once did) leaked a `subscribe()` loop each time.
-    let client =
-        tddy_livekit::LiveKitRpcClientFactory::for_room(room_arc).client(peer_id.to_string());
-    client.call_unary(service, method, body).await
+    let client = peer_client(room_slot, peer_id, service, method, "an RPC").await?;
+    tokio::time::timeout(
+        PEER_FORWARD_TIMEOUT,
+        client.call_unary(service, method, body),
+    )
+    .await
+    .map_err(|_| peer_forward_deadline_status(service, method, peer_id, PEER_FORWARD_TIMEOUT))?
+}
+
+/// Forward a **server-streaming** RPC to a peer daemon, relaying each frame decoded by
+/// `decode_frame` into the returned receiver.
+///
+/// The transport already does the streaming ([`tddy_livekit::RpcClient::call_server_stream`]);
+/// what a daemon needs on top is the peer's [`daemon_rpc_identity`], a deadline, and the guarantee
+/// that a stream which stops without its end-of-stream marker terminates **as an error** rather
+/// than as a short but successful stream. That distinction is the whole point: a caller writing
+/// frames to disk cannot tell a truncated document from a complete one.
+pub async fn forward_server_stream_to_peer<T, D>(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_id: &str,
+    service: &str,
+    method: &str,
+    body: Vec<u8>,
+    decode_frame: D,
+) -> Result<tokio::sync::mpsc::UnboundedReceiver<Result<T, tddy_rpc::Status>>, tddy_rpc::Status>
+where
+    T: Send + 'static,
+    D: Fn(Vec<u8>) -> Result<T, tddy_rpc::Status> + Send + 'static,
+{
+    let client = peer_client(room_slot, peer_id, service, method, "a stream").await?;
+    let mut frames = tokio::time::timeout(
+        PEER_FORWARD_TIMEOUT,
+        client.call_server_stream(service, method, body),
+    )
+    .await
+    .map_err(|_| peer_forward_deadline_status(service, method, peer_id, PEER_FORWARD_TIMEOUT))??;
+
+    // Deliberately unbounded, even though the transport channel underneath it is bounded (32
+    // frames): that channel is filled by the room's **shared** response loop with
+    // `send().await` (`ClientEngine::on_response`), so a relay that stopped draining it would
+    // block response dispatch for every other in-flight call on this daemon's common-room
+    // connection — head-of-line blocking across unrelated RPCs, which is worse than buffering one
+    // stream. What bounds the buffer instead is the payload: both callers cap what they accept
+    // (`max_attachment_bytes` re-checked while accumulating in
+    // `fetch_peer_staged_attachment`, the same cap checked before the first frame in
+    // `stream_read_host_document`), and both relayed streams are short-lived. Bounding this
+    // safely needs backpressure the transport can express without stalling its shared loop.
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let peer_id = peer_id.to_string();
+    let service = service.to_string();
+    let method = method.to_string();
+    tokio::spawn(async move {
+        // The client carries this call's registration in the room's shared engine; hold it for the
+        // stream's whole life so the response loop keeps delivering frames to it.
+        let _client = client;
+        loop {
+            let item =
+                match tokio::time::timeout(PEER_FORWARD_STREAM_IDLE_TIMEOUT, frames.recv()).await {
+                    Ok(Some(Ok(bytes))) => decode_frame(bytes),
+                    // A mid-stream failure arrives as a single terminal error frame.
+                    Ok(Some(Err(status))) => Err(status),
+                    // The peer sent end-of-stream: the relayed stream ends the same way.
+                    Ok(None) => break,
+                    Err(_) => Err(peer_forward_deadline_status(
+                        &service,
+                        &method,
+                        &peer_id,
+                        PEER_FORWARD_STREAM_IDLE_TIMEOUT,
+                    )),
+                };
+            let terminal = item.is_err();
+            if tx.send(item).is_err() || terminal {
+                break;
+            }
+        }
+    });
+    Ok(rx)
 }
 
 /// Forward **StartSession** to another daemon in the common room via LiveKit data-channel RPC.
@@ -1100,6 +1249,34 @@ pub async fn forward_start_session_via_livekit(
     .await?;
     StartSessionResponse::decode(out.as_slice())
         .map_err(|e| tddy_rpc::Status::internal(format!("decode StartSessionResponse: {e}")))
+}
+
+/// Forward **StreamStartSession** to another daemon in the common room, yielding the peer's
+/// start-session events (attachment progress, then the terminal result).
+///
+/// Thin decode wrapper around [`forward_server_stream_to_peer`]. The session — and its
+/// attachments — live on the peer; only the events cross back.
+pub async fn forward_stream_start_session_via_livekit(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &StartSessionRequest,
+) -> Result<
+    tokio::sync::mpsc::UnboundedReceiver<Result<StartSessionEvent, tddy_rpc::Status>>,
+    tddy_rpc::Status,
+> {
+    forward_server_stream_to_peer(
+        room_slot,
+        peer_instance_id,
+        "connection.ConnectionService",
+        "StreamStartSession",
+        request.encode_to_vec(),
+        |bytes| {
+            StartSessionEvent::decode(bytes.as_slice()).map_err(|e| {
+                tddy_rpc::Status::internal(format!("decode StartSessionEvent from peer: {e}"))
+            })
+        },
+    )
+    .await
 }
 
 /// Forward **AddProjectToHost** to another daemon in the common room via LiveKit data-channel RPC.
@@ -1228,6 +1405,35 @@ pub async fn forward_read_host_document_via_livekit(
         .map_err(|e| tddy_rpc::Status::internal(format!("decode ReadHostDocumentResponse: {e}")))
 }
 
+/// Forward **StreamReadHostDocument** to another daemon in the common room, yielding the peer's
+/// document frames.
+///
+/// Thin decode wrapper around [`forward_server_stream_to_peer`]: a frame that fails to decode
+/// terminates the stream with a status, so a caller reassembling the document never treats a
+/// malformed frame as the document's end.
+pub async fn forward_stream_read_host_document_via_livekit(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &ReadHostDocumentRequest,
+) -> Result<
+    tokio::sync::mpsc::UnboundedReceiver<Result<HostDocumentChunk, tddy_rpc::Status>>,
+    tddy_rpc::Status,
+> {
+    forward_server_stream_to_peer(
+        room_slot,
+        peer_instance_id,
+        "connection.ConnectionService",
+        "StreamReadHostDocument",
+        request.encode_to_vec(),
+        |bytes| {
+            HostDocumentChunk::decode(bytes.as_slice()).map_err(|e| {
+                tddy_rpc::Status::internal(format!("decode HostDocumentChunk from peer: {e}"))
+            })
+        },
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1254,6 +1460,7 @@ mod tests {
             instance_id: "peer-a".to_string(),
             label: "peer-a (this daemon)".to_string(),
             repos_base_path: "repos".to_string(),
+            max_attachment_bytes: 0,
         };
 
         // When it is serialized to the wire and parsed back

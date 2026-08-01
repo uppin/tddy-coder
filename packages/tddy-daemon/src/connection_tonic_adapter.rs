@@ -67,10 +67,10 @@ use tddy_service::proto::connection::{
 };
 use tddy_service::proto::connection::{
     DeleteSessionUploadRequest, DeleteSessionUploadResponse, DeleteStagedAttachmentRequest,
-    DeleteStagedAttachmentResponse, ListSessionUploadsRequest, ListSessionUploadsResponse,
-    ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, ReadHostDocumentRequest,
-    ReadHostDocumentResponse, UploadStagedAttachmentChunkRequest,
-    UploadStagedAttachmentChunkResponse,
+    DeleteStagedAttachmentResponse, HostDocumentChunk, ListSessionUploadsRequest,
+    ListSessionUploadsResponse, ListStagedAttachmentsRequest, ListStagedAttachmentsResponse,
+    ReadHostDocumentRequest, ReadHostDocumentResponse, StartSessionEvent,
+    UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
 };
 use tddy_service::tonic_connection::connection_service_server::ConnectionService as TonicConnectionService;
 
@@ -1027,5 +1027,44 @@ where
         .await
         .map_err(to_tonic_status)?;
         Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    /// Server streaming: a host document past the unary message-size ceiling.
+    type StreamReadHostDocumentStream =
+        Pin<Box<dyn Stream<Item = Result<HostDocumentChunk, tonic::Status>> + Send>>;
+
+    /// Server streaming: attachment-materialization progress, then one terminal result.
+    type StreamStartSessionStream =
+        Pin<Box<dyn Stream<Item = Result<StartSessionEvent, tonic::Status>> + Send>>;
+
+    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    #[allow(clippy::result_large_err)]
+    async fn stream_read_host_document(
+        &self,
+        request: tonic::Request<ReadHostDocumentRequest>,
+    ) -> Result<tonic::Response<Self::StreamReadHostDocumentStream>, tonic::Status> {
+        let resp = RpcConnectionService::stream_read_host_document(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
+        Ok(tonic::Response::new(Box::pin(outbound)))
+    }
+
+    #[allow(clippy::result_large_err)]
+    async fn stream_start_session(
+        &self,
+        request: tonic::Request<StartSessionRequest>,
+    ) -> Result<tonic::Response<Self::StreamStartSessionStream>, tonic::Status> {
+        let resp = RpcConnectionService::stream_start_session(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
+        Ok(tonic::Response::new(Box::pin(outbound)))
     }
 }

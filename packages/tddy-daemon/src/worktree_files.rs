@@ -21,6 +21,11 @@ pub struct WorktreeEntry {
     /// Basename of the entry relative to its parent directory.
     pub name: String,
     pub is_dir: bool,
+    /// On-disk size of a file entry, so a picker can refuse an oversized document before requesting
+    /// it. A directory reports 0 — it has no attachable size and is never offered as a document. A
+    /// path git still lists but the filesystem no longer holds (a tracked file deleted from the
+    /// worktree) also reports 0: it has no bytes, and reading it fails for the same reason.
+    pub size_bytes: u64,
 }
 
 /// Result of a size-capped UTF-8 file read.
@@ -71,13 +76,19 @@ pub fn list_worktree_directory_entries(
     }
 
     let mut out: Vec<WorktreeEntry> = Vec::with_capacity(dirs.len() + file_names.len());
-    out.extend(
-        dirs.into_iter()
-            .map(|name| WorktreeEntry { name, is_dir: true }),
-    );
-    out.extend(file_names.into_iter().map(|name| WorktreeEntry {
+    out.extend(dirs.into_iter().map(|name| WorktreeEntry {
         name,
-        is_dir: false,
+        is_dir: true,
+        size_bytes: 0,
+    }));
+    let dir_path = worktree_root.join(&dir_prefix);
+    out.extend(file_names.into_iter().map(|name| {
+        let size_bytes = on_disk_size_bytes(&dir_path.join(&name));
+        WorktreeEntry {
+            name,
+            is_dir: false,
+            size_bytes,
+        }
     }));
     log::info!(
         "list_worktree_directory_entries: {} entrie(s) under {:?}",
@@ -165,6 +176,19 @@ pub fn read_worktree_file_utf8(
         truncated,
         byte_size,
     })
+}
+
+/// Size of a listed file as the filesystem reports it, following symlinks — a link's target is what
+/// a reader would actually pull, so that is the size a cap must be applied to. A path git lists but
+/// the filesystem no longer holds has no size to report and yields 0.
+fn on_disk_size_bytes(path: &Path) -> u64 {
+    match std::fs::metadata(path) {
+        Ok(metadata) => metadata.len(),
+        Err(e) => {
+            log::warn!("on_disk_size_bytes: metadata {:?} unavailable: {}", path, e);
+            0
+        }
+    }
 }
 
 /// Canonicalizes the worktree root, rejecting a missing/inaccessible directory.
@@ -314,6 +338,7 @@ mod tests {
 
     const README: &str = "# Hello Worktree\n\n- alpha\n- beta\n";
     const MAIN_RS: &str = "fn main() { println!(\"worktree-code-pane\"); }\n";
+    const LIB_RS: &str = "pub fn lib() {}\n";
 
     fn run_git(cwd: &Path, args: &[&str]) {
         let status = Command::new("git")
@@ -345,24 +370,28 @@ mod tests {
         std::fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
         std::fs::write(root.join("README.md"), README).unwrap();
         std::fs::write(root.join("src/main.rs"), MAIN_RS).unwrap();
-        std::fs::write(root.join("src/lib.rs"), "pub fn lib() {}\n").unwrap();
+        std::fs::write(root.join("src/lib.rs"), LIB_RS).unwrap();
         std::fs::write(root.join(".env"), "SECRET=must-not-appear\n").unwrap();
         std::fs::write(root.join("ignored.txt"), "junk\n").unwrap();
         std::fs::write(root.join("node_modules/pkg/index.js"), "// vendored\n").unwrap();
         dir
     }
 
+    /// A directory row — no attachable size, so always 0 bytes.
     fn a_dir(name: &str) -> WorktreeEntry {
         WorktreeEntry {
             name: name.to_string(),
             is_dir: true,
+            size_bytes: 0,
         }
     }
 
-    fn a_file(name: &str) -> WorktreeEntry {
+    /// A file row carrying the byte length of the fixture content stored under `name`.
+    fn a_file(name: &str, contents: &str) -> WorktreeEntry {
         WorktreeEntry {
             name: name.to_string(),
             is_dir: false,
+            size_bytes: contents.len() as u64,
         }
     }
 
@@ -376,7 +405,7 @@ mod tests {
 
         // Then — the source dir precedes the root file; .git, .env, ignored.txt and node_modules
         // are all absent.
-        assert_eq!(entries, vec![a_dir("src"), a_file("README.md")]);
+        assert_eq!(entries, vec![a_dir("src"), a_file("README.md", README)]);
     }
 
     #[test]
@@ -388,7 +417,10 @@ mod tests {
         let entries = list_worktree_directory_entries(wt.path(), "src").unwrap();
 
         // Then
-        assert_eq!(entries, vec![a_file("lib.rs"), a_file("main.rs")]);
+        assert_eq!(
+            entries,
+            vec![a_file("lib.rs", LIB_RS), a_file("main.rs", MAIN_RS)]
+        );
     }
 
     #[test]

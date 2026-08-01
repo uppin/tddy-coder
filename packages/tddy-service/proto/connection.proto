@@ -142,25 +142,36 @@ service ConnectionService {
   // newest-first list, and deletes a single uploaded file on demand.
   rpc ListSessionUploads(ListSessionUploadsRequest) returns (ListSessionUploadsResponse);
   rpc DeleteSessionUpload(DeleteSessionUploadRequest) returns (DeleteSessionUploadResponse);
-  // Start-session attachments — pre-session staging. NOT IMPLEMENTED: all three return
-  // UNIMPLEMENTED; see packages/tddy-daemon/docs/connection-service.md § Start-session attachments
-  // for the intended semantics. Documents picked in the Start-Session form are uploaded like the
-  // terminal "Attach" flow (client-side 48 KiB chunks, one unary per chunk, `last` on the final
-  // one), but no session exists yet — so the bytes land in a per-host staging area keyed by
-  // `staging_id` and are referenced from StartSessionRequest.attachments. Staged batches are
-  // addressed to one host (`daemon_instance_id`) and are only usable by a session started on that
-  // same host. List/Delete back the form's attachment chips (re-open, remove before starting).
+  // Start-session attachments — pre-session staging. Documents picked in the Start-Session form
+  // are uploaded like the terminal "Attach" flow (client-side 48 KiB chunks, one unary per chunk,
+  // `last` on the final one), but no session exists yet — so the bytes land in a per-host staging
+  // area keyed by `staging_id` and are referenced from StartSessionRequest.attachments. The
+  // staging root is restart-cleared (under the host's temp dir), so an abandoned batch does not
+  // outlive the host process. List/Delete back the form's attachment chips (re-open, remove
+  // before starting). See packages/tddy-daemon/docs/connection-service.md § Start-session
+  // attachments.
   rpc UploadStagedAttachmentChunk(UploadStagedAttachmentChunkRequest) returns (UploadStagedAttachmentChunkResponse);
   rpc ListStagedAttachments(ListStagedAttachmentsRequest) returns (ListStagedAttachmentsResponse);
   rpc DeleteStagedAttachment(DeleteStagedAttachmentRequest) returns (DeleteStagedAttachmentResponse);
   // Fetch the bytes of a document that already exists on a connected host, for materializing a
-  // `HostDocumentRef` during `StartSession`. Unary (not streaming) so it is forwardable over the
-  // LiveKit common room — streaming RPCs return `unimplemented` for `PeerRoute::Forward`. The
-  // owning daemon resolves the scope root under its own os_user mapping and refuses a path that
-  // escapes; binary (attachments may be images), so it does not reuse the UTF-8 readers. See
-  // docs/ft/coder/session-attachments.md and packages/tddy-daemon/docs/connection-service.md
-  // § Start-session attachments.
+  // `HostDocumentRef` during `StartSession`. Unary so it is forwardable over the LiveKit common
+  // room. The owning daemon resolves the scope root under its own os_user mapping and refuses a
+  // path that escapes; binary (attachments may be images), so it does not reuse the UTF-8 readers.
+  // Capped at the transport's message-size budget — StreamReadHostDocument carries anything
+  // larger. See docs/ft/coder/session-attachments.md and
+  // packages/tddy-daemon/docs/connection-service.md § Start-session attachments.
   rpc ReadHostDocument(ReadHostDocumentRequest) returns (ReadHostDocumentResponse);
+  // Streaming twin of ReadHostDocument, for a document past the unary message-size ceiling. Each
+  // frame carries the next slice of bytes plus the document's total size, so a consumer can size a
+  // progress bar without a preamble frame. A document over the host's configured attachment cap is
+  // refused up front (INVALID_ARGUMENT) rather than streamed and truncated.
+  rpc StreamReadHostDocument(ReadHostDocumentRequest) returns (stream HostDocumentChunk);
+  // Streaming twin of StartSession, for a request carrying attachments the host must materialize
+  // before the agent launches. Emits one AttachmentMaterializationProgress per attachment, then
+  // exactly one terminal StartSessionResponse. A failure terminates the stream with the error and
+  // never emits a result; the partial attachments are rolled back first. Unary StartSession stays
+  // the entry point for every non-interactive caller.
+  rpc StreamStartSession(StartSessionRequest) returns (stream StartSessionEvent);
 }
 
 message ListToolsRequest {}
@@ -426,10 +437,10 @@ message StartSessionRequest {
   bool create_remote_branch = 28;
   // Documents to attach to the new session. Each descriptor names the basename the document is
   // materialized under plus where its bytes come from — a pre-session staged upload, or a document
-  // that already exists on a connected host. Empty = no attachments. NOT IMPLEMENTED: the daemon's
-  // start_session currently ignores this field — a request carrying attachments starts a session
-  // with none, and no error. See packages/tddy-daemon/docs/connection-service.md § Start-session
-  // attachments.
+  // that already exists on a connected host. The daemon materializes every attachment into
+  // {session_dir}/artifacts/attachments/ before the agent launches; any failure fails the whole
+  // start with no partial attachments left behind. Empty = no attachments. See
+  // packages/tddy-daemon/docs/connection-service.md § Start-session attachments.
   repeated SessionAttachment attachments = 29;
   // How to handle `new_branch_name` naming a branch another session already owns. Only consulted in
   // "new_branch_from_base" mode with a non-empty `new_branch_name` — a generated branch name is
@@ -669,6 +680,9 @@ message WorktreeDirEntry {
   // Path segment (basename) of the entry, relative to its parent directory.
   string name = 1;
   bool is_dir = 2;
+  // On-disk size of a file entry, so a picker can refuse an oversized document before requesting
+  // it. Always 0 for a directory.
+  uint64 size_bytes = 3;
 }
 
 message ListWorktreeDirectoryRequest {
@@ -1446,6 +1460,11 @@ enum HostDocumentScope {
   HOST_DOCUMENT_SCOPE_SESSION_WORKTREE = 3;
   // The project's main checkout (ProjectEntry.main_repo_path) — e.g. a checked-in docs/ft/*.md.
   HOST_DOCUMENT_SCOPE_PROJECT_REPO = 4;
+  // The caller's pre-session staging area on the owning host — the root
+  // UploadStagedAttachmentChunk writes into. `relative_path` is "<staging_id>/<file_name>". A
+  // staged file whose upload never completed (no final chunk) is refused with
+  // FAILED_PRECONDITION, so a fetch never hands back truncated bytes.
+  HOST_DOCUMENT_SCOPE_STAGED_ATTACHMENT = 5;
 }
 
 // Request to fetch one host document's bytes. Mirrors `HostDocumentRef` plus the caller's
@@ -1470,4 +1489,38 @@ message ReadHostDocumentRequest {
 message ReadHostDocumentResponse {
   bytes data = 1;
   uint64 byte_size = 2;
+}
+
+// One frame of a StreamReadHostDocument response. The document's bytes are the concatenation of
+// every frame's `data`, in arrival order.
+message HostDocumentChunk {
+  // Next slice of the document. A zero-byte document still yields exactly one frame, so a consumer
+  // never has to distinguish "empty" from "nothing arrived".
+  bytes data = 1;
+  // Total size of the whole document, stamped on **every** frame — a consumer can size a progress
+  // bar from the first frame without a separate preamble message.
+  uint64 total_byte_size = 2;
+}
+
+// One event of a StreamStartSession response: progress while attachments materialize, then exactly
+// one terminal result. The result is always the last event; a failure terminates the stream with a
+// status instead, never with a result.
+message StartSessionEvent {
+  oneof event {
+    AttachmentMaterializationProgress attachment_progress = 1;
+    StartSessionResponse result = 2;
+  }
+}
+
+// Progress materializing one of a start-session request's attachments.
+message AttachmentMaterializationProgress {
+  // SessionAttachment.basename of the attachment this event is about.
+  string basename = 1;
+  // Zero-based position of this attachment in the request's `attachments` list.
+  uint32 attachment_index = 2;
+  // Number of attachments in the request, so a consumer can render "n of m" from any single event.
+  uint32 attachment_count = 3;
+  // Bytes of this attachment materialized so far, and its full size.
+  uint64 bytes_done = 4;
+  uint64 bytes_total = 5;
 }

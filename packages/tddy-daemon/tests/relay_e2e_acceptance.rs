@@ -17,8 +17,8 @@ use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::livekit_peer_discovery::{
-    spawn_common_room_discovery_task, CommonRoomPeerRegistry, DaemonAdvertisement,
-    LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
+    spawn_common_room_discovery_task, CommonRoomPeerRegistry, LiveKitDiscoveryHandles,
+    LiveKitEligibleDaemonSource,
 };
 use tddy_daemon::multi_host::EligibleDaemonSource;
 use tddy_daemon::relay_idle::IdleTimeoutTracker;
@@ -33,6 +33,14 @@ const RELAY_ROOM: &str = "relay-e2e-common-room";
 const RELAY_PEER_ID: &str = "relay-e2e-remote-peer";
 const LK_API_KEY: &str = "devkey";
 const LK_API_SECRET: &str = "secret";
+
+/// The identity a daemon serves RPC on — a fixed `daemon-` prefix over its instance id, the way
+/// `main.rs` joins the common room. The bare instance id is the discovery participant's, which
+/// publishes the advertisement and serves no RPC.
+/// See `docs/ft/web/daemon-selector-livekit-rpc.md`.
+fn rpc_identity(instance_id: &str) -> String {
+    format!("daemon-{instance_id}")
+}
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -180,18 +188,26 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     let config_b = DaemonConfig::load(&path_b).unwrap();
     let sessions_b = tempfile::tempdir().unwrap();
     let service_b = ConnectionServiceImpl::new(
-        config_b,
+        config_b.clone(),
         sessions_resolver(sessions_b.path().to_path_buf()),
         sessions_b.path().to_path_buf(),
         valid_user_resolver(),
         None,
-        None, // B has no discovery — it only serves its local tools
+        None, // B has no discovery of its own — it only serves its local tools
         None,
         Arc::new(ClaudeCliSessionManager::new()),
     );
 
+    // B's discovery participant: bare instance id, publishes the advertisement A discovers.
+    spawn_common_room_discovery_task(
+        Arc::new(config_b),
+        Arc::new(CommonRoomPeerRegistry::new()),
+        Arc::new(tokio::sync::RwLock::new(None)),
+    );
+
+    // B's RPC participant: `daemon-{instance_id}`, the identity A's forward addresses.
     let token_b = livekit
-        .generate_token(RELAY_ROOM, RELAY_PEER_ID)
+        .generate_token(RELAY_ROOM, &rpc_identity(RELAY_PEER_ID))
         .expect("LiveKit token for remote peer B");
     let connection_server_b = tddy_service::ConnectionServiceServer::new(service_b);
     let participant_b = LiveKitParticipant::connect(
@@ -204,18 +220,6 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     )
     .await
     .expect("remote peer B joins LiveKit common room");
-
-    let adv = DaemonAdvertisement {
-        instance_id: RELAY_PEER_ID.to_string(),
-        label: format!("{RELAY_PEER_ID} (remote peer)"),
-        repos_base_path: String::new(),
-    };
-    participant_b
-        .room()
-        .local_participant()
-        .set_metadata(serde_json::to_string(&adv).unwrap())
-        .await
-        .expect("B publishes daemon advertisement");
     let peer_run = tokio::spawn(async move { participant_b.run().await });
 
     // ── Service A: the relay. Has LiveKit discovery that will see B.

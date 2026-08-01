@@ -15,6 +15,9 @@ export interface DaemonHost {
   /** The host's base clone location (`repos_base_path`), relative to each OS user's home, as
    *  advertised in the common room. Optional: older daemons don't advertise it. */
   reposBasePath?: string;
+  /** The largest single session attachment this host will serve (`max_attachment_bytes`), as
+   *  advertised in the common room. Optional: older daemons don't advertise it. */
+  maxAttachmentBytes?: number;
 }
 
 /**
@@ -26,12 +29,22 @@ export function parseDaemonAdvertisement(metadata: string): DaemonHost | null {
   const t = metadata.trim();
   if (!t.startsWith("{")) return null;
   try {
-    const o = JSON.parse(t) as { instance_id?: unknown; label?: unknown; repos_base_path?: unknown };
+    const o = JSON.parse(t) as {
+      instance_id?: unknown;
+      label?: unknown;
+      repos_base_path?: unknown;
+      max_attachment_bytes?: unknown;
+    };
     if (typeof o.instance_id !== "string" || !o.instance_id.trim()) return null;
     if (typeof o.label !== "string" || !o.label.includes("(this daemon)")) return null;
     const host: DaemonHost = { instanceId: o.instance_id.trim(), label: o.label.trim() };
     if (typeof o.repos_base_path === "string" && o.repos_base_path.trim()) {
       host.reposBasePath = o.repos_base_path.trim();
+    }
+    // A cap of 0 (or worse) would make every attachment unpickable, so it reads as "unadvertised".
+    const cap = o.max_attachment_bytes;
+    if (typeof cap === "number" && Number.isFinite(cap) && cap > 0) {
+      host.maxAttachmentBytes = cap;
     }
     return host;
   } catch {
@@ -83,6 +96,9 @@ export function daemonHostsFromParticipants(
     seen.add(instanceId);
     const host: DaemonHost = { instanceId, label: adv?.label || instanceId };
     if (adv?.reposBasePath) host.reposBasePath = adv.reposBasePath;
+    // The Start-Session form enforces this cap at pick time, and this list is its only source of
+    // hosts — a cap dropped here is a cap the form can never enforce.
+    if (adv?.maxAttachmentBytes) host.maxAttachmentBytes = adv.maxAttachmentBytes;
     hosts.push(host);
   }
   return hosts;

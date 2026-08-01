@@ -87,6 +87,9 @@ struct Fixture {
     service: ConnectionServiceImpl,
     project_id: String,
     worktree_path: String,
+    /// The project's `main_repo_path` — the **primary** worktree, which the host-document picker
+    /// browses to offer project-repo files.
+    main_repo_path: String,
     _data_dir: tempfile::TempDir,
     _tmp: tempfile::TempDir,
 }
@@ -150,9 +153,43 @@ fn a_project_with_worktree(os_user: &str) -> Fixture {
         service,
         project_id,
         worktree_path: wt.canonicalize().unwrap().display().to_string(),
+        main_repo_path: main_repo_path.display().to_string(),
         _data_dir: data_dir,
         _tmp: tmp,
     }
+}
+
+/// The host-document picker offers project-repo files by listing the project's **primary** worktree
+/// rather than through a dedicated RPC. `worktree_path_is_listed` matches any row of
+/// `git worktree list`, and the primary is the first row — but nothing exercised that until now, and
+/// the whole `PROJECT_REPO` picker scope rests on it. If this ever stops holding, the picker needs a
+/// `ListProjectRepoDirectory` RPC instead of a different `worktree_path`.
+#[tokio::test]
+async fn list_worktree_directory_lists_the_projects_primary_worktree() {
+    // Given — a registered project whose main repo holds a tracked README
+    require_git();
+    let os_user = std::env::var("USER").expect("USER must be set");
+    let fixture = a_project_with_worktree(&os_user);
+
+    // When — the primary worktree is listed by its `main_repo_path`
+    let entries = fixture
+        .service
+        .list_worktree_directory(Request::new(ListWorktreeDirectoryRequest {
+            session_token: TEST_TOKEN.to_string(),
+            project_id: fixture.project_id.clone(),
+            worktree_path: fixture.main_repo_path.clone(),
+            rel_path: String::new(),
+        }))
+        .await
+        .expect("the primary worktree must be listable")
+        .into_inner()
+        .entries;
+
+    // Then — the repo's checked-in file is offered, with its real size
+    let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, vec!["README.md"]);
+    assert_eq!(entries[0].size_bytes, "# Hello Worktree\n\n- alpha\n".len() as u64);
+    assert!(!entries[0].is_dir);
 }
 
 /// Acceptance: an invalid session token is rejected before any filesystem access.
@@ -267,6 +304,46 @@ async fn list_worktree_directory_returns_root_entries_excluding_ignored() {
     assert!(!names.contains(&"secret.txt".to_string()), "got {names:?}");
     let src = entries.iter().find(|e| e.name == "src").unwrap();
     assert!(src.is_dir, "src must be reported as a directory");
+}
+
+/// Acceptance: a listed file carries its on-disk size, so a host-document picker can refuse an
+/// oversized document against `max_attachment_bytes` before ever requesting it.
+#[tokio::test]
+async fn list_worktree_directory_reports_a_files_size_in_bytes() {
+    // Given — a worktree file of a known byte length
+    require_git();
+    let os_user = std::env::var("USER").expect("USER must be set");
+    let fixture = a_project_with_worktree(&os_user);
+    let notes = "the picker weighs this exact document against the host's cap\n";
+    std::fs::write(Path::new(&fixture.worktree_path).join("notes.md"), notes).unwrap();
+
+    // When
+    let entries = fixture
+        .service
+        .list_worktree_directory(Request::new(ListWorktreeDirectoryRequest {
+            session_token: TEST_TOKEN.to_string(),
+            project_id: fixture.project_id.clone(),
+            worktree_path: fixture.worktree_path.clone(),
+            rel_path: "".to_string(),
+        }))
+        .await
+        .expect("ListWorktreeDirectory should succeed for a listed worktree")
+        .into_inner()
+        .entries;
+
+    // Then — the row reports the file's real byte count, not a placeholder 0
+    assert_eq!(
+        entries
+            .iter()
+            .find(|e| e.name == "notes.md")
+            .map(|e| e.size_bytes),
+        Some(notes.len() as u64),
+        "notes.md must be listed with its on-disk size, got {:?}",
+        entries
+            .iter()
+            .map(|e| (e.name.clone(), e.size_bytes))
+            .collect::<Vec<_>>()
+    );
 }
 
 /// Acceptance: reading a file under the worktree returns its exact UTF-8 contents.

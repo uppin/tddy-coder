@@ -2,8 +2,10 @@
 //!
 //! Documents picked in the Start-Session form are uploaded ahead of the session (before a
 //! session directory exists) into a per-host, per-caller staging root at
-//! `{tddy_data_dir}/staging/{os_user}/{staging_id}/{file_name}`, then referenced from
-//! `StartSessionRequest.attachments` via a `StagedAttachmentRef`. The materialization path
+//! `{staging_base_dir}/{os_user}/{staging_id}/{file_name}`, then referenced from
+//! `StartSessionRequest.attachments` via a `StagedAttachmentRef`. The base defaults to
+//! [`default_staging_base_dir`] — under the process temp dir, so a host restart clears whatever
+//! was abandoned rather than accumulating batches forever under the data dir. The materialization path
 //! (see `connection_service::materialize_session_attachments`) copies a staged file into the
 //! new session's `artifacts/attachments/` before the agent launches.
 //!
@@ -28,12 +30,24 @@ use crate::session_file_upload::{contained_canonical_dir, validate_segment};
 /// Suffix marking a staged file as fully uploaded (no further chunks, no re-upload).
 const STAGED_COMPLETE_SUFFIX: &str = ".staged-complete";
 
-/// Per-host, per-caller staging root: `{tddy_data_dir}/staging/{os_user}/`. Holds no untrusted
+/// Directory name the staging base takes under the process temp dir.
+const STAGING_BASE_DIR_NAME: &str = "tddy-staging";
+
+/// The staging base a daemon uses unless one is injected: `{temp_dir}/tddy-staging/`. A staged
+/// batch is only useful between its upload and the `StartSession` that consumes it, and nothing
+/// deletes a consumed or abandoned batch — so the root lives where the host clears it on restart,
+/// which bounds abandonment without a TTL, a GC job or any new failure mode.
+#[must_use]
+pub fn default_staging_base_dir() -> PathBuf {
+    std::env::temp_dir().join(STAGING_BASE_DIR_NAME)
+}
+
+/// Per-host, per-caller staging root: `{staging_base_dir}/{os_user}/`. Holds no untrusted
 /// component beyond `os_user` (which the daemon resolves from the session token), so it is the
 /// trusted base every per-batch directory must stay within.
 #[must_use]
-pub fn staging_root_for(os_user: &str, tddy_data_dir: &Path) -> PathBuf {
-    tddy_data_dir.join("staging").join(os_user)
+pub fn staging_root_for(os_user: &str, staging_base_dir: &Path) -> PathBuf {
+    staging_base_dir.join(os_user)
 }
 
 /// One file sitting in a host's pre-session staging area.

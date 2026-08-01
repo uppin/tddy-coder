@@ -185,12 +185,14 @@ binary and capped rather than UTF-8 and unbounded.
 
 ### Staging area
 
-A per-host, per-caller staging root at `{tddy_data_dir}/staging/{os_user}/` holds pre-session uploads. A batch is one `staging_id` subdirectory; files land at `{staging_root}/{staging_id}/{file_name}`.
+A per-host, per-caller staging root at `{staging_base}/{os_user}/` holds pre-session uploads, where `staging_base` defaults to `{temp_dir}/tddy-staging/`. A batch is one `staging_id` subdirectory; files land at `{staging_root}/{staging_id}/{file_name}`.
+
+The base is the host's temp dir rather than the data dir so that a host restart clears whatever was abandoned. Nothing deletes a batch once it is consumed and there is no TTL, so a restart-cleared root is what bounds the leak — and it needs no background job, no expiry bookkeeping and no new failure mode.
 
 - `UploadStagedAttachmentChunk` appends ordered chunks (48 KiB client-side chunking, mirroring `UploadSessionFileChunk`), validates `staging_id` and `file_name` as basenames, and returns the completed `StagedAttachmentEntry` on the final chunk.
 - `ListStagedAttachments` returns a batch's files (or every batch for the caller when `staging_id` is empty), newest-first.
 - `DeleteStagedAttachment` removes one staged file; a delete is never a weaker gate than a write (same `validate_segment` + `contained_canonical_dir` guards as the writer).
-- All three route by `daemon_instance_id`: empty / matching the local instance = local; otherwise forwarded to the peer daemon over the LiveKit common room (unary, so forwardable — streaming RPCs return `unimplemented` for `PeerRoute::Forward`).
+- All three route by `daemon_instance_id`: empty / matching the local instance = local; otherwise forwarded to the peer daemon over the LiveKit common room. The two streaming RPCs forward too, via `forward_server_stream_to_peer` — a peer-side error terminates the local stream **as an error**, and an idle deadline catches a peer that goes silent, so a stream that simply stops can never be mistaken for a clean end.
 
 ### `ReadHostDocument` — unary host-document fetch
 
@@ -202,8 +204,15 @@ A per-host, per-caller staging root at `{tddy_data_dir}/staging/{os_user}/` hold
 | `SESSION_UPLOAD` | `{session_dir}/uploads/` | `<upload_id>/<file_name>` |
 | `SESSION_WORKTREE` | the session's git worktree | a path surfaced by `ListWorktreeDirectory` |
 | `PROJECT_REPO` | `ProjectEntry.main_repo_path` | a checked-in path (e.g. `docs/ft/*.md`) |
+| `STAGED_ATTACHMENT` | the caller's staging root (`{staging_base}/{os_user}/`) | `<staging_id>/<file_name>` |
 
 A file larger than `MAX_HOST_DOCUMENT_BYTES` is refused with `INVALID_ARGUMENT` (not truncated — a truncated attachment is useless; the caller should stage larger docs, since staging is chunked with no single-message limit). This keeps the unary response within gRPC's default message-size budget. It routes by `daemon_instance_id` like the staging RPCs.
+
+`STAGED_ATTACHMENT` additionally refuses a staged file with no `.staged-complete` marker (`FAILED_PRECONDITION`), so a fetch can never hand back the bytes of an upload that is still in flight. The completeness check happens on the **owning** host, which is the only party that can tell a truncated file from a short one.
+
+### `StreamReadHostDocument` — streaming host-document fetch
+
+`StreamReadHostDocument(ReadHostDocumentRequest) returns (stream HostDocumentChunk)` is the same resolution — the same scopes, the same containment guards, the same completeness gate — for a document past the unary message-size ceiling. Every frame carries `total_byte_size`, so a consumer sizes a progress bar from the first frame. A document over the host's configured `max_attachment_bytes` is refused up front with `INVALID_ARGUMENT` naming the limit, rather than streamed and cut short: once frames have started, a consumer cannot tell a truncated document from a whole one. A zero-byte document still yields exactly one (empty) frame.
 
 ### Materialization flow
 
@@ -211,7 +220,7 @@ Two attachment sources, both naming the host authority that owns the bytes:
 
 | Source | Locator | Behavior |
 |--------|---------|----------|
-| `StagedAttachmentRef` | `daemon_instance_id` + `staging_id` + `file_name` | `daemon_instance_id` must be empty or match the host running the session; a mismatch is a request **error** (`INVALID_ARGUMENT`) — never a cross-host fetch, never a silent empty attachment. The staged file is copied via `copy_attachment_into_session`, and only once its upload is **complete** (the writer marks a `.staged-complete` sentinel on the final chunk; an in-progress or aborted upload is refused with `FAILED_PRECONDITION`, never copied as truncated bytes). |
+| `StagedAttachmentRef` | `daemon_instance_id` + `staging_id` + `file_name` | Empty or the session's own host is copied locally via `copy_attachment_into_session`. A ref naming **another connected host** is fetched from it through the `STAGED_ATTACHMENT` scope, because the browser stages to whichever daemon it is connected to and may start the session elsewhere; a host that is neither local nor a connected peer is `FAILED_PRECONDITION`. Either way the staged file is used only once its upload is **complete** — the writer marks a `.staged-complete` sentinel on the final chunk, and an in-progress or aborted upload is refused with `FAILED_PRECONDITION`, never copied as truncated bytes. That marker, checked on the host owning the bytes, is what guarantees no silent empty attachment; requiring same-host was the earlier, blunter way of getting the same property. |
 | `HostDocumentRef` | `daemon_instance_id` + `HostDocumentScope` + `session_id`/`project_id` + `relative_path` | If `daemon_instance_id` is empty / local, the daemon reads locally via the `ReadHostDocument` logic; otherwise it forwards `ReadHostDocument` to the owning peer, then writes the returned bytes to `artifacts/attachments/<basename>`. The session host re-checks `MAX_HOST_DOCUMENT_BYTES` on the forwarded bytes before writing, so a buggy/older peer cannot push an oversized blob. |
 
 - `basename` is validated as a single safe segment (the store's `validate_segment`). Duplicate basenames **within one request** are rejected with `INVALID_ARGUMENT` (no silent renaming) — a request error, never reaching the store's `FAILED_PRECONDITION`.
@@ -219,11 +228,19 @@ Two attachment sources, both naming the host authority that owns the bytes:
 - Materialization happens for **all session types** (tool / claude-cli / sandboxed claude-cli / cursor-cli / workspace). For the tool branch the daemon pre-creates `session_dir` (using the session_id it already passes to the child) and materializes before spawn; for the other types it materializes right after the handler creates `session_dir` and before the spawn.
 - On any materialization failure, `StartSession` fails — no partial attachments left behind: the `artifacts/attachments/` writes for the request are cleaned up before returning the error.
 
+### `StreamStartSession` — start with materialization progress
+
+`StreamStartSession(StartSessionRequest) returns (stream StartSessionEvent)` runs the identical start, reporting `AttachmentMaterializationProgress` (basename, zero-based index, request count, bytes) and then exactly one terminal `StartSessionResponse`. The result is always the last event. A failure terminates the stream **with the status** and never emits a result, after the same rollback the unary path performs. The caller's token is resolved before the route is classified, so an unauthenticated request cannot drive an outbound forward.
+
+A **cross-host** staged fetch reports frame by frame as the bytes arrive; one-step sources (a local copy, a host document) report once, on completion, because there is no meaningful intermediate point. That distinction is load-bearing rather than cosmetic: the forwarded relay's deadline is per frame, so reporting only on completion made the gap between frames the entire cross-host transfer, and an ordinary multi-megabyte document failed mid-creation with `DEADLINE_EXCEEDED` while transferring perfectly well.
+
+Streaming is added **alongside** unary rather than replacing it: `tddy-tools remote start-session`, `tddy-sandbox-app`, recipe hooks and PR-stack chain spawns all call unary `StartSession`, and both entry points delegate to one implementation whose only difference is where progress is reported. The unary path reports nowhere, so its behavior is unchanged.
+
 ## Constraints
 
 - `copy_attachment_into_session` is the host-side store the start-session materialization path calls; the staging RPCs and `ReadHostDocument` are the wire surface that feeds it. Nothing else reaches the wire except the `SessionContextDoc` fields and the attachment RPCs.
 - Attachment bytes are never read through the context-doc surface (see above).
-- No staging garbage collection yet: a consumed batch is not auto-deleted, and abandoned batches have no TTL — tracked as a follow-up. Session-scoped attachments live and die with the session directory, removed by `DeleteSession` along with the rest of the tree.
+- No staging garbage collection yet: a consumed batch is not auto-deleted and abandoned batches have no TTL — the restart-cleared staging base bounds the abandoned case, but a long-running host still accumulates consumed batches. Tracked as a follow-up. Session-scoped attachments live and die with the session directory, removed by `DeleteSession` along with the rest of the tree.
 
 ## Related
 
