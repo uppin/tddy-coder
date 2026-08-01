@@ -702,9 +702,10 @@ and falls back to the branch's current owner, each guarded on the session being 
 neither resolves the chip stays plain text, because a control that selects nothing is worse than no
 control. Navigation is in-app — the PR link remains the row's only new-tab affordance.
 
-*Known gap:* `handleSelectSession` does not write `window.location.hash`, so opening a session from the
-panel selects and attaches without changing the URL — identical to the peer switcher and to clicking a
-drawer row. Making drawer selection URL-addressable is a drawer-wide change.
+The URL follows. `onOpenSession` is wired to the drawer's own `handleSelectSession`, which since
+[#374](url-state-routing.md) navigates rather than only setting state — so opening a session from the
+panel is URL-addressable and back-button-able for free, with no PR-stack-specific routing. (This was
+a documented gap when the panel shipped; the drawer-wide change that closed it landed the same day.)
 
 **Base-sync badges** *(2026-08-01)*, in the summary strip, mutually exclusive:
 

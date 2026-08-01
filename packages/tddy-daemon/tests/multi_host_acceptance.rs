@@ -12,7 +12,6 @@ use livekit::prelude::RoomOptions;
 use serial_test::serial;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_daemon::livekit_peer_discovery::DaemonAdvertisement;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
@@ -28,6 +27,14 @@ const REMOTE_PEER_INSTANCE_ID: &str = "acceptance-daemon-b";
 const REMOTE_LK_API_KEY: &str = "devkey";
 const REMOTE_LK_API_SECRET: &str = "secret";
 const REMOTE_ROUTING_PROJECT_ID: &str = "remote-routing-proj";
+
+/// The identity a daemon serves `connection.ConnectionService` on — a fixed `daemon-` prefix over
+/// its instance id, the way `main.rs` joins the common room. The bare instance id is the discovery
+/// participant's, which publishes the advertisement and serves no RPC.
+/// See `docs/ft/web/daemon-selector-livekit-rpc.md`.
+fn rpc_identity(instance_id: &str) -> String {
+    format!("daemon-{instance_id}")
+}
 
 /// Returns the path to the `true` binary — `/usr/bin/true` on macOS, `/bin/true` on Linux.
 fn true_bin() -> &'static str {
@@ -288,7 +295,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     let base_b = sessions_b.path().to_path_buf();
     let resolver_b: SessionsBaseResolver = Arc::new(move |_| Some(base_b.clone()));
     let service_b = ConnectionServiceImpl::new(
-        config_b,
+        config_b.clone(),
         resolver_b,
         sessions_b.path().to_path_buf(),
         user_resolver.clone(),
@@ -298,8 +305,19 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     );
 
+    // Daemon B's discovery participant: bare instance id, publishes the advertisement A discovers.
+    tddy_daemon::livekit_peer_discovery::spawn_common_room_discovery_task(
+        Arc::new(config_b),
+        Arc::new(tddy_daemon::livekit_peer_discovery::CommonRoomPeerRegistry::new()),
+        Arc::new(tokio::sync::RwLock::new(None)),
+    );
+
+    // Daemon B's RPC participant: `daemon-{instance_id}`, the identity A's forward addresses.
     let token_b = livekit
-        .generate_token(REMOTE_ACCEPTANCE_ROOM, REMOTE_PEER_INSTANCE_ID)
+        .generate_token(
+            REMOTE_ACCEPTANCE_ROOM,
+            &rpc_identity(REMOTE_PEER_INSTANCE_ID),
+        )
         .expect("LiveKit token for peer daemon");
     let connection_server = tddy_service::ConnectionServiceServer::new(service_b);
     let participant = LiveKitParticipant::connect(
@@ -312,17 +330,6 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     )
     .await
     .expect("peer daemon joins common room with ConnectionService RPC");
-    let adv = DaemonAdvertisement {
-        instance_id: REMOTE_PEER_INSTANCE_ID.to_string(),
-        label: format!("{REMOTE_PEER_INSTANCE_ID} (this daemon)"),
-        repos_base_path: String::new(),
-    };
-    participant
-        .room()
-        .local_participant()
-        .set_metadata(serde_json::to_string(&adv).unwrap())
-        .await
-        .expect("peer publishes daemon advertisement metadata");
     let peer_run = tokio::spawn(async move { participant.run().await });
 
     let sessions_a = tempfile::tempdir().unwrap();

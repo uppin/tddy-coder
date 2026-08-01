@@ -113,6 +113,23 @@ export class ChunkError extends Error {
 interface PendingMessage {
   totalChunks: number;
   chunks: Map<number, Uint8Array>;
+  /** When this message's most recent frame was accepted; the base for {@link ChunkReassemblerOptions.partialTtlMs}. */
+  lastFrameAtMs: number;
+}
+
+/**
+ * How long a message with chunks still outstanding is kept before it is discarded. A message only
+ * ever completes from frames that arrive within one reliable, ordered delivery of it, so anything
+ * still incomplete after this long lost a frame in transit and will never complete — keeping it any
+ * longer only risks a later sender's reused `messageId` completing it with foreign bytes.
+ */
+export const DEFAULT_PARTIAL_TTL_MS = 30_000;
+
+export interface ChunkReassemblerOptions {
+  /** Clock used to age partial messages. Defaults to `Date.now`. */
+  nowMs?: () => number;
+  /** Age at which a message with outstanding chunks is discarded. Defaults to {@link DEFAULT_PARTIAL_TTL_MS}. */
+  partialTtlMs?: number;
 }
 
 /**
@@ -120,9 +137,23 @@ interface PendingMessage {
  * true) to {@link accept}; it returns the completed payload once the final frame of a message
  * arrives, or `null` while chunks are still outstanding. Concurrent messages (distinct
  * `messageId`s) reassemble independently.
+ *
+ * One reassembler buffers the frames of exactly one sender: `messageId`s are only unique within a
+ * sender, so a receiver talking to several peers keeps a reassembler per peer. Even within one
+ * sender an id can repeat — {@link nextMessageId} restarts at 0 with the page or process — so a
+ * message that never completes must not linger to be completed by a later generation's frames:
+ * a frame whose `totalChunks` disagrees with the buffered message replaces it, and a message left
+ * incomplete for longer than `partialTtlMs` is discarded.
  */
 export class ChunkReassembler {
   private readonly pending = new Map<number, PendingMessage>();
+  private readonly nowMs: () => number;
+  private readonly partialTtlMs: number;
+
+  constructor(options: ChunkReassemblerOptions = {}) {
+    this.nowMs = options.nowMs ?? Date.now;
+    this.partialTtlMs = options.partialTtlMs ?? DEFAULT_PARTIAL_TTL_MS;
+  }
 
   /**
    * Accept one received chunk frame. Returns the completed payload when its message's final chunk
@@ -144,11 +175,17 @@ export class ChunkReassembler {
     const index = view.getUint32(9, true);
     const data = frame.slice(HEADER_LEN);
 
+    const now = this.nowMs();
+    this.evictExpired(now);
+
+    // A frame whose chunk count disagrees with what is buffered belongs to a different message that
+    // happens to reuse the id (a restarted sender): start it afresh instead of mixing generations.
     let entry = this.pending.get(messageId);
-    if (!entry) {
-      entry = { totalChunks, chunks: new Map() };
+    if (!entry || entry.totalChunks !== totalChunks) {
+      entry = { totalChunks, chunks: new Map(), lastFrameAtMs: now };
       this.pending.set(messageId, entry);
     }
+    entry.lastFrameAtMs = now;
     entry.chunks.set(index, data);
 
     if (entry.chunks.size < entry.totalChunks) {
@@ -173,5 +210,16 @@ export class ChunkReassembler {
       offset += part.length;
     }
     return payload;
+  }
+
+  /** Drop messages whose last frame arrived more than `partialTtlMs` ago — a frame of theirs was
+   *  lost, so they can never complete on their own, and holding them lets a reused `messageId`
+   *  complete them with another message's bytes. */
+  private evictExpired(now: number): void {
+    for (const [messageId, entry] of this.pending) {
+      if (now - entry.lastFrameAtMs > this.partialTtlMs) {
+        this.pending.delete(messageId);
+      }
+    }
   }
 }

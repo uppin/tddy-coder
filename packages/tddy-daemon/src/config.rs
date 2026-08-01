@@ -196,6 +196,21 @@ pub struct DaemonConfig {
     /// misalignment. The browser invalidates any local override when this value changes. None = off.
     #[serde(default)]
     pub debug: Option<String>,
+
+    /// Largest single session attachment this host will serve or materialize, in bytes. Bounds
+    /// `StreamReadHostDocument` and is advertised to clients so a picker can refuse an oversized
+    /// document before uploading it. A host setting rather than a constant: hosts differ in disk
+    /// and link capacity, and a browser cannot guess. Note this is a *policy* cap — the unary
+    /// `ReadHostDocument` keeps its own, smaller `MAX_HOST_DOCUMENT_BYTES` ceiling, which is a
+    /// transport message-size limit.
+    #[serde(default = "default_max_attachment_bytes")]
+    pub max_attachment_bytes: u64,
+}
+
+/// 64 MiB — comfortably above a screenshot, a PDF spec or a log excerpt, well below anything that
+/// would strain a host's disk or a LiveKit data channel.
+fn default_max_attachment_bytes() -> u64 {
+    64 * 1024 * 1024
 }
 
 impl Default for DaemonConfig {
@@ -227,6 +242,7 @@ impl Default for DaemonConfig {
             sandbox_cgroup: None,
             local: LocalConfig::default(),
             debug: None,
+            max_attachment_bytes: default_max_attachment_bytes(),
         }
     }
 }

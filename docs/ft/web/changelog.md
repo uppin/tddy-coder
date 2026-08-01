@@ -13,6 +13,26 @@ Release note history for the Web product area.
 - **New base-sync badges** on every row: N behind, would-conflict (with the paths in the detail), in sync, or *unavailable*. "In sync" is a real badge rather than silence — otherwise a healthy row and a row whose poll has not answered would look identical.
 - **A row cleanly behind its base offers to pull it in**, labelled with the commit count: *Merge 3 commits from `origin/master`*, with rebase beside it. Neither is offered at zero commits, on conflicts, or on a comparison that could not be made. A worktree holding uncommitted work prompts first, and can commit and push it before pulling.
 - See [session-drawer.md § Planned-PR list](session-drawer.md#planned-pr-list).
+## 2026-08-01 — Attach documents while creating a session
+
+- The **New session** form (and the PR-stack **Start session** dialog, which shares it) gained an attachments section: pick or drag-drop local files, or reference a document that already exists on a connected host with no upload at all. Available for every session type and for peer spawns.
+- Each attachment is one row showing its source and size, with an **editable name** — renaming changes only what the agent sees, never the stored file.
+- Attached documents land in the session's `artifacts/attachments/` **before the agent's first turn**, so an initial prompt written in the form can refer to them.
+- The host-document picker browses four places on a host: a session's planning artifacts, its uploaded files, its git worktree, and the project's repository.
+- Nothing uploads until **Create** is pressed, so an abandoned form costs nothing — and a creation refused by a branch conflict re-uses the bytes already sent instead of uploading them again.
+- The host reports its own progress per attachment while the session is created, which matters most when the bytes are crossing between two machines.
+- A file larger than the host's configured attachment limit is refused when it is picked, naming the limit, rather than after a long upload.
+- Files can be staged to whichever daemon the browser is connected to and still used by a session started on a **different** host — the session's host fetches them.
+- Two names differing only in case (`Spec.md` and `spec.md`) are now treated as a collision, because storing both breaks session creation on macOS.
+## 2026-08-01 — Every navigable selection lives in the URL: sessions, tasks, panes and the selected host
+
+- **Navigating between sessions now changes the address bar.** `#/sessions/:id` is written on every selection — a drawer click, a peer switch, a post-create jump — where previously the URL sat at `#/sessions` no matter what you were looking at. See [url-state-routing.md](url-state-routing.md).
+- **The URL is the source of truth, not a copy of it.** Selection is derived from the hash, so Back and Forward walk your selection trail (re-attaching each session), an edited address bar moves the app with no reload, and a pasted link works in an already-open tab. The old one-shot read of `#/sessions/:id` at mount is gone.
+- **The selected host is in the URL** (`?host=`), above the per-tab `sessionStorage` value in precedence, so a link opened by a colleague — or in a new tab — lands on the host it names instead of silently on another. Switching host drops the session sub-selection, since a session id from the old host means nothing on the new one.
+- **Panes and tabs are shareable too:** `?inspector=<tab>` (+ `&full=1`), `?code=1`, `#/sessions/new`, `#/sessions/:id/add-agent`, `#/tasks/:taskId` + `?channel=`, `#/worktrees?project=`, and the RPC playground's `?participant=&service=&method=`. Copying the address bar mid-session reproduces the whole screen.
+- **History records what you chose, not what the app did on your behalf:** clicks push, while the inspector's auto-open/auto-close on connect, `#/` → `#/sessions`, and written-back defaults all *replace* — so Back never steps through states nobody picked.
+- **Unresolvable values degrade instead of breaking** — an unknown inspector tab falls back to Details, an unknown channel to the task's first, an unregistered project to the first listed — and the resolved answer is written back so the URL never lies about what is shown.
+- **Not in the URL, deliberately:** draft form input, and confirmation dialogs (a shared link must not re-arm a destructive confirm).
 
 ## 2026-07-30 — Creating a session on a branch another session owns asks what to do instead of silently renaming the branch
 

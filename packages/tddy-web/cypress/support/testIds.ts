@@ -96,6 +96,7 @@ export const TEST_IDS = {
   // Worktrees
   shellMenuWorktrees: "shell-menu-worktrees",
   worktreesScreen: "worktrees-screen",
+  worktreesProjectSelect: "worktrees-project-select",
   worktreesTable: "worktrees-table",
   worktreeRow: "worktrees-row",
   worktreeDelete: "worktrees-delete",
@@ -262,6 +263,23 @@ export const TEST_IDS = {
    *  other materialized branches. Shown only when `initialValues.stackParent` is set and not peer mode.
    *  The selected value is sent as `StartSessionRequest.selected_integration_base_ref`. */
   createSessionBaseBranchSelect: "create-session-base-branch-select",
+  // Attachments — documents attached at creation time (see docs/ft/coder/session-attachments.md).
+  // Local files are staged to the *connected* daemon on submit and referenced as
+  // `StagedAttachmentRef`; a document already on a host is referenced as `HostDocumentRef` with no
+  // upload. Both arrive as `StartSessionRequest.attachments`.
+  /** Section wrapper — also the drag-drop target for OS file drops. */
+  createSessionAttachmentsSection: "create-session-attachments-section",
+  /** Drag-over overlay, shown only while a file drag is over the section. */
+  createSessionAttachmentDropOverlay: "create-session-attachment-drop-overlay",
+  /** `<label>`-wrapped native multi-file picker (the input inside is visually hidden). */
+  createSessionAttachmentPickBtn: "create-session-attachment-pick-btn",
+  /** Opens the host-document picker, which attaches by reference instead of uploading. */
+  createSessionAttachmentPickHostDocBtn: "create-session-attachment-pick-host-doc-btn",
+  /** Inline refusal shown when a picked file is unusable (over the host cap, duplicate name). */
+  createSessionAttachmentError: "create-session-attachment-error",
+  /** Host-document picker dialog, and one selectable row per document it lists. */
+  createSessionHostDocPicker: "create-session-host-doc-picker",
+  createSessionHostDocPickerScopeSelect: "create-session-host-doc-picker-scope-select",
   createSessionCancelBtn: "create-session-cancel-btn",
   createSessionSubmitBtn: "create-session-submit-btn",
   createSessionError: "create-session-error",
@@ -305,6 +323,9 @@ export const TEST_IDS = {
 
   // RPC Playground
   rpcPlaygroundParticipantSelect: "rpc-playground-participant-select",
+  rpcServiceTree: "rpc-service-tree",
+  rpcRequestEditor: "rpc-request-editor",
+  rpcInvokeButton: "rpc-invoke-button",
   rpcServiceTree: "rpc-service-tree",
   rpcRequestEditor: "rpc-request-editor",
   rpcRequestRawJson: "rpc-request-raw-json",
@@ -999,3 +1020,33 @@ export const sessionUploadDelete = (fileName: string) => `session-upload-delete-
 /** The Confirm-delete button (second step) of an uploaded-file row. */
 export const sessionUploadDeleteConfirm = (fileName: string) =>
   `session-upload-delete-confirm-${fileName}`;
+
+// ---------------------------------------------------------------------------
+// New-session attachment rows — one per document attached at creation time.
+// ---------------------------------------------------------------------------
+
+/** An attachment row, keyed by the basename it will be materialized under. */
+export const createSessionAttachmentRow = (basename: string) =>
+  `create-session-attachment-row-${basename}`;
+
+/** The editable basename field of an attachment row. Renaming changes only
+ *  `SessionAttachment.basename`; the source locator (and the stored file) is untouched. */
+export const createSessionAttachmentName = (basename: string) =>
+  `create-session-attachment-name-${basename}`;
+
+/** An attachment row's size, in bytes, as the host will see it. */
+export const createSessionAttachmentSize = (basename: string) =>
+  `create-session-attachment-size-${basename}`;
+
+/** Removes an attachment row before the session is created. */
+export const createSessionAttachmentRemove = (basename: string) =>
+  `create-session-attachment-remove-${basename}`;
+
+/** Per-row materialization progress, carrying `data-attachment-percent` so a mid-stream
+ *  assertion reads an exact value rather than matching rendered text. */
+export const createSessionAttachmentProgress = (basename: string) =>
+  `create-session-attachment-progress-${basename}`;
+
+/** One selectable document row in the host-document picker. */
+export const createSessionHostDocRow = (relativePath: string) =>
+  `create-session-host-doc-row-${relativePath}`;

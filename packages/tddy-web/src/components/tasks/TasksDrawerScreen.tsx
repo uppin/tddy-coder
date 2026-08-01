@@ -1,9 +1,11 @@
-import React, { useState } from "react";
+import React from "react";
 import { useAuthContext } from "../../hooks/authProvider";
 import { AppShell } from "../shell/AppShell";
 import { TaskDrawer } from "./TaskDrawer";
 import { TaskOutputPane } from "./TaskOutputPane";
 import { useTaskListStream } from "./useTaskListStream";
+import { parseTaskId, tasksPathForTask } from "../../routing/appRoutes";
+import { useAppLocation } from "../../routing/useAppLocation";
 
 export function TasksDrawerScreen({
   // Optional so isolated component tests can mount the screen without a router; production
@@ -16,8 +18,11 @@ export function TasksDrawerScreen({
   const sessionToken = authSessionToken ?? "";
 
   const { tasks } = useTaskListStream(sessionToken);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
+  // The selected task is `#/tasks/:taskId`, not component state: selecting a task is a navigation,
+  // so Back steps through the trail and a shared link opens on the task it names.
+  const { location, navigate } = useAppLocation();
+  const selectedTaskId = parseTaskId(location.path);
   const selectedTask = selectedTaskId ? (tasks.get(selectedTaskId) ?? null) : null;
 
   return (
@@ -31,7 +36,7 @@ export function TasksDrawerScreen({
         <TaskDrawer
           tasks={[...tasks.values()]}
           selectedTaskId={selectedTaskId}
-          onSelectTask={setSelectedTaskId}
+          onSelectTask={(taskId) => navigate(tasksPathForTask(taskId))}
           sessionToken={sessionToken}
         />
         <TaskOutputPane task={selectedTask} sessionToken={sessionToken} />

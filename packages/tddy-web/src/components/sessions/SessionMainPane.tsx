@@ -8,6 +8,13 @@ import type { SessionAttachmentState } from "./useSessionAttachment";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { SessionInspectorDrawer } from "./SessionInspectorDrawer";
 import { isInspectorDocked } from "./inspectorState";
+import { PARAM_CODE } from "../../routing/appLocation";
+import { useAppLocation } from "../../routing/useAppLocation";
+import {
+  parseSessionsDrawerAddAgentSessionId,
+  sessionsDrawerAddAgentPath,
+  sessionsDrawerPathForSession,
+} from "../../routing/appRoutes";
 import { AgentActivityOverlay } from "./AgentActivityOverlay";
 import { Button } from "../ui/button";
 import { CreateSessionPane, type CreateSessionInitialValues } from "./CreateSessionPane";
@@ -135,8 +142,14 @@ export function SessionMainPane({
   const docked = isInspectorDocked(selectedSession);
 
   // The worktree Code pane is a split view available for every session type: it never replaces the
-  // base view (terminal / chat / PR-Stack), it opens beside it.
-  const [codeOpen, setCodeOpen] = React.useState(false);
+  // base view (terminal / chat / PR-Stack), it opens beside it. Its open/closed state lives in the
+  // URL (`?code=1`) so a shared link reproduces the pane layout.
+  const { location, navigate, setParams } = useAppLocation();
+  const codeOpen = location.params[PARAM_CODE] === "1";
+  const toggleCodePane = React.useCallback(
+    () => setParams({ [PARAM_CODE]: codeOpen ? null : "1" }),
+    [codeOpen, setParams],
+  );
   const codePaneEnabled = Boolean(client && selectedSession);
 
   // The selected session's peers — child sessions whose `orchestratorSessionId` is this session.
@@ -160,19 +173,15 @@ export function SessionMainPane({
   // The initialValues capture the orchestrator at "Add agent" click time so a later drawer selection
   // change can't desync the spawned peer's `stackParent`/`repoPath`/`projectId` from the optimistic
   // overlay's `orchestratorSessionId`.
-  const [peerCreateInitialValues, setPeerCreateInitialValues] =
-    React.useState<CreateSessionInitialValues | null>(null);
-  const isPeerCreating = peerCreateInitialValues !== null;
-  // Ref mirror of `peerCreateInitialValues` that survives the selection-change clear below. A peer
-  // `StartSession` is async: if the drawer selection changes between submit and `onCreated`, the
-  // effect that drops peer mode clears the state (so the pane unmounts) but `handlePeerCreated`
-  // still runs from the in-flight promise and must read the capture that was actually submitted —
-  // otherwise the optimistic overlay is skipped and the new peer never appears in the drawer.
-  const peerCreateCaptureRef = React.useRef<CreateSessionInitialValues | null>(null);
-
-  const handleAddAgent = () => {
-    if (!selectedSession) return;
-    const values: CreateSessionInitialValues = {
+  // Peer mode is `#/sessions/:id/add-agent`, so it survives a reload and is shareable. The values
+  // are still *derived from the selected session*, exactly as the "Add agent" click derived them —
+  // the URL carries only the mode.
+  const peerCreateInitialValues = React.useMemo<CreateSessionInitialValues | null>(() => {
+    if (!selectedSession) return null;
+    if (parseSessionsDrawerAddAgentSessionId(location.path) !== selectedSession.sessionId) {
+      return null;
+    }
+    return {
       stackParent: selectedSession.sessionId,
       // Use the resolved project so unscoped sessions (empty `projectId`) can still submit — the
       // pane requires a non-empty `projectId` to enable Create.
@@ -180,12 +189,26 @@ export function SessionMainPane({
       daemonInstanceId: selectedSession.daemonInstanceId,
       repoPath: selectedSession.repoPath,
     };
-    peerCreateCaptureRef.current = values;
-    setPeerCreateInitialValues(values);
+  }, [selectedSession, resolvedProjectId, location.path]);
+  const isPeerCreating = peerCreateInitialValues !== null;
+
+  // Ref mirror of `peerCreateInitialValues` that survives the derivation going null. A peer
+  // `StartSession` is async: if the drawer selection changes between submit and `onCreated`, the
+  // pane unmounts but `handlePeerCreated` still runs from the in-flight promise and must read the
+  // capture that was actually submitted — otherwise the optimistic overlay is skipped and the new
+  // peer never appears in the drawer.
+  const peerCreateCaptureRef = React.useRef<CreateSessionInitialValues | null>(null);
+  React.useEffect(() => {
+    if (peerCreateInitialValues) peerCreateCaptureRef.current = peerCreateInitialValues;
+  }, [peerCreateInitialValues]);
+
+  const handleAddAgent = () => {
+    if (!selectedSession) return;
+    navigate(sessionsDrawerAddAgentPath(selectedSession.sessionId));
   };
   const handleCancelPeerCreate = () => {
     peerCreateCaptureRef.current = null;
-    setPeerCreateInitialValues(null);
+    if (selectedSession) navigate(sessionsDrawerPathForSession(selectedSession.sessionId));
   };
   // A spawned peer is a child session — surface it via the optimistic overlay (same path the
   // PR-stack orchestrator uses) so it appears in the drawer immediately, then drop out of peer
@@ -207,21 +230,12 @@ export function SessionMainPane({
       });
     }
     peerCreateCaptureRef.current = null;
-    setPeerCreateInitialValues(null);
+    if (captured?.stackParent) navigate(sessionsDrawerPathForSession(captured.stackParent));
   };
 
-  // Drop out of peer-create mode if the operator navigates away (the drawer selection changes) or
-  // opens the standalone "new session" flow (`isCreating`). Without this, a stale peer pane could
-  // outlive its orchestrator and/or block the standalone create path from taking over.
-  React.useEffect(() => {
-    setPeerCreateInitialValues((prev) => (prev && isCreating ? null : prev));
-  }, [isCreating]);
-  const selectedSessionId = selectedSession?.sessionId;
-  React.useEffect(() => {
-    setPeerCreateInitialValues((prev) =>
-      prev && prev.stackParent !== selectedSessionId ? null : prev,
-    );
-  }, [selectedSessionId]);
+  // Peer mode drops out on its own when the operator navigates away: the derivation above is keyed
+  // on the add-agent path *and* the current selection, so a drawer selection change or the
+  // standalone "new session" flow (`#/sessions/new`) leaves it null without an effect.
 
   // Standalone "new session" (`isCreating`) takes precedence over peer-create mode so the drawer's
   // new-session flow always wins when both are active (the effect above also clears peer mode when
@@ -376,7 +390,7 @@ export function SessionMainPane({
                 variant="ghost"
                 size="sm"
                 className="h-6 px-2 text-xs"
-                onClick={() => setCodeOpen((open) => !open)}
+                onClick={toggleCodePane}
                 title="Toggle worktree code pane"
               >
                 Code

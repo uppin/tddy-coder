@@ -13,8 +13,16 @@ import {
 import { prStackOrchestrators } from "../../utils/stackParents";
 import { useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useAgentModels } from "../../rpc/useAgentModels";
+import {
+  useSessionAttachments,
+  type SessionAttachmentInit,
+  type StartSessionRequestInit,
+} from "../../hooks/useSessionAttachments";
 import { Button } from "../ui/button";
 import { BranchConflictDialog } from "./BranchConflictDialog";
+import { AttachmentDropZone } from "./attachments/AttachmentDropZone";
+import { HostDocumentPicker } from "./attachments/HostDocumentPicker";
+import { SessionAttachmentList } from "./attachments/SessionAttachmentList";
 
 /** Pseudo-agent key used to fetch the claude-cli session type's model catalog. */
 const CLAUDE_CLI_AGENT = "claude-cli";
@@ -318,8 +326,36 @@ export function CreateSessionPane({
     ? (initialValues?.daemonInstanceId ?? "")
     : daemonInstanceId;
 
+  // The attach rows and everything that follows from them: the effective size cap, the refusal shown
+  // next to a bad row, the upload of local files on submit, and the streamed start that reports the
+  // host's materialization progress.
+  const {
+    attachments,
+    progress: attachmentProgress,
+    stagingDaemonInstanceId,
+    problem: attachmentProblem,
+    pickRefusal,
+    hostDocPickerOpen,
+    attachFiles,
+    attachHostDocument,
+    renameAttachment,
+    removeAttachment,
+    openHostDocPicker,
+    closeHostDocPicker,
+    resetProgress: resetAttachmentProgress,
+    stageAttachments,
+    startSessionStreamed,
+  } = useSessionAttachments({
+    client,
+    sessionToken,
+    sessionDaemonInstanceId: effectiveDaemonInstanceId,
+  });
+
   const isSubmitEnabled = (() => {
     if (submitting) return false;
+    // An attachment the daemon would refuse (duplicate or unsafe basename) fails the whole creation,
+    // so it is refused in the form instead.
+    if (attachmentProblem !== null) return false;
     // A model is always required and comes from the daemon-advertised catalog; a failed/loading
     // probe leaves `model` empty, which disables Create (no fallback).
     if (sessionType === "tool") {
@@ -329,10 +365,14 @@ export function CreateSessionPane({
   })();
 
   /**
-   * Send one `StartSession` for the current form state, with the branch fields optionally overridden
-   * by a branch-conflict resolution (which re-runs the same creation under different branch fields).
+   * Build one `StartSession` request for the current form state, with the branch fields optionally
+   * overridden by a branch-conflict resolution (which re-runs the same creation under different
+   * branch fields).
    */
-  const startSession = (branchOverrides: BranchFieldOverrides | null) => {
+  const startSessionRequest = (
+    branchOverrides: BranchFieldOverrides | null,
+    requestAttachments: SessionAttachmentInit[],
+  ): StartSessionRequestInit => {
     // In peer mode the new session runs on the SAME worktree as the orchestrating session
     // (via repo_path), so no git worktree is created and no branch is checked out — branch fields
     // are irrelevant and kept empty.
@@ -351,10 +391,13 @@ export function CreateSessionPane({
       // branch: this form has an operator to prompt. A peer creates no branch at all, so there is
       // nothing to conflict over. See docs/ft/daemon/session-branch-conflict.md.
       onBranchConflict: peerMode ? "" : "reject",
+      // Documents the daemon materializes before the agent starts. Empty for a form with nothing
+      // attached, which is byte-for-byte the request this pane has always sent.
+      attachments: requestAttachments,
       ...branchOverrides,
     };
     if (sessionType === "tool") {
-      return client.startSession({
+      return {
         ...commonParams,
         toolPath,
         agent,
@@ -365,10 +408,10 @@ export function CreateSessionPane({
         permissionMode: "",
         initialPrompt: "",
         sandbox: false,
-      });
+      };
     }
     if (sessionType === "cursor-cli") {
-      return client.startSession({
+      return {
         ...commonParams,
         toolPath: "",
         agent: "",
@@ -382,9 +425,9 @@ export function CreateSessionPane({
         managedCodebase,
         specializedAgents: managedCodebase ? selectedSubagents : [],
         semanticIndex: managedCodebase ? semanticIndex : false,
-      });
+      };
     }
-    return client.startSession({
+    return {
       ...commonParams,
       toolPath: "",
       agent: "",
@@ -401,7 +444,7 @@ export function CreateSessionPane({
       // so a selection made before unchecking the toggle must not leak into the request.
       specializedAgents: managedCodebase ? selectedSubagents : [],
       semanticIndex: managedCodebase ? semanticIndex : false,
-    });
+    };
   };
 
   const submitCreation = async (branchOverrides: BranchFieldOverrides | null) => {
@@ -411,9 +454,23 @@ export function CreateSessionPane({
     flushSync(() => {
       setSubmitting(true);
       setError(null);
+      resetAttachmentProgress();
     });
     try {
-      const res = await startSession(branchOverrides);
+      // Uploads only what is not already on the staging host, so answering a branch-conflict prompt
+      // re-runs the creation without re-sending bytes that already arrived.
+      const requestAttachments: SessionAttachmentInit[] = await stageAttachments();
+      const request = startSessionRequest(branchOverrides, requestAttachments);
+      // Streaming only buys per-attachment progress, so a creation with nothing attached keeps using
+      // the unary RPC every other client uses.
+      const res =
+        requestAttachments.length === 0
+          ? await client.startSession(request)
+          : await startSessionStreamed(request);
+      if (res === null) {
+        // The form unmounted while the host was still working; it owns no navigation any more.
+        return;
+      }
       if (res.branchConflict) {
         // Another session owns the branch and nothing was created — ask the operator how to proceed
         // instead of navigating to a session that does not exist.
@@ -1007,6 +1064,43 @@ export function CreateSessionPane({
           )}
         </>
       )}
+
+      {/* Attachments — documents the daemon materializes into artifacts/attachments/ before the
+          agent starts. Shown for every session type and in peer mode, because the daemon
+          materializes them for all of them. See docs/ft/coder/session-attachments.md. */}
+      <AttachmentDropZone
+        onFilesPicked={attachFiles}
+        onPickHostDocument={openHostDocPicker}
+        disabled={submitting}
+      >
+        <SessionAttachmentList
+          attachments={attachments}
+          progress={attachmentProgress}
+          onRename={renameAttachment}
+          onRemove={removeAttachment}
+          disabled={submitting}
+        />
+        {(attachmentProblem ?? pickRefusal) !== null && (
+          <p data-testid="create-session-attachment-error" className="text-sm text-destructive">
+            {attachmentProblem ?? pickRefusal}
+          </p>
+        )}
+        {hostDocPickerOpen && (
+          // `browsedDaemonInstanceId` must name the host `client` enumerates from, because every ref
+          // the picker yields is stamped with it. It is `stagingDaemonInstanceId` because both derive
+          // from the connected daemon — the host whose documents are listed is the host stamped. It is
+          // deliberately NOT the session host: a document is read where it lives, and the session host
+          // fetches it from there.
+          <HostDocumentPicker
+            client={client}
+            sessionToken={sessionToken}
+            browsedDaemonInstanceId={stagingDaemonInstanceId}
+            project={projects.find((p) => p.projectId === effectiveProjectId)}
+            onPick={attachHostDocument}
+            onClose={closeHostDocPicker}
+          />
+        )}
+      </AttachmentDropZone>
 
       {/* Error */}
       {error !== null && (

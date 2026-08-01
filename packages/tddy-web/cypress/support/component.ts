@@ -11,6 +11,14 @@ beforeEach(() => {
   agentActivityRegistry.reset();
 });
 
+/** Screens derive their selection from the URL (docs/ft/web/1-WIP/PRD-2026-08-01-url-state-routing.md),
+ *  and component tests share one window — so a hash left behind by one spec would silently pre-select
+ *  a session, task or inspector tab in the next. Reset to the neutral root before each test; specs
+ *  that need a deep link set their own hash afterwards, in their own `beforeEach` or test body. */
+beforeEach(() => {
+  window.location.hash = "/";
+});
+
 /** Default `strict: false` so React 18 dev double-mount does not discard imperative refs / font state mid-test.
  *
  *  Wraps every mount in `UploadProgressProvider` to mirror production: the app shell provides it

@@ -63,26 +63,9 @@ import {
   isLiveKitPath,
   isSessionsDrawerPath,
   parseTerminalSessionIdFromPathname,
+  SESSIONS_DRAWER_ROUTE,
 } from "./routing/appRoutes";
-
-function getHashPath(): string {
-  return (typeof window !== "undefined" ? window.location.hash.slice(1) : "") || "/";
-}
-
-function usePathname(): [string, (path: string) => void] {
-  const [path, setPath] = useState(() => getHashPath());
-  useEffect(() => {
-    const onHash = () => setPath(getHashPath());
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, []);
-  const navigate = useCallback((to: string) => {
-    if (typeof window === "undefined") return;
-    window.location.hash = to;
-    setPath(to);
-  }, []);
-  return [path, navigate];
-}
+import { useAppLocation } from "./routing/useAppLocation";
 
 function getParamsFromUrl(): { url: string; identity: string; roomName: string; debugLogging: boolean } {
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
@@ -372,7 +355,8 @@ export interface AppProps {
 }
 
 export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
-  const [path, navigate] = usePathname();
+  const { location, navigate } = useAppLocation();
+  const path = location.path;
   const { isAuthenticated, isLoading: authLoading, login, error: authError } = useAuthContext();
   const [appConfig, setAppConfig] = useState<{
     daemonMode: boolean | null;
@@ -412,10 +396,17 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
   // Standalone mode uses query params for LiveKit fields, not `/terminal/:id`. Strip misleading hash paths.
   useEffect(() => {
     if (daemonMode !== false || typeof window === "undefined") return;
-    if (parseTerminalSessionIdFromPathname(getHashPath()) !== null) {
-      window.history.replaceState(null, "", "#/");
+    if (parseTerminalSessionIdFromPathname(path) !== null) {
+      navigate("/", { replace: true });
     }
-  }, [daemonMode]);
+  }, [daemonMode, path, navigate]);
+
+  // `#/` and `#/sessions` render the same screen; canonicalise so a copied address bar names the
+  // screen it is showing. `replace`: the operator did not navigate anywhere.
+  useEffect(() => {
+    if (daemonMode !== true || path !== "/") return;
+    navigate(SESSIONS_DRAWER_ROUTE, { replace: true });
+  }, [daemonMode, path, navigate]);
 
   return (
     <>

@@ -6,7 +6,8 @@
 //! These pin the host-side contract end-to-end through `ConnectionServiceImpl`:
 //! - a staged attachment referenced by `StartSession` lands under
 //!   `{session_dir}/artifacts/attachments/<basename>` before the agent runs;
-//! - a `StagedAttachmentRef` naming a foreign `daemon_instance_id` is a request error;
+//! - a `StagedAttachmentRef` naming a `daemon_instance_id` this host cannot reach is a request
+//!   error;
 //! - duplicate `basename` values within one request are rejected before any attachment is written;
 //! - a `HostDocumentRef` to a session artifact copies the bytes into attachments;
 //! - a `HostDocumentRef` whose `relative_path` escapes the scope root is refused;
@@ -56,7 +57,11 @@ users:
     (dir, config)
 }
 
-fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceImpl {
+fn minimal_service(
+    config: DaemonConfig,
+    sessions_base: PathBuf,
+    staging_base: PathBuf,
+) -> ConnectionServiceImpl {
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -77,6 +82,7 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionSe
         None,
         Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     )
+    .with_staging_base_dir(staging_base)
 }
 
 fn create_test_repo_with_origin(dir: &std::path::Path) {
@@ -108,15 +114,27 @@ fn register_project(projects_dir: &std::path::Path, repo_path: &std::path::Path)
     std::fs::write(projects_dir.join("projects.yaml"), yaml).unwrap();
 }
 
-/// A service + a registered workspace project backed by a real bare-origin git repo.
-fn a_workspace_service() -> (tempfile::TempDir, tempfile::TempDir, ConnectionServiceImpl) {
+/// A service + a registered workspace project backed by a real bare-origin git repo. The staging
+/// base is its own `TempDir` so a run never sees a batch a previous run left in the process temp
+/// dir (which is where the daemon stages by default).
+fn a_workspace_service() -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    tempfile::TempDir,
+    ConnectionServiceImpl,
+) {
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
     let sessions_tmp = tempfile::tempdir().unwrap();
+    let staging_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
     let (_cfg_dir, config) = write_config();
-    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
-    (repo_dir, sessions_tmp, service)
+    let service = minimal_service(
+        config,
+        sessions_tmp.path().to_path_buf(),
+        staging_tmp.path().to_path_buf(),
+    );
+    (repo_dir, sessions_tmp, staging_tmp, service)
 }
 
 async fn start_workspace(
@@ -204,7 +222,7 @@ fn host_doc_ref(
 async fn a_staged_attachment_referenced_by_start_session_lands_under_artifacts_attachments_before_the_agent_runs(
 ) {
     // Given — a workspace project and a staged file "spec.md"
-    let (_repo, sessions_tmp, service) = a_workspace_service();
+    let (_repo, sessions_tmp, _staging, service) = a_workspace_service();
     stage_one_file(&service, "", STAGING_ID_A, "spec.md", b"# spec\nplan body")
         .await
         .expect("staging the attachment must succeed");
@@ -228,27 +246,39 @@ async fn a_staged_attachment_referenced_by_start_session_lands_under_artifacts_a
 }
 
 // ---------------------------------------------------------------------------
-// AC2: a StagedAttachmentRef naming a foreign daemon is a request error.
+// AC2: a StagedAttachmentRef naming a host this daemon cannot reach is a request error.
 // ---------------------------------------------------------------------------
 
-/// AC2 — `StartSession` addressed to the local daemon with a `StagedAttachmentRef` whose
-/// `daemon_instance_id` names a peer host fails with `INVALID_ARGUMENT` (no cross-host fetch,
-/// no silent empty attachment).
+/// AC2 — a staged ref naming a host that is **not** in this daemon's eligible list cannot be
+/// fetched from anywhere, so `StartSession` fails with `FAILED_PRECONDITION` from
+/// `classify_peer_route`.
+///
+/// A ref naming a *reachable* peer is materialized cross-host (see
+/// `tests/session_attach_cross_host_acceptance.rs`); this is the single-host guard behind the
+/// "never a silent empty attachment" rule — an unreachable host must be an error, never an
+/// attachment that quietly resolves against the local filesystem or arrives empty.
 #[tokio::test]
-async fn start_session_refuses_a_staged_attachment_ref_naming_a_foreign_daemon_instance_id() {
+async fn start_session_refuses_a_staged_attachment_ref_naming_an_unreachable_daemon_instance_id() {
     // Given — a local daemon with no peer wired up
-    let (_repo, _sessions_tmp, service) = a_workspace_service();
+    let (_repo, sessions_tmp, _staging, service) = a_workspace_service();
 
-    // When — StartSession carries a staged ref naming a foreign daemon
+    // When — StartSession carries a staged ref naming a host that was never discovered
     let err = start_workspace(
         &service,
         vec![staged_ref("peer-host", STAGING_ID_A, "x.md")],
     )
     .await
-    .expect_err("a foreign staged ref must be rejected");
+    .expect_err("a staged ref naming an unreachable host must be rejected");
 
-    // Then — INVALID_ARGUMENT, not a forwarded fetch and not a silent success
-    assert_eq!(err.0, Code::InvalidArgument, "got {err:?}");
+    // Then — FAILED_PRECONDITION, not a silent success and not a local read
+    assert_eq!(err.0, Code::FailedPrecondition, "got {err:?}");
+
+    // And — nothing was written: the refusal and the absence of an empty attachment are the same
+    // guarantee, and only asserting both rules out a session that starts with a placeholder file
+    assert!(
+        !any_attachments_dir_has_files(&sessions_tmp.path().join("sessions")),
+        "no attachment may be written when the staging host is unreachable"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -261,7 +291,7 @@ async fn start_session_refuses_a_staged_attachment_ref_naming_a_foreign_daemon_i
 async fn start_session_rejects_duplicate_basenames_within_one_request_before_writing_any_attachment(
 ) {
     // Given — a workspace project and two staged files sharing a basename
-    let (_repo, sessions_tmp, service) = a_workspace_service();
+    let (_repo, sessions_tmp, _staging, service) = a_workspace_service();
     stage_one_file(&service, "", STAGING_ID_A, "dup.md", b"a")
         .await
         .expect("staging first file must succeed");
@@ -317,7 +347,7 @@ fn any_attachments_dir_has_files(root: &std::path::Path) -> bool {
 #[tokio::test]
 async fn a_host_document_ref_to_a_session_artifact_copies_the_bytes_into_attachments() {
     // Given — a workspace project
-    let (_repo, sessions_tmp, service) = a_workspace_service();
+    let (_repo, sessions_tmp, _staging, service) = a_workspace_service();
 
     // ... and a prior session A that already holds an artifacts/PRD.md planning doc
     let session_a = start_workspace(&service, vec![])
@@ -363,7 +393,7 @@ async fn a_host_document_ref_to_a_session_artifact_copies_the_bytes_into_attachm
 #[tokio::test]
 async fn a_host_document_ref_with_a_relative_path_escaping_the_scope_root_is_refused() {
     // Given — a workspace project and a prior session A with an artifact
-    let (_repo, sessions_tmp, service) = a_workspace_service();
+    let (_repo, sessions_tmp, _staging, service) = a_workspace_service();
     let session_a = start_workspace(&service, vec![])
         .await
         .expect("session A must start");
@@ -400,7 +430,7 @@ async fn a_host_document_ref_with_a_relative_path_escaping_the_scope_root_is_ref
 #[tokio::test]
 async fn a_host_document_ref_to_a_file_over_the_cap_is_refused() {
     // Given — a prior session A with an artifact larger than the cap
-    let (_repo, sessions_tmp, service) = a_workspace_service();
+    let (_repo, sessions_tmp, _staging, service) = a_workspace_service();
     let session_a = start_workspace(&service, vec![])
         .await
         .expect("session A must start");
@@ -439,7 +469,7 @@ async fn a_host_document_ref_to_a_file_over_the_cap_is_refused() {
 #[tokio::test]
 async fn start_session_refuses_a_staged_attachment_whose_upload_is_not_complete() {
     // Given — a workspace project and a staged file with only a non-final chunk written
-    let (_repo, sessions_tmp, service) = a_workspace_service();
+    let (_repo, sessions_tmp, _staging, service) = a_workspace_service();
     let resp = service
         .upload_staged_attachment_chunk(Request::new(UploadStagedAttachmentChunkRequest {
             session_token: VALID_TOKEN.to_string(),

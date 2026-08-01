@@ -4,6 +4,7 @@
  * All raw selectors live here; test bodies call named methods. No raw `cy.get(...)` in test files.
  */
 
+import * as ids from "../testIds";
 import { byTestId, TEST_IDS } from "../testIds";
 
 export const createSessionPage = {
@@ -54,5 +55,104 @@ export const createSessionPage = {
   /** Submit the new-session form. */
   submit() {
     byTestId(TEST_IDS.createSessionSubmitBtn).click();
+  },
+
+  /** The Create button itself — for asserting it is disabled while a creation is in flight. */
+  submitButton: () => byTestId(TEST_IDS.createSessionSubmitBtn),
+
+  /** The form-level error strip, shown when the daemon refuses the creation. */
+  error: () => byTestId(TEST_IDS.createSessionError),
+
+  // ---------------------------------------------------------------------------
+  // Attachments (docs/ft/coder/session-attachments.md)
+  // ---------------------------------------------------------------------------
+
+  /** The attachments section — also the drop target for an OS file drag. */
+  attachmentsSection: () => byTestId(TEST_IDS.createSessionAttachmentsSection),
+
+  /** Selector for the drop target, for the drag/drop helpers in `support/util/fileDrop`. */
+  attachmentDropSelector: `[data-testid='${TEST_IDS.createSessionAttachmentsSection}']`,
+
+  /** The drag-over overlay, shown only while a file drag is over the section. */
+  attachmentDropOverlay: () => byTestId(TEST_IDS.createSessionAttachmentDropOverlay),
+
+  /** The hidden native file input behind the "Attach files" label. */
+  attachmentFileInput: () =>
+    byTestId(TEST_IDS.createSessionAttachmentPickBtn).find("input[type='file']"),
+
+  /** Pick local files through the native input. `force` is required: the input is `opacity-0`. */
+  pickFiles(files: Cypress.FileReferenceObject[]) {
+    createSessionPage.attachmentFileInput().selectFile(files, { force: true });
+  },
+
+  /** The inline refusal shown when a picked file cannot be attached. */
+  attachmentError: () => byTestId(TEST_IDS.createSessionAttachmentError),
+
+  /** An attachment row, keyed by the basename it will be materialized under. */
+  attachmentRow: (basename: string) => byTestId(ids.createSessionAttachmentRow(basename)),
+
+  /** Every attachment row's basename, in render order. */
+  attachmentBasenames: (): Cypress.Chainable<string[]> =>
+    createSessionPage
+      .attachmentsSection()
+      .find(`[data-attachment-basename]`)
+      .then(($rows) => [...$rows].map((el) => el.getAttribute("data-attachment-basename") ?? "")),
+
+  /** An attachment row's rendered size in bytes. */
+  attachmentSize: (basename: string) => byTestId(ids.createSessionAttachmentSize(basename)),
+
+  /** Rename an attachment. Only `SessionAttachment.basename` changes; the source is untouched. */
+  renameAttachment(from: string, to: string) {
+    byTestId(ids.createSessionAttachmentName(from)).clear().type(to);
+  },
+
+  /** Drop an attachment before the session is created. */
+  removeAttachment(basename: string) {
+    byTestId(ids.createSessionAttachmentRemove(basename)).click();
+  },
+
+  /** An attachment row's progress element, carrying `data-attachment-percent`. */
+  attachmentProgress: (basename: string) =>
+    byTestId(ids.createSessionAttachmentProgress(basename)),
+
+  // ---------------------------------------------------------------------------
+  // Host-document picker — attaches by reference, with no upload
+  // ---------------------------------------------------------------------------
+
+  /** Open the picker for documents that already exist on the selected host. */
+  openHostDocPicker() {
+    byTestId(TEST_IDS.createSessionAttachmentPickHostDocBtn).click();
+  },
+
+  hostDocPicker: () => byTestId(TEST_IDS.createSessionHostDocPicker),
+
+  /** Choose which `HostDocumentScope` the picker browses. */
+  selectHostDocScope(scope: string) {
+    byTestId(TEST_IDS.createSessionHostDocPickerScopeSelect).select(scope);
+  },
+
+  /** A listed document row in the picker, keyed by the `relative_path` it would reference. */
+  hostDocRow: (relativePath: string) => byTestId(ids.createSessionHostDocRow(relativePath)),
+
+  /** Attach the listed document at `relativePath`. */
+  pickHostDoc(relativePath: string) {
+    byTestId(ids.createSessionHostDocRow(relativePath)).click();
+  },
+
+  /**
+   * A node in the picker's file tree. The worktree and project-repo scopes browse a real directory
+   * tree, so they reuse `WorktreeFileTree` (and its node ids) rather than the flat rows the
+   * artifact and upload scopes use.
+   */
+  hostDocTreeNode: (relPath: string) => byTestId(ids.worktreeTreeNode(relPath)),
+
+  /** Expand a directory in the picker's tree, which lazily lists that directory. */
+  expandHostDocDir(relPath: string) {
+    byTestId(ids.worktreeTreeNode(relPath)).click();
+  },
+
+  /** Attach the tree file at `relPath`. */
+  pickHostDocFromTree(relPath: string) {
+    byTestId(ids.worktreeTreeNode(relPath)).click();
   },
 };
