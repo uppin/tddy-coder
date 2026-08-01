@@ -63,11 +63,24 @@ collapsed into the single **Sessions** entry.
 
 ## Default route
 
-The route switch's catch-all now renders `SessionsDrawerScreen`, so **`#/` opens the
-sessions drawer**. The legacy `ConnectionScreen` and its `#/terminal/:id` route are removed;
-deep-linking to a session uses `#/sessions/:id`. A `#/sessions/<unknown-id>` that resolves to
-no known session (after the list loads) shows a "session not found" state with a Home link
+The route switch's catch-all renders `SessionsDrawerScreen`, so **`#/` opens the sessions drawer**;
+since 2026-08-01 it is also *canonicalised* to `#/sessions` (a replace, so it costs no history
+entry). The legacy `ConnectionScreen` and its `#/terminal/:id` route are removed; deep-linking to a
+session uses `#/sessions/:id`. A `#/sessions/<unknown-id>` that resolves to no known session (after
+the list loads) shows a "session not found" state with a Home link
 (`terminal-route-unknown-session` / `-home`).
+
+## Routing (updated 2026-08-01)
+
+The hash switch described here now covers only the **screen**. Every navigable selection *inside* a
+screen — the selected session and task, the create-session and Add-agent panes, the inspector's
+tab and open/expanded state, the Code pane, the task output channel, the worktrees project filter,
+the RPC-playground selection, and **the selected host** — is likewise carried in the URL, and the
+URL is the source of truth for all of it (Back, Forward, an edited address bar and a pasted link all
+move the app). `AppShell`'s `onNavigate` is now a thin wrapper over the shared location store.
+
+See **[url-state-routing.md](url-state-routing.md)** for the full grammar, the push/replace rules,
+and host precedence.
 
 ## LiveKit screen
 

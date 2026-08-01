@@ -86,6 +86,23 @@ export const sessionsDrawerPage = {
   expandRemaining: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsDrawerSeparatorRemaining, { timeout: 5000, ...options }).click(),
 
+  /** Asserts the given session's drawer row is the currently selected one. */
+  expectSelected: (sessionId: string) => {
+    byTestId(sessionsDrawerItem(sessionId), { timeout: 5000 }).should(
+      "have.attr",
+      "aria-selected",
+      "true",
+    );
+  },
+
+  /** Asserts the given session's drawer row is NOT the currently selected one. */
+  expectNotSelected: (sessionId: string) => {
+    byTestId(sessionsDrawerItem(sessionId), { timeout: 5000 }).should(
+      "not.have.attr",
+      "aria-selected",
+    );
+  },
+
   /** The derived label text inside a drawer item. */
   drawerItemLabel: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsDrawerItemLabel(sessionId), options),
@@ -185,6 +202,23 @@ export const sessionsDrawerPage = {
   /** The Tools tab button in the inspector tab strip. */
   inspectorToolsTab: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsInspectorTabTools, { timeout: 5000, ...options }),
+
+  /** The Worktree tab button in the inspector tab strip. */
+  inspectorWorktreeTab: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionInspectorTabWorktree, { timeout: 5000, ...options }),
+
+  /** The Files tab button in the inspector tab strip. */
+  inspectorFilesTab: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionInspectorTabFiles, { timeout: 5000, ...options }),
+
+  /** Asserts the inspector drawer is in the given visual state. */
+  expectInspectorState: (state: "closed" | "open" | "expanded") => {
+    byTestId(TEST_IDS.sessionsInspectorDrawer, { timeout: 5000 }).should(
+      "have.attr",
+      "data-state",
+      state,
+    );
+  },
 
   // ---------------------------------------------------------------------------
   // Usage tab

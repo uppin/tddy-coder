@@ -1,6 +1,8 @@
-import React, { useState } from "react";
+import React from "react";
 import type { TaskInfo } from "../../gen/tasks_pb";
 import { TaskChannelOutput } from "./TaskChannelOutput";
+import { PARAM_CHANNEL } from "../../routing/appLocation";
+import { useAppLocation } from "../../routing/useAppLocation";
 
 interface TaskOutputPaneProps {
   task: TaskInfo | null;
@@ -8,7 +10,9 @@ interface TaskOutputPaneProps {
 }
 
 export function TaskOutputPane({ task, sessionToken }: TaskOutputPaneProps) {
-  const [activeChannelId, setActiveChannelId] = useState<string>("0");
+  // The open channel tab is `?channel=`, so a link points at the exact output the operator meant.
+  const { location, setParams } = useAppLocation();
+  const activeChannelId = location.params[PARAM_CHANNEL] ?? "0";
 
   if (!task) {
     return (
@@ -42,7 +46,7 @@ export function TaskOutputPane({ task, sessionToken }: TaskOutputPaneProps) {
                   ? "bg-background border-border border-b-transparent"
                   : "bg-muted border-transparent text-muted-foreground"
               }`}
-              onClick={() => setActiveChannelId(ch.channelId)}
+              onClick={() => setParams({ [PARAM_CHANNEL]: ch.channelId })}
             >
               {ch.name}
             </button>

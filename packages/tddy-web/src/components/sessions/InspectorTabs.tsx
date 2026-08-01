@@ -1,13 +1,11 @@
 import React from "react";
+import type { InspectorTabName } from "../../routing/appRoutes";
 
-export type InspectorTab =
-  | "details"
-  | "tools"
-  | "usage"
-  | "worktree"
-  | "files"
-  | "vnc"
-  | "screen-sharing";
+/**
+ * The tab names are declared in `routing/appRoutes` (a pure module) so the `?inspector=` param can
+ * be validated without importing this component — see `isInspectorTabName`.
+ */
+export type InspectorTab = InspectorTabName;
 
 interface InspectorTabsProps {
   value: InspectorTab;

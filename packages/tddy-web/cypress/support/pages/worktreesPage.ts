@@ -7,6 +7,14 @@ import { byTestId, TEST_IDS } from "../testIds";
 export const worktreesPage = {
   menuButton: () => byTestId(TEST_IDS.shellMenuWorktrees),
   screen: () => byTestId(TEST_IDS.worktreesScreen),
+
+  /** The project filter `<select>` that scopes the worktree list. */
+  projectSelect: () => byTestId(TEST_IDS.worktreesProjectSelect, { timeout: 5000 }),
+  /** Pick the project with the given id in the project filter. */
+  chooseProject: (projectId: string) => {
+    byTestId(TEST_IDS.worktreesProjectSelect, { timeout: 5000 }).select(projectId);
+  },
+
   table: () => byTestId(TEST_IDS.worktreesTable),
   rows: () => byTestId(TEST_IDS.worktreeRow),
   /** First delete button by default; pass an index for others. */
