@@ -75,6 +75,36 @@ pub fn verify_install_overwrite_systemd_unit(contents: &str) {
     );
 }
 
+/// Optional `--user` installs a per-user systemd service: gated flag, `systemctl --user`, and a
+/// user-manager `[Install]` target (default.target rather than multi-user.target).
+pub fn verify_user_flag_support(contents: &str) {
+    assert!(contents.contains("--user"), "install must accept --user");
+    assert!(
+        contents.contains("want_user"),
+        "install must gate on a --user flag (e.g. want_user)"
+    );
+    assert!(
+        contents.contains("systemctl --user"),
+        "install --user must drive systemctl with --user"
+    );
+    assert!(
+        contents.contains("WantedBy=default.target"),
+        "install --user unit must target default.target (user manager)"
+    );
+}
+
+/// Optional `--headless` installs without requiring or shipping the tddy-web bundle.
+pub fn verify_headless_flag_support(contents: &str) {
+    assert!(
+        contents.contains("--headless"),
+        "install must accept --headless"
+    );
+    assert!(
+        contents.contains("want_headless"),
+        "install must gate on a --headless flag (e.g. want_headless)"
+    );
+}
+
 /// Optional `--build` runs the release script.
 pub fn verify_build_flag_invokes_release(contents: &str) {
     assert!(contents.contains("--build"), "install must accept --build");
@@ -132,6 +162,8 @@ pub fn verify_install_script_contracts(path: &Path, daemon_yaml_production_path:
     verify_no_systemctl_support(&contents);
     verify_install_overwrite_systemd_unit(&contents);
     verify_build_flag_invokes_release(&contents);
+    verify_user_flag_support(&contents);
+    verify_headless_flag_support(&contents);
     let prod = fs::read_to_string(daemon_yaml_production_path)
         .unwrap_or_else(|e| panic!("read {}: {e}", daemon_yaml_production_path.display()));
     verify_install_deploys_web_static_assets(&contents, &prod);
@@ -200,6 +232,16 @@ mod granular_tests {
     #[test]
     fn install_build_flag_granular() {
         verify_build_flag_invokes_release(&read_repo_install());
+    }
+
+    #[test]
+    fn install_user_flag_granular() {
+        verify_user_flag_support(&read_repo_install());
+    }
+
+    #[test]
+    fn install_headless_flag_granular() {
+        verify_headless_flag_support(&read_repo_install());
     }
 
     #[test]
