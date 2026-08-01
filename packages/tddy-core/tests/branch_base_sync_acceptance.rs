@@ -1,4 +1,4 @@
-//! PRD acceptance: `docs/ft/coder/1-WIP/PRD-2026-08-01-pr-stack-panel-ux.md` — the
+//! PRD acceptance: `docs/ft/coder/pr-stack-live-status.md § Panel UX` — the
 //! branch/base sync probe behind the PR-stack panel's "behind base / conflicts" badge.
 //!
 //! Pins `tddy_core::base_sync::branch_base_sync`: how a branch is compared against its base

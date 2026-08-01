@@ -11,8 +11,7 @@
 //! terms: a repository that cannot answer is the case that costs the most per probe, so re-asking it
 //! twelve times a minute is the one thing the cache must not do.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-08-01-pr-stack-panel-ux.md` § C4.
-//! Changeset: `docs/dev/1-WIP/CS-2026-08-01-pr-stack-panel-ux.md` (Milestone 2).
+//! PRD: `docs/ft/coder/pr-stack-live-status.md § Panel UX` § C4.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};

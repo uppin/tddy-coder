@@ -11,7 +11,7 @@
  * always-visible region. The detail is hidden rather than unmounted, so a row keeps its expansion
  * across a branch-resolution poll tick and across the panel closing and reopening.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-08-01-pr-stack-panel-ux.md (C1, D21–D22; AC 1–5).
+ * PRD: docs/ft/coder/pr-stack-live-status.md § Panel UX (C1, D21–D22; AC 1–5).
  */
 
 import React from "react";

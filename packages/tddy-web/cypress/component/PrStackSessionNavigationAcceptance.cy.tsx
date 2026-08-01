@@ -11,7 +11,7 @@
  * right now" is a different question whose answer changes after a resume or a hand-off. Both legs
  * are guarded on the session actually being known, so the control never selects nothing.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-08-01-pr-stack-panel-ux.md (C2, D23; AC 6–7).
+ * PRD: docs/ft/coder/pr-stack-live-status.md § Panel UX (C2, D23; AC 6–7).
  */
 
 import React from "react";

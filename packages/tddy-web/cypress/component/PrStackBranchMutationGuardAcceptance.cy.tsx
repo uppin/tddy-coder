@@ -11,7 +11,7 @@
  * side leaves a half-rebased worktree or force-pushes over a merge commit. Git's `index.lock` usually
  * makes one abort rather than corrupt — an abort mid-rebase is not a safe outcome either.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-08-01-pr-stack-panel-ux.md (C5, D30–D33).
+ * PRD: docs/ft/coder/pr-stack-live-status.md § Panel UX (C5, D30–D33).
  */
 
 import React from "react";

@@ -615,7 +615,8 @@ the row collapses to a summary and expands to its full detail, the spawned indic
 it is bound to, row order is persisted and operator-editable, each row states how its branch stands
 against its base, and a row that is cleanly behind its base can pull the base in.
 
-PRD: [PRD-2026-08-01-pr-stack-panel-ux.md](1-WIP/PRD-2026-08-01-pr-stack-panel-ux.md).
+Related: [Session drawer § Planned-PR list](../web/session-drawer.md#planned-pr-list) for the row
+anatomy, badges and controls as the operator meets them.
 
 ### Design decisions
 

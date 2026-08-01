@@ -18,8 +18,7 @@
 //! every node in topological order, and the numbers on disk are then the truth from that point on.
 //! Topological order, not `Vec` order: the `nodes` array has never been ordered by anything.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-08-01-pr-stack-panel-ux.md` § C3 (D24, D25).
-//! Changeset: `docs/dev/1-WIP/CS-2026-08-01-pr-stack-panel-ux.md` (Milestone 1).
+//! PRD: `docs/ft/coder/pr-stack-live-status.md § Panel UX` § C3 (D24, D25).
 
 mod common;
 

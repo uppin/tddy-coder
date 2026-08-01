@@ -21,8 +21,7 @@
 //! standing in for whoever else pushes. Fetch, lease and abort semantics are precisely what a fake
 //! would get wrong. All plumbing lives in the builders below; no test body runs git itself.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-08-01-pr-stack-panel-ux.md` § C5 (D30-D33).
-//! Changeset: `docs/dev/1-WIP/CS-2026-08-01-pr-stack-panel-ux.md` (Milestone 4).
+//! PRD: `docs/ft/coder/pr-stack-live-status.md § Panel UX` § C5 (D30-D33).
 
 mod common;
 

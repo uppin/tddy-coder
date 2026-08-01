@@ -13,7 +13,7 @@
  *   repoint that moves a node onto a different base leaves the old count in place; merging then takes
  *   the branch the node was just moved off, back into it.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-08-01-pr-stack-panel-ux.md (C5, D28–D33).
+ * PRD: docs/ft/coder/pr-stack-live-status.md § Panel UX (C5, D28–D33).
  */
 
 import React from "react";

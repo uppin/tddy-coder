@@ -15,7 +15,7 @@
  * - **"In sync" is a badge, not silence.** If only the bad states rendered, a healthy row and a row
  *   whose poll has not answered would look identical — the same conflation one level down.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-08-01-pr-stack-panel-ux.md (C4, D26–D29; AC 12–15).
+ * PRD: docs/ft/coder/pr-stack-live-status.md § Panel UX (C4, D26–D29; AC 12–15).
  */
 
 import React from "react";

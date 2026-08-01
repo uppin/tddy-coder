@@ -19,7 +19,7 @@
 //! same base the row's own base line names.
 //!
 //! PRD: docs/ft/coder/pr-stack-live-status.md (C2, C3, D4, D8, D12) and
-//! docs/ft/coder/1-WIP/PRD-2026-08-01-pr-stack-panel-ux.md (C4, D27-D29).
+//! docs/ft/coder/pr-stack-live-status.md § Panel UX (C4, D27-D29).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

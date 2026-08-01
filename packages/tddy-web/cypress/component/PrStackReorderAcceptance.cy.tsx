@@ -5,7 +5,7 @@
  * silently rewrote the operator's view. Order is now a persisted per-node position that changes only
  * as a deliberate act — these controls being that act.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-08-01-pr-stack-panel-ux.md (C3, D24; AC 11).
+ * PRD: docs/ft/coder/pr-stack-live-status.md § Panel UX (C3, D24; AC 11).
  */
 
 import React from "react";

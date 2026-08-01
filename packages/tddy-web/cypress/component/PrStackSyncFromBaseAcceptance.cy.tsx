@@ -14,7 +14,7 @@
  * not on conflicts, and never on a comparison that could not be made. An action derived from an
  * unavailable comparison would be an action derived from nothing.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-08-01-pr-stack-panel-ux.md (C5, D30–D33; AC 16–21).
+ * PRD: docs/ft/coder/pr-stack-live-status.md § Panel UX (C5, D30–D33; AC 16–21).
  */
 
 import React from "react";

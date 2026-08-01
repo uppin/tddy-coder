@@ -24,8 +24,7 @@
 //! because the pull fetches, merges and pushes, and the whole point of the returned resolution is
 //! that it reads refs that moved.
 //!
-//! PRD: `docs/ft/coder/1-WIP/PRD-2026-08-01-pr-stack-panel-ux.md` § C3, C5.
-//! Changeset: `docs/dev/1-WIP/CS-2026-08-01-pr-stack-panel-ux.md`.
+//! PRD: `docs/ft/coder/pr-stack-live-status.md § Panel UX` § C3, C5.
 
 use std::fs;
 use std::path::{Path, PathBuf};
