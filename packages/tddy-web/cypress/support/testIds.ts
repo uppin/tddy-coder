@@ -96,6 +96,7 @@ export const TEST_IDS = {
   // Worktrees
   shellMenuWorktrees: "shell-menu-worktrees",
   worktreesScreen: "worktrees-screen",
+  worktreesProjectSelect: "worktrees-project-select",
   worktreesTable: "worktrees-table",
   worktreeRow: "worktrees-row",
   worktreeDelete: "worktrees-delete",
@@ -305,6 +306,9 @@ export const TEST_IDS = {
 
   // RPC Playground
   rpcPlaygroundParticipantSelect: "rpc-playground-participant-select",
+  rpcServiceTree: "rpc-service-tree",
+  rpcRequestEditor: "rpc-request-editor",
+  rpcInvokeButton: "rpc-invoke-button",
   rpcServiceTree: "rpc-service-tree",
   rpcRequestEditor: "rpc-request-editor",
   rpcRequestRawJson: "rpc-request-raw-json",

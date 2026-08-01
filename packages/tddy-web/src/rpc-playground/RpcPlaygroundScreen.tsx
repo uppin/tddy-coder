@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { PARAM_METHOD, PARAM_SERVICE } from "@/routing/appLocation";
+import { useAppLocation } from "@/routing/useAppLocation";
 
 export type ServiceMethodKind =
   | "unary"
@@ -59,8 +61,11 @@ export function RpcPlaygroundScreen({
   onNavigate,
 }: RpcPlaygroundScreenProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [selectedService, setSelectedService] = useState<string | null>(null);
-  const [selectedMethod, setSelectedMethod] = useState<string | null>(null);
+  // The addressed call is `?service=&method=` — that is the thing worth linking a colleague to.
+  // The request JSON, editor mode and result stay local: those are draft input and output.
+  const { location, setParams } = useAppLocation();
+  const selectedService = location.params[PARAM_SERVICE] ?? null;
+  const selectedMethod = location.params[PARAM_METHOD] ?? null;
   const [editorMode, setEditorMode] = useState<EditorMode>("raw");
   const [requestJson, setRequestJson] = useState("{}");
   const [result, setResult] = useState<InvokeResult | null>(null);
@@ -72,15 +77,20 @@ export function RpcPlaygroundScreen({
     return svc?.methods.find((m) => m.name === selectedMethod) ?? null;
   }, [services, selectedService, selectedMethod]);
 
+  // The draft request and the last result belong to the method that was open. Reset them whenever
+  // the addressed call changes — including when the *URL* changes it (Back, a pasted link), which a
+  // reset inside the click handler would miss, leaving one method's body under another's name.
+  useEffect(() => {
+    setRequestJson("{}");
+    setResult(null);
+  }, [selectedService, selectedMethod]);
+
   const toggleService = (name: string) => {
     setExpanded((prev) => ({ ...prev, [name]: !prev[name] }));
   };
 
   const selectMethod = (serviceName: string, methodName: string) => {
-    setSelectedService(serviceName);
-    setSelectedMethod(methodName);
-    setRequestJson("{}");
-    setResult(null);
+    setParams({ [PARAM_SERVICE]: serviceName, [PARAM_METHOD]: methodName });
   };
 
   const handleInvoke = async () => {

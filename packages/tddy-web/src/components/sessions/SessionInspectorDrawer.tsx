@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
@@ -8,6 +8,9 @@ import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "../../lib/utils";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
+import { PARAM_INSPECTOR } from "../../routing/appLocation";
+import { isInspectorTabName } from "../../routing/appRoutes";
+import { useAppLocation } from "../../routing/useAppLocation";
 import { SessionToolsTab } from "./SessionToolsTab";
 import { SessionUsageTab } from "./SessionUsageTab";
 import { SessionWorktreeTab } from "./SessionWorktreeTab";
@@ -93,7 +96,16 @@ export function SessionInspectorDrawer({
   onInsertPathIntoTerminal,
 }: SessionInspectorDrawerProps) {
   const [pendingDelete, setPendingDelete] = useState(false);
-  const [tab, setTab] = useState<InspectorTab>("details");
+  // The active tab lives in the URL (`?inspector=<tab>`) so a shared link opens on the same tab.
+  // An unresolvable value degrades to Details rather than rendering a blank panel; the screen
+  // normalises the param itself, so the two never disagree for long.
+  const { location, setParams } = useAppLocation();
+  const tabParam = location.params[PARAM_INSPECTOR] ?? "";
+  const tab: InspectorTab = isInspectorTabName(tabParam) ? tabParam : "details";
+  const setTab = useCallback(
+    (next: InspectorTab) => setParams({ [PARAM_INSPECTOR]: next }),
+    [setParams],
+  );
   const vncClient = useHttpClient(VncService);
   const screenSharingClient = useHttpClient(ScreenSharingService);
 
