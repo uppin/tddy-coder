@@ -129,8 +129,8 @@ describe("groupSessionsByStack", () => {
 
 /**
  * Tests for `partitionSessionsByActivity` — splits a session list into an *active* partition
- * (green/yellow dots: `connectionStatusForSession !== "disconnected"`, i.e. `isActive` or
- * `pendingElicitation`) and a *remaining* partition (grey/disconnected), each independently
+ * (green/yellow dots: `connectionStatusForSession !== "disconnected"`, i.e. `isActive`, whether or
+ * not it is also eliciting) and a *remaining* partition (grey/disconnected), each independently
  * stack-grouped, with per-partition counts.
  */
 describe("partitionSessionsByActivity", () => {
@@ -161,8 +161,9 @@ describe("partitionSessionsByActivity", () => {
   });
 
   it("routes a needs-input (yellow) session to the active partition", () => {
-    // Given — an inactive session that is nonetheless waiting for human input (yellow dot)
-    const yellow = aSessionEntry({ sessionId: "yellow-1", isActive: false, pendingElicitation: true });
+    // Given — a live session waiting for human input (yellow dot). Elicitation marks a session
+    // needs-input only while it is actually running; a dead one carrying the flag is grey.
+    const yellow = aSessionEntry({ sessionId: "yellow-1", isActive: true, pendingElicitation: true });
 
     // When
     const result = partitionSessionsByActivity([yellow]);
@@ -179,7 +180,7 @@ describe("partitionSessionsByActivity", () => {
     const sessions = [
       aSessionEntry({ sessionId: "g1", isActive: true }),
       aSessionEntry({ sessionId: "g2", isActive: true }),
-      aSessionEntry({ sessionId: "y1", isActive: false, pendingElicitation: true }),
+      aSessionEntry({ sessionId: "y1", isActive: true, pendingElicitation: true }),
       aSessionEntry({ sessionId: "d1", isActive: false, pendingElicitation: false }),
     ];
 

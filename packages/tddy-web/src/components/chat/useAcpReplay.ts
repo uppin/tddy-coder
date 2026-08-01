@@ -27,6 +27,10 @@ function toolStatusOf(status: ToolCallStatus): "running" | "completed" | "error"
 export interface UseAcpReplayResult extends UseAgentChatResult {
   /** True once the count feed reports at least one persisted activity frame. */
   hasActivity: boolean;
+  /** True once the count feed has answered at all, whatever it said. Distinguishes "this session
+   *  recorded nothing" from "the count has not arrived yet" — a surface that renders that difference
+   *  must wait for this before claiming the former. */
+  countLoaded: boolean;
   /** Activity frames counted since the overlay was last opened (drives the unread badge). */
   unreadCount: number;
   /** Mark the current count as seen (clears the unread badge). */
@@ -76,6 +80,7 @@ export function useAcpReplay(args: {
   );
 
   const count = state?.count ?? 0;
+  const countLoaded = state?.countLoaded ?? false;
   const seenCount = state?.seenCount ?? 0;
   const messages = state?.messages ?? [];
   const snapshotLoaded = state?.snapshotLoaded ?? false;
@@ -241,6 +246,7 @@ export function useAcpReplay(args: {
     sendError: null,
     workflowError: null,
     hasActivity: count > 0,
+    countLoaded,
     unreadCount,
     markSeen,
     loadSnapshot,

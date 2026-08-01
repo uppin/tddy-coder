@@ -55,6 +55,7 @@ it("shows a Screen Sharing tab in the inspector tab strip alongside Details and 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   page.drawerItem(SESSION.sessionId).click();
+  page.inspectorToggle().click();
   page.inspectorDrawer().should("have.attr", "data-state", "open");
 
   // Then

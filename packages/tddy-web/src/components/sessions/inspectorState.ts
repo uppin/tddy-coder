@@ -1,8 +1,5 @@
 // Inspector panel state machine for the session inspector drawer.
 
-import { connectionStatusForSession } from "../../utils/connectionStatusForSession";
-import type { SessionEntry } from "../../gen/connection_pb";
-
 export type InspectorState = { open: boolean; expanded: boolean };
 
 export type InspectorAction =
@@ -11,20 +8,16 @@ export type InspectorAction =
   | { type: "toggle" }
   | { type: "expand" }
   | { type: "restore" }
-  | { type: "select"; isActive: boolean };
+  | { type: "select" };
 
 /**
- * Returns the default open state when a session is selected.
- * Active (connected) sessions hide the inspector; inactive sessions show it.
+ * Returns the default open state when a session is selected: closed, whatever the session's
+ * liveness. An active session shows its terminal and an inactive one shows its recorded activities,
+ * so neither has a reason to have the drawer opened for it — the operator asks for it via the
+ * `Inspector` toggle. See docs/ft/web/inactive-session-activities.md § Inspector.
  */
-export function defaultInspectorOpen(isActive: boolean): boolean {
-  return !isActive;
-}
-
-/** True when the inspector should render as the full main pane (docked) rather than an overlay
- *  drawer: the selected session is disconnected. */
-export function isInspectorDocked(session: SessionEntry | null): boolean {
-  return session != null && connectionStatusForSession(session) === "disconnected";
+export function defaultInspectorOpen(): boolean {
+  return false;
 }
 
 /**
@@ -46,6 +39,6 @@ export function nextInspectorState(
     case "restore":
       return { open: true, expanded: false };
     case "select":
-      return { open: defaultInspectorOpen(action.isActive), expanded: false };
+      return { open: defaultInspectorOpen(), expanded: false };
   }
 }

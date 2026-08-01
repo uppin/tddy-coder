@@ -1,17 +1,27 @@
 /**
- * Acceptance tests: the Session Inspector docks as the MAIN PANE for a disconnected session,
- * and stays an overlay drawer otherwise. As a consequence, the "Claim terminal" overlay is not
- * rendered for a disconnected session (its focused runtime foreground is suppressed) while the
- * runtime layer stays mounted so background sessions keep streaming.
+ * Acceptance tests: the Session Inspector is an **overlay drawer for every session** — it no longer
+ * docks as the main pane for a disconnected one. Docking existed only because a dormant session's
+ * pane was empty behind it; it now shows that session's recorded activities, which a full-pane
+ * drawer would bury.
  *
- * Amendment: docs/ft/web/1-WIP/inspector-docked-when-disconnected.md
- * PRD:       docs/ft/web/session-drawer.md § Session Inspector Drawer
+ * What survives the change: the "Claim terminal" overlay is still not rendered for an inactive
+ * session (its focused runtime foreground stays suppressed — now keyed on the session's inactivity
+ * rather than on the inspector being docked) while the runtime layer stays mounted so background
+ * sessions keep streaming.
  *
- * Layout ACs (1-3) drive the full SessionsDrawerScreen over the recording LiveKit harness
- * (mirrors SessionInspectorAcceptance). The Claim-terminal ACs (4-5) drive SessionMainPane
- * directly with an explicit runtime + a fake ConnectionService client (mirrors
- * TerminalControlAcceptance / SessionRuntimeStealClaimReattach), since they need a runtime that
- * is still mounted for a session that is / is not disconnected.
+ * PRD: docs/ft/web/inactive-session-activities.md § Inspector
+ *      docs/ft/web/session-drawer.md § Session Inspector Drawer
+ *
+ * These assert the drawer's *state* and what survives beside it, not its geometry: the component
+ * harness (`cypress/support/component-index.html`) loads no stylesheet, so every Tailwind class is
+ * inert and every element measures full width. Width or offset assertions would pass or fail for
+ * reasons unrelated to the layout they claim to check.
+ *
+ * Layout ACs drive the full SessionsDrawerScreen over the recording LiveKit harness (mirrors
+ * SessionInspectorAcceptance). The Claim-terminal ACs drive SessionMainPane directly with an
+ * explicit runtime + a fake ConnectionService client (mirrors TerminalControlAcceptance /
+ * SessionRuntimeStealClaimReattach), since they need a runtime that is still mounted for a session
+ * that is / is not disconnected.
  */
 
 import React from "react";
@@ -32,6 +42,7 @@ import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
+import { sessionActivitiesPage } from "../support/pages/sessionActivitiesPage";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
@@ -124,10 +135,10 @@ const noopInspectorHandlers = {
 };
 
 // ===========================================================================
-// AC1-AC3 — docked vs drawer layout (full screen)
+// Overlay-drawer layout, whatever the session's liveness (full screen)
 // ===========================================================================
 
-describe("SessionInspectorDockedDisconnected — docked-vs-drawer layout", () => {
+describe("SessionInactiveInspectorOverlay — overlay-drawer layout", () => {
   beforeEach(() => {
     cy.viewport(1280, 800);
     cy.clearLocalStorage();
@@ -135,20 +146,25 @@ describe("SessionInspectorDockedDisconnected — docked-vs-drawer layout", () =>
     window.localStorage.setItem("tddy_session_token", "fake-token");
   });
 
-  it("docks the inspector as the main pane when a disconnected session is selected", () => {
+  it("keeps a disconnected session's activities mounted behind the open inspector", () => {
     // Given
-    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
+    const backend = aConnectionServiceBackend({
+      sessions: [DISCONNECTED_SESSION],
+      acpReplay: { counts: [0], snapshot: [] },
+    });
 
-    // When
+    // When — the inspector no longer opens on its own, so ask for it
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     page.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    page.inspectorToggle().click();
 
-    // Then — open AND docked (main pane), not a side drawer
+    // Then — the drawer opens over a pane that still owns its base view. The docked layout used to
+    // *replace* that pane, so its survival is what the removal of docking buys.
     page.inspectorDrawer().should("have.attr", "data-state", "open");
-    page.inspectorDrawer().should("have.attr", "data-docked", "true");
+    sessionActivitiesPage.pane().should("exist");
   });
 
-  it("keeps the inspector an overlay drawer when a connected session is selected", () => {
+  it("keeps a connected session's terminal mounted behind the open inspector", () => {
     // Given
     const backend = aConnectionServiceBackend({
       sessions: [CONNECTED_SESSION],
@@ -159,44 +175,57 @@ describe("SessionInspectorDockedDisconnected — docked-vs-drawer layout", () =>
       },
     });
 
-    // When — connected session auto-closes the inspector, so open it via the toggle
+    // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     page.drawerItem(CONNECTED_SESSION.sessionId).click();
     page.inspectorToggle().click();
 
-    // Then — open but NOT docked (overlay drawer), terminal still present behind it
+    // Then — unchanged from before this feature: an active session's drawer was always an overlay
     page.inspectorDrawer().should("have.attr", "data-state", "open");
-    page.inspectorDrawer().should("have.attr", "data-docked", "false");
     page.detailTerminalContainer().should("exist");
   });
 
-  it("keeps the expand and close controls in docked mode; expand keeps it docked", () => {
+  it("expands a disconnected session's inspector on request", () => {
     // Given
-    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
+    const backend = aConnectionServiceBackend({
+      sessions: [DISCONNECTED_SESSION],
+      acpReplay: { counts: [0], snapshot: [] },
+    });
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     page.drawerItem(DISCONNECTED_SESSION.sessionId).click();
-    page.inspectorDrawer().should("have.attr", "data-docked", "true");
-
-    // Then — all controls present in docked mode
-    page.inspectorExpand().should("exist");
-    page.inspectorClose().should("exist");
-
-    // When — expand
+    page.inspectorToggle().click();
+    page.inspectorDrawer().should("have.attr", "data-state", "open");
     page.inspectorExpand().click();
 
-    // Then — expanded and still docked
+    // Then
     page.inspectorDrawer().should("have.attr", "data-state", "expanded");
-    page.inspectorDrawer().should("have.attr", "data-docked", "true");
+  });
+
+  it("keeps the expand and close controls available for a disconnected session", () => {
+    // Given
+    const backend = aConnectionServiceBackend({
+      sessions: [DISCONNECTED_SESSION],
+      acpReplay: { counts: [0], snapshot: [] },
+    });
+
+    // When
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+    page.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    page.inspectorToggle().click();
+
+    // Then
+    page.inspectorExpand().should("exist");
+    page.inspectorClose().should("exist");
   });
 });
 
 // ===========================================================================
-// AC4-AC5 — "Claim terminal" is suppressed for a disconnected selection only
+// "Claim terminal" is suppressed for an inactive selection only
 // ===========================================================================
 
-describe("SessionInspectorDockedDisconnected — Claim terminal suppression", () => {
+describe("SessionInactiveInspectorOverlay — Claim terminal suppression", () => {
   beforeEach(() => {
     cy.viewport(1280, 800);
   });
@@ -218,9 +247,8 @@ describe("SessionInspectorDockedDisconnected — Claim terminal suppression", ()
       />,
     );
 
-    // Then — inspector is docked, the focused-runtime marker + Claim overlay are gone, and the
-    // runtime layer is still mounted (background sessions keep streaming)
-    page.inspectorDrawer().should("have.attr", "data-docked", "true");
+    // Then — the focused-runtime marker + Claim overlay are gone, and the runtime layer is still
+    // mounted (background sessions keep streaming)
     byTestId(TEST_IDS.sessionsRuntimeLayer).should("exist");
     byTestId(TEST_IDS.sessionsDetailTerminalContainer).should("not.exist");
     page.terminalControlOverlay().should("not.exist");
@@ -243,8 +271,7 @@ describe("SessionInspectorDockedDisconnected — Claim terminal suppression", ()
       />,
     );
 
-    // Then — not docked, focused-runtime marker present, and the Claim terminal CTA shows
-    page.inspectorDrawer().should("have.attr", "data-docked", "false");
+    // Then — focused-runtime marker present, and the Claim terminal CTA shows
     byTestId(TEST_IDS.sessionsDetailTerminalContainer).should("exist");
     page.terminalControlOverlay().should("be.visible");
     page.terminalClaimBtn().should("contain.text", "Claim terminal");

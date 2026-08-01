@@ -66,6 +66,7 @@ import {
   DEFAULT_CLAUDE_CLI_MODEL,
   DEFAULT_CLAUDE_CLI_MODELS,
 } from "./responses";
+import { acpReplayHandlers, type AcpReplayScenario } from "./acpReplay";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -231,6 +232,10 @@ export interface ConnectionServiceScenario {
    *  across successive calls (one chunk per call). Each chunk's `startOffset`/`endOffset`/`atOldest`
    *  is used verbatim. The backend pops one chunk per `getTerminalHistory` call. */
   terminalHistory?: Array<{ data: Uint8Array; startOffset: bigint; endOffset: bigint; atOldest: boolean }>;
+  /** The session's recorded ACP transcript, served by `StreamAcpReplay` in both modes (and by
+   *  `GetAcpToolCallDetail` for the tool bodies). Backs the Agent Activity overlay and the inactive
+   *  session's Activities view. Default: unimplemented — omit it unless the spec reads a transcript. */
+  acpReplay?: AcpReplayScenario;
 }
 
 export interface ConnectionServiceBackend extends InMemoryRpcBackend {
@@ -370,6 +375,9 @@ export function aConnectionServiceBackend(
           ...overrides,
         });
       },
+      // The session's recorded ACP transcript. Spread (rather than re-implemented) so the two-phase
+      // replay protocol has one definition shared with `aReplayBackend` — see `./acpReplay`.
+      ...(scenario.acpReplay ? acpReplayHandlers(scenario.acpReplay) : {}),
       resumeSession: async (req) => {
         const overrides =
           typeof scenario.resumeSession === "function"

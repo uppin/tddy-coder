@@ -31,6 +31,11 @@ export interface AgentActivityState {
   /** Current number of coalesced activity entries (agent-text frames + distinct tool calls),
    *  streamed by the `COUNT_THEN_LIVE` feed. */
   readonly count: number;
+  /** True once the count feed has delivered a frame for this session — **whatever** that frame said.
+   *  `count` alone cannot distinguish "no activity" from "the feed has not answered yet", and a
+   *  surface that renders the difference (the Activities view's empty state) must not state the
+   *  former while the latter is still true. A feed that errors never sets this. */
+  readonly countLoaded: boolean;
   /** The lazily-pulled transcript entries (empty until the snapshot is opened). */
   readonly messages: ChatMessage[];
   /** The `count` value at the last overlay open — entries beyond it are unread. */
@@ -53,6 +58,7 @@ function freshState(sessionId: string): AgentActivityState {
   return {
     sessionId,
     count: 0,
+    countLoaded: false,
     messages: EMPTY_MESSAGES,
     seenCount: 0,
     snapshotLoaded: false,
@@ -75,11 +81,13 @@ export class AgentActivityRegistry {
     return this.bySessionId.get(sessionId);
   }
 
-  /** Record the latest streamed activity count. No-op (no notify) when unchanged. */
+  /** Record the latest streamed activity count, and mark the count feed as having answered. No-op
+   *  (no notify) only when both are already what this frame reports — the first frame of a session
+   *  with zero entries still flips `countLoaded`, which is the whole point of tracking it. */
   setCount(sessionId: string, count: number): void {
     const prev = this.bySessionId.get(sessionId) ?? freshState(sessionId);
-    if (prev.count === count) return;
-    this.write(sessionId, { ...prev, count });
+    if (prev.count === count && prev.countLoaded) return;
+    this.write(sessionId, { ...prev, count, countLoaded: true });
   }
 
   /** Replace the cached transcript entries (the resolved snapshot). */

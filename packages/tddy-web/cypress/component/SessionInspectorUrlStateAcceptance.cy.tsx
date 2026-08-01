@@ -89,9 +89,10 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 it("choosing an inspector tab records that tab in the URL", () => {
-  // Given — a selected session, whose inspector auto-opens on the Details tab
+  // Given — a selected session whose inspector the operator opens, landing on the Details tab
   mountSessionsDrawer();
   sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
+  sessionsDrawerPage.inspectorToggle().click();
   appLocationPage.expectParam("inspector", "details");
 
   // When
@@ -130,9 +131,10 @@ it("an unknown ?inspector= value falls back to the Details tab", () => {
 // ---------------------------------------------------------------------------
 
 it("closing the inspector drops the inspector param from the URL", () => {
-  // Given — a selected session whose inspector auto-opened, recorded in the URL
+  // Given — a selected session whose inspector the operator opened, recorded in the URL
   mountSessionsDrawer();
   sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
+  sessionsDrawerPage.inspectorToggle().click();
   sessionsDrawerPage.expectInspectorState("open");
   appLocationPage.expectParam("inspector", "details");
 
@@ -148,6 +150,7 @@ it("expanding the inspector records full=1 in the URL", () => {
   // Given
   mountSessionsDrawer();
   sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
+  sessionsDrawerPage.inspectorToggle().click();
   sessionsDrawerPage.expectInspectorState("open");
 
   // When

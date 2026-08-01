@@ -4,7 +4,16 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
-## 2026-08-01 — Planned-PR rows expand, link to their session, and hold their order
+## 2026-08-01 — A dormant session shows what it did, and offers to bring it back
+
+- **Selecting an inactive session now shows the work it recorded.** The main pane renders that session's agent transcript — its messages and tool calls, each with an elapsed badge, tool entries opening the full input and output. Previously the pane read *"Select Resume to reconnect"* and nothing else, while the transcript sat behind a top-bar icon that hides itself until something has been counted; the one surface worth reading for a finished session was the one you could not reach.
+- **Resume moved into the pane's top bar**, in the same position for every inactive session — including PR-Stack and workflow-chat sessions, whose own views are left alone. It used to live only inside the Inspector, which is no longer opened for you.
+- **The Inspector no longer opens itself.** Selecting a session leaves it shut whatever that session's state; a link that names a tab still opens it, and an attach failure still opens it, because that is a problem you have to see. It is also always a side drawer now — it used to take over the whole pane for a disconnected session, which would have buried the transcript.
+- **PR-Stack and workflow-chat sessions keep their own views when dormant.** The planned-PR panel renders from saved state and the workflow chat is already a transcript; neither is replaced.
+- **A session that died mid-elicitation now counts as finished.** Its "waiting for input" flag outlives the process, so it used to show as live — with a yellow dot in the drawer, sorted among the running sessions, and with neither the new view nor the Resume button. It now reads as disconnected everywhere.
+- **The pane no longer claims a session recorded nothing until it knows.** The "no recorded activity" message used to appear in the moment before the transcript count arrived, and to stay if that read failed — stating as fact something it had not yet been told.
+- **Returning from Resume is automatic.** Once the session is live again the pane goes back to its terminal on its own; there is no view to switch back. The change takes up to two seconds, the interval at which session liveness refreshes.
+
 
 - **Each row collapses to a summary and expands to its full detail** — title, status and call to action stay visible; description, branch, base branch, worktree, node id, parents, child recipe and bound session move behind a toggle. The row previously rendered all of it unconditionally, which in the panel's 360px dock made a five-node stack a wall of text with nowhere to put the fields the node had but never showed.
 - The detail is **hidden, never unmounted**, so expansion, scroll position and the branch poll set survive a collapse and a panel close. Blockers, refusals and errors stay outside the collapse boundary — a reason you have to expand a row to find is a fresh dead end.

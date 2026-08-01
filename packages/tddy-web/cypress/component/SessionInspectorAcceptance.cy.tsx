@@ -11,6 +11,7 @@ import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { sessionActivitiesPage } from "../support/pages/sessionActivitiesPage";
 
 // ---------------------------------------------------------------------------
 // Session constants used across specs
@@ -115,16 +116,17 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
   });
 
   // -------------------------------------------------------------------------
-  // AC3: Disconnected session → inspector open by default
+  // AC3: Disconnected session → inspector opens on the toggle, with no terminal behind it
   // -------------------------------------------------------------------------
 
-  it("opens the inspector by default when a disconnected session is selected", () => {
+  it("opens the inspector on the toggle for a disconnected session, with no terminal behind it", () => {
     // Given
     const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorToggle().click();
 
     // Then
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
@@ -142,6 +144,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorToggle().click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
     sessionsDrawerPage.inspectorExpand().click();
 
@@ -166,6 +169,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorToggle().click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
     sessionsDrawerPage.inspectorClose().click();
 
@@ -275,12 +279,13 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
   // -------------------------------------------------------------------------
 
   it("shows Details and Tools tabs; Details is selected by default and metadata is visible", () => {
-    // Given — a disconnected session so the inspector opens automatically
+    // Given — a disconnected session
     const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorToggle().click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
 
     // Then — both tabs exist
@@ -299,6 +304,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorToggle().click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
 
     // Switch to Tools tab
@@ -318,10 +324,12 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 });
 
 // ---------------------------------------------------------------------------
-// Attachment-driven inspector: auto-open/close based on connection status
+// The attachment never drives the inspector open or shut: only the operator's toggle does (an
+// attach *error* aside, which is a failure to surface rather than a liveness state).
+// See docs/ft/web/inactive-session-activities.md § Inspector.
 // ---------------------------------------------------------------------------
 
-describe("SessionInspectorAcceptance — attachment-driven auto-open/close", () => {
+describe("SessionInspectorAcceptance — the attachment does not drive the inspector", () => {
   beforeEach(() => {
     cy.viewport(1280, 800); // desktop: session list defaults open so drawer items are clickable
     cy.clearLocalStorage();
@@ -329,39 +337,57 @@ describe("SessionInspectorAcceptance — attachment-driven auto-open/close", () 
     window.localStorage.setItem("tddy_session_token", "fake-token");
   });
 
-  it("closes the inspector when a session becomes connected", () => {
-    // Given — disconnected session selected; inspector starts open
-    const backend = aConnectionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
+  it("keeps the inspector open when the session it is showing becomes connected", () => {
+    // Given — a disconnected session with the inspector opened by the operator
+    const backend = aConnectionServiceBackend({
+      sessions: [DISCONNECTED_SESSION],
+      resumeSession: {
+        livekitRoom: "room-resumed",
+        livekitUrl: "ws://127.0.0.1:7880",
+        livekitServerIdentity: "server",
+      },
+    });
 
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorToggle().click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
 
-    // When — user resumes the session (triggers attachment → connected-livekit)
+    // When — the operator resumes the session
     sessionsDrawerPage.inspectorResumeBtn(DISCONNECTED_SESSION.sessionId).click();
 
-    // Then — inspector closes to reveal the terminal
-    sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "closed");
+    // Then — the resume really did run (the attachment moves to connected on its response), and the
+    // drawer is still as the operator left it. Asserting the RPC rather than a terminal because the
+    // base view follows the daemon's session list, which still reports this fixture dormant.
+    cy.wrap(null).should(() => {
+      const resumed = backend
+        .callsTo(ConnectionService.method.resumeSession)
+        .map((c) => c.sessionId);
+      expect(resumed, "ResumeSession calls").to.deep.equal([DISCONNECTED_SESSION.sessionId]);
+    });
+    sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
   });
 
-  it("opens the inspector when a connected session attachment becomes idle", () => {
+  it("keeps the inspector closed when the selection moves to a disconnected session", () => {
     // Given — connected session selected; also list a disconnected session to switch to
     const backend = aConnectionServiceBackend({
       sessions: [CONNECTED_SESSION_A, DISCONNECTED_SESSION],
       connectSession: { livekitRoom: "room-a", livekitUrl: "ws://127.0.0.1:7880", livekitServerIdentity: "server" },
+      acpReplay: { counts: [0], snapshot: [] },
     });
 
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION_A.sessionId).click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "closed");
 
-    // When — simulate session going idle by selecting a disconnected session then reselecting
-    // (The attachment hook resets to idle when the session changes). The disconnected row lives in
+    // When — switching selection drops the attachment back to idle. The disconnected row lives in
     // the default-collapsed Remaining partition, so expand it first.
     sessionsDrawerPage.expandRemaining();
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
 
-    // Then — inspector opens for the now-disconnected selection
-    sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
+    // Then — the new selection really did take (its activities view is the observable proof), and
+    // the drawer was not opened for it
+    sessionActivitiesPage.pane().should("exist");
+    sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "closed");
   });
 });

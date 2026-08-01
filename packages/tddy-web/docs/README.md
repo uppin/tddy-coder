@@ -2,6 +2,7 @@
 
 - **Changeset history**: [changesets.md](changesets.md)
 - **Codex OAuth dialog**: [codex-oauth-dialog.md](codex-oauth-dialog.md)
+- **Inactive session activities (main-pane base view)**: [inactive-session-activities.md](inactive-session-activities.md)
 - **Insecure-origin constraints (plain-http LAN serving)**: [insecure-origin-constraints.md](insecure-origin-constraints.md)
 - **LiveKit presence — owned project count**: [livekit-participant-owned-projects.md](../../../docs/ft/web/livekit-participant-owned-projects.md)
 - **Product (Web area)**: `docs/ft/web/` (e.g. [web-terminal.md](../../../docs/ft/web/web-terminal.md))

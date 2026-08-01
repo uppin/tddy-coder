@@ -36,6 +36,41 @@ easy to lose among these:
 
 ## Future Enhancements
 
+### tddy-web — inactive session activities follow-ups (source: inactive-session-activities changeset, 2026-08-01)
+
+- **The component harness renders without any CSS, so no Cypress component test can assert layout.**
+  `cypress/support/component-index.html` loads no stylesheet and `cypress/support/component.ts`
+  imports none, so every Tailwind class is inert and every element measures the full viewport width.
+  This was discovered attempting to pin "the inspector is a ~360px overlay, not the full pane" after
+  `data-docked` was removed — the assertion failed with `expected 1280 to be below 1280`. **Do not
+  re-attempt geometry assertions in component specs** without first importing the app stylesheet into
+  the harness; until then, the *removal* of inspector docking has no direct test pinning it (the
+  specs prove the adjacent fact that the base view stays mounted behind an open drawer). Importing
+  the stylesheet would make layout testable but risks perturbing the ~163 existing specs, so it is
+  its own changeset.
+- **Resume has up to a ~2s dead time before the view changes.** The base view is derived from
+  session liveness, and liveness for the selected session only refreshes on the drawer's 2s
+  `ListSessions` poll (`sessionManager.ts` `REFRESH_INTERVAL_MS`), so after clicking Resume the pane
+  keeps showing the recorded transcript until the next poll reports the session live. Not a
+  regression — it falls straight out of "the view is derived, not navigated" — but it is a visible
+  lag on this feature's primary action. An optimistic local liveness hint on a successful
+  `ResumeSession` would close it without reintroducing view state.
+
+### tddy-web — dead session surfaces (source: inactive-session-activities changeset, 2026-08-01)
+
+- **`SessionDetailPane.tsx` has no importers.** It carries its own Resume/Delete buttons
+  (`sessions-detail-resume-*`, `sessions-detail-delete-*`) and a full metadata block, all reachable
+  from nothing — `SessionMainPane` superseded it. The ids still live in `cypress/support/testIds.ts`
+  (`sessionsDetailResumeBtn`, `sessionsDetailDeleteBtn`), so a spec could be written against a
+  component the app never mounts. Delete the component and its ids together, or wire it back in;
+  leaving it is what let a second Resume affordance drift out of sync with the real one.
+- **`useSessionActivity.ts` is callerless.** It consumes `StreamSessionActivity`
+  (`AgentActivityRecord` frames, coalesced by `call_id`) and nothing calls it — both the Agent
+  Activity overlay and the new inactive-session Activities view read the ACP replay path
+  (`useAcpReplay` over `StreamAcpReplay`) instead. The daemon still serves the RPC. Decide whether
+  `StreamSessionActivity` has a remaining consumer before treating it as load-bearing; note it also
+  hardcodes `daemonInstanceId: ""`, so it would not peer-forward for a cross-host session as written.
+
 ### Session attach UI — follow-ups (source: session-attach-ui changeset, 2026-08-01)
 
 - **The browser→daemon leg has never run.** Nothing in the attach feature has been exercised against a

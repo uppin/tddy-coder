@@ -68,10 +68,10 @@ it("opens the inspector as an overlay for a pr-stack session, leaving the PR-Sta
     listSessions: async () => ({ sessions: [] }),
   });
 
-  // When — PR_STACK_SESSION is disconnected (isActive: false), which auto-opens the inspector
-  // on selection (see SessionInspectorAcceptance AC3) — no toggle click needed
+  // When — the inspector is closed for every session until the operator asks for it
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   sessionsDrawerPage.drawerItem(PR_STACK_SESSION.sessionId).click();
+  sessionsDrawerPage.inspectorToggle().click();
 
   // Then — the drawer is present and open, and the pr-stack screen (the "terminal replacement")
   // stays mounted underneath it, exactly like the terminal does for regular sessions
