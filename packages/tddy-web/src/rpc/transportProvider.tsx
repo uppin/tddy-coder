@@ -95,8 +95,11 @@ function rpcDebugActive(): boolean {
   }
 }
 
-/** Factory for the production LiveKit transport. */
-function createDefaultLiveKitTransport(
+/**
+ * Factory for the production LiveKit transport. Exported so a test can drive the real transport the
+ * app runs with — in particular its fault reporting, which has no other observable surface.
+ */
+export function createDefaultLiveKitTransport(
   room: Room,
   targetIdentity: string,
   options?: LiveKitTransportOptions,
@@ -107,6 +110,11 @@ function createDefaultLiveKitTransport(
     targetIdentity,
     debug: options?.debug ?? rpcDebugActive(),
     meter: registry?.get(room.name || "livekit"),
+    // An inbound frame the transport cannot turn into a response is a dropped RPC: the call never
+    // settles, and the app sees only a stalled or throwing refresh. Name the connection it arrived
+    // on so the console says which room and which daemon, not just that decoding failed.
+    onTransportError: (error, context) =>
+      console.error(`[tddy][rpc] room=${room.name} target=${targetIdentity}: ${context}`, error),
   });
 }
 

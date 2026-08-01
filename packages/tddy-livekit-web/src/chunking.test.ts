@@ -59,6 +59,10 @@ function expectBytesEqual(actual: Uint8Array, expected: Uint8Array): void {
   expect(Array.from(actual)).toEqual(Array.from(expected));
 }
 
+/** The message id two different messages collide on: every sender's counter starts at 0, so a
+ *  restarted (or second) sender hands out ids a receiver may still hold partial chunks for. */
+const REUSED_MESSAGE_ID = 7;
+
 describe("chunking codec", () => {
   it("keeps a payload that already fits in a single frame", () => {
     // Given a payload well under the per-frame budget
@@ -213,6 +217,41 @@ describe("chunking codec", () => {
     const completed = feedAll(new ChunkReassembler(), frames);
     expect(completed.length).toBe(1);
     expectBytesEqual(completed[0], payload);
+  });
+
+  it("starts a fresh message when a reused message id arrives with a different chunk count", () => {
+    // Given — a sender published only the first of three frames under message id 7 and then died
+    // (a daemon killed mid-publish), leaving a partial message buffered under that id. Message ids
+    // are per-process and start at 0, so after restarting the sender hands out id 7 again.
+    const reassembler = new ChunkReassembler();
+    const abandoned = splitIntoFrames(REUSED_MESSAGE_ID, aPayloadOf(2_500), 1_000);
+    reassembler.accept(abandoned[0]);
+
+    // When the restarted sender's two-frame message reuses the same id
+    const resent = aPayloadOf(1_500);
+    const completed = feedAll(reassembler, splitIntoFrames(REUSED_MESSAGE_ID, resent, 1_000));
+
+    // Then the reused id yields exactly the new message's bytes — never a mix of the two
+    expect(completed.length).toBe(1);
+    expectBytesEqual(completed[0], resent);
+  });
+
+  it("discards a partial message that stopped arriving before a reused id completes it", () => {
+    // Given — a two-frame message under id 7 whose first frame was lost in transit, leaving its
+    // second chunk buffered forever. Nothing else ever completes that message.
+    let nowMs = 0;
+    const reassembler = new ChunkReassembler({ nowMs: () => nowMs, partialTtlMs: 30_000 });
+    const abandoned = splitIntoFrames(REUSED_MESSAGE_ID, aPayloadOf(1_500), 1_000);
+    reassembler.accept(abandoned[1]);
+
+    // When the partial TTL passes and a different two-frame message reuses the same id
+    nowMs = 30_001;
+    const resent = aPayloadOf(1_800);
+    const completed = feedAll(reassembler, splitIntoFrames(REUSED_MESSAGE_ID, resent, 1_000));
+
+    // Then the stale chunk was evicted, so the reused id yields exactly the new message's bytes
+    expect(completed.length).toBe(1);
+    expectBytesEqual(completed[0], resent);
   });
 
   it("hands out distinct message ids", () => {
