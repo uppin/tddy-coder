@@ -1,8 +1,12 @@
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService } from "../../gen/connection_pb";
 
-/** A single directory entry in the worktree tree. */
-export type WorktreeEntry = { name: string; isDir: boolean };
+/**
+ * A single directory entry in the worktree tree. `sizeBytes` is the entry's on-disk size (`0` for a
+ * directory), carried so a caller that attaches a worktree file can check it against the host's
+ * attachment cap before referencing it; the tree itself does not render it.
+ */
+export type WorktreeEntry = { name: string; isDir: boolean; sizeBytes: number };
 
 /** The content of a single worktree file read on demand. */
 export type WorktreeFileContent = {
@@ -41,7 +45,11 @@ export function createWorktreeFilesApi(
         worktreePath,
         relPath,
       });
-      return res.entries.map((e) => ({ name: e.name, isDir: e.isDir }));
+      return res.entries.map((e) => ({
+        name: e.name,
+        isDir: e.isDir,
+        sizeBytes: Number(e.sizeBytes),
+      }));
     },
     async readFile(relPath) {
       const res = await client.readWorktreeFile({

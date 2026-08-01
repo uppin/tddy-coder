@@ -13,9 +13,11 @@ use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id
 use tddy_core::{BranchWorktreeIntent, Changeset, ChangesetWorkflow};
 use tddy_rpc::{Request, Response, Status, Streaming};
 use tddy_service::proto::connection::{
-    session_attachment::Source as AttachmentSource, HostDocumentRef, HostDocumentScope,
-    ReadHostDocumentRequest, ReadHostDocumentResponse, SessionAttachment, StagedAttachmentEntry,
-    StagedAttachmentRef,
+    session_attachment::Source as AttachmentSource,
+    start_session_event::Event as StartSessionEventKind, AttachmentMaterializationProgress,
+    HostDocumentChunk, HostDocumentRef, HostDocumentScope, ReadHostDocumentRequest,
+    ReadHostDocumentResponse, SessionAttachment, StagedAttachmentEntry, StagedAttachmentRef,
+    StartSessionEvent,
 };
 use tddy_service::proto::connection::{
     AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest, AddProjectToHostResponse,
@@ -428,6 +430,14 @@ impl<T> Stream for MpscResultStream<T> {
 
 impl<T> Unpin for MpscResultStream<T> {}
 
+/// Opaque by design: a stream's pending items are not inspectable without consuming them, so this
+/// only names the adapter — enough for a `Result::expect_err` message on a handler that returns it.
+impl<T> std::fmt::Debug for MpscResultStream<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MpscResultStream")
+    }
+}
+
 /// Stream adapter backed by an mpsc channel for [`TerminalControlEvent`] server-streaming.
 pub struct MpscControlEventStream {
     rx: tokio::sync::mpsc::UnboundedReceiver<TerminalControlEvent>,
@@ -817,6 +827,11 @@ enum DemoVmHandle {
 }
 
 /// ConnectionService implementation.
+///
+/// `Clone` is a shallow, shared clone: every mutable field is behind an `Arc`, so a clone talks to
+/// the same session managers, registries and caches. The server-streaming handlers need it — they
+/// hand the work to a `tokio::spawn`ed producer task, which must own a `'static` service.
+#[derive(Clone)]
 pub struct ConnectionServiceImpl {
     config: DaemonConfig,
     #[allow(dead_code)]
@@ -860,6 +875,11 @@ pub struct ConnectionServiceImpl {
     /// PR-status reads act with. `None` (no `auth_storage` configured) means a real login's PR
     /// status reads as *unavailable*, never as "no PR".
     github_token_store: Option<Arc<dyn tddy_github::token_store::GitHubTokenStore>>,
+    /// Base of the pre-session attachment staging area; each caller's root is
+    /// `{staging_base_dir}/{os_user}/`. Separate from `tddy_data_dir` so an abandoned batch is
+    /// cleared by the host restart rather than living in the data dir forever. Defaults to
+    /// [`crate::session_attachment_staging::default_staging_base_dir`].
+    staging_base_dir: PathBuf,
 }
 
 /// A live reverse stdio endpoint to one spawned tddy-coder session. Holding it keeps the pipe's
@@ -939,7 +959,16 @@ impl ConnectionServiceImpl {
             session_stdio,
             agent_activity_hub: Arc::new(AgentActivityHub::default()),
             github_token_store: None,
+            staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
         }
+    }
+
+    /// Substitute the pre-session attachment staging base (builder pattern) — lets a test point
+    /// staging at a `TempDir` it owns and assert *where* staged bytes land, instead of sharing the
+    /// process temp dir with every other test run.
+    pub fn with_staging_base_dir(mut self, staging_base_dir: PathBuf) -> Self {
+        self.staging_base_dir = staging_base_dir;
+        self
     }
 
     /// Act on the operator's own GitHub credential for PR-status reads (builder). The store is the
@@ -3984,6 +4013,95 @@ fn cleanup_materialized_attachments(session_dir: &Path, written_basenames: &[Str
     }
 }
 
+/// On-disk size of a just-materialized attachment. An unreadable entry reports 0 rather than
+/// failing the start — the bytes are already written, and this value only feeds a progress event.
+fn attachment_size_bytes(session_dir: &Path, basename: &str) -> u64 {
+    std::fs::metadata(tddy_workflow::session_attachments_root(session_dir).join(basename))
+        .map(|m| m.len())
+        .unwrap_or(0)
+}
+
+/// Where attachment-materialization progress goes while a start-session request is being served.
+///
+/// `StreamStartSession` supplies the stream's sender; unary `StartSession` supplies
+/// [`AttachmentProgressSink::discarding`], so the two entry points run the identical code path and
+/// the unary one simply has nowhere to report to.
+struct AttachmentProgressSink {
+    tx: Option<tokio::sync::mpsc::UnboundedSender<Result<StartSessionEvent, Status>>>,
+}
+
+impl AttachmentProgressSink {
+    /// A sink that reports nowhere — the unary `StartSession` path.
+    fn discarding() -> Self {
+        Self { tx: None }
+    }
+
+    fn streaming(
+        tx: tokio::sync::mpsc::UnboundedSender<Result<StartSessionEvent, Status>>,
+    ) -> Self {
+        Self { tx: Some(tx) }
+    }
+
+    /// Reports one attachment's progress. A closed receiver (the client hung up) is ignored: the
+    /// session start is already under way and is not abandoned because nobody is watching.
+    fn report(&self, progress: AttachmentMaterializationProgress) {
+        let Some(tx) = self.tx.as_ref() else {
+            return;
+        };
+        let _ = tx.send(Ok(StartSessionEvent {
+            event: Some(StartSessionEventKind::AttachmentProgress(progress)),
+        }));
+    }
+}
+
+/// The attachment currently being materialized, bound to where its progress goes.
+///
+/// A source whose bytes arrive over time reports through this **as they arrive**, so a row's
+/// progress bar moves during the transfer. That is not cosmetic: a forwarded stream terminates a
+/// relay that goes [`crate::livekit_peer_discovery::PEER_FORWARD_STREAM_IDLE_TIMEOUT`] without a
+/// frame, so reporting only once an attachment has fully landed would leave that per-frame deadline
+/// covering a whole cross-host transfer.
+struct AttachmentProgressReporter<'a> {
+    sink: &'a AttachmentProgressSink,
+    basename: &'a str,
+    attachment_index: u32,
+    attachment_count: u32,
+}
+
+impl AttachmentProgressReporter<'_> {
+    fn report(&self, bytes_done: u64, bytes_total: u64) {
+        self.sink.report(AttachmentMaterializationProgress {
+            basename: self.basename.to_string(),
+            attachment_index: self.attachment_index,
+            attachment_count: self.attachment_count,
+            bytes_done,
+            bytes_total,
+        });
+    }
+}
+
+/// Everything materializing one start-session request's attachments needs: who asked, where the
+/// session lives, what to attach, and where progress goes.
+///
+/// One cohesive context rather than six carried parameters — every field travels together from the
+/// per-session-type branch in [`ConnectionServiceImpl::start_session_core`] down to the copy.
+struct AttachmentMaterialization<'a> {
+    session_token: &'a str,
+    os_user: &'a str,
+    sessions_base: &'a Path,
+    session_id: &'a str,
+    attachments: &'a [SessionAttachment],
+    progress: &'a AttachmentProgressSink,
+}
+
+impl AttachmentMaterialization<'_> {
+    fn session_dir(&self) -> PathBuf {
+        self.sessions_base
+            .join(SESSIONS_SUBDIR)
+            .join(self.session_id)
+    }
+}
+
 impl ConnectionServiceImpl {
     fn resolve_os_user(&self, session_token: &str) -> Result<String, Status> {
         let github_user = (self.user_resolver)(session_token)
@@ -4026,49 +4144,32 @@ impl ConnectionServiceImpl {
         })
     }
 
-    /// Pre-creates `session_dir` when needed and materializes `attachments` before spawn.
+    /// Pre-creates `session_dir` when needed and materializes the request's attachments before spawn.
     async fn prepare_session_attachments(
         &self,
-        session_token: &str,
-        os_user: &str,
-        sessions_base: &Path,
-        session_id: &str,
-        attachments: &[SessionAttachment],
+        ctx: &AttachmentMaterialization<'_>,
     ) -> Result<(), Status> {
-        if attachments.is_empty() {
+        if ctx.attachments.is_empty() {
             return Ok(());
         }
-        let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+        let session_dir = ctx.session_dir();
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
-        let local_id = local_instance_id_for_config(&self.config);
-        self.materialize_session_attachments(
-            session_token,
-            os_user,
-            sessions_base,
-            session_id,
-            attachments,
-            &local_id,
-        )
-        .await
+        self.materialize_session_attachments(ctx).await
     }
 
     async fn materialize_session_attachments(
         &self,
-        session_token: &str,
-        os_user: &str,
-        sessions_base: &Path,
-        session_id: &str,
-        attachments: &[SessionAttachment],
-        local_instance_id: &str,
+        ctx: &AttachmentMaterialization<'_>,
     ) -> Result<(), Status> {
-        if attachments.is_empty() {
+        if ctx.attachments.is_empty() {
             return Ok(());
         }
 
-        let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+        let session_dir = ctx.session_dir();
+        let local_instance_id = local_instance_id_for_config(&self.config);
         let mut seen_basenames = std::collections::HashSet::new();
-        for att in attachments {
+        for att in ctx.attachments {
             let safe = validate_attachment_basename(&att.basename)?;
             if !seen_basenames.insert(safe.to_string()) {
                 return Err(Status::invalid_argument(
@@ -4077,40 +4178,59 @@ impl ConnectionServiceImpl {
             }
         }
 
-        let staging_root =
-            crate::session_attachment_staging::staging_root_for(os_user, &self.tddy_data_dir);
+        let staging_root = crate::session_attachment_staging::staging_root_for(
+            ctx.os_user,
+            &self.staging_base_dir,
+        );
         let mut written: Vec<String> = Vec::new();
+        let attachment_count = ctx.attachments.len() as u32;
 
-        for att in attachments {
+        for (index, att) in ctx.attachments.iter().enumerate() {
             let basename = validate_attachment_basename(&att.basename)?.to_string();
             let source = att
                 .source
                 .as_ref()
                 .ok_or_else(|| Status::invalid_argument("attachment source must be set"))?;
+            let reporter = AttachmentProgressReporter {
+                sink: ctx.progress,
+                basename: &basename,
+                attachment_index: index as u32,
+                attachment_count,
+            };
 
             let materialize_result = match source {
-                AttachmentSource::Staged(staged) => self.materialize_staged_attachment(
-                    &staging_root,
-                    &session_dir,
-                    staged,
-                    &basename,
-                    local_instance_id,
-                ),
+                AttachmentSource::Staged(staged) => {
+                    self.materialize_staged_attachment(
+                        ctx.session_token,
+                        &staging_root,
+                        &session_dir,
+                        staged,
+                        &basename,
+                        &reporter,
+                    )
+                    .await
+                }
                 AttachmentSource::HostDocument(host_doc) => {
                     self.materialize_host_document_attachment(
-                        session_token,
-                        os_user,
+                        ctx.session_token,
+                        ctx.os_user,
                         &session_dir,
                         host_doc,
                         &basename,
-                        local_instance_id,
+                        &local_instance_id,
                     )
                     .await
                 }
             };
 
             match materialize_result {
-                Ok(()) => written.push(basename),
+                Ok(()) => {
+                    // The attachment is on disk now, so its final size is the honest byte count to
+                    // report — and it is the only report a source that copies in one step makes.
+                    let bytes = attachment_size_bytes(&session_dir, &basename);
+                    reporter.report(bytes, bytes);
+                    written.push(basename);
+                }
                 Err(e) => {
                     cleanup_materialized_attachments(&session_dir, &written);
                     return Err(e);
@@ -4121,23 +4241,58 @@ impl ConnectionServiceImpl {
         Ok(())
     }
 
-    fn materialize_staged_attachment(
+    /// Copies one staged file into the session's attachments.
+    ///
+    /// The browser stages to whichever daemon it is connected to and may then start the session on
+    /// another host, so a ref naming a foreign daemon is fetched from that daemon through the
+    /// `STAGED_ATTACHMENT` host-document scope — which applies the containment and
+    /// completeness-marker guards on the **owning** side, the only host that can tell a truncated
+    /// upload from a whole one. That fetch goes over the *streaming* read
+    /// ([`Self::fetch_peer_staged_attachment`]), so crossing hosts does not shrink the size a
+    /// session will accept. A local ref is copied straight off disk: there is no reason to
+    /// round-trip bytes through RPC on a single host.
+    async fn materialize_staged_attachment(
         &self,
+        session_token: &str,
         staging_root: &Path,
         session_dir: &Path,
         staged: &StagedAttachmentRef,
         basename: &str,
-        local_instance_id: &str,
+        progress: &AttachmentProgressReporter<'_>,
     ) -> Result<(), Status> {
-        let ref_daemon = staged.daemon_instance_id.trim();
-        if !ref_daemon.is_empty() && ref_daemon != local_instance_id {
-            return Err(Status::invalid_argument(
-                "staged attachment must be on the session host",
-            ));
-        }
-
         let safe_staging = validate_segment(&staged.staging_id)?;
         let safe_name = validate_segment(&staged.file_name)?;
+
+        match self.classify_daemon_route(&staged.daemon_instance_id)? {
+            PeerRoute::Local => Self::copy_local_staged_attachment(
+                staging_root,
+                session_dir,
+                safe_staging,
+                safe_name,
+                basename,
+            ),
+            PeerRoute::Forward { peer_instance_id } => {
+                self.fetch_peer_staged_attachment(
+                    session_token,
+                    session_dir,
+                    &peer_instance_id,
+                    &format!("{safe_staging}/{safe_name}"),
+                    basename,
+                    progress,
+                )
+                .await
+            }
+        }
+    }
+
+    /// Copies a staged file that already lives on this host into the session's attachments.
+    fn copy_local_staged_attachment(
+        staging_root: &Path,
+        session_dir: &Path,
+        safe_staging: &str,
+        safe_name: &str,
+        basename: &str,
+    ) -> Result<(), Status> {
         let batch_dir = staging_root.join(safe_staging);
         if !batch_dir.exists() {
             return Err(Status::invalid_argument("staged attachment file not found"));
@@ -4165,6 +4320,69 @@ impl ConnectionServiceImpl {
         Ok(())
     }
 
+    /// Fetches a staged file from the peer that owns it, over the **streaming** host-document read,
+    /// reporting each frame's arrival as progress.
+    ///
+    /// The unary read carries its own `MAX_HOST_DOCUMENT_BYTES` ceiling — a transport message-size
+    /// budget, not a policy. Routing a cross-host staged ref through it would refuse a document
+    /// that materializes fine when the session runs on the staging host, so the same attachment
+    /// would succeed on one host and fail across two. The stream has no per-message ceiling, which
+    /// leaves the host's configured `max_attachment_bytes` as the single limit on both paths.
+    ///
+    /// This is the slowest thing a start-session request does, and on the feature's primary flow —
+    /// bytes staged on the host the browser is connected to, session started on another — it is the
+    /// *only* thing between accepting the request and reporting the first byte of work. Reporting
+    /// per frame is therefore what keeps a relayed `StreamStartSession` producing inside
+    /// [`crate::livekit_peer_discovery::PEER_FORWARD_STREAM_IDLE_TIMEOUT`], and what makes the row's
+    /// progress bar advance instead of sitting at 0% for the whole transfer.
+    async fn fetch_peer_staged_attachment(
+        &self,
+        session_token: &str,
+        session_dir: &Path,
+        peer_instance_id: &str,
+        staged_relative_path: &str,
+        basename: &str,
+        progress: &AttachmentProgressReporter<'_>,
+    ) -> Result<(), Status> {
+        let slot = self.common_room_slot("StreamReadHostDocument")?;
+        let read_req = ReadHostDocumentRequest {
+            session_token: session_token.to_string(),
+            daemon_instance_id: peer_instance_id.to_string(),
+            scope: HostDocumentScope::StagedAttachment.into(),
+            session_id: String::new(),
+            project_id: String::new(),
+            relative_path: staged_relative_path.to_string(),
+        };
+        let mut frames =
+            crate::livekit_peer_discovery::forward_stream_read_host_document_via_livekit(
+                slot,
+                peer_instance_id,
+                &read_req,
+            )
+            .await?;
+
+        // The owning host refuses an over-cap document before its first frame, but a forwarded
+        // stream is bytes from a peer — hold the same configured cap here, and stop as soon as it
+        // is crossed rather than buffering an unbounded document into memory.
+        let max_bytes = self.config.max_attachment_bytes;
+        let mut data: Vec<u8> = Vec::new();
+        while let Some(frame) = frames.recv().await {
+            let frame = frame?;
+            data.extend_from_slice(&frame.data);
+            if data.len() as u64 > max_bytes {
+                return Err(Status::invalid_argument(format!(
+                    "staged attachment exceeds this host's maximum attachment size of {max_bytes} bytes"
+                )));
+            }
+            // The peer stamps the whole document's size on every frame, so each one is a complete
+            // progress reading with no preamble needed.
+            progress.report(data.len() as u64, frame.total_byte_size);
+        }
+
+        crate::session_attachments::write_attachment_bytes(session_dir, basename, &data)?;
+        Ok(())
+    }
+
     async fn materialize_host_document_attachment(
         &self,
         session_token: &str,
@@ -4182,6 +4400,7 @@ impl ConnectionServiceImpl {
             crate::host_documents::read_host_document_bytes(
                 os_user,
                 &self.tddy_data_dir,
+                &self.staging_base_dir,
                 scope,
                 &host_doc.session_id,
                 &host_doc.project_id,
@@ -4193,6 +4412,7 @@ impl ConnectionServiceImpl {
                 PeerRoute::Local => crate::host_documents::read_host_document_bytes(
                     os_user,
                     &self.tddy_data_dir,
+                    &self.staging_base_dir,
                     scope,
                     &host_doc.session_id,
                     &host_doc.project_id,
@@ -4236,6 +4456,510 @@ impl ConnectionServiceImpl {
 
         crate::session_attachments::write_attachment_bytes(session_dir, basename, &bytes.data)?;
         Ok(())
+    }
+
+    /// The one implementation behind both `StartSession` and `StreamStartSession`.
+    ///
+    /// `progress` is where attachment materialization reports to: the stream's sender for the
+    /// streaming entry point, [`AttachmentProgressSink::discarding`] for the unary one. Nothing
+    /// else differs between the two, so the unary path stays byte-for-byte what it was.
+    async fn start_session_core(
+        &self,
+        req: StartSessionRequest,
+        progress: &AttachmentProgressSink,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let agent_trim = req.agent.trim();
+        if !agent_trim.is_empty() {
+            let allowed = self.config.allowed_agents();
+            if !allowed.is_empty() && !allowed.iter().any(|a| a.id == agent_trim) {
+                return Err(Status::invalid_argument(format!(
+                    "agent id {:?} is not listed in allowed_agents (configure daemon YAML)",
+                    agent_trim
+                )));
+            }
+        }
+
+        let requested_daemon = req.daemon_instance_id.trim();
+        let local_id = local_instance_id_for_config(&self.config);
+        let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
+        let eligible_ids: Vec<String> = eligible_rows
+            .iter()
+            .map(|e| e.instance_id.0.clone())
+            .collect();
+        let route = match crate::livekit_peer_discovery::classify_start_session_peer_route(
+            &local_id,
+            requested_daemon,
+            &eligible_ids,
+        ) {
+            Ok(r) => r,
+            Err(msg) => {
+                log::info!("StartSession: rejected daemon routing: {}", msg);
+                return Err(Status::failed_precondition(msg));
+            }
+        };
+
+        match route {
+            crate::livekit_peer_discovery::StartSessionPeerRoute::Forward { peer_instance_id } => {
+                log::info!(
+                    "StartSession: forwarding RPC to remote daemon_instance_id={}",
+                    peer_instance_id
+                );
+                let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
+                    Status::failed_precondition(
+                        "cannot forward StartSession: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
+                    )
+                })?;
+                let inner = crate::livekit_peer_discovery::forward_start_session_via_livekit(
+                    slot,
+                    &peer_instance_id,
+                    &req,
+                )
+                .await?;
+                log::info!(
+                    "StartSession: forward succeeded session_id={} livekit_server_identity={}",
+                    inner.session_id,
+                    inner.livekit_server_identity
+                );
+                return Ok(Response::new(inner));
+            }
+            crate::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
+        }
+
+        // Validate cheap, session-type-specific inputs before the (potentially expensive) project
+        // auto-provision below: claude-cli always requires a model, so reject an empty one up front
+        // — a bad request should fail fast with INVALID_ARGUMENT, not a project NotFound. The
+        // per-session-type handlers re-check as defense-in-depth (and for the resume/child paths).
+        if req.session_type.trim() == "claude-cli" && req.model.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "model is required for claude-cli sessions",
+            ));
+        }
+        if req.session_type.trim() == "cursor-cli" && req.model.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "model is required for cursor-cli sessions",
+            ));
+        }
+
+        // Auto-provision the project's working copy on this host before dispatching to any session
+        // type: if the project isn't cloned here yet (registered-but-missing, or known only on a
+        // peer), clone it into the host's base location so the session can start on a host that
+        // doesn't have the project yet. A truly unknown project surfaces as NotFound.
+        {
+            let project_id = req.project_id.trim();
+            if !project_id.is_empty() {
+                let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+                    .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+                self.ensure_project_available_for_start(
+                    os_user,
+                    &projects_dir,
+                    project_id,
+                    &req.session_token,
+                )
+                .await?;
+            }
+        }
+
+        // A requested new branch another session already owns is refused here, before the
+        // session-type dispatch — so one check covers tool, claude-cli, cursor-cli and workspace, and
+        // so nothing has been created yet when it fires.
+        if let Some(conflict) = self.owned_branch_conflict(os_user, &req).await? {
+            log::info!(
+                "StartSession: refusing branch {:?} owned by session {}",
+                conflict.branch,
+                conflict
+                    .owner
+                    .as_ref()
+                    .map(|o| o.session_id.as_str())
+                    .unwrap_or_default()
+            );
+            return Ok(Response::new(StartSessionResponse {
+                branch_conflict: Some(conflict),
+                ..Default::default()
+            }));
+        }
+
+        // --- workspace branch: no LiveKit, no PTY; resolves project, creates a git worktree ---
+        if req.session_type.trim() == "workspace" {
+            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
+                os_user,
+                Some(&self.tddy_data_dir),
+            )
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+            let session_id = Uuid::now_v7().to_string();
+            self.prepare_session_attachments(&AttachmentMaterialization {
+                session_token: &req.session_token,
+                os_user,
+                sessions_base: &sessions_base,
+                session_id: &session_id,
+                attachments: &req.attachments,
+                progress,
+            })
+            .await?;
+            let timeout = self.config.spawn_worker_request_timeout();
+            return workspace_session::start_workspace_session(
+                os_user,
+                &session_id,
+                sessions_base,
+                req.project_id.trim(),
+                &self.tddy_data_dir,
+                timeout,
+            )
+            .await;
+        }
+
+        // --- claude-cli branch: no LiveKit; resolves project and creates a real git worktree ---
+        if req.session_type.trim() == "claude-cli" {
+            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
+                os_user,
+                Some(&self.tddy_data_dir),
+            )
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+            let session_id = Uuid::now_v7().to_string();
+            self.prepare_session_attachments(&AttachmentMaterialization {
+                session_token: &req.session_token,
+                os_user,
+                sessions_base: &sessions_base,
+                session_id: &session_id,
+                attachments: &req.attachments,
+                progress,
+            })
+            .await?;
+            let stack_parent_for_claude_cli: Option<String> = {
+                let t = req.stack_parent.trim();
+                if t.is_empty() {
+                    None
+                } else {
+                    Some(t.to_string())
+                }
+            };
+            // A managed-codebase claude-cli session with a recipe is launched workflow-aware. An
+            // unknown recipe is a request error (never silently ignored). Non-managed sessions and
+            // managed sessions without a recipe keep the plain launch (managed_recipe = None).
+            let managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>> = if req
+                .managed_codebase
+                && !req.recipe.trim().is_empty()
+            {
+                Some(
+                    tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(req.recipe.trim())
+                        .map_err(Status::invalid_argument)?,
+                )
+            } else {
+                None
+            };
+
+            if req.sandbox {
+                return self
+                    .start_sandboxed_claude_cli_session(
+                        os_user,
+                        &session_id,
+                        sessions_base,
+                        req.model.trim(),
+                        req.project_id.trim(),
+                        req.repo_path.trim(),
+                        req.branch_worktree_intent.trim(),
+                        req.new_branch_name.trim(),
+                        req.selected_integration_base_ref.trim(),
+                        req.selected_branch_to_work_on.trim(),
+                        req.initial_prompt.trim(),
+                        &req.claude_args,
+                        req.permission_mode.trim(),
+                        req.dangerously_skip_permissions,
+                        stack_parent_for_claude_cli.as_deref(),
+                        req.managed_codebase,
+                        &req.specialized_agents,
+                        managed_recipe,
+                        req.semantic_index,
+                        req.create_remote_branch,
+                    )
+                    .await;
+            }
+            return self
+                .start_claude_cli_session(
+                    os_user,
+                    &session_id,
+                    sessions_base,
+                    req.model.trim(),
+                    req.project_id.trim(),
+                    req.branch_worktree_intent.trim(),
+                    req.new_branch_name.trim(),
+                    req.selected_integration_base_ref.trim(),
+                    req.selected_branch_to_work_on.trim(),
+                    req.initial_prompt.trim(),
+                    req.permission_mode.trim(),
+                    req.dangerously_skip_permissions,
+                    stack_parent_for_claude_cli.as_deref(),
+                    managed_recipe,
+                    req.semantic_index,
+                    req.create_remote_branch,
+                )
+                .await;
+        }
+
+        // --- cursor-cli branch: no LiveKit; spawns Cursor Agent CLI in a PTY worktree ---
+        if req.session_type.trim() == "cursor-cli" {
+            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
+                os_user,
+                Some(&self.tddy_data_dir),
+            )
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+            let session_id = Uuid::now_v7().to_string();
+            self.prepare_session_attachments(&AttachmentMaterialization {
+                session_token: &req.session_token,
+                os_user,
+                sessions_base: &sessions_base,
+                session_id: &session_id,
+                attachments: &req.attachments,
+                progress,
+            })
+            .await?;
+            let managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>> = if req
+                .managed_codebase
+                && !req.recipe.trim().is_empty()
+            {
+                Some(
+                    tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(req.recipe.trim())
+                        .map_err(Status::invalid_argument)?,
+                )
+            } else {
+                None
+            };
+            if req.sandbox {
+                return self
+                    .start_sandboxed_cursor_cli_session(
+                        os_user,
+                        &session_id,
+                        sessions_base,
+                        req.model.trim(),
+                        req.project_id.trim(),
+                        req.branch_worktree_intent.trim(),
+                        req.new_branch_name.trim(),
+                        req.selected_integration_base_ref.trim(),
+                        req.selected_branch_to_work_on.trim(),
+                        Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
+                        req.initial_prompt.trim(),
+                        req.managed_codebase,
+                        &req.specialized_agents,
+                        managed_recipe,
+                        req.semantic_index,
+                        req.create_remote_branch,
+                    )
+                    .await;
+            }
+            return crate::cursor_cli_spawn::spawn_cursor_cli_session_inner(
+                &self.config,
+                &self.tddy_data_dir,
+                &self.claude_cli_manager,
+                os_user,
+                &session_id,
+                sessions_base,
+                req.model.trim(),
+                req.project_id.trim(),
+                req.branch_worktree_intent.trim(),
+                req.new_branch_name.trim(),
+                req.selected_integration_base_ref.trim(),
+                req.selected_branch_to_work_on.trim(),
+                req.repo_path.trim(),
+                Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
+                req.initial_prompt.trim(),
+                req.managed_codebase,
+                &req.specialized_agents,
+                managed_recipe,
+                req.semantic_index,
+                req.create_remote_branch,
+                &self.task_registry,
+            )
+            .await;
+        }
+
+        let livekit = spawner::livekit_creds_from_config(&self.config)
+            .ok_or_else(|| Status::failed_precondition("LiveKit not configured"))?;
+
+        let project_id_req = req.project_id.trim();
+        if project_id_req.is_empty() {
+            return Err(Status::invalid_argument("project_id is required"));
+        }
+
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        let project = project_storage::find_project(&projects_dir, project_id_req)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+
+        let repo_path = Path::new(&project.main_repo_path);
+        if !repo_path.exists() {
+            return Err(Status::invalid_argument(
+                "project main repo path does not exist",
+            ));
+        }
+
+        log::debug!("StartSession: entering spawn_blocking session_id=new");
+        let spawn_client = self.spawn_client.clone();
+        let spawn_mouse = self.config.spawn_mouse;
+        let os_user = os_user.to_string();
+        let tool_path = req.tool_path.clone();
+        let tddy_data_dir_for_spawn = self.tddy_data_dir.clone();
+        let repo_path = repo_path.to_path_buf();
+        let livekit = livekit.clone();
+        let pid_for_spawn = project.project_id.clone();
+        let agent_for_spawn: Option<String> = {
+            let t = req.agent.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        };
+        let recipe_for_spawn: Option<String> = {
+            let t = req.recipe.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        };
+        let stack_parent_for_spawn: Option<String> = {
+            let t = req.stack_parent.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        };
+        let model_for_spawn: Option<String> = {
+            let t = req.model.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        };
+        let timeout = self.config.spawn_worker_request_timeout();
+        let daemon_log = self.config.log.clone();
+        let coder_config_path = self.config.coder_config_path.clone();
+        // Grill-me tool sessions relay `spawn_conversation` back over a per-session unix socket.
+        // Because the coder needs the socket path (and orchestrator id) at spawn time — and the
+        // socket path is what crosses the forked `spawn_worker` boundary — bind it and pre-generate
+        // the session id BEFORE the spawn, so both the worker and direct paths carry it identically.
+        let enable_conversation_spawn = recipe_for_spawn
+            .as_deref()
+            .map(recipe_enables_conversation_spawn)
+            .unwrap_or(false);
+        let (mut pre_session_id, host_session_socket): (Option<String>, Option<String>) =
+            if enable_conversation_spawn {
+                let sid = Uuid::now_v7().to_string();
+                let sock = self
+                    .spawn_host_session_socket(
+                        &sid,
+                        &os_user,
+                        &pid_for_spawn,
+                        model_for_spawn.clone(),
+                    )
+                    .await;
+                (Some(sid), sock)
+            } else {
+                (None, None)
+            };
+        let tool_session_id = pre_session_id
+            .clone()
+            .unwrap_or_else(|| Uuid::now_v7().to_string());
+        if enable_conversation_spawn || !req.attachments.is_empty() {
+            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
+                &os_user,
+                Some(&self.tddy_data_dir),
+            )
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+            self.prepare_session_attachments(&AttachmentMaterialization {
+                session_token: &req.session_token,
+                os_user: &os_user,
+                sessions_base: &sessions_base,
+                session_id: &tool_session_id,
+                attachments: &req.attachments,
+                progress,
+            })
+            .await?;
+            pre_session_id = Some(tool_session_id);
+        }
+        let result = spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
+            log::debug!(
+                "StartSession: spawn_blocking running, using_spawn_worker={}",
+                spawn_client.is_some()
+            );
+            let pid = Some(pid_for_spawn.as_str());
+            let agent = agent_for_spawn.as_deref();
+            let recipe = recipe_for_spawn.as_deref();
+            let stack_parent = stack_parent_for_spawn.as_deref();
+            let model = model_for_spawn.as_deref();
+            let new_session_id = pre_session_id.as_deref();
+            let host_socket = host_session_socket.as_deref();
+            let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
+            if let Some(ref client) = spawn_client {
+                let spawn_req = spawn_worker::build_spawn_request(
+                    &os_user,
+                    &tool_path,
+                    &tddy_data_dir_for_spawn,
+                    &repo_path,
+                    &livekit,
+                    SpawnOptions {
+                        resume_session_id: None,
+                        new_session_id,
+                        project_id: pid,
+                        agent,
+                        mouse: spawn_mouse,
+                        recipe,
+                        stack_parent,
+                        model,
+                        host_session_socket: host_socket,
+                    },
+                    daemon_log.as_ref(),
+                    coder_log_yaml,
+                );
+                client.spawn(spawn_req)
+            } else {
+                let (child_log_level, child_log_format) =
+                    spawner::child_log_yaml_tuning(daemon_log.as_ref());
+                spawner::spawn_as_user(
+                    &os_user,
+                    &tool_path,
+                    &tddy_data_dir_for_spawn,
+                    &repo_path,
+                    &livekit,
+                    SpawnOptions {
+                        resume_session_id: None,
+                        new_session_id,
+                        project_id: pid,
+                        agent,
+                        mouse: spawn_mouse,
+                        recipe,
+                        stack_parent,
+                        model,
+                        host_session_socket: host_socket,
+                    },
+                    child_log_level.as_str(),
+                    child_log_format.as_str(),
+                    coder_log_yaml.as_deref(),
+                )
+            }
+        })
+        .await?;
+        log::debug!(
+            "StartSession: spawn_blocking returned, session_id={}",
+            result.session_id
+        );
+        self.maybe_spawn_telegram_observer(&result.session_id, result.grpc_port);
+        Ok(Response::new(StartSessionResponse {
+            session_id: result.session_id,
+            livekit_room: result.livekit_room,
+            livekit_url: result.livekit_url,
+            livekit_server_identity: result.livekit_server_identity,
+            branch_conflict: None,
+        }))
     }
 }
 
@@ -4861,495 +5585,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         &self,
         request: Request<StartSessionRequest>,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        let agent_trim = req.agent.trim();
-        if !agent_trim.is_empty() {
-            let allowed = self.config.allowed_agents();
-            if !allowed.is_empty() && !allowed.iter().any(|a| a.id == agent_trim) {
-                return Err(Status::invalid_argument(format!(
-                    "agent id {:?} is not listed in allowed_agents (configure daemon YAML)",
-                    agent_trim
-                )));
-            }
-        }
-
-        let requested_daemon = req.daemon_instance_id.trim();
-        let local_id = local_instance_id_for_config(&self.config);
-        let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
-        let eligible_ids: Vec<String> = eligible_rows
-            .iter()
-            .map(|e| e.instance_id.0.clone())
-            .collect();
-        let route = match crate::livekit_peer_discovery::classify_start_session_peer_route(
-            &local_id,
-            requested_daemon,
-            &eligible_ids,
-        ) {
-            Ok(r) => r,
-            Err(msg) => {
-                log::info!("StartSession: rejected daemon routing: {}", msg);
-                return Err(Status::failed_precondition(msg));
-            }
-        };
-
-        match route {
-            crate::livekit_peer_discovery::StartSessionPeerRoute::Forward { peer_instance_id } => {
-                log::info!(
-                    "StartSession: forwarding RPC to remote daemon_instance_id={}",
-                    peer_instance_id
-                );
-                let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
-                    Status::failed_precondition(
-                        "cannot forward StartSession: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
-                    )
-                })?;
-                let inner = crate::livekit_peer_discovery::forward_start_session_via_livekit(
-                    slot,
-                    &peer_instance_id,
-                    &req,
-                )
-                .await?;
-                log::info!(
-                    "StartSession: forward succeeded session_id={} livekit_server_identity={}",
-                    inner.session_id,
-                    inner.livekit_server_identity
-                );
-                return Ok(Response::new(inner));
-            }
-            crate::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
-        }
-
-        // Validate cheap, session-type-specific inputs before the (potentially expensive) project
-        // auto-provision below: claude-cli always requires a model, so reject an empty one up front
-        // — a bad request should fail fast with INVALID_ARGUMENT, not a project NotFound. The
-        // per-session-type handlers re-check as defense-in-depth (and for the resume/child paths).
-        if req.session_type.trim() == "claude-cli" && req.model.trim().is_empty() {
-            return Err(Status::invalid_argument(
-                "model is required for claude-cli sessions",
-            ));
-        }
-        if req.session_type.trim() == "cursor-cli" && req.model.trim().is_empty() {
-            return Err(Status::invalid_argument(
-                "model is required for cursor-cli sessions",
-            ));
-        }
-
-        // Auto-provision the project's working copy on this host before dispatching to any session
-        // type: if the project isn't cloned here yet (registered-but-missing, or known only on a
-        // peer), clone it into the host's base location so the session can start on a host that
-        // doesn't have the project yet. A truly unknown project surfaces as NotFound.
-        {
-            let project_id = req.project_id.trim();
-            if !project_id.is_empty() {
-                let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-                    .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-                self.ensure_project_available_for_start(
-                    os_user,
-                    &projects_dir,
-                    project_id,
-                    &req.session_token,
-                )
-                .await?;
-            }
-        }
-
-        // A requested new branch another session already owns is refused here, before the
-        // session-type dispatch — so one check covers tool, claude-cli, cursor-cli and workspace, and
-        // so nothing has been created yet when it fires.
-        if let Some(conflict) = self.owned_branch_conflict(os_user, &req).await? {
-            log::info!(
-                "StartSession: refusing branch {:?} owned by session {}",
-                conflict.branch,
-                conflict
-                    .owner
-                    .as_ref()
-                    .map(|o| o.session_id.as_str())
-                    .unwrap_or_default()
-            );
-            return Ok(Response::new(StartSessionResponse {
-                branch_conflict: Some(conflict),
-                ..Default::default()
-            }));
-        }
-
-        // --- workspace branch: no LiveKit, no PTY; resolves project, creates a git worktree ---
-        if req.session_type.trim() == "workspace" {
-            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
-                os_user,
-                Some(&self.tddy_data_dir),
-            )
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-            let session_id = Uuid::now_v7().to_string();
-            self.prepare_session_attachments(
-                &req.session_token,
-                os_user,
-                &sessions_base,
-                &session_id,
-                &req.attachments,
-            )
-            .await?;
-            let timeout = self.config.spawn_worker_request_timeout();
-            return workspace_session::start_workspace_session(
-                os_user,
-                &session_id,
-                sessions_base,
-                req.project_id.trim(),
-                &self.tddy_data_dir,
-                timeout,
-            )
-            .await;
-        }
-
-        // --- claude-cli branch: no LiveKit; resolves project and creates a real git worktree ---
-        if req.session_type.trim() == "claude-cli" {
-            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
-                os_user,
-                Some(&self.tddy_data_dir),
-            )
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-            let session_id = Uuid::now_v7().to_string();
-            self.prepare_session_attachments(
-                &req.session_token,
-                os_user,
-                &sessions_base,
-                &session_id,
-                &req.attachments,
-            )
-            .await?;
-            let stack_parent_for_claude_cli: Option<String> = {
-                let t = req.stack_parent.trim();
-                if t.is_empty() {
-                    None
-                } else {
-                    Some(t.to_string())
-                }
-            };
-            // A managed-codebase claude-cli session with a recipe is launched workflow-aware. An
-            // unknown recipe is a request error (never silently ignored). Non-managed sessions and
-            // managed sessions without a recipe keep the plain launch (managed_recipe = None).
-            let managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>> = if req
-                .managed_codebase
-                && !req.recipe.trim().is_empty()
-            {
-                Some(
-                    tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(req.recipe.trim())
-                        .map_err(Status::invalid_argument)?,
-                )
-            } else {
-                None
-            };
-
-            if req.sandbox {
-                return self
-                    .start_sandboxed_claude_cli_session(
-                        os_user,
-                        &session_id,
-                        sessions_base,
-                        req.model.trim(),
-                        req.project_id.trim(),
-                        req.repo_path.trim(),
-                        req.branch_worktree_intent.trim(),
-                        req.new_branch_name.trim(),
-                        req.selected_integration_base_ref.trim(),
-                        req.selected_branch_to_work_on.trim(),
-                        req.initial_prompt.trim(),
-                        &req.claude_args,
-                        req.permission_mode.trim(),
-                        req.dangerously_skip_permissions,
-                        stack_parent_for_claude_cli.as_deref(),
-                        req.managed_codebase,
-                        &req.specialized_agents,
-                        managed_recipe,
-                        req.semantic_index,
-                        req.create_remote_branch,
-                    )
-                    .await;
-            }
-            return self
-                .start_claude_cli_session(
-                    os_user,
-                    &session_id,
-                    sessions_base,
-                    req.model.trim(),
-                    req.project_id.trim(),
-                    req.branch_worktree_intent.trim(),
-                    req.new_branch_name.trim(),
-                    req.selected_integration_base_ref.trim(),
-                    req.selected_branch_to_work_on.trim(),
-                    req.initial_prompt.trim(),
-                    req.permission_mode.trim(),
-                    req.dangerously_skip_permissions,
-                    stack_parent_for_claude_cli.as_deref(),
-                    managed_recipe,
-                    req.semantic_index,
-                    req.create_remote_branch,
-                )
-                .await;
-        }
-
-        // --- cursor-cli branch: no LiveKit; spawns Cursor Agent CLI in a PTY worktree ---
-        if req.session_type.trim() == "cursor-cli" {
-            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
-                os_user,
-                Some(&self.tddy_data_dir),
-            )
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-            let session_id = Uuid::now_v7().to_string();
-            self.prepare_session_attachments(
-                &req.session_token,
-                os_user,
-                &sessions_base,
-                &session_id,
-                &req.attachments,
-            )
-            .await?;
-            let managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>> = if req
-                .managed_codebase
-                && !req.recipe.trim().is_empty()
-            {
-                Some(
-                    tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(req.recipe.trim())
-                        .map_err(Status::invalid_argument)?,
-                )
-            } else {
-                None
-            };
-            if req.sandbox {
-                return self
-                    .start_sandboxed_cursor_cli_session(
-                        os_user,
-                        &session_id,
-                        sessions_base,
-                        req.model.trim(),
-                        req.project_id.trim(),
-                        req.branch_worktree_intent.trim(),
-                        req.new_branch_name.trim(),
-                        req.selected_integration_base_ref.trim(),
-                        req.selected_branch_to_work_on.trim(),
-                        Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
-                        req.initial_prompt.trim(),
-                        req.managed_codebase,
-                        &req.specialized_agents,
-                        managed_recipe,
-                        req.semantic_index,
-                        req.create_remote_branch,
-                    )
-                    .await;
-            }
-            return crate::cursor_cli_spawn::spawn_cursor_cli_session_inner(
-                &self.config,
-                &self.tddy_data_dir,
-                &self.claude_cli_manager,
-                os_user,
-                &session_id,
-                sessions_base,
-                req.model.trim(),
-                req.project_id.trim(),
-                req.branch_worktree_intent.trim(),
-                req.new_branch_name.trim(),
-                req.selected_integration_base_ref.trim(),
-                req.selected_branch_to_work_on.trim(),
-                req.repo_path.trim(),
-                Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
-                req.initial_prompt.trim(),
-                req.managed_codebase,
-                &req.specialized_agents,
-                managed_recipe,
-                req.semantic_index,
-                req.create_remote_branch,
-                &self.task_registry,
-            )
-            .await;
-        }
-
-        let livekit = spawner::livekit_creds_from_config(&self.config)
-            .ok_or_else(|| Status::failed_precondition("LiveKit not configured"))?;
-
-        let project_id_req = req.project_id.trim();
-        if project_id_req.is_empty() {
-            return Err(Status::invalid_argument("project_id is required"));
-        }
-
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        let project = project_storage::find_project(&projects_dir, project_id_req)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let repo_path = Path::new(&project.main_repo_path);
-        if !repo_path.exists() {
-            return Err(Status::invalid_argument(
-                "project main repo path does not exist",
-            ));
-        }
-
-        log::debug!("StartSession: entering spawn_blocking session_id=new");
-        let spawn_client = self.spawn_client.clone();
-        let spawn_mouse = self.config.spawn_mouse;
-        let os_user = os_user.to_string();
-        let tool_path = req.tool_path.clone();
-        let tddy_data_dir_for_spawn = self.tddy_data_dir.clone();
-        let repo_path = repo_path.to_path_buf();
-        let livekit = livekit.clone();
-        let pid_for_spawn = project.project_id.clone();
-        let agent_for_spawn: Option<String> = {
-            let t = req.agent.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
-        let recipe_for_spawn: Option<String> = {
-            let t = req.recipe.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
-        let stack_parent_for_spawn: Option<String> = {
-            let t = req.stack_parent.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
-        let model_for_spawn: Option<String> = {
-            let t = req.model.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        };
-        let timeout = self.config.spawn_worker_request_timeout();
-        let daemon_log = self.config.log.clone();
-        let coder_config_path = self.config.coder_config_path.clone();
-        // Grill-me tool sessions relay `spawn_conversation` back over a per-session unix socket.
-        // Because the coder needs the socket path (and orchestrator id) at spawn time — and the
-        // socket path is what crosses the forked `spawn_worker` boundary — bind it and pre-generate
-        // the session id BEFORE the spawn, so both the worker and direct paths carry it identically.
-        let enable_conversation_spawn = recipe_for_spawn
-            .as_deref()
-            .map(recipe_enables_conversation_spawn)
-            .unwrap_or(false);
-        let (mut pre_session_id, host_session_socket): (Option<String>, Option<String>) =
-            if enable_conversation_spawn {
-                let sid = Uuid::now_v7().to_string();
-                let sock = self
-                    .spawn_host_session_socket(
-                        &sid,
-                        &os_user,
-                        &pid_for_spawn,
-                        model_for_spawn.clone(),
-                    )
-                    .await;
-                (Some(sid), sock)
-            } else {
-                (None, None)
-            };
-        let tool_session_id = pre_session_id
-            .clone()
-            .unwrap_or_else(|| Uuid::now_v7().to_string());
-        if enable_conversation_spawn || !req.attachments.is_empty() {
-            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
-                &os_user,
-                Some(&self.tddy_data_dir),
-            )
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-            self.prepare_session_attachments(
-                &req.session_token,
-                &os_user,
-                &sessions_base,
-                &tool_session_id,
-                &req.attachments,
-            )
-            .await?;
-            pre_session_id = Some(tool_session_id);
-        }
-        let result = spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
-            log::debug!(
-                "StartSession: spawn_blocking running, using_spawn_worker={}",
-                spawn_client.is_some()
-            );
-            let pid = Some(pid_for_spawn.as_str());
-            let agent = agent_for_spawn.as_deref();
-            let recipe = recipe_for_spawn.as_deref();
-            let stack_parent = stack_parent_for_spawn.as_deref();
-            let model = model_for_spawn.as_deref();
-            let new_session_id = pre_session_id.as_deref();
-            let host_socket = host_session_socket.as_deref();
-            let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
-            if let Some(ref client) = spawn_client {
-                let spawn_req = spawn_worker::build_spawn_request(
-                    &os_user,
-                    &tool_path,
-                    &tddy_data_dir_for_spawn,
-                    &repo_path,
-                    &livekit,
-                    SpawnOptions {
-                        resume_session_id: None,
-                        new_session_id,
-                        project_id: pid,
-                        agent,
-                        mouse: spawn_mouse,
-                        recipe,
-                        stack_parent,
-                        model,
-                        host_session_socket: host_socket,
-                    },
-                    daemon_log.as_ref(),
-                    coder_log_yaml,
-                );
-                client.spawn(spawn_req)
-            } else {
-                let (child_log_level, child_log_format) =
-                    spawner::child_log_yaml_tuning(daemon_log.as_ref());
-                spawner::spawn_as_user(
-                    &os_user,
-                    &tool_path,
-                    &tddy_data_dir_for_spawn,
-                    &repo_path,
-                    &livekit,
-                    SpawnOptions {
-                        resume_session_id: None,
-                        new_session_id,
-                        project_id: pid,
-                        agent,
-                        mouse: spawn_mouse,
-                        recipe,
-                        stack_parent,
-                        model,
-                        host_session_socket: host_socket,
-                    },
-                    child_log_level.as_str(),
-                    child_log_format.as_str(),
-                    coder_log_yaml.as_deref(),
-                )
-            }
-        })
-        .await?;
-        log::debug!(
-            "StartSession: spawn_blocking returned, session_id={}",
-            result.session_id
-        );
-        self.maybe_spawn_telegram_observer(&result.session_id, result.grpc_port);
-        Ok(Response::new(StartSessionResponse {
-            session_id: result.session_id,
-            livekit_room: result.livekit_room,
-            livekit_url: result.livekit_url,
-            livekit_server_identity: result.livekit_server_identity,
-            branch_conflict: None,
-        }))
+        self.start_session_core(request.into_inner(), &AttachmentProgressSink::discarding())
+            .await
     }
 
     async fn connect_session(
@@ -5801,6 +6038,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .map(|e| WorktreeDirEntry {
                 name: e.name,
                 is_dir: e.is_dir,
+                size_bytes: e.size_bytes,
             })
             .collect();
         Ok(Response::new(ListWorktreeDirectoryResponse { entries }))
@@ -7402,11 +7640,13 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         self.record_rpc_activity();
         let req = request.into_inner();
 
-        // Route BEFORE session lookup so a relay can forward. Server-streaming cannot reuse the
-        // unary `forward_to_peer` helper, so a request addressed to a remote daemon is rejected
-        // rather than silently served from the local (wrong) log.
-        // TODO(agent-activity): forward StreamSessionActivity to a peer daemon over LiveKit once a
-        // streaming forward primitive exists (forward_to_peer is unary-only today).
+        // Route BEFORE session lookup so a relay can forward. A request addressed to a remote daemon
+        // is rejected rather than silently served from the local (wrong) log.
+        // TODO(agent-activity): forward StreamSessionActivity to a peer daemon over
+        // `forward_server_stream_to_peer`. The primitive exists and carries an idle deadline sized
+        // for a short-lived stream; this one is long-lived and open-ended, so migrating it needs a
+        // keepalive frame (or a per-call deadline) first — otherwise an idle session's activity
+        // stream would be terminated as a stalled peer.
         let requested_daemon = req.daemon_instance_id.trim();
         if !requested_daemon.is_empty() {
             let local_id = local_instance_id_for_config(&self.config);
@@ -7494,11 +7734,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         self.record_rpc_activity();
         let req = request.into_inner();
 
-        // Route BEFORE session lookup so a relay can forward. Server-streaming cannot reuse the
-        // unary `forward_to_peer` helper, so a request addressed to a remote daemon is rejected
-        // rather than silently served from the local (wrong) transcript.
-        // TODO(acp-replay): forward StreamAcpReplay to a peer daemon over LiveKit once a streaming
-        // forward primitive exists (forward_to_peer is unary-only today).
+        // Route BEFORE session lookup so a relay can forward. A request addressed to a remote daemon
+        // is rejected rather than silently served from the local (wrong) transcript.
+        // TODO(acp-replay): forward StreamAcpReplay to a peer daemon over
+        // `forward_server_stream_to_peer`, blocked on the same keepalive gap as
+        // `stream_session_activity` above — this stream stays open for a session's whole life, and
+        // the primitive's idle deadline is sized for a short-lived one.
         let requested_daemon = req.daemon_instance_id.trim();
         if !requested_daemon.is_empty() {
             let local_id = local_instance_id_for_config(&self.config);
@@ -8463,7 +8704,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         }
 
         let staging_root =
-            crate::session_attachment_staging::staging_root_for(&os_user, &self.tddy_data_dir);
+            crate::session_attachment_staging::staging_root_for(&os_user, &self.staging_base_dir);
         let host_path = crate::session_attachment_staging::write_staged_chunk(
             &staging_root,
             &req.staging_id,
@@ -8511,7 +8752,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         }
 
         let staging_root =
-            crate::session_attachment_staging::staging_root_for(&os_user, &self.tddy_data_dir);
+            crate::session_attachment_staging::staging_root_for(&os_user, &self.staging_base_dir);
         let files = crate::session_attachment_staging::list_staged_attachments(
             &staging_root,
             &req.staging_id,
@@ -8556,7 +8797,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         }
 
         let staging_root =
-            crate::session_attachment_staging::staging_root_for(&os_user, &self.tddy_data_dir);
+            crate::session_attachment_staging::staging_root_for(&os_user, &self.staging_base_dir);
         crate::session_attachment_staging::delete_staged_attachment(
             &staging_root,
             &req.staging_id,
@@ -8594,6 +8835,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let doc = crate::host_documents::read_host_document_bytes(
             &os_user,
             &self.tddy_data_dir,
+            &self.staging_base_dir,
             scope,
             &req.session_id,
             &req.project_id,
@@ -8603,6 +8845,198 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             data: doc.data,
             byte_size: doc.byte_size,
         }))
+    }
+
+    /// Associated output stream type for [`stream_read_host_document`].
+    type StreamReadHostDocumentStream = MpscResultStream<HostDocumentChunk>;
+
+    /// Associated output stream type for [`stream_start_session`].
+    type StreamStartSessionStream = MpscResultStream<StartSessionEvent>;
+
+    async fn stream_read_host_document(
+        &self,
+        request: Request<ReadHostDocumentRequest>,
+    ) -> Result<Response<Self::StreamReadHostDocumentStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let os_user = self.resolve_os_user(&req.session_token)?;
+
+        if let PeerRoute::Forward { peer_instance_id } =
+            self.classify_daemon_route(&req.daemon_instance_id)?
+        {
+            log::info!(
+                "StreamReadHostDocument: forwarding stream to remote daemon_instance_id={peer_instance_id}"
+            );
+            let slot = self.common_room_slot("StreamReadHostDocument")?;
+            // The owning host resolves the document under its own `os_user` mapping and applies
+            // its own cap, so nothing is read locally here. A peer-side failure — or a stream that
+            // stops without its terminator — arrives as an error item, terminating this stream.
+            let rx = crate::livekit_peer_discovery::forward_stream_read_host_document_via_livekit(
+                slot,
+                &peer_instance_id,
+                &req,
+            )
+            .await?;
+            return Ok(Response::new(MpscResultStream { rx }));
+        }
+
+        let scope =
+            HostDocumentScope::try_from(req.scope).unwrap_or(HostDocumentScope::Unspecified);
+        let resolved = crate::host_documents::resolve_host_document(
+            &os_user,
+            &self.tddy_data_dir,
+            &self.staging_base_dir,
+            scope,
+            &req.session_id,
+            &req.project_id,
+            &req.relative_path,
+        )?;
+
+        // The cap is checked before the first frame, so an over-cap document is refused rather
+        // than streamed and cut short: a consumer cannot tell a truncated document from a whole
+        // one once the frames have started.
+        let max_bytes = self.config.max_attachment_bytes;
+        if resolved.byte_size > max_bytes {
+            return Err(Status::invalid_argument(format!(
+                "host document exceeds this host's maximum attachment size of {max_bytes} bytes"
+            )));
+        }
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<HostDocumentChunk, Status>>();
+        tokio::task::spawn_blocking(move || {
+            stream_document_frames(&resolved.path, resolved.byte_size, &tx);
+        });
+        Ok(Response::new(MpscResultStream { rx }))
+    }
+
+    async fn stream_start_session(
+        &self,
+        request: Request<StartSessionRequest>,
+    ) -> Result<Response<Self::StreamStartSessionStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        // Authenticate before classifying the route: forwarding opens an outbound RPC to a peer and
+        // holds a pending-call slot on both hosts for the forward's whole deadline, so an
+        // unauthenticated caller must never get that far. The resolved user is not used here — the
+        // host that runs the session resolves it again under its own mapping — which is the same
+        // order the unary `start_session` and `stream_read_host_document` already use.
+        self.resolve_os_user(&req.session_token)?;
+
+        if let PeerRoute::Forward { peer_instance_id } =
+            self.classify_daemon_route(&req.daemon_instance_id)?
+        {
+            log::info!(
+                "StreamStartSession: forwarding stream to remote daemon_instance_id={peer_instance_id}"
+            );
+            let slot = self.common_room_slot("StreamStartSession")?;
+            // The session, its worktree and its attachments are created on the peer; only its
+            // events cross back, so progress still reaches the client for the slowest case there
+            // is — attachment bytes moving between two hosts.
+            let rx = crate::livekit_peer_discovery::forward_stream_start_session_via_livekit(
+                slot,
+                &peer_instance_id,
+                &req,
+            )
+            .await?;
+            return Ok(Response::new(MpscResultStream { rx }));
+        }
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<StartSessionEvent, Status>>();
+        // The work runs on its own task so progress reaches the client while the host is still
+        // materializing, rather than all at once after the start completes. A failure terminates
+        // the stream with the status — a result event is only ever sent on success.
+        let service = self.clone();
+        let progress_tx = tx.clone();
+        tokio::spawn(async move {
+            let sink = AttachmentProgressSink::streaming(progress_tx);
+            let event = match service.start_session_core(req, &sink).await {
+                Ok(response) => Ok(StartSessionEvent {
+                    event: Some(StartSessionEventKind::Result(response.into_inner())),
+                }),
+                Err(status) => Err(status),
+            };
+            let _ = tx.send(event);
+        });
+        Ok(Response::new(MpscResultStream { rx }))
+    }
+}
+
+/// Bytes per `StreamReadHostDocument` frame. Mirrors the 48 KiB the upload path chunks with, which
+/// every transport in the stack (ConnectRPC-HTTP, LiveKit data channels) already carries per
+/// message without its own chunk framing.
+pub const HOST_DOCUMENT_FRAME_BYTES: usize = 48 * 1024;
+
+/// Bytes to leave free in a LiveKit data packet for everything in a `HostDocumentChunk` frame that
+/// is not document data: the RPC envelope (request id, service/method metadata, sender identity) and
+/// the chunk's own `total_byte_size`. Mirrors the web's `UPLOAD_REQUEST_ENVELOPE_HEADROOM`, which
+/// sizes the same budget from the other end of the same transport.
+const HOST_DOCUMENT_FRAME_ENVELOPE_HEADROOM: usize = 8 * 1024;
+
+/// A frame plus its envelope must fit in one LiveKit data packet. Past that budget the transport
+/// splits each frame into chunk frames, and one lost chunk frame leaves the peer's reassembler
+/// permanently incomplete — the call is then never answered and never fails
+/// (`docs/ft/coder/rpc-multi-transport.md`). A build failure here is the point: the doc comment above
+/// asserts "without its own chunk framing", and raising the frame size to 64 KiB would silently make
+/// that false.
+const _: () = assert!(
+    HOST_DOCUMENT_FRAME_BYTES + HOST_DOCUMENT_FRAME_ENVELOPE_HEADROOM
+        <= tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES,
+    "HOST_DOCUMENT_FRAME_BYTES must fit in one LiveKit data packet with envelope headroom"
+);
+
+/// Reads `path` in [`HOST_DOCUMENT_FRAME_BYTES`] slices into `tx`, stamping `total_byte_size` on
+/// every frame. A zero-byte document still yields exactly one (empty) frame, so a consumer never
+/// has to tell "empty document" from "stream produced nothing". A read error terminates the stream
+/// with a status rather than closing it, so a partial document is never mistaken for a whole one.
+fn stream_document_frames(
+    path: &Path,
+    total_byte_size: u64,
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<HostDocumentChunk, Status>>,
+) {
+    use std::io::Read as _;
+
+    let mut file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            log::error!("stream_read_host_document: open {path:?} failed: {e}");
+            let _ = tx.send(Err(Status::internal(format!(
+                "failed to read host document: {e}"
+            ))));
+            return;
+        }
+    };
+
+    let mut buf = vec![0u8; HOST_DOCUMENT_FRAME_BYTES];
+    let mut sent_any = false;
+    loop {
+        let read = match file.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) => {
+                log::error!("stream_read_host_document: read {path:?} failed: {e}");
+                let _ = tx.send(Err(Status::internal(format!(
+                    "failed to read host document: {e}"
+                ))));
+                return;
+            }
+        };
+        sent_any = true;
+        if tx
+            .send(Ok(HostDocumentChunk {
+                data: buf[..read].to_vec(),
+                total_byte_size,
+            }))
+            .is_err()
+        {
+            return;
+        }
+    }
+
+    if !sent_any {
+        let _ = tx.send(Ok(HostDocumentChunk {
+            data: Vec::new(),
+            total_byte_size,
+        }));
     }
 }
 

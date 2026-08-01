@@ -19,8 +19,8 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::livekit_peer_discovery::{
-    spawn_common_room_discovery_task, CommonRoomPeerRegistry, DaemonAdvertisement,
-    LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
+    spawn_common_room_discovery_task, CommonRoomPeerRegistry, LiveKitDiscoveryHandles,
+    LiveKitEligibleDaemonSource,
 };
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_livekit::LiveKitParticipant;
@@ -41,6 +41,14 @@ const LK_API_KEY: &str = "devkey";
 const LK_API_SECRET: &str = "secret";
 const TEST_PROJECT_ID: &str = "attach-start-fwd-proj";
 const STAGING_ID: &str = "ffffffff-ffff-7fff-8fff-ffffffffffff";
+
+/// The identity a daemon serves `connection.ConnectionService` on — a fixed `daemon-` prefix over
+/// its instance id, the way `main.rs` joins the common room. The bare instance id belongs to the
+/// discovery participant, which publishes the advertisement and serves no RPC.
+/// See `docs/ft/web/daemon-selector-livekit-rpc.md`.
+fn rpc_identity(instance_id: &str) -> String {
+    format!("daemon-{instance_id}")
+}
 
 fn true_bin() -> &'static str {
     if cfg!(target_os = "macos") {
@@ -116,6 +124,9 @@ fn create_test_repo_with_origin(dir: &std::path::Path) {
 struct TwoDaemons {
     service_a: ConnectionServiceImpl,
     peer_base: PathBuf,
+    /// The peer's staging base — its own root, separate from its data dir since staging moved to a
+    /// restart-cleared location.
+    peer_staging_base: PathBuf,
     local_base: PathBuf,
     _peer_run: tokio::task::JoinHandle<()>,
     _livekit: LiveKitTestkit,
@@ -125,6 +136,8 @@ struct TwoDaemons {
     _config_b: tempfile::TempDir,
     _sessions_a: tempfile::TempDir,
     _sessions_b: tempfile::TempDir,
+    _staging_a: tempfile::TempDir,
+    _staging_b: tempfile::TempDir,
 }
 
 async fn two_daemons() -> TwoDaemons {
@@ -148,11 +161,12 @@ async fn two_daemons() -> TwoDaemons {
 
     // Peer daemon B: registered project + service, joined to the common room as an RPC participant.
     let sessions_b = tempfile::tempdir().unwrap();
+    let staging_b = tempfile::tempdir().unwrap();
     register_project(&sessions_b.path().join("projects"), repo_dir.path());
     let base_b = sessions_b.path().to_path_buf();
     let resolver_b: SessionsBaseResolver = Arc::new(move |_| Some(base_b.clone()));
     let service_b = ConnectionServiceImpl::new(
-        config_b,
+        config_b.clone(),
         resolver_b,
         sessions_b.path().to_path_buf(),
         user_resolver.clone(),
@@ -160,9 +174,19 @@ async fn two_daemons() -> TwoDaemons {
         None,
         None,
         Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
+    )
+    .with_staging_base_dir(staging_b.path().to_path_buf());
+
+    // B's discovery participant: bare instance id, publishes the advertisement, serves no RPC.
+    spawn_common_room_discovery_task(
+        Arc::new(config_b),
+        Arc::new(CommonRoomPeerRegistry::new()),
+        Arc::new(tokio::sync::RwLock::new(None)),
     );
+
+    // B's RPC participant: `daemon-{instance_id}`, the identity a forward must address.
     let token_b = livekit
-        .generate_token(ROOM, PEER_INSTANCE_ID)
+        .generate_token(ROOM, &rpc_identity(PEER_INSTANCE_ID))
         .expect("LiveKit token for peer");
     let server = tddy_service::ConnectionServiceServer::new(service_b);
     let participant = LiveKitParticipant::connect(
@@ -175,21 +199,11 @@ async fn two_daemons() -> TwoDaemons {
     )
     .await
     .expect("peer daemon joins common room");
-    let adv = DaemonAdvertisement {
-        instance_id: PEER_INSTANCE_ID.to_string(),
-        label: PEER_INSTANCE_ID.to_string(),
-        repos_base_path: String::new(),
-    };
-    participant
-        .room()
-        .local_participant()
-        .set_metadata(serde_json::to_string(&adv).unwrap())
-        .await
-        .expect("peer publishes advertisement");
     let peer_run = tokio::spawn(async move { participant.run().await });
 
     // Local daemon A: discovery wired so it can route to the peer.
     let sessions_a = tempfile::tempdir().unwrap();
+    let staging_a = tempfile::tempdir().unwrap();
     register_project(&sessions_a.path().join("projects"), repo_dir.path());
     let base_a = sessions_a.path().to_path_buf();
     let resolver_a: SessionsBaseResolver = Arc::new(move |_| Some(base_a.clone()));
@@ -212,7 +226,8 @@ async fn two_daemons() -> TwoDaemons {
         }),
         None,
         Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
-    );
+    )
+    .with_staging_base_dir(staging_a.path().to_path_buf());
 
     // Wait until A discovers B.
     tokio::time::timeout(Duration::from_secs(45), async {
@@ -239,6 +254,7 @@ async fn two_daemons() -> TwoDaemons {
     TwoDaemons {
         service_a,
         peer_base,
+        peer_staging_base: staging_b.path().to_path_buf(),
         local_base: base_a,
         _peer_run: peer_run,
         _livekit: livekit,
@@ -247,6 +263,8 @@ async fn two_daemons() -> TwoDaemons {
         _config_b: config_b_dir,
         _sessions_a: sessions_a,
         _sessions_b: sessions_b,
+        _staging_a: staging_a,
+        _staging_b: staging_b,
     }
 }
 
@@ -258,7 +276,7 @@ async fn staging_rpcs_addressed_to_a_peer_daemon_forward_and_operate_on_the_peer
     // Given — two daemons in a common room
     let env = two_daemons().await;
     let service_a = &env.service_a;
-    let peer_base = env.peer_base.clone();
+    let peer_staging_base = env.peer_staging_base.clone();
 
     // When — A stages a file addressed to the peer
     service_a
@@ -276,7 +294,7 @@ async fn staging_rpcs_addressed_to_a_peer_daemon_forward_and_operate_on_the_peer
     // Then — the file landed on the peer's staging root, not A's
     let os_user = std::env::var("USER").unwrap();
     let peer_staged =
-        tddy_daemon::session_attachment_staging::staging_root_for(&os_user, &peer_base)
+        tddy_daemon::session_attachment_staging::staging_root_for(&os_user, &peer_staging_base)
             .join(STAGING_ID)
             .join("remote.md");
     assert!(

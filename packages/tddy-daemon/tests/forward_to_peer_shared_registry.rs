@@ -22,9 +22,15 @@ use tddy_service::proto::test::{EchoRequest, EchoResponse};
 use tddy_service::{EchoServiceImpl, EchoServiceServer};
 
 const COMMON_ROOM: &str = "forward-shared-registry";
-const PEER_IDENTITY: &str = "shared-registry-peer";
+const PEER_INSTANCE_ID: &str = "shared-registry-peer";
 const LOCAL_IDENTITY: &str = "shared-registry-local";
 const PARTICIPANT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The identity a daemon serves RPC on — a fixed `daemon-` prefix over its instance id, the way
+/// `main.rs` joins the common room. `forward_to_peer` takes the bare instance id and maps it.
+fn rpc_identity(instance_id: &str) -> String {
+    format!("daemon-{instance_id}")
+}
 
 async fn wait_for_participant(
     room: &Room,
@@ -52,14 +58,15 @@ async fn wait_for_participant(
 #[tokio::test]
 #[serial]
 async fn forward_to_peer_draws_from_one_shared_registry_per_room() -> Result<()> {
-    // Given — a peer serving EchoService in the common room, and a local common-room connection in
-    // a room slot (the shape `spawn_common_room_discovery_task` hands `forward_to_peer`)
+    // Given — a peer serving EchoService in the common room under the `daemon-{id}` identity a
+    // real daemon serves on, and a local common-room connection in a room slot (the shape
+    // `spawn_common_room_discovery_task` hands `forward_to_peer`)
     let livekit = LiveKitTestkit::start().await?;
     let url = livekit.get_ws_url();
 
     let peer = LiveKitParticipant::connect(
         &url,
-        &livekit.generate_token(COMMON_ROOM, PEER_IDENTITY)?,
+        &livekit.generate_token(COMMON_ROOM, &rpc_identity(PEER_INSTANCE_ID))?,
         EchoServiceServer::new(EchoServiceImpl),
         RoomOptions::default(),
         None,
@@ -75,7 +82,7 @@ async fn forward_to_peer_draws_from_one_shared_registry_per_room() -> Result<()>
     )
     .await
     .map_err(|e| anyhow::anyhow!("local connect: {}", e))?;
-    wait_for_participant(&room, &mut events, PEER_IDENTITY).await?;
+    wait_for_participant(&room, &mut events, &rpc_identity(PEER_INSTANCE_ID)).await?;
     let room = Arc::new(room);
     let room_slot = Arc::new(RwLock::new(Some(room.clone())));
 
@@ -94,7 +101,7 @@ async fn forward_to_peer_draws_from_one_shared_registry_per_room() -> Result<()>
                 message: format!("forward-{i}"),
             }
             .encode_to_vec();
-            let bytes = forward_to_peer(&slot, PEER_IDENTITY, "test.EchoService", "Echo", body)
+            let bytes = forward_to_peer(&slot, PEER_INSTANCE_ID, "test.EchoService", "Echo", body)
                 .await
                 .expect("forward_to_peer should return the peer's echo");
             EchoResponse::decode(&bytes[..])

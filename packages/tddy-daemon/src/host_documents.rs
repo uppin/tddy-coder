@@ -2,12 +2,12 @@
 //! exists on a connected host, for materializing a `HostDocumentRef` during `StartSession`.
 //!
 //! The owning daemon resolves the scope root under **its own** `os_user` mapping (the referencing
-//! client's host grants no access) and refuses a `relative_path` that escapes. Unary (not
-//! streaming) so the RPC is forwardable over the LiveKit common room; binary (attachments may be
-//! images/PDFs), so it does not reuse the UTF-8 readers (`ReadSessionWorkflowFile`,
-//! `ReadWorktreeFile`). A file over [`MAX_HOST_DOCUMENT_BYTES`] is refused with
-//! `INVALID_ARGUMENT` rather than truncated — a truncated attachment is useless, and staging
-//! exists for larger docs (chunked, no single-message limit).
+//! client's host grants no access) and refuses a `relative_path` that escapes. Binary (attachments
+//! may be images/PDFs), so it does not reuse the UTF-8 readers (`ReadSessionWorkflowFile`,
+//! `ReadWorktreeFile`). A file over [`MAX_HOST_DOCUMENT_BYTES`] is refused by the unary read with
+//! `INVALID_ARGUMENT` rather than truncated — a truncated attachment is useless. Anything larger
+//! goes through `StreamReadHostDocument`, which shares [`resolve_host_document`] (and therefore
+//! every guard) and applies the host's configured attachment cap instead.
 //!
 //! Product contract: `docs/ft/coder/session-attachments.md` + the amendment
 //! `docs/ft/coder/session-attachments.md` § Start-session materialization.
@@ -73,9 +73,27 @@ fn validate_session_upload_relative_path(relative_path: &str) -> Result<(), Stat
     Ok(())
 }
 
+/// The `HOST_DOCUMENT_SCOPE_STAGED_ATTACHMENT` address shape: exactly `<staging_id>/<file_name>`,
+/// the same two-segment form `SESSION_UPLOAD` uses. Both segments are untrusted client input that
+/// become path components, so each must be a pure basename — the batch is not a directory the
+/// caller may descend into or climb out of.
+pub fn validate_staged_attachment_relative_path(relative_path: &str) -> Result<(), Status> {
+    validate_relative_path(relative_path)?;
+    let parts: Vec<&str> = relative_path.split('/').collect();
+    if parts.len() != 2 {
+        return Err(Status::invalid_argument(
+            "staged attachment relative_path must be <staging_id>/<file_name>",
+        ));
+    }
+    validate_segment(parts[0])?;
+    validate_segment(parts[1])?;
+    Ok(())
+}
+
 fn resolve_scope_root(
     os_user: &str,
     tddy_data_dir: &Path,
+    staging_base_dir: &Path,
     scope: HostDocumentScope,
     session_id: &str,
     project_id: &str,
@@ -120,35 +138,57 @@ fn resolve_scope_root(
                 .ok_or_else(|| Status::not_found("project not found"))?;
             Ok(PathBuf::from(project.main_repo_path))
         }
+        HostDocumentScope::StagedAttachment => Ok(
+            crate::session_attachment_staging::staging_root_for(os_user, staging_base_dir),
+        ),
         HostDocumentScope::Unspecified => Err(Status::invalid_argument(
             "host document scope must be specified",
         )),
     }
 }
 
-/// Resolves a `HostDocumentRef` against the caller's `os_user` data root and reads the bytes.
+/// A host document resolved to a real file on disk: its canonical path and on-disk size, with
+/// every scope, containment and completeness guard already applied. Split out from the byte read
+/// so the streaming reader applies its own (larger) cap without duplicating a single guard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedHostDocument {
+    pub path: PathBuf,
+    pub byte_size: u64,
+}
+
+/// Resolves a `HostDocumentRef` against the caller's `os_user` roots, without reading any bytes.
 /// `relative_path` is POSIX-separated, no `.`/`..`, not absolute, and canonicalize-and-contained
-/// under the resolved scope root. The owning daemon performs the read under its own `os_user`
-/// mapping; the referencing client's host grants no access.
-pub fn read_host_document_bytes(
+/// under the resolved scope root. The owning daemon performs the resolution under its own
+/// `os_user` mapping; the referencing client's host grants no access.
+pub fn resolve_host_document(
     os_user: &str,
     tddy_data_dir: &Path,
+    staging_base_dir: &Path,
     scope: HostDocumentScope,
     session_id: &str,
     project_id: &str,
     relative_path: &str,
-) -> Result<HostDocumentBytes, Status> {
-    let scope_root = resolve_scope_root(os_user, tddy_data_dir, scope, session_id, project_id)?;
+) -> Result<ResolvedHostDocument, Status> {
+    let scope_root = resolve_scope_root(
+        os_user,
+        tddy_data_dir,
+        staging_base_dir,
+        scope,
+        session_id,
+        project_id,
+    )?;
 
     if scope == HostDocumentScope::SessionUpload {
         validate_session_upload_relative_path(relative_path)?;
+    } else if scope == HostDocumentScope::StagedAttachment {
+        validate_staged_attachment_relative_path(relative_path)?;
     } else if scope == HostDocumentScope::SessionWorktree {
         validate_relative_path(relative_path)?;
         let rel_slashed = relative_path.replace('\\', "/");
         let files = git_listed_files(&scope_root)?;
         if !files.iter().any(|f| f == &rel_slashed) {
             log::warn!(
-                "read_host_document_bytes: rejected path not surfaced by listing: {:?}",
+                "resolve_host_document: rejected path not surfaced by listing: {:?}",
                 relative_path
             );
             return Err(Status::permission_denied(
@@ -171,7 +211,7 @@ pub fn read_host_document_bytes(
     let joined = scope_root.join(relative_path.replace('\\', "/"));
     let canonical_root = scope_root.canonicalize().map_err(|e| {
         log::error!(
-            "read_host_document_bytes: canonicalize scope root {:?} failed: {e}",
+            "resolve_host_document: canonicalize scope root {:?} failed: {e}",
             scope_root
         );
         Status::internal(format!("failed to resolve scope root: {e}"))
@@ -201,7 +241,7 @@ pub fn read_host_document_bytes(
     // (already-canonical) parent is not enough — the file name itself may be a link.
     let canonical_file = target.canonicalize().map_err(|e| {
         log::error!(
-            "read_host_document_bytes: canonicalize {:?} failed: {e}",
+            "resolve_host_document: canonicalize {:?} failed: {e}",
             target
         );
         Status::internal(format!("failed to resolve host document: {e}"))
@@ -210,27 +250,72 @@ pub fn read_host_document_bytes(
         return Err(Status::invalid_argument("relative_path escapes scope root"));
     }
 
-    // Check the size on disk before reading, so an oversized file is refused without
-    // loading its full contents into memory.
-    let file_size = std::fs::metadata(&canonical_file)
+    // A staged file is only whole once its uploader wrote the final chunk and dropped the
+    // completeness marker beside it. Refuse an in-progress or aborted upload here — the owning
+    // host is the only party that can tell truncated bytes from a short document, so a fetch
+    // must not be able to hand a caller half a file that reads as a whole one.
+    if scope == HostDocumentScope::StagedAttachment {
+        let file_name_str = file_name.to_string_lossy();
+        let marker = crate::session_attachment_staging::staged_complete_marker(
+            &canonical_parent,
+            &file_name_str,
+        );
+        if !marker.exists() {
+            return Err(Status::failed_precondition(
+                "staged attachment upload is not complete",
+            ));
+        }
+    }
+
+    // The size comes from the metadata, so an oversized file is refused by the caller's cap
+    // without ever loading its contents into memory.
+    let byte_size = std::fs::metadata(&canonical_file)
         .map_err(|e| {
             log::error!(
-                "read_host_document_bytes: metadata {:?} failed: {e}",
+                "resolve_host_document: metadata {:?} failed: {e}",
                 canonical_file
             );
             Status::internal(format!("failed to read host document metadata: {e}"))
         })?
         .len();
-    if file_size > MAX_HOST_DOCUMENT_BYTES as u64 {
+
+    Ok(ResolvedHostDocument {
+        path: canonical_file,
+        byte_size,
+    })
+}
+
+/// Resolves a `HostDocumentRef` and reads its bytes, capped at [`MAX_HOST_DOCUMENT_BYTES`] — the
+/// unary transport's message-size budget. A file over the cap is refused rather than truncated;
+/// `stream_read_host_document` is the path for anything larger.
+pub fn read_host_document_bytes(
+    os_user: &str,
+    tddy_data_dir: &Path,
+    staging_base_dir: &Path,
+    scope: HostDocumentScope,
+    session_id: &str,
+    project_id: &str,
+    relative_path: &str,
+) -> Result<HostDocumentBytes, Status> {
+    let resolved = resolve_host_document(
+        os_user,
+        tddy_data_dir,
+        staging_base_dir,
+        scope,
+        session_id,
+        project_id,
+        relative_path,
+    )?;
+    if resolved.byte_size > MAX_HOST_DOCUMENT_BYTES as u64 {
         return Err(Status::invalid_argument(format!(
             "host document exceeds maximum size of {MAX_HOST_DOCUMENT_BYTES} bytes"
         )));
     }
 
-    let data = std::fs::read(&canonical_file).map_err(|e| {
+    let data = std::fs::read(&resolved.path).map_err(|e| {
         log::error!(
             "read_host_document_bytes: read {:?} failed: {e}",
-            canonical_file
+            resolved.path
         );
         Status::internal(format!("failed to read host document: {e}"))
     })?;
@@ -257,6 +342,12 @@ mod tests {
 
     fn caller() -> String {
         std::env::var("USER").expect("USER")
+    }
+
+    /// None of these scopes resolve against the staging base; naming a path that exists nowhere
+    /// keeps that explicit (and fails loudly if one of them ever starts reaching for it).
+    fn unused_staging_base() -> &'static Path {
+        Path::new("/nonexistent-staging-base")
     }
 
     /// A data root + the owning session's directory, with `artifacts/` and `uploads/` ready.
@@ -315,6 +406,7 @@ mod tests {
         let doc = read_host_document_bytes(
             &caller(),
             data.path(),
+            unused_staging_base(),
             HostDocumentScope::SessionArtifact,
             SESSION_ID,
             "",
@@ -338,6 +430,7 @@ mod tests {
         let doc = read_host_document_bytes(
             &caller(),
             data.path(),
+            unused_staging_base(),
             HostDocumentScope::SessionUpload,
             SESSION_ID,
             "",
@@ -374,6 +467,7 @@ mod tests {
         let doc = read_host_document_bytes(
             &caller(),
             data.path(),
+            unused_staging_base(),
             HostDocumentScope::ProjectRepo,
             "",
             PROJECT_ID,
@@ -395,6 +489,7 @@ mod tests {
         let err = read_host_document_bytes(
             &caller(),
             data.path(),
+            unused_staging_base(),
             HostDocumentScope::SessionArtifact,
             SESSION_ID,
             "",
@@ -414,6 +509,7 @@ mod tests {
         let err = read_host_document_bytes(
             &caller(),
             data.path(),
+            unused_staging_base(),
             HostDocumentScope::SessionArtifact,
             SESSION_ID,
             "",
@@ -436,6 +532,7 @@ mod tests {
         let err = read_host_document_bytes(
             &caller(),
             data.path(),
+            unused_staging_base(),
             HostDocumentScope::SessionArtifact,
             SESSION_ID,
             "",
@@ -456,6 +553,7 @@ mod tests {
         let doc = read_host_document_bytes(
             &caller(),
             data.path(),
+            unused_staging_base(),
             HostDocumentScope::SessionArtifact,
             SESSION_ID,
             "",
@@ -501,6 +599,7 @@ mod tests {
         let err = read_host_document_bytes(
             &caller(),
             data.path(),
+            unused_staging_base(),
             HostDocumentScope::SessionWorktree,
             SESSION_ID,
             "",
@@ -528,6 +627,7 @@ mod tests {
         let err = read_host_document_bytes(
             &caller(),
             data.path(),
+            unused_staging_base(),
             HostDocumentScope::SessionArtifact,
             SESSION_ID,
             "",

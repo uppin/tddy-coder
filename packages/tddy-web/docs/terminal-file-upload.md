@@ -69,18 +69,18 @@ host. An OS file drag (carrying `DataTransfer.files`) is unchanged and still upl
 route (Files-tab **Insert** button) reaches the focused terminal through the runtime registry's
 `insertInput` hook instead of the drop zone.
 
-## Reuse: start-session attachments (no web UI yet)
+## Shared with start-session attachments
 
 The pre-session staging upload for start-session attachments is deliberately the **same** shape as
 this flow — `UploadStagedAttachmentChunk` is `UploadSessionFileChunk` with `session_id` replaced by
-`daemon_instance_id` and `upload_id` by `staging_id`. So `chunkFile()` / `UPLOAD_CHUNK_SIZE` and the
-per-file chunk loop are reusable as-is; only the request builder differs. The daemon side is live and
-`StartSession` materializes attachments before the agent spawns; nothing in this package calls it yet
-— see
-[connection-service.md § Start-session attachments](../../tddy-daemon/docs/connection-service.md#start-session-attachments)
-before wiring a picker, in particular the rule that a staged batch is usable only by a session
-started on the host it was uploaded to, and that only the **final** chunk marks a batch complete (an
-incomplete upload is refused at materialization, not silently truncated).
+`daemon_instance_id` and `upload_id` by `staging_id` — so `chunkFile()` / `UPLOAD_CHUNK_SIZE` and the
+per-file chunk loop are reused as-is and only the request builder differs. That reuse is why the
+48 KiB ceiling above is load-bearing for two features, not one.
+
+The attach UI is implemented: see [session-attach-ui.md](session-attach-ui.md). Note that its
+behaviour has since diverged in one respect worth knowing if you read the two side by side — a staged
+batch is **no longer** restricted to the host it was uploaded to; the session host fetches the bytes
+across hosts when they differ.
 
 ## Tests
 
