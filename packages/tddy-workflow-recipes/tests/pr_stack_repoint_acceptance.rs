@@ -96,6 +96,7 @@ fn a_node(node_id: &str, branch: &str, parents: &[&str]) -> StackNode {
         }),
         child_state: None,
         internal_status: None,
+        display_order: None,
     }
 }
 

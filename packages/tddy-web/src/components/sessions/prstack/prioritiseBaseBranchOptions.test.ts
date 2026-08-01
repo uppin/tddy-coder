@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
+import { aStackNode } from "../../../test-utils";
 import { prioritiseBaseBranchOptions } from "./prioritiseBaseBranchOptions";
-import type { StackNode } from "./stackPlan";
 
 /**
  * Tests for `prioritiseBaseBranchOptions` — the ordered base-branch option list the Start-Session
@@ -13,28 +13,10 @@ import type { StackNode } from "./stackPlan";
  * nodes contribute nothing.
  */
 
-/** A stack node with only the fields these tests care about; everything else gets a valid default. */
-function aNode(overrides: Partial<StackNode> & { nodeId: string }): StackNode {
-  return {
-    nodeId: overrides.nodeId,
-    title: overrides.title ?? overrides.nodeId,
-    description: "",
-    branchSuggestion: null,
-    branch: null,
-    sessionId: null,
-    parents: [],
-    prStatus: null,
-    childState: null,
-    childRecipe: "tdd",
-    internalStatus: null,
-    ...overrides,
-  };
-}
-
 describe("prioritiseBaseBranchOptions", () => {
   it("returns an empty list for a root node with no other materialized branches", () => {
     // Given
-    const n1 = aNode({ nodeId: "n1", branchSuggestion: "feature/stack/n1" });
+    const n1 = aStackNode({ nodeId: "n1", branchSuggestion: "feature/stack/n1" });
 
     // When
     const options = prioritiseBaseBranchOptions(n1, [n1]);
@@ -45,8 +27,8 @@ describe("prioritiseBaseBranchOptions", () => {
 
   it("lists the single direct dependency branch for a linear chain", () => {
     // Given
-    const n1 = aNode({ nodeId: "n1", branch: "feature/stack/n1", prStatus: { phase: "open" } });
-    const n2 = aNode({ nodeId: "n2", branchSuggestion: "feature/stack/n2", parents: ["n1"] });
+    const n1 = aStackNode({ nodeId: "n1", branch: "feature/stack/n1", prStatus: { phase: "open" } });
+    const n2 = aStackNode({ nodeId: "n2", branchSuggestion: "feature/stack/n2", parents: ["n1"] });
 
     // When
     const options = prioritiseBaseBranchOptions(n2, [n1, n2]);
@@ -57,17 +39,17 @@ describe("prioritiseBaseBranchOptions", () => {
 
   it("lists both direct dependency branches in node.parents order when they are at the same depth", () => {
     // Given — the attach-start diamond: parents [attach-proto, attach-store], both roots (depth 0).
-    const proto = aNode({
+    const proto = aStackNode({
       nodeId: "attach-proto",
       branch: "feature/session-attach-docs/attach-proto",
       prStatus: { phase: "open" },
     });
-    const store = aNode({
+    const store = aStackNode({
       nodeId: "attach-store",
       branch: "feature/session-attach-docs/attach-store",
       prStatus: { phase: "open" },
     });
-    const start = aNode({
+    const start = aStackNode({
       nodeId: "attach-start",
       branchSuggestion: "feature/session-attach-docs/attach-start",
       parents: ["attach-proto", "attach-store"],
@@ -86,14 +68,14 @@ describe("prioritiseBaseBranchOptions", () => {
   it("orders direct dependency branches by the dependency's own depth (deepest first) for a diamond", () => {
     // Given — n3 depends on [n1, n2] and n2 depends on n1: n2 is depth 1, n1 is depth 0. n2 is listed
     // second in node.parents but is deeper, so it must come first.
-    const n1 = aNode({ nodeId: "n1", branch: "feature/stack/n1", prStatus: { phase: "open" } });
-    const n2 = aNode({
+    const n1 = aStackNode({ nodeId: "n1", branch: "feature/stack/n1", prStatus: { phase: "open" } });
+    const n2 = aStackNode({
       nodeId: "n2",
       branch: "feature/stack/n2",
       prStatus: { phase: "open" },
       parents: ["n1"],
     });
-    const n3 = aNode({
+    const n3 = aStackNode({
       nodeId: "n3",
       branchSuggestion: "feature/stack/n3",
       parents: ["n1", "n2"],
@@ -108,9 +90,9 @@ describe("prioritiseBaseBranchOptions", () => {
 
   it("appends other materialized stack branches after the direct dependencies", () => {
     // Given — n3 depends on n1 only; n2 is a materialized sibling root, not a direct dependency.
-    const n1 = aNode({ nodeId: "n1", branch: "feature/stack/n1", prStatus: { phase: "open" } });
-    const n2 = aNode({ nodeId: "n2", branch: "feature/stack/n2", prStatus: { phase: "open" } });
-    const n3 = aNode({ nodeId: "n3", branchSuggestion: "feature/stack/n3", parents: ["n1"] });
+    const n1 = aStackNode({ nodeId: "n1", branch: "feature/stack/n1", prStatus: { phase: "open" } });
+    const n2 = aStackNode({ nodeId: "n2", branch: "feature/stack/n2", prStatus: { phase: "open" } });
+    const n3 = aStackNode({ nodeId: "n3", branchSuggestion: "feature/stack/n3", parents: ["n1"] });
 
     // When
     const options = prioritiseBaseBranchOptions(n3, [n1, n2, n3]);
@@ -122,14 +104,14 @@ describe("prioritiseBaseBranchOptions", () => {
   it("excludes the node's own descendants from the other-branches section to avoid a cycle", () => {
     // Given — n1 is materialized; n2 depends on n1; n3 depends on n2. Starting n2's session, the
     // "other" section must not offer n3 (a descendant of n2) as a base.
-    const n1 = aNode({ nodeId: "n1", branch: "feature/stack/n1", prStatus: { phase: "open" } });
-    const n2 = aNode({
+    const n1 = aStackNode({ nodeId: "n1", branch: "feature/stack/n1", prStatus: { phase: "open" } });
+    const n2 = aStackNode({
       nodeId: "n2",
       branch: "feature/stack/n2",
       prStatus: { phase: "open" },
       parents: ["n1"],
     });
-    const n3 = aNode({ nodeId: "n3", branchSuggestion: "feature/stack/n3", parents: ["n2"] });
+    const n3 = aStackNode({ nodeId: "n3", branchSuggestion: "feature/stack/n3", parents: ["n2"] });
 
     // When — options for n2: direct dep n1; n3 is a descendant and must be excluded.
     const options = prioritiseBaseBranchOptions(n2, [n1, n2, n3]);
@@ -141,13 +123,13 @@ describe("prioritiseBaseBranchOptions", () => {
   it("skips merged parents and excludes merged branches from the other-branches section", () => {
     // Given — n1 (merged) and n2 (open) are both roots; n3 depends on both. A merged parent contributes
     // no ref (its origin ref may be gone), and a merged non-direct branch is not offered either.
-    const n1 = aNode({
+    const n1 = aStackNode({
       nodeId: "n1",
       branch: "feature/stack/n1",
       prStatus: { phase: "merged" },
     });
-    const n2 = aNode({ nodeId: "n2", branch: "feature/stack/n2", prStatus: { phase: "open" } });
-    const n3 = aNode({
+    const n2 = aStackNode({ nodeId: "n2", branch: "feature/stack/n2", prStatus: { phase: "open" } });
+    const n3 = aStackNode({
       nodeId: "n3",
       branchSuggestion: "feature/stack/n3",
       parents: ["n1", "n2"],
@@ -162,9 +144,9 @@ describe("prioritiseBaseBranchOptions", () => {
 
   it("skips a branchless direct parent (no ref to offer)", () => {
     // Given — n1 is a planned, branchless parent of n2; n2 also has a materialized parent n3.
-    const n1 = aNode({ nodeId: "n1", branchSuggestion: "feature/stack/n1" });
-    const n3 = aNode({ nodeId: "n3", branch: "feature/stack/n3", prStatus: { phase: "open" } });
-    const n2 = aNode({
+    const n1 = aStackNode({ nodeId: "n1", branchSuggestion: "feature/stack/n1" });
+    const n3 = aStackNode({ nodeId: "n3", branch: "feature/stack/n3", prStatus: { phase: "open" } });
+    const n2 = aStackNode({
       nodeId: "n2",
       branchSuggestion: "feature/stack/n2",
       parents: ["n1", "n3"],
@@ -180,9 +162,9 @@ describe("prioritiseBaseBranchOptions", () => {
   it("de-duplicates a branch that is both a direct dependency and appears elsewhere in the stack", () => {
     // Given — n1 and n2 both own the same branch name (a malformed but defensive case); n3 depends on
     // both. The branch must appear exactly once.
-    const n1 = aNode({ nodeId: "n1", branch: "feature/stack/shared", prStatus: { phase: "open" } });
-    const n2 = aNode({ nodeId: "n2", branch: "feature/stack/shared", prStatus: { phase: "open" } });
-    const n3 = aNode({
+    const n1 = aStackNode({ nodeId: "n1", branch: "feature/stack/shared", prStatus: { phase: "open" } });
+    const n2 = aStackNode({ nodeId: "n2", branch: "feature/stack/shared", prStatus: { phase: "open" } });
+    const n3 = aStackNode({
       nodeId: "n3",
       branchSuggestion: "feature/stack/n3",
       parents: ["n1", "n2"],

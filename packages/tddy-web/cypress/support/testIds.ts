@@ -490,6 +490,15 @@ export const TEST_IDS = {
   prStackAddPlannedPrCancelBtn: "pr-stack-add-planned-pr-cancel-btn",
   prStackAddPlannedPrError: "pr-stack-add-planned-pr-error",
 
+  // PR-Stack Chat Screen — the prompt shown when a pull targets a worktree with uncommitted work.
+  // A dirty worktree is neither silently merged into nor a dead end: the operator is told what is
+  // outstanding and can commit and push it before the pull proceeds.
+  prStackDirtyWorktreeDialog: "pr-stack-dirty-worktree-dialog",
+  prStackDirtyWorktreePaths: "pr-stack-dirty-worktree-paths",
+  prStackDirtyWorktreeCommitMessageInput: "pr-stack-dirty-worktree-commit-message-input",
+  prStackDirtyWorktreeCommitBtn: "pr-stack-dirty-worktree-commit-btn",
+  prStackDirtyWorktreeCancelBtn: "pr-stack-dirty-worktree-cancel-btn",
+
   // Daemon selector (top-right strip on daemon-mode screens)
   daemonSelectorTrigger: "daemon-selector-trigger",
 
@@ -798,8 +807,75 @@ export const prStackRepointBtn = (nodeId: string) => `pr-stack-repoint-${nodeId}
 /** `[data-testid="pr-stack-worktree-<nodeId>"]` — the on-disk worktree indicator (from QueryBranch) */
 export const prStackWorktree = (nodeId: string) => `pr-stack-worktree-${nodeId}`;
 
-/** `[data-testid="pr-stack-session-<nodeId>"]` — the resolved in-progress session reference (QueryBranch) */
+/** `[data-testid="pr-stack-session-<nodeId>"]` — the control that opens the node's bound child
+ *  session, wrapping the status chip. Present only when the node's recorded child session — or,
+ *  failing that, the session that owns its branch — resolves to a session the drawer knows */
 export const prStackSession = (nodeId: string) => `pr-stack-session-${nodeId}`;
+
+/** `[data-testid="pr-stack-row-toggle-<nodeId>"]` — the row header that expands/collapses its detail */
+export const prStackRowToggle = (nodeId: string) => `pr-stack-row-toggle-${nodeId}`;
+
+/** `[data-testid="pr-stack-row-details-<nodeId>"]` — the row's detail body. Always mounted and hidden
+ *  when collapsed, so expansion, scroll position and the branch poll set survive a collapse */
+export const prStackRowDetails = (nodeId: string) => `pr-stack-row-details-${nodeId}`;
+
+/** `[data-testid="pr-stack-node-id-<nodeId>"]` — the planner-assigned node id, in the row's detail */
+export const prStackNodeId = (nodeId: string) => `pr-stack-node-id-${nodeId}`;
+
+/** `[data-testid="pr-stack-parents-<nodeId>"]` — the titles of the nodes this one is stacked on */
+export const prStackParents = (nodeId: string) => `pr-stack-parents-${nodeId}`;
+
+/** `[data-testid="pr-stack-child-recipe-<nodeId>"]` — the recipe the node's child session runs */
+export const prStackChildRecipe = (nodeId: string) => `pr-stack-child-recipe-${nodeId}`;
+
+/** `[data-testid="pr-stack-child-session-<nodeId>"]` — the bound child session's id, in the detail */
+export const prStackChildSession = (nodeId: string) => `pr-stack-child-session-${nodeId}`;
+
+/** `[data-testid="pr-stack-child-state-<nodeId>"]` — the coarse mirror of the child session's
+ *  workflow state the orchestrator last recorded. Stale whenever the orchestrator agent is not
+ *  running, which is why it is a detail line rather than a badge */
+export const prStackChildState = (nodeId: string) => `pr-stack-child-state-${nodeId}`;
+
+/** `[data-testid="pr-stack-move-up-<nodeId>"]` — move the row one position earlier in the persisted order */
+export const prStackMoveUpBtn = (nodeId: string) => `pr-stack-move-up-${nodeId}`;
+
+/** `[data-testid="pr-stack-move-down-<nodeId>"]` — move the row one position later in the persisted order */
+export const prStackMoveDownBtn = (nodeId: string) => `pr-stack-move-down-${nodeId}`;
+
+/** `[data-testid="pr-stack-reorder-error-<nodeId>"]` — the daemon's reason for refusing or failing a
+ *  reorder. Rendered outside the row's collapse boundary: a refused reorder moves nothing, which is
+ *  indistinguishable from a swallowed click unless the row says why */
+export const prStackReorderError = (nodeId: string) => `pr-stack-reorder-error-${nodeId}`;
+
+/** `[data-testid="pr-stack-base-behind-<nodeId>"]` — how many commits the branch is behind its base */
+export const prStackBaseBehind = (nodeId: string) => `pr-stack-base-behind-${nodeId}`;
+
+/** `[data-testid="pr-stack-base-in-sync-<nodeId>"]` — the branch contains every commit on its base.
+ *  Rendered rather than staying silent: without it a clean row and a row whose comparison has not
+ *  arrived would look identical, which is the conflation the unavailable discriminator exists to stop */
+export const prStackBaseInSync = (nodeId: string) => `pr-stack-base-in-sync-${nodeId}`;
+
+/** `[data-testid="pr-stack-base-conflicts-<nodeId>"]` — merging the base into the branch would conflict */
+export const prStackBaseConflicts = (nodeId: string) => `pr-stack-base-conflicts-${nodeId}`;
+
+/** `[data-testid="pr-stack-base-sync-unavailable-<nodeId>"]` — the base comparison could not be made
+ *  (no base named, a ref that resolves to nothing, a git failure). A failed comparison arrives
+ *  byte-identical to a healthy one, so it must never render as "in sync" */
+export const prStackBaseSyncUnavailable = (nodeId: string) => `pr-stack-base-sync-unavailable-${nodeId}`;
+
+/** `[data-testid="pr-stack-base-conflict-paths-<nodeId>"]` — the conflicting paths, in the row's detail */
+export const prStackBaseConflictPaths = (nodeId: string) => `pr-stack-base-conflict-paths-${nodeId}`;
+
+/** `[data-testid="pr-stack-sync-merge-<nodeId>"]` — pull the base in by merging it (the default) */
+export const prStackSyncMergeBtn = (nodeId: string) => `pr-stack-sync-merge-${nodeId}`;
+
+/** `[data-testid="pr-stack-sync-rebase-<nodeId>"]` — pull the base in by rebasing onto it */
+export const prStackSyncRebaseBtn = (nodeId: string) => `pr-stack-sync-rebase-${nodeId}`;
+
+/** `[data-testid="pr-stack-sync-error-<nodeId>"]` — the daemon's reason for refusing or failing a pull.
+ *  Rendered outside the row's collapse boundary: a reason the operator must expand a row to find is
+ *  the dead end the always-visible warning region exists to remove */
+export const prStackSyncError = (nodeId: string) => `pr-stack-sync-error-${nodeId}`;
 
 /** `[data-testid="pr-stack-branch-<nodeId>"]` — the branch this planned PR owns (a branch that exists) */
 export const prStackBranch = (nodeId: string) => `pr-stack-branch-${nodeId}`;

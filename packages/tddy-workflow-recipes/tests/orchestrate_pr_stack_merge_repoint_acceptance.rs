@@ -121,6 +121,7 @@ fn merge_task_writes_prmerged_journal_then_marks_node_merged() {
             }),
             child_state: None,
             internal_status: None,
+            display_order: None,
         }],
     );
     let mock_gh = MockGithubPrApi::new("merge-sha-abc");
@@ -180,6 +181,7 @@ fn repoint_task_repoints_each_dependent_and_clears_journal() {
                 }),
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             },
             StackNode {
                 node_id: "n2".into(),
@@ -196,6 +198,7 @@ fn repoint_task_repoints_each_dependent_and_clears_journal() {
                 }),
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             },
             StackNode {
                 node_id: "n3".into(),
@@ -212,6 +215,7 @@ fn repoint_task_repoints_each_dependent_and_clears_journal() {
                 }),
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             },
         ],
     );

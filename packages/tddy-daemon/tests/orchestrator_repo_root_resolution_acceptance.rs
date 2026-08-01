@@ -181,6 +181,8 @@ async fn query(service: &ConnectionServiceImpl) -> BranchResolution {
             session_token: TOKEN.to_string(),
             session_id: ORCHESTRATOR.to_string(),
             branch: BRANCH.to_string(),
+            // This file's subject is how the repo root is resolved, not the base comparison.
+            base_branch: String::new(),
         }))
         .await
         .expect("QueryBranch must succeed as an RPC")

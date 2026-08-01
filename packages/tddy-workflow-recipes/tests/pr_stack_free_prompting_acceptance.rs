@@ -93,6 +93,7 @@ fn a_legacy_orchestrator_stuck_at_init_with_a_populated_stack_resumes_into_orche
                 pr_status: None,
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             }],
         }),
         ..Changeset::default()

@@ -86,8 +86,9 @@ use tddy_service::proto::connection::{
     GetAcpToolCallDetailResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
     GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest, HostCpuStats,
     HostDiskStats, HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse, QueryBranchRequest,
-    QueryBranchResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse, PullBaseIntoBranchRequest,
+    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
+    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
     ReportAgentActivityRequest, ReportAgentActivityResponse, StartDemoVmRequest,
     StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, StreamAcpReplayRequest,
     StreamHostStatsRequest, StreamMode, StreamSessionActivityRequest,
@@ -1107,6 +1108,64 @@ impl ConnectionServiceImpl {
                 format!("the PR lookup did not complete: {join_error}"),
             ),
         }
+    }
+
+    /// How the branch stands against the base the caller named, for `QueryBranch`'s fifth leg.
+    ///
+    /// Never fails, exactly like the session, worktree, remote and PR legs beside it: an unnamed
+    /// base, an unknown checkout, a probe that could not run and a probe that ran out of time all
+    /// arrive as `unavailable` carrying a reason. A comparison that could not be made is byte-
+    /// identical to a healthy one on every other field, so the discriminator is the only thing that
+    /// keeps "could not tell" from rendering as "clean" (PRD D27).
+    ///
+    /// An unnamed base is reported unavailable rather than substituted with the project default
+    /// (D29): this is a display, and the number beside a row must describe the same base the row's
+    /// own base line shows.
+    async fn base_sync_leg(
+        &self,
+        repo_root: Option<&std::path::Path>,
+        branch: &str,
+        base_branch: &str,
+    ) -> Option<tddy_service::proto::connection::BranchBaseSync> {
+        if base_branch.is_empty() {
+            return Some(base_sync_unavailable(
+                "",
+                "no base branch was named for this branch, so there is nothing to compare it \
+                 against",
+            ));
+        }
+        let Some(repo_root) = repo_root else {
+            return Some(base_sync_unavailable(
+                base_branch,
+                "no checkout is recorded for this session, so its repository could not be resolved",
+            ));
+        };
+
+        let probe_root = repo_root.to_path_buf();
+        let probe_branch = branch.to_string();
+        let probe_base = base_branch.to_string();
+        let probed = spawn_blocking_with_timeout(
+            self.config.spawn_worker_request_timeout(),
+            "QueryBranch: compare branch against base",
+            move || {
+                Ok(base_sync_through_cache(
+                    &probe_root,
+                    &probe_branch,
+                    &probe_base,
+                ))
+            },
+        )
+        .await;
+
+        Some(match probed {
+            Ok(Ok(sync)) => base_sync_view(sync),
+            Ok(Err(reason)) => base_sync_unavailable(base_branch, &reason),
+            // A timeout degrades this leg; it must not take the other four with it.
+            Err(status) => base_sync_unavailable(
+                base_branch,
+                &format!("the comparison did not complete: {}", status.message()),
+            ),
+        })
     }
 
     fn resolve_chain_base_ref_status(
@@ -7912,28 +7971,75 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             None => BranchSession::default(),
         };
 
-        // Worktree — the on-disk worktree checked out for the branch (non-erroring).
-        let worktree = match repo_root
-            .as_deref()
-            .and_then(|root| tddy_core::worktree::worktree_path_for_branch(root, &branch))
-        {
-            Some(path) => BranchWorktree {
-                exists: true,
-                path: path.to_string_lossy().into_owned(),
+        // Worktree — the on-disk worktree checked out for the branch (non-erroring), and whether it
+        // holds outstanding work. Dirtiness is deliberately *not* cached with the base comparison
+        // below: it is not a function of the two commits, and an operator's edit must show up on the
+        // next tick.
+        //
+        // Both halves are git subprocesses — a `worktree list` walk and a `status --porcelain` — so
+        // they run on the blocking pool like every other leg. A timeout degrades this leg to "no
+        // worktree" rather than failing the call, which is the same contract the other four keep.
+        let worktree_repo_root = repo_root.clone();
+        let branch_for_worktree = branch.clone();
+        let worktree = spawn_blocking_with_timeout(
+            self.config.spawn_worker_request_timeout(),
+            "QueryBranch: read the branch's worktree",
+            move || {
+                Ok(worktree_leg(
+                    worktree_repo_root.as_deref(),
+                    &branch_for_worktree,
+                ))
             },
-            None => BranchWorktree::default(),
-        };
+        )
+        .await
+        .unwrap_or_else(|status| {
+            log::warn!(
+                "QueryBranch: the worktree leg did not complete: {}",
+                status.message()
+            );
+            BranchWorktree::default()
+        });
 
         // Remote — `origin/<branch>` in the orchestrator's repo, which is what a descendant's
         // worktree is created from. Only as fresh as the last fetch, so it can delay a spawn but
         // never permit one that would fail inside `git fetch`.
-        let remote = match repo_root
-            .as_deref()
-            .and_then(|root| tddy_core::worktree::remote_branch_ref_sha(root, &branch))
-        {
-            Some(sha) => BranchRemote { exists: true, sha },
-            None => BranchRemote::default(),
-        };
+        //
+        // Shells out to `git rev-parse`, so it goes to the blocking pool like every other leg here:
+        // this handler is polled once per rendered row every few seconds, and a subprocess run
+        // inline would occupy a runtime worker thread for its whole duration.
+        let remote_repo_root = repo_root.clone();
+        let remote_branch = branch.clone();
+        let remote = spawn_blocking_with_timeout(
+            self.config.spawn_worker_request_timeout(),
+            "QueryBranch: remote ref",
+            move || {
+                Ok(
+                    match remote_repo_root.as_deref().and_then(|root| {
+                        tddy_core::worktree::remote_branch_ref_sha(root, &remote_branch)
+                    }) {
+                        Some(sha) => BranchRemote { exists: true, sha },
+                        None => BranchRemote::default(),
+                    },
+                )
+            },
+        )
+        .await
+        .unwrap_or_else(|status| {
+            // Degrades this leg alone — an absent remote ref only blocks a *descendant's* spawn, and
+            // reporting the RPC as failed would take the session, worktree and PR legs down with it.
+            log::warn!(
+                "QueryBranch: resolving the remote ref for '{branch}' did not complete: {}",
+                status.message()
+            );
+            BranchRemote::default()
+        });
+
+        // Base sync — how the branch stands against the base the caller named. Like every other leg
+        // it never fails the call: an unnamed base, an unknown checkout, a probe that could not run
+        // and a probe that timed out all arrive as `unavailable` with a reason.
+        let base_sync = self
+            .base_sync_leg(repo_root.as_deref(), &branch, req.base_branch.trim())
+            .await;
 
         // PR — same path as get_pr_status. A lookup that cannot be performed degrades this leg
         // alone; the session, worktree and remote legs above stay usable.
@@ -7948,6 +8054,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 worktree: Some(worktree),
                 pr: Some(pr),
                 remote: Some(remote),
+                base_sync,
             }),
         }))
     }
@@ -8055,6 +8162,206 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
         let stack_plan_json = session_list_enrichment::stack_plan_json_for_changeset(&updated);
         Ok(Response::new(RepointPlannedPrResponse { stack_plan_json }))
+    }
+
+    /// Move one planned node up or down the operator's reading order.
+    ///
+    /// Touches nothing but `StackNode.display_order`: the dependency graph is a different fact, and
+    /// keeping the two independent is the whole reason the field exists. Moving past either end is a
+    /// successful no-op — the control at the end of the list is inert, not wrong.
+    async fn reorder_planned_pr(
+        &self,
+        request: Request<ReorderPlannedPrRequest>,
+    ) -> Result<Response<ReorderPlannedPrResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        if req.node_id.trim().is_empty() {
+            return Err(Status::invalid_argument("node_id is required"));
+        }
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+        require_pr_stack_orchestrator(&session_dir)?;
+
+        tddy_workflow_recipes::pr_stack::move_planned_pr_node(
+            &session_dir,
+            req.node_id.trim(),
+            req.direction.trim(),
+        )
+        .map_err(Status::invalid_argument)?;
+
+        // The same serializer `ListSessions` enrichment uses, so the response's `stack_plan_json` is
+        // the exact wire shape `PrStackScreen`'s `parseStackPlan` already reads.
+        let updated =
+            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
+        let stack_plan_json = session_list_enrichment::stack_plan_json_for_changeset(&updated);
+        Ok(Response::new(ReorderPlannedPrResponse { stack_plan_json }))
+    }
+
+    /// Take a base branch's commits into a planned node's branch, inside that node's own worktree,
+    /// and push the result.
+    ///
+    /// A mutation, so an unknown checkout is a precondition failure rather than a degraded leg — the
+    /// pull has nowhere to happen. The branch is then re-resolved **uncached**: the refs it compares
+    /// have just moved, and the point of returning a resolution at all is that the row repaints
+    /// without waiting for the next poll tick.
+    async fn pull_base_into_branch(
+        &self,
+        request: Request<PullBaseIntoBranchRequest>,
+    ) -> Result<Response<PullBaseIntoBranchResponse>, Status> {
+        use tddy_service::proto::connection::{
+            BranchRemote, BranchResolution, BranchSession, BranchWorktree,
+        };
+
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        if req.node_id.trim().is_empty() {
+            return Err(Status::invalid_argument("node_id is required"));
+        }
+        if req.base_branch.trim().is_empty() {
+            return Err(Status::invalid_argument("base_branch is required"));
+        }
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+        require_pr_stack_orchestrator(&session_dir)?;
+
+        let repo_root = tddy_core::repo_root_for_session(&session_dir).ok_or_else(|| {
+            Status::failed_precondition(
+                "no checkout is recorded for this session, so its repository could not be resolved",
+            )
+        })?;
+
+        let strategy = tddy_workflow_recipes::pr_stack::BaseSyncStrategy::from_wire(&req.strategy);
+        let node_id = req.node_id.trim().to_string();
+        let base_branch = req.base_branch.trim().to_string();
+        let dirty_worktree_action = req.dirty_worktree_action.clone();
+        let commit_message = req.commit_message.clone();
+        let session_dir_for_op = session_dir.clone();
+        let repo_root_for_op = repo_root.clone();
+        let report = tokio::task::spawn_blocking(move || {
+            tddy_workflow_recipes::pr_stack::pull_base_into_node_branch(
+                &session_dir_for_op,
+                &repo_root_for_op,
+                &node_id,
+                &base_branch,
+                strategy,
+                &dirty_worktree_action,
+                &commit_message,
+            )
+        })
+        .await
+        .map_err(|e| Status::internal(format!("pull_base_into_branch join error: {e}")))?
+        .map_err(Status::failed_precondition)?;
+
+        // The branch the pull just moved, re-read from disk.
+        let branch = tddy_core::read_changeset(&session_dir)
+            .ok()
+            .and_then(|changeset| changeset.stack)
+            .and_then(|stack| stack.node(req.node_id.trim())?.branch.clone())
+            .unwrap_or_default();
+
+        // A sessions-directory walk, two worktree probes and a `git merge-tree` — all blocking, so
+        // they go to the blocking pool together rather than tying up a runtime thread for the length
+        // of four git subprocesses.
+        let resolution_branch = branch.clone();
+        let resolution_repo_root = repo_root.clone();
+        let resolution_sessions_base = sessions_base.clone();
+        let resolution_base_branch = req.base_branch.trim().to_string();
+        let (session, worktree, remote, base_sync) = spawn_blocking_with_timeout(
+            self.config.spawn_worker_request_timeout(),
+            "PullBaseIntoBranch: re-read the branch",
+            move || {
+                let session = match crate::branch_owner::find_session_owning_branch(
+                    &resolution_sessions_base,
+                    &resolution_branch,
+                )
+                .ok()
+                .flatten()
+                {
+                    Some(s) => BranchSession {
+                        exists: true,
+                        session_id: s.session_id,
+                        is_active: s.is_active,
+                        status: s.status,
+                    },
+                    None => BranchSession::default(),
+                };
+                let worktree = worktree_leg(Some(&resolution_repo_root), &resolution_branch);
+                let remote = match tddy_core::worktree::remote_branch_ref_sha(
+                    &resolution_repo_root,
+                    &resolution_branch,
+                ) {
+                    Some(sha) => BranchRemote { exists: true, sha },
+                    None => BranchRemote::default(),
+                };
+                // Uncached on purpose: the cache is keyed on the refs and the commits they point at,
+                // and both commits may have just moved. Going through it would answer about the pair
+                // the poll saw a moment ago.
+                let base_sync = Some(
+                    match tddy_core::base_sync::branch_base_sync(
+                        &resolution_repo_root,
+                        &resolution_branch,
+                        &resolution_base_branch,
+                    ) {
+                        Ok(sync) => base_sync_view(sync),
+                        Err(reason) => base_sync_unavailable(&resolution_base_branch, &reason),
+                    },
+                );
+                Ok((session, worktree, remote, base_sync))
+            },
+        )
+        .await
+        // The pull itself already landed. Failing the whole call because re-reading the branch took
+        // too long would leave the operator with no idea that it did, so the description degrades
+        // and the report below still says what happened.
+        .unwrap_or_else(|status| {
+            let reason = format!(
+                "the branch could not be re-read after the pull: {}",
+                status.message()
+            );
+            log::warn!("PullBaseIntoBranch: {reason}");
+            (
+                BranchSession::default(),
+                BranchWorktree::default(),
+                BranchRemote::default(),
+                Some(base_sync_unavailable(req.base_branch.trim(), &reason)),
+            )
+        });
+        let pr = self
+            .pr_status_for_caller(&github_user, Some(&repo_root), &branch)
+            .await;
+
+        Ok(Response::new(PullBaseIntoBranchResponse {
+            resolution: Some(BranchResolution {
+                branch,
+                session: Some(session),
+                worktree: Some(worktree),
+                pr: Some(pr),
+                remote: Some(remote),
+                base_sync,
+            }),
+            strategy: report.strategy.to_string(),
+            changed: report.changed,
+            pushed: report.pushed,
+            push_error: report.push_error.unwrap_or_default(),
+        }))
     }
 
     /// Local peer-trust minting is not available on this transport. Peer credentials
@@ -8668,6 +8975,97 @@ fn pr_status_unavailable(
         unavailable_reason: reason,
         ..Default::default()
     }
+}
+
+/// Compare `branch` against `base_branch`, reading through the process-wide cache.
+///
+/// Resolving the two refs is a pair of `rev-parse`s and runs every time — it is what produces the
+/// cache key, and it is also how a moved ref is noticed. Only the comparison itself, which runs
+/// `git merge-tree`, is cached.
+fn base_sync_through_cache(
+    repo_root: &std::path::Path,
+    branch: &str,
+    base_branch: &str,
+) -> Result<tddy_core::base_sync::BranchBaseSync, String> {
+    let refs = tddy_core::base_sync::resolve_base_sync_refs(repo_root, branch, base_branch)?;
+    let key = crate::base_sync_cache::BaseSyncKey::new(repo_root, &refs);
+    crate::base_sync_cache::shared().get_or_probe(key, || {
+        tddy_core::base_sync::compare_base_sync_refs(repo_root, &refs)
+    })
+}
+
+/// A completed comparison on the wire. `base_branch` carries the ref that was actually compared —
+/// not the one the caller asked for — because the counts are meaningless beside a ref they did not
+/// come from (D28).
+fn base_sync_view(
+    sync: tddy_core::base_sync::BranchBaseSync,
+) -> tddy_service::proto::connection::BranchBaseSync {
+    tddy_service::proto::connection::BranchBaseSync {
+        base_branch: sync.base_ref.clone(),
+        behind_count: sync.behind_count,
+        ahead_count: sync.ahead_count,
+        has_conflicts: sync.has_conflicts,
+        conflicted_paths: sync.conflicted_paths,
+        unavailable: false,
+        unavailable_reason: String::new(),
+        base_ref: sync.base_ref,
+        head_ref: sync.head_ref,
+    }
+}
+
+/// A comparison the daemon could not make: *unavailable* with an operator-facing reason, never a
+/// zeroed success. A failed comparison reads identically to a healthy one on every other field, so
+/// this discriminator is the only thing standing between "could not tell" and "clean" (D27).
+fn base_sync_unavailable(
+    base_branch: &str,
+    reason: &str,
+) -> tddy_service::proto::connection::BranchBaseSync {
+    tddy_service::proto::connection::BranchBaseSync {
+        base_branch: base_branch.to_string(),
+        unavailable: true,
+        unavailable_reason: reason.to_string(),
+        ..Default::default()
+    }
+}
+
+/// The `worktree` leg of a `BranchResolution`: the on-disk worktree checked out for `branch`, and
+/// whether it holds outstanding work.
+///
+/// Two git subprocesses — a `git worktree list` walk and a `git status --porcelain` — so every caller
+/// runs this on the blocking pool, never on a runtime thread.
+fn worktree_leg(
+    repo_root: Option<&std::path::Path>,
+    branch: &str,
+) -> tddy_service::proto::connection::BranchWorktree {
+    use tddy_service::proto::connection::BranchWorktree;
+
+    let Some(path) =
+        repo_root.and_then(|root| tddy_core::worktree::worktree_path_for_branch(root, branch))
+    else {
+        return BranchWorktree::default();
+    };
+    let dirty_paths = worktree_dirty_paths(&path);
+    BranchWorktree {
+        exists: true,
+        path: path.to_string_lossy().into_owned(),
+        dirty: !dirty_paths.is_empty(),
+        dirty_paths,
+    }
+}
+
+/// The tracked paths with outstanding changes in a worktree — empty for a clean one, and empty for
+/// a path git cannot read at all, which is the same thing as far as offering a pull goes.
+///
+/// Untracked files are deliberately excluded: git refuses loudly rather than clobbering one, and
+/// counting them would leave the pull control permanently blocked in any worktree an agent works in.
+fn worktree_dirty_paths(worktree: &std::path::Path) -> Vec<String> {
+    tddy_workflow_recipes::orchestrate_pr_stack::worktree_is_clean(worktree).unwrap_or_else(|e| {
+        log::warn!(
+            "QueryBranch: could not read the state of the worktree at {}: {e}",
+            worktree.display()
+        );
+        Vec::new()
+    })
 }
 
 /// GitHub PR state → the lowercase label carried on the `PrStatusView.state` wire field.
@@ -10824,6 +11222,7 @@ mod stack_child_link_tests {
             pr_status: None,
             child_state: None,
             internal_status: None,
+            display_order: None,
         }
     }
 

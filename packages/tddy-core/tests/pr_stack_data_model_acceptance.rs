@@ -36,6 +36,7 @@ fn stack_roundtrip_linear_and_dag() {
                 pr_status: None,
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             },
             StackNode {
                 node_id: "n2".into(),
@@ -48,6 +49,7 @@ fn stack_roundtrip_linear_and_dag() {
                 pr_status: None,
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             },
             StackNode {
                 node_id: "n3".into(),
@@ -60,6 +62,7 @@ fn stack_roundtrip_linear_and_dag() {
                 pr_status: None,
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             },
         ],
     };
@@ -109,6 +112,7 @@ fn effective_base_refs_skips_merged_ancestor() {
                 }),
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             },
             StackNode {
                 node_id: "n2".into(),
@@ -125,6 +129,7 @@ fn effective_base_refs_skips_merged_ancestor() {
                 }),
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             },
         ],
     };
@@ -157,6 +162,7 @@ fn topo_order_rejects_cycle() {
                 pr_status: None,
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             },
             StackNode {
                 node_id: "n2".into(),
@@ -169,6 +175,7 @@ fn topo_order_rejects_cycle() {
                 pr_status: None,
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             },
         ],
     };
@@ -216,6 +223,7 @@ fn internal_status_roundtrips_through_changeset_yaml() {
                 ),
                 source: "derived".into(),
             }),
+            display_order: None,
         }],
     };
     let cs = Changeset {

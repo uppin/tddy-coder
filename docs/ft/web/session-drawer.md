@@ -660,21 +660,77 @@ child sessions for each planned PR — all without leaving the orchestrator sess
 
 Reads the orchestrator's `Stack` (see [PR stacking § Stack data model](../coder/pr-stacking.md#stack-data-model))
 via `SessionEntry.stackPlanJson` (proto field 23 — a JSON-serialized `Stack`, empty string
-until a plan exists) and renders one row per `StackNode` in `Stack::topo_order` (roots
-before dependents).
+until a plan exists) and renders one row per `StackNode`.
 
-Each row renders the node's **branch name** (`pr-stack-branch-<nodeId>`) or, when no branch exists yet,
+> **Updated 2026-08-01** — rows render in the order the plan **persists** (`StackNode.display_order`),
+> not in `Stack::topo_order`. The reading order and the dependency graph are different facts, and
+> deriving one from the other meant a merge, a repoint or a re-parenting silently moved a row the
+> operator was reading. `orderStackNodes` falls back to `topoSortStackNodes` **wholesale** for a plan
+> that carries no positions at all (a plan authored before this existed); a half-numbered plan takes
+> the same fallback, since interleaving real positions with invented ones can render a child above its
+> parent. See [PR-Stack live status § Persisted display order](../coder/pr-stack-live-status.md#persisted-display-order).
+
+**Row anatomy** *(2026-08-01)* — a row is a collapsed summary that expands to its full detail:
+
+| Region | Contents | Visibility |
+|---|---|---|
+| Summary header | the toggle (`pr-stack-row-toggle-<nodeId>`, carrying the title and `aria-expanded`), the badge strip, and the CTA slot | always |
+| Detail body (`pr-stack-row-details-<nodeId>`) | description, branch / planned branch, base branch, worktree, node id, parents, child recipe, child state, bound child session, conflicted paths, and the reorder + pull controls | **hidden, never unmounted** |
+| Footer | `pr-stack-start-warning-<nodeId>`, `pr-stack-repoint-error-<nodeId>`, `pr-stack-sync-error-<nodeId>`, `pr-stack-reorder-error-<nodeId>` | always |
+
+The detail is hidden with `display:none` rather than unmounted, so expansion, scroll position and the
+branch poll set all survive a collapse — and every existing information contract keeps holding. Errors
+and blockers sit **outside** the collapse boundary: a reason the operator must expand a row to find is
+the dead end D16 exists to remove. The badge strip and CTA are siblings of the toggle, never nested
+inside it — a button within a button would swallow the Start-session click.
+
+The detail carries the node's **branch name** (`pr-stack-branch-<nodeId>`) or, when no branch exists yet,
 its `branchSuggestion` marked as **planned** (`pr-stack-planned-branch-<nodeId>`, rendered as
-`planned: <name>`) — a suggestion names no ref, so the two are never shown the same way. Alongside it:
-live **worktree** (`pr-stack-worktree-<nodeId>`), **in-progress session**
-(`pr-stack-session-<nodeId>`), **PR** link/state (`pr-stack-pr-link-<nodeId>` /
-`pr-stack-pr-state-<nodeId>`), or **"PR status unavailable"** (`pr-stack-pr-unavailable-<nodeId>`, with
-the reason as its `title` tooltip) — all resolved by branch through the `QueryBranch` RPC
-(`useQueryBranch`, per-branch polled). See
+`planned: <name>`) — a suggestion names no ref, so the two are never shown the same way — plus the live
+**worktree** (`pr-stack-worktree-<nodeId>`) and the **base branch** its child worktree would be created
+from (`pr-stack-base-branch-<nodeId>`), whatever its startability. The summary strip carries the
+**in-progress** badge, the **PR** link/state (`pr-stack-pr-link-<nodeId>` / `pr-stack-pr-state-<nodeId>`)
+or **"PR status unavailable"** (`pr-stack-pr-unavailable-<nodeId>`, reason as its `title`), and the
+base-sync badge below. All of it is resolved by branch through the `QueryBranch` RPC (`useQueryBranch`,
+per-branch polled). See
 [PR-Stack live status § QueryBranch](../coder/pr-stack-live-status.md#api-surface).
 
-Every row also renders the **base branch** its child worktree would be created from
-(`pr-stack-base-branch-<nodeId>`), whatever its startability.
+**The spawned indicator opens its session** *(2026-08-01)*. When the node's bound child session resolves,
+the status chip is **wrapped** (not replaced) in `pr-stack-session-<nodeId>`, which selects and attaches
+that session exactly as clicking it in the drawer does. Resolution prefers the session the plan records
+and falls back to the branch's current owner, each guarded on the session being one the drawer knows; when
+neither resolves the chip stays plain text, because a control that selects nothing is worse than no
+control. Navigation is in-app — the PR link remains the row's only new-tab affordance.
+
+*Known gap:* `handleSelectSession` does not write `window.location.hash`, so opening a session from the
+panel selects and attaches without changing the URL — identical to the peer switcher and to clicking a
+drawer row. Making drawer selection URL-addressable is a drawer-wide change.
+
+**Base-sync badges** *(2026-08-01)*, in the summary strip, mutually exclusive:
+
+| State | Badge |
+|---|---|
+| Behind by N commits, no conflicts | `pr-stack-base-behind-<nodeId>` — "N behind `<base>`" |
+| Would conflict | `pr-stack-base-conflicts-<nodeId>`; the paths in the detail (`pr-stack-base-conflict-paths-<nodeId>`) |
+| Contains every commit on its base | `pr-stack-base-in-sync-<nodeId>` |
+| Comparison could not be made | `pr-stack-base-sync-unavailable-<nodeId>`, reason as its `title` |
+| Poll has not answered / older daemon | nothing |
+
+An unavailable comparison is **never** rendered as clean, and "in sync" is a badge rather than silence —
+otherwise a healthy row and a row whose poll has not answered would look identical.
+
+**Row controls in the detail** *(2026-08-01)*:
+
+- **Reorder** — `pr-stack-move-up-<nodeId>` / `pr-stack-move-down-<nodeId>`, disabled at the ends of the
+  rendered order and while a reorder is in flight, backed by `ReorderPlannedPr`.
+- **Pull from base** — `pr-stack-sync-merge-<nodeId>` ("Merge N commits from `<base>`", singular at 1) and
+  `pr-stack-sync-rebase-<nodeId>`, backed by `PullBaseIntoBranch`. Offered **only** when the row is cleanly
+  behind and owns a branch: not at zero commits, not on conflicts, not on an unavailable or unarrived
+  comparison. Both disable together while either runs — a concurrent merge and rebase of one branch is
+  destructive, not merely wasteful. Merge is the default; rebase is the operator's explicit choice.
+- **Dirty worktree** — when the branch's worktree holds uncommitted tracked changes, clicking a pull
+  control opens `pr-stack-dirty-worktree-dialog` naming those paths, offering to commit and push them
+  first. Cancelling calls nothing at all.
 
 **The CTA slot holds exactly one of two things**, and a blocked row carries its warning *beside* the
 CTA rather than in place of it:

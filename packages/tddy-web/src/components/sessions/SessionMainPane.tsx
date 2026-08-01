@@ -264,6 +264,10 @@ export function SessionMainPane({
         defaultBranch,
         defaultRemote,
         onChildSessionStarted,
+        // The peer switcher is `SessionsDrawerScreen`'s own `handleSelectSession` — select and
+        // attach, reusing the runtime registry — which is exactly what opening a planned PR's bound
+        // child session means, so the two share one handler rather than adding a second.
+        onOpenSession: onSwitchPeer,
       })
     : null;
 

@@ -4,6 +4,16 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-08-01 — Planned-PR rows expand, link to their session, and hold their order
+
+- **Each row collapses to a summary and expands to its full detail** — title, status and call to action stay visible; description, branch, base branch, worktree, node id, parents, child recipe and bound session move behind a toggle. The row previously rendered all of it unconditionally, which in the panel's 360px dock made a five-node stack a wall of text with nowhere to put the fields the node had but never showed.
+- The detail is **hidden, never unmounted**, so expansion, scroll position and the branch poll set survive a collapse and a panel close. Blockers, refusals and errors stay outside the collapse boundary — a reason you have to expand a row to find is a fresh dead end.
+- **The spawned indicator now opens the session it is bound to**, selecting and attaching it exactly as clicking it in the drawer does. It prefers the session the plan records and falls back to the branch's current owner; when neither is a session the drawer knows it stays plain text rather than offering a link that would select nothing.
+- **Rows no longer reshuffle.** Order comes from the plan's persisted position rather than being re-derived from the dependency graph, and each row offers move up / move down. A plan authored before this renders in topological order until the next write numbers it.
+- **New base-sync badges** on every row: N behind, would-conflict (with the paths in the detail), in sync, or *unavailable*. "In sync" is a real badge rather than silence — otherwise a healthy row and a row whose poll has not answered would look identical.
+- **A row cleanly behind its base offers to pull it in**, labelled with the commit count: *Merge 3 commits from `origin/master`*, with rebase beside it. Neither is offered at zero commits, on conflicts, or on a comparison that could not be made. A worktree holding uncommitted work prompts first, and can commit and push it before pulling.
+- See [session-drawer.md § Planned-PR list](session-drawer.md#planned-pr-list).
+
 ## 2026-07-30 — Creating a session on a branch another session owns asks what to do instead of silently renaming the branch
 
 - **A new `BranchConflictDialog`** replaces the silent `<branch>-1` rename: when the daemon reports the requested branch is already owned, the creation form stays put and offers three choices — **switch to the owning session** (named, with whether it is active), **add another agent on that branch** (a second session sharing the owner's worktree), or **use a different branch name** (an editable field pre-filled with the daemon's suggestion, so the suffix is consented rather than applied behind your back). See [session-branch-conflict.md](../daemon/session-branch-conflict.md).

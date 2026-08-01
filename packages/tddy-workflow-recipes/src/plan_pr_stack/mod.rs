@@ -51,9 +51,14 @@ pub struct PlannedPr {
 }
 
 /// Convert a parsed plan into StackNode list (no child session yet — session_id/branch = None).
+///
+/// The reading order is the plan's own array order: the agent writes the PRs in the sequence it
+/// means them to be read, and that sequence is not always the topological one (two independent
+/// roots have no order at all in the DAG, but the plan lists them in one).
 pub fn planned_prs_into_stack_nodes(prs: &[PlannedPr]) -> Vec<StackNode> {
     prs.iter()
-        .map(|pr| StackNode {
+        .enumerate()
+        .map(|(position, pr)| StackNode {
             node_id: pr.node_id.clone(),
             title: pr.title.clone(),
             description: pr.description.clone(),
@@ -64,6 +69,7 @@ pub fn planned_prs_into_stack_nodes(prs: &[PlannedPr]) -> Vec<StackNode> {
             pr_status: None,
             child_state: None,
             internal_status: None,
+            display_order: Some(position as u32),
         })
         .collect()
 }

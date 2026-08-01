@@ -93,6 +93,7 @@ fn spawn_chain_child_sets_orchestrator_session_id() {
                 pr_status: None,
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             }],
         }),
         ..Changeset::default()
@@ -148,6 +149,7 @@ fn link_stack_node_sets_session_id_and_branch() {
                 pr_status: None,
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             }],
         }),
         ..Changeset::default()

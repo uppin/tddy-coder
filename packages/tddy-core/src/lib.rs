@@ -3,6 +3,7 @@
 pub mod agent_activity;
 pub mod agent_skills;
 pub mod backend;
+pub mod base_sync;
 pub mod branch_worktree_intent;
 pub mod changeset;
 pub mod claude_argv;

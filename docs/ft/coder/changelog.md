@@ -2,6 +2,16 @@
 
 Release note history for the Coder product area.
 
+## 2026-08-01 — PR-stack rows hold still, state their base, and can take it
+
+- **Row order is persisted.** `StackNode` gains `display_order`, and the panel renders strictly by it, so a merge, a repoint or a re-parenting no longer moves a row the operator is reading. Order is assigned on the next write to a stack (never on read), and each row offers move up / move down via the new `ReorderPlannedPr` RPC.
+- **Each row states how its branch stands against its base** — behind by N commits, would conflict (with the paths), in sync, or explicitly *unavailable*. Computed on the existing `QueryBranch` poll by `tddy_core::base_sync`, so it is live whether or not the orchestrator agent is running.
+- The probe is **strictly non-mutating** — `git rev-list --left-right --count` plus `git merge-tree --write-tree`, which touch no index, working tree, `HEAD` or ref. The existing `pr_resolve_conflicts` detector runs a real `git merge --no-commit` and could never be put on a 5 s poll against a worktree an agent is working in. It also never fetches, so the counts are as fresh as the last fetch.
+- A comparison that **could not be made is never reported as clean** — a failure arrives byte-identical to a healthy branch, so it carries its own discriminator (the same rule as PR status, D12).
+- **A row cleanly behind its base can pull it in**: `PullBaseIntoBranch` merges (the default, matching `pr_resolve_conflicts` — no force-push, review anchors intact) or rebases (`--force-with-lease`), inside the node's own worktree, then pushes. A conflict aborts and reports its paths rather than leaving a half-merged tree for an agent mid-turn. A dirty worktree is refused unless the caller opts into committing and pushing the outstanding work first.
+- Cost is bounded by a content-keyed cache on `(repo_root, base_sha, head_sha)` — a key that cannot go stale — plus a short-circuit when nothing is behind.
+- See [pr-stack-live-status.md § Panel UX](pr-stack-live-status.md#panel-ux-expandable-rows-session-links-persisted-order-base-sync-added-2026-08-01).
+
 ## 2026-07-30 — PR-stack full control from the orchestrator chat
 
 - The `pr-stack` orchestrator agent gains seven `mcp__tddy-tools__pr_*` tools and can now change the plan, not only grow it: `pr_update_planned` (edit title/description any time, `branch_suggestion` only while unspawned, opt-in `sync_pr` publishes to the PR), `pr_delete_planned` (remove a node, reparenting its children onto its parents; refuses an open PR), `pr_set_parents` (the plan-level move, and the only reorder primitive), `pr_read`, `pr_search`, `pr_comments`, and `pr_adopt` (bring an externally-created PR into the stack).

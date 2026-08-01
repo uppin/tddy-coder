@@ -41,6 +41,11 @@ export interface WorkflowViewContext {
     orchestratorSessionId: string;
     projectId: string;
   }) => void;
+  /**
+   * Select and attach an existing session. The PR-Stack view opens a spawned planned PR's bound child
+   * session with it — see `PrStackScreenProps.onOpenSession`.
+   */
+  onOpenSession?: (sessionId: string) => void;
 }
 
 /**
@@ -72,6 +77,7 @@ export function resolveWorkflowView(
         defaultBranch={context.defaultBranch}
         defaultRemote={context.defaultRemote}
         onChildSessionStarted={context.onChildSessionStarted}
+        onOpenSession={context.onOpenSession}
       />
     );
   }

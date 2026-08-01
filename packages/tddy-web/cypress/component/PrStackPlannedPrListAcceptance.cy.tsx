@@ -98,9 +98,73 @@ it("shows a status chip instead of a Start session CTA once a node has a spawned
 });
 
 it("renders planned-PR rows in topological order, roots before their dependents", () => {
-  // Given — n2 depends on n1; the plan lists them out of order to prove sorting, not fixture order
+  // Given — n2 depends on n1; the plan lists them out of order to prove sorting, not fixture order.
+  // Neither node carries a persisted position, which is what a plan authored before display order
+  // existed looks like — so this is also the legacy fallback case.
   const plan = aStackPlanJson(1, [
     aPlannedNode({ nodeId: "n2", title: "Add auth middleware", parents: ["n1"] }),
+    aPlannedNode({ nodeId: "n1", title: "Add token store" }),
+  ]);
+
+  // When
+  openPrStackScreen(anOrchestratorSession(plan));
+
+  // Then
+  prStackScreenPage.plannedPrRowNodeIds().should("deep.equal", ["n1", "n2"]);
+});
+
+// ---------------------------------------------------------------------------
+// Row order is read from the plan, not re-derived from the DAG
+// ---------------------------------------------------------------------------
+
+it("renders planned-PR rows in the order the plan persists", () => {
+  // Given — the persisted positions contradict both the fixture order and the dependency graph
+  const plan = aStackPlanJson(1, [
+    aPlannedNode({ nodeId: "n1", title: "Add token store", displayOrder: 2 }),
+    aPlannedNode({ nodeId: "n2", title: "Add auth middleware", parents: ["n1"], displayOrder: 0 }),
+    aPlannedNode({ nodeId: "n3", title: "Add login screen", parents: ["n2"], displayOrder: 1 }),
+  ]);
+
+  // When
+  openPrStackScreen(anOrchestratorSession(plan));
+
+  // Then — the operator's reading order and the dependency graph are allowed to differ
+  prStackScreenPage.plannedPrRowNodeIds().should("deep.equal", ["n2", "n3", "n1"]);
+});
+
+it("keeps a row in its persisted position when a predecessor merges under it", () => {
+  // Given — n1 has merged, which collapses n2's effective base and would re-layer a derived order.
+  // The positions say otherwise, and a merge is exactly the kind of unrelated event that used to
+  // make a row the operator was reading jump.
+  const plan = aStackPlanJson(1, [
+    aPlannedNode({
+      nodeId: "n1",
+      title: "Add token store",
+      branch: "feature/auth/token-store",
+      prStatus: { phase: "merged" },
+      displayOrder: 1,
+    }),
+    aPlannedNode({
+      nodeId: "n2",
+      title: "Add auth middleware",
+      parents: ["n1"],
+      displayOrder: 0,
+    }),
+  ]);
+
+  // When
+  openPrStackScreen(anOrchestratorSession(plan));
+
+  // Then
+  prStackScreenPage.plannedPrRowNodeIds().should("deep.equal", ["n2", "n1"]);
+});
+
+it("falls back to topological order when only some rows carry a persisted position", () => {
+  // Given — a half-numbered plan has no coherent total order. Interleaving real positions with
+  // invented ones can render a child above its parent, which is a worse lie than one render of a
+  // correct derived order; the next write to the stack numbers everything.
+  const plan = aStackPlanJson(1, [
+    aPlannedNode({ nodeId: "n2", title: "Add auth middleware", parents: ["n1"], displayOrder: 0 }),
     aPlannedNode({ nodeId: "n1", title: "Add token store" }),
   ]);
 

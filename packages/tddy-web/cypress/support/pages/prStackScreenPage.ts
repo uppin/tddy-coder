@@ -27,6 +27,24 @@ import {
   prStackStartWarning,
   prStackRepointError,
   prStackPrUnavailable,
+  prStackRowToggle,
+  prStackRowDetails,
+  prStackNodeId,
+  prStackParents,
+  prStackChildRecipe,
+  prStackChildSession,
+  prStackChildState,
+  prStackMoveUpBtn,
+  prStackMoveDownBtn,
+  prStackReorderError,
+  prStackBaseBehind,
+  prStackBaseInSync,
+  prStackBaseConflicts,
+  prStackBaseSyncUnavailable,
+  prStackBaseConflictPaths,
+  prStackSyncMergeBtn,
+  prStackSyncRebaseBtn,
+  prStackSyncError,
   TEST_IDS,
 } from "../testIds";
 
@@ -92,9 +110,170 @@ export const prStackScreenPage = {
   worktree: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(prStackWorktree(nodeId), { timeout: 5000, ...options }),
 
-  /** The resolved in-progress session reference for a row (resolved by branch via QueryBranch). */
+  /**
+   * The control that opens the child session a row is bound to — the status chip made clickable.
+   * Absent when neither the plan's recorded child nor the branch's owner is a known session.
+   */
   sessionRef: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(prStackSession(nodeId), { timeout: 5000, ...options }),
+
+  /** Open the child session a row is bound to. */
+  openBoundSession(nodeId: string) {
+    byTestId(prStackSession(nodeId)).click();
+  },
+
+  // ---------------------------------------------------------------------------
+  // Row expansion
+  // ---------------------------------------------------------------------------
+
+  /** A row's header control — clicking it expands or collapses that row's detail. */
+  rowToggle: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackRowToggle(nodeId), { timeout: 5000, ...options }),
+
+  /** A row's detail body. Always mounted; hidden rather than unmounted while collapsed. */
+  rowDetails: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackRowDetails(nodeId), { timeout: 5000, ...options }),
+
+  /** The planner-assigned node id, shown in the row's detail. */
+  nodeIdLabel: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackNodeId(nodeId), { timeout: 5000, ...options }),
+
+  /** The titles of the nodes this row is stacked on, shown in its detail. */
+  parents: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackParents(nodeId), { timeout: 5000, ...options }),
+
+  /** The recipe the row's child session runs, shown in its detail. */
+  childRecipe: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackChildRecipe(nodeId), { timeout: 5000, ...options }),
+
+  /** The bound child session's id, shown in the row's detail. */
+  childSession: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackChildSession(nodeId), { timeout: 5000, ...options }),
+
+  /** The child session's last-recorded workflow state, shown in the row's detail. */
+  childState: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackChildState(nodeId), { timeout: 5000, ...options }),
+
+  /** Expand a row to reveal its detail. */
+  expandRow(nodeId: string) {
+    byTestId(prStackRowToggle(nodeId)).click();
+  },
+
+  /**
+   * Assert the row header names the detail body it reveals: its `aria-controls` must resolve to that
+   * row's own detail container, rather than merely being present.
+   */
+  expectRowToggleControlsDetails(nodeId: string) {
+    prStackScreenPage
+      .rowToggle(nodeId)
+      .invoke("attr", "aria-controls")
+      .should("be.a", "string")
+      .then((controlsId) => {
+        cy.get(`#${controlsId}`).should("have.attr", "data-testid", prStackRowDetails(nodeId));
+      });
+  },
+
+  // ---------------------------------------------------------------------------
+  // Row order
+  // ---------------------------------------------------------------------------
+
+  /** Move a row one position earlier in the persisted order. */
+  moveUpBtn: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackMoveUpBtn(nodeId), { timeout: 5000, ...options }),
+
+  /** Move a row one position later in the persisted order. */
+  moveDownBtn: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackMoveDownBtn(nodeId), { timeout: 5000, ...options }),
+
+  /** Click a row's move-up control. */
+  clickMoveUp(nodeId: string) {
+    byTestId(prStackMoveUpBtn(nodeId)).click();
+  },
+
+  /** Click a row's move-down control. */
+  clickMoveDown(nodeId: string) {
+    byTestId(prStackMoveDownBtn(nodeId)).click();
+  },
+
+  /** The daemon's reason for refusing or failing a reorder, shown outside the collapse boundary. */
+  reorderError: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackReorderError(nodeId), { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
+  // Standing against the base branch
+  // ---------------------------------------------------------------------------
+
+  /** How many commits the row's branch is behind its base. */
+  baseBehind: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackBaseBehind(nodeId), { timeout: 5000, ...options }),
+
+  /** The row's branch contains every commit on its base. */
+  baseInSync: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackBaseInSync(nodeId), { timeout: 5000, ...options }),
+
+  /** Merging the base into the row's branch would conflict. */
+  baseConflicts: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackBaseConflicts(nodeId), { timeout: 5000, ...options }),
+
+  /** The base comparison could not be made — distinct from a clean result. */
+  baseSyncUnavailable: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackBaseSyncUnavailable(nodeId), { timeout: 5000, ...options }),
+
+  /** The conflicting paths, in the row's detail. */
+  baseConflictPaths: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackBaseConflictPaths(nodeId), { timeout: 5000, ...options }),
+
+  // ---------------------------------------------------------------------------
+  // Pulling the base into the row's branch
+  // ---------------------------------------------------------------------------
+
+  /** Pull the base in by merging it — the default strategy. */
+  syncMergeBtn: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackSyncMergeBtn(nodeId), { timeout: 5000, ...options }),
+
+  /** Pull the base in by rebasing the branch onto it. */
+  syncRebaseBtn: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackSyncRebaseBtn(nodeId), { timeout: 5000, ...options }),
+
+  /** The daemon's reason for refusing or failing a pull, shown outside the collapse boundary. */
+  syncError: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackSyncError(nodeId), { timeout: 5000, ...options }),
+
+  /** Click a row's merge-from-base control. */
+  clickSyncMerge(nodeId: string) {
+    byTestId(prStackSyncMergeBtn(nodeId)).click();
+  },
+
+  /** Click a row's rebase-onto-base control. */
+  clickSyncRebase(nodeId: string) {
+    byTestId(prStackSyncRebaseBtn(nodeId)).click();
+  },
+
+  /** The prompt shown when a pull targets a worktree holding uncommitted work. */
+  dirtyWorktreeDialog: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackDirtyWorktreeDialog, { timeout: 5000, ...options }),
+
+  /** The uncommitted paths the prompt names. */
+  dirtyWorktreePaths: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackDirtyWorktreePaths, { timeout: 5000, ...options }),
+
+  /** The commit message the outstanding changes would be committed with. */
+  dirtyWorktreeCommitMessageInput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackDirtyWorktreeCommitMessageInput, { timeout: 5000, ...options }),
+
+  /** Commit and push the outstanding changes, then continue with the pull. */
+  dirtyWorktreeCommitBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackDirtyWorktreeCommitBtn, { timeout: 5000, ...options }),
+
+  /** Abandon the pull, leaving the worktree untouched. */
+  dirtyWorktreeCancelBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackDirtyWorktreeCancelBtn, { timeout: 5000, ...options }),
+
+  /** Confirm the dirty-worktree prompt: commit the outstanding work with `message`, then pull. */
+  commitDirtyWorktreeAndPull(message: string) {
+    byTestId(TEST_IDS.prStackDirtyWorktreeCommitMessageInput).clear().type(message);
+    byTestId(TEST_IDS.prStackDirtyWorktreeCommitBtn).click();
+  },
 
   /** The branch a row's planned PR owns — a branch that exists. */
   branchName: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>

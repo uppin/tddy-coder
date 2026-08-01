@@ -31,6 +31,7 @@ pub fn seed_orchestrator_stack_from_plan(
 
     let nodes = crate::plan_pr_stack::planned_prs_into_stack_nodes(&plan.prs);
     tddy_core::changeset::update_stack_atomic(orchestrator_session_dir, |stack| {
+        crate::pr_stack::assign_missing_display_order(stack);
         if stack.nodes.is_empty() {
             stack.version = plan.version;
             stack.nodes = nodes.clone();
@@ -171,7 +172,11 @@ pub fn execute_stack_repoint(
                         }
                     })
                     .unwrap_or_default();
-                if let Err(e) = force_push_with_lease(repo_root, &dep_branch, &expected_sha) {
+                let remote = tddy_core::worktree::detect_default_remote_name(repo_root)
+                    .unwrap_or_else(|| "origin".to_string());
+                if let Err(e) =
+                    force_push_with_lease(repo_root, &remote, &dep_branch, &expected_sha)
+                {
                     log::warn!("execute_stack_repoint: force-push failed for {dep_branch}: {e}");
                 }
             }

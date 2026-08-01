@@ -607,4 +607,154 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
 - **Parent's branch recorded only by its child session.** The node's `branch` resolves through
   that session's changeset (`resolve_stack_node_branch`), so the descendant still spawns. A missing
   session directory resolves to no branch, which is a refusal, not a crash.
-```
+
+## Panel UX: expandable rows, session links, persisted order, base sync *(added 2026-08-01)*
+
+Everything above made a planned PR's *state* legible. This makes the panel usable as a control surface:
+the row collapses to a summary and expands to its full detail, the spawned indicator opens the session
+it is bound to, row order is persisted and operator-editable, each row states how its branch stands
+against its base, and a row that is cleanly behind its base can pull the base in.
+
+PRD: [PRD-2026-08-01-pr-stack-panel-ux.md](1-WIP/PRD-2026-08-01-pr-stack-panel-ux.md).
+
+### Design decisions
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| D21 *(2026-08-01)* | A row's detail is **hidden, not unmounted** | Expansion, scroll position and the branch poll set all survive a collapse — the stance `PlannedPrPanel` already takes. It also keeps D16 intact rather than reversing it: the row still renders its full information, one interaction away. Concretely, eight existing acceptance specs assert the detail lines with `exist` / `contain.text`, which pass inside a `display:none` subtree and would all break on an unmount. |
+| D22 *(2026-08-01)* | Blockers, refusals and errors stay **outside** the collapse boundary | These are the states that explain why an action is unavailable. A reason the operator has to expand a row to find is the dead end D16 removed. |
+| D23 *(2026-08-01)* | The bound session is resolved from the **plan first**, the branch's current owner second, and both are guarded on the session being one the drawer knows | The indicator is the *node's* recorded binding and the plan is the durable record; "who owns this branch right now" is a different question whose answer changes after a resume or a hand-off. Without the known-session guard the control would select nothing for a child deleted on another host. |
+| D24 *(2026-08-01)* | Display order is **persisted per node**, not derived from `parents` | The dependency graph and the reading order are different facts. Deriving one from the other means every merge, repoint and re-parenting silently rewrites the operator's view — a row they are reading jumps position because of an unrelated event. |
+| D25 *(2026-08-01)* | A plan carrying only *some* positions falls back to topological order **wholesale** | A half-numbered plan has no coherent total order, and interleaving real positions with invented ones can render a child above its parent — a worse lie than one render of a correct derived order. The next write numbers every node, after which the fallback stops applying. |
+| D26 *(2026-08-01)* | Base sync is computed with a **non-mutating** probe, and never fetches | It runs on the 5 s poll against worktrees that may have a live agent in them, which disqualifies the existing `pr_resolve_conflicts_action` (`git merge --no-commit` then `--abort` — it mutates the index). Fetching is disqualified on cost: the authoritative default-branch resolver runs `git fetch origin`. |
+| D27 *(2026-08-01)* | An unavailable comparison is **never** rendered as clean | A failed comparison arrives with no commits behind and no conflicts — byte-identical to a healthy branch. This is [D12](#authenticated-pr-status-added-2026-07-26) restated one level down, and it exists for the same reason: conflating "could not tell" with "nothing to report" is how a live open PR stayed invisible for a day. |
+| D28 *(2026-08-01)* | The **base actually compared is reported back**, and is what the row names | The counts are meaningless without the ref they came from, and the base may resolve locally rather than remotely. The row states what was compared, not what it asked for — the same discipline as [D18](#repointing-a-dead-end-planned-pr-added-2026-07-26). |
+| D29 *(2026-08-01)* | An **unnamed base is unavailable**, not substituted | `RepointPlannedPr` substitutes the resolved default for an empty target (D20) because it is a mutation the operator asked for. This is a display: the number beside a row must describe the same base the row's own base line shows, and substituting a different one answers a question the row is not asking. The authoritative resolver also fetches. |
+| D30 *(2026-08-01)* | Pull **defaults to merge**; rebase is offered beside it | Merge preserves the open PR's review anchors and needs no force-push — it is what the stack's own `pr_resolve_conflicts` already does. Rebase rewrites history and force-pushes, which is the right trade only when the operator picks it. |
+| D31 *(2026-08-01)* | A **dirty worktree prompts** to commit and push first | Refusing outright leaves a permanently dead button in any worktree an agent is working in; auto-stashing can conflict on the pop and would leave a child session's checkout in a state nobody asked for. Committing is the one resolution that is explicit, recoverable through git, and leaves the child's work safe. |
+| D32 *(2026-08-01)* | A pull **pushes**; a failed push is reported, not rolled back | Without the push the GitHub PR still reports itself behind and the row contradicts the reviewer's view. That the local merge or rebase landed is a fact worth reporting truthfully — undoing it would be strictly worse. |
+| D33 *(2026-08-01)* | Conflicts **abort**, and the node is not stamped `has-conflicts` | Leaving `MERGE_HEAD` and conflict markers in a worktree an agent may be mid-turn in would corrupt that turn. (The agent-facing `pr_resolve_conflicts` deliberately leaves them, because it runs *inside* the child's own workflow where the agent is about to be prompted to resolve them.) And with conflicts now a live fact on every poll, a persisted stamp can only go stale — clearing it later would risk stomping an agent's own `source: "override"`. |
+
+### Persisted display order
+
+`StackNode.display_order: Option<u32>` (additive, omitted when unset). `Stack::display_order()` sits beside
+`topo_order` and sorts on `(display_order.unwrap_or(u32::MAX), topo_index, node_id)`. It **never errors** —
+it is on a render path, so a cycle degrades `topo_index` to declaration order rather than failing, and no
+node is ever dropped.
+
+Assignment is on write, not on read: `pr_stack::assign_missing_display_order` is the first statement of
+every mutator's `update_stack_atomic` closure, so a legacy stack is numbered the next time anything writes
+it. Backfilling inside `read_changeset` was rejected — it would make the value returned differ from the
+bytes on disk, breaking the roundtrip contract `pr_stack_data_model_acceptance.rs` pins, and would rewrite
+meaning on a path with no write.
+
+- `planned_prs_into_stack_nodes` numbers from the plan's **array index** — the order the agent emitted is
+  the intended reading order, and it may legitimately differ from the DAG.
+- `add_planned_pr_node` / `adopt_pr_as_stack_node` take `max + 1`; neither renumbers the rows above.
+- `delete_planned_pr_node` leaves survivors alone. Gaps are harmless in a sort key, and renumbering would
+  be a write across every surviving node purely to make the numbers tidy.
+- `reseed_stack_from_plan_if_unspawned` takes the new plan's order wholesale — it already refuses once any
+  node owns a branch or a session, so nothing has spawned and no operator has been working against those rows.
+- `pr_stack::move_planned_pr_node(session_dir, node_id, "up" | "down")` swaps a node with its neighbour.
+  Past either end is a **no-op success**; an unknown node id is refused without writing.
+
+### Base sync
+
+`tddy_core::base_sync` — a new module rather than an addition to `worktree.rs` (already ~2300 lines) and
+deliberately not in the recipe crate, since a display probe is not a recipe concern:
+
+- `resolve_base_sync_refs` (cheap: resolve both refs) and `compare_base_sync_refs` (expensive: the counts
+  and the conflict probe) are split so the daemon can cache on the two commit SHAs — the comparison is a
+  pure function of them.
+- A leading `<remote>/` is **stripped off the requested base before probing**. The caller sends
+  `ProjectEntry.main_branch_ref`, which is usually already `origin/master`, and
+  `refs/remotes/origin/origin/master` resolves to nothing.
+- Base resolves remote-first, head local-first; both resolved names are reported (D28).
+- `git rev-list --left-right --count <base>...<head>` gives behind and ahead in one process.
+  **`behind_count == 0` short-circuits the conflict probe** — nothing to merge in, nothing to conflict.
+- Otherwise `git merge-tree --write-tree --name-only -z`: exit 0 clean, exit 1 → the conflicted paths,
+  anything else → an error. It writes a tree into `.git/objects` but touches no index, working tree, `HEAD`
+  or ref, which is exactly what makes it safe against a live checkout; repeated identical probes produce
+  identical objects, which are ordinary gc candidates.
+- Every failure is a `Result::Err`, never a zeroed success (D27).
+
+**Cost, and the four bounds on it.** `QueryBranch` was ≈4 git execs per branch per tick. The new leg adds 4
+on a cache miss and 2 on a hit, and skips `merge-tree` entirely when nothing is behind. Uncached, a ten-node
+stack on the 5 s cadence would roughly double git load, and `merge-tree` is the outlier — proportional to the
+merge diff, so hundreds of milliseconds on a large repo with wide base drift. Bounded by: the content-keyed
+`base_sync_cache` (keyed `(repo_root, base_sha, head_sha)`, **no TTL** — an entry cannot go stale, it only
+becomes unreachable when a ref moves; errors are cached too so a repo that cannot answer is not re-probed
+twelve times a minute; capped with oldest-insert eviction), the `behind == 0` short-circuit,
+`spawn_blocking_with_timeout`, and skipping the leg when no base was named.
+
+**Freshness.** The probe never fetches, so the counts are only as fresh as the last fetch — the same
+conservatism `remote_branch_ref_sha` already ships with (D9). The pull action fetches, and the next tick sees
+the truth.
+
+**Worktree dirtiness rides the `worktree` leg, not the sync leg**, and stays **outside** the cache: it is a
+property of the checkout, not of the two commits. `git status --porcelain --untracked-files=no` — untracked
+files are deliberately ignored, since git refuses loudly rather than clobbering one, while blocking on them
+would make the pull control permanently dead in any real agent worktree.
+
+### Pulling the base into a branch
+
+`pr_stack::pull_base_into_node_branch` operates in the node's **own worktree**. The ordering is the safety
+design:
+
+1. node absent, node owns no `branch`, or no base named → refused.
+2. no worktree for the branch → refused, naming the branch. It deliberately does **not** fall back to
+   checking the branch out in the main repo; `git_ops::rebase_onto` does that, and that latent clobbering
+   hazard is not extended to a new caller.
+3. **worktree cleanliness is checked before the fetch and before anything touches git state.** Dirty refuses,
+   unless the caller opted into committing (D31), in which case the tracked changes are committed and pushed
+   first.
+4. fetch — **base-ref-scoped, not `git fetch origin`**, so a rebase's `--force-with-lease` still sees the
+   remote as it was.
+5. apply; a conflict is aborted and reported with its paths (D33); already-up-to-date changes nothing.
+6. push — plain for a merge, `--force-with-lease` for a rebase. A failed push is a **successful call
+   reporting `pushed = false`** with the reason, not an error (D32).
+
+The gate is a clean tree, **not** session activity: an active session with a clean tree is the normal case,
+and `is_active` is an unreliable proxy either way. The residual race — the agent writes between the check and
+the merge — is bounded by git itself, which refuses a merge that would overwrite local modifications, so the
+worst case is a clean refusal rather than lost work.
+
+### API surface *(added 2026-08-01)*
+
+Proto (`packages/tddy-service/proto/connection.proto`):
+
+- `QueryBranchRequest.base_branch = 4` — the base to compare against. Empty means the caller could not name
+  one, and the leg reports itself unavailable rather than substituting a default (D29).
+- `BranchResolution.base_sync = 6` → `BranchBaseSync { base_branch, behind_count, ahead_count, has_conflicts,
+  conflicted_paths, unavailable, unavailable_reason, base_ref, head_ref }`. `base_branch` carries the ref
+  actually compared (D28).
+- `BranchWorktree.dirty = 3`, `dirty_paths = 4`.
+- `rpc ReorderPlannedPr` — `{session_id, node_id, direction}` → `{stack_plan_json}`, the same wire shape
+  `AddPlannedPr` and `RepointPlannedPr` already return, so the web reuses `parseStackPlan`.
+- `rpc PullBaseIntoBranch` — `{session_id, node_id, base_branch, strategy, dirty_worktree_action,
+  commit_message}` → `{resolution, strategy, changed, pushed, push_error}`. It returns a **fresh
+  `BranchResolution`** so the row repaints without waiting for the next poll tick.
+
+Both handlers carry the standard prologue ending in `require_pr_stack_orchestrator`. The base-sync leg is
+**non-erroring like every other `QueryBranch` leg** — an absent base, an unknown repo root, a probe failure
+or a `spawn_blocking` timeout all degrade that leg alone and the RPC still succeeds.
+
+Web (`tddy-web`), all under `src/components/sessions/prstack/`:
+
+- `orderStackNodes` — persisted order when every node has one, else `topoSortStackNodes` wholesale (D25).
+  `topoSortStackNodes` is unchanged and remains the legacy fallback.
+- `parentTitles` — parent ids to titles, skipping dangling ids.
+- `boundChildSession` — the session the indicator opens (D23).
+- `branchQueries` — `buildBranchQueries(nodes, defaultBranch)` pairs each owned branch with its base. This
+  also closes a hole: a **root** node's base is the project default, which the old poll set never queried at
+  all. Every ancestor base is itself some node's branch, so the branch set is unchanged and the GitHub
+  request rate does not move.
+- `baseSyncStatus` — `baseSyncView` returning `unknown | unavailable | conflicts | behind | in-sync` in that
+  precedence, and `canPullFromBase`, which is true only for `behind`.
+- `useQueryBranch` takes branch+base queries and additionally returns `setResolution`, so a completed pull
+  writes its fresh resolution straight into the hook's map — the map *is* the state, so the write is
+  naturally superseded by the next poll and there is no override layer to go stale.
+- `DirtyWorktreeDialog` — the commit-and-push-first prompt (D31).
+
+`in-sync` renders a real badge rather than nothing: if only the bad states rendered, a healthy row and a row
+whose poll has not answered would look identical — D27 one level down.

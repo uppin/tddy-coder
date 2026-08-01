@@ -71,6 +71,7 @@ fn sync_stack_node_reflects_child_state_and_pr_status() {
                 pr_status: None,   // not yet synced
                 child_state: None, // not yet synced
                 internal_status: None,
+                display_order: None,
             }],
         }),
         ..Changeset::default()
@@ -135,6 +136,7 @@ fn update_stack_atomic_applies_mutation_and_writes_back() {
                 pr_status: None,
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             }],
         }),
         ..Changeset::default()

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Button } from "../../ui/button";
-import { topoSortStackNodes, type StackNode } from "./stackPlan";
+import { orderStackNodes } from "./orderStackNodes";
+import type { StackNode } from "./stackPlan";
 
 export interface AddPlannedPrFormSubmission {
   title: string;
@@ -10,7 +11,7 @@ export interface AddPlannedPrFormSubmission {
 }
 
 export interface AddPlannedPrFormProps {
-  /** Existing planned-PR nodes offered as ancestor checkboxes, in topo order. */
+  /** Existing planned-PR nodes offered as ancestor checkboxes, in the order the panel lists them. */
   nodes: StackNode[];
   /** Rejects to report a failed submission — the form surfaces the error and stays open. */
   onSubmit: (input: AddPlannedPrFormSubmission) => Promise<void>;
@@ -22,7 +23,8 @@ const inputClass =
 
 /** Form for manually adding a single planned PR to the stack, with a multi-select ancestor picker. */
 export function AddPlannedPrForm({ nodes, onSubmit, onCancel }: AddPlannedPrFormProps) {
-  const ordered = topoSortStackNodes(nodes);
+  // The same order the planned-PR list renders, so the picker lists the nodes as the operator sees them.
+  const ordered = orderStackNodes(nodes);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [branchSuggestion, setBranchSuggestion] = useState("");
