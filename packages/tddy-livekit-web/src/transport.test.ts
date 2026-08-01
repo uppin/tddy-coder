@@ -19,12 +19,15 @@ import {
   RpcResponseSchema,
   CallMetadataSchema,
 } from "./gen/rpc_envelope_pb.js";
+import { CHUNK_FRAME_MAGIC, splitIntoFrames } from "./chunking.js";
 import { LiveKitTransport } from "./transport.js";
 
 // ---------------------------------------------------------------------------
 // Minimal fake Room
 // ---------------------------------------------------------------------------
 
+/** livekit-client passes `undefined` for the participant whenever the sender is not (yet) in the
+ *  room's `remoteParticipants` map, so the identity is genuinely optional here. */
 type DataReceivedListener = (
   payload: Uint8Array,
   participant?: { identity: string } | null,
@@ -53,7 +56,7 @@ function makeFakeRoom(onPublish?: (payload: Uint8Array) => void) {
       },
     },
     /** Test helper: emit a DataReceived event with the given payload. */
-    _emit(event: string, payload: Uint8Array, participant: { identity: string } | null, topic: string) {
+    _emit(event: string, payload: Uint8Array, participant: { identity: string } | null | undefined, topic: string) {
       for (const handler of listeners[event] ?? []) {
         handler(payload, participant, undefined, topic);
       }
@@ -301,6 +304,122 @@ describe("LiveKitTransport unary — call deadlines", () => {
     // Then — it still resolves
     const result = await callPromise;
     expect(result.message).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Chunk frames from a second sender
+//
+// Every sender's `messageId` counter starts at 0 (`chunking.ts`, `chunking.rs`), so two senders —
+// or one sender before and after a restart — hand out the same ids. The standalone transport must
+// therefore never let another sender's frames land in its peer's message. A `undefined` participant
+// is the case that matters: livekit-client passes it whenever the sender is not in the room's
+// `remoteParticipants` map, so identity-based filtering alone does not keep senders apart.
+// ---------------------------------------------------------------------------
+
+const FAKE_METHOD_RETURNING_CALL_METADATA = {
+  kind: "unary",
+  name: "Describe",
+  parent: { typeName: "test.TestService" },
+  input: RpcRequestSchema,
+  output: CallMetadataSchema,
+} as any;
+
+/** Long enough that its response envelope needs three chunk frames under a 200-byte budget — the
+ *  small-scale stand-in for a `ListSessionsResponse` that outgrows one LiveKit packet. */
+const A_LONG_SERVICE_NAME = "connection.ConnectionService".padEnd(400, ".");
+
+/** The message id both senders' messages carry: each counter starts at 0, so ids collide. */
+const REUSED_MESSAGE_ID = 7;
+
+/** Per-frame budget used to chunk the test envelope; small so a modest payload spans three frames. */
+const A_SMALL_FRAME_BUDGET = 200;
+
+/** A valid `RpcResponse` for `requestId` carrying a `CallMetadata` message. */
+function aCallMetadataResponse(requestId: number): Uint8Array {
+  const message = toBinary(
+    CallMetadataSchema,
+    create(CallMetadataSchema, { service: A_LONG_SERVICE_NAME, method: "ListSessions" }),
+  );
+  return makeResponsePayload(requestId, message);
+}
+
+/** A chunk frame of another sender's message that reuses `REUSED_MESSAGE_ID`: same header and same
+ *  data length as `frames[index]`, different bytes. */
+function aFrameOfAnotherSendersMessage(envelopeLength: number, index: number): Uint8Array {
+  const foreignPayload = new Uint8Array(envelopeLength).fill(0xff);
+  return splitIntoFrames(REUSED_MESSAGE_ID, foreignPayload, A_SMALL_FRAME_BUDGET)[index];
+}
+
+describe("LiveKitTransport — chunk frames from another sender", () => {
+  it("resolves a chunked response with its own peer's bytes when another sender reuses the message id", async () => {
+    // Given — a pending unary whose response is chunked into three frames
+    let capturedRequestId = 0;
+    const fakeRoom = makeFakeRoom((payload) => {
+      capturedRequestId = fromBinary(RpcRequestSchema, payload).requestId;
+    });
+    const transport = new LiveKitTransport({ room: fakeRoom as any, targetIdentity: "server" } as any);
+    // 100 ms deadline so a message that never completes fails the test promptly instead of hanging.
+    const callPromise = transport.unary(FAKE_METHOD_RETURNING_CALL_METADATA, undefined, 100, undefined, {});
+    await Promise.resolve();
+    const envelope = aCallMetadataResponse(capturedRequestId);
+    const frames = splitIntoFrames(REUSED_MESSAGE_ID, envelope, A_SMALL_FRAME_BUDGET);
+
+    // When — the peer's first two frames arrive, then an unidentified sender's final frame for the
+    // same message id, then the peer's own final frame
+    fakeRoom._emit(RoomEvent.DataReceived, frames[0], { identity: "server" }, "tddy-rpc");
+    fakeRoom._emit(RoomEvent.DataReceived, frames[1], { identity: "server" }, "tddy-rpc");
+    fakeRoom._emit(
+      RoomEvent.DataReceived,
+      aFrameOfAnotherSendersMessage(envelope.length, 2),
+      undefined,
+      "tddy-rpc",
+    );
+    fakeRoom._emit(RoomEvent.DataReceived, frames[2], { identity: "server" }, "tddy-rpc");
+
+    // Then — the call resolves with the peer's message, not a mix of the two senders' frames
+    const result = await callPromise;
+    expect(result.message.service).toBe(A_LONG_SERVICE_NAME);
+    expect(result.message.method).toBe("ListSessions");
+  });
+});
+
+describe("LiveKitTransport — undecodable inbound frames", () => {
+  it("reports a payload that cannot be decoded as a response envelope", () => {
+    // Given — a transport that reports transport-level failures to its host
+    const reported: unknown[] = [];
+    const fakeRoom = makeFakeRoom();
+    new LiveKitTransport({
+      room: fakeRoom as any,
+      targetIdentity: "server",
+      onTransportError: (error: unknown) => reported.push(error),
+    } as any);
+
+    // When — bytes arrive that are not a decodable `RpcResponse`: field 2 declares five bytes of
+    // `response_message` but only one follows, the wire shape of a truncated or mixed-up payload
+    fakeRoom._emit(RoomEvent.DataReceived, new Uint8Array([0x12, 0x05, 0x68]), { identity: "server" }, "tddy-rpc");
+
+    // Then — the failure is surfaced rather than silently dropped
+    expect(reported.length).toBe(1);
+    expect(reported[0]).toBeInstanceOf(Error);
+  });
+
+  it("reports a chunk frame too short to carry a chunk header", () => {
+    // Given — a transport that reports transport-level failures to its host
+    const reported: unknown[] = [];
+    const fakeRoom = makeFakeRoom();
+    new LiveKitTransport({
+      room: fakeRoom as any,
+      targetIdentity: "server",
+      onTransportError: (error: unknown) => reported.push(error),
+    } as any);
+
+    // When — a frame marked as chunked arrives with fewer bytes than the 13-byte header
+    fakeRoom._emit(RoomEvent.DataReceived, new Uint8Array([CHUNK_FRAME_MAGIC, 0x01, 0x02]), { identity: "server" }, "tddy-rpc");
+
+    // Then — the failure is surfaced rather than silently dropped
+    expect(reported.length).toBe(1);
+    expect(reported[0]).toBeInstanceOf(Error);
   });
 });
 

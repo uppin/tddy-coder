@@ -122,6 +122,24 @@ describe("LiveKitTransportFactory", () => {
     expect(publishedRequestIdForTarget(freshRoom, "daemon-x")).toBe(1);
   });
 
+  it("reports an undecodable inbound frame through the handler given to forRoom", () => {
+    // Given — a factory built with a transport-error handler, vending one transport over the room's
+    // shared registry
+    const reported: Array<{ error: unknown; context: string }> = [];
+    const room = makeFakeRoom();
+    const factory = LiveKitTransportFactory.forRoom(room as any, false, (error, context) =>
+      reported.push({ error, context }),
+    );
+    factory.transport("daemon-a");
+
+    // When — bytes arrive that do not decode as an `RpcResponse`: field 2 declares five bytes of
+    // `response_message` but only one follows
+    room._emit(RoomEvent.DataReceived, new Uint8Array([0x12, 0x05, 0x68]), { identity: "daemon-a" }, "tddy-rpc");
+
+    // Then — the shared registry surfaces the failure, naming the sender it came from
+    expect(reported.map((r) => r.context)).toEqual(["decode error from sender=daemon-a"]);
+  });
+
   it("routes concurrent responses to the transport that made each call, never crossing targets", async () => {
     // Given — one factory vending transports to two daemons
     const room = makeFakeRoom();
