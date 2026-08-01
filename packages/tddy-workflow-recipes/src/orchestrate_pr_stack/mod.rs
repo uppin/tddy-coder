@@ -20,6 +20,9 @@ pub use bridge::{
     execute_stack_merge, execute_stack_repoint, pr_number_from_status_url,
     seed_orchestrator_stack_from_plan,
 };
+/// The outstanding tracked changes in a worktree — the one git primitive the daemon reads directly,
+/// for `QueryBranch`'s dirtiness leg.
+pub use git_ops::worktree_is_clean;
 pub use github::{GithubPrApi, RealGithubPrApi};
 pub use hooks::OrchestratePrStackHooks;
 pub use internal_status::{derive_internal_status, reconcile_internal_status};

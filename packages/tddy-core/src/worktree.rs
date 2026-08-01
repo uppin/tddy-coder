@@ -443,6 +443,15 @@ fn git_rev_parse_abbrev_ref(cwd: &Path, rev: &str) -> Result<String, String> {
     Ok(s)
 }
 
+/// The branch `worktree_dir` actually has checked out, or [`None`] when its `HEAD` is detached.
+///
+/// [`find_existing_worktree_for_branch_ref`] may answer with a worktree that merely *shares* the
+/// branch's tip commit (its tier 2), which is fine for a caller that only displays an indicator and
+/// wrong for one that is about to write. A mutation asks this first and refuses on a mismatch.
+pub fn checked_out_branch_name(worktree_dir: &Path) -> Result<Option<String>, String> {
+    git_head_branch_name(worktree_dir)
+}
+
 /// Current branch name in `cwd`, or [`None`] when `HEAD` is detached.
 fn git_head_branch_name(cwd: &Path) -> Result<Option<String>, String> {
     let out = Command::new("git")

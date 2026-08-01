@@ -76,6 +76,17 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **read_stack_with_resolved_branches(sessions_root, orchestrator_session_id) -> Result<Option<Stack>, WorkflowError>**: the orchestrator's stack with every node's `branch` hydrated through the resolver; `Ok(None)` when the session carries no stack. The hydrated copy is read-only — persisting it would write a fallback-derived branch onto a node that never recorded one.
 - **link_stack_node_to_child_session(orchestrator_dir, node_id, child_session_id, branch)**: record the branch a spawn created (and its session) on the node.
 - **`branch` vs `branch_suggestion`**: `branch` means "a branch that exists"; `branch_suggestion` is a planned name that never satisfies the spawn gate. Planning leaves `branch = None`.
+- **`StackNode.display_order: Option<u32>`**: the operator-visible row position, persisted so it is independent of the DAG. A merge, a repoint or a re-parenting rewrites `parents` and therefore the topology, and rows must not move under the operator when they do. Additive and omitted when unset.
+- **Stack::display_order() -> Vec\<String\>**: the render order, beside `topo_order`. Sort key `(display_order.unwrap_or(u32::MAX), topological index, node_id)`. **Never fails** — it is on a render path, so a cycle degrades the tie-break to declaration order rather than erroring, and no node is ever dropped. Numbering happens on *write* (`pr_stack::assign_missing_display_order`), never on read: backfilling inside `read_changeset` would make the value returned differ from the bytes on disk.
+
+### Base sync (`base_sync.rs`)
+
+How a branch stands against its base — behind/ahead counts and whether taking the base would conflict — computed **without touching the repository's state**, because it runs on a status poll against worktrees that may have a child session's agent working in them.
+
+- **branch_base_sync(repo_root, branch, base_branch) -> Result\<BranchBaseSync, String\>**, split into **resolve_base_sync_refs** (cheap: resolve both refs to commits) and **compare_base_sync_refs** (expensive: the counts and the conflict probe) so a polling caller can cache on the two SHAs.
+- `git rev-list --left-right --count` for the counts; `git merge-tree --write-tree --name-only -z` for conflicts, which merges in memory and writes only the resulting tree — **no index, no working tree, no `HEAD`, no ref**. `behind_count == 0` short-circuits the probe entirely. `orchestrate_pr_stack::pr_actions::pr_resolve_conflicts_action` is **not** reusable here: it runs a real `git merge --no-commit` and would corrupt a concurrent agent's turn.
+- A `<remote>/` prefix on the requested base is normalised off before probing — callers pass `ProjectEntry.main_branch_ref`, usually already `origin/master`.
+- **Nothing here fetches**, so the base is read as of the last fetch. Every failure is an `Err`, never a zeroed success: a comparison that could not be made arrives byte-identical to a healthy one, so collapsing it to a default would render "could not tell" as "clean".
 
 ### Toolcall (`toolcall/`)
 

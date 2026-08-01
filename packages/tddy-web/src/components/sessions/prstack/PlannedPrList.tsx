@@ -1,10 +1,13 @@
-import React from "react";
+import React, { useState } from "react";
 import type { BranchResolution, SessionEntry } from "../../../gen/connection_pb";
 import { resolveNodeSession } from "../../../utils/resolveNodeSession";
 import { PlannedPrRow } from "./PlannedPrRow";
+import { boundChildSession } from "./boundChildSession";
 import { resolveStackBase } from "./deriveStackBaseBranch";
+import { orderStackNodes } from "./orderStackNodes";
+import { parentTitles } from "./parentTitles";
 import { resolveRepointTarget, startBlockers } from "./startBlockers";
-import { topoSortStackNodes, type StackNode } from "./stackPlan";
+import type { StackNode } from "./stackPlan";
 
 export interface PlannedPrListProps {
   nodes: StackNode[];
@@ -29,11 +32,35 @@ export interface PlannedPrListProps {
   defaultBranch?: string;
   /** The daemon's reason per node whose last repoint was refused or failed, keyed by node id. */
   repointErrorByNodeId?: Record<string, string>;
-  /** Nodes whose repoint is in flight — their control is disabled so it cannot be started twice. */
-  repointingNodeIds?: ReadonlySet<string>;
+  /**
+   * Nodes with a mutation of their branch in flight — a repoint or a pull. Disables that row's
+   * repoint control *and* both of its pull controls, since all three rewrite the same branch's refs.
+   */
+  branchMutatingNodeIds?: ReadonlySet<string>;
+  /** Move a node one position in the persisted reading order. */
+  onReorder?: (nodeId: string, direction: "up" | "down") => void;
+  /** The daemon's reason per node whose last reorder was refused or failed, keyed by node id. */
+  reorderErrorByNodeId?: Record<string, string>;
+  /** Nodes whose reorder is in flight — both of their controls are disabled until it settles. */
+  reorderingNodeIds?: ReadonlySet<string>;
+  /** Pull a node's base into its branch, by the strategy the clicked control named. */
+  onSyncFromBase?: (nodeId: string, strategy: "merge" | "rebase") => void;
+  /** The daemon's reason per node whose last pull was refused or failed, keyed by node id. */
+  syncErrorByNodeId?: Record<string, string>;
+  /**
+   * Select and attach a node's bound child session — the same act as clicking that session in the
+   * drawer. Absent when the caller offers no navigation, in which case a row's status chip stays
+   * plain text rather than becoming a control that goes nowhere.
+   */
+  onOpenSession?: (sessionId: string) => void;
 }
 
-/** Renders one row per planned `StackNode`, roots before their dependents. */
+/**
+ * Renders one row per planned `StackNode`, in the order the plan persists (see `orderStackNodes`).
+ *
+ * The list owns which rows are expanded, rather than each row holding its own state, so the set is a
+ * property of the list that survives every re-render a poll tick causes.
+ */
 export function PlannedPrList({
   nodes,
   onStartSession,
@@ -43,17 +70,36 @@ export function PlannedPrList({
   onRepoint,
   defaultBranch = "",
   repointErrorByNodeId = {},
-  repointingNodeIds = new Set<string>(),
+  branchMutatingNodeIds = new Set<string>(),
+  onReorder,
+  reorderErrorByNodeId = {},
+  reorderingNodeIds = new Set<string>(),
+  onSyncFromBase,
+  syncErrorByNodeId = {},
+  onOpenSession,
 }: PlannedPrListProps) {
-  const ordered = topoSortStackNodes(nodes);
+  const ordered = orderStackNodes(nodes);
   const nodeById = new Map(nodes.map((n) => [n.nodeId, n]));
+  const [expandedNodeIds, setExpandedNodeIds] = useState<ReadonlySet<string>>(new Set());
+
+  const toggleExpanded = (nodeId: string) => {
+    setExpandedNodeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
+      }
+      return next;
+    });
+  };
 
   return (
     <div data-testid="pr-stack-planned-pr-list" className="flex flex-col gap-2 overflow-y-auto p-3">
       {ordered.length === 0 ? (
         <p className="text-sm text-muted-foreground">No planned PRs yet.</p>
       ) : (
-        ordered.map((node) => {
+        ordered.map((node, index) => {
           // In progress when a live session owns the node's branch.
           const owner = resolveNodeSession(node, sessions);
           const inProgress = Boolean(owner?.isActive);
@@ -99,9 +145,23 @@ export function PlannedPrList({
                 defaultBranch,
               )}
               repointError={repointErrorByNodeId[node.nodeId]}
-              repointing={repointingNodeIds.has(node.nodeId)}
+              branchMutating={branchMutatingNodeIds.has(node.nodeId)}
+              // The ends of the *rendered* order, which is the order the operator is looking at —
+              // the persisted positions themselves may be sparse or start anywhere.
+              canMoveUp={index > 0}
+              canMoveDown={index < ordered.length - 1}
+              onReorder={onReorder}
+              reorderError={reorderErrorByNodeId[node.nodeId]}
+              reordering={reorderingNodeIds.has(node.nodeId)}
+              onSyncFromBase={onSyncFromBase}
+              syncError={syncErrorByNodeId[node.nodeId]}
               blockers={blockers}
               baseBranchLabel={baseBranchLabel}
+              expanded={expandedNodeIds.has(node.nodeId)}
+              onToggleExpanded={toggleExpanded}
+              parentTitles={parentTitles(node, nodes)}
+              boundSessionId={boundChildSession(node, resolution, sessions)}
+              onOpenSession={onOpenSession}
             />
           );
         })

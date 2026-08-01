@@ -80,6 +80,7 @@ fn a_materialized_node(node_id: &str, branch: &str, parents: &[&str]) -> StackNo
         pr_status: None,
         child_state: None,
         internal_status: None,
+        display_order: None,
     }
 }
 
@@ -95,6 +96,7 @@ fn a_planned_child_node(node_id: &str, branch_suggestion: &str, parents: &[&str]
         pr_status: None,
         child_state: None,
         internal_status: None,
+        display_order: None,
     }
 }
 

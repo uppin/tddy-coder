@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
+import { aStackNode } from "../../../test-utils";
 import {
   branchlessNonMergedParent,
   deriveStackBaseBranch,
   resolveStackBase,
 } from "./deriveStackBaseBranch";
-import type { StackNode } from "./stackPlan";
 
 /**
  * Tests for `deriveStackBaseBranch` — the base branch the Start-Session dialog shows for a planned
@@ -20,28 +20,10 @@ import type { StackNode } from "./stackPlan";
 
 const DEFAULT_BRANCH = "master";
 
-/** A stack node with only the fields these tests care about; everything else gets a valid default. */
-function aNode(overrides: Partial<StackNode> & { nodeId: string }): StackNode {
-  return {
-    nodeId: overrides.nodeId,
-    title: overrides.title ?? overrides.nodeId,
-    description: "",
-    branchSuggestion: null,
-    branch: null,
-    sessionId: null,
-    parents: [],
-    prStatus: null,
-    childState: null,
-    childRecipe: "tdd",
-    internalStatus: null,
-    ...overrides,
-  };
-}
-
 describe("deriveStackBaseBranch", () => {
   it("returns the default branch for a root node with no parents", () => {
     // Given
-    const n1 = aNode({ nodeId: "n1", branch: "feature/auth/token-store" });
+    const n1 = aStackNode({ nodeId: "n1", branch: "feature/auth/token-store" });
 
     // When
     const base = deriveStackBaseBranch(n1, [n1], DEFAULT_BRANCH);
@@ -52,8 +34,8 @@ describe("deriveStackBaseBranch", () => {
 
   it("returns the parent's branch for a node with a single non-merged parent", () => {
     // Given
-    const n1 = aNode({ nodeId: "n1", branch: "feature/auth/token-store", prStatus: { phase: "open" } });
-    const n2 = aNode({ nodeId: "n2", branch: "feature/auth/middleware", parents: ["n1"] });
+    const n1 = aStackNode({ nodeId: "n1", branch: "feature/auth/token-store", prStatus: { phase: "open" } });
+    const n2 = aStackNode({ nodeId: "n2", branch: "feature/auth/middleware", parents: ["n1"] });
 
     // When
     const base = deriveStackBaseBranch(n2, [n1, n2], DEFAULT_BRANCH);
@@ -64,8 +46,8 @@ describe("deriveStackBaseBranch", () => {
 
   it("returns the default branch when the only parent has merged", () => {
     // Given
-    const n1 = aNode({ nodeId: "n1", branch: "feature/auth/token-store", prStatus: { phase: "merged" } });
-    const n2 = aNode({ nodeId: "n2", branch: "feature/auth/middleware", parents: ["n1"] });
+    const n1 = aStackNode({ nodeId: "n1", branch: "feature/auth/token-store", prStatus: { phase: "merged" } });
+    const n2 = aStackNode({ nodeId: "n2", branch: "feature/auth/middleware", parents: ["n1"] });
 
     // When
     const base = deriveStackBaseBranch(n2, [n1, n2], DEFAULT_BRANCH);
@@ -76,14 +58,14 @@ describe("deriveStackBaseBranch", () => {
 
   it("skips a merged parent to the nearest non-merged ancestor's branch", () => {
     // Given — n1 (non-merged) → n2 (merged) → n3
-    const n1 = aNode({ nodeId: "n1", branch: "feature/auth/token-store", prStatus: { phase: "open" } });
-    const n2 = aNode({
+    const n1 = aStackNode({ nodeId: "n1", branch: "feature/auth/token-store", prStatus: { phase: "open" } });
+    const n2 = aStackNode({
       nodeId: "n2",
       branch: "feature/auth/middleware",
       parents: ["n1"],
       prStatus: { phase: "merged" },
     });
-    const n3 = aNode({ nodeId: "n3", branch: "feature/auth/handler", parents: ["n2"] });
+    const n3 = aStackNode({ nodeId: "n3", branch: "feature/auth/handler", parents: ["n2"] });
 
     // When
     const base = deriveStackBaseBranch(n3, [n1, n2, n3], DEFAULT_BRANCH);
@@ -94,13 +76,13 @@ describe("deriveStackBaseBranch", () => {
 
   it("returns the default branch without hanging when parents form a cycle", () => {
     // Given — a malformed stack where n1 and n2 are mutual, merged parents (a cycle)
-    const n1 = aNode({
+    const n1 = aStackNode({
       nodeId: "n1",
       branch: "feature/x/n1",
       parents: ["n2"],
       prStatus: { phase: "merged" },
     });
-    const n2 = aNode({
+    const n2 = aStackNode({
       nodeId: "n2",
       branch: "feature/x/n2",
       parents: ["n1"],
@@ -116,8 +98,8 @@ describe("deriveStackBaseBranch", () => {
 
   it("ignores a parent's branch suggestion when its branch is not created yet", () => {
     // Given — the predecessor has only a suggested branch so far
-    const n1 = aNode({ nodeId: "n1", branchSuggestion: "feature/auth/token-store" });
-    const n2 = aNode({ nodeId: "n2", branchSuggestion: "feature/auth/middleware", parents: ["n1"] });
+    const n1 = aStackNode({ nodeId: "n1", branchSuggestion: "feature/auth/token-store" });
+    const n2 = aStackNode({ nodeId: "n2", branchSuggestion: "feature/auth/middleware", parents: ["n1"] });
 
     // When
     const base = deriveStackBaseBranch(n2, [n1, n2], DEFAULT_BRANCH);
@@ -128,9 +110,9 @@ describe("deriveStackBaseBranch", () => {
 
   it("skips a branchless parent to a predecessor that owns a branch", () => {
     // Given — n2 is planned only; n1 owns a real branch
-    const n1 = aNode({ nodeId: "n1", branch: "feature/auth/token-store" });
-    const n2 = aNode({ nodeId: "n2", branchSuggestion: "feature/auth/middleware" });
-    const n3 = aNode({ nodeId: "n3", parents: ["n2", "n1"] });
+    const n1 = aStackNode({ nodeId: "n1", branch: "feature/auth/token-store" });
+    const n2 = aStackNode({ nodeId: "n2", branchSuggestion: "feature/auth/middleware" });
+    const n3 = aStackNode({ nodeId: "n3", parents: ["n2", "n1"] });
 
     // When
     const base = deriveStackBaseBranch(n3, [n1, n2, n3], DEFAULT_BRANCH);
@@ -143,7 +125,7 @@ describe("deriveStackBaseBranch", () => {
 describe("resolveStackBase", () => {
   it("resolves a root node to the project default branch", () => {
     // Given
-    const n1 = aNode({ nodeId: "n1", branch: "feature/auth/token-store" });
+    const n1 = aStackNode({ nodeId: "n1", branch: "feature/auth/token-store" });
 
     // When
     const base = resolveStackBase(n1, [n1]);
@@ -154,12 +136,12 @@ describe("resolveStackBase", () => {
 
   it("resolves a node whose only ancestor has merged to the project default branch", () => {
     // Given — the predecessor's work is already on the default branch
-    const n1 = aNode({
+    const n1 = aStackNode({
       nodeId: "n1",
       branch: "feature/auth/token-store",
       prStatus: { phase: "merged" },
     });
-    const n2 = aNode({ nodeId: "n2", parents: ["n1"] });
+    const n2 = aStackNode({ nodeId: "n2", parents: ["n1"] });
 
     // When
     const base = resolveStackBase(n2, [n1, n2]);
@@ -170,12 +152,12 @@ describe("resolveStackBase", () => {
 
   it("resolves a node to its nearest non-merged ancestor's created branch", () => {
     // Given
-    const n1 = aNode({
+    const n1 = aStackNode({
       nodeId: "n1",
       branch: "feature/auth/token-store",
       prStatus: { phase: "open" },
     });
-    const n2 = aNode({ nodeId: "n2", parents: ["n1"] });
+    const n2 = aStackNode({ nodeId: "n2", parents: ["n1"] });
 
     // When
     const base = resolveStackBase(n2, [n1, n2]);
@@ -186,8 +168,8 @@ describe("resolveStackBase", () => {
 
   it("resolves a node whose ancestor owns no created branch to no-ancestor-branch, naming the planned branch", () => {
     // Given — the predecessor holds only a suggestion, so there is no ref to base onto
-    const n1 = aNode({ nodeId: "n1", branchSuggestion: "feature/auth/token-store" });
-    const n2 = aNode({ nodeId: "n2", parents: ["n1"] });
+    const n1 = aStackNode({ nodeId: "n1", branchSuggestion: "feature/auth/token-store" });
+    const n2 = aStackNode({ nodeId: "n2", parents: ["n1"] });
 
     // When
     const base = resolveStackBase(n2, [n1, n2]);
@@ -201,8 +183,8 @@ describe("resolveStackBase", () => {
 
   it("resolves a node whose ancestor has neither a branch nor a suggestion to no-ancestor-branch with no name", () => {
     // Given
-    const n1 = aNode({ nodeId: "n1" });
-    const n2 = aNode({ nodeId: "n2", parents: ["n1"] });
+    const n1 = aStackNode({ nodeId: "n1" });
+    const n2 = aStackNode({ nodeId: "n2", parents: ["n1"] });
 
     // When
     const base = resolveStackBase(n2, [n1, n2]);
@@ -216,9 +198,9 @@ describe("branchlessNonMergedParent", () => {
   it("names a branchless parent even when a sibling parent owns a branch", () => {
     // Given — n3 depends on n1 (owns a branch) *before* n2 (planned only), so only a check that
     // looks past the first usable parent can find the blocker
-    const n1 = aNode({ nodeId: "n1", branch: "feature/auth/token-store" });
-    const n2 = aNode({ nodeId: "n2", branchSuggestion: "feature/auth/middleware" });
-    const n3 = aNode({ nodeId: "n3", parents: ["n1", "n2"] });
+    const n1 = aStackNode({ nodeId: "n1", branch: "feature/auth/token-store" });
+    const n2 = aStackNode({ nodeId: "n2", branchSuggestion: "feature/auth/middleware" });
+    const n3 = aStackNode({ nodeId: "n3", parents: ["n1", "n2"] });
 
     // When
     const blocking = branchlessNonMergedParent(n3, [n1, n2, n3]);
@@ -229,9 +211,9 @@ describe("branchlessNonMergedParent", () => {
 
   it("returns null when every parent owns a branch", () => {
     // Given
-    const n1 = aNode({ nodeId: "n1", branch: "feature/auth/token-store" });
-    const n2 = aNode({ nodeId: "n2", branch: "feature/auth/middleware" });
-    const n3 = aNode({ nodeId: "n3", parents: ["n1", "n2"] });
+    const n1 = aStackNode({ nodeId: "n1", branch: "feature/auth/token-store" });
+    const n2 = aStackNode({ nodeId: "n2", branch: "feature/auth/middleware" });
+    const n3 = aStackNode({ nodeId: "n3", parents: ["n1", "n2"] });
 
     // When
     const blocking = branchlessNonMergedParent(n3, [n1, n2, n3]);
@@ -242,7 +224,7 @@ describe("branchlessNonMergedParent", () => {
 
   it("returns null for a root node with no parents", () => {
     // Given
-    const n1 = aNode({ nodeId: "n1" });
+    const n1 = aStackNode({ nodeId: "n1" });
 
     // When
     const blocking = branchlessNonMergedParent(n1, [n1]);
@@ -253,8 +235,8 @@ describe("branchlessNonMergedParent", () => {
 
   it("passes over a merged parent that owns no branch", () => {
     // Given — a merged parent needs no branch: its work is already on the base
-    const n1 = aNode({ nodeId: "n1", prStatus: { phase: "merged" } });
-    const n2 = aNode({ nodeId: "n2", parents: ["n1"] });
+    const n1 = aStackNode({ nodeId: "n1", prStatus: { phase: "merged" } });
+    const n2 = aStackNode({ nodeId: "n2", parents: ["n1"] });
 
     // When
     const blocking = branchlessNonMergedParent(n2, [n1, n2]);
@@ -265,7 +247,7 @@ describe("branchlessNonMergedParent", () => {
 
   it("returns null when a parent id refers to no node in the stack", () => {
     // Given — a malformed plan referencing a parent that is not present
-    const n2 = aNode({ nodeId: "n2", parents: ["ghost"] });
+    const n2 = aStackNode({ nodeId: "n2", parents: ["ghost"] });
 
     // When
     const blocking = branchlessNonMergedParent(n2, [n2]);

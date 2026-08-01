@@ -11,7 +11,10 @@ import { AddPlannedPrForm, type AddPlannedPrFormSubmission } from "./AddPlannedP
 import { PrStackChat } from "./PrStackChat";
 import { parseStackPlan, type StackNode } from "./stackPlan";
 import { useQueryBranch } from "./useQueryBranch";
-import { deriveStackBaseBranch, resolveStackBase } from "./deriveStackBaseBranch";
+import { buildBranchQueries } from "./branchQueries";
+import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
+import { DirtyWorktreeDialog, type DirtyWorktreePrompt } from "./DirtyWorktreeDialog";
+import { deriveStackBaseBranch } from "./deriveStackBaseBranch";
 import { baseBranchChoice } from "./baseBranchChoice";
 import { resolveRepointTarget } from "./startBlockers";
 import { CreateSessionDialog } from "../CreateSessionDialog";
@@ -21,6 +24,40 @@ import { remoteTrackingName } from "../../../lib/branchNames";
 type ConnectionClient = Client<typeof ConnectionService>;
 
 const IDLE_ATTACHMENT: SessionAttachmentState = { status: "idle" };
+
+/** The reason map without `nodeId`'s entry, or the map itself when it holds none. */
+function withoutNode(errors: Record<string, string>, nodeId: string): Record<string, string> {
+  if (!(nodeId in errors)) return errors;
+  const next = { ...errors };
+  delete next[nodeId];
+  return next;
+}
+
+/** The in-flight set without `nodeId`, leaving the previous set untouched. */
+function withoutNodeInFlight(inFlight: ReadonlySet<string>, nodeId: string): ReadonlySet<string> {
+  const next = new Set(inFlight);
+  next.delete(nodeId);
+  return next;
+}
+
+/** The message an operator is shown for a rejected call, whatever the client threw. */
+function failureReason(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * What a pull that landed locally but never reached the remote tells the operator.
+ *
+ * The daemon answers such a pull with *success* and `pushed = false` (D32): the merge or rebase is in
+ * the branch, and rolling it back would be strictly worse than reporting the truth. Reported as an
+ * outright failure it would read as "nothing happened", and silently as success it would leave the
+ * open PR still showing itself behind with the row claiming it is in sync — which is the exact state
+ * D32 exists to make visible. So the wording states both halves: the work landed, the remote does not
+ * have it.
+ */
+function unpushedPullReason(baseBranch: string, branch: string, pushError: string): string {
+  return `Pulled ${baseBranch} into ${branch} locally, but the push failed — ${branch} on the remote (and its PR) does not have it yet: ${pushError}`;
+}
 
 export interface PrStackScreenProps {
   session: SessionEntry;
@@ -65,6 +102,12 @@ export interface PrStackScreenProps {
     orchestratorSessionId: string;
     projectId: string;
   }) => void;
+  /**
+   * Select and attach an existing session — how a spawned planned PR's status chip opens the child
+   * session it is bound to. Absent when the caller offers no navigation, in which case the chip stays
+   * plain text rather than becoming a control that goes nowhere.
+   */
+  onOpenSession?: (sessionId: string) => void;
 }
 
 /**
@@ -81,6 +124,7 @@ export function PrStackScreen({
   defaultBranch = "",
   defaultRemote = "",
   onChildSessionStarted,
+  onOpenSession,
 }: PrStackScreenProps) {
   const { room, status: roomStatus, error: roomError } = usePresenterLiveKitRoom(attachment);
   const livekitServerIdentity =
@@ -101,49 +145,53 @@ export function PrStackScreen({
   // Why a node's last repoint did not happen, keyed by node id. Per node rather than one banner: the
   // list shows several nodes at once and only the one that was refused is still blocked.
   const [repointErrorByNodeId, setRepointErrorByNodeId] = useState<Record<string, string>>({});
-  // Nodes with a repoint in flight, so a second click cannot start one beside it. Repointing a node
-  // that owns a branch rebases and force-pushes it, which is not safe to run twice concurrently. A set
-  // rather than a single id: repoints of different nodes are independent and may legitimately overlap.
-  const [repointingNodeIds, setRepointingNodeIds] = useState<ReadonlySet<string>>(new Set());
+  // Nodes with a mutation of their branch in flight — a repoint *or* a pull from the base. One set
+  // covering both, because both rewrite the same branch: a repoint rebases and force-pushes it, and a
+  // pull merges or rebases the base into it. The daemon serializes neither, so the two running side by
+  // side leaves a half-rebased worktree or force-pushes over a merge commit — and the state where both
+  // controls are offered at once is the normal post-merge one, since a node becomes repointable
+  // exactly when the parent whose merge also left it behind its new base landed.
+  //
+  // A set rather than a single id: mutations of *different* nodes touch different branches and may
+  // legitimately overlap. Only the guard is shared — each operation still reports its own failure.
+  const [branchMutatingNodeIds, setBranchMutatingNodeIds] = useState<ReadonlySet<string>>(new Set());
+  // Why a node's last reorder did not happen. Nothing moved, so the row would otherwise look as
+  // though the click was simply ignored.
+  const [reorderErrorByNodeId, setReorderErrorByNodeId] = useState<Record<string, string>>({});
+  // Nodes with a reorder in flight — the plan is rewritten from the response, so a second click
+  // would race the first for which returned order wins.
+  const [reorderingNodeIds, setReorderingNodeIds] = useState<ReadonlySet<string>>(new Set());
+  // Why a node's last pull from its base did not happen, keyed by node id. Kept apart from the repoint
+  // reasons: the two operations fail for different causes and the row states each where it happened.
+  const [syncErrorByNodeId, setSyncErrorByNodeId] = useState<Record<string, string>>({});
+  // The pull the operator asked for that is waiting on what to do about uncommitted work in the
+  // node's worktree. Null when nothing is pending — the prompt is the only thing standing between
+  // the click and the call.
+  const [dirtyWorktreePrompt, setDirtyWorktreePrompt] = useState<DirtyWorktreePrompt | null>(null);
   // The panel keeps today's at-a-glance view of the plan on desktop, where there is room for it, and
   // starts out of the way on mobile, where it covers the chat entirely (same seed as the session
   // list's own `sessionListOpen`).
   const [plannedPrPanelOpen, setPlannedPrPanelOpen] = useState(() => !detectIsMobile());
   const isMobile = useIsMobile();
 
-  // The branches nodes own. `QueryBranch` resolves each one's live GitHub PR itself, so the screen
-  // makes no second PR lookup: `GetPrStatus` reaches the same authenticated `GET /pulls` on the
-  // daemon, and polling both would double the GitHub request rate for no extra information — enough
-  // to exhaust a 5000/hour user limit within the hour on a five-node stack, after which every row
-  // reads "PR status unavailable" and stays there.
-  const branches = useMemo(
-    () => stack.nodes.map((n) => n.branch).filter((b): b is string => Boolean(b)),
-    [stack.nodes],
+  // What to ask `QueryBranch` to resolve: one call per branch a node owns, each paired with that
+  // node's base so the daemon can also report how the two stand against each other. `QueryBranch`
+  // resolves each branch's live GitHub PR itself, so the screen makes no second PR lookup:
+  // `GetPrStatus` reaches the same authenticated `GET /pulls` on the daemon, and polling both would
+  // double the GitHub request rate for no extra information — enough to exhaust a 5000/hour user
+  // limit within the hour on a five-node stack, after which every row reads "PR status unavailable"
+  // and stays there.
+  const branchQueries = useMemo(
+    () => buildBranchQueries(stack.nodes, defaultBranch),
+    [stack.nodes, defaultBranch],
   );
-  // Branches to resolve through `QueryBranch`: the branches nodes own, plus every node's *base*
-  // branch. A node's startability is a property of its base — its worktree is created from
-  // `origin/<base>` — and an unspawned node owns no branch of its own, so without the bases in the
-  // poll set the thing that decides startability is never resolved at all.
-  const resolvedBranches = useMemo(
-    () =>
-      [
-        ...new Set([
-          ...branches,
-          ...stack.nodes.flatMap((n) => {
-            const base = resolveStackBase(n, stack.nodes);
-            return base.kind === "ancestor-branch" ? [base.branch] : [];
-          }),
-        ]),
-      ].sort(),
-    [branches, stack.nodes],
-  );
-  // One-call branch resolution (worktree + in-progress session + remote + PR) per branch, polled on
-  // the same interval and independent of the agent.
-  const branchResolutionByBranch = useQueryBranch(
+  // One-call branch resolution (worktree + in-progress session + remote + PR + base sync) per branch,
+  // polled on the same interval and independent of the agent.
+  const { resolutionByBranch: branchResolutionByBranch, setResolution } = useQueryBranch(
     client,
     sessionToken,
     session.sessionId,
-    resolvedBranches,
+    branchQueries,
   );
 
   // Opening "Start session" no longer spawns the child directly — it opens the shared creation
@@ -248,19 +296,14 @@ export function PrStackScreen({
     if (!client) return;
     const node = stack.nodes.find((n) => n.nodeId === nodeId);
     if (!node) return;
-    // The control is disabled while a repoint is in flight, but a second call must be impossible
-    // rather than merely hard to trigger: a repeat rebase and force-push of the same branch is not a
-    // repeat of a harmless read.
-    if (repointingNodeIds.has(nodeId)) return;
-    setRepointingNodeIds((prev) => new Set(prev).add(nodeId));
+    // The control is disabled while any mutation of this branch is in flight, but a second call must
+    // be impossible rather than merely hard to trigger: a rebase and force-push landing beside a pull
+    // that is merging into the same branch is not a repeat of a harmless read.
+    if (branchMutatingNodeIds.has(nodeId)) return;
+    setBranchMutatingNodeIds((prev) => new Set(prev).add(nodeId));
     // A new attempt clears the previous reason: keeping it beside a repoint that is in flight would
     // report a failure that is no longer the current state.
-    setRepointErrorByNodeId((prev) => {
-      if (!(nodeId in prev)) return prev;
-      const next = { ...prev };
-      delete next[nodeId];
-      return next;
-    });
+    setRepointErrorByNodeId((prev) => withoutNode(prev, nodeId));
     try {
       const res = await client.repointPlannedPr({
         sessionToken,
@@ -278,17 +321,146 @@ export function PrStackScreen({
       // The daemon refuses a target that names neither the default branch nor any parent's branch, and
       // the repoint can still fail on an unresolvable default branch or a rebase conflict. Nothing was
       // persisted in either case, so the row stays blocked and has to say why.
-      setRepointErrorByNodeId((errors) => ({
-        ...errors,
-        [nodeId]: err instanceof Error ? err.message : String(err),
-      }));
+      setRepointErrorByNodeId((errors) => ({ ...errors, [nodeId]: failureReason(err) }));
     } finally {
-      setRepointingNodeIds((prev) => {
-        const next = new Set(prev);
-        next.delete(nodeId);
-        return next;
-      });
+      setBranchMutatingNodeIds((prev) => withoutNodeInFlight(prev, nodeId));
     }
+  };
+
+  // Move a row one position in the persisted reading order. The plan comes back renumbered and is
+  // re-rendered through the same override `handleAddPlannedPr` uses, since the `session` prop only
+  // refreshes on a later refetch.
+  const handleReorder = async (nodeId: string, direction: "up" | "down") => {
+    if (!client) return;
+    // The control is disabled while a reorder is in flight, but a second call must be impossible
+    // rather than merely hard to trigger: two reorders of one node race over which returned plan wins.
+    if (reorderingNodeIds.has(nodeId)) return;
+    setReorderingNodeIds((prev) => new Set(prev).add(nodeId));
+    setReorderErrorByNodeId((prev) => withoutNode(prev, nodeId));
+    try {
+      const res = await client.reorderPlannedPr({
+        sessionToken,
+        sessionId: session.sessionId,
+        nodeId,
+        direction,
+      });
+      setStackPlanOverride(res.stackPlanJson);
+    } catch (err) {
+      // Nothing was persisted, so nothing moved — without a reason the row would look as though the
+      // click was simply swallowed.
+      setReorderErrorByNodeId((errors) => ({ ...errors, [nodeId]: failureReason(err) }));
+    } finally {
+      setReorderingNodeIds((prev) => withoutNodeInFlight(prev, nodeId));
+    }
+  };
+
+  // Take the base's commits into a node's branch. The base sent is the one the row's badge and the
+  // control's own label named — the same discipline repoint follows (D18) — so the daemon does
+  // exactly what the operator was promised rather than re-deriving a base of its own.
+  const runPull = async (pull: {
+    nodeId: string;
+    /** The branch that takes the commits — the key the fresh resolution is written back under. */
+    branch: string;
+    baseBranch: string;
+    strategy: "merge" | "rebase";
+    /** "commit" commits and pushes the worktree's outstanding work first; empty leaves it to fail. */
+    dirtyWorktreeAction: "" | "commit";
+    commitMessage: string;
+  }) => {
+    if (!client) return;
+    const { nodeId, branch } = pull;
+    // Every control that touches this branch is disabled while one of them runs, but a concurrent
+    // merge, rebase or repoint of one branch is destructive rather than merely wasteful, so it must
+    // be impossible rather than merely unreachable through the UI.
+    if (branchMutatingNodeIds.has(nodeId)) return;
+    setBranchMutatingNodeIds((prev) => new Set(prev).add(nodeId));
+    // A new attempt clears the previous reason: a failure kept beside a pull that is now in flight
+    // reports a state that is no longer true.
+    setSyncErrorByNodeId((prev) => withoutNode(prev, nodeId));
+    try {
+      const res = await client.pullBaseIntoBranch({
+        sessionToken,
+        sessionId: session.sessionId,
+        nodeId,
+        baseBranch: pull.baseBranch,
+        strategy: pull.strategy,
+        dirtyWorktreeAction: pull.dirtyWorktreeAction,
+        commitMessage: pull.commitMessage,
+      });
+      // The refs just moved, so the row repaints from the pull's own re-resolution instead of
+      // waiting up to a full poll interval to stop claiming the branch is behind. Written into the
+      // poll's own map rather than layered over it, so the next tick simply supersedes it.
+      if (res.resolution) setResolution(branch, res.resolution);
+      // A successful call is not necessarily a completed pull: the local merge or rebase can land
+      // while the push that follows it fails, which the daemon reports rather than rolling back
+      // (D32). The re-resolution above then repaints the row as in sync with the base — true of the
+      // local branch, and not true of the PR anyone is reviewing — so the one surface that can say
+      // so has to.
+      if (!res.pushed && res.pushError) {
+        setSyncErrorByNodeId((errors) => ({
+          ...errors,
+          [nodeId]: unpushedPullReason(pull.baseBranch, branch, res.pushError),
+        }));
+      }
+    } catch (err) {
+      // A conflict aborts the pull and a push can fail on its own; either way the row still reads
+      // "behind", so it has to say why it stayed that way.
+      setSyncErrorByNodeId((errors) => ({ ...errors, [nodeId]: failureReason(err) }));
+    } finally {
+      setBranchMutatingNodeIds((prev) => withoutNodeInFlight(prev, nodeId));
+    }
+  };
+
+  // The click on a merge or rebase control. A worktree holding uncommitted work is a prompt rather
+  // than a refusal (D31): a child session's agent may be mid-turn in that checkout, so the operator
+  // sees what is outstanding and chooses to commit it before anything is touched.
+  const handleSyncFromBase = (nodeId: string, strategy: "merge" | "rebase") => {
+    const node = stack.nodes.find((n) => n.nodeId === nodeId);
+    if (!node?.branch) return;
+    // Refused here as well as in `runPull`, so a pull that cannot run never gets as far as opening
+    // the dirty-worktree prompt — a prompt whose confirm button does nothing is its own dead end.
+    if (branchMutatingNodeIds.has(nodeId)) return;
+    const resolution = branchResolutionByBranch[node.branch];
+    const view = baseSyncView(resolution);
+    // The controls render only for a clean behind-count, and the base they name comes from the same
+    // view — so a pull can never be issued against a comparison that was not made.
+    if (!canPullFromBase(view)) return;
+    if (resolution?.worktree?.dirty) {
+      setDirtyWorktreePrompt({
+        nodeId,
+        branch: node.branch,
+        baseBranch: view.baseBranch,
+        strategy,
+        dirtyPaths: resolution.worktree.dirtyPaths,
+      });
+      return;
+    }
+    void runPull({
+      nodeId,
+      branch: node.branch,
+      baseBranch: view.baseBranch,
+      strategy,
+      dirtyWorktreeAction: "",
+      commitMessage: "",
+    });
+  };
+
+  // The operator confirmed the prompt: commit and push the outstanding work first, then pull with
+  // the strategy they originally clicked.
+  const handleCommitDirtyWorktreeAndPull = (commitMessage: string) => {
+    const prompt = dirtyWorktreePrompt;
+    if (!prompt) return;
+    setDirtyWorktreePrompt(null);
+    void runPull({
+      nodeId: prompt.nodeId,
+      branch: prompt.branch,
+      baseBranch: prompt.baseBranch,
+      // The strategy the operator originally clicked, not a reset to the default: confirming the
+      // prompt answers what to do about the worktree, not which pull to run.
+      strategy: prompt.strategy,
+      dirtyWorktreeAction: "commit",
+      commitMessage,
+    });
   };
 
   const plannedPrPanelState = plannedPrPanelOpen ? "open" : "closed";
@@ -356,10 +528,21 @@ export function PrStackScreen({
             onRepoint={handleRepoint}
             defaultBranch={defaultBranch}
             repointErrorByNodeId={repointErrorByNodeId}
-            repointingNodeIds={repointingNodeIds}
+            branchMutatingNodeIds={branchMutatingNodeIds}
+            onReorder={handleReorder}
+            reorderErrorByNodeId={reorderErrorByNodeId}
+            reorderingNodeIds={reorderingNodeIds}
+            onSyncFromBase={handleSyncFromBase}
+            syncErrorByNodeId={syncErrorByNodeId}
+            onOpenSession={onOpenSession}
           />
         </PlannedPrPanel>
       </div>
+      <DirtyWorktreeDialog
+        prompt={dirtyWorktreePrompt}
+        onCommitAndPull={handleCommitDirtyWorktreeAndPull}
+        onCancel={() => setDirtyWorktreePrompt(null)}
+      />
       {client && (
         <CreateSessionDialog
           open={startSessionNode !== null}

@@ -32,6 +32,13 @@ export interface StackNode {
   /** Recipe the child session should be started with. Defaults to "tdd" when unset by the plan. */
   childRecipe: string;
   internalStatus: PrInternalStatus | null;
+  /**
+   * The node's persisted row position — the operator's reading order, which is a different fact from
+   * the dependency graph and does not change when the graph does. `null` for a node the plan does not
+   * order (a stack authored before display order existed), which falls back to topological order —
+   * see `orderStackNodes`.
+   */
+  displayOrder: number | null;
 }
 
 export interface Stack {
@@ -51,6 +58,7 @@ interface WireStackNode {
   child_state?: string | null;
   child_recipe?: string | null;
   internal_status?: PrInternalStatus | null;
+  display_order?: number | null;
 }
 
 interface WireStack {
@@ -79,6 +87,9 @@ export function parseStackPlan(stackPlanJson: string | undefined | null): Stack 
     childState: n.child_state ?? null,
     childRecipe: n.child_recipe ?? "tdd",
     internalStatus: n.internal_status ?? null,
+    // Position 0 is a real position, so an absent field is distinguished by type rather than by
+    // falsiness: `?? null` would read the first row's own position as "this node has no position".
+    displayOrder: typeof n.display_order === "number" ? n.display_order : null,
   }));
   return { version: parsed.version ?? 0, nodes };
 }

@@ -117,6 +117,13 @@ service ConnectionService {
   // PR-Stack Chat Screen: repoint a planned node after a predecessor merged — drop merged parents,
   // rebase the local branch onto the effective base, and re-target the open PR's base branch.
   rpc RepointPlannedPr(RepointPlannedPrRequest) returns (RepointPlannedPrResponse);
+  // PR-Stack Chat Screen: move one planned node up or down the operator's reading order. Changes
+  // only `StackNode.display_order` — the dependency graph (`parents`) is a different fact and is
+  // left alone. See docs/ft/coder/pr-stack-live-status.md.
+  rpc ReorderPlannedPr(ReorderPlannedPrRequest) returns (ReorderPlannedPrResponse);
+  // PR-Stack Chat Screen: take a base branch's commits into a planned node's branch, inside that
+  // node's own worktree, and push the result. Merge by default; rebase on request.
+  rpc PullBaseIntoBranch(PullBaseIntoBranchRequest) returns (PullBaseIntoBranchResponse);
   // PR-Stack Chat Screen: resolve one head branch to its in-progress child session, on-disk
   // worktree, and live GitHub PR status in a single call. Polled by the web per rendered branch.
   // See docs/ft/coder/pr-stack-live-status.md.
@@ -1211,6 +1218,12 @@ message QueryBranchRequest {
   string session_id = 2;
   // Head branch to resolve.
   string branch = 3;
+  // The base the branch is compared against for `BranchResolution.base_sync`. Usually
+  // `ProjectEntry.main_branch_ref`, so it commonly already carries a `<remote>/` prefix — the
+  // daemon normalises one off before probing. Empty means the caller named no base, which is
+  // reported as `base_sync.unavailable` rather than substituting one: the count beside a row must
+  // describe the same base the row's own base line shows.
+  string base_branch = 4;
 }
 message QueryBranchResponse {
   BranchResolution resolution = 1;
@@ -1228,6 +1241,44 @@ message BranchResolution {
   PrStatusView pr = 4;
   // The branch on `origin` — whether it can be based onto by a descendant's worktree.
   BranchRemote remote = 5;
+  // How the branch stands against the base named in the request. Always present, including when
+  // the request named no base — that is reported as `unavailable`, not omitted. Absent only from a
+  // daemon that predates the field, which a client must read as "unknown" rather than "in sync".
+  BranchBaseSync base_sync = 6;
+}
+
+// How a branch stands against its base: how far behind, how far ahead, and whether taking the
+// base's commits would conflict.
+//
+// Computed with `git rev-list --left-right --count` and `git merge-tree --write-tree`, neither of
+// which touches the index, the working tree, `HEAD`, any ref, or the network — the probe runs on a
+// poll against worktrees that may have a live agent in them. It reads the base as of the last
+// fetch, so it can report a branch behind that has just caught up, never the reverse.
+message BranchBaseSync {
+  // The base that was actually compared, which is not always the one requested: a requested
+  // `origin/master` is normalised, and a base resolves remote-first. The row names this, not what
+  // it asked for.
+  string base_branch = 1;
+  // Commits on the base that the branch lacks.
+  uint32 behind_count = 2;
+  // Commits on the branch that the base lacks.
+  uint32 ahead_count = 3;
+  // True when taking the base's commits would conflict. Always false when behind_count = 0, which
+  // is short-circuited without a merge probe.
+  bool has_conflicts = 4;
+  // The files that cannot be merged, when has_conflicts = true.
+  repeated string conflicted_paths = 5;
+  // True when the comparison could not be made at all — no base named, no repository, an
+  // unresolvable ref, unrelated histories. A failed comparison is byte-identical to a healthy one
+  // (nothing behind, no conflicts), so it carries this discriminator and must never render as
+  // "in sync".
+  bool unavailable = 6;
+  // Operator-facing reason when unavailable = true; empty otherwise.
+  string unavailable_reason = 7;
+  // The fully-resolved ref the base was read from, e.g. "origin/master" or "master".
+  string base_ref = 8;
+  // The fully-resolved ref the head was read from, e.g. "feature/x" or "origin/feature/x".
+  string head_ref = 9;
 }
 
 // The remote-tracking state of a branch on `origin`.
@@ -1250,6 +1301,12 @@ message BranchWorktree {
   bool exists = 1;
   // Absolute worktree path when exists = true.
   string path = 2;
+  // True when the worktree holds uncommitted changes to *tracked* files. Untracked files are
+  // deliberately not dirtiness here: git refuses loudly rather than clobbering one, and counting
+  // them would leave the pull control permanently blocked in any worktree an agent works in.
+  bool dirty = 3;
+  // The tracked paths with outstanding changes, when dirty = true.
+  repeated string dirty_paths = 4;
 }
 
 message RepointPlannedPrRequest {
@@ -1268,6 +1325,60 @@ message RepointPlannedPrRequest {
 message RepointPlannedPrResponse {
   // Updated JSON-serialized `Stack`, same wire shape as `SessionEntry.stack_plan_json` (field 23).
   string stack_plan_json = 1;
+}
+
+// --- PR-Stack Chat Screen: reordering the reading order ---
+
+message ReorderPlannedPrRequest {
+  string session_token = 1;
+  // The "pr-stack" orchestrator session whose Changeset.stack holds the node.
+  string session_id = 2;
+  // The planned node to move.
+  string node_id = 3;
+  // "up" or "down". Moving past either end is a successful no-op — the control at the end of the
+  // list is inert, not wrong.
+  string direction = 4;
+}
+message ReorderPlannedPrResponse {
+  // Updated JSON-serialized `Stack`, same wire shape as `SessionEntry.stack_plan_json` (field 23).
+  string stack_plan_json = 1;
+}
+
+// --- PR-Stack Chat Screen: taking base changes into a node's branch ---
+
+message PullBaseIntoBranchRequest {
+  string session_token = 1;
+  // The "pr-stack" orchestrator session whose Changeset.stack holds the node.
+  string session_id = 2;
+  // The node whose branch takes the base's commits. The pull runs in that node's own worktree.
+  string node_id = 3;
+  // The base to take from — the base the operator's control named, so the operation matches what
+  // the row's base-sync badge stated.
+  string base_branch = 4;
+  // "merge" (default, and what an empty string means) or "rebase". Merge disturbs no review
+  // anchors on the open PR and needs no force-push; rebase rewrites history and force-pushes with
+  // a lease, which is the right trade only when the operator chooses it.
+  string strategy = 5;
+  // What to do about uncommitted changes to tracked files in the worktree. Empty refuses the pull
+  // and names the paths; "commit" commits and pushes them first, then pulls.
+  string dirty_worktree_action = 6;
+  // The commit message for dirty_worktree_action = "commit". Meaningless otherwise.
+  string commit_message = 7;
+}
+message PullBaseIntoBranchResponse {
+  // The branch re-resolved after the pull, uncached — the refs just moved, so the row repaints
+  // without waiting for the next poll tick.
+  BranchResolution resolution = 1;
+  // The strategy that actually ran: "merge" or "rebase".
+  string strategy = 2;
+  // False when the branch already contained every commit on its base, in which case nothing was
+  // committed and nothing was pushed.
+  bool changed = 3;
+  // False when the push failed. The local merge or rebase still landed — rolling it back would be
+  // strictly worse than reporting the truth.
+  bool pushed = 4;
+  // Why the push failed, when pushed = false and changed = true.
+  string push_error = 5;
 }
 
 // --- Local peer-trust token minting (Unix-domain socket only) ---

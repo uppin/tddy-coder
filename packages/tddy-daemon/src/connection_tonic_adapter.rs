@@ -49,9 +49,10 @@ use tddy_service::proto::connection::{
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse,
-    QueryBranchRequest, QueryBranchResponse, ReadSessionWorkflowFileRequest,
-    ReadSessionWorkflowFileResponse, ReadWorktreeFileRequest, ReadWorktreeFileResponse,
-    RemoveWorktreeRequest, RemoveWorktreeResponse, RepointPlannedPrRequest,
+    PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
+    ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse, ReadWorktreeFileRequest,
+    ReadWorktreeFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
+    ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
     RepointPlannedPrResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
     ReportSessionStatusRequest, ReportSessionStatusResponse, RestoreSessionWorktreeRequest,
     RestoreSessionWorktreeResponse, ResumeSessionRequest, ResumeSessionResponse,
@@ -831,6 +832,32 @@ where
         request: tonic::Request<RepointPlannedPrRequest>,
     ) -> Result<tonic::Response<RepointPlannedPrResponse>, tonic::Status> {
         let resp = RpcConnectionService::repoint_planned_pr(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn reorder_planned_pr(
+        &self,
+        request: tonic::Request<ReorderPlannedPrRequest>,
+    ) -> Result<tonic::Response<ReorderPlannedPrResponse>, tonic::Status> {
+        let resp = RpcConnectionService::reorder_planned_pr(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn pull_base_into_branch(
+        &self,
+        request: tonic::Request<PullBaseIntoBranchRequest>,
+    ) -> Result<tonic::Response<PullBaseIntoBranchResponse>, tonic::Status> {
+        let resp = RpcConnectionService::pull_base_into_branch(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

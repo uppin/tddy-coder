@@ -30,6 +30,7 @@ import {
   type ProjectEntry,
   type SessionEntry,
 } from "../gen/connection_pb";
+import type { StackNode } from "../components/sessions/prstack/stackPlan";
 import type { ViewRect } from "../lib/terminalStatusBarLayout";
 import type { TransitionCounters } from "../components/connection/terminalPresentation";
 import type { RoomParticipant } from "../hooks/useRoomParticipants";
@@ -89,6 +90,40 @@ export function aBranchResolution(overrides: Partial<BranchResolution> = {}): Br
     remote: { exists: false, sha: "" },
     ...overrides,
   });
+}
+
+// ---------------------------------------------------------------------------
+// StackNode (PR-Stack planned PR)
+// ---------------------------------------------------------------------------
+
+/**
+ * A planned PR as `parseStackPlan` produces it — every field present and carrying the value an
+ * unspawned, branchless, unordered node has. Override only the fields a scenario is about.
+ *
+ * `displayOrder` defaults to `null` (the plan orders nothing) rather than being left off: absent and
+ * `null` mean the same thing to `orderStackNodes` but are different *values*, and only `parseStackPlan`
+ * guarantees the field is written. A test about the absent-field case builds it explicitly.
+ *
+ * The title defaults to the node id so a stack built from ids alone still renders distinguishable
+ * rows; a test that reads titles states them.
+ */
+export function aStackNode(overrides: Partial<StackNode> = {}): StackNode {
+  const nodeId = overrides.nodeId ?? "n1";
+  return {
+    nodeId,
+    title: nodeId,
+    description: "",
+    branchSuggestion: null,
+    branch: null,
+    sessionId: null,
+    parents: [],
+    prStatus: null,
+    childState: null,
+    childRecipe: "tdd",
+    internalStatus: null,
+    displayOrder: null,
+    ...overrides,
+  };
 }
 
 // ---------------------------------------------------------------------------

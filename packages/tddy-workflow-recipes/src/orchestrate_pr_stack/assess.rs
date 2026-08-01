@@ -717,6 +717,7 @@ mod tests {
                     pr_status: None,
                     child_state: None,
                     internal_status: None,
+                    display_order: None,
                 },
                 StackNode {
                     node_id: "n2".into(),
@@ -729,6 +730,7 @@ mod tests {
                     pr_status: None,
                     child_state: None,
                     internal_status: None,
+                    display_order: None,
                 },
             ],
         };
@@ -795,6 +797,7 @@ mod tests {
                 pr_status: None,
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             }],
         };
         let mock_gh = NoneOpenMockGh;
@@ -832,6 +835,7 @@ mod tests {
                 pr_status: None,
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             }],
         };
         let gh = AlwaysOpenMockGh {
@@ -885,6 +889,7 @@ mod tests {
                 pr_status: None,
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             }],
         };
 

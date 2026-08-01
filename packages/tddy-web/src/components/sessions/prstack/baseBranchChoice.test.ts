@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { aStackNode } from "../../../test-utils";
 import { baseBranchChoice } from "./baseBranchChoice";
 import type { StackNode } from "./stackPlan";
 
@@ -26,24 +27,6 @@ import type { StackNode } from "./stackPlan";
  * into remote-tracking form (idempotently) for display; this layer keeps them as given.
  */
 
-/** A stack node with only the fields these tests care about; everything else gets a valid default. */
-function aNode(overrides: Partial<StackNode> & { nodeId: string }): StackNode {
-  return {
-    nodeId: overrides.nodeId,
-    title: overrides.title ?? overrides.nodeId,
-    description: "",
-    branchSuggestion: null,
-    branch: null,
-    sessionId: null,
-    parents: [],
-    prStatus: null,
-    childState: null,
-    childRecipe: "tdd",
-    internalStatus: null,
-    ...overrides,
-  };
-}
-
 const DEFAULT_BRANCH = "origin/master";
 const ATTACH_PROTO_BRANCH = "feature/session-attach-docs/attach-proto";
 const ATTACH_STORE_BRANCH = "feature/session-attach-docs/attach-store";
@@ -58,26 +41,26 @@ function anAttachDocsStackWithRepointedUi(): {
   attachStart: StackNode;
   nodes: StackNode[];
 } {
-  const attachProto = aNode({
+  const attachProto = aStackNode({
     nodeId: "attach-proto",
     title: "Start-session attachment proto",
     branch: ATTACH_PROTO_BRANCH,
     prStatus: { phase: "open" },
   });
-  const attachStore = aNode({
+  const attachStore = aStackNode({
     nodeId: "attach-store",
     title: "Session attachment storage and context docs",
     branch: ATTACH_STORE_BRANCH,
     prStatus: { phase: "open" },
   });
-  const attachStart = aNode({
+  const attachStart = aStackNode({
     nodeId: "attach-start",
     title: "Copy attachments during StartSession",
     branchSuggestion: "feature/session-attach-docs/attach-start",
     parents: ["attach-proto", "attach-store"],
   });
   // Repointed onto master: the daemon dropped every parent edge (`RepointPlannedPr`).
-  const attachUi = aNode({
+  const attachUi = aStackNode({
     nodeId: "attach-ui",
     title: "Create Session attach UI",
     branchSuggestion: "feature/session-attach-docs/attach-ui",
@@ -127,7 +110,7 @@ describe("baseBranchChoice", () => {
 
   it("offers nothing to choose for a lone planned root", () => {
     // Given — a single planned root: the stack owns no branch anywhere.
-    const loneRoot = aNode({ nodeId: "n1", title: "root", branchSuggestion: "feature/stack/n1" });
+    const loneRoot = aStackNode({ nodeId: "n1", title: "root", branchSuggestion: "feature/stack/n1" });
 
     // When
     const choice = baseBranchChoice(loneRoot, [loneRoot], DEFAULT_BRANCH);
@@ -165,15 +148,15 @@ describe("baseBranchChoice", () => {
    * the merged node to n1, which the option list also carries as an "other" stack branch.
    */
   function aStackWhoseBaseIsAboveAMergedParent(): { n3: StackNode; nodes: StackNode[] } {
-    const n1 = aNode({ nodeId: "n1", title: "root", branch: "feature/stack/n1", prStatus: { phase: "open" } });
-    const n2 = aNode({
+    const n1 = aStackNode({ nodeId: "n1", title: "root", branch: "feature/stack/n1", prStatus: { phase: "open" } });
+    const n2 = aStackNode({
       nodeId: "n2",
       title: "merged mid",
       branch: "feature/stack/n2",
       prStatus: { phase: "merged" },
       parents: ["n1"],
     });
-    const n3 = aNode({
+    const n3 = aStackNode({
       nodeId: "n3",
       title: "planned top",
       branchSuggestion: "feature/stack/n3",

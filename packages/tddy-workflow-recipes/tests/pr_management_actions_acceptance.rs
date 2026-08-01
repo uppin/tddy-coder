@@ -94,6 +94,7 @@ fn an_orchestrator_dir_with_open_pr_node(label: &str) -> std::path::PathBuf {
                 }),
                 child_state: None,
                 internal_status: None,
+                display_order: None,
             }],
         }),
         ..Changeset::default()

@@ -74,6 +74,18 @@ export const sessionsDrawerPage = {
   drawerItem: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsDrawerItem(sessionId), { timeout: 5000, ...options }),
 
+  /**
+   * Assert the drawer has this session selected. `aria-selected` is set on the drawer item itself,
+   * so this states "the app navigated here" without reaching into the detail pane's own chrome.
+   */
+  expectSessionSelected(sessionId: string) {
+    byTestId(sessionsDrawerItem(sessionId), { timeout: 5000 }).should(
+      "have.attr",
+      "aria-selected",
+      "true",
+    );
+  },
+
   /** The "Active (N)" partition header (present only when the list has both active and inactive rows). */
   separatorActive: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsDrawerSeparatorActive, { timeout: 5000, ...options }),

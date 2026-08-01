@@ -11,7 +11,15 @@
 //! Stub/demo authentication is a first-class state, not a degraded one: it reports no PRs and no
 //! error at all (D12).
 //!
-//! PRD: docs/ft/coder/pr-stack-live-status.md (C2, C3, D4, D8, D12).
+//! The **base_sync** leg follows the same rule one level down: a comparison that could not be made
+//! carries an explicit `unavailable` discriminator, because a failed comparison is byte-identical to
+//! a healthy one — nothing behind, no conflicts — and rendering it as "clean" is exactly the
+//! conflation D12 already ruled out for PR status (D27). An unnamed base is likewise unavailable
+//! rather than substituted with the project default (D29): the number beside a row must describe the
+//! same base the row's own base line names.
+//!
+//! PRD: docs/ft/coder/pr-stack-live-status.md (C2, C3, D4, D8, D12) and
+//! docs/ft/coder/pr-stack-live-status.md § Panel UX (C4, D27-D29).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -25,7 +33,8 @@ use tddy_daemon::connection_service::{
 };
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
-    BranchResolution, ConnectionService as ConnectionServiceTrait, QueryBranchRequest,
+    BranchBaseSync, BranchResolution, ConnectionService as ConnectionServiceTrait,
+    QueryBranchRequest,
 };
 use tddy_testing_commons::{a_session_metadata, fs::write_session_yaml};
 
@@ -96,6 +105,24 @@ fn a_branch(repo: &Path, branch: &str, push: bool) -> String {
         git(repo, &["push", "origin", branch]);
     }
     sha
+}
+
+/// A commit landed on `master` after the branch forked, pushed — so `origin/master` runs ahead of
+/// the branch by exactly one commit.
+fn a_commit_on_master_touching(repo: &Path, file: &str, contents: &str) {
+    git(repo, &["checkout", "master"]);
+    std::fs::write(repo.join(file), contents).unwrap();
+    git(repo, &["add", file]);
+    git(repo, &["commit", "-m", "base work"]);
+    git(repo, &["push", "origin", "master"]);
+}
+
+/// The base comparison of a resolution, which every base-sync case asserts on.
+fn base_sync_of(resolution: &BranchResolution) -> BranchBaseSync {
+    resolution
+        .base_sync
+        .clone()
+        .expect("the base-sync leg must be present")
 }
 
 /// A daemon config mapping GitHub login `u` to OS user `u`, with `github.stub` as given.
@@ -170,12 +197,24 @@ fn a_pr_stack_orchestrator_with_a_child_on(sessions_base: &Path, repo_root: &Pat
     );
 }
 
+/// Resolve `branch` without asking for any base comparison — what a caller that has no base to name
+/// sends.
 async fn query(service: &ConnectionServiceImpl, branch: &str) -> BranchResolution {
+    query_against(service, branch, "").await
+}
+
+/// Resolve `branch`, comparing it against `base_branch`.
+async fn query_against(
+    service: &ConnectionServiceImpl,
+    branch: &str,
+    base_branch: &str,
+) -> BranchResolution {
     service
         .query_branch(Request::new(QueryBranchRequest {
             session_token: TOKEN.to_string(),
             session_id: ORCHESTRATOR.to_string(),
             branch: branch.to_string(),
+            base_branch: base_branch.to_string(),
         }))
         .await
         .expect("QueryBranch must succeed as an RPC")
@@ -292,5 +331,239 @@ async fn reports_no_pr_and_no_unavailability_for_a_stub_login() {
         (pr.exists, pr.unavailable, pr.unavailable_reason.as_str()),
         (false, false, ""),
         "a stub login must never surface an error or an unavailable PR status"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The base-sync leg
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn reports_how_far_behind_its_base_a_branch_is_and_which_base_that_was() {
+    // Given — the branch forked, then master landed a commit it does not have
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    a_repo_with_a_github_origin(&repo);
+    a_branch(&repo, BRANCH, true);
+    a_commit_on_master_touching(&repo, "base-only", "base work");
+    let sessions_base = temp.path().join("data");
+    a_pr_stack_orchestrator_with_a_child_on(&sessions_base, &repo);
+
+    // When — the caller names the base the way a project stores it, remote prefix and all
+    let resolution = query_against(&a_service(sessions_base, false), BRANCH, "origin/master").await;
+
+    // Then — the count, and the ref it was actually measured against (D28)
+    let base_sync = base_sync_of(&resolution);
+    assert_eq!(
+        (
+            base_sync.behind_count,
+            base_sync.ahead_count,
+            base_sync.has_conflicts,
+            base_sync.unavailable,
+            base_sync.base_branch.as_str()
+        ),
+        (1, 1, false, false, "origin/master")
+    );
+}
+
+#[tokio::test]
+async fn reports_the_conflicting_paths_of_a_branch_that_cannot_take_its_base() {
+    // Given — the branch and master have each rewritten the same file
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    a_repo_with_a_github_origin(&repo);
+    a_branch(&repo, BRANCH, true);
+    a_commit_on_master_touching(&repo, "g", "the base rewrote this");
+    let sessions_base = temp.path().join("data");
+    a_pr_stack_orchestrator_with_a_child_on(&sessions_base, &repo);
+
+    // When
+    let resolution = query_against(&a_service(sessions_base, false), BRANCH, "origin/master").await;
+
+    // Then — the operator learns which files stand in the way, not merely that something does
+    let base_sync = base_sync_of(&resolution);
+    assert_eq!(
+        (base_sync.has_conflicts, base_sync.conflicted_paths.clone()),
+        (true, vec!["g".to_string()])
+    );
+}
+
+#[tokio::test]
+async fn reports_a_branch_that_contains_every_commit_on_its_base_as_neither_behind_nor_conflicting()
+{
+    // Given — the branch forked and the base has not moved since
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    a_repo_with_a_github_origin(&repo);
+    a_branch(&repo, BRANCH, true);
+    let sessions_base = temp.path().join("data");
+    a_pr_stack_orchestrator_with_a_child_on(&sessions_base, &repo);
+
+    // When
+    let resolution = query_against(&a_service(sessions_base, false), BRANCH, "origin/master").await;
+
+    // Then — a healthy comparison, explicitly *not* flagged unavailable
+    let base_sync = base_sync_of(&resolution);
+    assert_eq!(
+        (
+            base_sync.behind_count,
+            base_sync.has_conflicts,
+            base_sync.unavailable
+        ),
+        (0, false, false)
+    );
+}
+
+#[tokio::test]
+async fn an_unnamed_base_is_reported_unavailable_rather_than_substituted_with_the_default() {
+    // Given — a caller with no base to name, e.g. a project that stores no default branch
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    a_repo_with_a_github_origin(&repo);
+    a_branch(&repo, BRANCH, true);
+    let sessions_base = temp.path().join("data");
+    a_pr_stack_orchestrator_with_a_child_on(&sessions_base, &repo);
+
+    // When
+    let resolution = query(&a_service(sessions_base, false), BRANCH).await;
+
+    // Then — substituting a base would answer a question the row is not asking (D29), and a zeroed
+    // comparison would read as "in sync" against a base the row never names
+    let base_sync = base_sync_of(&resolution);
+    assert!(base_sync.unavailable);
+    assert!(
+        !base_sync.unavailable_reason.trim().is_empty(),
+        "unavailability must carry an operator-facing reason"
+    );
+}
+
+#[tokio::test]
+async fn a_base_that_names_no_ref_is_reported_unavailable_rather_than_in_sync() {
+    // Given — a base branch that does not exist in this repository
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    a_repo_with_a_github_origin(&repo);
+    a_branch(&repo, BRANCH, true);
+    let sessions_base = temp.path().join("data");
+    a_pr_stack_orchestrator_with_a_child_on(&sessions_base, &repo);
+
+    // When
+    let resolution = query_against(
+        &a_service(sessions_base, false),
+        BRANCH,
+        "release/never-created",
+    )
+    .await;
+
+    // Then — a failed comparison is byte-identical to a healthy one on every other field (D27)
+    let base_sync = base_sync_of(&resolution);
+    assert_eq!(
+        (
+            base_sync.unavailable,
+            base_sync.behind_count,
+            base_sync.has_conflicts
+        ),
+        (true, 0, false)
+    );
+    assert!(
+        base_sync
+            .unavailable_reason
+            .contains("release/never-created"),
+        "the reason must name the base that could not be resolved, was '{}'",
+        base_sync.unavailable_reason
+    );
+}
+
+#[tokio::test]
+async fn a_base_sync_that_cannot_be_computed_leaves_the_other_legs_intact() {
+    // Given — a base nothing in the repository resolves, so only the comparison can fail
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    a_repo_with_a_github_origin(&repo);
+    a_branch(&repo, BRANCH, true);
+    let sessions_base = temp.path().join("data");
+    a_pr_stack_orchestrator_with_a_child_on(&sessions_base, &repo);
+
+    // When
+    let resolution = query_against(
+        &a_service(sessions_base, false),
+        BRANCH,
+        "release/never-created",
+    )
+    .await;
+
+    // Then — the failure degrades itself and nothing else (AC 23)
+    assert!(base_sync_of(&resolution).unavailable);
+    let session = resolution.session.expect("the session leg must be present");
+    let worktree = resolution
+        .worktree
+        .expect("the worktree leg must be present");
+    let remote = resolution.remote.expect("the remote leg must be present");
+    let pr = resolution.pr.expect("the pr leg must be present");
+    assert_eq!(
+        (
+            session.exists,
+            session.session_id.as_str(),
+            worktree.exists,
+            remote.exists,
+            pr.unavailable
+        ),
+        (true, CHILD, false, true, true)
+    );
+}
+
+#[tokio::test]
+async fn reports_a_clean_worktree_as_holding_nothing_outstanding() {
+    // Given — a branch checked out in a worktree with no edits in it
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    a_repo_with_a_github_origin(&repo);
+    a_branch(&repo, BRANCH, true);
+    let worktree = temp.path().join("wt");
+    git(
+        &repo,
+        &["worktree", "add", worktree.to_str().unwrap(), BRANCH],
+    );
+    let sessions_base = temp.path().join("data");
+    a_pr_stack_orchestrator_with_a_child_on(&sessions_base, &repo);
+
+    // When
+    let resolution = query(&a_service(sessions_base, false), BRANCH).await;
+
+    // Then
+    let leg = resolution
+        .worktree
+        .expect("the worktree leg must be present");
+    assert_eq!((leg.exists, leg.dirty), (true, false));
+}
+
+#[tokio::test]
+async fn reports_the_tracked_paths_a_worktree_has_left_uncommitted() {
+    // Given — an edit to a tracked file, left uncommitted, beside a file git has never seen
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    a_repo_with_a_github_origin(&repo);
+    a_branch(&repo, BRANCH, true);
+    let worktree = temp.path().join("wt");
+    git(
+        &repo,
+        &["worktree", "add", worktree.to_str().unwrap(), BRANCH],
+    );
+    std::fs::write(worktree.join("g"), "an unsaved edit").unwrap();
+    std::fs::write(worktree.join("scratch.md"), "notes to self").unwrap();
+    let sessions_base = temp.path().join("data");
+    a_pr_stack_orchestrator_with_a_child_on(&sessions_base, &repo);
+
+    // When
+    let resolution = query(&a_service(sessions_base, false), BRANCH).await;
+
+    // Then — the untracked file is not outstanding work: git refuses loudly rather than clobbering
+    // one, and counting it would leave the pull control dead in every real agent worktree
+    let leg = resolution
+        .worktree
+        .expect("the worktree leg must be present");
+    assert_eq!(
+        (leg.dirty, leg.dirty_paths.clone()),
+        (true, vec!["g".to_string()])
     );
 }

@@ -1,7 +1,11 @@
 import React from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "../../ui/button";
 import type { BranchResolution } from "../../../gen/connection_pb";
+import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
 import { isNodeOrphaned } from "./isNodeOrphaned";
+import { PlannedPrRowBadges } from "./PlannedPrRowBadges";
+import { PlannedPrRowDetails } from "./PlannedPrRowDetails";
 import type { StartBlocker } from "./startBlockers";
 import type { StackNode } from "./stackPlan";
 
@@ -34,10 +38,37 @@ export interface PlannedPrRowProps {
   /** The daemon's reason for refusing or failing this node's last repoint, shown inline. */
   repointError?: string;
   /**
-   * True while this node's repoint is in flight. Disables the control: a repoint of a node that owns a
-   * branch rebases and force-pushes it, so a second concurrent run is destructive, not just wasteful.
+   * True while a mutation of this node's branch is in flight — a repoint or a pull from its base.
+   *
+   * One flag rather than one per operation, because it disables the same three controls either way:
+   * repoint rebases and force-pushes the branch, and a pull merges or rebases the base into that very
+   * branch. Any two of them running side by side is destructive rather than merely wasteful, and the
+   * post-merge state where a node is both repointable *and* behind its new base is the normal one —
+   * so "a repoint is running" and "a pull is running" are not a distinction a control can act on.
+   * Each failure still reports itself separately (see {@link repointError} and {@link syncError}).
    */
-  repointing?: boolean;
+  branchMutating?: boolean;
+  /** False on the first row of the rendered order — its move-up control is inert. */
+  canMoveUp?: boolean;
+  /** False on the last row of the rendered order — its move-down control is inert. */
+  canMoveDown?: boolean;
+  /** Move this node one position in the persisted reading order. */
+  onReorder?: (nodeId: string, direction: "up" | "down") => void;
+  /** The daemon's reason for refusing or failing this node's last reorder, shown inline. */
+  reorderError?: string;
+  /** True while this node's reorder is in flight — both of its controls are disabled until it settles. */
+  reordering?: boolean;
+  /**
+   * Pull this node's base into its branch. Rendered only when the branch is cleanly behind, so the
+   * strategy is the operator's only remaining choice — the base comes from the comparison itself.
+   */
+  onSyncFromBase?: (nodeId: string, strategy: "merge" | "rebase") => void;
+  /**
+   * What the operator is told about this node's last pull from its base, shown inline. Either the
+   * daemon's reason for refusing or failing it, or — for a pull that landed locally but whose push
+   * did not (D32) — that the work is in the branch and not yet on the remote.
+   */
+  syncError?: string;
   /**
    * Every reason a spawn cannot succeed right now, each with the text to show. Non-empty *disables*
    * the Start-session button — it never replaces it, and never suppresses any of the row's own
@@ -47,22 +78,37 @@ export interface PlannedPrRowProps {
   blockers?: StartBlocker[];
   /** The base branch the row states its child worktree would be created from. */
   baseBranchLabel?: string;
+  /** True when this row's detail body is revealed. The row itself holds no state — see `PlannedPrList`. */
+  expanded?: boolean;
+  /** Reveal or hide this row's detail body. */
+  onToggleExpanded?: (nodeId: string) => void;
+  /** The titles of the planned PRs this node is stacked on — see `parentTitles`. */
+  parentTitles?: string[];
+  /**
+   * The child session this row's status chip opens, resolved by `boundChildSession`. Empty when
+   * neither the plan's recorded child nor the branch's current owner is a session the caller knows,
+   * in which case the chip stays plain text rather than offering a control that selects nothing.
+   */
+  boundSessionId?: string;
+  /** Select and attach {@link boundSessionId}, exactly as clicking that session in the drawer does. */
+  onOpenSession?: (sessionId: string) => void;
 }
 
-/** Tailwind classes for an internal-status badge, keyed by status kind. */
-const INTERNAL_STATUS_BADGE_CLASSES: Record<string, string> = {
-  "needs-repoint": "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100",
-  "has-conflicts": "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100",
-  "ready-to-merge": "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
-  blocked: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100",
-};
-
 /**
- * A single row in the planned-PR list, rendering the planned PR's full information whatever its
- * startability: title, description, the branch it owns or its planned branch, its base branch, its
- * worktree and its PR link/state. The CTA slot holds either the live child's status chip or the
- * Start-session button — disabled, with a warning naming each blocker, when a spawn cannot succeed
- * (D16, which reverses the earlier indicator that replaced the row's contents).
+ * A single row in the planned-PR list, in three regions — one per block of the returned markup:
+ *
+ * - a **summary header** — the expand/collapse toggle carrying the title, then
+ *   {@link PlannedPrRowBadges} and the CTA slot *beside* it rather than inside it (a button nested
+ *   in a button is invalid markup, and would swallow the Start-session click into an expand);
+ * - a **detail body** ({@link PlannedPrRowDetails}) holding everything else the node knows and the
+ *   controls that act on its branch and its position;
+ * - an **always-visible footer** for blockers and refusals. These stay outside the collapse boundary
+ *   (D22): a reason the operator has to expand a row to discover is a fresh dead end — which is why
+ *   it is the row itself, not the detail body, that renders them.
+ *
+ * The CTA slot holds either the live child's status chip — clickable when a bound session resolves —
+ * or the Start-session button, disabled with a warning naming each blocker when a spawn cannot
+ * succeed (D16, which reverses the earlier indicator that replaced the row's contents).
  */
 export function PlannedPrRow({
   node,
@@ -74,30 +120,58 @@ export function PlannedPrRow({
   onRepoint,
   repointTarget = "",
   repointError = "",
-  repointing = false,
+  branchMutating = false,
+  canMoveUp = false,
+  canMoveDown = false,
+  onReorder,
+  reorderError = "",
+  reordering = false,
+  onSyncFromBase,
+  syncError = "",
   blockers = [],
   baseBranchLabel = "",
+  expanded = false,
+  onToggleExpanded,
+  parentTitles = [],
+  boundSessionId = "",
+  onOpenSession,
 }: PlannedPrRowProps) {
   // A node whose recorded child session has been deleted is workable again, so it shows the CTA
   // rather than a status chip for a session that no longer exists.
   const isSpawned = Boolean(node.sessionId) && !isNodeOrphaned(node, resolution);
-  const worktree = resolution?.worktree;
-  const showWorktree = Boolean(worktree?.exists);
   // A session is in progress when either source says so: `QueryBranch` resolves it server-side by
   // branch, while `inProgress` comes from the session list the caller already holds.
   const inProgressEffective =
     inProgress || Boolean(resolution?.session?.exists && resolution.session.isActive);
-  const pr = resolution?.pr;
-  const hasPr = Boolean(pr?.exists);
-  // "Could not look up" is deliberately distinct from "this branch has no PR": conflating the two is
-  // why a live open PR stayed invisible while the daemon held no GitHub credential.
-  const prUnavailable = Boolean(pr?.unavailable);
   // The blockers explain a Start-session button that cannot be pressed, so they are silent for a node
   // that has already been spawned: its child exists, and nothing about a base it will never be created
   // from is news.
   const isBlocked = !isSpawned && blockers.length > 0;
   // The same reasons as the warning, on the button itself, so hovering the disabled control answers why.
   const blockerSummary = blockers.map((b) => b.message).join("; ");
+  // The chip becomes a control only when there is a session to select *and* a way to select it.
+  const canOpenBoundSession = Boolean(boundSessionId) && Boolean(onOpenSession);
+  // How the branch stands against the base the daemon actually compared it to. "Unknown" (an
+  // unanswered poll, or a daemon that reports no comparison) renders nothing at all — a row says
+  // nothing it does not know, and a failed comparison is never shown as clean (D27).
+  const baseSync = baseSyncView(resolution);
+  // The pull is offered only from a clean behind-count, and only for a branch there is something to
+  // pull into: an unspawned node owns no branch to merge the base into. Holding the comparison
+  // itself rather than a flag is what lets the controls name the count and the base they promise.
+  const pullFromBase = canPullFromBase(baseSync) && node.branch ? baseSync : null;
+
+  // The detail body's own id, so the header toggle can name what it reveals (`aria-controls`) rather
+  // than leaving a screen reader to infer the relationship from document order.
+  const detailsId = `pr-stack-row-details-${node.nodeId}`;
+
+  const statusChip = (
+    <span
+      data-testid={`pr-stack-status-chip-${node.nodeId}`}
+      className="flex-shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+    >
+      {node.prStatus?.phase || node.childState || "spawned"}
+    </span>
+  );
 
   return (
     <div
@@ -105,105 +179,35 @@ export function PlannedPrRow({
       className="flex flex-col gap-1 rounded-md border border-border px-3 py-2"
     >
       <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium truncate">{node.title}</p>
-          {node.description && (
-            <p className="text-xs text-muted-foreground truncate">{node.description}</p>
+        <button
+          type="button"
+          data-testid={`pr-stack-row-toggle-${node.nodeId}`}
+          aria-expanded={expanded}
+          aria-controls={detailsId}
+          onClick={() => onToggleExpanded?.(node.nodeId)}
+          className="flex min-w-0 flex-1 items-center gap-1 text-left"
+        >
+          {expanded ? (
+            <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
           )}
-          {node.branch && (
-            <p
-              data-testid={`pr-stack-branch-${node.nodeId}`}
-              className="text-xs text-muted-foreground truncate font-mono"
-              title={node.branch}
-            >
-              {node.branch}
-            </p>
-          )}
-          {/* A suggestion names no ref — the branch does not exist yet — so it is marked as planned
-              rather than shown as the branch the node owns. */}
-          {!node.branch && node.branchSuggestion && (
-            <p
-              data-testid={`pr-stack-planned-branch-${node.nodeId}`}
-              className="text-xs text-muted-foreground/70 truncate font-mono italic"
-              title={`Planned branch, not created yet: ${node.branchSuggestion}`}
-            >
-              planned: {node.branchSuggestion}
-            </p>
-          )}
-          {/* The ref the child worktree would be created from. Rendered whatever the node's
-              startability: "which branch is this waiting on" used to be legible only inside the
-              blocked indicator's own text, so a healthy row never showed its base at all. */}
-          <p
-            data-testid={`pr-stack-base-branch-${node.nodeId}`}
-            className="text-xs text-muted-foreground/70 truncate font-mono"
-            title={`Base branch: ${baseBranchLabel}`}
-          >
-            base: {baseBranchLabel}
-          </p>
-          {showWorktree && (
-            <p
-              data-testid={`pr-stack-worktree-${node.nodeId}`}
-              className="text-xs text-muted-foreground truncate font-mono"
-              title={worktree!.path}
-            >
-              {worktree!.path}
-            </p>
-          )}
-        </div>
-        {inProgressEffective && (
-          <span
-            data-testid={`pr-stack-in-progress-${node.nodeId}`}
-            className="flex-shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800 dark:bg-blue-900 dark:text-blue-100"
-          >
-            in progress
-          </span>
-        )}
-        {hasPr && (
-          <a
-            data-testid={`pr-stack-pr-link-${node.nodeId}`}
-            href={pr!.url}
-            target="_blank"
-            rel="noreferrer"
-            className="flex-shrink-0 text-xs text-blue-600 hover:underline dark:text-blue-400"
-          >
-            #{pr!.number.toString()}
-          </a>
-        )}
-        {hasPr && (
-          <span
-            data-testid={`pr-stack-pr-state-${node.nodeId}`}
-            className="flex-shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-          >
-            {pr!.state}
-          </span>
-        )}
-        {prUnavailable && (
-          <span
-            data-testid={`pr-stack-pr-unavailable-${node.nodeId}`}
-            title={pr!.unavailableReason}
-            className="flex-shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-          >
-            PR status unavailable
-          </span>
-        )}
-        {node.internalStatus && (
-          <span
-            data-testid={`pr-stack-internal-status-badge-${node.nodeId}`}
-            title={node.internalStatus.note ?? undefined}
-            className={`flex-shrink-0 rounded-full px-2 py-0.5 text-xs ${
-              INTERNAL_STATUS_BADGE_CLASSES[node.internalStatus.kind] ??
-              "bg-muted text-muted-foreground"
-            }`}
-          >
-            {node.internalStatus.kind}
-          </span>
-        )}
+          <span className="truncate text-sm font-medium">{node.title}</span>
+        </button>
+        {/* Everything the row states about its branch without the operator having to expand it —
+            a sibling of the toggle above, never a child of it. */}
+        <PlannedPrRowBadges
+          node={node}
+          inProgress={inProgressEffective}
+          pr={resolution?.pr}
+          baseSync={baseSync}
+        />
         {canRepoint && (
           <Button
             data-testid={`pr-stack-repoint-${node.nodeId}`}
             size="sm"
             variant="outline"
-            disabled={repointing}
+            disabled={branchMutating}
             onClick={() => onRepoint?.(node.nodeId)}
           >
             {/* The target is named so the operator knows where the node lands before clicking, and it
@@ -215,12 +219,25 @@ export function PlannedPrRow({
         {/* One CTA slot, two occupants: the live child's status chip, or the Start-session button —
             disabled when blocked rather than replaced, since it is the control a repoint re-enables. */}
         {isSpawned ? (
-          <span
-            data-testid={`pr-stack-status-chip-${node.nodeId}`}
-            className="flex-shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-          >
-            {node.prStatus?.phase || node.childState || "spawned"}
-          </span>
+          canOpenBoundSession ? (
+            // The chip is wrapped rather than relabelled, so its own contract is untouched: it still
+            // reads the child's phase and still answers to `pr-stack-status-chip-<nodeId>`. The
+            // accessible name is stated rather than left to the chip's own text, which would
+            // otherwise announce the phase alone ("spawned, button") with no hint that it navigates
+            // — `title` does not override content-derived naming.
+            <button
+              type="button"
+              data-testid={`pr-stack-session-${node.nodeId}`}
+              aria-label={`Open child session ${boundSessionId} for ${node.title}`}
+              title={`Open child session ${boundSessionId}`}
+              onClick={() => onOpenSession?.(boundSessionId)}
+              className="flex flex-shrink-0 items-center"
+            >
+              {statusChip}
+            </button>
+          ) : (
+            statusChip
+          )
         ) : (
           <Button
             data-testid={`pr-stack-start-session-${node.nodeId}`}
@@ -233,8 +250,25 @@ export function PlannedPrRow({
           </Button>
         )}
       </div>
+      <PlannedPrRowDetails
+        node={node}
+        id={detailsId}
+        expanded={expanded}
+        baseBranchLabel={baseBranchLabel}
+        worktree={resolution?.worktree}
+        parentTitles={parentTitles}
+        boundSessionId={boundSessionId}
+        baseSync={baseSync}
+        pullFromBase={pullFromBase}
+        branchMutating={branchMutating}
+        onSyncFromBase={onSyncFromBase}
+        canMoveUp={canMoveUp}
+        canMoveDown={canMoveDown}
+        reordering={reordering}
+        onReorder={onReorder}
+      />
       {/* Each blocking issue in full, on its own line — the disabled button's reason, in the row
-          rather than only in a tooltip. */}
+          rather than only in a tooltip. Outside the collapse boundary (D22). */}
       {isBlocked && (
         <div
           data-testid={`pr-stack-start-warning-${node.nodeId}`}
@@ -256,6 +290,30 @@ export function PlannedPrRow({
           className="text-xs text-destructive"
         >
           {repointError}
+        </p>
+      )}
+      {/* A pull that did not happen leaves the row still reading "behind", and a pull that landed
+          locally without reaching the remote leaves it reading "in sync" while the PR is not — both
+          leave the row unable to state its own truth, so the reason lives outside the collapse
+          boundary too: it must stay visible when the row is collapsed. */}
+      {syncError && (
+        <p
+          data-testid={`pr-stack-sync-error-${node.nodeId}`}
+          role="alert"
+          className="text-xs text-destructive"
+        >
+          {syncError}
+        </p>
+      )}
+      {/* A refused reorder moves nothing, which is indistinguishable from a click that was
+          swallowed unless the row says why. */}
+      {reorderError && (
+        <p
+          data-testid={`pr-stack-reorder-error-${node.nodeId}`}
+          role="alert"
+          className="text-xs text-destructive"
+        >
+          {reorderError}
         </p>
       )}
     </div>
