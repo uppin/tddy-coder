@@ -1,7 +1,7 @@
 # Changeset: Inactive session shows its recorded activities, not the inspector
 
 **Date**: 2026-08-01
-**Status**: 🚧 In Progress
+**Status**: ✅ Complete — awaiting review; wrap after [PR #378](https://github.com/uppin/tddy-coder/pull/378) merges
 **Type**: Feature
 **PRD**: [docs/ft/web/inactive-session-activities.md](../../ft/web/inactive-session-activities.md)
 **Branch**: `feat-inactive-session-activities`
@@ -60,11 +60,13 @@ live inside the drawer we are about to stop opening.
 
 ## Scope
 
-- [ ] Package Documentation
+- [x] Package Documentation — `packages/tddy-web/docs/changesets.md` index entry. No narrative
+      package doc: the feature's reference lives in `docs/ft/web/inactive-session-activities.md`,
+      alongside the other `session-*` surfaces it amends.
 - [x] Implementation
 - [x] Testing
 - [x] Integration
-- [ ] Technical Debt
+- [x] Technical Debt — two dead surfaces and two residual gaps recorded in `docs/dev/TODO.md`
 - [x] Code Quality
 
 ## Technical Changes
@@ -151,12 +153,14 @@ rather than deleted, so the setups keep earning their keep.
 
 ## Implementation Milestones
 
-- [ ] `sessionBaseView.ts` + its unit tests
-- [ ] `SessionActivitiesPane` + page object + test ids
-- [ ] `SessionMainPane` base-view switch, top-bar Resume, overlay suppression, runtime focus rekey
-- [ ] Inspector default closed + docking removal (`inspectorState`, `SessionInspectorDrawer`, `SessionsDrawerScreen`)
-- [ ] Update the seven affected existing specs
-- [ ] Package docs + `packages/tddy-web/docs/changesets.md` entry
+- [x] `sessionBaseView.ts` + its unit tests
+- [x] `SessionActivitiesPane` + page object + test ids
+- [x] `SessionMainPane` base-view switch, top-bar Resume, overlay suppression, runtime focus rekey
+- [x] Inspector default closed + docking removal (`inspectorState`, `SessionInspectorDrawer`, `SessionsDrawerScreen`)
+- [x] Update the affected existing specs — **nine**, not the seven scoped here; see the table above
+- [x] Package docs + `packages/tddy-web/docs/changesets.md` entry
+- [x] Validation fixes: attach-claim epoch, duplicate `ConnectSession`, premature empty state,
+      tautological tests, `connectionStatusForSession` semantics (added during `/pr-wrap`)
 
 ## Testing Plan
 
@@ -189,51 +193,86 @@ combinatorial.
 
 ## Acceptance Tests
 
-### tddy-web — `cypress/component/InactiveSessionActivitiesAcceptance.cy.tsx`
+As shipped. Five tests were added beyond the plan (three pinning defects found in validation, one for
+the count-pending window, one from splitting a two-behavior test), and three planned entries shipped
+differently — noted inline.
 
-- [ ] **Cypress**: `shows the recorded activity transcript as the main view when an inactive session is selected` — the Activities pane renders and carries the replayed entries, in place of the "Select Resume to reconnect" placeholder
-- [ ] **Cypress**: `keeps the inspector closed when an inactive session is selected` — `data-state="closed"` with no toggle click (the core inversion)
-- [ ] **Cypress**: `offers Resume in the pane top bar for an inactive session` — top-bar button present without opening the inspector
-- [ ] **Cypress**: `resumes the session through the owning daemon when the top-bar Resume is clicked` — `ResumeSession` recorded exactly once, carrying that session id
-- [ ] **Cypress**: `shows an explicit empty state when the inactive session recorded no activity` — empty-state marker present, transcript absent, Resume still offered
-- [ ] **Cypress**: `shows the terminal and no Resume button for an active session` — the inverse case stays untouched
-- [ ] **Cypress**: `keeps the planned-PR view for an inactive pr-stack session and still offers Resume` — workflow precedence plus universal Resume, in one behavior
-- [ ] **Cypress**: `keeps the workflow chat view for an inactive workflow session` — `WorkflowChatScreen` is not replaced
-- [ ] **Cypress**: `hides the agent activity overlay icon while the activities view is showing` — no duplicate transcript surface
-- [ ] **Cypress**: `keeps the agent activity overlay icon for an inactive pr-stack session` — suppression is scoped to the Activities view, not to inactivity
-- [ ] **Cypress**: `opens the tool call detail dialog from an entry in the activities view` — `GetAcpToolCallDetail` wiring survives the new mount
-- [ ] **Cypress**: `honours a deep-linked inspector tab for an inactive session` — `?inspector=files` still pre-opens the drawer
-- [ ] **Cypress**: `keeps a mounted runtime unfocused behind the activities view` — runtime layer present, focused-terminal marker and claim-terminal overlay absent
-- [ ] **Cypress**: `returns to the terminal view once the session becomes active` — liveness flip swaps the base view back and drops Resume
+### tddy-web — `cypress/component/InactiveSessionActivitiesAcceptance.cy.tsx` (18)
 
-### tddy-web — rewritten `cypress/component/SessionInspectorDockedDisconnected.cy.tsx`
+- [x] **Cypress**: `shows the recorded activity transcript as the main view when an inactive session is selected` — the Activities pane renders and carries the replayed entries, in place of the "Select Resume to reconnect" placeholder
+- [x] **Cypress**: `keeps the inspector closed when an inactive session is selected` — `data-state="closed"` with no toggle click (the core inversion)
+- [x] **Cypress**: `offers Resume in the pane top bar for an inactive session` — top-bar button present without opening the inspector
+- [x] **Cypress**: `resumes the session through the owning daemon when the top-bar Resume is clicked` — `ResumeSession` recorded exactly once, carrying that session id
+- [x] **Cypress**: `shows an explicit empty state when the inactive session recorded no activity` — empty-state marker present, transcript absent, Resume still offered
+- [x] **Cypress**: `makes no claim about recorded activity while the count feed is still pending` — *added*: the empty state must not stand in for an unanswered or failed count feed
+- [x] **Cypress**: `shows the terminal and no Resume button for an active session` — the inverse case stays untouched
+- [x] **Cypress**: `opens a deep-linked inspector tab for an inactive session` — *renamed*: asserts the named tab is selected (`aria-selected`), and uses `?inspector=details` because the Files tab pulls `ListSessionUploads`
+- [x] **Cypress**: `returns to the terminal view once the session becomes active` — liveness flip swaps the base view back and drops Resume
+- [x] **Cypress**: `re-attaches a session resumed a second time within the same selection` — *added*: pins the attach-claim epoch (dormant→live→dormant→live)
+- [x] **Cypress**: `does not attach twice when the session is resumed from the top bar` — *added*: pins the duplicate-`ConnectSession` fix
+- [x] **Cypress**: `keeps the planned-PR view for an inactive pr-stack session` — *split* from the entry below
+- [x] **Cypress**: `offers Resume for an inactive pr-stack session whose view is left alone` — *split*: workflow precedence and universal Resume are two behaviors
+- [x] **Cypress**: `keeps the workflow chat view for an inactive workflow session` — `WorkflowChatScreen` is not replaced
+- [x] **Cypress**: `hides the agent activity overlay icon while the activities view is showing` — no duplicate transcript surface
+- [x] **Cypress**: `keeps the agent activity overlay icon for an inactive pr-stack session` — suppression is scoped to the Activities view, not to inactivity
+- [x] **Cypress**: `opens the tool call detail dialog from an entry in the activities view` — `GetAcpToolCallDetail` wiring survives the new mount
+- [x] **Cypress**: `keeps a mounted runtime unfocused behind the activities view` — runtime layer present, focused-terminal marker and claim-terminal overlay absent
 
-- [ ] **Cypress**: `renders the inspector as an overlay drawer for a disconnected session, not as the main pane` — replaces the docking AC
-- [ ] **Cypress**: `keeps the inspector an overlay drawer for a connected session` — unchanged behavior, docking assertion dropped
+### tddy-web — `cypress/component/SessionInactiveInspectorOverlay.cy.tsx` (6, renamed from `SessionInspectorDockedDisconnected`)
+
+The two planned docking ACs could not be written as planned: `data-docked` was the only
+harness-observable discriminator and it is deleted, and the component harness loads no stylesheet, so
+a width assertion fails (`expected 1280 to be below 1280`) regardless of layout. They pin the
+adjacent, real consequence instead — the base view survives behind the drawer, which docking replaced.
+
+- [x] **Cypress**: `keeps a disconnected session's activities mounted behind the open inspector`
+- [x] **Cypress**: `keeps a connected session's terminal mounted behind the open inspector`
+- [x] **Cypress**: `expands a disconnected session's inspector on request`
+- [x] **Cypress**: `keeps the expand and close controls available for a disconnected session`
+- [x] **Cypress**: `does NOT render the focused-runtime foreground or Claim terminal for a disconnected session, but keeps the runtime layer mounted`
+- [x] **Cypress**: `still renders the focused-runtime foreground and Claim terminal for a connected session`
 
 ## Unit Tests
 
-### tddy-web — `src/components/sessions/sessionBaseView.test.ts`
+### tddy-web — `src/components/sessions/sessionBaseView.test.ts` (14)
 
-- [ ] `sessionBaseViewMode` returns `"activities"` for an inactive session with no workflow view
-- [ ] `sessionBaseViewMode` returns `"terminal"` for an active session
-- [ ] `sessionBaseViewMode` returns `"workflow"` for an inactive session that has a workflow view
-- [ ] `sessionBaseViewMode` returns `"workflow"` for an active session that has a workflow view
-- [ ] `sessionBaseViewMode` returns `"terminal"` for a needs-input session (pending elicitation reads as active)
-- [ ] `sessionBaseViewMode` returns `"terminal"` when there is no session
-- [ ] `canResumeSession` is true for an inactive session
-- [ ] `canResumeSession` is false for an active session
-- [ ] `canResumeSession` is false for a needs-input session
-- [ ] `canResumeSession` is false when there is no session
+The two planned needs-input rows inverted once `connectionStatusForSession` changed: a session that
+died mid-elicitation is dormant, so it gets the Activities view *and* Resume. A *running* session
+awaiting input keeps the terminal and offers neither.
 
-### tddy-web — `src/components/sessions/inspectorState.test.ts` (amended)
+- [x] `shows the activities view for an inactive session with no workflow view`
+- [x] `shows the terminal for an active session`
+- [x] `keeps the workflow view for an inactive session that has one`
+- [x] `keeps the workflow view for an active session that has one`
+- [x] `shows the terminal for a running session awaiting input`
+- [x] `shows the activities view for a session that died mid-elicitation` — *inverted from plan*
+- [x] `shows the terminal when there is no session`
+- [x] `shows the workflow view when there is no session but a workflow view was resolved` — *added*: pins which branch short-circuits first
+- [x] `offers resume for an inactive session`
+- [x] `offers resume for an inactive session that shows a workflow view`
+- [x] `offers resume for a session that died mid-elicitation` — *inverted from plan*
+- [x] `does not offer resume for an active session`
+- [x] `does not offer resume for a running session awaiting input`
+- [x] `does not offer resume when there is no session`
 
-- [ ] `defaultInspectorOpen` returns false for an active session
-- [ ] `defaultInspectorOpen` returns false for an inactive session (the changed contract)
-- [ ] `select` action closes the drawer for an inactive session
-- [ ] `select` action closes the drawer for an active session
-- [ ] existing `open`/`close`/`toggle`/`expand`/`restore` cases unchanged
-- [ ] `isInspectorDocked` cases removed with the function
+### tddy-web — `src/components/sessions/inspectorState.test.ts` (11, amended)
+
+- [x] `keeps the inspector closed when a session is selected` — `defaultInspectorOpen()` lost its argument, so the two planned per-liveness rows collapse into one
+- [x] `select leaves a closed drawer closed` / `select closes an open drawer` / `select collapses an expanded drawer` — the reducer's three real transitions, replacing the per-liveness pair
+- [x] existing `open`/`close`/`toggle`/`expand`/`restore` cases unchanged
+- [x] `isInspectorDocked` cases removed with the function
+
+### tddy-web — `src/utils/connectionStatusForSession.test.ts` (5, amended — not in the original plan)
+
+- [x] `returns 'connected' for an active session with no pending elicitation`
+- [x] `returns 'disconnected' for an inactive session with no pending elicitation`
+- [x] `returns 'needs-input' for an active session that has pending elicitation`
+- [x] `returns 'disconnected' for a dead session still carrying a pending elicitation` — the changed contract
+- [x] `liveness decides before the elicitation flag refines it`
+
+### tddy-web — `src/utils/sessionStackGroups.test.ts` (amended)
+
+- [x] The two "yellow dot" fixtures now set `isActive: true`, which is what yellow always meant
 
 ## Decisions & Trade-offs
 
