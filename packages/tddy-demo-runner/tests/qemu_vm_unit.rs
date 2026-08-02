@@ -4,7 +4,7 @@
 //! using local TCP/Unix-socket infrastructure — no real QEMU process required.
 
 use std::time::Duration;
-use tddy_vm::{PortForward, QemuVm, RunningVm, Vm};
+use tddy_vm::{PortForward, QemuVm, RunningVm, Vm, VmLogin};
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 
@@ -97,6 +97,10 @@ async fn qemu_forward_validates_host_port_and_builds_share_url() {
         ssh_host_port: 2222,
         monitor_socket: "/tmp/test-monitor.sock".to_string(),
         pid: 99999,
+        login: VmLogin {
+            username: "root".to_string(),
+            private_key_path: None,
+        },
     };
     let port_forward = PortForward {
         host_port,
@@ -128,6 +132,10 @@ async fn qemu_forward_returns_err_when_host_port_not_reachable() {
         ssh_host_port: 2222,
         monitor_socket: "/tmp/test-monitor.sock".to_string(),
         pid: 99999,
+        login: VmLogin {
+            username: "root".to_string(),
+            private_key_path: None,
+        },
     };
     // Port 19868 is unlikely to have a listener.
     let port_forward = PortForward {

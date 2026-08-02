@@ -17,8 +17,8 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::qemu::{send_monitor_command, QemuVmArgs};
-use crate::vm::VmError;
+use crate::qemu::{qemu_binary, send_monitor_command, QemuVmArgs};
+use crate::vm::{UefiFirmware, VmAccel, VmArch, VmError};
 
 // ── Pure argv builders ───────────────────────────────────────────────────────────
 
@@ -46,6 +46,21 @@ pub fn base_convert_argv(base_input: &Path, base_output: &Path) -> Vec<String> {
 /// and semantics from `tddy_sandbox_qemu::argv::overlay_create_argv`, which builds an
 /// ephemeral, absolute-path-backed overlay with no size argument.
 pub fn overlay_create_argv(base_basename: &str, overlay: &Path, disk_size: &str) -> Vec<String> {
+    qcow2_overlay_create_argv(base_basename, overlay, disk_size)
+}
+
+/// The one `qemu-img create` argv shape shared by [`overlay_create_argv`] and
+/// [`crate::library::vm_overlay_create_argv`].
+///
+/// The two public functions differ only in what they pass as `backing_file` — a relative
+/// basename for cloud-init's co-located pair, an absolute path for a per-VM overlay — and
+/// their doc comments explain why. Routing both through this helper is what keeps the flag
+/// order itself a single definition rather than two that must be kept in lockstep by hand.
+pub(crate) fn qcow2_overlay_create_argv(
+    backing_file: &str,
+    overlay: &Path,
+    disk_size: &str,
+) -> Vec<String> {
     vec![
         "create".to_string(),
         "-f".to_string(),
@@ -53,7 +68,7 @@ pub fn overlay_create_argv(base_basename: &str, overlay: &Path, disk_size: &str)
         "-F".to_string(),
         "qcow2".to_string(),
         "-b".to_string(),
-        base_basename.to_string(),
+        backing_file.to_string(),
         overlay.display().to_string(),
         disk_size.to_string(),
     ]
@@ -73,6 +88,16 @@ pub struct CloudInitUser {
     /// [`render_user_data`].
     #[serde(default)]
     pub ssh_authorized_keys: Vec<String>,
+    /// Console password for this user. Distro cloud images ship no password at all, so
+    /// without one the guest can only be reached over SSH — set this (together with
+    /// `lock_passwd: Some(false)`) when something has to log in on the **serial console**,
+    /// before sshd or networking are up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plain_text_passwd: Option<String>,
+    /// cloud-init locks every created account's password by default; `Some(false)` unlocks
+    /// it so [`Self::plain_text_passwd`] can actually be used to log in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lock_passwd: Option<bool>,
 }
 
 /// A single `write_files` entry.
@@ -82,6 +107,22 @@ pub struct CloudInitWriteFile {
     pub content: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<String>,
+    /// `user:group` to chown the written file to (cloud-init's `owner` key). `None` leaves
+    /// cloud-init's default of `root:root`.
+    ///
+    /// Naming an account from this document's `users` list requires [`Self::defer`] as
+    /// well: cloud-init runs `write_files` *before* `users_groups`, and chowning to a
+    /// not-yet-created user or group fails the whole module.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    /// Write this file in cloud-init's `write_files_deferred` module (final stage, after
+    /// users exist and packages are installed) instead of the early `write_files` one.
+    ///
+    /// Still ordered before `runcmd`, which runs later in the same final stage under
+    /// `scripts_user`, so a deferred config file is in place before any provisioning
+    /// command reads it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defer: Option<bool>,
 }
 
 /// The provisioning spec rendered into a NoCloud `user-data` document by
@@ -114,6 +155,10 @@ struct RenderedUser<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     sudo: Option<&'a str>,
     ssh_authorized_keys: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    plain_text_passwd: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lock_passwd: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -122,6 +167,10 @@ struct RenderedWriteFile<'a> {
     content: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     permissions: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owner: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    defer: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -158,6 +207,8 @@ fn render_users<'a>(users: &'a [CloudInitUser], ssh_public_key: &str) -> Vec<Ren
                 .iter()
                 .map(|k| k.replace("{{SSH_PUBLIC_KEY}}", ssh_public_key))
                 .collect(),
+            plain_text_passwd: u.plain_text_passwd.as_deref(),
+            lock_passwd: u.lock_passwd,
         })
         .collect()
 }
@@ -192,17 +243,45 @@ fn completion_script_content(completion_token: &str) -> String {
     )
 }
 
-/// Render the NoCloud `user-data` document: a `#cloud-config` header followed by the
-/// caller's users/packages/runcmd/write_files/bootcmd, plus:
+/// Render the NoCloud `user-data` document for a **bake**: a `#cloud-config` header
+/// followed by the caller's users/packages/runcmd/write_files/bootcmd, plus:
 /// - SSH public key substitution for the `{{SSH_PUBLIC_KEY}}` placeholder.
 /// - A `cloud-init clean --logs --seed` `bootcmd` entry (forces cloud-init to re-run
 ///   against the fresh seed on a copied base image that already ran cloud-init once).
 /// - A basic DHCP netplan config for the primary NIC.
 /// - A `scripts-per-boot` completion script (see [`completion_script_content`]).
+///
+/// **The completion script halts the guest** once provisioning finishes — that is the
+/// bake contract: signal the token, then power down so the host can seal the overlay. A
+/// guest that is meant to keep running after provisioning must therefore be seeded with
+/// [`render_user_data_without_completion`] instead.
 pub fn render_user_data(
     user_data: &CloudInitUserData,
     ssh_public_key: &str,
     completion_token: &str,
+) -> String {
+    render_user_data_doc(user_data, ssh_public_key, Some(completion_token))
+}
+
+/// Render the NoCloud `user-data` document for a **long-lived guest**: identical to
+/// [`render_user_data`] except that no completion script is injected, so the guest stays
+/// up after cloud-init finishes instead of halting itself.
+///
+/// Used for guests the caller intends to keep working with — over SSH or the serial
+/// console — rather than bake into an image.
+pub fn render_user_data_without_completion(
+    user_data: &CloudInitUserData,
+    ssh_public_key: &str,
+) -> String {
+    render_user_data_doc(user_data, ssh_public_key, None)
+}
+
+/// Shared body of [`render_user_data`] and [`render_user_data_without_completion`].
+/// `completion_token` of `None` omits the halt-on-completion script entirely.
+fn render_user_data_doc(
+    user_data: &CloudInitUserData,
+    ssh_public_key: &str,
+    completion_token: Option<&str>,
 ) -> String {
     let users = render_users(&user_data.users, ssh_public_key);
 
@@ -213,19 +292,27 @@ pub fn render_user_data(
             path: w.path.as_str(),
             content: w.content.as_str(),
             permissions: w.permissions.as_deref(),
+            owner: w.owner.as_deref(),
+            defer: w.defer,
         })
         .collect();
     write_files.push(RenderedWriteFile {
         path: "/etc/netplan/50-tddy-cloud-init-dhcp.yaml",
         content: NETPLAN_DHCP_CONTENT,
         permissions: Some("0644"),
+        owner: None,
+        defer: None,
     });
-    let completion_script = completion_script_content(completion_token);
-    write_files.push(RenderedWriteFile {
-        path: "/var/lib/cloud/scripts/per-boot/99-tddy-cloud-init-complete.sh",
-        content: &completion_script,
-        permissions: Some("0755"),
-    });
+    let completion_script = completion_token.map(completion_script_content);
+    if let Some(completion_script) = &completion_script {
+        write_files.push(RenderedWriteFile {
+            path: "/var/lib/cloud/scripts/per-boot/99-tddy-cloud-init-complete.sh",
+            content: completion_script,
+            permissions: Some("0755"),
+            owner: None,
+            defer: None,
+        });
+    }
 
     let mut bootcmd = vec!["cloud-init clean --logs --seed".to_string()];
     bootcmd.extend(user_data.bootcmd.iter().cloned());
@@ -310,6 +397,17 @@ pub fn iso_tool_command(
 
 // ── Boot argv ─────────────────────────────────────────────────────────────────────
 
+/// A host directory exported into the guest over virtio-9p.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NinePShare {
+    /// The directory on the host to export.
+    pub host_path: String,
+    /// The tag the guest mounts it by (`mount -t 9p <mount_tag> …`).
+    pub mount_tag: String,
+    /// Whether the guest may write through the share.
+    pub writable: bool,
+}
+
 /// Configuration needed to boot the overlay with its seed ISO attached, for
 /// [`cloud_init_boot_argv`].
 #[derive(Debug, Clone)]
@@ -319,12 +417,29 @@ pub struct CloudInitBootConfig {
     pub memory: String,
     pub cpus: u32,
     pub ssh_host_port: u16,
+    /// Guest architecture — selects the machine type, as it does for a normal boot.
+    pub arch: VmArch,
+    /// Accelerator to bake under. A TCG bake of a real distro image takes hours.
+    pub accel: VmAccel,
+    /// UEFI firmware pair, or `None` for a guest that boots via its own BIOS.
+    pub firmware: Option<UefiFirmware>,
+    /// Host directories the provisioning steps read from (e.g. a source working copy).
+    pub nine_p_shares: Vec<NinePShare>,
 }
 
-/// Build the full `qemu-system-x86_64` argv to boot `config.overlay_path` with the
-/// seed ISO attached, serial routed to stdio (so the host can watch it live for the
-/// completion token), and `-no-reboot` (so the guest's `shutdown -h now` ends the
-/// process instead of rebooting it).
+/// Build the full `qemu-system-<arch>` argv to boot `config.overlay_path` with the
+/// seed ISO attached and serial routed to stdio, so the host can watch it live for the
+/// completion token.
+///
+/// **Deliberately no `-no-reboot`.** A guest *reset* has to be survivable: provisioning
+/// may legitimately reboot mid-bake (the tddy host recipe swaps the cloud kernel for a
+/// 9p-capable one and reboots into it), and cloud-init re-runs against the seed on the
+/// next boot. Under `-no-reboot` QEMU exits on that reset, the serial reader sees EOF, and
+/// the bake fails with "exited before the cloud-init completion token was observed".
+/// `-no-reboot` is not needed to end the process on completion either: the completion
+/// script's `shutdown -h now` is a *power-off*, which terminates QEMU on its own. The cost
+/// is that a guest stuck in a boot loop is caught by the build timeout rather than by an
+/// immediate EOF.
 ///
 /// Also pins the datasource to NoCloud via an SMBIOS type-1 serial number
 /// (`ds=nocloud;`) — the standard mechanism `DataSourceNoCloud` checks for before
@@ -338,9 +453,16 @@ pub fn cloud_init_boot_argv(config: &CloudInitBootConfig) -> Vec<String> {
         "unix:{},server,nowait",
         QemuVmArgs::monitor_socket_path(config.ssh_host_port)
     );
-    vec![
+    let mut args = vec![
+        "-machine".to_string(),
+        QemuVmArgs::machine_arg(config.arch, config.accel),
+        "-cpu".to_string(),
+        QemuVmArgs::cpu_arg(config.arch, config.accel).to_string(),
         "-drive".to_string(),
         format!("file={},if=virtio,format=qcow2", config.overlay_path),
+    ];
+    args.extend(QemuVmArgs::pflash_args(config.firmware.as_ref()));
+    args.extend([
         "-cdrom".to_string(),
         config.seed_iso_path.clone(),
         "-m".to_string(),
@@ -350,16 +472,19 @@ pub fn cloud_init_boot_argv(config: &CloudInitBootConfig) -> Vec<String> {
         "-nographic".to_string(),
         "-serial".to_string(),
         "stdio".to_string(),
+    ]);
+    args.extend(QemuVmArgs::nine_p_args(&config.nine_p_shares));
+    args.extend([
         "-netdev".to_string(),
         format!("user,id=net0,hostfwd=tcp::{}-:22", config.ssh_host_port),
         "-device".to_string(),
         "virtio-net-pci,netdev=net0".to_string(),
-        "-no-reboot".to_string(),
         "-monitor".to_string(),
         monitor,
         "-smbios".to_string(),
         "type=1,serial=ds=nocloud;".to_string(),
-    ]
+    ]);
+    args
 }
 
 // ── Serial classification ─────────────────────────────────────────────────────────
@@ -428,6 +553,53 @@ pub fn cloud_init_library_paths(
     }
 }
 
+/// Promote the finished qcow2 pair out of a per-image scratch directory to the flat
+/// `images/02-prepared-base/` locations [`cloud_init_library_paths`] resolves, then lock
+/// both read-only.
+///
+/// [`build_cloud_init_image`] writes every artifact it produces (the pair, the seed ISO, the
+/// generated keypair, the boot log) into one `output_dir`; running it against a scratch
+/// subdirectory and moving only the two images up keeps `02-prepared-base/` free of
+/// non-image files. Both files move together, so the overlay's *relative* backing-file
+/// reference to its base stays valid.
+pub async fn promote_prepared_base_pair(
+    scratch_dir: &Path,
+    name: &str,
+    paths: &CloudInitLibraryPaths,
+) -> Result<(), VmError> {
+    move_scratch_output(
+        scratch_dir,
+        &format!("{name}-base.qcow2"),
+        &paths.prepared_base_output,
+    )
+    .await?;
+    move_scratch_output(
+        scratch_dir,
+        &format!("{name}.qcow2"),
+        &paths.prepared_overlay_output,
+    )
+    .await?;
+
+    crate::library::set_readonly_file(&paths.prepared_base_output)?;
+    crate::library::set_readonly_file(&paths.prepared_overlay_output)
+}
+
+/// Move `scratch_dir.join(filename)` to `dest`.
+async fn move_scratch_output(
+    scratch_dir: &Path,
+    filename: &str,
+    dest: &Path,
+) -> Result<(), VmError> {
+    let src = scratch_dir.join(filename);
+    tokio::fs::rename(&src, dest).await.map_err(|e| {
+        VmError::BuildFailed(format!(
+            "failed to move {} to {}: {e}",
+            src.display(),
+            dest.display()
+        ))
+    })
+}
+
 // ── Orchestrator ──────────────────────────────────────────────────────────────────
 
 /// Options for [`build_cloud_init_image`].
@@ -445,6 +617,15 @@ pub struct CloudInitBuildOptions {
     pub iso_tool: IsoTool,
     /// If `Some`, read and use this key. If `None`, generate a fresh ed25519 keypair.
     pub ssh_public_key: Option<PathBuf>,
+    /// Architecture of the base image being baked — it must match the emulator, and on
+    /// aarch64 there is no default machine type to fall back on.
+    pub arch: VmArch,
+    /// Accelerator to bake under.
+    pub accel: VmAccel,
+    /// UEFI firmware pair, or `None` for a base image that boots via its own BIOS.
+    pub firmware: Option<UefiFirmware>,
+    /// Host directories the provisioning steps read from.
+    pub nine_p_shares: Vec<NinePShare>,
 }
 
 /// Input hashed by [`completion_token`] to derive a build-specific token —
@@ -488,32 +669,18 @@ async fn run_iso_tool(program: &str, args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Generate a fresh ed25519 keypair at `<output_dir>/id_<name>` via `ssh-keygen` and
-/// return the contents of the resulting `.pub` file.
+/// Generate a fresh ed25519 keypair at `<output_dir>/id_<name>` and return the contents of
+/// the resulting `.pub` file, for the seed's `authorized_keys` to carry.
 async fn generate_ssh_keypair(output_dir: &Path, name: &str) -> Result<String, VmError> {
-    let key_path = output_dir.join(format!("id_{name}"));
-    let status = tokio::process::Command::new("ssh-keygen")
-        .arg("-t")
-        .arg("ed25519")
-        .arg("-N")
-        .arg("")
-        .arg("-f")
-        .arg(&key_path)
-        .status()
+    let keys = crate::library::generate_vm_ssh_keypair(output_dir, name)?;
+    tokio::fs::read_to_string(&keys.public_key_path)
         .await
-        .map_err(|e| VmError::BuildFailed(format!("failed to spawn ssh-keygen: {e}")))?;
-    if !status.success() {
-        return Err(VmError::BuildFailed(format!(
-            "ssh-keygen exited with {status}"
-        )));
-    }
-    let pub_path = key_path.with_extension("pub");
-    tokio::fs::read_to_string(&pub_path).await.map_err(|e| {
-        VmError::BuildFailed(format!(
-            "failed to read generated public key {}: {e}",
-            pub_path.display()
-        ))
-    })
+        .map_err(|e| {
+            VmError::BuildFailed(format!(
+                "failed to read generated public key {}: {e}",
+                keys.public_key_path.display()
+            ))
+        })
 }
 
 /// Handle one line read from the qemu serial console during [`boot_and_bake`]'s watch
@@ -549,6 +716,19 @@ async fn handle_boot_line(
     }
 }
 
+/// How long a timed-out bake is given to act on the monitor's `system_powerdown` before it
+/// is force-killed. Short on purpose: the guest has already missed its deadline, and the
+/// overlay it leaves behind is discarded either way.
+const POWERDOWN_GRACE: Duration = Duration::from_secs(5);
+
+/// How long the QEMU process is given to exit after the completion token is observed.
+///
+/// The completion script powers the guest off immediately after printing the token, so
+/// this is normally a few seconds of orderly shutdown. It is bounded rather than an
+/// unqualified `wait()` because the boot argv carries no `-no-reboot`: a guest that resets
+/// instead of halting would otherwise keep the bake blocked forever.
+const HALT_GRACE: Duration = Duration::from_secs(120);
+
 /// Handle the watch loop's timeout branch: attempt a graceful shutdown via the QEMU
 /// monitor socket, give it a short grace period, then force-kill the process
 /// regardless. Always returns an `Err` — the caller's loop always breaks on this path.
@@ -566,7 +746,7 @@ async fn handle_boot_timeout(
     progress(msg);
     let _ = boot_log.write_all(format!("-- {msg}\n").as_bytes()).await;
     let _ = send_monitor_command(monitor_socket, "system_powerdown").await;
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    tokio::time::sleep(POWERDOWN_GRACE).await;
     let _ = child.kill().await;
     VmError::BootFailed(format!(
         "timed out waiting for cloud-init completion token (full log: {})",
@@ -597,8 +777,13 @@ async fn boot_and_bake(
         memory: opts.memory.clone(),
         cpus: opts.cpus,
         ssh_host_port: opts.ssh_host_port,
+        arch: opts.arch,
+        accel: opts.accel,
+        firmware: opts.firmware.clone(),
+        nine_p_shares: opts.nine_p_shares.clone(),
     };
     let args = cloud_init_boot_argv(&boot_config);
+    let binary = qemu_binary(opts.arch);
     let monitor_socket = QemuVmArgs::monitor_socket_path(opts.ssh_host_port);
 
     let mut boot_log = tokio::fs::File::create(boot_log_path).await.map_err(|e| {
@@ -612,18 +797,18 @@ async fn boot_and_bake(
         boot_log_path.display()
     ));
 
-    let mut child = tokio::process::Command::new("qemu-system-x86_64")
+    let mut child = tokio::process::Command::new(binary)
         .args(&args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .map_err(|e| VmError::BootFailed(format!("spawn qemu-system-x86_64: {e}")))?;
+        .map_err(|e| VmError::BootFailed(format!("spawn {binary}: {e}")))?;
 
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| VmError::BootFailed("qemu-system-x86_64 stdout unavailable".to_string()))?;
+        .ok_or_else(|| VmError::BootFailed(format!("{binary} stdout unavailable")))?;
     let mut lines = BufReader::new(stdout).lines();
 
     let deadline = tokio::time::Instant::now() + opts.timeout;
@@ -641,10 +826,10 @@ async fn boot_and_bake(
                     }
                     Ok(None) => {
                         let _ = boot_log
-                            .write_all(b"-- qemu-system-x86_64 stdout closed (process exited) --\n")
+                            .write_all(format!("-- {binary} stdout closed (process exited) --\n").as_bytes())
                             .await;
                         break Err(VmError::BootFailed(format!(
-                            "qemu-system-x86_64 exited before the cloud-init completion token was observed (full log: {})",
+                            "{binary} exited before the cloud-init completion token was observed (full log: {})",
                             boot_log_path.display()
                         )));
                     }
@@ -662,8 +847,12 @@ async fn boot_and_bake(
         }
     };
 
-    if outcome.is_ok() {
-        let _ = child.wait().await;
+    if outcome.is_ok()
+        && tokio::time::timeout(HALT_GRACE, child.wait())
+            .await
+            .is_err()
+    {
+        let _ = child.kill().await;
     }
     outcome
 }
@@ -730,6 +919,30 @@ fn derive_completion_token(opts: &CloudInitBuildOptions) -> Result<String, VmErr
     Ok(completion_token(&opts.name, &token_data))
 }
 
+/// Write `contents` to `path` restricted to its owner (`0600`) from creation.
+///
+/// The rendered `user-data` carries every credential the seed injects into the guest — SSH
+/// keys, and whatever the caller's `write_files` hold — so it must not be readable by other
+/// local accounts, not even for the span of the bake.
+async fn write_owner_only(path: &Path, contents: &str) -> Result<(), VmError> {
+    use tokio::io::AsyncWriteExt;
+
+    let mut options = tokio::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options
+        .open(path)
+        .await
+        .map_err(|e| VmError::BuildFailed(format!("failed to create {}: {e}", path.display())))?;
+    file.write_all(contents.as_bytes())
+        .await
+        .map_err(|e| VmError::BuildFailed(format!("failed to write {}: {e}", path.display())))?;
+    // `mode` above only applies when the file is created; an earlier attempt may have left
+    // a more permissive one behind.
+    crate::library::set_owner_only_file(path)
+}
+
 /// Render and write the NoCloud `user-data`/`meta-data` seed into `<output_dir>/seed/
 /// nocloud/` (step 5). Returns the seed directory path.
 async fn write_nocloud_seed(
@@ -746,9 +959,7 @@ async fn write_nocloud_seed(
     })?;
 
     let user_data_rendered = render_user_data(&opts.user_data, ssh_public_key.trim(), token);
-    tokio::fs::write(nocloud_dir.join("user-data"), user_data_rendered)
-        .await
-        .map_err(|e| VmError::BuildFailed(format!("failed to write user-data: {e}")))?;
+    write_owner_only(&nocloud_dir.join("user-data"), &user_data_rendered).await?;
 
     let meta_data_rendered = render_meta_data(
         &format!("cloud-init-{}", opts.name),

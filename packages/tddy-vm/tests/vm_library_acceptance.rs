@@ -12,7 +12,7 @@
 
 use tddy_vm::library::VmLibrary;
 use tddy_vm::vm_manifest::{LoginPolicy, RunPolicy, VmManifest};
-use tddy_vm::{MockVm, VmManager, VmSpec, VmState};
+use tddy_vm::{MockVm, VmAccel, VmArch, VmManager, VmSpec, VmState};
 use tempfile::tempdir;
 
 fn test_spec(name: &str) -> VmSpec {
@@ -36,6 +36,13 @@ fn a_vm_manifest(name: &str, prepared_base: &str) -> VmManifest {
             disk_size: "20G".to_string(),
             ssh_host_port: 2222,
             port_forwards: vec![],
+            // Pinned rather than host-derived: `VmManager::start` resolves UEFI firmware
+            // for an aarch64 guest, which walks `$PATH` for a real emulator and would make
+            // this `MockVm`-backed lifecycle test fail on any machine without QEMU. x86_64
+            // boots through its own BIOS, so no firmware is resolved and the test stays
+            // hermetic. Nothing here is about the architecture.
+            arch: VmArch::X86_64,
+            accel: VmAccel::Tcg,
         },
         login: LoginPolicy {
             username: "tddy".to_string(),

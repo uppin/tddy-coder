@@ -2,11 +2,13 @@
 # Placeholders replaced at install time:
 #   __INSTALL_BIN_DIR__   — binary directory (default: /usr/local/bin)
 #   __WEB_BUNDLE_PATH__   — static web root (default: /usr/local/share/tddy/web)
+#   __DAEMON_LOG_DIR__    — daemon file-log dir (default: /var/log/tddy-daemon; --user: XDG state dir)
+#   __AUTH_STORAGE_DIR__  — OAuth/token storage base (default: /var/lib/tddy; --user: XDG data dir)
 
 log:
   loggers:
     default:
-      output: { file: "/var/log/tddy-daemon/daemon" }
+      output: { file: "__DAEMON_LOG_DIR__/daemon" }
       format: "{timestamp} [{level}] [{target}] {message}"
   default:
     level: info
@@ -20,7 +22,7 @@ web_bundle_path: "__WEB_BUNDLE_PATH__"
 
 # Where each GitHub login's access token is retained (github-tokens.json, mode 0600). Must be writable
 # by the daemon user or the daemon refuses to start — see the `github:` block below.
-auth_storage: "/var/lib/tddy/auth"
+auth_storage: "__AUTH_STORAGE_DIR__/auth"
 
 # Linux rootless cgroups sandbox delegation. Defaults derive the delegated cgroup base from
 # /proc/self/cgroup at runtime (nothing hardcoded), so no override is needed when the systemd unit
@@ -44,7 +46,8 @@ auth_storage: "/var/lib/tddy/auth"
 #      widened carry only `read:user`; PR status reads "PR status unavailable" until they re-login.
 #   2. `auth_storage` must exist and be WRITABLE by the daemon user. If it is set and unwritable the
 #      daemon REFUSES TO START (a failed token write fails every login, so it is caught at boot).
-#      ./install creates/chowns only the parent /var/lib/tddy — create and chown the `auth` dir itself.
+#      ./install creates/chowns only the parent __AUTH_STORAGE_DIR__ — create and chown the `auth` dir
+#      itself (system default /var/lib/tddy; --user: ${XDG_DATA_HOME:-~/.local/share}/tddy).
 #      Leaving `auth_storage` unset is allowed: logins work, but PR status reads as unavailable.
 #
 # `stub: true` is the demo/test provider: it retains no token and its PR lookups resolve to "no PRs",

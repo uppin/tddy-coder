@@ -1,5 +1,6 @@
 use crate::library::VmLibrary;
-use crate::vm::{PortForward, Vm, VmConfig, VmError};
+use crate::qemu::uefi_firmware_for;
+use crate::vm::{PortForward, Vm, VmAccel, VmArch, VmConfig, VmError, VmLogin};
 use crate::vm_manifest::{LoginPolicy, RunPolicy, VmManifest};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -156,6 +157,85 @@ impl VmManager {
             .collect()
     }
 
+    /// The [`VmLibrary`] this manager is backed by, or `None` for a JSON-backed one. Only
+    /// the library-backed shape supports prepared bases; see [`VmManager::from_library`].
+    pub fn library(&self) -> Option<&VmLibrary> {
+        match &self.storage {
+            Storage::Library(library) => Some(library),
+            Storage::Json(_) => None,
+        }
+    }
+
+    /// Where a VM's own runtime state — currently just its writable UEFI variables store —
+    /// lives: its library directory, or a directory beside the JSON state file when this
+    /// manager has no library.
+    fn vm_state_dir(&self, name: &str) -> PathBuf {
+        match &self.storage {
+            Storage::Library(library) => library.vm_dir(name),
+            Storage::Json(state_file) => state_file
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(name),
+        }
+    }
+
+    /// Create `vm/<name>/` from the prepared base named in `manifest` — mutable overlay,
+    /// per-VM SSH keypair, and `manifest.yaml` — and register the VM in memory so
+    /// `start`/`status`/`list` see it without reloading the library. Returns the overlay path.
+    ///
+    /// A prepared base that is not in the library is an error naming it, rather than an
+    /// overlay chained onto a backing file that does not exist.
+    pub async fn create_from_prepared_base(
+        &self,
+        manifest: &VmManifest,
+    ) -> Result<PathBuf, VmError> {
+        let library = self.library().ok_or_else(|| {
+            VmError::InvalidState(
+                "this VM manager is not backed by a VM & Image Library, so it has no prepared \
+                 bases to create from"
+                    .to_string(),
+            )
+        })?;
+        let prepared_base = manifest.prepared_base.as_ref().ok_or_else(|| {
+            VmError::InvalidState(
+                "create_from_prepared_base requires manifest.prepared_base to be set".to_string(),
+            )
+        })?;
+        let prepared_base_path = library
+            .prepared_base_dir()
+            .join(format!("{prepared_base}.qcow2"));
+        if !prepared_base_path.exists() {
+            return Err(VmError::NotFound(format!(
+                "prepared base '{prepared_base}' — no image at {}",
+                prepared_base_path.display()
+            )));
+        }
+
+        let mut vms = self.vms.lock().await;
+        if vms.contains_key(&manifest.name) {
+            return Err(VmError::AlreadyExists(manifest.name.clone()));
+        }
+        let overlay_path = library.create_vm(manifest).await?;
+        let persisted = library.read_manifest(&manifest.name)?;
+        let spec = vm_spec_from_manifest(library, &persisted);
+        vms.insert(spec.name.clone(), (spec, VmHandle::defined()));
+        Ok(overlay_path)
+    }
+
+    /// The manifest describing how `spec`'s VM is run: the persisted one in library mode,
+    /// or the one the spec itself maps to in JSON mode, which has no per-VM manifest file.
+    ///
+    /// An unreadable or unparseable `manifest.yaml` is an error, never a spec-derived
+    /// substitute: that substitute logs in as `root` with no key and its own resources, so
+    /// silently using it would turn a corrupt manifest into an unexplainable SSH failure
+    /// much later.
+    fn run_manifest_for(&self, spec: &VmSpec) -> Result<VmManifest, VmError> {
+        match &self.storage {
+            Storage::Library(library) => library.read_manifest(&spec.name),
+            Storage::Json(_) => Ok(vm_manifest_from_spec(spec)),
+        }
+    }
+
     pub async fn start(&self, name: &str) -> Result<(), VmError> {
         // Extract what we need and update state to Booting, then release lock
         let config = {
@@ -183,20 +263,42 @@ impl VmManager {
                 ));
             };
 
-            handle.state = VmState::Booting;
+            let manifest = self.run_manifest_for(spec)?;
+            // Resolved before the state moves to Booting: an unresolvable firmware image is
+            // a failed start, and the VM must be left as it was rather than stuck Booting.
+            let firmware = uefi_firmware_for(manifest.run.arch, &self.vm_state_dir(name), name)?;
 
-            let extra_hostfwd = spec.port_forwards.clone();
-            let ssh_host_port = spec.ssh_host_port;
+            handle.state = VmState::Booting;
 
             VmConfig {
                 qcow2_path: image_path,
-                extra_hostfwd,
-                ssh_host_port,
+                extra_hostfwd: manifest.run.port_forwards.clone(),
+                ssh_host_port: manifest.run.ssh_host_port,
+                arch: manifest.run.arch,
+                accel: manifest.run.accel,
+                memory: manifest.run.memory.clone(),
+                cpus: manifest.run.cpus,
+                firmware,
+                login: VmLogin {
+                    username: manifest.login.username.clone(),
+                    private_key_path: manifest.login.ssh_private_key.clone(),
+                },
+                seed_iso: None,
+                nine_p_shares: vec![],
             }
         };
 
         // Call async backend without holding the lock
-        let running_vm = self.backend.boot(&config).await?;
+        let running_vm = match self.backend.boot(&config).await {
+            Ok(running_vm) => running_vm,
+            // A VM left in `Booting` can never be started or stopped again — both reject
+            // that state — so a failed boot records the reason and leaves the VM startable,
+            // the same way `stop` records its own failures.
+            Err(e) => {
+                self.mark_error(name, &e).await;
+                return Err(e);
+            }
+        };
 
         // Re-lock and update state
         let mut vms = self.vms.lock().await;
@@ -207,6 +309,15 @@ impl VmManager {
         handle.running = Some(running_vm);
 
         Ok(())
+    }
+
+    /// Record `e` as the VM's state. Used on backend failures, where the VM must not be
+    /// left in a transitional state no later call can leave.
+    async fn mark_error(&self, name: &str, e: &VmError) {
+        let mut vms = self.vms.lock().await;
+        if let Some((_, handle)) = vms.get_mut(name) {
+            handle.state = VmState::Error(e.to_string());
+        }
     }
 
     pub async fn stop(&self, name: &str) -> Result<(), VmError> {
@@ -239,10 +350,7 @@ impl VmManager {
                 Ok(())
             }
             Err(e) => {
-                let mut vms = self.vms.lock().await;
-                if let Some((_, handle)) = vms.get_mut(name) {
-                    handle.state = VmState::Error(e.to_string());
-                }
+                self.mark_error(name, &e).await;
                 Err(e)
             }
         }
@@ -336,9 +444,12 @@ fn vm_manifest_from_spec(spec: &VmSpec) -> VmManifest {
             disk_size: "20G".to_string(),
             ssh_host_port: spec.ssh_host_port,
             port_forwards: spec.port_forwards.clone(),
+            arch: VmArch::host(),
+            accel: VmAccel::host_default(),
         },
         login: LoginPolicy {
-            // SSH-as-root matches this crate's existing `QemuVm` convention (see qemu.rs).
+            // A directly-supplied image is not one this library provisioned, so there is no
+            // per-VM keypair to name and root is the only login it can be assumed to have.
             username: "root".to_string(),
             ssh_private_key: None,
             ssh_public_key: None,

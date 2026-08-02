@@ -76,6 +76,10 @@ fn running_vm() -> RunningVm {
         ssh_host_port: 2222,
         monitor_socket: "/tmp/tddy-test-monitor.sock".to_string(),
         pid: 12345,
+        login: tddy_vm::VmLogin {
+            username: "root".to_string(),
+            private_key_path: None,
+        },
     }
 }
 

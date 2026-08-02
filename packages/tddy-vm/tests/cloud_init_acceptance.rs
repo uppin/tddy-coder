@@ -27,6 +27,8 @@ use std::time::Duration;
 use tddy_vm::cloud_init::{
     build_cloud_init_image, CloudInitBuildOptions, CloudInitUser, CloudInitUserData, IsoTool,
 };
+use tddy_vm::qemu::{ensure_uefi_vars_file, resolve_uefi_code_path};
+use tddy_vm::{UefiFirmware, VmAccel, VmArch};
 use tempfile::tempdir;
 
 /// The env var this production test reads its base image path from — the same config
@@ -38,6 +40,27 @@ fn configured_base_image() -> Option<PathBuf> {
     std::env::var(BASE_IMAGE_ENV).ok().map(PathBuf::from)
 }
 
+/// The UEFI firmware pair the bake boots through on this host, with its writable variables
+/// store placed in `work_dir`.
+///
+/// `None` on x86_64, whose `q35` machine boots the image's own bootloader through SeaBIOS;
+/// the aarch64 `virt` machine has no BIOS at all, so firmware there is mandatory.
+fn a_host_firmware(work_dir: &std::path::Path, name: &str) -> Option<UefiFirmware> {
+    let arch = VmArch::host();
+    if arch == VmArch::X86_64 {
+        return None;
+    }
+    let vars = work_dir.join(format!("{name}-vars.fd"));
+    ensure_uefi_vars_file(&vars).expect("UEFI vars file must be creatable");
+    Some(UefiFirmware {
+        code_path: resolve_uefi_code_path(arch)
+            .expect("UEFI firmware must be resolvable")
+            .display()
+            .to_string(),
+        vars_path: vars.display().to_string(),
+    })
+}
+
 fn a_minimal_cloud_init_user_data() -> CloudInitUserData {
     CloudInitUserData {
         hostname: Some("cloud-init-acceptance".to_string()),
@@ -46,6 +69,8 @@ fn a_minimal_cloud_init_user_data() -> CloudInitUserData {
             shell: Some("/bin/bash".to_string()),
             sudo: Some("ALL=(ALL) NOPASSWD:ALL".to_string()),
             ssh_authorized_keys: vec!["{{SSH_PUBLIC_KEY}}".to_string()],
+            plain_text_passwd: None,
+            lock_passwd: None,
         }],
         packages: vec![],
         runcmd: vec![],
@@ -80,6 +105,10 @@ async fn builds_a_ready_to_use_provisioned_qcow2_by_baking_cloud_init_into_an_ov
         timeout: Duration::from_secs(180),
         iso_tool: IsoTool::Xorriso,
         ssh_public_key: None,
+        arch: VmArch::host(),
+        accel: VmAccel::host_default(),
+        firmware: a_host_firmware(dir.path(), "cloud-init-demo"),
+        nine_p_shares: vec![],
     };
 
     // When building the cloud-init image
@@ -129,6 +158,10 @@ async fn the_overlay_records_its_immutable_base_as_a_relative_backing_file() {
         timeout: Duration::from_secs(180),
         iso_tool: IsoTool::Xorriso,
         ssh_public_key: None,
+        arch: VmArch::host(),
+        accel: VmAccel::host_default(),
+        firmware: a_host_firmware(dir.path(), "cloud-init-backing"),
+        nine_p_shares: vec![],
     };
     let overlay_path = build_cloud_init_image(&opts, &|line| eprintln!("{line}"))
         .await

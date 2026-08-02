@@ -1,10 +1,22 @@
 #!/usr/bin/env bash
 # Install tddy-daemon (and tddy-coder, tddy-tools) as a systemd service.
 #
-# Usage: sudo ./install --systemd [--build]
+# Usage: sudo ./install --systemd [--build] [--headless]
+#        ./install --systemd --user [--build] [--headless]
 #
 #   --systemd   Required. Install release binaries, config template, unit file; enable+start service.
 #   --build     Optional. Run ./release before copying binaries.
+#   --user      Optional. Install as a per-user systemd service (systemctl --user) instead of a
+#               system service. No root required: paths default to XDG user locations
+#               (~/.local/bin, ~/.config/tddy, ~/.config/systemd/user, ...), the unit runs as the
+#               invoking user (no User=/Group=/AppArmorProfile, WantedBy=default.target), and no
+#               dedicated service user, /var provisioning, or AppArmor profile is created. Sessions
+#               spawn as this same user (no multi-user setuid). Env path overrides still apply.
+#   --headless  Optional. Do not require or ship the built tddy-web bundle. Skips the
+#               packages/tddy-web/dist check and the static-bundle copy; web_bundle_path is left
+#               pointing at an (empty) WEB_BUNDLE_DIR so the daemon still starts and serves /rpc and
+#               /api/config — only the web UI is absent. Rebuild tddy-web and re-run without
+#               --headless to add the UI later.
 #
 # Optional (from repo root): ./dev bun install — installs @zed-industries/codex-acp and the
 # platform-specific native package under node_modules/. When that native binary exists, it is
@@ -22,6 +34,11 @@
 #   INSTALL_SYSTEMD_DIR   systemd unit directory (default: /etc/systemd/system).
 #   INSTALL_WEB_BUNDLE_DIR  Directory for tddy-web static files (default: ${INSTALL_PREFIX}/share/tddy/web).
 #
+#   INSTALL_DAEMON_LOG_DIR   Daemon file-log dir (default: /var/log/tddy-daemon; --user:
+#                        ${XDG_STATE_HOME:-~/.local/state}/tddy-daemon). Substituted into daemon.yaml.
+#   INSTALL_AUTH_STORAGE_DIR OAuth/token storage base (default: /var/lib/tddy; --user:
+#                        ${XDG_DATA_HOME:-~/.local/share}/tddy). Substituted into daemon.yaml.
+#
 #   INSTALL_NO_SYSTEMCTL=1  Skip root check and systemctl (for automated tests).
 #
 #   INSTALL_BUNDLE_CODEX_ACP=1  Always install ${BIN_DIR}/codex-acp from node_modules; fail if the
@@ -36,18 +53,68 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 ROOT_DIR="$(pwd)"
-BIN_DIR="${INSTALL_BIN_DIR:-${INSTALL_PREFIX:-/usr/local}/bin}"
-WEB_BUNDLE_DIR="${INSTALL_WEB_BUNDLE_DIR:-${INSTALL_PREFIX:-/usr/local}/share/tddy/web}"
-CONFIG_DIR="${INSTALL_CONFIG_DIR:-/etc/tddy}"
-SYSTEMD_DIR="${INSTALL_SYSTEMD_DIR:-/etc/systemd/system}"
+
+want_systemd=false
+want_build=false
+want_user=false
+want_headless=false
+for arg in "$@"; do
+  case "$arg" in
+    --systemd) want_systemd=true ;;
+    --build) want_build=true ;;
+    --user) want_user=true ;;
+    --headless) want_headless=true ;;
+    *)
+      echo "Unknown option: $arg" >&2
+      echo "Usage: $0 --systemd [--build] [--user] [--headless]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if ! "$want_systemd"; then
+  echo "Usage: $0 --systemd [--build] [--user] [--headless]" >&2
+  exit 1
+fi
+
+# Path defaults differ for a per-user install (--user): everything lands under XDG user locations
+# and needs no root. Explicit INSTALL_* env overrides always win in both modes.
+if "$want_user"; then
+  XDG_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
+  XDG_DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
+  XDG_STATE="${XDG_STATE_HOME:-$HOME/.local/state}"
+  BIN_DIR="${INSTALL_BIN_DIR:-${INSTALL_PREFIX:-$HOME/.local}/bin}"
+  WEB_BUNDLE_DIR="${INSTALL_WEB_BUNDLE_DIR:-${INSTALL_PREFIX:-$HOME/.local}/share/tddy/web}"
+  CONFIG_DIR="${INSTALL_CONFIG_DIR:-${XDG_CONFIG}/tddy}"
+  SYSTEMD_DIR="${INSTALL_SYSTEMD_DIR:-${XDG_CONFIG}/systemd/user}"
+  DAEMON_LOG_DIR="${INSTALL_DAEMON_LOG_DIR:-${XDG_STATE}/tddy-daemon}"
+  AUTH_STORAGE_DIR="${INSTALL_AUTH_STORAGE_DIR:-${XDG_DATA}/tddy}"
+else
+  BIN_DIR="${INSTALL_BIN_DIR:-${INSTALL_PREFIX:-/usr/local}/bin}"
+  WEB_BUNDLE_DIR="${INSTALL_WEB_BUNDLE_DIR:-${INSTALL_PREFIX:-/usr/local}/share/tddy/web}"
+  CONFIG_DIR="${INSTALL_CONFIG_DIR:-/etc/tddy}"
+  SYSTEMD_DIR="${INSTALL_SYSTEMD_DIR:-/etc/systemd/system}"
+  # Paths referenced by daemon.yaml.production (log + auth); children use per-repo tmp/logs at runtime.
+  DAEMON_LOG_DIR="${INSTALL_DAEMON_LOG_DIR:-/var/log/tddy-daemon}"
+  AUTH_STORAGE_DIR="${INSTALL_AUTH_STORAGE_DIR:-/var/lib/tddy}"
+fi
+
 WEB_DIST_SRC="${ROOT_DIR}/packages/tddy-web/dist"
 CONFIG_FILE="${CONFIG_DIR}/daemon.yaml"
 UNIT_PATH="${SYSTEMD_DIR}/tddy-daemon.service"
 NO_SYSTEMCTL="${INSTALL_NO_SYSTEMCTL:-0}"
 OVERWRITE_SYSTEMD_UNIT="${INSTALL_OVERWRITE_SYSTEMD_UNIT:-0}"
 
-# The unprivileged OS user/group the daemon runs as (see the systemd unit below). Configurable so
-# nothing is hardcoded; set INSTALL_DAEMON_USER=root for multi-user setuid spawning instead.
+# `systemctl` invocation: a --user install targets the invoking user's manager.
+if "$want_user"; then
+  SYSTEMCTL=(systemctl --user)
+else
+  SYSTEMCTL=(systemctl)
+fi
+
+# The unprivileged OS user/group the daemon runs as (system install only; --user runs as the
+# invoking user). Configurable so nothing is hardcoded; set INSTALL_DAEMON_USER=root for multi-user
+# setuid spawning instead.
 DAEMON_USER="${INSTALL_DAEMON_USER:-tddy}"
 DAEMON_GROUP="${INSTALL_DAEMON_GROUP:-$DAEMON_USER}"
 
@@ -65,32 +132,11 @@ APPARMOR_DIR="${INSTALL_APPARMOR_DIR:-/etc/apparmor.d}"
 APPARMOR_PROFILE_SRC="${ROOT_DIR}/packages/tddy-daemon/apparmor/tddy-daemon"
 APPARMOR_PROFILE_PATH="${APPARMOR_DIR}/tddy-daemon"
 
-# Paths referenced by daemon.yaml.production (log + auth); children use per-repo tmp/logs at runtime.
-DAEMON_LOG_DIR="/var/log/tddy-daemon"
-AUTH_STORAGE_DIR="/var/lib/tddy"
-
-want_systemd=false
-want_build=false
-for arg in "$@"; do
-  case "$arg" in
-    --systemd) want_systemd=true ;;
-    --build) want_build=true ;;
-    *)
-      echo "Unknown option: $arg" >&2
-      echo "Usage: $0 --systemd [--build]" >&2
-      exit 1
-      ;;
-  esac
-done
-
-if ! "$want_systemd"; then
-  echo "Usage: $0 --systemd [--build]" >&2
-  exit 1
-fi
-
-if [[ "$NO_SYSTEMCTL" != "1" ]]; then
+# Production (system) installs require root unless testing mode is enabled. A --user install targets
+# the invoking user's systemd manager and never needs root.
+if [[ "$NO_SYSTEMCTL" != "1" ]] && ! "$want_user"; then
   if [[ "$(id -u)" -ne 0 ]]; then
-    echo "install: must run as root (use sudo) or set INSTALL_NO_SYSTEMCTL=1 for test installs" >&2
+    echo "install: must run as root (use sudo), pass --user for a per-user install, or set INSTALL_NO_SYSTEMCTL=1 for test installs" >&2
     exit 1
   fi
 fi
@@ -109,9 +155,12 @@ for name in tddy-daemon tddy-coder tddy-tools; do
   fi
 done
 
-if [[ ! -f "${WEB_DIST_SRC}/index.html" ]]; then
+if "$want_headless"; then
+  echo "install: --headless — skipping tddy-web bundle requirement (no web UI will be served)"
+elif [[ ! -f "${WEB_DIST_SRC}/index.html" ]]; then
   echo "install: missing built tddy-web bundle: ${WEB_DIST_SRC}/index.html" >&2
   echo "install: run from repo root: ./dev bun run build  (or: cd packages/tddy-web && bun run build)" >&2
+  echo "install: or pass --headless to install without the web UI" >&2
   exit 1
 fi
 
@@ -187,7 +236,12 @@ echo "install: codex-acp — if present under node_modules, copied to \${BIN_DIR
 
 mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$SYSTEMD_DIR" "$WEB_BUNDLE_DIR"
 
-if [[ "$NO_SYSTEMCTL" != "1" ]]; then
+if "$want_user"; then
+  # --user: the daemon runs as the invoking user, so there is no dedicated service user to create
+  # and nothing to chown — just ensure the (user-owned) log + auth dirs exist.
+  echo "install: (--user) ensuring log + auth dirs: ${DAEMON_LOG_DIR}, ${AUTH_STORAGE_DIR}"
+  mkdir -p "$DAEMON_LOG_DIR" "$AUTH_STORAGE_DIR"
+elif [[ "$NO_SYSTEMCTL" != "1" ]]; then
   if [[ "$DAEMON_USER" != "root" ]]; then
     echo "install: ensuring service user/group ${DAEMON_USER}:${DAEMON_GROUP}"
     if ! getent group "$DAEMON_GROUP" >/dev/null; then
@@ -217,17 +271,22 @@ install -m 0755 "${ROOT_DIR}/target/release/tddy-tools" "${BIN_DIR}/tddy-tools"
 echo "install:   updated ${BIN_DIR}/tddy-tools"
 install_codex_acp_from_node_modules
 
-echo "install: copying web static bundle ${WEB_DIST_SRC}/ -> ${WEB_BUNDLE_DIR}/"
-cp -a "${WEB_DIST_SRC}/." "$WEB_BUNDLE_DIR/"
-echo "install:   web bundle deployed (e.g. index.html)"
+if "$want_headless"; then
+  echo "install: --headless — not copying web bundle; ${WEB_BUNDLE_DIR}/ left empty (daemon serves /rpc + /api/config, no UI)"
+else
+  echo "install: copying web static bundle ${WEB_DIST_SRC}/ -> ${WEB_BUNDLE_DIR}/"
+  cp -a "${WEB_DIST_SRC}/." "$WEB_BUNDLE_DIR/"
+  echo "install:   web bundle deployed (e.g. index.html)"
+fi
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
   if [[ ! -f "${ROOT_DIR}/daemon.yaml.production" ]]; then
     echo "install: missing ${ROOT_DIR}/daemon.yaml.production" >&2
     exit 1
   fi
-  echo "install: creating ${CONFIG_FILE} from daemon.yaml.production (placeholders: __INSTALL_BIN_DIR__, __WEB_BUNDLE_PATH__)"
+  echo "install: creating ${CONFIG_FILE} from daemon.yaml.production (placeholders: __INSTALL_BIN_DIR__, __WEB_BUNDLE_PATH__, __DAEMON_LOG_DIR__, __AUTH_STORAGE_DIR__)"
   sed -e "s#__INSTALL_BIN_DIR__#${BIN_DIR}#g" -e "s#__WEB_BUNDLE_PATH__#${WEB_BUNDLE_DIR}#g" \
+    -e "s#__DAEMON_LOG_DIR__#${DAEMON_LOG_DIR}#g" -e "s#__AUTH_STORAGE_DIR__#${AUTH_STORAGE_DIR}#g" \
     "${ROOT_DIR}/daemon.yaml.production" >"$CONFIG_FILE"
   chmod 0644 "$CONFIG_FILE"
 else
@@ -239,7 +298,29 @@ if [[ -f "$UNIT_PATH" ]] && [[ "$OVERWRITE_SYSTEMD_UNIT" != "1" ]]; then
   echo "install:   set INSTALL_OVERWRITE_SYSTEMD_UNIT=1 to replace with this script's template (ExecStart, User=, etc.)"
 else
   echo "install: writing systemd unit ${UNIT_PATH}"
-  cat >"$UNIT_PATH" <<UNIT
+  if "$want_user"; then
+    cat >"$UNIT_PATH" <<UNIT
+[Unit]
+Description=tddy-daemon (per-user service)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${BIN_DIR}/tddy-daemon -c ${CONFIG_FILE}
+Restart=on-failure
+RestartSec=5
+# Per-user install: runs in the invoking user's \`systemctl --user\` manager, as that user. No
+# privilege separation and no multi-user setuid spawning — sessions run as this same user. Delegate=yes
+# hands the service a writable cgroup v2 subtree for the sandbox; on Ubuntu 24.04, unprivileged user
+# namespaces may still be restricted (no AppArmor profile is attached here — the user manager cannot
+# load one). If the sandbox cannot create user namespaces, relax kernel.apparmor_restrict_unprivileged_userns.
+Delegate=yes
+
+[Install]
+WantedBy=default.target
+UNIT
+  else
+    cat >"$UNIT_PATH" <<UNIT
 [Unit]
 Description=tddy-daemon multi-user daemon
 After=network.target
@@ -268,11 +349,18 @@ AppArmorProfile=tddy-daemon
 [Install]
 WantedBy=multi-user.target
 UNIT
+  fi
   chmod 0644 "$UNIT_PATH"
   echo "install:   ExecStart=${BIN_DIR}/tddy-daemon -c ${CONFIG_FILE}"
 fi
 
-if [[ -f "$UNIT_SOCKET_PATH" ]] && [[ "$OVERWRITE_SYSTEMD_UNIT" != "1" ]]; then
+# The socket unit is system-only: it binds in /run and chowns the socket to ${DAEMON_USER}:${SOCKET_GROUP},
+# neither of which a user manager can do. A --user install runs without socket activation — the daemon
+# self-binds ${XDG_RUNTIME_DIR:-/run}/tddy-daemon.sock (its default local.socket_path), which is why the
+# --user service unit carries no Requires=tddy-daemon.socket.
+if "$want_user"; then
+  echo "install: (--user) skipping socket unit; daemon self-binds its local socket under \${XDG_RUNTIME_DIR}"
+elif [[ -f "$UNIT_SOCKET_PATH" ]] && [[ "$OVERWRITE_SYSTEMD_UNIT" != "1" ]]; then
   echo "install: keeping existing systemd socket unit (not overwriting): ${UNIT_SOCKET_PATH}"
   echo "install:   set INSTALL_OVERWRITE_SYSTEMD_UNIT=1 to replace with this script's template (SocketGroup, ListenStream, etc.)"
 else
@@ -298,8 +386,9 @@ SOCKET
 fi
 
 # AppArmor profile granting the daemon binary unprivileged user namespaces. Loaded before the service
-# starts because the unit's AppArmorProfile= transition fails if the profile is not present.
-if [[ "$NO_SYSTEMCTL" != "1" ]]; then
+# starts because the unit's AppArmorProfile= transition fails if the profile is not present. Skipped
+# for --user installs: the user unit has no AppArmorProfile= and loading a profile needs root.
+if [[ "$NO_SYSTEMCTL" != "1" ]] && ! "$want_user"; then
   if [[ -f "$APPARMOR_PROFILE_SRC" ]]; then
     echo "install: installing AppArmor profile -> ${APPARMOR_PROFILE_PATH} (userns grant for ${BIN_DIR}/tddy-daemon)"
     mkdir -p "$APPARMOR_DIR"
@@ -317,15 +406,25 @@ if [[ "$NO_SYSTEMCTL" != "1" ]]; then
 fi
 
 if [[ "$NO_SYSTEMCTL" != "1" ]]; then
-  echo "install: systemctl daemon-reload; enable + start tddy-daemon.socket and tddy-daemon"
-  systemctl daemon-reload
-  # Start the socket first so the listening fd exists before the service is (re)started and adopts it.
-  systemctl enable tddy-daemon.socket
-  systemctl restart tddy-daemon.socket
-  systemctl enable tddy-daemon
-  systemctl restart tddy-daemon
-  echo "install: done (socket + service started). journal: journalctl -u tddy-daemon -f"
-  echo "install: verify socket: ls -l ${SOCKET_LISTEN_PATH}  (expect srw-rw---- ${DAEMON_USER}:${SOCKET_GROUP})"
+  if "$want_user"; then
+    echo "install: ${SYSTEMCTL[*]} daemon-reload; enable + start tddy-daemon"
+    "${SYSTEMCTL[@]}" daemon-reload
+    "${SYSTEMCTL[@]}" enable tddy-daemon
+    "${SYSTEMCTL[@]}" restart tddy-daemon
+    echo "install: done (user service started). journal: journalctl --user -u tddy-daemon -f"
+    echo "install:   tip: 'loginctl enable-linger $(id -un)' keeps the user service running after logout"
+    echo "install:   local socket: self-bound by the daemon at \${XDG_RUNTIME_DIR:-/run}/tddy-daemon.sock (no socket unit in --user mode)"
+  else
+    echo "install: ${SYSTEMCTL[*]} daemon-reload; enable + start tddy-daemon.socket and tddy-daemon"
+    "${SYSTEMCTL[@]}" daemon-reload
+    # Start the socket first so the listening fd exists before the service is (re)started and adopts it.
+    "${SYSTEMCTL[@]}" enable tddy-daemon.socket
+    "${SYSTEMCTL[@]}" restart tddy-daemon.socket
+    "${SYSTEMCTL[@]}" enable tddy-daemon
+    "${SYSTEMCTL[@]}" restart tddy-daemon
+    echo "install: done (socket + service started). journal: journalctl -u tddy-daemon -f"
+    echo "install: verify socket: ls -l ${SOCKET_LISTEN_PATH}  (expect srw-rw---- ${DAEMON_USER}:${SOCKET_GROUP})"
+  fi
 else
-  echo "install: done (INSTALL_NO_SYSTEMCTL=1: skipped systemctl; skipped mkdir ${DAEMON_LOG_DIR} and ${AUTH_STORAGE_DIR}; skipped enable/start)"
+  echo "install: done (INSTALL_NO_SYSTEMCTL=1: skipped systemctl; skipped enable/start)"
 fi

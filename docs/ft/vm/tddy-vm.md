@@ -252,9 +252,20 @@ primitives instead of duplicating them:
   pre-baked cloud image's prior cloud-init state doesn't suppress re-provisioning on the
   copy.
 - **Bake-in by booting.** The overlay is booted with the seed ISO attached
-  (`-cdrom`), reusing `QemuVmArgs`' argv shape (`packages/tddy-vm/src/qemu.rs`) with the
-  differences needed to observe completion: `-serial stdio` (not `file:`) and
-  `-no-reboot`. A deterministic completion token
+  (`-cdrom`), reusing `QemuVmArgs`' argv shape (`packages/tddy-vm/src/qemu.rs`) with the one
+  difference needed to observe completion: `-serial stdio` (not `file:`).
+
+  **The bake deliberately does *not* pass `-no-reboot`** (Updated: 2026-08-02). Under that
+  flag QEMU *exits* on a guest reset, so any provisioning step that reboots — the tddy host
+  recipe's kernel swap below does — ends the emulator, the serial reader hits EOF, and the
+  bake fails with "exited before the cloud-init completion token was observed" before doing
+  any real work. `-no-reboot` was never needed to end the process on success either: the
+  completion script's `shutdown -h now` is a *power-off*, which terminates QEMU on its own.
+  The cost of dropping it is that a guest stuck in a boot loop is caught by the build timeout
+  rather than by an immediate EOF; once the token *is* seen, the process is given a bounded
+  grace period to halt and is force-killed if it resets instead.
+
+  A deterministic completion token
   (`CLOUDINIT_COMPLETE_<name>_<sha256(provisioning-input)[:12]>`) is embedded in
   user-data as a per-boot script that prints the token then calls `shutdown -h now` (or
   `<token>_FAILED` on error); the host watches the serial stream line-by-line (reusing
@@ -382,6 +393,327 @@ mutable overlay), reusing this crate's existing `cloud_init` argv builders
   environment this feature was implemented in (missing ISO tooling) — only compiled and
   gating-verified. The equivalent `tddy-vm`-level `create_vm` production test was run for
   real, against a real prepared base.
+
+## Daemon-spawned tddy host VM (Added: 2026-08-02)
+
+**Product area:** VM
+**Feature PRD:** this section
+**Status:** Implemented. All six boot-control acceptance tests pass against a real
+`debian-12-genericcloud-arm64` guest on an Apple Silicon host (~327 s, `--test-threads=1`),
+and 167 unit/integration tests pass in `tddy-vm` with 19 more in the daemon's VM suites.
+**The hours-long bake itself has not yet been run end to end** — see "Running the bake" below
+for how, and "Known gaps" for what that leaves unproven.
+
+Lets the daemon spawn a VM that *is itself a tddy host*: a Debian cloud image baked by
+cloud-init into a prepared base that has `tddy-daemon`/`tddy-coder`/`tddy-tools` built from
+the operator's own working copy and installed as a systemd service, with the guest daemon
+configured to join the LiveKit common room. Once such a VM is running, **project cloning and
+session start are the existing flow** — the guest announces itself via the existing peer
+discovery, and `CreateProject` / `StartSession` target it by `daemon_instance_id`. No new
+repo-provisioning code is introduced.
+
+### User story
+
+As a developer, I want the daemon to spawn a VM that runs my current build of tddy, so I can
+start sessions against a disposable, isolated host without provisioning a machine by hand.
+
+### RPC surface — two new methods on the existing `vm.VmService`
+
+The split mirrors the library's `01-base → 02-prepared-base → vm/<name>` layering: the
+expensive bake happens **once**, and many cheap VMs are created from its output.
+
+| Method | Description |
+|--------|-------------|
+| `BuildTddyHostImage` | **Server-streaming.** Import the caller-supplied Debian cloud image into `images/01-base/`, render a tddy-host cloud-init user-data document, bake it by booting with the operator's working copy attached over virtio-9p, and emit the finished prepared-base name. Streams every serial-console line as progress. |
+| `CreateVmFromPreparedBase` | Create `vm/<name>/` from a named prepared base: mutable overlay, generated per-VM SSH keypair, and `manifest.yaml` carrying the `RunPolicy` (arch, accel, memory, cpus, disk, ports) and `LoginPolicy`. |
+
+`StartVm` / `GetVmStatus` / `StopVm` / `RemoveVm` keep their existing signatures and cover the
+rest of the lifecycle. Both new methods require `session_token`, like every other method on
+this service.
+
+**No `tddy-web` changes in this changeset** — the RPC surface only. The `/vms` page continues
+to work against the unchanged methods.
+
+### Cloud-init bake: what the guest does
+
+The rendered user-data provisions in this order:
+
+1. Mounts the operator's working copy from the reserved virtio-9p share (`mount_tag`
+   `tddy-src`, read-only) at `/mnt/tddy-src` and copies it to `/opt/tddy` — so the image is
+   built from exactly the tree on the operator's disk, with no git URL and no credentials.
+2. Installs the Nix package manager, because `./release` and `./install` are defined in terms
+   of the repo's nix dev shell. This is the documented build path; bypassing it with
+   `apt`+`rustup` would silently drop toolchain the flake provides.
+3. Runs `./release` (Rust binaries) and `bun run build` (the web bundle `./install` copies).
+4. Runs `./install --systemd`, producing the `tddy-daemon.service` + `tddy-daemon.socket`
+   units the repo already ships.
+5. Leaves a daemon config at the install config path containing the LiveKit `common_room`
+   settings, written via cloud-init `write_files` **before** `runcmd` — `./install` keeps an
+   existing config rather than overwriting it, so the LiveKit wiring survives the install.
+
+### QEMU launcher corrections (prerequisites)
+
+`QemuVmArgs::build` currently hard-codes `qemu-system-x86_64`, `-m 512M`, no `-smp`, no
+accelerator, and no firmware. None of that can boot a Debian arm64 cloud image on an Apple
+Silicon host, so this changeset makes the launcher honour the manifest:
+
+- **Architecture** — `VmArch::{Aarch64, X86_64}` selects the `qemu-system-*` binary and the
+  machine type (`virt` for aarch64, `q35` for x86_64).
+- **Acceleration** — `VmAccel::{Hvf, Kvm, Tcg}`, emitted as `-machine <type>,accel=<accel>`
+  with `-cpu host` when hardware-accelerated. `VmAccel::host_default()` is an explicit
+  constructor used to populate the manifest; the launcher itself never guesses.
+- **Resources** — `RunPolicy.memory` and `RunPolicy.cpus` reach `-m` / `-smp` (they are
+  currently written to `manifest.yaml` and then ignored).
+- **UEFI** — aarch64 `virt` has no legacy BIOS, so the launcher emits a two-pflash pair: the
+  read-only `edk2-<arch>-code.fd` firmware and a writable 64 MiB vars file per VM. The
+  firmware is resolved from `TDDY_VM_UEFI_CODE`, else from the QEMU installation's
+  `share/qemu/` directory; **an unresolvable firmware path is an error, not a silent
+  fallback to BIOS boot.**
+- **Login** — SSH uses `LoginPolicy.username` and `-i <ssh_private_key>` from the per-VM
+  keypair, replacing the current unconditional `root@` with the ambient agent key.
+
+Verified on the target host: the Debian 12 arm64 genericcloud image reaches a login prompt in
+roughly 17 seconds under `-machine virt,accel=hvf -cpu host` with `edk2-aarch64-code.fd`.
+
+### Serial-console control (`tddy_vm::serial_shell`)
+
+Baking and verifying a VM both need to drive the guest over its serial console — before
+sshd, networking, or cloud-init are necessarily up. Today the crate can only match a single
+completion token (`classify_serial_line`); there is no way to log in or run a command over
+UART.
+
+This changeset adds a console driver modelled on `~/Code/makers-lt/common/shell-utils`
+(`ShellHandler`), ported to Rust and restructured so the parsing core is pure:
+
+- `SerialShellState` — `Prelude → AtLogin → AtPassword → AtPrompt → ExecutingCommand`.
+- `SerialShell::feed(&mut self, chunk: &str) -> Vec<SerialShellEvent>` — a **pure** state
+  machine over a byte stream, handling partial lines and prompt-without-newline. Returning
+  events instead of the TypeScript version's `EventEmitter` is what makes it unit-testable
+  with no VM and no I/O.
+- `strip_ansi_codes` — pure, shared by prompt detection.
+- Configurable login/password/command prompt patterns, plus optional auto-login credentials.
+- `SerialConsole` — the async driver that owns the QEMU serial pipe and exposes
+  `wait_for_prompt`, `login`, and `run_command`.
+
+One deliberate departure from the TypeScript original: `run_command` determines completion
+from an explicit exit-code marker (`; echo <MARKER>$?`) rather than from the next prompt
+match. The original's `sendCommand` resolves on the following `prompt` event and emits a
+synthetic `prompt` to start the queue, which cannot distinguish "command finished" from "a
+prompt-shaped line appeared in the output" and yields no exit status.
+
+For context on how the same problem is solved upstream: `maker-vm`'s cloud-init boot script
+detects completion by scanning console lines for a unique injected token plus sentinel
+banners, and treats reaching a `login:` prompt without the token as a build failure. This
+crate already has the token half (`classify_serial_line`); `serial_shell` adds the login and
+command-execution half, so the bake can also *interrogate* a guest that failed rather than
+only reporting that the token never arrived.
+
+### Acceptance criteria
+
+1. `BuildTddyHostImage` with a valid token and a real Debian cloud image produces a prepared
+   base in `images/02-prepared-base/`, and streams serial-console output as progress.
+2. A VM created from that prepared base boots, and `systemctl is-active tddy-daemon` in the
+   guest reports `active`.
+3. The guest daemon's Connect port answers over the forwarded host port.
+4. `CreateVmFromPreparedBase` writes `manifest.yaml`, a mutable overlay backed by the
+   prepared base, and a per-VM SSH keypair; the public key is returned to the caller.
+5. SSH into a started VM succeeds as `LoginPolicy.username` using the generated private key.
+6. The serial console reaches a login prompt, accepts credentials, and executes a command
+   returning its real exit code — with no SSH and no guest networking.
+7. The read-only 9p share is mounted in the guest and its contents are readable.
+8. Both new methods reject an invalid `session_token` with `unauthenticated`.
+9. `StopVm` shuts a running VM down gracefully via the QEMU monitor.
+
+### Testing
+
+Per the developer's direction, this feature is only meaningfully proven by an end-to-end run
+against a real VM with demonstrated control of it. Acceptance tests are therefore real-boot
+[production tests](../../dev/guides/testing.md#production-tests): `#[ignore]` + `#[serial]`
+*and* gated on an env var pointing at a real Debian cloud image, exactly like
+`cloud_init_acceptance.rs`. They are excluded from `./test`, `./verify`, and plain
+`cargo test`, and do not run even with `--ignored` unless the image variable is set.
+
+The pure builders (argv assembly, user-data rendering, serial-shell state machine) also carry
+ordinary unit tests, and the two new RPCs carry `RpcBridge` dispatch tests with `MockVm` — but
+those pin contracts, not the feature. The e2e run is the proof.
+
+#### Running the boot-control suite (~5 minutes)
+
+Proves the launcher, serial-console control, 9p, SSH login, and graceful shutdown against a
+real guest. Needs a cloud-init-capable qcow2 **matching the host architecture**:
+
+```bash
+TDDY_CLOUDINIT_BASE_IMAGE=/path/to/debian-12-genericcloud-<arch>.qcow2 \
+  ./dev cargo test -p tddy-vm --test vm_boot_control_acceptance -- --ignored --test-threads=1
+```
+
+`--test-threads=1` is not optional: the tests use fixed host ports (2231–2236), and
+`#[serial]` only orders tests within one binary. If a run is interrupted, clear any orphans
+before the next one — a leaked QEMU still holding a forwarded port makes the next run fail
+for an unrelated reason:
+
+```bash
+pkill -f qemu-system-; rm -f /tmp/tddy-vm-monitor-*.sock
+```
+
+#### Running the bake (hours)
+
+The full `BuildTddyHostImage` path. Budget several hours: it installs a 9p-capable kernel,
+installs Nix, and runs a cold `./release` for the whole workspace — including `libwebrtc` —
+inside a 2-vCPU guest.
+
+```bash
+TDDY_CLOUDINIT_BASE_IMAGE=/path/to/debian-12-genericcloud-<arch>.qcow2 \
+  ./dev cargo test -p tddy-vm --test tddy_host_vm_acceptance -- --ignored --nocapture \
+  bakes_a_prepared_base_whose_guest_runs_the_tddy_daemon_under_systemd
+```
+
+`--nocapture` matters — it is the only way to watch the streamed serial console, which is
+where a stalled `apt`, a failed Nix install, or a wedged `./release` becomes visible. The
+guest's full transcript is also written to `<output-dir>/<name>-boot.log`.
+
+On success the prepared-base pair lands in `<tddy-data-dir>/images/02-prepared-base/`
+(`debian-12-tddy-base.qcow2` + `debian-12-tddy.qcow2`, both sealed `0444`). The scratch
+directory is removed on both the success and failure paths, so a failed run leaves no
+plaintext seed behind — but it also leaves nothing to inspect, so capture the console output.
+
+The two follow-on tests reuse that output instead of re-baking, and run in about a minute:
+
+```bash
+TDDY_TDDY_HOST_PREPARED_BASE=<tddy-data-dir>/images/02-prepared-base/debian-12-tddy.qcow2 \
+  ./dev cargo test -p tddy-vm --test tddy_host_vm_acceptance -- --ignored --test-threads=1
+```
+
+**When the bake is first run, check two things the static analysis could not settle:** that
+the LiveKit `api_secret` does not appear in `<name>-boot.log` or the streamed RPC progress,
+and that the completion token is not emitted before `runcmd` has finished (see the
+cloud-init ordering question in `docs/dev/TODO.md`).
+
+### Out of scope for this sub-feature
+
+- Any `tddy-web` change, including a UI for the new methods.
+- Downloading a base image — the Debian cloud image stays caller-supplied.
+- Cloning project repos into the VM: that is the existing `CreateProject` / `StartSession`
+  flow against the guest daemon, unchanged.
+- Host-side peer registration — the guest self-announces on the LiveKit common room.
+- Buildroot-image lineage and the `tddy-sandbox-qemu` 9p guest work, which stay as they are.
+
+### Guest kernel: virtio-9p needs the generic kernel flavour (Added: 2026-08-02)
+
+Debian's *cloud* kernel — what every `genericcloud` image runs — is trimmed and ships **no 9p
+modules at all**, so the source share cannot be mounted on a stock image:
+
+```
+$ uname -r
+6.1.0-21-cloud-arm64
+$ modprobe 9p
+FATAL: Module 9p not found in directory /lib/modules/6.1.0-21-cloud-arm64
+$ mount -t 9p ... /mnt/tddy-src
+mount: unknown filesystem type '9p'      # exit 32
+```
+
+The host side was never at fault: QEMU attaches the `-fsdev` / `virtio-9p-pci` pair and boots
+normally.
+
+The recipe therefore begins by putting the guest on a 9p-capable kernel
+([`tddy_host::ninep_capable_kernel_command`]): install `linux-image-<arch>` (the generic
+flavour, which carries the 9p modules), **purge the cloud flavour**, `update-grub`, and
+reboot. Installing alone is not sufficient — with both flavours present GRUB keeps booting
+the cloud one, and this image has no `GRUB_FLAVOUR_ORDER` setting to redirect it. Removing
+the cloud packages is what makes the generic kernel the only thing left to boot.
+
+The step is guarded on `uname -r | grep -- '-cloud'`, so it is a no-op once a generic kernel
+is running. That bounds it to exactly one reboot: cloud-init re-runs `runcmd` on the next
+boot (the seed's `cloud-init clean` bootcmd ensures that), and the second pass falls straight
+through to the real provisioning work. **That "next boot" only exists because the bake's boot
+argv omits `-no-reboot`** (see "Bake-in by booting" above) — with it, the guest's reset would
+end QEMU instead of restarting the guest, and the bake would fail on every `genericcloud`
+image, which is the only input this feature supports.
+
+**A failed kernel install must fail the bake** (Added: 2026-08-02). cloud-init concatenates
+`runcmd` into a single shell script and adds no error handling, so this step captures the
+`apt-get` chain's status and exits with it rather than with a hardcoded `0`; the script also
+opens with `set -e`. Without both, a failed step (an unreachable mirror, a failed `rsync`)
+skipped only the rest of its own `&&` chain, `runcmd` still exited 0, cloud-init recorded no
+error, and the host sealed and promoted a prepared base containing no tddy at all — reported
+as a successful bake.
+
+Verified end-to-end on `debian-12-genericcloud-arm64`: the guest comes back on
+`6.1.0-51-arm64`, the kernel logs `9p: Installing v9fs 9p2000 file system support`, and the
+host's file is read from inside the guest.
+
+**Cost:** roughly three minutes and a ~100 MB download added to the front of each bake, plus
+one extra reboot. A caller who supplies a Debian *generic* (rather than *genericcloud*) base
+image skips all of it, since the step's guard sees a non-cloud kernel and does nothing.
+
+### Known gaps / pending design — daemon-spawned tddy host VM (Added: 2026-08-02)
+
+- **The bake has never been run end to end.** Accepted deliberately when this shipped. Every
+  prerequisite it stands on *is* verified against a real guest — arch/accel/UEFI boot, serial
+  console login and command execution, the 9p share, SSH with the per-VM key, graceful
+  shutdown — and the pure recipe-rendering is unit-tested. What remains unproven is the long
+  tail inside the guest: the Nix install, `./release`, `bun run build`, and
+  `./install --systemd` actually completing. Two criticals found during PR wrap
+  (a `systemctl reboot` incompatible with `-no-reboot`, and a failed kernel install reporting
+  success) were both on this path and both invisible to the boot-control suite, so treat the
+  first real bake as likely to surface more. See "Running the bake" for how.
+- **`packages/tddy-web/src/gen/vm_pb.ts` is not regenerated.** Accepted deliberately: this
+  changeset is RPC-level and no web code consumes the new messages, so nothing is broken. But
+  `vm.proto` and the TypeScript client are out of sync until someone runs
+  `bunx buf generate ../tddy-service/proto` from `packages/tddy-web` on a machine where
+  `bun install` completes — it wedged on the development host.
+
+- **The LiveKit credential is baked into a shared, world-readable prepared base.** This is a
+  known limitation, not an oversight. `build_tddy_host_image` writes the `common_room` `url`
+  / `api_key` / `api_secret` into `/etc/tddy/daemon.yaml` *inside* the image, and prepared
+  bases are deliberately sealed `chmod 0444` in `images/02-prepared-base/` so nothing mutates
+  them. Two consequences follow, and both are accepted for now:
+  - **Any local account on the host can read the secret** out of the qcow2. Inside the guest
+    the file is at least `0640 root:tddy` (deferred `write_files`, so the chown happens after
+    cloud-init creates the user) rather than the `0644` the other tddy configs use, since
+    this is the first tddy config to carry a live secret — `daemon.yaml.production` ships its
+    whole `livekit:` block commented out.
+  - **Every VM cloned from the base shares one credential**, so rotating it means baking a
+    new prepared base — hours, per "the bake is slow" above — instead of restarting a VM.
+
+  The fix is to stop baking the secret and inject it **per VM** at
+  `CreateVmFromPreparedBase` time via a small per-VM NoCloud seed: `VmConfig::seed_iso`
+  already exists for exactly this and is currently unused. That is a design change and is
+  deliberately out of scope here. The bake's own scratch directory — which holds the rendered
+  `user-data`, the seed ISO, and the generated SSH private key — is created `0700`, has its
+  `user-data` written `0600`, and is removed on both the success and the failure path, so the
+  plaintext copy does not outlive the bake even though the baked-in copy does.
+- **Two opposite policies for a failed YAML render.** `tddy_host::daemon_config_yaml`
+  `expect`s (correct: the document is owned `String`/`&str`/`u16` only, so a failure is a
+  programming error), while `cloud_init::render_user_data_doc` falls back to
+  `unwrap_or_else(|e| format!("# failed …"))`, which would hand cloud-init an
+  empty-but-valid `#cloud-config` and bake an unprovisioned image while reporting success.
+  Left as-is in this pass; the fallback should become an error return.
+- **The bake is slow.** `./release` builds the whole workspace including `libwebrtc`, on top
+  of a Nix installation, inside a 2-vCPU guest — expect hours for a cold run. This is why the
+  bake is a separate RPC whose output is reused, and why its acceptance test is
+  manual-trigger only.
+- **Guest disk sizing is a guess.** The prepared base is sized for a full Rust target
+  directory plus a Nix store; the default may need raising after the first real bake.
+- **A baked tddy host has no serial-console credential.** `TddyHostSpec` deliberately carries
+  no password: the provisioned user authenticates with the per-VM SSH key, and putting a
+  password in the recipe would place a credential in generated production config. The
+  consequence is that a tddy host whose *networking* is broken cannot be logged into at all —
+  sshd being independent of the daemon means SSH still covers the ordinary "daemon failed to
+  start" case, but not a broken NIC. The `serial_shell` driver can log in given credentials,
+  so closing this is a matter of deciding where a console credential should come from
+  (`LoginPolicy`, an operator-supplied override, or a one-shot break-glass account).
+- **No console log-level control.** The guest boots with the image's default kernel/systemd
+  console verbosity (~713 serial lines in the first 17 seconds), all of which is streamed as
+  RPC progress and written to the boot log. `cloud_init_boot_argv` emits no kernel cmdline at
+  all today, so there is no `loglevel=`/`quiet` knob to turn down.
+
+  There is no prior art to copy here: `~/Code/makers-lt` has no guest-side loglevel control
+  either — no `printk`, `dmesg -n`, or `console=`/`loglevel=` kernel argument anywhere, and
+  its `qemu-vm-builder` exposes no `-append`. It handles console noise purely host-side, by
+  pattern-matching sentinel lines and gating echo behind a `debug` namespace. Turning guest
+  verbosity down is therefore new design work, deferred until the bake's real
+  signal-to-noise is known.
 
 ## Out of scope for this changeset
 
