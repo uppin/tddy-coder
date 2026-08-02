@@ -6,12 +6,15 @@
 //! spawning `qemu-img`, an ISO tool, or QEMU itself.
 
 use pretty_assertions::assert_eq;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tddy_vm::cloud_init::{
-    base_convert_argv, classify_serial_line, cloud_init_boot_argv, completion_token,
-    iso_tool_command, overlay_create_argv, render_meta_data, render_user_data, seed_iso_argv,
-    CloudInitBootConfig, CloudInitOutcome, CloudInitUser, CloudInitUserData, IsoTool,
+    base_convert_argv, classify_serial_line, cloud_init_boot_argv, cloud_init_library_paths,
+    completion_token, iso_tool_command, overlay_create_argv, promote_prepared_base_pair,
+    render_meta_data, render_user_data, render_user_data_without_completion, seed_iso_argv,
+    CloudInitBootConfig, CloudInitOutcome, CloudInitUser, CloudInitUserData, IsoTool, NinePShare,
 };
+use tddy_vm::library::VmLibrary;
+use tddy_vm::{UefiFirmware, VmAccel, VmArch};
 
 fn a_cloud_init_user_data() -> CloudInitUserData {
     CloudInitUserData {
@@ -21,6 +24,8 @@ fn a_cloud_init_user_data() -> CloudInitUserData {
             shell: Some("/bin/bash".to_string()),
             sudo: Some("ALL=(ALL) NOPASSWD:ALL".to_string()),
             ssh_authorized_keys: vec!["{{SSH_PUBLIC_KEY}}".to_string()],
+            plain_text_passwd: None,
+            lock_passwd: None,
         }],
         packages: vec!["curl".to_string()],
         runcmd: vec![],
@@ -36,6 +41,10 @@ fn a_boot_config() -> CloudInitBootConfig {
         memory: "2048M".to_string(),
         cpus: 2,
         ssh_host_port: 2222,
+        arch: VmArch::host(),
+        accel: VmAccel::host_default(),
+        firmware: None,
+        nine_p_shares: vec![],
     }
 }
 
@@ -204,6 +213,151 @@ fn rendered_user_data_injects_a_cloud_init_clean_bootcmd_so_the_copied_base_re_r
     );
 }
 
+// ── render_user_data_without_completion ──────────────────────────────────────
+
+/// A guest seeded for real work — over SSH or the serial console — must not power itself
+/// off the moment cloud-init finishes. Re-introducing the completion script here would kill
+/// every real-boot test the moment provisioning completed.
+#[test]
+fn user_data_without_completion_omits_the_halt_on_completion_script() {
+    // Given a provisioning spec for a guest that must stay up
+    let user_data = a_cloud_init_user_data();
+
+    // When rendering user-data without a completion token
+    let rendered = render_user_data_without_completion(&user_data, "ssh-ed25519 AAAA...");
+
+    // Then nothing in the document powers the guest down
+    assert!(
+        !rendered.contains("shutdown -h now"),
+        "a long-lived guest must not be told to halt, got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("99-tddy-cloud-init-complete.sh"),
+        "the completion script must not be written at all, got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("CLOUDINIT_COMPLETE"),
+        "no completion token belongs in a long-lived guest's seed, got: {rendered}"
+    );
+}
+
+#[test]
+fn user_data_with_a_completion_token_still_halts_the_guest() {
+    // Given the same provisioning spec, rendered for a bake
+    let user_data = a_cloud_init_user_data();
+
+    // When rendering user-data with a completion token
+    let rendered = render_user_data(
+        &user_data,
+        "ssh-ed25519 AAAA...",
+        "CLOUDINIT_COMPLETE_demo_abc123456789",
+    );
+
+    // Then the halt-on-completion script is present — the two renderers differ in exactly
+    // this, and nothing else
+    assert!(
+        rendered.contains("shutdown -h now"),
+        "a bake must halt so the host can seal the overlay, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("99-tddy-cloud-init-complete.sh"),
+        "the completion script must be written for a bake, got: {rendered}"
+    );
+}
+
+#[test]
+fn user_data_without_completion_renders_the_users_packages_and_runcmd_it_was_given() {
+    // Given a provisioning spec with a user, a package, and a command
+    let user_data = CloudInitUserData {
+        packages: vec!["curl".to_string()],
+        runcmd: vec!["systemctl enable tddy-daemon".to_string()],
+        ..a_cloud_init_user_data()
+    };
+
+    // When rendering user-data without a completion token
+    let rendered = render_user_data_without_completion(
+        &user_data,
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 demo@tddy",
+    );
+
+    // Then the caller's directives survive, key substitution included
+    assert!(rendered.starts_with("#cloud-config\n"), "got: {rendered}");
+    assert!(rendered.contains("hostname: demo-vm"), "got: {rendered}");
+    assert!(rendered.contains("name: tddy"), "got: {rendered}");
+    assert!(rendered.contains("- curl"), "got: {rendered}");
+    assert!(
+        rendered.contains("systemctl enable tddy-daemon"),
+        "got: {rendered}"
+    );
+    assert!(
+        rendered.contains("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 demo@tddy"),
+        "got: {rendered}"
+    );
+}
+
+#[test]
+fn user_data_without_completion_keeps_the_netplan_and_cloud_init_clean_bootcmd() {
+    // Given a provisioning spec for a guest that must stay up
+    let user_data = a_cloud_init_user_data();
+
+    // When rendering user-data without a completion token
+    let rendered = render_user_data_without_completion(&user_data, "ssh-ed25519 AAAA...");
+
+    // Then it still gets networking and still re-provisions on a copied base image — the
+    // only thing dropped relative to render_user_data is the halt
+    assert!(
+        rendered.contains("/etc/netplan/50-tddy-cloud-init-dhcp.yaml"),
+        "got: {rendered}"
+    );
+    assert!(
+        rendered.contains("cloud-init clean --logs --seed"),
+        "got: {rendered}"
+    );
+}
+
+// ── users: plain_text_passwd / lock_passwd ───────────────────────────────────
+
+#[test]
+fn a_user_with_an_unlocked_console_password_renders_both_password_keys() {
+    // Given a user given a serial-console password, with the password lock lifted
+    let user_data = CloudInitUserData {
+        users: vec![CloudInitUser {
+            name: "tddy".to_string(),
+            shell: None,
+            sudo: None,
+            ssh_authorized_keys: vec![],
+            plain_text_passwd: Some("console-pass".to_string()),
+            lock_passwd: Some(false),
+        }],
+        ..a_cloud_init_user_data()
+    };
+
+    // When rendering user-data
+    let rendered = render_user_data_without_completion(&user_data, "ssh-ed25519 AAAA...");
+
+    // Then both keys reach the document — cloud-init locks every account's password by
+    // default, so the password alone would not let anyone log in on the console
+    assert!(
+        rendered.contains("plain_text_passwd: console-pass"),
+        "got: {rendered}"
+    );
+    assert!(rendered.contains("lock_passwd: false"), "got: {rendered}");
+}
+
+#[test]
+fn a_user_with_no_console_password_omits_both_password_keys_entirely() {
+    // Given a user with neither a password nor a lock setting
+    let user_data = a_cloud_init_user_data();
+
+    // When rendering user-data
+    let rendered = render_user_data_without_completion(&user_data, "ssh-ed25519 AAAA...");
+
+    // Then neither key appears — an emitted `plain_text_passwd: null` or
+    // `lock_passwd: null` is not the same document to cloud-init
+    assert!(!rendered.contains("plain_text_passwd"), "got: {rendered}");
+    assert!(!rendered.contains("lock_passwd"), "got: {rendered}");
+}
+
 // ── render_meta_data ──────────────────────────────────────────────────────────
 
 #[test]
@@ -354,16 +508,95 @@ fn cloud_init_boot_argv_routes_the_serial_console_to_stdio_for_token_watching() 
 }
 
 #[test]
-fn cloud_init_boot_argv_disables_reboot_so_the_guest_shutdown_ends_the_process() {
+fn cloud_init_boot_argv_survives_a_guest_reboot_by_never_passing_no_reboot() {
     // Given a boot config
     let cfg = a_boot_config();
 
     // When building the boot argv
     let args = cloud_init_boot_argv(&cfg);
 
-    // Then -no-reboot is present, so the guest's `shutdown -h now` ends the QEMU
-    // process instead of rebooting it
-    assert!(args.contains(&"-no-reboot".to_string()));
+    // Then -no-reboot is absent. Provisioning may legitimately reboot mid-bake (the tddy
+    // host recipe swaps the cloud kernel for a 9p-capable one), and under -no-reboot QEMU
+    // exits on that reset — the serial reader hits EOF and the bake fails before doing any
+    // work. The completion script's `shutdown -h now` is a power-off, which ends the
+    // process without this flag.
+    assert!(
+        !args.contains(&"-no-reboot".to_string()),
+        "the bake must tolerate a guest reboot, got: {args:?}"
+    );
+}
+
+#[test]
+fn cloud_init_boot_argv_attaches_the_uefi_firmware_pair_as_read_only_code_and_writable_vars() {
+    // Given a boot config for a guest that boots through UEFI rather than its own BIOS
+    let cfg = CloudInitBootConfig {
+        firmware: Some(UefiFirmware {
+            code_path: "/firmware/edk2-aarch64-code.fd".to_string(),
+            vars_path: "/images/demo-vars.fd".to_string(),
+        }),
+        ..a_boot_config()
+    };
+
+    // When building the boot argv
+    let args = cloud_init_boot_argv(&cfg);
+
+    // Then the pflash pair follows the overlay drive: firmware code read-only on unit 0,
+    // this guest's own variables store writable on unit 1
+    let pflash_idx = args
+        .iter()
+        .position(|a| a.starts_with("if=pflash"))
+        .unwrap();
+    assert_eq!(
+        args[pflash_idx - 2..pflash_idx + 3],
+        [
+            "file=/images/demo.qcow2,if=virtio,format=qcow2".to_string(),
+            "-drive".to_string(),
+            "if=pflash,format=raw,unit=0,readonly=on,file=/firmware/edk2-aarch64-code.fd"
+                .to_string(),
+            "-drive".to_string(),
+            "if=pflash,format=raw,unit=1,file=/images/demo-vars.fd".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn cloud_init_boot_argv_exports_the_source_share_read_only_over_virtio_9p() {
+    // Given a boot config carrying the operator's working copy as a read-only 9p share —
+    // the entire mechanism by which the working copy reaches a tddy host bake
+    let cfg = CloudInitBootConfig {
+        nine_p_shares: vec![NinePShare {
+            host_path: "/home/dev/tddy-coder".to_string(),
+            mount_tag: "tddy-src".to_string(),
+            writable: false,
+        }],
+        ..a_boot_config()
+    };
+
+    // When building the boot argv
+    let args = cloud_init_boot_argv(&cfg);
+
+    // Then the fsdev/device pair exports it under the tag the guest mounts, read-only
+    let fsdev_idx = args.iter().position(|a| a == "-fsdev").unwrap();
+    assert_eq!(
+        args[fsdev_idx + 1],
+        "local,id=fsdev0,path=/home/dev/tddy-coder,security_model=none,readonly=on"
+    );
+    assert_eq!(
+        args[fsdev_idx + 3],
+        "virtio-9p-pci,fsdev=fsdev0,mount_tag=tddy-src"
+    );
+}
+
+#[test]
+fn cloud_init_boot_argv_exports_no_9p_device_when_no_share_is_configured() {
+    // Given a boot config with no 9p shares
+    let cfg = a_boot_config();
+
+    // When building the boot argv
+    let args = cloud_init_boot_argv(&cfg);
+
+    // Then no fsdev is emitted at all
+    assert!(!args.contains(&"-fsdev".to_string()), "got: {args:?}");
 }
 
 #[test]
@@ -411,6 +644,107 @@ fn serial_watcher_reports_failure_when_the_failed_token_variant_appears() {
     // Then it reports failure, not success (the failed variant must be checked before
     // the bare token, since it contains the bare token as a substring)
     assert_eq!(outcome, CloudInitOutcome::Failed);
+}
+
+// ── promote_prepared_base_pair ────────────────────────────────────────────────
+
+/// Two dummy files standing in for a finished bake's chained pair, in the scratch directory
+/// `build_cloud_init_image` writes every artifact to.
+fn a_baked_pair_in(scratch_dir: &Path, name: &str) {
+    std::fs::create_dir_all(scratch_dir).unwrap();
+    std::fs::write(
+        scratch_dir.join(format!("{name}-base.qcow2")),
+        b"immutable base",
+    )
+    .unwrap();
+    std::fs::write(scratch_dir.join(format!("{name}.qcow2")), b"delta overlay").unwrap();
+    std::fs::write(scratch_dir.join(format!("{name}-seed.iso")), b"seed").unwrap();
+}
+
+#[tokio::test]
+async fn promoting_moves_both_halves_of_the_pair_out_of_the_scratch_directory() {
+    // Given a finished bake's scratch directory holding the pair plus its seed ISO
+    let dir = tempfile::tempdir().unwrap();
+    let library = VmLibrary::new(dir.path());
+    library.init().unwrap();
+    let scratch_dir = library.prepared_base_dir().join("demo");
+    a_baked_pair_in(&scratch_dir, "demo");
+    let paths = cloud_init_library_paths(&library, "debian-12", "demo");
+
+    // When the pair is promoted
+    promote_prepared_base_pair(&scratch_dir, "demo", &paths)
+        .await
+        .unwrap();
+
+    // Then both halves land flat in images/02-prepared-base/, co-located so the overlay's
+    // relative backing reference still resolves, and only they moved
+    assert_eq!(
+        std::fs::read(&paths.prepared_base_output).unwrap(),
+        b"immutable base"
+    );
+    assert_eq!(
+        std::fs::read(&paths.prepared_overlay_output).unwrap(),
+        b"delta overlay"
+    );
+    assert!(
+        scratch_dir.join("demo-seed.iso").exists(),
+        "promotion moves the images only — the seed ISO stays for its owner to clean up"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn promoting_locks_both_halves_of_the_pair_read_only() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Given a finished bake's scratch directory
+    let dir = tempfile::tempdir().unwrap();
+    let library = VmLibrary::new(dir.path());
+    library.init().unwrap();
+    let scratch_dir = library.prepared_base_dir().join("demo");
+    a_baked_pair_in(&scratch_dir, "demo");
+    let paths = cloud_init_library_paths(&library, "debian-12", "demo");
+
+    // When the pair is promoted
+    promote_prepared_base_pair(&scratch_dir, "demo", &paths)
+        .await
+        .unwrap();
+
+    // Then both are sealed 0444 — a prepared base is shared by every VM cloned from it and
+    // must not be mutated in place
+    let base_mode = std::fs::metadata(&paths.prepared_base_output)
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    let overlay_mode = std::fs::metadata(&paths.prepared_overlay_output)
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(base_mode, 0o444);
+    assert_eq!(overlay_mode, 0o444);
+}
+
+#[tokio::test]
+async fn promoting_fails_when_the_bake_left_no_pair_behind() {
+    // Given an empty scratch directory — a bake that produced nothing
+    let dir = tempfile::tempdir().unwrap();
+    let library = VmLibrary::new(dir.path());
+    library.init().unwrap();
+    let scratch_dir = library.prepared_base_dir().join("demo");
+    std::fs::create_dir_all(&scratch_dir).unwrap();
+    let paths = cloud_init_library_paths(&library, "debian-12", "demo");
+
+    // When the pair is promoted
+    let result = promote_prepared_base_pair(&scratch_dir, "demo", &paths).await;
+
+    // Then it reports the missing file rather than silently publishing nothing
+    let message = result.unwrap_err().to_string();
+    assert!(
+        message.contains("demo-base.qcow2"),
+        "error must name the missing image, got: {message}"
+    );
 }
 
 #[test]

@@ -3,7 +3,9 @@
 //! Records all calls (deploy steps, verify commands, forward requests) and
 //! returns configurable results. Used in acceptance tests.
 
-use crate::vm::{ForwardHandle, PortForward, RunningVm, VerifyResult, Vm, VmConfig, VmError};
+use crate::vm::{
+    ForwardHandle, PortForward, RunningVm, UefiFirmware, VerifyResult, Vm, VmConfig, VmError,
+};
 use std::sync::Mutex;
 
 /// Recorded call to `deploy`.
@@ -32,6 +34,9 @@ pub struct ForwardCall {
 pub struct BootCall {
     pub qcow2_path: String,
     pub ssh_host_port: u16,
+    /// The UEFI firmware pair the caller resolved for this boot, or `None` for a guest that
+    /// boots through its own BIOS.
+    pub firmware: Option<UefiFirmware>,
 }
 
 /// Test double for `Vm`.
@@ -82,11 +87,13 @@ impl Vm for MockVm {
         self.boot_calls.lock().unwrap().push(BootCall {
             qcow2_path: config.qcow2_path.clone(),
             ssh_host_port: config.ssh_host_port,
+            firmware: config.firmware.clone(),
         });
         Ok(RunningVm {
             ssh_host_port: config.ssh_host_port,
             monitor_socket: "/tmp/tddy-mock-monitor.sock".to_string(),
             pid: 99999,
+            login: config.login.clone(),
         })
     }
 

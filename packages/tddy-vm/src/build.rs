@@ -1103,7 +1103,7 @@ async fn send_progress(
 }
 
 /// Write a log line to the task channel so `WatchTask` subscribers (Tasks UI) see build output.
-fn write_to_channel(ch: &Option<Arc<TaskChannel>>, line: &str) {
+pub(crate) fn write_to_channel(ch: &Option<Arc<TaskChannel>>, line: &str) {
     if let Some(ch) = ch {
         ch.write(Bytes::from(format!("{line}\n")));
     }
