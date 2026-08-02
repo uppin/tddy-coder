@@ -84,10 +84,10 @@ use crate::worktrees::{
 };
 use tddy_service::proto::connection::{
     AcpReplayFrame, AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState,
-    ExecuteToolRequest, ExecuteToolResponse, GetAcpToolCallDetailRequest,
-    GetAcpToolCallDetailResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
-    GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest, HostCpuStats,
-    HostDiskStats, HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse,
+    ExecuteToolRequest, ExecuteToolResponse, GetAcpReplayPageRequest, GetAcpReplayPageResponse,
+    GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse, GetDemoVmStatusRequest,
+    GetDemoVmStatusResponse, GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest,
+    HostCpuStats, HostDiskStats, HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse,
     ListSessionToolCallsRequest, ListSessionToolCallsResponse, PullBaseIntoBranchRequest,
     PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
     ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
@@ -538,31 +538,60 @@ impl Stream for MpscAcpReplayStream {
 impl Unpin for MpscAcpReplayStream {}
 
 /// Wrap one ACP frame in the connection-local [`AcpReplayFrame`] envelope, encoding the inner
-/// `AcpAgentMessage` to its protobuf bytes.
-fn acp_replay_frame(frame: &tddy_service::proto::acp::AcpAgentMessage) -> AcpReplayFrame {
+/// `AcpAgentMessage` to its protobuf bytes and stamping its absolute transcript position.
+///
+/// `seq` is the frame's 0-based index in the session's *resolved* transcript
+/// ([`tddy_service::acp_replay::read_session_transcript`]) — the same list
+/// [`tddy_service::acp_replay::page_before`] indexes, so the reverse cursor a client reads off a
+/// frame addresses the same position the pager does.
+fn acp_replay_frame(frame: &tddy_service::proto::acp::AcpAgentMessage, seq: u64) -> AcpReplayFrame {
     AcpReplayFrame {
         acp_agent_message: tddy_service::acp_replay::strip_tool_body(frame).encode_to_vec(),
         // A transcript frame carries no count; the count-first mode sets this instead.
         activity_count: 0,
+        seq,
     }
 }
 
 /// Relay task for `StreamAcpReplay`: forwards live agent-activity records for one session (the
 /// broadcast is already session-scoped) as enriched ACP `tool_call` replay frames into `tx` until
 /// the client disconnects.
+///
+/// `next_seq` is the resolved transcript's length at subscribe time, so the live tail continues the
+/// snapshot's numbering and a frame delivered live carries the position a later re-read would give
+/// it.
+///
+/// A tool call broadcasts twice — its `running` record then its terminal one — but the two coalesce
+/// into a *single* resolved transcript entry, so the refinement must land on the position its first
+/// record was given instead of consuming one of its own. `seq_by_tool_call` remembers that mapping
+/// and is pre-seeded from the snapshot ([`seq_by_tool_call`]), so a call straddling the subscribe
+/// boundary refines the entry the snapshot already placed.
 async fn relay_acp_replay(
     mut broadcast_rx: tokio::sync::broadcast::Receiver<
         tddy_core::agent_activity::AgentActivityRecord,
     >,
     tx: tokio::sync::mpsc::UnboundedSender<AcpReplayFrame>,
+    mut next_seq: u64,
+    mut seq_by_tool_call: std::collections::HashMap<String, u64>,
 ) {
     use tokio::sync::broadcast::error::RecvError;
     loop {
         match broadcast_rx.recv().await {
             Ok(record) => {
-                let frame =
-                    acp_replay_frame(&tddy_service::acp_replay::frame_for_agent_activity(&record));
-                if tx.send(frame).is_err() {
+                let frame = tddy_service::acp_replay::frame_for_agent_activity(&record);
+                let seq = match tddy_service::acp_replay::tool_call_id_of(&frame) {
+                    Some(id) => *seq_by_tool_call.entry(id.to_string()).or_insert_with(|| {
+                        let seq = next_seq;
+                        next_seq += 1;
+                        seq
+                    }),
+                    None => {
+                        let seq = next_seq;
+                        next_seq += 1;
+                        seq
+                    }
+                };
+                if tx.send(acp_replay_frame(&frame, seq)).is_err() {
                     break;
                 }
             }
@@ -570,6 +599,25 @@ async fn relay_acp_replay(
             Err(RecvError::Closed) => break,
         }
     }
+}
+
+/// The absolute 0-based position of every tool call in a resolved transcript, keyed by
+/// `tool_call_id`.
+///
+/// Seeds [`relay_acp_replay`]'s live numbering: when a call whose `running` record is already in the
+/// snapshot reports its terminal record, that record refines the snapshot entry and so must carry
+/// the snapshot's position for it — not a fresh position at the tail.
+fn seq_by_tool_call(
+    frames: &[tddy_service::proto::acp::AcpAgentMessage],
+) -> std::collections::HashMap<String, u64> {
+    frames
+        .iter()
+        .enumerate()
+        .filter_map(|(index, frame)| {
+            tddy_service::acp_replay::tool_call_id_of(frame)
+                .map(|id| (id.to_string(), index as u64))
+        })
+        .collect()
 }
 
 /// Count-only relay task for `StreamAcpReplay`'s `CountThenLive` mode: each **newly-seen** tool call
@@ -600,6 +648,8 @@ async fn relay_acp_replay_count(
                     .send(AcpReplayFrame {
                         acp_agent_message: Vec::new(),
                         activity_count: count,
+                        // A count frame carries no transcript payload, so it has no position.
+                        seq: 0,
                     })
                     .is_err()
                 {
@@ -7862,6 +7912,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 .send(AcpReplayFrame {
                     acp_agent_message: Vec::new(),
                     activity_count: count,
+                    // A count frame carries no transcript payload, so it has no position.
+                    seq: 0,
                 })
                 .is_err()
             {
@@ -7873,19 +7925,44 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Ok(Response::new(MpscAcpReplayStream { rx }));
         }
 
-        if mode == StreamMode::SnapshotThenLive {
-            let snapshot =
-                tddy_service::acp_replay::read_session_transcript(&session_dir).unwrap_or_default();
-            for frame in snapshot {
-                if tx.send(acp_replay_frame(&frame)).is_err() {
-                    // Receiver already gone — return an empty live stream that terminates immediately.
-                    return Ok(Response::new(MpscAcpReplayStream { rx }));
-                }
+        // The resolved transcript is what every position refers to: the replayed frames index into
+        // it, and the live tail continues its numbering from the end of it. Live-only replays none
+        // of it but still needs its length, so a live frame's `seq` means the same thing there.
+        let snapshot =
+            tddy_service::acp_replay::read_session_transcript(&session_dir).unwrap_or_default();
+
+        // Which slice of the transcript is replayed on subscribe, and where in the transcript that
+        // slice starts: all of it (snapshot-then-live, the proto3 default), its newest page only
+        // (tail-then-live), or none of it (live-only).
+        let (first_seq, replayed): (u64, &[tddy_service::proto::acp::AcpAgentMessage]) = match mode
+        {
+            StreamMode::SnapshotThenLive => (0, &snapshot),
+            StreamMode::TailThenLive => {
+                let page = tddy_service::acp_replay::tail_page(
+                    &snapshot,
+                    usize::try_from(req.page_size).unwrap_or(usize::MAX),
+                );
+                (page.first_seq, page.frames)
+            }
+            _ => (0, &[]),
+        };
+        for (offset, frame) in replayed.iter().enumerate() {
+            if tx
+                .send(acp_replay_frame(frame, first_seq + offset as u64))
+                .is_err()
+            {
+                // Receiver already gone — return an empty live stream that terminates immediately.
+                return Ok(Response::new(MpscAcpReplayStream { rx }));
             }
         }
 
         let broadcast_rx = self.agent_activity_hub.subscribe(&req.session_id);
-        tokio::spawn(relay_acp_replay(broadcast_rx, tx));
+        tokio::spawn(relay_acp_replay(
+            broadcast_rx,
+            tx,
+            snapshot.len() as u64,
+            seq_by_tool_call(&snapshot),
+        ));
 
         Ok(Response::new(MpscAcpReplayStream { rx }))
     }
@@ -7979,6 +8056,105 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 raw_output: detail.raw_output,
             })),
         }
+    }
+
+    /// Return one page of transcript frames strictly older than `before_seq` — the reverse cursor a
+    /// tail-first replay pages backwards with. Mirrors [`get_acp_tool_call_detail`]'s routing (it
+    /// peer-forwards, unlike the streaming modes) and `stream_acp_replay`'s auth, and applies the
+    /// same `strip_tool_body` seam the replay stream does: a paged frame is not a back door to the
+    /// bodies.
+    async fn get_acp_replay_page(
+        &self,
+        request: Request<GetAcpReplayPageRequest>,
+    ) -> Result<Response<GetAcpReplayPageResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        // Route BEFORE session lookup so a relay (which has no local sessions) can forward.
+        let requested_daemon = req.daemon_instance_id.trim();
+        if !requested_daemon.is_empty() {
+            let local_id = local_instance_id_for_config(&self.config);
+            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
+            let eligible_ids: Vec<String> = eligible_rows
+                .iter()
+                .map(|e| e.instance_id.0.clone())
+                .collect();
+            match crate::livekit_peer_discovery::classify_peer_route(
+                &local_id,
+                requested_daemon,
+                &eligible_ids,
+            ) {
+                Err(msg) => {
+                    log::info!("GetAcpReplayPage: rejected daemon routing: {}", msg);
+                    return Err(Status::invalid_argument(msg));
+                }
+                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
+                    log::info!(
+                        "GetAcpReplayPage: forwarding RPC to remote daemon_instance_id={}",
+                        peer_instance_id
+                    );
+                    let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
+                        Status::failed_precondition(
+                            "cannot forward GetAcpReplayPage: this process has no LiveKit common-room connection",
+                        )
+                    })?;
+                    let body = req.encode_to_vec();
+                    let out = crate::livekit_peer_discovery::forward_to_peer(
+                        slot,
+                        &peer_instance_id,
+                        "connection.ConnectionService",
+                        "GetAcpReplayPage",
+                        body,
+                    )
+                    .await?;
+                    let inner = GetAcpReplayPageResponse::decode(out.as_slice()).map_err(|e| {
+                        Status::internal(format!("decode GetAcpReplayPageResponse: {e}"))
+                    })?;
+                    return Ok(Response::new(inner));
+                }
+                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
+                    // Fall through to local execution below.
+                }
+            }
+        }
+
+        // Authenticate caller.
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        // Validate session ID.
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+
+        // Resolve the session dir.
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+
+        // A transcript that cannot be read is an error, never an empty page: an empty page means
+        // "you have reached the head", and a reader told that stops paging for good.
+        let transcript = tddy_service::acp_replay::read_session_transcript(&session_dir)
+            .map_err(|e| Status::internal(format!("read transcript: {e}")))?;
+        let page = tddy_service::acp_replay::page_before(
+            &transcript,
+            req.before_seq,
+            usize::try_from(req.page_size).unwrap_or(usize::MAX),
+        );
+
+        Ok(Response::new(GetAcpReplayPageResponse {
+            frames: page
+                .frames
+                .iter()
+                .map(|frame| tddy_service::acp_replay::strip_tool_body(frame).encode_to_vec())
+                .collect(),
+            first_seq: page.first_seq,
+            at_oldest: page.at_oldest,
+        }))
     }
 
     // --- terminal control mutex ---
@@ -10837,6 +11013,7 @@ mod agent_activity_unit_tests {
                 session_id: session_id.to_string(),
                 daemon_instance_id: String::new(),
                 mode: StreamMode::SnapshotThenLive as i32,
+                page_size: 0,
             }))
             .await
             .unwrap()
@@ -10872,6 +11049,7 @@ mod agent_activity_unit_tests {
                 session_id: session_id.to_string(),
                 daemon_instance_id: String::new(),
                 mode: StreamMode::SnapshotThenLive as i32,
+                page_size: 0,
             }))
             .await
             .unwrap()
@@ -10937,6 +11115,7 @@ mod agent_activity_unit_tests {
                 session_id: session_id.to_string(),
                 daemon_instance_id: String::new(),
                 mode: StreamMode::CountThenLive as i32,
+                page_size: 0,
             }))
             .await
             .unwrap()
@@ -10980,6 +11159,7 @@ mod agent_activity_unit_tests {
                 session_id: session_id.to_string(),
                 daemon_instance_id: String::new(),
                 mode: StreamMode::CountThenLive as i32,
+                page_size: 0,
             }))
             .await
             .unwrap()
@@ -11029,6 +11209,7 @@ mod agent_activity_unit_tests {
                 session_id: session_id.to_string(),
                 daemon_instance_id: String::new(),
                 mode: StreamMode::SnapshotThenLive as i32,
+                page_size: 0,
             }))
             .await
             .unwrap()
@@ -11067,6 +11248,7 @@ mod agent_activity_unit_tests {
                 session_id: session_id.to_string(),
                 daemon_instance_id: String::new(),
                 mode: StreamMode::CountThenLive as i32,
+                page_size: 0,
             }))
             .await
             .unwrap()
@@ -11118,6 +11300,7 @@ mod agent_activity_unit_tests {
                 session_id: session_id.to_string(),
                 daemon_instance_id: String::new(),
                 mode: StreamMode::SnapshotThenLive as i32,
+                page_size: 0,
             }))
             .await
             .unwrap()
@@ -11149,6 +11332,7 @@ mod agent_activity_unit_tests {
                 session_id: session_id.to_string(),
                 daemon_instance_id: String::new(),
                 mode: StreamMode::LiveOnly as i32,
+                page_size: 0,
             }))
             .await
             .unwrap()
@@ -11233,6 +11417,334 @@ mod agent_activity_unit_tests {
 
         // Then the status is NOT_FOUND.
         assert_eq!(status.code(), tddy_rpc::Code::NotFound);
+    }
+
+    // -----------------------------------------------------------------------
+    // Tail-first replay and the reverse cursor
+    // -----------------------------------------------------------------------
+
+    use tddy_service::proto::connection::GetAcpReplayPageRequest;
+
+    /// Seed a session dir with `entry_count` agent-text frames labelled `Entry 1` … `Entry N`
+    /// (1-based, naming the entry's position in the whole transcript) and return its dir.
+    fn a_session_recording(sessions_base: &std::path::Path, session_id: &str, entry_count: usize) {
+        let session_dir = unified_session_dir_path(sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        for n in 1..=entry_count {
+            tddy_service::acp_replay::append_acp_frame(
+                &session_dir,
+                &tddy_service::acp_replay::agent_text_frame(
+                    &format!("Entry {n}"),
+                    1_000 * n as i64,
+                ),
+            )
+            .unwrap();
+        }
+    }
+
+    /// Tail mode replays the newest page only — a long transcript no longer costs its whole history
+    /// to render a screenful of its end.
+    #[tokio::test]
+    async fn stream_acp_replay_in_tail_mode_replays_only_the_newest_page() {
+        // Given a session whose persisted transcript holds five entries.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-tail-1";
+        a_session_recording(&sessions_base, session_id, 5);
+        let service = make_unit_service(sessions_base);
+
+        // When a client subscribes tail-first for a page of two.
+        let mut stream = service
+            .stream_acp_replay(Request::new(StreamAcpReplayRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                mode: StreamMode::TailThenLive as i32,
+                page_size: 2,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Then only the newest two arrive, oldest-first *within* the page — entries 1-3 are not
+        // replayed at all, and are reached by paging backwards instead.
+        let first = next_replay_frame(&mut stream).await;
+        let second = next_replay_frame(&mut stream).await;
+        assert_eq!(
+            (acp_agent_text(&first), acp_agent_text(&second)),
+            ("Entry 4".to_string(), "Entry 5".to_string())
+        );
+    }
+
+    /// Every tail frame carries its position in the **whole** transcript, not its index within the
+    /// page — the first frame's `seq` is what the client pages backwards from.
+    #[tokio::test]
+    async fn stream_acp_replay_tail_frames_carry_their_absolute_transcript_position() {
+        // Given a session whose persisted transcript holds five entries.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-tail-seq-1";
+        a_session_recording(&sessions_base, session_id, 5);
+        let service = make_unit_service(sessions_base);
+
+        // When the newest page of two is replayed.
+        let mut stream = service
+            .stream_acp_replay(Request::new(StreamAcpReplayRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                mode: StreamMode::TailThenLive as i32,
+                page_size: 2,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // Then the page's frames are stamped 3 and 4 — their 0-based positions in the transcript.
+        let first = next_replay_envelope(&mut stream).await;
+        let second = next_replay_envelope(&mut stream).await;
+        assert_eq!((first.seq, second.seq), (3, 4));
+    }
+
+    /// The reverse cursor: one page of frames strictly older than `before_seq`, oldest-first.
+    #[tokio::test]
+    async fn get_acp_replay_page_serves_the_frames_before_the_cursor() {
+        // Given a session whose persisted transcript holds five entries.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-page-1";
+        a_session_recording(&sessions_base, session_id, 5);
+        let service = make_unit_service(sessions_base);
+
+        // When the page before seq 3 is requested, two frames wide.
+        let page = service
+            .get_acp_replay_page(Request::new(GetAcpReplayPageRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                before_seq: 3,
+                page_size: 2,
+            }))
+            .await
+            .expect("page lookup should succeed")
+            .into_inner();
+
+        // Then entries at seq 1 and 2 come back, oldest-first, with the head still further back.
+        let texts: Vec<String> = page
+            .frames
+            .iter()
+            .map(|bytes| {
+                acp_agent_text(
+                    &prost::Message::decode(&bytes[..]).expect("decode paged AcpAgentMessage"),
+                )
+            })
+            .collect();
+        assert_eq!((page.first_seq, page.at_oldest), (1, false));
+        assert_eq!(texts, vec!["Entry 2".to_string(), "Entry 3".to_string()]);
+    }
+
+    /// A paged frame is not a back door to the bodies: `GetAcpReplayPage` applies the same
+    /// `strip_tool_body` seam the replay stream does.
+    #[tokio::test]
+    async fn get_acp_replay_page_strips_tool_bodies_like_the_replay_stream_does() {
+        // Given a session whose transcript holds a completed Read call with full bodies, followed
+        // by one entry, so the call sits strictly before the cursor.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-page-strip-1";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            &session_dir,
+            &tddy_service::acp_replay::frame_for_agent_activity(&a_seeded_record("call-a", "Read")),
+        )
+        .unwrap();
+        let service = make_unit_service(sessions_base);
+
+        // When that call is paged back rather than streamed.
+        let page = service
+            .get_acp_replay_page(Request::new(GetAcpReplayPageRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                before_seq: 1,
+                page_size: 10,
+            }))
+            .await
+            .expect("page lookup should succeed")
+            .into_inner();
+
+        // Then it arrives with its id and title intact but its bodies stripped.
+        let frame: tddy_service::proto::acp::AcpAgentMessage =
+            prost::Message::decode(&page.frames[0][..]).expect("decode paged AcpAgentMessage");
+        let tc = acp_tool_call(&frame);
+        assert_eq!(tc.tool_call_id.expect("tool_call_id").value, "call-a");
+        assert_eq!(
+            (tc.title, tc.raw_input, tc.raw_output),
+            ("Read".to_string(), None, None)
+        );
+    }
+
+    /// The `running` record a tool call publishes when it starts: the same call as
+    /// [`a_seeded_record`], before its result is known.
+    fn a_running_record(call_id: &str, tool_name: &str) -> AgentActivityRecord {
+        AgentActivityRecord {
+            status: STATUS_RUNNING.to_string(),
+            result: serde_json::Value::Null,
+            completed_unix_ms: 0,
+            ..a_seeded_record(call_id, tool_name)
+        }
+    }
+
+    /// A tool call's terminal record refines the entry its `running` record created, so it carries
+    /// that entry's position — the two records coalesce into one transcript row, and a live reader
+    /// must be able to replace the row it already placed rather than append a second one.
+    #[tokio::test]
+    async fn stream_acp_replay_gives_a_tool_calls_terminal_record_the_position_of_its_running_record(
+    ) {
+        // Given a session whose transcript holds two entries, streamed tail-first.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-live-refine-1";
+        a_session_recording(&sessions_base, session_id, 2);
+        let service = make_unit_service(sessions_base);
+        let hub = service.agent_activity_hub();
+        let mut stream = service
+            .stream_acp_replay(Request::new(StreamAcpReplayRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                mode: StreamMode::TailThenLive as i32,
+                page_size: 2,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        next_replay_envelope(&mut stream).await;
+        next_replay_envelope(&mut stream).await;
+
+        // When a tool call publishes its running record and then its terminal one.
+        hub.publish(session_id, a_running_record("call-x", "Bash"));
+        hub.publish(session_id, a_seeded_record("call-x", "Bash"));
+
+        // Then both land on position 2 — the position a re-read of the transcript would give the
+        // single row they coalesce into.
+        let running = next_replay_envelope(&mut stream).await;
+        let terminal = next_replay_envelope(&mut stream).await;
+        assert_eq!((running.seq, terminal.seq), (2, 2));
+    }
+
+    /// A refinement must not cost the transcript a position: the next distinct call takes the very
+    /// next one, so live numbering neither drifts ahead of nor lags behind a later re-read.
+    #[tokio::test]
+    async fn stream_acp_replay_gives_the_call_after_a_refinement_the_next_position() {
+        // Given a session whose transcript holds two entries, streamed tail-first.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-live-refine-2";
+        a_session_recording(&sessions_base, session_id, 2);
+        let service = make_unit_service(sessions_base);
+        let hub = service.agent_activity_hub();
+        let mut stream = service
+            .stream_acp_replay(Request::new(StreamAcpReplayRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                mode: StreamMode::TailThenLive as i32,
+                page_size: 2,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        next_replay_envelope(&mut stream).await;
+        next_replay_envelope(&mut stream).await;
+
+        // When one call runs to completion and a second, distinct call then starts.
+        hub.publish(session_id, a_running_record("call-x", "Bash"));
+        hub.publish(session_id, a_seeded_record("call-x", "Bash"));
+        hub.publish(session_id, a_running_record("call-y", "Read"));
+
+        // Then the new call is at 3: the refinement of call-x consumed no position of its own.
+        next_replay_envelope(&mut stream).await;
+        next_replay_envelope(&mut stream).await;
+        let new_call = next_replay_envelope(&mut stream).await;
+        assert_eq!(new_call.seq, 3);
+    }
+
+    /// `LIVE_ONLY` replays none of the transcript but still numbers against it: a live frame's
+    /// position is where that entry sits in the whole recording, not where it sits in the handful of
+    /// frames this subscription happened to see. Reading the transcript purely to establish that base
+    /// is the only reason the mode touches the disk at all, so this is what pays for it.
+    #[tokio::test]
+    async fn stream_acp_replay_live_only_frames_are_numbered_from_the_recorded_transcript() {
+        // Given a session with three recorded entries, subscribed live-only (nothing replayed).
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-live-only-seq-1";
+        a_session_recording(&sessions_base, session_id, 3);
+        let service = make_unit_service(sessions_base);
+        let hub = service.agent_activity_hub();
+        let mut stream = service
+            .stream_acp_replay(Request::new(StreamAcpReplayRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                mode: StreamMode::LiveOnly as i32,
+                page_size: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        // When a new call is published live.
+        hub.publish(session_id, a_seeded_record("call-live", "Grep"));
+
+        // Then it is at position 3 — after the three recorded entries — rather than claiming
+        // position 0 as it would if the mode numbered from its own first delivery.
+        assert_eq!(next_replay_envelope(&mut stream).await.seq, 3);
+    }
+
+    /// A call that straddles the subscribe boundary — its `running` record already in the snapshot,
+    /// its terminal record arriving live — refines the snapshot's row, so it carries the position
+    /// the snapshot gave that row rather than a fresh one at the tail.
+    #[tokio::test]
+    async fn stream_acp_replay_gives_a_live_terminal_record_the_position_its_call_holds_in_the_snapshot(
+    ) {
+        // Given a session whose snapshot is one agent-text entry followed by a still-running call.
+        let temp = tempfile::tempdir().unwrap();
+        let sessions_base = temp.path().to_path_buf();
+        let session_id = "acp-replay-live-refine-3";
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            &session_dir,
+            &tddy_service::acp_replay::agent_text_frame("Reading the parser.", 1_000),
+        )
+        .unwrap();
+        append_agent_activity(&session_dir, &a_running_record("call-a", "Read")).unwrap();
+        let service = make_unit_service(sessions_base);
+        let hub = service.agent_activity_hub();
+        let mut stream = service
+            .stream_acp_replay(Request::new(StreamAcpReplayRequest {
+                session_token: "valid".to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: String::new(),
+                mode: StreamMode::SnapshotThenLive as i32,
+                page_size: 0,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        next_replay_envelope(&mut stream).await;
+        let snapshot_call = next_replay_envelope(&mut stream).await;
+        assert_eq!(snapshot_call.seq, 1);
+
+        // When that same call reports its terminal record live.
+        hub.publish(session_id, a_seeded_record("call-a", "Read"));
+
+        // Then it arrives at position 1 — replacing the snapshot's row, not appended after it.
+        let terminal = next_replay_envelope(&mut stream).await;
+        assert_eq!(terminal.seq, 1);
     }
 }
 

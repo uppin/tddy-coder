@@ -217,7 +217,25 @@ pub fn page_before(frames: &[AcpAgentMessage], before_seq: u64, page_size: usize
   `SNAPSHOT_THEN_LIVE` does — a paged frame is not a back door to the bodies.
 
 The live tail continues `seq` from the snapshot length, so a frame appended while the stream is open
-carries the position it would have had on a later re-read.
+carries the position it would have had on a later re-read — **provided the transcript's coalesced
+order does not change**.
+
+Two things make that proviso necessary, and both hosts implement the same answer:
+
+- A tool call broadcasts **twice** (its `running` then its terminal record) but resolves to a
+  *single* coalesced entry. Numbering per delivered record would therefore drift one position ahead
+  per completed call, and would give a refinement a position of its own. Each host instead keeps a
+  `tool_call_id → seq` map, pre-seeded from the resolved transcript, so a refinement carries the
+  position of the entry it refines and only a genuinely new entry advances the counter.
+- Coalescing keeps a call at its **last** record's slot, so a re-read orders tool rows by
+  *completion* time while the live tail can only number them by *first-record* time. Interleave two
+  calls — `a` starts, `b` starts, `b` finishes, `a` finishes — and the live tail says `a, b` where a
+  re-read resolves `b, a`. Closing that would mean renumbering frames already sent, which the wire
+  cannot express: a frame carries one immutable `seq`. A stable row is worth more than an exact
+  match with a hypothetical re-read, so the append-only semantic stands.
+
+Neither divergence reaches the client's cursor: `useAcpReplay` reads `seq` only off the **first**
+frame of the tail page, and merges live frames by `tool_call_id` rather than by position.
 
 ## Client contract
 
@@ -254,6 +272,15 @@ behavior above — and the Cypress component harness loads no stylesheet
 (`docs/dev/TODO.md` § "The component harness renders without any CSS"), so a Tailwind-only
 declaration leaves the container unscrollable and every follow/paging test vacuous. Specs mount the
 surface inside a fixed-height, inline-styled host.
+
+The contract runs the **whole ancestor chain down to the scroll container**, not just the two
+elements above. `AgentActivityOverlay`'s panel is `flex h-full w-full flex-col`, equally inert
+without a stylesheet, so a transcript root that declares its own flex/overflow inline still has no
+bounded height inside it and still cannot overflow. The overlay panel therefore carries the same
+inline height declaration. (Confirmed empirically while writing the acceptance specs: the
+follow/paging cases fail with `cy.scrollTo() failed because this element is not scrollable` on
+`agent-chat-messages`, and the overlay case cannot be satisfied by the transcript's own declarations
+alone.)
 
 ## Acceptance criteria
 

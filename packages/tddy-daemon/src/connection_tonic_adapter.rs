@@ -36,14 +36,14 @@ use tddy_service::proto::connection::{
     CalculateWorktreeSizeResponse, ClaimTerminalControlRequest, ClaimTerminalControlResponse,
     CleanWorktreeRequest, CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
     CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse,
-    ExecuteToolRequest, ExecuteToolResponse, GetAcpToolCallDetailRequest,
-    GetAcpToolCallDetailResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
-    GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest, HostStatsEvent,
-    ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse,
-    ListEligibleDaemonsRequest, ListEligibleDaemonsResponse, ListExecToolsRequest,
-    ListExecToolsResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
-    ListProjectsRequest, ListProjectsResponse, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse, ListSessionWorkflowFilesRequest,
+    ExecuteToolRequest, ExecuteToolResponse, GetAcpReplayPageRequest, GetAcpReplayPageResponse,
+    GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse, GetDemoVmStatusRequest,
+    GetDemoVmStatusResponse, GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest,
+    HostStatsEvent, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
+    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
+    ListExecToolsRequest, ListExecToolsResponse, ListProjectBranchesRequest,
+    ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ListSessionWorkflowFilesRequest,
     ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse,
     ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
@@ -708,6 +708,19 @@ where
         request: tonic::Request<GetAcpToolCallDetailRequest>,
     ) -> Result<tonic::Response<GetAcpToolCallDetailResponse>, tonic::Status> {
         let resp = RpcConnectionService::get_acp_tool_call_detail(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn get_acp_replay_page(
+        &self,
+        request: tonic::Request<GetAcpReplayPageRequest>,
+    ) -> Result<tonic::Response<GetAcpReplayPageResponse>, tonic::Status> {
+        let resp = RpcConnectionService::get_acp_replay_page(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

@@ -1,24 +1,17 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { fromBinary } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
 import { type ConnectionService, StreamMode } from "../../gen/connection_pb";
-import { AcpAgentMessageSchema, ToolCallStatus } from "../../gen/tddy/acp/v1/acp_pb";
+import { AcpAgentMessageSchema } from "../../gen/tddy/acp/v1/acp_pb";
 import { agentActivityRegistry } from "../sessions/agentActivityRegistry";
-import { createAgentChunkMerger } from "./acpAgentMerge";
-import type { ChatMessage, UseAgentChatResult } from "./useAgentChat";
+import { createReplayProjector, projectReplayFrames } from "./acpReplayProjection";
+import type { UseAgentChatResult } from "./useAgentChat";
 
-/** Map an ACP `ToolCallStatus` onto the transcript's coarse status marker. Unspecified/pending/
- *  in-progress all read as "running"; a failed call reads "error"; a completed call "completed". */
-function toolStatusOf(status: ToolCallStatus): "running" | "completed" | "error" {
-  switch (status) {
-    case ToolCallStatus.COMPLETED:
-      return "completed";
-    case ToolCallStatus.FAILED:
-      return "error";
-    default:
-      return "running";
-  }
-}
+/** Frames per transcript page — the tail the feed opens on, and the size of every page paged in
+ *  behind it. Mirrors `tddy_service::acp_replay::DEFAULT_REPLAY_PAGE_SIZE`; stated explicitly rather
+ *  than left at 0 so the request says what it wants instead of inheriting whatever the host defaults
+ *  to. */
+export const REPLAY_PAGE_SIZE = 100;
 
 /** The read-only transcript surface the Agent Activity overlay renders. Extends the shared
  *  {@link UseAgentChatResult} (so `AgentChatView` can render it interchangeably) with the overlay's
@@ -41,6 +34,14 @@ export interface UseAcpReplayResult extends UseAgentChatResult {
   loadSnapshot: () => void;
   /** True once the snapshot pull has delivered this session's transcript. */
   snapshotLoaded: boolean;
+  /** True once the loaded range reaches the transcript head — nothing older is left to page in. */
+  atOldest: boolean;
+  /** True while a page of older history is in flight. */
+  loadingOlder: boolean;
+  /** Page in the history immediately before the loaded range and prepend it. A no-op while
+   *  {@link atOldest}, while a fetch is already in flight, or before the transcript feed has
+   *  delivered a cursor to page back from. */
+  loadOlder: () => void;
 }
 
 const NOOP_SEND = () => false;
@@ -52,20 +53,23 @@ const NOOP_SEND = () => false;
  * - a **count** feed (`COUNT_THEN_LIVE`), opened while the session is focused, whose frames carry
  *   `activity_count` (no transcript payload). This drives `hasActivity` and `unreadCount` cheaply,
  *   without pulling the full transcript.
- * - a **snapshot** feed (`SNAPSHOT_THEN_LIVE`), opened lazily by {@link UseAcpReplayResult.loadSnapshot}
- *   on the first overlay open. Its ACP `session_update` frames are projected into the read-only chat
- *   transcript and cached in the registry, so a switch away and back reuses it rather than re-pulling.
- *   A pull only counts as done once its frames actually land, so one that is cancelled mid-flight
- *   (a remount, a session switch) is retried instead of caching an empty transcript.
+ * - a **transcript** feed (`TAIL_THEN_LIVE`, {@link REPLAY_PAGE_SIZE} frames), opened lazily by
+ *   {@link UseAcpReplayResult.loadSnapshot} — on the first overlay open, or straight away for the
+ *   Activities view, which IS the transcript. It replays only the **newest** page of the recorded
+ *   transcript, then tails live, so a session with a multi-megabyte history costs one page to show
+ *   the end of it. Its ACP `session_update` frames are projected into the read-only chat transcript
+ *   and cached in the registry, so a switch away and back reuses it rather than re-pulling. A pull
+ *   only counts as done once its frames actually land, so one that is cancelled mid-flight (a
+ *   remount, a session switch) is retried instead of caching an empty transcript.
  *
- * Frame projection mirrors the live ACP path: `agent_message_chunk` text merges into agent bubbles
- * (via {@link createAgentChunkMerger}, finalized per recorded chunk so discrete chunks stay separate);
- * `tool_call` becomes a tool entry carrying the server-enriched `title`, a coarse status, and its
- * `tool_call_id`, coalesced by that id. The hosts strip `raw_input`/`raw_output` out of every streamed
- * frame, so the bodies are **not** on the entry: the detail dialog fetches them by id through
- * `GetAcpToolCallDetail`. `user_message_chunk` becomes a user bubble; `agent_thought_chunk` a goal
- * bubble. Each entry's timestamp is the frame's `SessionNotification.timestamp_unix_ms`, so elapsed
- * badges reflect the recorded timeline.
+ * Older history is reached by paging **backwards**: the feed's first frame carries the absolute
+ * position its page starts at, and {@link UseAcpReplayResult.loadOlder} fetches the page before that
+ * cursor through the unary `GetAcpReplayPage`, prepending it above the loaded range. A failed fetch
+ * changes nothing except clearing the in-flight flag, so a later scroll retries it.
+ *
+ * Frame projection lives in {@link createReplayProjector} and mirrors the live ACP path — see there
+ * for how each `session_update` variant becomes an entry. Each entry's timestamp is the frame's
+ * `SessionNotification.timestamp_unix_ms`, so elapsed badges reflect the recorded timeline.
  */
 export function useAcpReplay(args: {
   sessionId: string;
@@ -84,6 +88,8 @@ export function useAcpReplay(args: {
   const seenCount = state?.seenCount ?? 0;
   const messages = state?.messages ?? [];
   const snapshotLoaded = state?.snapshotLoaded ?? false;
+  const atOldest = state?.atOldest ?? false;
+  const loadingOlder = state?.loadingOlder ?? false;
 
   // Both stream effects key on `client`, so a genuine routing change (daemon-direct → session-scoped
   // once the session's room connects) re-subscribes over the new transport. That is only safe because
@@ -116,26 +122,21 @@ export function useAcpReplay(args: {
     };
   }, [client, sessionId, sessionToken]);
 
-  // Which session's snapshot has been requested via `loadSnapshot`. Held per-hook (not per-session)
-  // so switching away to an unvisited session does NOT eagerly open its snapshot.
+  // Which session's transcript has been requested via `loadSnapshot`. Held per-hook (not per-session)
+  // so switching away to an unvisited session does NOT eagerly open its transcript.
   const [snapshotSession, setSnapshotSession] = useState<string | null>(null);
   const loadSnapshot = useCallback(() => setSnapshotSession(sessionId), [sessionId]);
 
-  // The snapshot feed: opened lazily once `loadSnapshot` targets the current session, and only when
-  // the registry has not already loaded it (a switch-back reuses the cached transcript).
+  // The transcript feed: opened lazily once `loadSnapshot` targets the current session, and only when
+  // the registry has not already loaded it (a switch-back reuses the cached range and its cursor).
   useEffect(() => {
     if (snapshotSession !== sessionId) return;
     if (agentActivityRegistry.get(sessionId)?.snapshotLoaded) return;
 
     let cancelled = false;
-    const merger = createAgentChunkMerger();
-    const acc: ChatMessage[] = [];
-    // Position in `acc` of the entry for each seen tool_call_id, so a later frame carrying an id we
-    // already rendered refines that same entry instead of appending a duplicate.
-    const toolIndexById = new Map<string, number>();
-    let toolKey = 0;
-    let userKey = 0;
-    let goalKey = 0;
+    // Opened on the first frame, which is what states the page's absolute start — the projector needs
+    // it to scope its entry keys, since a page paged in later shares one rendered list with this one.
+    let projector: ReturnType<typeof createReplayProjector> | null = null;
 
     (async () => {
       try {
@@ -143,83 +144,30 @@ export function useAcpReplay(args: {
           sessionToken,
           sessionId,
           daemonInstanceId: "",
-          mode: StreamMode.SNAPSHOT_THEN_LIVE,
+          mode: StreamMode.TAIL_THEN_LIVE,
+          pageSize: REPLAY_PAGE_SIZE,
         })) {
           if (cancelled) break;
           // The pull counts as done from its first delivered frame onwards — marking it earlier (at
           // subscribe time) would leave a pull cancelled before any frame landed cached as an empty
           // transcript that no later open would refill.
           agentActivityRegistry.markSnapshotLoaded(sessionId);
-          const msg = fromBinary(AcpAgentMessageSchema, frame.acpAgentMessage);
-          if (msg.msg.case !== "sessionUpdate") continue;
-          const notification = msg.msg.value;
-          const at = Number(notification.timestampUnixMs);
-          const update = notification.update?.update;
-          if (!update) continue;
-
-          if (update.case === "agentMessageChunk") {
-            const block = update.value.content?.block;
-            if (block?.case === "text") {
-              merger.appendChunk(acc, block.value.text, at);
-              // A replayed chunk is a complete recorded event: finalize it so the next chunk opens a
-              // new bubble instead of concatenating onto this one.
-              merger.finalize(acc, at);
-            }
-          } else if (update.case === "toolCall") {
-            // The server emits a tool call as it progresses (e.g. in-progress then completed) under
-            // one tool_call_id. Coalesce by id: a repeat refines the existing entry's label/status/
-            // timestamp in place (keeping its key + position). Only non-empty ids coalesce; a missing
-            // id always opens a new entry.
-            //
-            // The id is also persisted onto the entry: the streamed frame carries no
-            // `raw_input`/`raw_output` (the hosts strip them), so the detail dialog fetches the
-            // bodies by id instead of reading them off the message. It is written only when non-empty,
-            // by the same rule — an id-less frame leaves `toolCallId` `undefined` (as its optionality
-            // states) rather than carrying `""`, which would send the dialog looking up the empty id
-            // and have the host answer `NOT_FOUND`: a round trip whose result reads as "this call is
-            // missing from the transcript" for an entry that never had an id to look up.
-            const id = update.value.toolCallId?.value ?? "";
-            const idField = id ? { toolCallId: id } : {};
-            const existingIndex = id ? toolIndexById.get(id) : undefined;
-            if (existingIndex !== undefined) {
-              acc[existingIndex] = {
-                ...acc[existingIndex],
-                text: update.value.title,
-                at,
-                toolStatus: toolStatusOf(update.value.status),
-                ...idField,
-              };
-            } else {
-              if (id) toolIndexById.set(id, acc.length);
-              acc.push({
-                key: `tool-${toolKey++}`,
-                text: update.value.title,
-                from: "tool",
-                at,
-                toolStatus: toolStatusOf(update.value.status),
-                ...idField,
-              });
-            }
-          } else if (update.case === "userMessageChunk") {
-            const block = update.value.content?.block;
-            if (block?.case === "text") {
-              acc.push({ key: `user-${userKey++}`, text: block.value.text, from: "user", at });
-            }
-          } else if (update.case === "agentThoughtChunk") {
-            // tddy convention: the thought channel carries the workflow goal → "goal" bubble.
-            const block = update.value.content?.block;
-            if (block?.case === "text") {
-              acc.push({ key: `goal-${goalKey++}`, text: block.value.text, from: "goal", at });
-            }
+          if (!projector) {
+            // The first frame's absolute position IS the reverse cursor: 0 means the page already
+            // reaches the transcript head, so there is nothing older to page in.
+            const firstSeq = Number(frame.seq);
+            projector = createReplayProjector(firstSeq);
+            agentActivityRegistry.setOldestSeq(sessionId, firstSeq, firstSeq === 0);
           }
-          // tool_call_update / plan carry no additional bubble; ignored on purpose.
-
-          if (!cancelled) agentActivityRegistry.setMessages(sessionId, acc.slice());
+          const entries = projector.append(
+            fromBinary(AcpAgentMessageSchema, frame.acpAgentMessage),
+          );
+          if (!cancelled) agentActivityRegistry.setMessages(sessionId, entries);
         }
       } catch (err) {
         // A stream aborted on unmount surfaces as an AbortError; ignore it. Any other error while
         // still mounted leaves the transcript showing what it has (no fallback fabrication).
-        if (!cancelled) console.debug("[useAcpReplay] snapshot stream error", err);
+        if (!cancelled) console.debug("[useAcpReplay] transcript stream error", err);
       }
     })();
 
@@ -227,6 +175,49 @@ export function useAcpReplay(args: {
       cancelled = true;
     };
   }, [client, sessionId, sessionToken, snapshotSession]);
+
+  // Exactly one page fetch is in flight at a time. Held in a ref rather than read off the registry
+  // because a second scroll can cross the threshold before a `loadingOlder` write has re-rendered,
+  // and two requests for the same cursor would page the same frames in twice.
+  const olderPageInFlight = useRef(false);
+
+  const loadOlder = useCallback(() => {
+    const loaded = agentActivityRegistry.get(sessionId);
+    const cursor = loaded?.oldestSeq ?? null;
+    // Nothing to page back from: the feed has not stated where the range starts, or the range
+    // already reaches the transcript head.
+    if (cursor === null || cursor <= 0 || loaded?.atOldest) return;
+    if (olderPageInFlight.current) return;
+
+    olderPageInFlight.current = true;
+    agentActivityRegistry.setLoadingOlder(sessionId, true);
+    (async () => {
+      try {
+        const page = await client.getAcpReplayPage({
+          sessionToken,
+          sessionId,
+          daemonInstanceId: "",
+          beforeSeq: BigInt(cursor),
+          pageSize: REPLAY_PAGE_SIZE,
+        });
+        const firstSeq = Number(page.firstSeq);
+        const entries = projectReplayFrames(
+          page.frames.map((bytes) => fromBinary(AcpAgentMessageSchema, bytes)),
+          firstSeq,
+        );
+        // Keyed by the `sessionId` this fetch was issued for, so a page that resolves after a session
+        // switch lands under its own session rather than the one now on screen.
+        agentActivityRegistry.prependMessages(sessionId, entries, firstSeq, page.atOldest);
+      } catch (err) {
+        // The loaded range is left exactly as it was: no fabricated page, no partial one, and the
+        // range is NOT closed — clearing the in-flight flag below is what makes a later scroll retry.
+        console.debug("[useAcpReplay] older page fetch failed", err);
+      } finally {
+        olderPageInFlight.current = false;
+        agentActivityRegistry.setLoadingOlder(sessionId, false);
+      }
+    })();
+  }, [client, sessionId, sessionToken]);
 
   const markSeen = useCallback(() => {
     agentActivityRegistry.markSeen(sessionId);
@@ -251,5 +242,8 @@ export function useAcpReplay(args: {
     markSeen,
     loadSnapshot,
     snapshotLoaded,
+    atOldest,
+    loadingOlder,
+    loadOlder,
   };
 }

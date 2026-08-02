@@ -36,8 +36,21 @@ export interface AgentActivityState {
    *  surface that renders the difference (the Activities view's empty state) must not state the
    *  former while the latter is still true. A feed that errors never sets this. */
   readonly countLoaded: boolean;
-  /** The lazily-pulled transcript entries (empty until the snapshot is opened). */
+  /** The transcript entries currently loaded, oldest-first: the pages paged in behind the range
+   *  followed by the range the transcript feed owns. Empty until the feed is opened. */
   readonly messages: ChatMessage[];
+  /** The entries paged in from **before** where the transcript feed's range starts, oldest-first.
+   *  Held apart from that range because the feed rewrites its own entries wholesale on every frame
+   *  it delivers, which would otherwise drop everything paged in behind them. */
+  readonly olderMessages: ChatMessage[];
+  /** Absolute 0-based transcript position of the loaded range's oldest entry — the reverse cursor
+   *  the next `GetAcpReplayPage` pages back from. `null` until the feed's first frame states it. */
+  readonly oldestSeq: number | null;
+  /** True once the loaded range reaches the transcript head: nothing older exists, so no scroll
+   *  issues another page fetch. */
+  readonly atOldest: boolean;
+  /** True while a `GetAcpReplayPage` for this session is in flight. */
+  readonly loadingOlder: boolean;
   /** The `count` value at the last overlay open — entries beyond it are unread. */
   readonly seenCount: number;
   /** True once the `SNAPSHOT_THEN_LIVE` transcript pull has **delivered** for this session. A pull
@@ -60,6 +73,10 @@ function freshState(sessionId: string): AgentActivityState {
     count: 0,
     countLoaded: false,
     messages: EMPTY_MESSAGES,
+    olderMessages: EMPTY_MESSAGES,
+    oldestSeq: null,
+    atOldest: false,
+    loadingOlder: false,
     seenCount: 0,
     snapshotLoaded: false,
     toolDetails: EMPTY_TOOL_DETAILS,
@@ -90,10 +107,60 @@ export class AgentActivityRegistry {
     this.write(sessionId, { ...prev, count, countLoaded: true });
   }
 
-  /** Replace the cached transcript entries (the resolved snapshot). */
+  /** Replace the entries the transcript feed owns — the range it opened on plus whatever it has
+   *  tailed since. Pages already prepended behind that range are kept ahead of them, so a live frame
+   *  (which re-states the whole fed range) cannot drop history the operator paged in. */
   setMessages(sessionId: string, messages: ChatMessage[]): void {
     const prev = this.bySessionId.get(sessionId) ?? freshState(sessionId);
-    this.write(sessionId, { ...prev, messages });
+    const combined =
+      prev.olderMessages.length === 0 ? messages : [...prev.olderMessages, ...messages];
+    this.write(sessionId, { ...prev, messages: combined });
+  }
+
+  /** Record where the loaded range starts, as the transcript feed's first frame states it, and
+   *  whether that already reaches the transcript head. No-op (no notify) when unchanged. */
+  setOldestSeq(sessionId: string, seq: number, atOldest: boolean): void {
+    const prev = this.bySessionId.get(sessionId) ?? freshState(sessionId);
+    if (prev.oldestSeq === seq && prev.atOldest === atOldest) return;
+    this.write(sessionId, { ...prev, oldestSeq: seq, atOldest });
+  }
+
+  /** Flag a `GetAcpReplayPage` as in flight (or no longer so). A **failed** fetch clears it through
+   *  this same writer and leaves the loaded range untouched, so a later scroll retries. No-op (no
+   *  notify) when unchanged. */
+  setLoadingOlder(sessionId: string, loadingOlder: boolean): void {
+    const prev = this.bySessionId.get(sessionId) ?? freshState(sessionId);
+    if (prev.loadingOlder === loadingOlder) return;
+    this.write(sessionId, { ...prev, loadingOlder });
+  }
+
+  /**
+   * Prepend a resolved older page above the loaded range and move the reverse cursor to its start.
+   *
+   * A page whose `firstSeq` is not strictly below the current cursor is **ignored**: it is either a
+   * duplicate of one already prepended or an answer to a cursor that has since moved, and rendering
+   * it would double the same entries. That arithmetic is the only thing standing between an
+   * in-flight response arriving twice and a doubled transcript, which is why the cursor is an
+   * absolute position rather than an opaque token. A page arriving before the feed has stated where
+   * the range starts is ignored for the same reason — there is nothing to compare it against.
+   */
+  prependMessages(
+    sessionId: string,
+    messages: ChatMessage[],
+    firstSeq: number,
+    atOldest: boolean,
+  ): void {
+    const prev = this.bySessionId.get(sessionId) ?? freshState(sessionId);
+    if (prev.oldestSeq === null || firstSeq >= prev.oldestSeq) return;
+    const olderMessages = [...messages, ...prev.olderMessages];
+    const fedRange = prev.messages.slice(prev.olderMessages.length);
+    this.write(sessionId, {
+      ...prev,
+      olderMessages,
+      messages: [...olderMessages, ...fedRange],
+      oldestSeq: firstSeq,
+      atOldest,
+    });
   }
 
   /** Mark that the snapshot pull has delivered (its first frame landed), so a later switch-back

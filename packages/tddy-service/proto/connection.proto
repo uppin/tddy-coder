@@ -97,6 +97,12 @@ service ConnectionService {
   // the same coalesced transcript the stream replays (acp-transcript.jsonl + agent-activity.jsonl
   // fallback). See docs/ft/coder/acp-replay-lazy-tool-bodies.md.
   rpc GetAcpToolCallDetail(GetAcpToolCallDetailRequest) returns (GetAcpToolCallDetailResponse);
+  // The transcript's reverse cursor: one page of frames strictly OLDER than `before_seq`. A
+  // TAIL_THEN_LIVE replay opens on the newest page, so reading further back is paging backwards from
+  // the first delivered frame's `seq`. Unary (unlike the replay stream) so it peer-forwards on
+  // daemon_instance_id exactly as GetAcpToolCallDetail does. See
+  // docs/ft/web/agent-activity-pane.md § Read-only ACP transcript.
+  rpc GetAcpReplayPage(GetAcpReplayPageRequest) returns (GetAcpReplayPageResponse);
   // Demo VM lifecycle — UI-driven QEMU boot/shutdown for the demo goal.
   rpc StartDemoVm(StartDemoVmRequest) returns (StartDemoVmResponse);
   rpc StopDemoVm(StopDemoVmRequest) returns (StopDemoVmResponse);
@@ -1014,6 +1020,10 @@ enum StreamMode {
   // new count for each frame appended live. Carries no transcript payload — the cheap "minimal
   // activity data" that drives the Agent Activity icon/badge before the pane is opened.
   COUNT_THEN_LIVE    = 2;
+  // Tail-first (StreamAcpReplay only): replay only the NEWEST `page_size` persisted frames — in
+  // recorded order, oldest-first within the page — then tail live. Older frames are reached by
+  // paging backwards with GetAcpReplayPage from the first delivered frame's `seq`.
+  TAIL_THEN_LIVE     = 3;
 }
 
 message StreamSessionActivityRequest {
@@ -1030,6 +1040,8 @@ message StreamAcpReplayRequest {
   string     session_id         = 2;
   string     daemon_instance_id = 3;
   StreamMode mode               = 4;   // snapshot-then-live (default) vs live-only
+  // TAIL_THEN_LIVE only: how many newest frames to replay. 0 ⇒ the server's default page size.
+  uint32     page_size          = 5;
 }
 
 // One replay frame: a connection-local wrapper carrying an ACP `tddy.acp.v1.AcpAgentMessage`
@@ -1042,6 +1054,11 @@ message AcpReplayFrame {
   // Set only in COUNT_THEN_LIVE frames (the current number of persisted transcript frames); the
   // SNAPSHOT_THEN_LIVE / LIVE_ONLY modes leave this 0 and carry acp_agent_message instead.
   uint64 activity_count = 2;
+  // The frame's absolute 0-based position in the session's resolved transcript, oldest = 0. Carried
+  // by every transcript frame (snapshot, tail page, and live tail). On the FIRST frame of a tail
+  // page it doubles as the reverse cursor: `seq == 0` means the page reaches the transcript head.
+  // COUNT_THEN_LIVE frames carry no transcript payload and leave it 0.
+  uint64 seq = 3;
 }
 
 // Request for one tool call's full body. Mirrors StreamAcpReplayRequest's routing (same
@@ -1059,6 +1076,28 @@ message GetAcpToolCallDetailRequest {
 message GetAcpToolCallDetailResponse {
   optional string raw_input  = 1;
   optional string raw_output = 2;
+}
+
+// One page of transcript frames strictly OLDER than `before_seq` — the reverse cursor behind the
+// Activities transcript's scroll-up. Mirrors GetAcpToolCallDetail's routing (peer-forwarding on
+// daemon_instance_id) and StreamAcpReplay's auth.
+message GetAcpReplayPageRequest {
+  string session_token      = 1;
+  string session_id         = 2;
+  string daemon_instance_id = 3;
+  uint64 before_seq         = 4;   // exclusive upper bound; frames with seq < before_seq
+  uint32 page_size          = 5;   // 0 ⇒ the server's default page size
+}
+
+// One page of the resolved transcript, oldest-first. `at_oldest` is an explicit field rather than
+// `first_seq == 0` because an EMPTY page (the cursor is already at the head) would otherwise be
+// indistinguishable from a one-frame page at the head.
+message GetAcpReplayPageResponse {
+  // Protobuf-encoded `tddy.acp.v1.AcpAgentMessage` frames, oldest-first, tool bodies stripped —
+  // byte-identical in shape to AcpReplayFrame.acp_agent_message.
+  repeated bytes frames    = 1;
+  uint64         first_seq = 2;   // absolute seq of frames[0]; meaningless when `frames` is empty
+  bool           at_oldest = 3;   // true when this page reaches the transcript head
 }
 
 /// Sent by `tddy-tools session-hook`; bearer is the per-session hook_token.

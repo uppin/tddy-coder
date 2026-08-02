@@ -14,8 +14,12 @@ import type { ChatMessage } from "./useAgentChat";
  * as a finalized line and clears the partial state — replay callers call it after each discrete
  * recorded chunk so consecutive recorded chunks render as separate bubbles rather than concatenating
  * into one.
+ *
+ * `keyPrefix` namespaces the generated bubble keys. One rendered list can hold entries produced by
+ * more than one merger — the paged transcript projects each page with its own — and React reconciles
+ * by key, so two mergers counting from zero under the same prefix would collide.
  */
-export function createAgentChunkMerger() {
+export function createAgentChunkMerger(keyPrefix = "agent-line") {
   let buffer = "";
   let partialActive = false;
   let keyCounter = 0;
@@ -24,7 +28,7 @@ export function createAgentChunkMerger() {
     messages.length > 0 && messages[messages.length - 1].from === "agent" ? messages.length - 1 : -1;
 
   const pushAgentLine = (messages: ChatMessage[], text: string, at: number) => {
-    messages.push({ key: `agent-line-${keyCounter++}`, text, from: "agent", at });
+    messages.push({ key: `${keyPrefix}-${keyCounter++}`, text, from: "agent", at });
   };
 
   /** A finalized line (delta buffer flushed on `\n`): replace the in-progress partial row, else

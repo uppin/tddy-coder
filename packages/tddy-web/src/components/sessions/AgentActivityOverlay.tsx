@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import type { Client } from "@connectrpc/connect";
 import { ConnectionService } from "../../gen/connection_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
@@ -29,6 +29,18 @@ interface AgentActivityOverlayProps {
  *
  * PRD: docs/ft/web/agent-activity-pane.md § Read-only ACP transcript.
  */
+
+/** Inline duplicate of the panel's `flex h-full w-full flex-col` classes. The transcript inside can
+ *  only scroll if every element above it bounds its height — a transcript that declares its own
+ *  flex/overflow inside a panel with no height still has nothing to overflow (PRD § Inline layout
+ *  contract). */
+const OVERLAY_PANEL_STYLE: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  height: "100%",
+  width: "100%",
+  minHeight: 0,
+};
 export function AgentActivityOverlay({
   sessionId,
   sessionToken,
@@ -40,6 +52,7 @@ export function AgentActivityOverlay({
 
   const chat = useAcpReplay({ sessionId, sessionToken, client: resolvedClient });
   const { hasActivity, unreadCount, markSeen, loadSnapshot } = chat;
+  const { atOldest, loadingOlder, loadOlder } = chat;
 
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<ChatMessage | null>(null);
@@ -100,6 +113,7 @@ export function AgentActivityOverlay({
         <div
           data-testid="agent-activity-overlay"
           className="absolute top-0 right-0 z-10 flex h-full w-full flex-col border-l border-border bg-background md:w-[360px]"
+          style={OVERLAY_PANEL_STYLE}
         >
           <div className="flex flex-shrink-0 items-center justify-between border-b border-border px-3 py-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -130,7 +144,19 @@ export function AgentActivityOverlay({
             </Button>
           </div>
 
-          <AgentChatView room={null} readOnly chat={chat} onToolClick={setDetail} />
+          {/* Keyed by session for the same reason as the Activities pane: the overlay is not
+              remounted on a session switch, so the transcript would otherwise carry the previous
+              session's scroll position, detach anchor and measured height into the next one. */}
+          <AgentChatView
+            key={sessionId}
+            room={null}
+            readOnly
+            chat={chat}
+            onToolClick={setDetail}
+            onLoadOlder={loadOlder}
+            hasOlder={!atOldest}
+            loadingOlder={loadingOlder}
+          />
         </div>
       )}
 

@@ -146,3 +146,101 @@ describe("AgentActivityRegistry tool-body cache", () => {
     expect(notifications).toBe(0);
   });
 });
+
+/**
+ * The loaded range: which slice of the transcript is in memory, where it starts, and whether
+ * anything older remains. The rendered consequences are pinned by
+ * `cypress/component/ActivitiesTailScrollAcceptance.cy.tsx`; these specs pin the store contract the
+ * paging depends on — a prepend that lands out of order, or a cursor that fails to advance, would
+ * page the same frames in forever.
+ */
+describe("AgentActivityRegistry loaded range", () => {
+  /** A transcript entry labelled by its position, so a prepend's ordering is readable. */
+  function anEntry(label: string, at: number): ChatMessage {
+    return { key: `agent-${label}`, text: label, from: "agent", at };
+  }
+
+  /** A session holding the newest page: entries 151 → 152, starting at seq 150, more behind it. */
+  function aSessionOnItsNewestPage(): AgentActivityRegistry {
+    const registry = new AgentActivityRegistry();
+    registry.setMessages("s1", [anEntry("Entry 151", 151_000), anEntry("Entry 152", 152_000)]);
+    registry.setOldestSeq("s1", 150, false);
+    return registry;
+  }
+
+  it("prepends an older page above the loaded entries", () => {
+    // Given — a session showing its newest page
+    const registry = aSessionOnItsNewestPage();
+
+    // When — the page behind it resolves
+    registry.prependMessages(
+      "s1",
+      [anEntry("Entry 149", 149_000), anEntry("Entry 150", 150_000)],
+      148,
+      false,
+    );
+
+    // Then — the older entries lead the range, in their own recorded order
+    expect(registry.get("s1")?.messages.map((entry) => entry.text)).toEqual([
+      "Entry 149",
+      "Entry 150",
+      "Entry 151",
+      "Entry 152",
+    ]);
+  });
+
+  it("advances the reverse cursor to the prepended page's first seq", () => {
+    // Given — a range starting at seq 150
+    const registry = aSessionOnItsNewestPage();
+
+    // When — two older entries land at seq 148
+    registry.prependMessages(
+      "s1",
+      [anEntry("Entry 149", 149_000), anEntry("Entry 150", 150_000)],
+      148,
+      false,
+    );
+
+    // Then — the next fetch pages back from there, not from the old cursor
+    expect(registry.get("s1")?.oldestSeq).toBe(148);
+  });
+
+  it("marks the range closed when the prepended page reaches the head", () => {
+    // Given — a range one page from the transcript head
+    const registry = aSessionOnItsNewestPage();
+
+    // When — the page that resolves reaches it
+    registry.prependMessages("s1", [anEntry("Entry 1", 1_000)], 0, true);
+
+    // Then — the range is closed, so no further scroll issues a fetch
+    expect(registry.get("s1")?.atOldest).toBe(true);
+  });
+
+  it("ignores a page whose first seq is not older than the current cursor", () => {
+    // Given — a range that has already paged back to seq 148
+    const registry = aSessionOnItsNewestPage();
+    registry.prependMessages(
+      "s1",
+      [anEntry("Entry 149", 149_000), anEntry("Entry 150", 150_000)],
+      148,
+      false,
+    );
+
+    // When — a duplicate in-flight response for the page already prepended arrives
+    registry.prependMessages(
+      "s1",
+      [anEntry("Entry 149", 149_000), anEntry("Entry 150", 150_000)],
+      148,
+      false,
+    );
+
+    // Then — it is dropped rather than double-rendered: the cursor is the arithmetic that makes a
+    // duplicate detectable at all
+    expect(registry.get("s1")?.messages.map((entry) => entry.text)).toEqual([
+      "Entry 149",
+      "Entry 150",
+      "Entry 151",
+      "Entry 152",
+    ]);
+  });
+});
