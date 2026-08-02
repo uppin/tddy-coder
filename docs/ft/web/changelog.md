@@ -4,6 +4,16 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-08-02 — The activity transcript opens at the end, follows it, and pages back on demand
+
+- **The transcript now opens on the newest entry.** It used to open on the oldest one — the least interesting thing a finished session did — so reading what the agent last did meant scrolling to the bottom by hand, every time you opened the pane and every time you switched sessions and back.
+- **It follows the agent while you are at the bottom.** New activity scrolls into view on its own; previously it appended below the fold and the pane silently stopped reflecting what the agent was doing.
+- **Scrolling up stops it moving.** Frames still arrive and still render, but the view stays where you left it. A button appears saying how many entries arrived while you were reading; clicking it, or scrolling back down, returns you to the newest entry.
+- **Older history loads as you scroll back**, a page at a time, and the entry you were reading stays under the same pixel when it lands. Reaching the beginning stops the fetching for good.
+- **Opening a session no longer transfers its whole recorded history.** Only the newest 100 entries are fetched up front, so a session with a large recording costs a page rather than all of it to show the end.
+- **A failed page load leaves the transcript alone** — nothing invented, nothing half-loaded, and no false "you have reached the beginning". Scrolling up again retries.
+- **Switching sessions no longer carries one session's scroll position into another.**
+
 ## 2026-08-01 — A dormant session shows what it did, and offers to bring it back
 
 - **Selecting an inactive session now shows the work it recorded.** The main pane renders that session's agent transcript — its messages and tool calls, each with an elapsed badge, tool entries opening the full input and output. Previously the pane read *"Select Resume to reconnect"* and nothing else, while the transcript sat behind a top-bar icon that hides itself until something has been counted; the one surface worth reading for a finished session was the one you could not reach.

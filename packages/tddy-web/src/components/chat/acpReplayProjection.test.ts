@@ -7,7 +7,7 @@
  * never had to meet — entries from two different pages share one rendered list, so their keys must
  * not collide.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-02-activities-tail-first-autoscroll.md § Client contract.
+ * PRD: docs/ft/web/agent-activity-pane.md § Tail-first, auto-scrolling transcript.
  */
 
 import { describe, expect, it } from "bun:test";

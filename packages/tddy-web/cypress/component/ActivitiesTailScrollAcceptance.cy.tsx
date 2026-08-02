@@ -13,7 +13,7 @@
  * tail-mode request and the whole head-first history for anything else, so a spec fails when the
  * client opens the wrong mode rather than passing on the fake's generosity.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-02-activities-tail-first-autoscroll.md
+ * PRD: docs/ft/web/agent-activity-pane.md § Tail-first, auto-scrolling transcript
  */
 
 import React from "react";
@@ -54,7 +54,8 @@ const NEWEST_IN_A_FULL_PAGE = DEFAULT_REPLAY_PAGE_SIZE - 1;
  * inert and a surface mounted bare measures the full viewport and can never overflow. These specs
  * are entirely about a scroll container, so the host declares its bounded height inline; the
  * transcript's own flex/overflow declarations are the component's contract to keep
- * (PRD § Inline layout contract).
+ * (`docs/ft/web/agent-activity-pane.md` § Tail-first — the scroll container must declare its own
+ * layout).
  */
 function inAFixedHeightPane(surface: React.ReactElement) {
   return (

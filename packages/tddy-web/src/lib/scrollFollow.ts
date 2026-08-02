@@ -6,7 +6,7 @@
  * it is near enough to the start of the loaded range to page older history in, and where the scroll
  * offset must land once that older page has been prepended.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-02-activities-tail-first-autoscroll.md § Following,
+ * PRD: docs/ft/web/agent-activity-pane.md § Tail-first — opening and following,
  * § Paging backwards.
  */
 

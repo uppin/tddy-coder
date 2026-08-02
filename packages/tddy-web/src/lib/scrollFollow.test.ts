@@ -8,7 +8,7 @@
  * when a viewport counts as following, when it counts as near enough to the top to page, and where
  * the scroll offset must land after an older page is prepended.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-02-activities-tail-first-autoscroll.md § Following, § Paging
+ * PRD: docs/ft/web/agent-activity-pane.md § Tail-first — opening and following, § Paging
  * backwards.
  */
 

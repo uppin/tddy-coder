@@ -14,7 +14,7 @@ import type { ChatMessage } from "./useAgentChat";
  * element on the chain from the surface down to the scroll container carries its own declaration;
  * a bounded height that stops one level above the container bounds nothing.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-02-activities-tail-first-autoscroll.md § Inline layout contract.
+ * PRD: docs/ft/web/agent-activity-pane.md § Tail-first — the scroll container must declare its own layout.
  */
 export const TRANSCRIPT_ROOT_STYLE: React.CSSProperties = {
   display: "flex",

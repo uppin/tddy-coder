@@ -20,7 +20,7 @@ export interface AgentChatProps {
   /** Live chat only: error from the room connection attempt — meaningful when
    *  `roomStatus === "error"`. A read-only transcript renders no error banner: a replay that fails
    *  keeps whatever frames arrived rather than fabricating a message about them
-   *  (`docs/ft/web/1-WIP/PRD-2026-08-02-activities-tail-first-autoscroll.md` § Edge cases). */
+   *  (`docs/ft/web/agent-activity-pane.md` § Tail-first, auto-scrolling transcript). */
   roomError?: string | null;
   /** Drive the session over the ACP protobuf mirror (`AcpService.Session`) instead of the default
    *  `TddyRemote.Stream`. Both ride the same LiveKit session connection and render identically. */
