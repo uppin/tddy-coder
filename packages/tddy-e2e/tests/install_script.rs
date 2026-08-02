@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tddy_e2e::install_contract::{
-    verify_build_flag_invokes_release, verify_env_override_references,
+    verify_build_flag_invokes_release, verify_env_override_references, verify_headless_flag_support,
     verify_install_overwrite_systemd_unit, verify_install_script_contracts,
     verify_no_systemctl_support, verify_requires_systemd_flag, verify_root_check, verify_syntax,
+    verify_user_flag_support,
 };
 
 fn repo_root() -> PathBuf {
@@ -183,10 +184,19 @@ fn write_fake_codex_acp_native(root: &Path) {
 }
 
 fn run_install_in(root: &Path, env: &[(&str, &str)]) -> std::process::ExitStatus {
+    run_install_args_in(root, &["--systemd"], env)
+}
+
+/// Run `install` with an explicit argument list (always the first arg is the script path).
+fn run_install_args_in(
+    root: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> std::process::ExitStatus {
     let mut cmd = Command::new("bash");
     cmd.current_dir(root);
     cmd.arg(root.join("install"));
-    cmd.args(["--systemd"]);
+    cmd.args(args);
     for (k, v) in env {
         cmd.env(k, v);
     }
@@ -509,5 +519,156 @@ fn install_fails_when_install_bundle_codex_acp_without_native() {
     assert!(
         !st.success(),
         "install should fail when INSTALL_BUNDLE_CODEX_ACP=1 but native package is missing"
+    );
+}
+
+#[test]
+fn install_user_flag_documented() {
+    // Given
+    let script = read_install();
+
+    // When / Then
+    verify_user_flag_support(&script);
+}
+
+#[test]
+fn install_headless_flag_documented() {
+    // Given
+    let script = read_install();
+
+    // When / Then
+    verify_headless_flag_support(&script);
+}
+
+/// A `--user` install writes the unit into the invoking user's systemd dir, runs the daemon as that
+/// user (no `User=`/`Group=`/`AppArmorProfile=`), targets `default.target`, and defaults every path
+/// to XDG user locations under `$HOME` — all without root.
+#[test]
+fn install_user_mode_writes_user_service_and_config() {
+    // Given — a fake $HOME so XDG defaults resolve under the tempdir (no INSTALL_* path overrides)
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    copy_install_tree(root);
+    write_fake_release_binaries(root);
+    write_fake_codex_acp_native(root);
+    let home = root.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let home_str = home.to_str().unwrap();
+
+    // When
+    let mut cmd = Command::new("bash");
+    cmd.current_dir(root);
+    cmd.arg(root.join("install"));
+    cmd.args(["--systemd", "--user"]);
+    cmd.env("INSTALL_NO_SYSTEMCTL", "1");
+    cmd.env("HOME", home_str);
+    // Clear ambient XDG so defaults are deterministic (~/.config, ~/.local/...).
+    cmd.env_remove("XDG_CONFIG_HOME");
+    cmd.env_remove("XDG_DATA_HOME");
+    cmd.env_remove("XDG_STATE_HOME");
+    let st = cmd
+        .status()
+        .unwrap_or_else(|e| panic!("spawn install: {e}"));
+
+    // Then — unit lands in the user systemd dir and is a user-manager unit
+    assert!(st.success(), "user install: {st:?}");
+    let unit_path = home.join(".config/systemd/user/tddy-daemon.service");
+    let unit = fs::read_to_string(&unit_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", unit_path.display()));
+    assert!(
+        unit.contains("WantedBy=default.target"),
+        "user unit must target default.target; got:\n{unit}"
+    );
+    assert!(
+        !unit.contains("User=") && !unit.contains("Group="),
+        "user unit must not set User=/Group= (runs as invoking user); got:\n{unit}"
+    );
+    assert!(
+        !unit.contains("AppArmorProfile="),
+        "user unit must not reference an AppArmor profile; got:\n{unit}"
+    );
+    let want_exec = format!(
+        "ExecStart={}/tddy-daemon -c {}",
+        home.join(".local/bin").display(),
+        home.join(".config/tddy/daemon.yaml").display()
+    );
+    assert!(
+        unit.contains(&want_exec),
+        "user unit ExecStart should point at XDG user paths; want {want_exec}\ngot:\n{unit}"
+    );
+
+    // Config is created under XDG config with user-writable log + auth paths
+    let cfg = fs::read_to_string(home.join(".config/tddy/daemon.yaml")).unwrap();
+    assert!(
+        cfg.contains(home.join(".local/state/tddy-daemon").to_str().unwrap()),
+        "user config log path must be user-writable; got:\n{cfg}"
+    );
+    assert!(
+        cfg.contains(home.join(".local/share/tddy/auth").to_str().unwrap()),
+        "user config auth_storage must be user-writable; got:\n{cfg}"
+    );
+}
+
+/// `--headless` installs without the built tddy-web bundle: the `dist` check is skipped, nothing is
+/// copied into the web bundle dir, and the daemon config still points `web_bundle_path` at it.
+#[test]
+fn install_headless_skips_web_bundle() {
+    // Given — no tddy-web dist at all
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    copy_install_tree(root);
+    fs::remove_dir_all(root.join("packages/tddy-web/dist")).unwrap();
+    write_fake_release_binaries(root);
+    write_fake_codex_acp_native(root);
+    let bin_dir = root.join("b");
+    let cfg_dir = root.join("c");
+    let sys_dir = root.join("s");
+    let web_dir = root.join("w");
+
+    // When
+    let st = run_install_args_in(
+        root,
+        &["--systemd", "--headless"],
+        &[
+            ("INSTALL_NO_SYSTEMCTL", "1"),
+            ("INSTALL_BIN_DIR", bin_dir.to_str().unwrap()),
+            ("INSTALL_CONFIG_DIR", cfg_dir.to_str().unwrap()),
+            ("INSTALL_SYSTEMD_DIR", sys_dir.to_str().unwrap()),
+            ("INSTALL_WEB_BUNDLE_DIR", web_dir.to_str().unwrap()),
+        ],
+    );
+
+    // Then — install succeeds despite no dist, and the web bundle dir is empty
+    assert!(
+        st.success(),
+        "headless install should succeed without tddy-web dist; got {st:?}"
+    );
+    let entries = fs::read_dir(&web_dir).map(|d| d.count()).unwrap_or(0);
+    assert_eq!(entries, 0, "headless install must not copy any web assets");
+    let cfg = fs::read_to_string(cfg_dir.join("daemon.yaml")).unwrap();
+    assert!(
+        cfg.contains(web_dir.to_str().unwrap()),
+        "config should still declare web_bundle_path (empty dir); got:\n{cfg}"
+    );
+}
+
+/// Without `--headless`, a missing tddy-web bundle is a hard error (guards against silently shipping
+/// a UI-less daemon).
+#[test]
+fn install_without_headless_requires_web_bundle() {
+    // Given — no tddy-web dist
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    copy_install_tree(root);
+    fs::remove_dir_all(root.join("packages/tddy-web/dist")).unwrap();
+    write_fake_release_binaries(root);
+
+    // When
+    let st = run_install_in(root, &[("INSTALL_NO_SYSTEMCTL", "1")]);
+
+    // Then
+    assert!(
+        !st.success(),
+        "install should fail without --headless when the tddy-web bundle is missing"
     );
 }
